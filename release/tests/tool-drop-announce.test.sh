@@ -711,6 +711,10 @@ ORIGINAL_PATH="$PATH"
 RUN_REPOSITORY="$FIXTURE_REPOSITORY"
 RUN_TAG="$FIXTURE_TAG"
 RUN_SOURCE_ROOT="$SOURCE_ROOT"
+# The caller's default Actions variables. Empty for every plugin case, which
+# never sets them; the product cases override them through dynamic scope.
+RUN_GITHUB_REPOSITORY=''
+RUN_GITHUB_REPOSITORY_ID=''
 readonly FAKE_MAX_ATTEMPTS=8
 mkdir -p "$SOURCE_ROOT/.claude-plugin" "$FAKE_BIN"
 
@@ -949,6 +953,8 @@ run_helper() {
     PATH="$FAKE_BIN:$ORIGINAL_PATH" \
     EVENT_ACTION="$event_action" \
     REPOSITORY="$RUN_REPOSITORY" \
+    GITHUB_REPOSITORY="$RUN_GITHUB_REPOSITORY" \
+    GITHUB_REPOSITORY_ID="$RUN_GITHUB_REPOSITORY_ID" \
     RELEASE_ID="$release_id" \
     RELEASE_TAG="$RUN_TAG" \
     CURRENT_RELEASE_FILE="$current_release_file" \
@@ -1725,5 +1731,170 @@ fi
 [[ ! -s "$CALLS_FILE" ]] || die "derive-before-no-ops mutant minted or sent a request for a draft release"
 grep -Fq "$PLANTED_REFUSAL" "$TMP/run-output" || die "derive-before-no-ops mutant did not refuse the draft release's planted tag"
 pass "derive-before-no-ops mutant refuses a draft release with the planted tag, so the no-ops stay ahead of derivation"
+
+# ---------------------------------------------------------------------------
+# Product lane. A product (HoV Router) is a repository named in the helper's
+# product table by full name and repository id. It has no VERSION file, no
+# plugin manifest and no marketplace entry, and releases on plain vX.Y.Z tags.
+# Detection keys on GITHUB_REPOSITORY plus GITHUB_REPOSITORY_ID, never on the
+# bare REPOSITORY name that any repository can share.
+# ---------------------------------------------------------------------------
+PRODUCT_FULL_NAME='StartupBros/hov-router'
+PRODUCT_REPO_ID='1278801682'
+PRODUCT_NAME='hov-router'
+PRODUCT_TAG='v3.7.1'
+PRODUCT_RELEASE_ID='2001'
+PRODUCT_SOURCE="$TMP/product-source"
+PRODUCT_MANIFEST="$TMP/product-marketplace.json"
+mkdir -p "$PRODUCT_SOURCE"
+printf '%s\n' '{"plugins":[]}' >"$PRODUCT_MANIFEST"
+[[ ! -e "$PRODUCT_SOURCE/VERSION" && ! -e "$PRODUCT_SOURCE/.claude-plugin" ]] || die "product fixture must have no VERSION or plugin manifest"
+PRODUCT_BODY='{"operation":"announce","repository":"hov-router","releaseId":"2001","notesSummary":"First safe improvement\nSecond exact detail"}'
+
+# Positional: tag, GITHUB_REPOSITORY, GITHUB_REPOSITORY_ID, then optional draft,
+# prerelease, latest-stable id, event action and REPOSITORY (the bare name).
+run_product() {
+  local tag="$1" github_repository="$2" github_repository_id="$3"
+  local draft="${4:-false}" prerelease="${5:-false}" latest_id="${6:-$PRODUCT_RELEASE_ID}"
+  local action="${7:-published}" bare_name="${8:-$PRODUCT_NAME}"
+  local helper="${PRODUCT_HELPER:-$HELPER}"
+  local RUN_REPOSITORY="$bare_name" RUN_TAG="$tag" RUN_SOURCE_ROOT="$PRODUCT_SOURCE"
+  local RUN_GITHUB_REPOSITORY="$github_repository" RUN_GITHUB_REPOSITORY_ID="$github_repository_id"
+  reset_capture
+  write_current_release "$PRODUCT_RELEASE_ID" "$tag" "$VALID_NOTES" "$draft" "$prerelease"
+  run_helper "$helper" "$PRODUCT_MANIFEST" "$PRODUCT_RELEASE_ID" "$latest_id" "$SOURCE_SHA" "$CURRENT_RELEASE_FILE" "$action" >"$TMP/run-output" 2>&1
+}
+
+assert_no_request() {
+  [[ ! -s "$CALLS_FILE" ]] || die "$1 minted or sent a request"
+}
+
+if ! run_product "$PRODUCT_TAG" "$PRODUCT_FULL_NAME" "$PRODUCT_REPO_ID"; then
+  command cat "$TMP/run-output" >&2
+  die "product release fixture"
+fi
+assert_one_bound_request '["notesSummary","operation","releaseId","repository"]'
+[[ "$(<"$BODY_FILE")" == "$PRODUCT_BODY" ]] || die "product request body did not carry repository=hov-router and the release id"
+pass "a latest-stable $PRODUCT_TAG release of $PRODUCT_FULL_NAME announces as hov-router with no VERSION, plugin.json or manifest entry"
+
+if ! run_product "$PRODUCT_TAG" "$PRODUCT_FULL_NAME" "$PRODUCT_REPO_ID" false false "$PRODUCT_RELEASE_ID" edited; then
+  command cat "$TMP/run-output" >&2
+  die "edited product release fixture"
+fi
+assert_one_bound_request '["notesSummary","operation","releaseId","repository"]'
+[[ "$(<"$BODY_FILE")" == "$PRODUCT_BODY" ]] || die "edited product request body drifted"
+pass "an edited product release announces too"
+
+# Planted: the same bare name under another owner is never a product, even when
+# it copies the real repository id. It takes the plugin path and fails there.
+for impostor in StartupBros-com/hov-router another-owner/hov-router; do
+  if run_product "$PRODUCT_TAG" "$impostor" "$PRODUCT_REPO_ID"; then
+    die "$impostor announced as a product"
+  fi
+  assert_no_request "$impostor"
+  grep -Fq "no VERSION file at $PRODUCT_SOURCE for release tag $PRODUCT_TAG" "$TMP/run-output" \
+    || die "$impostor did not take the plugin path and fail its plugin checks"
+  pass "$impostor takes the plugin path and fails its plugin checks instead of announcing as a product"
+done
+
+# Planted: a missing GITHUB_REPOSITORY (every older plugin fixture) is the plugin path.
+if run_product "$PRODUCT_TAG" '' ''; then
+  die "a caller with no GITHUB_REPOSITORY announced as a product"
+fi
+assert_no_request "a caller with no GITHUB_REPOSITORY"
+grep -Fq "no VERSION file at $PRODUCT_SOURCE" "$TMP/run-output" || die "a caller with no GITHUB_REPOSITORY did not take the plugin path"
+pass "a caller without GITHUB_REPOSITORY takes the plugin path"
+
+# Planted: the right full name with a different repository id is a deleted and
+# recreated or transferred repository. It is refused outright.
+for wrong_id in 1278801683 1 ''; do
+  if run_product "$PRODUCT_TAG" "$PRODUCT_FULL_NAME" "$wrong_id"; then
+    die "$PRODUCT_FULL_NAME with repository id '$wrong_id' announced"
+  fi
+  assert_no_request "$PRODUCT_FULL_NAME with repository id '$wrong_id'"
+  grep -Fq '::error' "$TMP/run-output" || die "repository id '$wrong_id' mismatch did not emit an ::error::"
+  grep -Fq "$PRODUCT_FULL_NAME" "$TMP/run-output" || die "repository id '$wrong_id' mismatch did not name the repository"
+  ! grep -Fq 'no VERSION file' "$TMP/run-output" || die "repository id '$wrong_id' mismatch fell through to the plugin path"
+  pass "$PRODUCT_FULL_NAME with repository id '${wrong_id:-<unset>}' is refused, not announced and not routed to the plugin path"
+done
+
+# Planted: a product releases on plain tags only.
+if run_product "hov-router--$PRODUCT_TAG" "$PRODUCT_FULL_NAME" "$PRODUCT_REPO_ID"; then
+  die "a hov-router--v tag announced in the product repository"
+fi
+assert_no_request "a hov-router--v tag"
+grep -Fq 'is not a plain v<major.minor.patch> tag' "$TMP/run-output" || die "a hov-router--v tag was not refused by the plain tag rule"
+pass "hov-router--$PRODUCT_TAG in the product repository is refused loudly"
+
+for bad_tag in v3.7.1-rc.1 v3.7.1+build v3.7 v03.7.1 3.7.1 v3.7.1.1; do
+  if run_product "$bad_tag" "$PRODUCT_FULL_NAME" "$PRODUCT_REPO_ID"; then
+    die "product tag $bad_tag announced"
+  fi
+  assert_no_request "product tag $bad_tag"
+  grep -Fq 'is not a plain v<major.minor.patch> tag' "$TMP/run-output" || die "product tag $bad_tag was not refused by the plain tag rule"
+  pass "product tag $bad_tag is refused"
+done
+
+if ! run_product "$PRODUCT_TAG" "$PRODUCT_FULL_NAME" "$PRODUCT_REPO_ID" false false 2002; then
+  command cat "$TMP/run-output" >&2
+  die "a non-latest product release did not stay a no-op"
+fi
+assert_no_request "a non-latest product release"
+grep -Fq "release $PRODUCT_RELEASE_ID is not latest stable 2002; no-op" "$TMP/run-output" || die "a non-latest product release was not reported as a no-op"
+pass "a product release that is not the latest stable one is a no-op"
+
+for state in "true false" "false true"; do
+  read -r draft prerelease <<<"$state"
+  if ! run_product "$PRODUCT_TAG" "$PRODUCT_FULL_NAME" "$PRODUCT_REPO_ID" "$draft" "$prerelease"; then
+    command cat "$TMP/run-output" >&2
+    die "a product release with draft=$draft prerelease=$prerelease did not stay a no-op"
+  fi
+  assert_no_request "a product release with draft=$draft prerelease=$prerelease"
+  grep -Fq 'prerelease or draft release ignored' "$TMP/run-output" || die "a product release with draft=$draft prerelease=$prerelease was not ignored"
+  pass "a product release with draft=$draft prerelease=$prerelease is skipped"
+done
+
+# A draft release with an unfit tag or a stale id stays a no-op: the product
+# checks sit behind the same no-ops the plugin path honours.
+if ! run_product "hov-router--$PRODUCT_TAG" "$PRODUCT_FULL_NAME" 1 true false; then
+  command cat "$TMP/run-output" >&2
+  die "a draft product release with a bad tag and id did not stay a no-op"
+fi
+assert_no_request "a draft product release with a bad tag and id"
+pass "a draft product release is ignored before the product checks run"
+
+# Each mutant disables one product rule in a copy of the helper; the case that
+# pins the rule must then announce, which proves the rule alone refuses it.
+expect_product_mutant_announces() {
+  local label="$1" old="$2" new="$3" tag="$4" github_repository="$5" github_repository_id="$6" bare_name="$7"
+  local mutant="$TMP/helper-$label.sh"
+  replace_once "$HELPER" "$mutant" "$old" "$new"
+  chmod +x "$mutant"
+  if ! PRODUCT_HELPER="$mutant" run_product "$tag" "$github_repository" "$github_repository_id" false false "$PRODUCT_RELEASE_ID" published "$bare_name"; then
+    command cat "$TMP/run-output" >&2
+    die "$label mutant did not announce $tag for $github_repository"
+  fi
+  assert_one_bound_request '["notesSummary","operation","releaseId","repository"]'
+  [[ "$(<"$BODY_FILE")" == "$PRODUCT_BODY" ]] || die "$label mutant announced with an unexpected body"
+  pass "$label mutant announces the planted case, so that rule alone refuses it"
+}
+
+expect_product_mutant_announces product-id-comparison-removed \
+  '    if [[ "${GITHUB_REPOSITORY_ID:-}" != "$product_id" ]]; then' \
+  '    if false; then' \
+  "$PRODUCT_TAG" "$PRODUCT_FULL_NAME" 1278801683 "$PRODUCT_NAME"
+expect_product_mutant_announces product-keyed-on-bare-name \
+  '    [[ "${GITHUB_REPOSITORY:-}" == "$full_name" ]] || continue' \
+  '    [[ "${GITHUB_REPOSITORY:-}" == "$full_name" || "${REPOSITORY:-}" == "$product_name" ]] || continue' \
+  "$PRODUCT_TAG" another-owner/hov-router "$PRODUCT_REPO_ID" "$PRODUCT_NAME"
+expect_product_mutant_announces product-plain-tag-rule-removed \
+  '  [[ "$RELEASE_TAG" =~ $PRODUCT_TAG_SHAPE ]] || fail "product release tag $RELEASE_TAG is not a plain v<major.minor.patch> tag"' \
+  '  true' \
+  "hov-router--$PRODUCT_TAG" "$PRODUCT_FULL_NAME" "$PRODUCT_REPO_ID" "$PRODUCT_NAME"
+
+# The table is reviewed code: exactly one row.
+[[ "$(sed -n '/^readonly PRODUCTS=(/,/^)/p' "$HELPER" | grep -c "^  '")" == 1 ]] || die "product table does not hold exactly one row"
+grep -Fxq "  'StartupBros/hov-router 1278801682 hov-router'" "$HELPER" || die "product table row drifted"
+pass "the product table holds exactly one row: StartupBros/hov-router 1278801682 hov-router"
 
 printf '%d Tool Drop announce checks passed\n' "$pass_count"
