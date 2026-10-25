@@ -176,7 +176,7 @@ Two days of evaluation in the operator's harness produced the missing half: a ro
 - Marketplace mechanics: `scripts/validate-marketplace.sh` in hov-marketplace — allowlist case statement, manifest-entry shape (six checks: name regex, approved `.git` URL, 40-hex lowercase sha, semver version, uint releaseId, releaseTag = `v`+version), pinned-commit content checks, monotonicity rules. New plugin rows need no first-add exemption.
 - Packaging conventions: pro-gate's plugin tree (plugin.json fields, `VERSION` file, doctor-script pattern, runtime version precheck via `CLAUDE_PLUGIN_ROOT`).
 - Runner architecture precedent: the i-have-adhd `evals/` harness — subcommand CLI, resumability key `(case, trial, condition, runner)`, budget parsing from `claude --output-format json` `total_cost_usd`, unmetered rejection before any call, retries with backoff, append-only JSONL, isolation flag set, and its postmortem fixes (cwd pinning, baseline-leak warning, judge-blinding gap).
-- Evidence base: StartupBros-com/dotfiles PR #203 (vendored fork + validation results) and PR #247 (evidence ledger + validated prunes, open draft).
+- Evidence base: the operator's dotfiles repository, PR #203 (vendored fork + validation results) and PR #247 (evidence ledger + validated prunes, open draft).
 - Ancestor: github.com/mattpocock/skills `skills/productivity/writing-for-agents` (MIT).
 
 ---

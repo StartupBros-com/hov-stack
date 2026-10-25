@@ -430,7 +430,7 @@ TMPDIR="$TMP/validator-tmp" GIT_TRACE="$TMP/git-trace" expect_pass "mixed manife
 assert_monorepo_cache "full validation fetches main once for two git-subdir entries and removes its cache"
 TMPDIR="$TMP/validator-tmp" GIT_TRACE="$TMP/git-trace" expect_pass "git-subdir entry accepts the prefixed expected tag and payload paths under its path" env EXPECTED_PLUGIN_NAME=sign-it EXPECTED_PLUGIN_VERSION=0.5.0 EXPECTED_RELEASE_ID=40 EXPECTED_RELEASE_TAG=sign-it--v0.5.0 EXPECTED_SHA="$SIGN_SHA" EXPECTED_PAYLOAD_PATHS=.claude-plugin/plugin.json,skills/sign-it/SKILL.md bash -c 'cd "$1" && MARKETPLACE_TEST_REMOTE_ROOT="$2" ALLOW_LOCAL_FILE_REMOTES=1 "$3" full' _ "$WORK" "$REMOTE_ROOT" "$VALIDATOR"
 assert_monorepo_cache "an expected-inputs full run also fetches main once and removes its cache"
-expect_fail_reason "the monorepo url is one configuration value: another literal refuses every git-subdir entry" "git-subdir entry must use the monorepo source https://github.com/StartupBros-com/scratch.git" env MONOREPO_SOURCE_URL=https://github.com/StartupBros-com/scratch.git bash -c 'cd "$1" && "$2" syntax' _ "$WORK" "$VALIDATOR"
+expect_fail_reason "the monorepo url is one configuration value: another literal refuses every git-subdir entry" "git-subdir entry must use the monorepo source https://github.com/example-owner/scratch.git" env MONOREPO_SOURCE_URL=https://github.com/example-owner/scratch.git bash -c 'cd "$1" && "$2" syntax' _ "$WORK" "$VALIDATOR"
 
 # Twin: a git-subdir entry needs no root VERSION, root manifest or root skill
 # directory (the fixture has none) and no root release train either.

@@ -3,7 +3,7 @@
 Claude Code tools for builders. Add the marketplace over HTTPS once, then install any of the tools:
 
 ```text
-/plugin marketplace add https://github.com/StartupBros-com/hov-marketplace.git
+/plugin marketplace add https://github.com/StartupBros-com/hov-stack.git
 /plugin install token-eater@hov
 /plugin install pro-gate@hov
 /plugin install wsl-cdp@hov
