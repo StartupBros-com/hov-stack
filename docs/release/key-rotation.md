@@ -62,8 +62,8 @@ would shadow the organisation copy for every job in the repository, including
 jobs outside the environment. Check with:
 
 ```bash
-gh api repos/StartupBros-com/hov-marketplace/actions/secrets --jq '.secrets[].name'
-gh api repos/StartupBros-com/hov-marketplace/environments/release/secrets --jq '.secrets[].name'   # after U22
+gh api repos/StartupBros-com/hov-stack/actions/secrets --jq '.secrets[].name'
+gh api repos/StartupBros-com/hov-stack/environments/release/secrets --jq '.secrets[].name'   # after U22
 ```
 
 ## Rotating a key
@@ -82,9 +82,9 @@ ID does not change.
    ```bash
    # now: the organisation secret, visibility and repository list unchanged
    gh secret set HOV_RELEASE_APP_PRIVATE_KEY --org StartupBros-com --visibility selected \
-     --repos hov-marketplace,<plugin repositories still on url entries> < new-key.pem
+     --repos hov-stack,<plugin repositories still on url entries> < new-key.pem
    # after U22: the environment secret on this repository
-   gh secret set HOV_RELEASE_APP_PRIVATE_KEY --repo StartupBros-com/hov-marketplace --env release < new-key.pem
+   gh secret set HOV_RELEASE_APP_PRIVATE_KEY --repo StartupBros-com/hov-stack --env release < new-key.pem
    ```
 
    The bot key is the same command with `HOV_MARKETPLACE_APP_PRIVATE_KEY`
@@ -105,7 +105,7 @@ ID does not change.
 Each proof is one observation; record which ones were made.
 
 - **The new key mints.** Dispatch the reconciler
-  (`gh workflow run repin-reconcile.yml --repo StartupBros-com/hov-marketplace`)
+  (`gh workflow run repin-reconcile.yml --repo StartupBros-com/hov-stack`)
   and confirm the mint step for the rotated key succeeds in its log: "Mint a
   release App token for the plugin repositories" for the release App, "Mint a
   marketplace-bot token for this repository" for the bot. Both steps run on

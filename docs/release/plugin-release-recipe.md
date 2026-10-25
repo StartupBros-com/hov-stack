@@ -76,7 +76,7 @@ chain converges without them.
      for a late schedule.
 
      ```bash
-     gh workflow run repin-reconcile.yml --repo StartupBros-com/hov-marketplace
+     gh workflow run repin-reconcile.yml --repo StartupBros-com/hov-stack
      ```
 
    - A plugin's migration release (KTD2, U9): the reconciler compares a `url`
@@ -86,7 +86,7 @@ chain converges without them.
      would, pinned to the newest prefixed release.
 
      ```bash
-     gh workflow run repin-reconcile.yml --repo StartupBros-com/hov-marketplace -f migrate_plugin=<name>
+     gh workflow run repin-reconcile.yml --repo StartupBros-com/hov-stack -f migrate_plugin=<name>
      ```
 
 5. **Publish** (same workflow, `release/scripts/repin-publish.sh`). The merge's push to
@@ -114,10 +114,10 @@ chain converges without them.
    annotation):
 
    ```bash
-   gh run list --repo StartupBros-com/hov-marketplace --workflow "Release train" --limit 8 \
+   gh run list --repo StartupBros-com/hov-stack --workflow "Release train" --limit 8 \
      --json databaseId,status,displayTitle,createdAt \
      --jq '.[] | select(.displayTitle=="<name> v<version>") | "\(.databaseId) \(.status) \(.createdAt)"'
-   gh run view <run-id> --repo StartupBros-com/hov-marketplace --log \
+   gh run view <run-id> --repo StartupBros-com/hov-stack --log \
      | grep -E '"status":"announced"|status=not-announced|does not yet list'
    ```
 
@@ -141,9 +141,9 @@ direction is forward.
 
 | Lever | Window | Command | Implemented by |
 | --- | --- | --- | --- |
-| Delete the draft | before the card lands | reconciler off (next row); close the open repin PR, `gh pr close <n> --repo StartupBros-com/hov-marketplace --delete-branch` (the form `repin-land.sh` uses; a leftover branch is reused by the next run, so a bare close also works); then `gh release delete <name>--v<version> --repo StartupBros-com/hov-marketplace --yes`; reconciler on | `release/scripts/release-stage.sh` creates the draft (U10); the validator never checks that a release id exists, only that the tag resolves (U6), so the PR is closed first; a no-drift tick closes stale repin PRs (`release/scripts/repin-land.sh`, U9) |
-| Re-draft a release published out of band | before the card lands | `gh release edit <name>--v<version> --repo StartupBros-com/hov-marketplace --draft` | returns the release to the draft-first state: the train that ran at the out-of-band publish reported not-listed and posted nothing (AE9), and the publish that announces is the one the publisher makes after the card lands. The reconciler still counts a draft as newest, so this buys time; delete it to stop |
-| Disable the reconciler | any time | `gh workflow disable repin-reconcile.yml --repo StartupBros-com/hov-marketplace`; later `gh workflow enable repin-reconcile.yml --repo StartupBros-com/hov-marketplace` | every trigger stops: the schedule, the manifest push and a dispatch alike (U9). Nothing is pinned or published while it is off; drafts wait |
+| Delete the draft | before the card lands | reconciler off (next row); close the open repin PR, `gh pr close <n> --repo StartupBros-com/hov-stack --delete-branch` (the form `repin-land.sh` uses; a leftover branch is reused by the next run, so a bare close also works); then `gh release delete <name>--v<version> --repo StartupBros-com/hov-stack --yes`; reconciler on | `release/scripts/release-stage.sh` creates the draft (U10); the validator never checks that a release id exists, only that the tag resolves (U6), so the PR is closed first; a no-drift tick closes stale repin PRs (`release/scripts/repin-land.sh`, U9) |
+| Re-draft a release published out of band | before the card lands | `gh release edit <name>--v<version> --repo StartupBros-com/hov-stack --draft` | returns the release to the draft-first state: the train that ran at the out-of-band publish reported not-listed and posted nothing (AE9), and the publish that announces is the one the publisher makes after the card lands. The reconciler still counts a draft as newest, so this buys time; delete it to stop |
+| Disable the reconciler | any time | `gh workflow disable repin-reconcile.yml --repo StartupBros-com/hov-stack`; later `gh workflow enable repin-reconcile.yml --repo StartupBros-com/hov-stack` | every trigger stops: the schedule, the manifest push and a dispatch alike (U9). Nothing is pinned or published while it is off; drafts wait |
 
 Order matters for the first row. Auto-merge is GitHub-side, so an open repin PR
 whose draft has just been deleted still merges when its checks pass, and the
@@ -155,7 +155,7 @@ the release App and the author delete one (R48). A `release.yml` dispatch with
 the same tag re-stages the draft, which is how a held release resumes:
 
 ```bash
-gh workflow run release.yml --repo StartupBros-com/hov-marketplace -f tag=<name>--v<version>
+gh workflow run release.yml --repo StartupBros-com/hov-stack -f tag=<name>--v<version>
 ```
 
 What is not a lever:
