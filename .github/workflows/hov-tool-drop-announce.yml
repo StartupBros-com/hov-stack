@@ -2,7 +2,18 @@ name: hov Tool Drop announce
 
 # Reusable announce-only release train for every marketplace plugin, whether
 # it releases from its own repository on v<version> tags or from a shared
-# repository on <name>--v<version> tags.
+# repository on <name>--v<version> tags, and for the products listed in the
+# PRODUCTS table of release/scripts/tool-drop-announce.sh (today HoV Router).
+#
+# A product is not a marketplace plugin. It calls this workflow exactly as a
+# plugin does, but its repository has no VERSION file, no
+# .claude-plugin/plugin.json and no marketplace manifest entry or card (the
+# product's card lives in the announce endpoint's own registry). It must release
+# on plain v<major.minor.patch> tags. The helper recognises a product by the
+# caller's full repository name and repository id, skips the plugin and
+# marketplace checks, and keeps the draft/prerelease skip, the latest-stable
+# guard and the default-branch ancestry step below. The announce endpoint
+# re-verifies every token claim and the live release either way.
 #
 # Caller, pinned to a full commit SHA of the repository holding this file:
 #

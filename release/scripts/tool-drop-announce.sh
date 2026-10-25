@@ -2,7 +2,8 @@
 set -euo pipefail
 
 # Generalized announce-only Tool Drop train, called by the reusable workflow
-# .github/workflows/hov-tool-drop-announce.yml for EVERY catalog plugin.
+# .github/workflows/hov-tool-drop-announce.yml for EVERY catalog plugin and for
+# each product listed in PRODUCTS below.
 #
 # The marketplace manifest in this repo is the single source of truth: a
 # release announces only when the manifest already lists this exact release
@@ -16,6 +17,20 @@ set -euo pipefail
 # Soft exits (loud in the run UI, green in the checks list): marketplace not
 # yet repinned to this release, or no card block registered — both resolve
 # with a marketplace PR, then editing the release re-fires the announce.
+#
+# Products differ from plugins. A product (HoV Router) is software released from
+# its own repository that is not a marketplace plugin: it has no VERSION file,
+# no .claude-plugin/plugin.json, no marketplace manifest entry and no card in
+# the manifest (pushbot's own product registry holds its card). It is recognised
+# by the caller's full repository name AND repository id in PRODUCTS, never by
+# the bare repository name. For a product release this helper keeps the
+# argument and environment checks, the draft/prerelease skip, the published or
+# edited action check and the latest-stable guard, then requires a plain
+# v<major.minor.patch> tag, takes the announced name from the table, skips
+# verify_release and both marketplace checks, and announces exactly as a plugin
+# does. Every plugin release behaves as before. Pushbot re-verifies every token
+# claim and the live release itself; the table only decides which local checks
+# apply.
 
 fail() {
   printf 'error: %s\n' "$*" >&2
@@ -43,6 +58,19 @@ readonly PROMOTION_LAG_ERROR='release does not match the marketplace promotion'
 # which brackets both samples. If the real mechanism turns out to be a longer cache TTL, raise
 # THIS rather than the attempt count -- the attempt budget is shared with the 409/429 lease path.
 readonly PROMOTION_LAG_RETRY_SECONDS=30
+
+# Products that may call the workflow, one row each: "<owner/name> <repository id>
+# <product name>". This script runs from the trusted workflow SHA, so a new row
+# is reviewed code. The product name is what the request body announces; pushbot
+# independently verifies the repository, owner, repository id, workflow ref and
+# lineage claims of the OIDC token and the live GitHub release, so a wrong row
+# cannot make pushbot accept a repository it does not know.
+readonly PRODUCTS=(
+  'StartupBros/hov-router 1278801682 hov-router'
+)
+# A product releases on plain v<major.minor.patch> tags with canonical numbers,
+# the same rule latest-stable-release.sh applies to a repository-family tag.
+readonly PRODUCT_TAG_SHAPE='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
 
 ANNOUNCE_RESPONSE_DIR=''
 
@@ -384,6 +412,34 @@ derive_plugin_identity() {
   fi
 }
 
+# Decide whether the caller is a listed product. The caller's identity is the
+# default Actions variables GITHUB_REPOSITORY (owner/name) and
+# GITHUB_REPOSITORY_ID, never REPOSITORY, the bare name any repository can share.
+# GITHUB_REPOSITORY_ID is consulted only once the full name matches a row, so a
+# caller that is not a listed product never needs it. A matching full name with
+# a different id is a deleted-and-recreated or transferred repository: refused,
+# never announced. Returns 0 with PRODUCT_NAME set for a product, 1 otherwise.
+resolve_product() {
+  local row full_name product_id product_name
+  PRODUCT_NAME=''
+  for row in "${PRODUCTS[@]}"; do
+    read -r full_name product_id product_name <<<"$row"
+    [[ "${GITHUB_REPOSITORY:-}" == "$full_name" ]] || continue
+    if [[ "${GITHUB_REPOSITORY_ID:-}" != "$product_id" ]]; then
+      printf '::error title=Product repository mismatch::%s has repository id %s, not the registered %s; refusing to announce.\n' \
+        "$full_name" "${GITHUB_REPOSITORY_ID:-<unset>}" "$product_id"
+      exit 1
+    fi
+    PRODUCT_NAME="$product_name"
+    return 0
+  done
+  return 1
+}
+
+require_product_release_tag() {
+  [[ "$RELEASE_TAG" =~ $PRODUCT_TAG_SHAPE ]] || fail "product release tag $RELEASE_TAG is not a plain v<major.minor.patch> tag"
+}
+
 verify_release() {
   require SOURCE_ROOT
   require SOURCE_SHA
@@ -464,6 +520,16 @@ main() {
   is_positive_uint "$LATEST_STABLE_ID" || fail "LATEST_STABLE_ID must be a positive canonical decimal integer"
   if [[ "$RELEASE_ID" != "$LATEST_STABLE_ID" ]]; then
     printf 'release %s is not latest stable %s; no-op\n' "$RELEASE_ID" "$LATEST_STABLE_ID"
+    return
+  fi
+
+  # A listed product announces without plugin verification or marketplace
+  # entry. The check sits after every no-op, and before the plugin path, which
+  # stays exactly as it was.
+  if resolve_product; then
+    require_product_release_tag
+    PLUGIN_NAME="$PRODUCT_NAME"
+    announce
     return
   fi
 
