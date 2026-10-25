@@ -69,8 +69,8 @@ design-rails/
 
 - **P1 — scaffold (repo created PRIVATE, in progress).** Curated import from
   dotfiles @ current main; private-identifier sweep (the engine comments accreted
-  fresh app/brand specifics during the dogfood sprints — sweep list: prbot,
-  pushbot, formal-founder, startupbros, matrix-brand references); README leads
+  fresh app/brand specifics during the dogfood sprints — sweep list: the
+  private app, brand and repository names); README leads
   with posture and the evidence; CI green; designmd-lint smoke pinned @0.4.0.
 - **P2 — consumption switch (dotfiles).** Vendor-drop + overlay split; live
   behaviour byte-identical.

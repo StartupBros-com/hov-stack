@@ -100,15 +100,15 @@ Merge in dependency order:
 3. pro-gate plugin/runtime packaging and release train.
 4. hov-marketplace catalog and validator, pinned to the landed tool commits.
 
-Do not move files from `apps/startupbros/content-staging/vault/` into `apps/startupbros/content/vault/` yet.
+Do not move files from the members app's `content-staging/vault/` into its `content/vault/` yet.
 
 ### 2. Apply the production migration
 
 **Will-owned.** Apply the prbot migration after the prbot code PR is merged and before setting the announce endpoint live:
 
 ```bash
-cd apps/startupbros
-supabase link --project-ref odohsprxbcctfyoldtdr
+cd <members-app directory>
+supabase link --project-ref <members-app project ref>
 supabase db push
 supabase migration list
 ```
@@ -227,8 +227,8 @@ printf '%s' "$HOV_MARKETPLACE_DEPLOY_KEY" | gh secret set HOV_MARKETPLACE_DEPLOY
 printf '%s' "$TOOL_RELEASE_ANNOUNCE_SECRET" | gh secret set TOOL_RELEASE_ANNOUNCE_SECRET \
   --org StartupBros-com --repos token-eater,pro-gate
 
-gh variable set TOOL_RELEASE_ANNOUNCE_URL --body 'https://members.startupbros.com/api/internal/ops/tool-releases' --repo StartupBros-com/token-eater
-gh variable set TOOL_RELEASE_ANNOUNCE_URL --body 'https://members.startupbros.com/api/internal/ops/tool-releases' --repo StartupBros-com/pro-gate
+gh variable set TOOL_RELEASE_ANNOUNCE_URL --body '<Tool Drop endpoint URL>' --repo StartupBros-com/token-eater
+gh variable set TOOL_RELEASE_ANNOUNCE_URL --body '<Tool Drop endpoint URL>' --repo StartupBros-com/pro-gate
 
 # Keep syntax validation until all three repositories are public.
 gh variable set HOV_MARKETPLACE_VALIDATION_MODE --body syntax --repo StartupBros-com/token-eater
@@ -250,7 +250,7 @@ CUTOVER
 
 Delete the temporary token in GitHub settings now, success or failure. A mid-bootstrap failure leaves the release train frozen, which is the safe state: rerun the block to completion before continuing.
 
-Set `TOOL_RELEASE_ANNOUNCE_SECRET` in the StartupBros production deployment environment to the same dedicated value, then redeploy the app. Prove the wiring after the redeploy: an unauthenticated request receives `401` and a `{}` probe with the configured secret receives the route's `400` validation response. Confirm `DISCORD_CHANNEL_ANNOUNCEMENTS_ID` is configured. For the announcement test fire only, set the dedicated `DISCORD_CHANNEL_TOOL_RELEASES_ID` to the test announcements channel: the route resolves that variable and falls back to the announcements channel, so shared production senders (event publication, going-live notifications, lifecycle operations) are never repointed. This requires the tool-release channel isolation change (pushbot #1020) deployed to production first.
+Set `TOOL_RELEASE_ANNOUNCE_SECRET` in the StartupBros production deployment environment to the same dedicated value, then redeploy the app. Prove the wiring after the redeploy: an unauthenticated request receives `401` and a `{}` probe with the configured secret receives the route's `400` validation response. Confirm `DISCORD_CHANNEL_ANNOUNCEMENTS_ID` is configured. For the announcement test fire only, set the dedicated `DISCORD_CHANNEL_TOOL_RELEASES_ID` to the test announcements channel: the route resolves that variable and falls back to the announcements channel, so shared production senders (event publication, going-live notifications, lifecycle operations) are never repointed. This requires the tool-release channel isolation change (members-app #1020) deployed to production first.
 
 Now run the announcement endpoint test fire (see that section) while every release workflow is still disabled, so a real release can never race the test-channel override. After the test fire and its ledger cleanup pass, set `DISCORD_CHANNEL_TOOL_RELEASES_ID` to the production announcements channel (or remove it to use the fallback) and redeploy.
 
@@ -363,7 +363,7 @@ git log --all --format='%ae%n%ce' | sort -u
 - Confirm tracked trees contain no operator-specific paths:
 
 ```bash
-git grep -nE '(/home/will|home/will|Users/will)' -- .
+git grep -nE "(home/$USER|Users/$USER)" -- .
 ```
 
 Expected result for the tool repositories: no matches.
@@ -431,8 +431,8 @@ A 404, authentication prompt, duplicate installation, or version mismatch stops 
 Only after the unauthenticated smoke is green, move the staged pages into the synced vault tree on a prbot branch:
 
 ```bash
-git mv apps/startupbros/content-staging/vault/pro-gate.md apps/startupbros/content/vault/pro-gate.md
-git mv apps/startupbros/content-staging/vault/token-eater.md apps/startupbros/content/vault/token-eater.md
+git mv <members-app>/content-staging/vault/pro-gate.md <members-app>/content/vault/pro-gate.md
+git mv <members-app>/content-staging/vault/token-eater.md <members-app>/content/vault/token-eater.md
 pnpm --filter startupbros typecheck
 pnpm --filter startupbros lint
 ```
@@ -457,7 +457,7 @@ curl --fail-with-body \
     "releaseUrl":"https://github.com/StartupBros-com/token-eater/releases/tag/v0.1.1",
     "notesSummary":"Release train test fire"
   }' \
-  https://members.startupbros.com/api/internal/ops/tool-releases
+  '<Tool Drop endpoint URL>'
 unset TOOL_RELEASE_ANNOUNCE_SECRET
 ```
 
@@ -559,7 +559,7 @@ For AE3 and R17, observe Cooper or the first engaged member after the next stabl
 - [x] All three repositories public.
 - [x] Full public-source marketplace validation green (`HOV_SOURCES_PUBLIC=true`, `HOV_MARKETPLACE_VALIDATION_MODE=full`, merged catalog pins landed SHAs).
 - [x] Unauthenticated two-tool install smoke green (clean `CLAUDE_CONFIG_DIR`: marketplace add + `token-eater@hov` 0.1.1 + `pro-gate@hov` 0.21.0).
-- [x] Vault pages moved from staging, deployed, and content-sync green (pushbot #998 merged 2026-07-15 as `ef4e70a50f3feb4794babfee033148217c4983cd`).
+- [x] Vault pages moved from staging, deployed, and content-sync green (members-app #998 merged 2026-07-15 as `ef4e70a50f3feb4794babfee033148217c4983cd`).
 - [ ] Announcement test fire idempotent in the test channel.
 - [ ] One stable promotion per tool recorded.
 - [ ] Cooper confirms the working path.
@@ -570,9 +570,9 @@ For AE3 and R17, observe Cooper or the first engaged member after the next stabl
 
 | Item | Evidence |
 | --- | --- |
-| PR landings | pushbot #979, token-eater #30 (`79f99f0`), pro-gate #22 (`f28b7b3`), hov-marketplace #1 (`2fed62a`), vault #998 (`ef4e70a`) |
-| Announce URL vars | `TOOL_RELEASE_ANNOUNCE_URL=https://members.startupbros.com/api/internal/ops/tool-releases` on both tool repos |
-| Announce fail-closed | `members.startupbros.com` route returns `401 Unauthorized` without secret and with wrong secret |
+| PR landings | members-app #979, token-eater #30 (`79f99f0`), pro-gate #22 (`f28b7b3`), hov-marketplace #1 (`2fed62a`), vault #998 (`ef4e70a`) |
+| Announce URL vars | `TOOL_RELEASE_ANNOUNCE_URL` set to the Tool Drop endpoint on both tool repos |
+| Announce fail-closed | The Tool Drop route returns `401 Unauthorized` without secret and with wrong secret |
 | Token-eater consent AE6 | `consent-preflight.sh` blocks first run, records on caveat version 1, silent on repeat, re-asks on version 2 |
 | Pro-gate daemon default | daemon globally defers without operator consent v1; interactive install leaves daemon off |
 | Install path | `/plugin marketplace add https://github.com/StartupBros-com/hov-marketplace.git` then `/plugin install token-eater@hov` and `/plugin install pro-gate@hov` |

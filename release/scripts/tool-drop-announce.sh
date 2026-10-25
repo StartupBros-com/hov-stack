@@ -21,14 +21,14 @@ set -euo pipefail
 # Products differ from plugins. A product (HoV Router) is software released from
 # its own repository that is not a marketplace plugin: it has no VERSION file,
 # no .claude-plugin/plugin.json, no marketplace manifest entry and no card in
-# the manifest (pushbot's own product registry holds its card). It is recognised
+# the manifest (the announce service's own product registry holds its card). It is recognised
 # by the caller's full repository name AND repository id in PRODUCTS, never by
 # the bare repository name. For a product release this helper keeps the
 # argument and environment checks, the draft/prerelease skip, the published or
 # edited action check and the latest-stable guard, then requires a plain
 # v<major.minor.patch> tag, takes the announced name from the table, skips
 # verify_release and both marketplace checks, and announces exactly as a plugin
-# does. Every plugin release behaves as before. Pushbot re-verifies every token
+# does. Every plugin release behaves as before. The announce service re-verifies every token
 # claim and the live release itself; the table only decides which local checks
 # apply.
 
@@ -61,10 +61,10 @@ readonly PROMOTION_LAG_RETRY_SECONDS=30
 
 # Products that may call the workflow, one row each: "<owner/name> <repository id>
 # <product name>". This script runs from the trusted workflow SHA, so a new row
-# is reviewed code. The product name is what the request body announces; pushbot
+# is reviewed code. The product name is what the request body announces; the announce service
 # independently verifies the repository, owner, repository id, workflow ref and
 # lineage claims of the OIDC token and the live GitHub release, so a wrong row
-# cannot make pushbot accept a repository it does not know.
+# cannot make the announce service accept a repository it does not know.
 readonly PRODUCTS=(
   'StartupBros/hov-router 1278801682 hov-router'
 )

@@ -58,7 +58,7 @@ RETIRED_SHA='$OLD'" ]; then
 else
   die "hardened/retired each move one step, got: $got"
 fi
-if printf '%s' "$naive" | grep -q "RETIRED_SHA='$NEW'"; then
+if grep -q "RETIRED_SHA='$NEW'" <<<"$naive"; then
   pass "planted negative: the naive sequential replace does collapse both slots"
 else
   die "planted negative did not reproduce the collapse it guards against"
@@ -163,7 +163,7 @@ fi
 d="$(mkrepo partial "$NEW" "HARDENED_SHA='$OLD'
 RETIRED_SHA='$PREV'
 ")"
-if printf '%s' "$(roll_candidates "$d" "$NEW" "$PREV" "$OLD" "$NEW")" | grep -q 'pins.txt'; then
+if grep -q 'pins.txt' <<<"$(roll_candidates "$d" "$NEW" "$PREV" "$OLD" "$NEW")"; then
   pass "a partly-rolled repository still selects the file whose retired slot is unfinished"
 else
   die "a partly-rolled repository selects its unfinished file"
@@ -171,7 +171,7 @@ fi
 
 # 9. An ordinary unrolled repository selects its workflow.
 d="$(mkrepo plain "$OLD")"
-if printf '%s' "$(roll_candidates "$d" "$OLD" "$PREV" "$OLD" "$NEW")" | grep -q 'release-train.yml'; then
+if grep -q 'release-train.yml' <<<"$(roll_candidates "$d" "$OLD" "$PREV" "$OLD" "$NEW")"; then
   pass "an unrolled repository selects its workflow"
 else
   die "an unrolled repository selects its workflow"
