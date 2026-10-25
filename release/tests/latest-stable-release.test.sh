@@ -97,7 +97,7 @@ page() {
 
 # run_guard <pages_dir> <release_id> <release_tag> [repository_name] [fail_at_page]
 run_guard() {
-  local pages_dir="$1" release_id="$2" release_tag="$3" repository="${4:-hovstack}" fail_at_page="${5:-}"
+  local pages_dir="$1" release_id="$2" release_tag="$3" repository="${4:-hov-stack}" fail_at_page="${5:-}"
   : >"$CALLS"
   : >"$OUTPUT"
   env \
@@ -116,7 +116,7 @@ run_guard() {
 }
 
 expect_latest() {
-  local label="$1" pages_dir="$2" release_id="$3" release_tag="$4" repository="${5:-hovstack}"
+  local label="$1" pages_dir="$2" release_id="$3" release_tag="$4" repository="${5:-hov-stack}"
   if ! run_guard "$pages_dir" "$release_id" "$release_tag" "$repository"; then
     command cat "$RUN_OUTPUT" >&2
     die "$label: guard failed"
@@ -129,7 +129,7 @@ expect_latest() {
 }
 
 expect_not_latest() {
-  local label="$1" pages_dir="$2" release_id="$3" release_tag="$4" winner_id="$5" winner_tag="$6" plugin="$7" repository="${8:-hovstack}"
+  local label="$1" pages_dir="$2" release_id="$3" release_tag="$4" winner_id="$5" winner_tag="$6" plugin="$7" repository="${8:-hov-stack}"
   if ! run_guard "$pages_dir" "$release_id" "$release_tag" "$repository"; then
     command cat "$RUN_OUTPUT" >&2
     die "$label: guard failed"
@@ -144,7 +144,7 @@ expect_not_latest() {
 }
 
 expect_failure() {
-  local label="$1" pages_dir="$2" release_id="$3" release_tag="$4" reason="$5" repository="${6:-hovstack}" fail_at_page="${7:-}"
+  local label="$1" pages_dir="$2" release_id="$3" release_tag="$4" reason="$5" repository="${6:-hov-stack}" fail_at_page="${7:-}"
   if run_guard "$pages_dir" "$release_id" "$release_tag" "$repository" "$fail_at_page"; then
     command cat "$RUN_OUTPUT" >&2
     die "$label: guard succeeded"
@@ -159,15 +159,15 @@ expect_failure() {
 SAME_DAY="$TMP/same-day"
 page "$SAME_DAY" 1 \
   "$(release 42 pro-gate--v2.0.0 false false 2026-10-21T10:00:00Z)" \
-  "$(release 41 hovstack--v0.1.0 false false 2026-10-21T09:00:00Z)" \
+  "$(release 41 hov-stack--v0.1.0 false false 2026-10-21T09:00:00Z)" \
   "$(release 40 pro-gate--v1.9.0 false false 2026-10-20T10:00:00Z)" \
-  "$(release 39 hovstack--v0.0.9 false false 2026-10-19T10:00:00Z)"
-expect_latest "pro-gate--v2.0.0 is latest in its own family on a day hovstack also released" "$SAME_DAY" 42 pro-gate--v2.0.0
-expect_latest "hovstack--v0.1.0 is latest in its own family on a day pro-gate also released" "$SAME_DAY" 41 hovstack--v0.1.0
+  "$(release 39 hov-stack--v0.0.9 false false 2026-10-19T10:00:00Z)"
+expect_latest "pro-gate--v2.0.0 is latest in its own family on a day hov-stack also released" "$SAME_DAY" 42 pro-gate--v2.0.0
+expect_latest "hov-stack--v0.1.0 is latest in its own family on a day pro-gate also released" "$SAME_DAY" 41 hov-stack--v0.1.0
 
 # --- Re-run of the earlier release: skip with the helper's marker.
 expect_not_latest "a re-run of pro-gate--v1.9.0 after 2.0.0 skips and prints the marker" "$SAME_DAY" 40 pro-gate--v1.9.0 42 pro-gate--v2.0.0 pro-gate
-expect_not_latest "a re-run of hovstack--v0.0.9 after 0.1.0 skips and prints the marker" "$SAME_DAY" 39 hovstack--v0.0.9 41 hovstack--v0.1.0 hovstack
+expect_not_latest "a re-run of hov-stack--v0.0.9 after 0.1.0 skips and prints the marker" "$SAME_DAY" 39 hov-stack--v0.0.9 41 hov-stack--v0.1.0 hov-stack
 
 # --- Semver order, not creation order.
 LATER_LOWER="$TMP/later-lower"
@@ -240,20 +240,20 @@ PAGINATED="$TMP/paginated"
 mkdir -p "$PAGINATED"
 jq -n '[range(0; 100) | {id: (300 - .), tag_name: ("pro-gate--v1." + (99 - . | tostring) + ".0"), draft: false, prerelease: false, created_at: "2026-10-20T10:00:00Z", published_at: "2026-10-20T10:00:00Z"}]' >"$PAGINATED/page-1.json"
 jq -n '[
-  {id: 24, tag_name: "hovstack--v0.50.0", draft: false, prerelease: false, created_at: "2026-01-02T10:00:00Z", published_at: "2026-01-02T10:00:00Z"},
-  (range(0; 18) | {id: (23 - .), tag_name: ("hovstack--v0." + (17 - . | tostring) + ".0"), draft: false, prerelease: false, created_at: "2026-01-01T10:00:00Z", published_at: "2026-01-01T10:00:00Z"}),
+  {id: 24, tag_name: "hov-stack--v0.50.0", draft: false, prerelease: false, created_at: "2026-01-02T10:00:00Z", published_at: "2026-01-02T10:00:00Z"},
+  (range(0; 18) | {id: (23 - .), tag_name: ("hov-stack--v0." + (17 - . | tostring) + ".0"), draft: false, prerelease: false, created_at: "2026-01-01T10:00:00Z", published_at: "2026-01-01T10:00:00Z"}),
   {id: 5, tag_name: "pro-gate--v9.0.0", draft: false, prerelease: false, created_at: "2025-12-01T10:00:00Z", published_at: "2025-12-01T10:00:00Z"}
 ]' >"$PAGINATED/page-2.json"
 [[ "$(jq -s 'map(length) | add' "$PAGINATED"/page-*.json)" == 120 ]] || die "pagination fixture does not hold 120 releases"
 expect_latest "pro-gate--v9.0.0 on page two of 120 releases is latest" "$PAGINATED" 5 pro-gate--v9.0.0
 expect_not_latest "pro-gate--v1.50.0 on page one loses to 9.0.0 on page two" "$PAGINATED" 251 pro-gate--v1.50.0 5 pro-gate--v9.0.0 pro-gate
-expect_latest "hovstack--v0.50.0 on page two is latest among 19 hovstack releases" "$PAGINATED" 24 hovstack--v0.50.0
+expect_latest "hov-stack--v0.50.0 on page two is latest among 19 hov-stack releases" "$PAGINATED" 24 hov-stack--v0.50.0
 grep -Fq -- '--paginate' "$CALLS" || die "the guard listed releases without --paginate"
 [[ "$(grep -c 'releases?per_page=100' "$CALLS")" == 1 ]] || die "the guard listed releases more than once"
 pass "one paginated list call resolves 120 releases"
 
 # --- Failures: never a silent wrong answer.
-expect_failure "a gh failure on page two fails the guard and writes no output" "$PAGINATED" 5 pro-gate--v9.0.0 'listing releases of fixture-owner/hovstack failed' hovstack 2
+expect_failure "a gh failure on page two fails the guard and writes no output" "$PAGINATED" 5 pro-gate--v9.0.0 'listing releases of fixture-owner/hov-stack failed' hov-stack 2
 expect_failure "a current tag x--v1--v1.0.0 is refused before the listing is read" "$SAME_DAY" 42 x--v1--v1.0.0 'contains --, the release tag separator: x--v1'
 [[ ! -s "$CALLS" ]] || die "a malformed current tag still listed releases"
 pass "a malformed current tag makes no gh call"
@@ -272,7 +272,7 @@ expect_failure "a stable same-family release tagged pro-gate--v1.10 fails loudly
 
 MALFORMED_OTHER="$TMP/malformed-other"
 page "$MALFORMED_OTHER" 1 \
-  "$(release 94 hovstack--v0.1 false false 2026-10-21T10:00:00Z)" \
+  "$(release 94 hov-stack--v0.1 false false 2026-10-21T10:00:00Z)" \
   "$(release 93 pro-gate--v1.9.0 false false 2026-10-20T10:00:00Z)"
 expect_latest "a non-canonical tag in another family does not affect pro-gate--v1.9.0" "$MALFORMED_OTHER" 93 pro-gate--v1.9.0
 
@@ -297,8 +297,8 @@ expect_failure "an error object in place of a page fails" "$NOT_ARRAY" 42 pro-ga
 : >"$OUTPUT"
 # GitHub Actions exports GITHUB_OUTPUT to every run step, so the variable
 # must be removed explicitly or this case runs the guard for real in CI.
-if env -u GITHUB_OUTPUT PATH="$FAKE_BIN:$PATH" FAKE_GH_CALLS="$CALLS" FAKE_GH_PAGES="$SAME_DAY" FAKE_GH_REPOSITORY=fixture-owner/hovstack \
-  GH_TOKEN=fixture-token GITHUB_REPOSITORY=fixture-owner/hovstack REPOSITORY=hovstack RELEASE_ID=42 RELEASE_TAG=pro-gate--v2.0.0 \
+if env -u GITHUB_OUTPUT PATH="$FAKE_BIN:$PATH" FAKE_GH_CALLS="$CALLS" FAKE_GH_PAGES="$SAME_DAY" FAKE_GH_REPOSITORY=fixture-owner/hov-stack \
+  GH_TOKEN=fixture-token GITHUB_REPOSITORY=fixture-owner/hov-stack REPOSITORY=hov-stack RELEASE_ID=42 RELEASE_TAG=pro-gate--v2.0.0 \
   bash "$GUARD" >"$RUN_OUTPUT" 2>&1; then
   die "the guard ran without GITHUB_OUTPUT"
 fi
@@ -312,8 +312,8 @@ fi
 grep -Fq 'RELEASE_ID must be a positive canonical decimal integer' "$RUN_OUTPUT" || die "non-canonical RELEASE_ID was not named"
 pass "a non-canonical RELEASE_ID is refused"
 
-if env PATH="$FAKE_BIN:$PATH" FAKE_GH_CALLS="$CALLS" FAKE_GH_PAGES="$SAME_DAY" FAKE_GH_REPOSITORY=fixture-owner/hovstack \
-  GH_TOKEN=fixture-token GITHUB_REPOSITORY=fixture-owner/hovstack GITHUB_OUTPUT="$OUTPUT" REPOSITORY=hovstack RELEASE_ID=42 RELEASE_TAG=pro-gate--v2.0.0 \
+if env PATH="$FAKE_BIN:$PATH" FAKE_GH_CALLS="$CALLS" FAKE_GH_PAGES="$SAME_DAY" FAKE_GH_REPOSITORY=fixture-owner/hov-stack \
+  GH_TOKEN=fixture-token GITHUB_REPOSITORY=fixture-owner/hov-stack GITHUB_OUTPUT="$OUTPUT" REPOSITORY=hov-stack RELEASE_ID=42 RELEASE_TAG=pro-gate--v2.0.0 \
   bash "$GUARD" extra-argument >"$RUN_OUTPUT" 2>&1; then
   die "the guard accepted an argument"
 fi

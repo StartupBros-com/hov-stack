@@ -5,7 +5,7 @@ set -euo pipefail
 #
 # The validator admits the url-to-git-subdir transition once per plugin. The
 # reconciler never changes a card's shape; this script writes that one transition
-# (or creates the hovstack skill pack's first entry), and the workflow opens the PR.
+# (or creates the hov-stack skill pack's first entry), and the workflow opens the PR.
 #
 # Usage:
 #   release/scripts/repin-migrate.sh <name>
@@ -16,7 +16,7 @@ set -euo pipefail
 #   PLAN_FILE            TSV plan (default: repin-plan.tsv)
 #   DRY_RUN              1 writes the plan only (default: 0)
 #   GH_TOKEN             release App token for draft-visible reads
-#   MONOREPO_SOURCE_URL  shared source URL (default: StartupBros-com/hovstack.git)
+#   MONOREPO_SOURCE_URL  shared source URL (default: StartupBros-com/hov-stack.git)
 #
 # Exit codes:
 #   0  migration written, or a dry-run plan written
@@ -41,7 +41,7 @@ count="$(jq -er --arg n "$name" '[.plugins[] | select(type == "object" and .name
 origin='url entry'
 case "$count" in
   0)
-    [ "$name" = hovstack ] || fail "$name has no entry; only hovstack may be created"
+    [ "$name" = hov-stack ] || fail "$name has no entry; only hov-stack may be created"
     origin='new entry' ;;
   1)
     shape="$(jq -r --arg n "$name" '.plugins[] | select(type == "object" and .name == $n) | .source.source' "$MANIFEST")" \
@@ -68,10 +68,10 @@ esac
 
 description=''
 if [ "$count" -eq 0 ]; then
-  plugin="$(gh api "repos/$monorepo/contents/plugins/hovstack/.claude-plugin/plugin.json?ref=$sha" -H 'Accept: application/vnd.github.raw')" \
-    || fail "could not read hovstack plugin.json at $sha in $monorepo"
-  description="$(jq -er 'select(.name == "hovstack") | .description | select(type == "string" and length > 0)' <<<"$plugin")" \
-    || fail 'hovstack plugin.json must name hovstack and carry a non-empty description'
+  plugin="$(gh api "repos/$monorepo/contents/plugins/hov-stack/.claude-plugin/plugin.json?ref=$sha" -H 'Accept: application/vnd.github.raw')" \
+    || fail "could not read hov-stack plugin.json at $sha in $monorepo"
+  description="$(jq -er 'select(.name == "hov-stack") | .description | select(type == "string" and length > 0)' <<<"$plugin")" \
+    || fail 'hov-stack plugin.json must name hov-stack and carry a non-empty description'
 fi
 
 : > "$PLAN_FILE"

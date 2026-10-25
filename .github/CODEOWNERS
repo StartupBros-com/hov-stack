@@ -7,4 +7,4 @@
 **/VERSION           @StartupBros
 /setup               @StartupBros
 /hooks/              @StartupBros
-/plugins/hovstack/   @StartupBros
+/plugins/hov-stack/   @StartupBros

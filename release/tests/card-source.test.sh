@@ -55,7 +55,7 @@ traps_before="$(trap -p)"
 pass 'sourcing under set -euo pipefail is silent and preserves shell flags and traps'
 
 for url in https://github.com/acme/widget.git https://github.com/acme/gadget.git https://github.com/acme/mono.git \
-  https://github.com/StartupBros-com/pro-gate.git https://github.com/StartupBros-com/hovstack.git https://github.com/acme/mono; do
+  https://github.com/StartupBros-com/pro-gate.git https://github.com/StartupBros-com/hov-stack.git https://github.com/acme/mono; do
   expected="${url#https://github.com/}"; expected="${expected%.git}"
   [ "$(repo_from_url "$url")" = "$expected" ] || die "URL resolution: $url"
   pass "repo_from_url accepts $url"

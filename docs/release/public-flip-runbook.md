@@ -5,7 +5,7 @@
 > end are dated 2026-07-15 and the body below is kept as written. Three things
 > about it have changed since:
 >
-> - **The rename to `hovstack` does not follow it.** The restructure plan's
+> - **The rename to `hov-stack` does not follow it.** The restructure plan's
 >   flip units (U20 to U26; the plan lands in this repository at U23) supersede
 >   this runbook for the rename, the plugin imports and the cutover window.
 >   Its stop conditions under "Ownership and stop conditions" and its

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # Shared interpretation of marketplace cards and their release tag families.
-MONOREPO_SOURCE_URL="${MONOREPO_SOURCE_URL:-https://github.com/StartupBros-com/hovstack.git}"
+MONOREPO_SOURCE_URL="${MONOREPO_SOURCE_URL:-https://github.com/StartupBros-com/hov-stack.git}"
 
 # Keep the canonical URL rule identical for every caller.
 repo_from_url() {
