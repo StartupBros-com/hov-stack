@@ -20,10 +20,10 @@ MARKETPLACE_TEST_REMOTE_ROOT="${MARKETPLACE_TEST_REMOTE_ROOT:-}"
 # plugins/<name>/ (the renamed marketplace repo). A single configuration value,
 # so the gate-2 rehearsal can aim the check at a scratch repository without
 # editing the check itself.
-MONOREPO_SOURCE_URL="${MONOREPO_SOURCE_URL:-https://github.com/StartupBros-com/hovstack.git}"
+MONOREPO_SOURCE_URL="${MONOREPO_SOURCE_URL:-https://github.com/StartupBros-com/hov-stack.git}"
 # The shared announce workflow is referenced under either repository name
 # during the rename window; GitHub redirects the old one.
-ANNOUNCE_WORKFLOW_REPOSITORIES=(StartupBros-com/hov-marketplace StartupBros-com/hovstack)
+ANNOUNCE_WORKFLOW_REPOSITORIES=(StartupBros-com/hov-marketplace StartupBros-com/hov-stack)
 # Per-run cache of monorepo main checkouts (one full fetch per distinct remote),
 # created on first use and removed at exit.
 MONOREPO_CACHE_DIR=""
@@ -110,7 +110,7 @@ expected_source_url() {
 # so is never a url entry. This case list is the only place a name is admitted.
 approved_subdir_plugin_name() {
   case "$1" in
-    hovstack) return 0 ;;
+    hov-stack) return 0 ;;
     *) expected_source_url "$1" >/dev/null ;;
   esac
 }

@@ -346,9 +346,9 @@ expect_fail "card without run line rejected" validate syntax
 # needs the network. Its root carries only the workflow set: no root VERSION,
 # no root plugin manifest, no root skill directory.
 
-MONOREPO="$TMP/hovstack"
-MONOREPO_REMOTE="$REMOTE_ROOT/StartupBros-com/hovstack.git"
-MONOREPO_URL="https://github.com/StartupBros-com/hovstack.git"
+MONOREPO="$TMP/hov-stack"
+MONOREPO_REMOTE="$REMOTE_ROOT/StartupBros-com/hov-stack.git"
+MONOREPO_URL="https://github.com/StartupBros-com/hov-stack.git"
 git init -q "$MONOREPO"
 git -C "$MONOREPO" config user.name Fixture
 git -C "$MONOREPO" config user.email fixture@example.com
@@ -381,20 +381,20 @@ add_subdir_plugin() {
 
 # add_pack_plugin VERSION: commits the skill pack in its real layout, several
 # skills under skills/<skill>/ and none named after the pack, tags
-# hovstack--vVERSION, publishes, prints the commit.
+# hov-stack--vVERSION, publishes, prints the commit.
 add_pack_plugin() {
   local version="$1" skill
-  local dir="$MONOREPO/plugins/hovstack"
+  local dir="$MONOREPO/plugins/hov-stack"
   mkdir -p "$dir/.claude-plugin"
-  jq -n --arg version "$version" '{name: "hovstack", version: $version}' >"$dir/.claude-plugin/plugin.json"
+  jq -n --arg version "$version" '{name: "hov-stack", version: $version}' >"$dir/.claude-plugin/plugin.json"
   printf '%s\n' "$version" >"$dir/VERSION"
   for skill in alpha beta; do
     mkdir -p "$dir/skills/$skill"
     printf '# fixture\n' >"$dir/skills/$skill/SKILL.md"
   done
-  git -C "$MONOREPO" add plugins/hovstack
-  git -C "$MONOREPO" commit -qm "hovstack $version"
-  git -C "$MONOREPO" tag "hovstack--v$version"
+  git -C "$MONOREPO" add plugins/hov-stack
+  git -C "$MONOREPO" commit -qm "hov-stack $version"
+  git -C "$MONOREPO" tag "hov-stack--v$version"
   publish_monorepo
   git -C "$MONOREPO" rev-parse HEAD
 }
@@ -408,7 +408,7 @@ write_mixed_manifest() {
   write_manifest "$TOKEN_SHA" "$PRO_SHA" 10
   jq --arg url "$MONOREPO_URL" --arg sign_sha "$SIGN_SHA" --arg pack_sha "$PACK_SHA" '.plugins += [
     {name: "sign-it", source: {source: "git-subdir", url: $url, path: "plugins/sign-it", sha: $sign_sha}, description: "Sign it.", metadata: {version: "0.5.0", releaseId: 40, releaseTag: "sign-it--v0.5.0"}},
-    {name: "hovstack", source: {source: "git-subdir", url: $url, path: "plugins/hovstack", sha: $pack_sha}, description: "The stack.", metadata: {version: "0.1.0", releaseId: 50, releaseTag: "hovstack--v0.1.0"}}
+    {name: "hov-stack", source: {source: "git-subdir", url: $url, path: "plugins/hov-stack", sha: $pack_sha}, description: "The stack.", metadata: {version: "0.1.0", releaseId: 50, releaseTag: "hov-stack--v0.1.0"}}
   ]' "$WORK/.claude-plugin/marketplace.json" >"$TMP/mixed.json"
   mv "$TMP/mixed.json" "$WORK/.claude-plugin/marketplace.json"
 }
@@ -464,16 +464,16 @@ publish_monorepo
 
 # Negative: the skill pack's pin must carry at least one skill directly under
 # skills/; a SKILL.md two levels down does not count.
-git -C "$MONOREPO" rm -rq plugins/hovstack/skills
-mkdir -p "$MONOREPO/plugins/hovstack/skills/alpha/nested"
-printf '# fixture\n' >"$MONOREPO/plugins/hovstack/skills/alpha/nested/SKILL.md"
-git -C "$MONOREPO" add plugins/hovstack
-git -C "$MONOREPO" commit -qm 'hovstack with no top-level skill'
+git -C "$MONOREPO" rm -rq plugins/hov-stack/skills
+mkdir -p "$MONOREPO/plugins/hov-stack/skills/alpha/nested"
+printf '# fixture\n' >"$MONOREPO/plugins/hov-stack/skills/alpha/nested/SKILL.md"
+git -C "$MONOREPO" add plugins/hov-stack
+git -C "$MONOREPO" commit -qm 'hov-stack with no top-level skill'
 publish_monorepo
 BARE_PACK_SHA="$(git -C "$MONOREPO" rev-parse HEAD)"
 write_mixed_manifest
-mutate_manifest --arg sha "$BARE_PACK_SHA" '(.plugins[] | select(.name == "hovstack") | .source.sha) = $sha'
-expect_fail_reason "skill pack pin with no top-level skill rejected" "plugin hovstack pin has no skill at plugins/hovstack/skills/<skill>/SKILL.md" validate full
+mutate_manifest --arg sha "$BARE_PACK_SHA" '(.plugins[] | select(.name == "hov-stack") | .source.sha) = $sha'
+expect_fail_reason "skill pack pin with no top-level skill rejected" "plugin hov-stack pin has no skill at plugins/hov-stack/skills/<skill>/SKILL.md" validate full
 git -C "$MONOREPO" revert --no-edit HEAD >/dev/null
 publish_monorepo
 
@@ -497,22 +497,22 @@ publish_monorepo
 # bad pin: the first entry's fetch must be reused for the traced count to
 # read one on the fail path, so a per-entry cache would read two here too.
 git -C "$MONOREPO" checkout -q -b side
-printf '0.2.0\n' >"$MONOREPO/plugins/hovstack/VERSION"
-jq '.version = "0.2.0"' "$MONOREPO/plugins/hovstack/.claude-plugin/plugin.json" >"$TMP/side-manifest.json"
-mv "$TMP/side-manifest.json" "$MONOREPO/plugins/hovstack/.claude-plugin/plugin.json"
-git -C "$MONOREPO" commit -qam 'hovstack 0.2.0 on a side branch'
-git -C "$MONOREPO" tag hovstack--v0.2.0
+printf '0.2.0\n' >"$MONOREPO/plugins/hov-stack/VERSION"
+jq '.version = "0.2.0"' "$MONOREPO/plugins/hov-stack/.claude-plugin/plugin.json" >"$TMP/side-manifest.json"
+mv "$TMP/side-manifest.json" "$MONOREPO/plugins/hov-stack/.claude-plugin/plugin.json"
+git -C "$MONOREPO" commit -qam 'hov-stack 0.2.0 on a side branch'
+git -C "$MONOREPO" tag hov-stack--v0.2.0
 SIDE_SHA="$(git -C "$MONOREPO" rev-parse HEAD)"
-git -C "$MONOREPO" push -q "$MONOREPO_REMOTE" side hovstack--v0.2.0
+git -C "$MONOREPO" push -q "$MONOREPO_REMOTE" side hov-stack--v0.2.0
 git -C "$MONOREPO" checkout -q main
 write_mixed_manifest
-mutate_manifest --arg sha "$SIDE_SHA" '(.plugins[] | select(.name == "hovstack")) |= (.source.sha = $sha | .metadata = {version: "0.2.0", releaseId: 51, releaseTag: "hovstack--v0.2.0"})'
-TMPDIR="$TMP/validator-tmp" GIT_TRACE="$TMP/git-trace" expect_fail_reason "git-subdir pinned commit must be reachable from main" "plugin hovstack pinned commit is not reachable from main at" validate full
+mutate_manifest --arg sha "$SIDE_SHA" '(.plugins[] | select(.name == "hov-stack")) |= (.source.sha = $sha | .metadata = {version: "0.2.0", releaseId: 51, releaseTag: "hov-stack--v0.2.0"})'
+TMPDIR="$TMP/validator-tmp" GIT_TRACE="$TMP/git-trace" expect_fail_reason "git-subdir pinned commit must be reachable from main" "plugin hov-stack pinned commit is not reachable from main at" validate full
 assert_monorepo_cache "a failing full run reuses the first entry's fetch and still removes its cache"
 
 # Twin: a url entry's release train may reference the shared workflow under
 # the new repository name during the window.
-yq -i '.jobs.announce.uses = "StartupBros-com/hovstack/.github/workflows/hov-tool-drop-announce.yml@c981b872ebf650805200ad72c8b7142232f8b3f6"' "$TMP/token-eater/.github/workflows/release-train.yml"
+yq -i '.jobs.announce.uses = "StartupBros-com/hov-stack/.github/workflows/hov-tool-drop-announce.yml@c981b872ebf650805200ad72c8b7142232f8b3f6"' "$TMP/token-eater/.github/workflows/release-train.yml"
 publish_fixture_commit 'announce reference under the new repository name'
 write_mixed_manifest
 expect_pass "url entry may reference the shared workflow under the new repository name" validate full
@@ -529,8 +529,8 @@ mutate_manifest '(.plugins[] | select(.name == "sign-it")) |= (.name = "sign--it
 expect_fail_reason "plugin name containing -- rejected" "plugin names must not contain --, the release tag separator: sign--it" validate syntax
 
 write_mixed_manifest
-mutate_manifest '(.plugins[] | select(.name == "hovstack")) |= (.source = {source: "url", url: "https://github.com/StartupBros-com/hovstack.git", sha: .source.sha} | .metadata.releaseTag = "v0.1.0")'
-expect_fail_reason "hovstack is admitted only as a git-subdir entry" "plugin hovstack is not approved for this marketplace" validate syntax
+mutate_manifest '(.plugins[] | select(.name == "hov-stack")) |= (.source = {source: "url", url: "https://github.com/StartupBros-com/hov-stack.git", sha: .source.sha} | .metadata.releaseTag = "v0.1.0")'
+expect_fail_reason "hov-stack is admitted only as a git-subdir entry" "plugin hov-stack is not approved for this marketplace" validate syntax
 
 write_mixed_manifest
 mutate_manifest '(.plugins[] | select(.name == "sign-it") | .metadata.releaseTag) = "v0.5.0"'

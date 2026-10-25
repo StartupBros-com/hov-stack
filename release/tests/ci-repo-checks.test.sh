@@ -82,7 +82,7 @@ sed 's|^/hooks/ .*|/hooks/|' "$TMP/owners" >.github/CODEOWNERS
 reject 'missing required entry /hooks/ with an @owner' bash "$SCRIPT"
 pass 'an owner-less required entry fails'
 cp "$TMP/owners" .github/CODEOWNERS
-plugin hovstack
+plugin hov-stack
 mkdir -p hooks
 reject 'CODEOWNERS lists /setup, which does not exist' bash "$SCRIPT"
 pass 'future paths become mandatory when plugins exists'

@@ -35,7 +35,7 @@ case "$path" in
   repos/acme/mono/git/ref/tags/*) printf '{"object":{"type":"commit","sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}\n' | emit ;;
   repos/acme/mono/compare/*) jq -n --arg s "$(cat "$FIX/status")" '{status:$s}' | emit ;;
   repos/acme/mono) printf '{"default_branch":"main"}\n' | emit ;;
-  'repos/acme/mono/contents/plugins/hovstack/.claude-plugin/plugin.json?ref=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa') cat "$FIX/plugin.json" ;;
+  'repos/acme/mono/contents/plugins/hov-stack/.claude-plugin/plugin.json?ref=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa') cat "$FIX/plugin.json" ;;
   *) exit 92 ;;
 esac
 STUB
@@ -48,7 +48,7 @@ base_manifest() {
     {name:"gadget",description:"Gadget",source:{source:"git-subdir",url:"https://github.com/acme/mono.git",path:"plugins/gadget",sha:$s},metadata:{version:"1.0.0",releaseId:20,releaseTag:"gadget--v1.0.0"}}
   ]}' > "$TMP/m.json"
   printf 'behind\n' > "$FIX/status"
-  printf '{"name":"hovstack","description":"The skill pack ⚡"}\n' > "$FIX/plugin.json"
+  printf '{"name":"hov-stack","description":"The skill pack ⚡"}\n' > "$FIX/plugin.json"
 }
 releases() { # name [version]
   jq -n --arg tag "$1--v${2:-2.0.0}" '[{id:900,tag_name:$tag,draft:true,prerelease:false,created_at:"2026-10-21"}]' > "$FIX/acme/mono/page-1.json"
@@ -67,7 +67,7 @@ refuse() {
 }
 base_manifest
 releases widget
-refuse nonesuch 'only hovstack may be created'
+refuse nonesuch 'only hov-stack may be created'
 refuse gadget 'already a git-subdir entry'
 : > "$CALLS"
 refuse bad--name 'invalid plugin name'
@@ -160,18 +160,18 @@ validate_against_base || die "migrated url output fails against the base manifes
 pass 'the migrated url output passes the unchanged validator against the base manifest, transition and monotonicity included'
 cp "$WORK/.claude-plugin/marketplace.json" "$TMP/m.json"
 cp "$TMP/m.json" "$TMP/approved-migrated"
-releases hovstack 0.1.0
-migrate hovstack || die "hovstack creation failed: $(cat "$TMP/err")"
-jq -e '.plugins | length == 2 and .[0].name == "pro-gate" and .[-1].name == "hovstack" and .[-1].description == "The skill pack ⚡" and (.[-1] | has("card") | not)' "$TMP/m.json" >/dev/null || die 'skill pack not appended correctly'
-jq -e --arg s "$SHA" '.plugins[-1].source == {source:"git-subdir",url:"https://github.com/acme/mono.git",path:"plugins/hovstack",sha:$s} and .plugins[-1].metadata == {version:"0.1.0",releaseId:900,releaseTag:"hovstack--v0.1.0"}' "$TMP/m.json" >/dev/null || die 'skill pack tuple wrong'
-[ "$(cat "$TMP/plan.tsv")" = "$(printf 'hovstack\t0.1.0\thovstack--v0.1.0\t900\t%s\ttrue' "$SHA")" ] || die 'skill pack plan differs'
-grep -Fq "contents/plugins/hovstack/.claude-plugin/plugin.json?ref=$SHA" "$CALLS" || die 'plugin description not read at pinned sha'
+releases hov-stack 0.1.0
+migrate hov-stack || die "hov-stack creation failed: $(cat "$TMP/err")"
+jq -e '.plugins | length == 2 and .[0].name == "pro-gate" and .[-1].name == "hov-stack" and .[-1].description == "The skill pack ⚡" and (.[-1] | has("card") | not)' "$TMP/m.json" >/dev/null || die 'skill pack not appended correctly'
+jq -e --arg s "$SHA" '.plugins[-1].source == {source:"git-subdir",url:"https://github.com/acme/mono.git",path:"plugins/hov-stack",sha:$s} and .plugins[-1].metadata == {version:"0.1.0",releaseId:900,releaseTag:"hov-stack--v0.1.0"}' "$TMP/m.json" >/dev/null || die 'skill pack tuple wrong'
+[ "$(cat "$TMP/plan.tsv")" = "$(printf 'hov-stack\t0.1.0\thov-stack--v0.1.0\t900\t%s\ttrue' "$SHA")" ] || die 'skill pack plan differs'
+grep -Fq "contents/plugins/hov-stack/.claude-plugin/plugin.json?ref=$SHA" "$CALLS" || die 'plugin description not read at pinned sha'
 cp "$TMP/m.json" "$WORK/.claude-plugin/marketplace.json"
-validate_against_base || die "created hovstack output fails against the base manifest: $(cat "$TMP/validate")"
-pass 'hovstack is appended with its exact tuple, plan row and pinned description, and passes the validator against the base manifest'
+validate_against_base || die "created hov-stack output fails against the base manifest: $(cat "$TMP/validate")"
+pass 'hov-stack is appended with its exact tuple, plan row and pinned description, and passes the validator against the base manifest'
 cp "$TMP/approved-migrated" "$TMP/m.json"
-printf '{"name":"hovstack","description":""}\n' > "$FIX/plugin.json"
-refuse hovstack 'non-empty description'
+printf '{"name":"hov-stack","description":""}\n' > "$FIX/plugin.json"
+refuse hov-stack 'non-empty description'
 printf '{"name":"other","description":"valid description"}\n' > "$FIX/plugin.json"
-refuse hovstack 'must name hovstack'
+refuse hov-stack 'must name hov-stack'
 printf '%s repin migrate checks passed\n' "$PASS"

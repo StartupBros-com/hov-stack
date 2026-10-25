@@ -65,7 +65,7 @@ done
 pass 'the three token-minting workflows each carry a minting job'
 pins="$(grep -rhoE 'hov-tool-drop-announce\.yml@[0-9a-f]{40}' .github/workflows)"
 [ "$pins" = hov-tool-drop-announce.yml@41bb6f811f1c1ad65f62c1ef32e696c60fb1d8c3 ] || die 'announce pin count/value'
-jq -e --arg uses "StartupBros-com/hov-marketplace/.github/workflows/hov-tool-drop-announce.yml@41bb6f811f1c1ad65f62c1ef32e696c60fb1d8c3" \
+jq -e --arg uses "StartupBros-com/hov-stack/.github/workflows/hov-tool-drop-announce.yml@41bb6f811f1c1ad65f62c1ef32e696c60fb1d8c3" \
   --arg announce "github.event.release.draft == false && github.event.release.prerelease == false && needs.verify.result == 'success'" '
   (.jobs.announce | has("with") | not)
   and .jobs.announce.permissions == {"contents":"read","id-token":"write"}

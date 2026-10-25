@@ -399,4 +399,4 @@ runs on the bump PR and again before the draft is created.
 - `key-rotation.md`: where each App key lives and how to rotate one.
 - `public-flip-runbook.md`: the 2026-07 public flip of this repository; its
   stop conditions and clean-history contingency still apply here. The rename
-  to `hovstack` follows the restructure plan's flip units instead.
+  to `hov-stack` follows the restructure plan's flip units instead.

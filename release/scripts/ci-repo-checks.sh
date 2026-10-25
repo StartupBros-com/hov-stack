@@ -25,7 +25,7 @@ else
 fi
 if [ ! -f "$owners" ]; then problem "CODEOWNERS file $owners does not exist";
 else
-  for pattern in '/.github/' '/release/' '/.claude-plugin/' '**/VERSION' '/setup' '/hooks/' '/plugins/hovstack/'; do
+  for pattern in '/.github/' '/release/' '/.claude-plugin/' '**/VERSION' '/setup' '/hooks/' '/plugins/hov-stack/'; do
     if ! awk -v pattern="$pattern" '$1 == pattern && $2 ~ /^@/ { found=1 } END { exit !found }' "$owners"; then
       problem "CODEOWNERS $owners is missing required entry $pattern with an @owner"
     fi

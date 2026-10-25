@@ -95,13 +95,13 @@ pass 'missing files do not stop other checks'
 
 # The skill pack ships several skills and none named after itself; it still
 # needs at least one skill directly under skills/.
-plugin hovstack 0.1.0; rm -r plugins/hovstack/skills/hovstack
-mkdir -p plugins/hovstack/skills/alpha; printf 'fixture skill\n' >plugins/hovstack/skills/alpha/SKILL.md
-bash "$SCRIPT" plugins/hovstack >"$TMP/out" 2>"$TMP/err" || { cat "$TMP/err"; die 'skill pack without a self-named skill'; }
+plugin hov-stack 0.1.0; rm -r plugins/hov-stack/skills/hov-stack
+mkdir -p plugins/hov-stack/skills/alpha; printf 'fixture skill\n' >plugins/hov-stack/skills/alpha/SKILL.md
+bash "$SCRIPT" plugins/hov-stack >"$TMP/out" 2>"$TMP/err" || { cat "$TMP/err"; die 'skill pack without a self-named skill'; }
 pass 'the skill pack needs no skill named after itself'
-rm -r plugins/hovstack/skills/alpha; mkdir -p plugins/hovstack/skills/alpha/nested
-printf 'fixture skill\n' >plugins/hovstack/skills/alpha/nested/SKILL.md
-reject 'missing plugins/hovstack/skills/<skill>/SKILL.md' bash "$SCRIPT" plugins/hovstack
+rm -r plugins/hov-stack/skills/alpha; mkdir -p plugins/hov-stack/skills/alpha/nested
+printf 'fixture skill\n' >plugins/hov-stack/skills/alpha/nested/SKILL.md
+reject 'missing plugins/hov-stack/skills/<skill>/SKILL.md' bash "$SCRIPT" plugins/hov-stack
 pass 'a skill pack with no top-level skill is named'
 plugin b; rm plugins/b/skills/b/SKILL.md
 mkdir -p plugins/b/skills/other; printf 'fixture skill\n' >plugins/b/skills/other/SKILL.md

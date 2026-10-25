@@ -654,7 +654,7 @@ cat >"$STABLE_PROBE_DIR/bin/gh" <<'FAKE_GH'
 set -euo pipefail
 printf '%s\n' "$*" >>"$STABLE_PROBE_CALLS"
 [[ "$*" == "api --paginate repos/fixture-owner/fixture-monorepo/releases?per_page=100" ]] || exit 120
-printf '%s\n' '[{"id":9,"tag_name":"pro-gate--v2.0.0","draft":false,"prerelease":false},{"id":8,"tag_name":"hovstack--v0.1.0","draft":false,"prerelease":false},{"id":7,"tag_name":"pro-gate--v1.9.0","draft":false,"prerelease":false}]'
+printf '%s\n' '[{"id":9,"tag_name":"pro-gate--v2.0.0","draft":false,"prerelease":false},{"id":8,"tag_name":"hov-stack--v0.1.0","draft":false,"prerelease":false},{"id":7,"tag_name":"pro-gate--v1.9.0","draft":false,"prerelease":false}]'
 FAKE_GH
 chmod +x "$STABLE_PROBE_DIR/bin/gh"
 : >"$STABLE_PROBE_CALLS"
@@ -1453,7 +1453,7 @@ write_monorepo_plugin() {
     '{name: $name, version: $version}' >"$MONOREPO/plugins/$name/.claude-plugin/plugin.json"
 }
 write_monorepo_plugin pro-gate "$PRO_GATE_VERSION"
-write_monorepo_plugin hovstack "$HOVSTACK_VERSION"
+write_monorepo_plugin hov-stack "$HOVSTACK_VERSION"
 # Planted: a directory whose name carries the tag separator, complete with a
 # VERSION, a plugin manifest, a tag and (below) a carded marketplace entry, so
 # the name rule is the only thing between it and an announce.
@@ -1467,7 +1467,7 @@ git -C "$MONOREPO" config user.email fixture@example.com
 git -C "$MONOREPO" add plugins
 git -C "$MONOREPO" commit -qm 'monorepo fixture'
 git -C "$MONOREPO" tag "pro-gate--v$PRO_GATE_VERSION"
-git -C "$MONOREPO" tag "hovstack--v$HOVSTACK_VERSION"
+git -C "$MONOREPO" tag "hov-stack--v$HOVSTACK_VERSION"
 git -C "$MONOREPO" tag "x--v1--v$PLANTED_VERSION"
 git -C "$MONOREPO" tag "pro_gate--v$BADSHAPE_VERSION"
 # The same commit under a tag whose version disagrees with plugins/pro-gate/VERSION.
@@ -1486,7 +1486,7 @@ jq -n \
       card: {rows: ["one", "two", "three"], run: "Run it"}};
    {plugins: [
      entry("pro-gate"; $pro_gate_version; $pro_gate_release_id),
-     entry("hovstack"; $hovstack_version; $hovstack_release_id),
+     entry("hov-stack"; $hovstack_version; $hovstack_release_id),
      entry("x--v1"; $planted_version; $planted_release_id),
      entry("pro_gate"; $badshape_version; $badshape_release_id)
    ]}' >"$MONO_MANIFEST"
@@ -1507,7 +1507,7 @@ run_monorepo() {
 }
 
 PRO_GATE_BODY='{"operation":"announce","repository":"pro-gate","releaseId":"7","notesSummary":"First safe improvement\nSecond exact detail"}'
-HOVSTACK_BODY='{"operation":"announce","repository":"hovstack","releaseId":"8","notesSummary":"First safe improvement\nSecond exact detail"}'
+HOVSTACK_BODY='{"operation":"announce","repository":"hov-stack","releaseId":"8","notesSummary":"First safe improvement\nSecond exact detail"}'
 PLANTED_REFUSAL='contains --, the release tag separator: x--v1'
 PLANTED_BODY='{"operation":"announce","repository":"x--v1","releaseId":"9","notesSummary":"First safe improvement\nSecond exact detail"}'
 BADSHAPE_BODY='{"operation":"announce","repository":"pro_gate","releaseId":"10","notesSummary":"First safe improvement\nSecond exact detail"}'
@@ -1521,13 +1521,13 @@ assert_one_bound_request '["notesSummary","operation","releaseId","repository"]'
 [[ "$(<"$BODY_FILE")" == "$PRO_GATE_BODY" ]] || die "monorepo request body did not carry the plugin name pro-gate"
 pass "pro-gate--v$PRO_GATE_VERSION on the monorepo verifies plugins/pro-gate/VERSION and sends repository=pro-gate while REPOSITORY is $MONOREPO_REPOSITORY"
 
-if ! run_monorepo "$HELPER" "hovstack--v$HOVSTACK_VERSION" "$HOVSTACK_RELEASE_ID" "$MONO_MANIFEST"; then
+if ! run_monorepo "$HELPER" "hov-stack--v$HOVSTACK_VERSION" "$HOVSTACK_RELEASE_ID" "$MONO_MANIFEST"; then
   command cat "$TMP/run-output" >&2
-  die "monorepo hovstack fixture"
+  die "monorepo hov-stack fixture"
 fi
 assert_one_bound_request '["notesSummary","operation","releaseId","repository"]'
-[[ "$(<"$BODY_FILE")" == "$HOVSTACK_BODY" ]] || die "monorepo request body did not carry the skill pack name hovstack"
-pass "hovstack--v$HOVSTACK_VERSION on the monorepo names the skill pack from plugins/hovstack/VERSION"
+[[ "$(<"$BODY_FILE")" == "$HOVSTACK_BODY" ]] || die "monorepo request body did not carry the skill pack name hov-stack"
+pass "hov-stack--v$HOVSTACK_VERSION on the monorepo names the skill pack from plugins/hov-stack/VERSION"
 
 if run_monorepo "$HELPER" 'pro-gate--v0.67.0' "$PRO_GATE_RELEASE_ID" "$MONO_MANIFEST"; then
   die "a prefixed tag whose version disagrees with plugins/pro-gate/VERSION unexpectedly succeeded"
