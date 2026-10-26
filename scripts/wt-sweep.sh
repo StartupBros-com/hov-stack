@@ -30,7 +30,10 @@ ONLY="${ONLY:-}"; ACTIVE_MIN="${ACTIVE_MIN:-120}"
 # Preview reads must not refresh an index or acquire optional Git locks. Every
 # mutation is separately routed through run(), but status itself may otherwise
 # rewrite index metadata while answering a read-only question.
-[ "$DRY_RUN" = 1 ] && export GIT_OPTIONAL_LOCKS=0
+# Unconditional since dotfiles#1590: run()'s mutations take mandatory locks
+# regardless, and a status probe killed mid-write under DRY_RUN=0 leaves a
+# zero-byte index.lock that dcg will not let an agent remove.
+export GIT_OPTIONAL_LOCKS=0
 # Shared liveness implementation (fd+cwd+cmdline) — lib/proc_liveness.py, also
 # used by reclaim-sweep.py (issue #378). Overridable so the test suite can point
 # alive() at the checkout's copy (and at a broken path for the fail-closed case).

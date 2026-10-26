@@ -149,7 +149,7 @@ GATE_NONCRITICAL=""
 capture_worktree_state() {
   local status
   DIRTY_N="" END_SHA="" FINAL_STATE_UNKNOWN=""
-  if status=$(git -C "$WT" status --porcelain 2>>"${LOG:-/dev/null}"); then
+  if status=$(git -C "$WT" --no-optional-locks status --porcelain 2>>"${LOG:-/dev/null}"); then
     DIRTY_N=$(printf '%s' "$status" | grep -c .) || [ "$DIRTY_N" = 0 ] || DIRTY_N=""
   fi
   END_SHA=$(git -C "$WT" rev-parse HEAD 2>>"${LOG:-/dev/null}") || END_SHA=""

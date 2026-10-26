@@ -1139,6 +1139,46 @@ chk "in-progress state is untouched" "$S" "$(cat "$C/.git/MERGE_HEAD")"
 hasnot "in-progress checkout never claims current" "$out" "activation: checkout current"
 unset STUB_SYSTEMCTL_CALLS
 
+# --- 46. a lock left by a killed git probe: stale ones are cleared before the reset --
+# (dotfiles#1590). The branch ref lock is the one `reset --soft` must take, so
+# without the clearance this closeout fails at the reset; the planted negative
+# below shows exactly that for a FRESH lock, which the helper must keep.
+unset STUB_SYSTEMCTL_CALLS STUB_SYSTEMCTL_FF
+S=$(mkfix lockstale); export STUB_GH_OUT="7 $S"
+LS_GD=$(realpath "$TMP/lockstale/repo/.git/worktrees/wt"); LS_CD=$(realpath "$TMP/lockstale/repo/.git")
+for f in "$LS_GD/index.lock" "$LS_CD/refs/heads/feat.lock" "$LS_CD/packed-refs.lock"; do
+  : >"$f"; touch -d "@$(( $(date +%s) - 120 ))" "$f"
+done
+out=$(DRY_RUN=0 bash "$SCRIPT" "$TMP/lockstale/wt" 2>&1); rc=$?
+chk "stale locks: closeout exits 0" 0 "$rc"
+# the second count is masked: the plant and the helper read `date` separately
+has "stale locks: index.lock cleared with its proof" "$(sed -E 's/\(([0-9]+)s old, /(Ns old, /' <<<"$out")" "cleared: $LS_GD/index.lock (Ns old, 0 bytes, no process holds it open, no git on this worktree)"
+has "stale locks: the branch ref lock cleared" "$out" "cleared: $LS_CD/refs/heads/feat.lock ("
+has "stale locks: packed-refs.lock cleared" "$out" "cleared: $LS_CD/packed-refs.lock ("
+has "stale locks: the reset then succeeds" "$out" "=> reconciled to $S"
+[ -d "$TMP/lockstale/wt" ] && no "stale locks: worktree removed" || ok "stale locks: worktree removed"
+[ -e "$LS_CD/refs/heads/feat.lock" ] && no "stale locks: ref lock gone" || ok "stale locks: ref lock gone"
+[ -e "$LS_CD/packed-refs.lock" ] && no "stale locks: packed-refs.lock gone" || ok "stale locks: packed-refs.lock gone"
+
+# --- 47. PLANTED NEGATIVE: a fresh lock is kept and the reset refuses ----------
+S=$(mkfix lockfresh); export STUB_GH_OUT="7 $S"
+LF_CD=$(realpath "$TMP/lockfresh/repo/.git")
+: >"$LF_CD/refs/heads/feat.lock"
+out=$(DRY_RUN=0 bash "$SCRIPT" "$TMP/lockfresh/wt" 2>&1); rc=$?
+chk "fresh lock: closeout exits 1" 1 "$rc"
+has "fresh lock: kept as fresh" "$out" "kept: $LF_CD/refs/heads/feat.lock (fresh: "
+has "fresh lock: the reset refuses" "$out" "!! FAILED: reset --soft $S"
+[ -e "$LF_CD/refs/heads/feat.lock" ] && ok "fresh lock: still present" || no "fresh lock: still present"
+[ -d "$TMP/lockfresh/wt" ] && ok "fresh lock: worktree untouched" || no "fresh lock: worktree untouched"
+
+# --- 48. dry run plans the clearance and removes nothing ------------------------
+S=$(mkfix lockdry); export STUB_GH_OUT="7 $S"
+LD_GD=$(realpath "$TMP/lockdry/repo/.git/worktrees/wt")
+: >"$LD_GD/index.lock"; touch -d "@$(( $(date +%s) - 120 ))" "$LD_GD/index.lock"
+out=$(DRY_RUN=1 bash "$SCRIPT" "$TMP/lockdry/wt" 2>&1)
+has "dry run: plans the rm" "$out" "would: rm $LD_GD/index.lock ("
+[ -e "$LD_GD/index.lock" ] && ok "dry run: lock untouched" || no "dry run: lock untouched"
+
 echo
 echo "wt-done: $pass passed, $fail failed"
 [ "$fail" = 0 ] || exit 1

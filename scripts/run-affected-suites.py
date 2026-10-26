@@ -340,8 +340,10 @@ class Recorder:
             self.why_not = "HEAD does not resolve to a commit"
             return
         try:
+            # Read-only probes must not take index.lock: a probe killed mid-write leaves a
+            # zero-byte lock that dcg will not let an agent remove (dotfiles#1590).
             dirty = subprocess.check_output(
-                ["git", "status", "--porcelain"], cwd=repo, text=True
+                ["git", "--no-optional-locks", "status", "--porcelain"], cwd=repo, text=True
             )
         except (OSError, subprocess.CalledProcessError):
             dirty = "?"

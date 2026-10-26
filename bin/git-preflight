@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# Read-only by contract (dotfiles#1590): status must not write back the refreshed
+# index (GIT_OPTIONAL_LOCKS=0) and the two worktree diffs must not refresh it
+# (-c diff.autoRefreshIndex=false), so a probe killed mid-run leaves no index.lock.
+export GIT_OPTIONAL_LOCKS=0
 
 usage() {
   cat <<'USAGE'
@@ -80,10 +84,10 @@ if [[ $dry_run -eq 1 ]]; then
 fi
 
 status=$(git -C "$root" status --short --branch)
-diff_stat=$(git -C "$root" diff --stat)
+diff_stat=$(git -C "$root" -c diff.autoRefreshIndex=false diff --stat)
 diff_check=""
 git_check_rc=0
-diff_check=$(git -C "$root" diff --check 2>&1) || git_check_rc=$?
+diff_check=$(git -C "$root" -c diff.autoRefreshIndex=false diff --check 2>&1) || git_check_rc=$?
 # Reserve exit 2 for invocation/repository errors. Git currently returns 2 for
 # whitespace findings, so exposing its raw code would make a failed check
 # indistinguishable from a command that never ran.

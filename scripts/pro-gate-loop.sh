@@ -1050,7 +1050,7 @@ dirty_note() {
 # round 1). A rename's or copy's source path rides in the same line.
 fixer_tree_state() {
   local entry src blob
-  git status --porcelain -z --untracked-files=all | while IFS= read -r -d '' entry; do
+  git --no-optional-locks status --porcelain -z --untracked-files=all | while IFS= read -r -d '' entry; do
     src=''
     case "${entry:0:2}" in *R*|*C*) IFS= read -r -d '' src ;; esac
     blob=$(git hash-object -- "${entry:3}" 2>/dev/null) || blob=-
@@ -2414,7 +2414,7 @@ owner_stall_repair() {
     json=$(ci_current_check_runs "$SLUG" "$sha" 2>>"$dir/stall.err") || return 1
   fi
   pr_owner_ci_red "$json" | ci_stall_only "$SLUG" > "$dir/stall.json" 2>>"$dir/stall.err" || return 1
-  if [ -n "$(git status --porcelain --untracked-files=all)" ]; then
+  if [ -n "$(git --no-optional-locks status --porcelain --untracked-files=all)" ]; then
     warn "stall repair declined: the worktree is dirty"; return 1
   fi
   if [ "$(git rev-parse HEAD 2>/dev/null)" != "$sha" ]; then
@@ -2476,7 +2476,7 @@ owner_stall_repair() {
 # owner_stall_restored <head>: the tree is back where the repair found it,
 # on <head> with nothing dirty.
 owner_stall_restored() {
-  [ "$(git rev-parse HEAD 2>/dev/null)" = "$1" ] && [ -z "$(git status --porcelain --untracked-files=all)" ]
+  [ "$(git rev-parse HEAD 2>/dev/null)" = "$1" ] && [ -z "$(git --no-optional-locks status --porcelain --untracked-files=all)" ]
 }
 
 # CI and conflicts are inputs to the existing fenced fixer, never runtime

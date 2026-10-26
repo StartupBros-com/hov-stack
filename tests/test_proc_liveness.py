@@ -26,10 +26,16 @@ _spec.loader.exec_module(PL)
 NO_EXCLUDES = frozenset()
 
 
-def _fake_proc(root: str, pid: int, cwd=None, fd_targets=(), argv=(), env=()):
-    """Materialize one /proc/<pid> entry in a fake procfs tree."""
+def _fake_proc(root: str, pid: int, cwd=None, fd_targets=(), argv=(), env=(), comm=None):
+    """Materialize one /proc/<pid> entry in a fake procfs tree.
+
+    `comm` is written only when given: an entry without one is what every
+    older fake looked like, and it must keep its unfiltered meaning.
+    """
     base = os.path.join(root, str(pid))
     os.makedirs(os.path.join(base, "fd"), exist_ok=True)
+    if comm is not None:
+        Path(os.path.join(base, "comm")).write_text(comm + "\n")
     if cwd is not None:
         os.symlink(cwd, os.path.join(base, "cwd"))
     for i, tgt in enumerate(fd_targets):
@@ -106,6 +112,31 @@ class FakeProcfsSignalTests(unittest.TestCase):
         self.assertIsNone(snap.holder(self.target))
         self.assertTrue(snap.ok, "an excluded pid still counts as scanned")
 
+    def test_comm_filter_counts_only_the_named_program(self):
+        """wt-unlock asks "is a git on this gitdir", not "is anything" (#1590)."""
+        _fake_proc(self.proc, 201, cwd=self.target, comm="bash")
+        _fake_proc(self.proc, 202, cwd=self.target, comm="git")
+        snap = self._snap()
+        self.assertIn(snap.holder(self.target).pid, (201, 202),
+                      "unfiltered: either process counts; procfs order is not pinned")
+        self.assertEqual(snap.holder(self.target, comm="git").pid, 202)
+        self.assertIsNone(snap.holder(self.target, comm="python3"))
+
+    def test_comm_filter_applies_to_every_signal(self):
+        held = os.path.join(self.target, "x.db")
+        _fake_proc(self.proc, 211, cwd="/", fd_targets=[held], comm="bash")
+        _fake_proc(self.proc, 212, cwd="/", argv=["x", self.target], comm="bash")
+        _fake_proc(self.proc, 213, cwd="/", env=["D=" + self.target], comm="bash")
+        snap = self._snap()
+        self.assertIsNotNone(snap.holder(self.target))
+        self.assertIsNone(snap.holder(self.target, comm="git"))
+
+    def test_comm_filter_never_matches_a_process_without_comm(self):
+        """An unreadable comm cannot satisfy a filter; without one it still counts."""
+        _fake_proc(self.proc, 221, cwd=self.target)
+        self.assertIsNone(self._snap().holder(self.target, comm="git"))
+        self.assertIsNotNone(self._snap().holder(self.target))
+
     def test_empty_procfs_is_not_ok(self):
         self.assertFalse(self._snap().ok)
 
@@ -137,6 +168,17 @@ class CliContractTests(unittest.TestCase):
             _fake_proc(proc, 202, cwd="/")
             tgt = os.path.join(d, "t"); os.makedirs(tgt)
             r = self._run("--procfs", proc, "--", tgt)
+            self.assertEqual(r.returncode, 1)
+
+    def test_comm_filter_on_the_cli(self):
+        with tempfile.TemporaryDirectory() as d:
+            proc = os.path.join(d, "proc"); os.makedirs(proc)
+            tgt = os.path.join(d, "t"); os.makedirs(tgt)
+            _fake_proc(proc, 231, cwd=tgt, comm="git")
+            r = self._run("--procfs", proc, "--comm", "git", "--", tgt)
+            self.assertEqual(r.returncode, 0)
+            self.assertIn("pid:231", r.stdout)
+            r = self._run("--procfs", proc, "--comm", "bash", "--", tgt)
             self.assertEqual(r.returncode, 1)
 
     def test_answerless_scan_exits_2_not_1(self):
@@ -201,6 +243,17 @@ class RealProcIntegrationTests(unittest.TestCase):
                 h = self._wait_for(lambda: PL.ProcSnapshot().holder(d))
                 self.assertIsNotNone(h)
                 self.assertEqual((h.signal, h.pid), ("fd", child.pid))
+            finally:
+                child.kill(); child.wait()
+
+    def test_child_comm_filter_on_real_proc(self):
+        """The kernel's comm is the basename of the executable, newline-terminated."""
+        with tempfile.TemporaryDirectory() as d:
+            child = subprocess.Popen(["sleep", "30"], cwd=d)
+            try:
+                got = self._wait_for(lambda: PL.ProcSnapshot().holder(d, comm="sleep"))
+                self.assertEqual((got.signal, got.pid), ("cwd", child.pid))
+                self.assertIsNone(PL.ProcSnapshot().holder(d, comm="git"))
             finally:
                 child.kill(); child.wait()
 

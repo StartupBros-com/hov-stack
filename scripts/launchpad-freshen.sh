@@ -108,7 +108,9 @@ process_repo() {
     return
   fi
   branch=$(git -C "$repo" branch --show-current 2>/dev/null)
-  tracked=$(git -C "$repo" status --porcelain 2>/dev/null | grep -c -v '^??')
+  # --no-optional-locks: the SessionStart hook kills this helper at 7 s, and a
+  # status probe killed mid-write leaves a zero-byte index.lock (dotfiles#1590).
+  tracked=$(git -C "$repo" --no-optional-locks status --porcelain 2>/dev/null | grep -c -v '^??')
 
   if [ -z "$branch" ] || [ "$branch" != "$def" ]; then
     state=${branch:-DETACHED HEAD}
