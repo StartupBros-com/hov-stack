@@ -719,6 +719,44 @@ OUT=$(ROOT="$TMP/nowhere" bash "$SCRIPT" "$REPO" case-m8-slug --issue 406 2>&1);
 case "$OUT" in *"gh pr create --repo fake/fake --base main --head case-m8-slug"*) ok ;; *) bad "m8: printed command does not carry the detected default --base main: $OUT" ;; esac
 reset_gh_stub
 
+echo "-- case (u1): a stale git lock in the checkout is cleared before the fetch and worktree add (dotfiles#1590) --"
+# `worktree add -b <slug>` must take refs/heads/<slug>.lock; a stale one left by
+# a killed probe blocks it outright. Case (u2) proves that without the helper.
+plant_stale_locks() {
+  local gd=$1 f
+  mkdir -p "$gd/refs/heads"
+  for f in "$gd/refs/heads/$2.lock" "$gd/index.lock"; do : >"$f"; touch -d "@$(( $(date +%s) - 120 ))" "$f"; done
+}
+REPO=$(fixture case_u1)
+U1_GIT=$(realpath "$REPO/.git")
+plant_stale_locks "$U1_GIT" case-u1-slug
+reset_gh_stub
+export GH_STUB_ISSUE_STATE=OPEN GH_STUB_ISSUE_LABELS='[]' GH_STUB_ISSUE_COMMENTS='[]'
+export GH_STUB_ISSUE_URL="https://github.com/fake/fake/issues/401"
+export CLAUDE_CODE_SESSION_ID=wt-new-test-u1
+GH_CALLS="$TMP/gh-calls.u1"; : >"$GH_CALLS"; export GH_CALLS
+OUT=$(ROOT="$TMP/nowhere" bash "$SCRIPT" "$REPO" case-u1-slug --issue 401 2>&1); RC=$?
+[ "$RC" = 0 ] || bad "u1: expected exit 0 once the stale locks are cleared, got $RC: $OUT"
+[ -d "$REPO/.claude/worktrees/case-u1-slug" ] || bad "u1: worktree missing: $OUT"
+case "$OUT" in *"wt-unlock: cleared: $U1_GIT/refs/heads/case-u1-slug.lock ("[0-9]*"s old, 0 bytes, no process holds it open, no git on any checkout of this repo)"*) ok ;; *) bad "u1: output lacks the ref-lock clearance line: $OUT" ;; esac
+case "$OUT" in *"wt-unlock: cleared: $U1_GIT/index.lock ("*) ok ;; *) bad "u1: output lacks the index.lock clearance line: $OUT" ;; esac
+[ -e "$U1_GIT/index.lock" ] && bad "u1: index.lock survived" || ok
+unset CLAUDE_CODE_SESSION_ID
+
+echo "-- case (u2): PLANTED NEGATIVE: the same stale ref lock blocks the worktree add when nothing clears it --"
+REPO=$(fixture case_u2)
+U2_GIT=$(realpath "$REPO/.git")
+plant_stale_locks "$U2_GIT" case-u2-slug
+reset_gh_stub
+export GH_STUB_ISSUE_STATE=OPEN GH_STUB_ISSUE_LABELS='[]' GH_STUB_ISSUE_COMMENTS='[]'
+export GH_STUB_ISSUE_URL="https://github.com/fake/fake/issues/402"
+GH_CALLS="$TMP/gh-calls.u2"; : >"$GH_CALLS"; export GH_CALLS
+OUT=$(ROOT="$TMP/nowhere" WT_UNLOCK_LIB="$TMP/no-such-lib" bash "$SCRIPT" "$REPO" case-u2-slug --issue 402 2>&1); RC=$?
+[ "$RC" = 1 ] || bad "u2: expected exit 1 when the stale ref lock is not cleared, got $RC: $OUT"
+[ -d "$REPO/.claude/worktrees/case-u2-slug" ] && bad "u2: worktree was created past a ref lock nothing cleared" || ok
+case "$OUT" in *"File exists"*) ok ;; *) bad "u2: git did not refuse on the ref lock: $OUT" ;; esac
+[ -e "$U2_GIT/refs/heads/case-u2-slug.lock" ] || bad "u2: the ref lock vanished although the helper had no lib"
+
 if [ "$fail" -eq 0 ]; then
   echo "ok — wt-new.sh: $pass/$((pass + fail)) assertions passed"
 else

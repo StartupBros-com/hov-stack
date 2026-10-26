@@ -286,6 +286,12 @@ EOF
   exit 1
 }
 
+# A lock left by a killed git probe would fail the fetch here or the `worktree
+# add -b` below with "File exists". wt-unlock removes one only with proof that
+# its writer is gone (dotfiles#1590); wt-new has no dry run, so this applies.
+if [ -f "$HERE/wt-unlock.sh" ]; then
+  DRY_RUN=0 bash "$HERE/wt-unlock.sh" "$REPO" 2>&1 | sed 's/^/wt-unlock: /' >&2
+fi
 git -C "$REPO" fetch origin --quiet || echo "WARN: fetch failed (offline?); proceeding on cached refs" >&2
 DEFAULT="${BASE:-$(def_of "$REPO")}"
 

@@ -17,6 +17,9 @@
 # Report-only: never modifies anything. Exits 1 if any WARN, 0 if clean.
 # Run manually or via a weekly systemd timer.
 set -uo pipefail
+# Read-only: status probes must not write back the refreshed index, so a probe
+# killed mid-run leaves no zero-byte index.lock behind (dotfiles#1590).
+export GIT_OPTIONAL_LOCKS=0
 # The checkout this script audits: DOTFILES_REPO when set (the harness-doctor-*
 # suites point it at a fixture tree), else the one this script runs from. Every
 # tracked-file path and fix hint below hangs off it instead of assuming where the
@@ -790,7 +793,7 @@ for _pk_top in "${!_pk_names[@]}"; do
     fi
   done <<<"${_pk_paths[$_pk_top]}"
   _pk_diff=$({ git -C "$_pk_top" diff --name-only "origin/$_pk_default...HEAD" -- "${_pk_rel_args[@]}" 2>/dev/null
-               git -C "$_pk_top" diff --name-only HEAD -- "${_pk_rel_args[@]}" 2>/dev/null
+               git -C "$_pk_top" -c diff.autoRefreshIndex=false diff --name-only HEAD -- "${_pk_rel_args[@]}" 2>/dev/null
                git -C "$_pk_top" ls-files --others --exclude-standard -- "${_pk_rel_args[@]}" 2>/dev/null; } | sort -u)
   _pk_count=$(printf '%s\n' "$_pk_diff" | grep -c . || true)
   _pk_list=""

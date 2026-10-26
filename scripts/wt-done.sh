@@ -87,11 +87,16 @@ set -uo pipefail
 DRY_RUN="${DRY_RUN:-1}"
 # Preview is cached-state-only: no fetch, no optional index refresh. If cached
 # objects cannot prove shipment, close_one() follows its existing refusal paths.
-[ "$DRY_RUN" = 1 ] && export GIT_OPTIONAL_LOCKS=0
+# Unconditional since dotfiles#1590: the optional lock only covers status's
+# index write-back, every mutation below takes a mandatory lock regardless, and
+# a status probe killed mid-write under DRY_RUN=0 leaves a zero-byte index.lock
+# that dcg will not let an agent remove (nine of them on 2026-10-19).
+export GIT_OPTIONAL_LOCKS=0
 # Merged-PR anchors (see WHAT IT DOES): namespace, unshipped count, orphan listing.
 # Shared with wt-sweep.sh. Missing lib = refuse to run: without it the unshipped
 # count would read empty, i.e. "already reconciled", and remove the worktree.
 _lib="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib/wt-anchor.sh"
+_unlock="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/wt-unlock.sh"
 # shellcheck source=SCRIPTDIR/lib/wt-anchor.sh
 . "$_lib" 2>/dev/null || { echo "wt-done: cannot load $_lib" >&2; exit 1; }
 RECONCILE_ONLY=0
@@ -349,6 +354,20 @@ close_one() {
   if [ -n "$porc" ]; then
     echo "      => REFUSE (worktree has local changes; wt-done never discards)"
     return 1
+  fi
+
+  # A lock left by a killed git probe (a 0-byte index.lock, a ref lock) would
+  # fail the fetch and the reset below with "File exists". wt-unlock removes one
+  # only with proof that its writer is gone (dotfiles#1590) and prints why it
+  # keeps any other; closeout continues either way, since git refuses on a live
+  # lock loudly enough by itself. A missing helper is noted, never fatal.
+  local unlock_out unlock_rc
+  if [ -f "$_unlock" ]; then
+    unlock_out=$(DRY_RUN="$DRY_RUN" bash "$_unlock" "$wt" 2>&1); unlock_rc=$?
+    [ -n "$unlock_out" ] && sed 's/^/      /' <<<"$unlock_out"
+    [ "$unlock_rc" -gt 1 ] && echo "      note: wt-unlock exited $unlock_rc"
+  else
+    echo "      note: $_unlock missing; a stale git lock would not be cleared"
   fi
 
   # Apply mode freshens remote refs once per shared object store. Preview never

@@ -33,7 +33,10 @@ FAILURE DIRECTION
   false dead, which is the direction that deletes live state.
 
 CLI (the bash callers' entry point, e.g. wt-sweep.sh alive()):
-    proc_liveness.py [--quiet] [--procfs DIR] -- PATH [PATH...]
+    proc_liveness.py [--quiet] [--procfs DIR] [--comm NAME] -- PATH [PATH...]
+  --comm NAME counts only processes whose /proc/<pid>/comm is NAME, for a
+  caller that asks "is a git on this gitdir" rather than "is anything"
+  (wt-unlock.sh, dotfiles#1590); a pid with no readable comm never matches.
   exit 0  at least one PATH is held (each holder printed unless --quiet)
   exit 1  no PATH is held
   exit 2  cannot answer (unreadable procfs, bad usage) — treat as held
@@ -73,6 +76,7 @@ class ProcSnapshot:
         self._cwds: list[tuple[str, int]] = []
         self._environs: list[tuple[str, int]] = []
         self._cmdlines: list[tuple[str, int]] = []
+        self._comm: dict[int, str] = {}
         excl = {os.getpid()} if exclude_pids is None else set(exclude_pids)
         try:
             entries = os.listdir(procfs)
@@ -88,6 +92,11 @@ class ProcSnapshot:
             if pid in excl:
                 continue
             base = os.path.join(procfs, entry)
+            try:
+                with open(os.path.join(base, "comm"), encoding="utf-8", errors="replace") as fh:
+                    self._comm[pid] = fh.read().strip()
+            except OSError:
+                pass
             try:
                 self._cwds.append((os.readlink(os.path.join(base, "cwd")), pid))
             except OSError:
@@ -118,8 +127,11 @@ class ProcSnapshot:
         """False when the scan saw no processes at all — an answerless scan."""
         return self.pids_scanned > 0
 
-    def holder(self, path: str) -> Optional[Holder]:
-        """First live holder of `path` (itself or anything under it), or None."""
+    def holder(self, path: str, comm: Optional[str] = None) -> Optional[Holder]:
+        """First live holder of `path` (itself or anything under it), or None.
+
+        `comm` restricts holders to processes whose comm is that name.
+        """
         real = os.path.realpath(path)
         pref = real + os.sep
         # fd and cwd targets come kernel-resolved, so compare against realpath.
@@ -128,13 +140,19 @@ class ProcSnapshot:
         # would make everything "alive" by matching its short substring anywhere.
         raw = path if os.path.isabs(path) and path != real else None
         for tgt, pid in self._fd_targets:
+            if comm is not None and self._comm.get(pid) != comm:
+                continue
             if tgt == real or tgt.startswith(pref):
                 return Holder("fd", pid)
         for tgt, pid in self._cwds:
+            if comm is not None and self._comm.get(pid) != comm:
+                continue
             if tgt == real or tgt.startswith(pref):
                 return Holder("cwd", pid)
         for signal, blobs in (("environ", self._environs), ("cmdline", self._cmdlines)):
             for blob, pid in blobs:
+                if comm is not None and self._comm.get(pid) != comm:
+                    continue
                 if real in blob or (raw is not None and raw in blob):
                     return Holder(signal, pid)
         return None
@@ -144,6 +162,8 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[1].strip())
     ap.add_argument("--quiet", action="store_true", help="no per-holder output")
     ap.add_argument("--procfs", default="/proc", help="procfs root (tests)")
+    ap.add_argument("--comm", default=None, metavar="NAME",
+                    help="count only processes whose /proc/<pid>/comm is NAME")
     ap.add_argument("paths", nargs="+", metavar="PATH")
     args = ap.parse_args(argv)
 
@@ -155,7 +175,7 @@ def main(argv=None) -> int:
 
     any_held = False
     for p in args.paths:
-        h = snap.holder(p)
+        h = snap.holder(p, comm=args.comm)
         if h:
             any_held = True
             if not args.quiet:
