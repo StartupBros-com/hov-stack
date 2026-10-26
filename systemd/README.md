@@ -14,6 +14,7 @@ These need no edits. Copy them as they are.
 
 | Unit | Timer schedule | What it runs | What it needs |
 | --- | --- | --- | --- |
+| `cass-release-promote` | `OnCalendar=*-*-* 03:35:00`, `RandomizedDelaySec=15m` | `cass-release-promote.sh`: moves the live `cass` symlink to the latest release only after its checksum, version and a read-only smoke on a scratch archive pass, rolls back if the promoted binary then fails, and never indexes | `cass` at `~/.local/bin/cass`; `gh`, `jq`, `sha256sum` and `tar`; a network connection to GitHub. The unit sets `DRY_RUN=0`. The pin it starts from is the author's build, so a first run fails until you vouch for your own binary once, with the two commands under "FIRST RUN" in the script's header |
 | `codex-auto-update` | `OnBootSec=10min`, `OnUnitActiveSec=15min` | `codex-update.sh`: verified Codex CLI update through pnpm | `pnpm` and a network connection to the npm registry |
 | `dcg-auto-update` | `OnCalendar=*-*-* 03:30:00` | `dcg-update.sh`: updates the destructive-command guard, and moves the live symlink only if the contract tests pass against the new binary | `dcg` installed; a network connection to GitHub |
 | `pkg-cache-prune` | `OnCalendar=Tue *-*-* 01:35:00` | `pkg-cache-prune.sh`: prunes the pnpm, npm and uv caches and stale Hugging Face partial downloads | whichever of those tools you have |
@@ -41,7 +42,7 @@ sudo systemctl daemon-reload
 
 ## The pager
 
-Ten of the units, plus the `jsm-auto-update` drop-in `override.conf`, wire `OnFailure=harness-unit-failure-alert@%n.service` (`backup-harness`, `codex-auto-update`, `dcg-auto-update`, `docker-hygiene`, `mcp-servers-update`, `pkg-cache-prune`, `reclaim-sweep`, `skills-update`, `tools-auto-update`, `wt-sweep`). Copy `harness-unit-failure-alert@.service` into `~/.config/systemd/user/` alongside them. It runs `scripts/unit-failure-alert.sh`, which posts through `scripts/discord-notify.sh` and needs `DISCORD_WEBHOOK_URL`, either in the unit's environment or in `~/.secrets`. Without it the alert unit exits 3 and shows as failed. The original job's failure still shows in `systemctl --user list-timers` and the journal either way.
+Eleven of the units, plus the `jsm-auto-update` drop-in `override.conf`, wire `OnFailure=harness-unit-failure-alert@%n.service` (`backup-harness`, `cass-release-promote`, `codex-auto-update`, `dcg-auto-update`, `docker-hygiene`, `mcp-servers-update`, `pkg-cache-prune`, `reclaim-sweep`, `skills-update`, `tools-auto-update`, `wt-sweep`). Copy `harness-unit-failure-alert@.service` into `~/.config/systemd/user/` alongside them. It runs `scripts/unit-failure-alert.sh`, which posts through `scripts/discord-notify.sh` and needs `DISCORD_WEBHOOK_URL`, either in the unit's environment or in `~/.secrets`. Without it the alert unit exits 3 and shows as failed. The original job's failure still shows in `systemctl --user list-timers` and the journal either way.
 
 `disk-watermark.service` has no `OnFailure=` on purpose; its comment says why.
 
@@ -109,7 +110,7 @@ bash tests/systemd-network-online.test.sh
 bash tests/unit-failure-alert.test.sh
 ```
 
-Per-unit suites: `docker-hygiene`, `disk-watermark`, `wt-sweep-alive`, `wt-sweep-reconcile`, `pkg-cache-prune-busy`, `pkg-cache-prune-hf`, `jsm-auto-update-wrapper` and `dcg-jsm-prune-guard`, each as `bash tests/<name>.test.sh`. `reclaim-sweep` has a Python suite:
+Per-unit suites: `cass-release-promote`, `cass-reap`, `cass-smoke-classification`, `cass-smoke-diagnostics`, `cass-search-health`, `docker-hygiene`, `disk-watermark`, `wt-sweep-alive`, `wt-sweep-reconcile`, `pkg-cache-prune-busy`, `pkg-cache-prune-hf`, `jsm-auto-update-wrapper` and `dcg-jsm-prune-guard`, each as `bash tests/<name>.test.sh`. `reclaim-sweep` has a Python suite:
 
 ```bash
 python3 -I tests/test_reclaim_sweep.py

@@ -1,0 +1,31 @@
+[Unit]
+Description=cass verified release promotion (candidate-gated)
+Documentation=https://github.com/Dicklesworthstone/coding_agent_session_search/releases
+
+OnFailure=harness-unit-failure-alert@%n.service
+
+[Service]
+Type=oneshot
+# The promotion lane never indexes or mutates the archive. It only verifies a
+# release candidate and atomically switches the binary when cass is quiescent.
+Environment=DRY_RUN=0
+Environment=PATH=%h/.local/bin:%h/.local/share/mise/shims:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+# Keeps the never-indexes promise above true on cass 0.9.0. There the live
+# archive advisory probe (`search --json` in the script) against an unusable,
+# over-budget lexical index would otherwise spawn a detached
+# `cass index --full --background`. With the knob set it still exits 5, so the
+# advisory still warns; that advisory never changes this unit's result.
+Environment=CASS_AUTO_REFRESH=0
+# No network-online.target exists in the user manager, so
+# readiness is this bounded probe of api.github.com, the host
+# cass-release-promote.sh asks first (gh api .../releases/latest). The
+# leading - keeps the script's own contract on the deadline: it runs,
+# reports the latest release unknown, leaves the binary in place and
+# exits 0. ExecStartPre time counts against TimeoutStartSec, which is 1200s
+# so cass-release-promote.sh keeps the 900s it had before the probe existed
+# even when the whole wait is spent.
+ExecStartPre=-%h/.claude/scripts/net-ready.sh --wait 300 --url https://api.github.com/
+ExecStart=%h/.claude/scripts/cass-release-promote.sh
+Nice=10
+IOSchedulingClass=idle
+TimeoutStartSec=1200
