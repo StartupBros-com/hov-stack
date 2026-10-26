@@ -6,8 +6,9 @@ description: >-
 ---
 
 <!--
-  LOCAL skill, pairs with the `cass-rerank` wrapper (~/.local/bin/cass-rerank,
-  source in dotfiles/scripts). Routes through the gateway host's `local-rerank`
+  LOCAL skill, pairs with the `cass-rerank` wrapper (source: scripts/cass-rerank
+  in the hov-stack repo; put it on PATH to call it by name). Routes through the
+  gateway host's `local-rerank`
   LiteLLM lane over the tailnet with a scoped virtual key, per the lab's target
   architecture (one gateway, one pane; no ad-hoc SSH tunnels). The old
   SSH tunnel chain is retired.
@@ -23,8 +24,8 @@ description: >-
 
 > ⚠️ **NEVER run bare `cass`** — it launches a blocking TUI. Use `cass-rerank` or `cass ... --robot`.
 
-> **Historical incidents:** lexical retrieval failed in September 2026 (dotfiles
-> #1235, upstream cass #494), and this wrapper previously mislabeled retrieval
+> **Historical incidents:** lexical retrieval failed in September 2026 (upstream
+> cass #494), and this wrapper previously mislabeled retrieval
 > errors as "no results". Lexical recovery was observed on September 29; synthetic
 > scoring was observed on October 1. Those dated observations are not current-health
 > guarantees or post-fix end-to-end evidence. The wrapper now reports retrieval

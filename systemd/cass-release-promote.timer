@@ -1,0 +1,13 @@
+[Unit]
+Description=Daily verified cass release promotion
+
+[Timer]
+# Run after JSM and dcg, before the normal cass indexing window. Randomized delay
+# avoids making every workstation hit GitHub at the same minute.
+OnCalendar=*-*-* 03:35:00
+Persistent=true
+RandomizedDelaySec=15m
+Unit=cass-release-promote.service
+
+[Install]
+WantedBy=timers.target
