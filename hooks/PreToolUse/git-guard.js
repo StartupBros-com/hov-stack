@@ -481,7 +481,9 @@ function run(rawInput) {
           const { execFileSync } = require('child_process');
           const addCwd =
             extractCwd(gitCommand, segmentCwd, expand) || segmentCwd || process.cwd();
-          const files = execFileSync('git', ['status', '--porcelain'], {
+          // --no-optional-locks: a hint killed at its 3 s timeout mid-status must not
+          // leave a partial index.lock behind (dotfiles#1590).
+          const files = execFileSync('git', ['--no-optional-locks', 'status', '--porcelain'], {
             encoding: 'utf8',
             timeout: 3000,
             stdio: ['pipe', 'pipe', 'pipe'],

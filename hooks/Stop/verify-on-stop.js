@@ -187,8 +187,11 @@ function isTrusted(cwd) {
 // Session-scoped change detection
 // ---------------------------------------------------------------------------
 
+// --no-optional-locks: a probe killed at GIT_TIMEOUT_MS mid-status must not leave a
+// partial index.lock (dotfiles#1590); GIT_OPTIONAL_LOCKS=0 on the verify command below
+// gives the git that turbo spawns the same guarantee.
 function git(cwd, args) {
-  return execSync(`git ${args}`, {
+  return execSync(`git --no-optional-locks ${args}`, {
     cwd,
     timeout: GIT_TIMEOUT_MS,
     stdio: ['ignore', 'pipe', 'ignore'],
@@ -415,7 +418,7 @@ function verifyGate(input) {
       timeout: TIMEOUT_MS,
       stdio: ['ignore', 'pipe', 'pipe'],
       encoding: 'utf8',
-      env: { ...process.env, CI: '1' },
+      env: { ...process.env, CI: '1', GIT_OPTIONAL_LOCKS: '0' },
     });
     // Passed, allow stop.
     return null;

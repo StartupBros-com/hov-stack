@@ -468,8 +468,8 @@ test('the git segment renders branch and change count from two git spawns', () =
     assert.ok(!output.includes(String.fromCodePoint(0xe0a0)), 'private-use branch glyph needs a Nerd Font');
     const calls = fs.readFileSync(f.env.GIT_LOG, 'utf8').split('\n').filter(Boolean);
     assert.strictEqual(calls.length, 2, calls.join(' | '));
-    assert.match(calls[0], /rev-parse --is-inside-work-tree --abbrev-ref HEAD --show-toplevel --path-format=absolute --git-common-dir$/);
-    assert.match(calls[1], /status --porcelain$/);
+    assert.match(calls[0], /^--no-optional-locks -C .+ rev-parse --is-inside-work-tree --abbrev-ref HEAD --show-toplevel --path-format=absolute --git-common-dir$/);
+    assert.match(calls[1], /^--no-optional-locks -C .+ status --porcelain$/);
   } finally {
     fs.rmSync(f.dir, { recursive: true, force: true });
   }
