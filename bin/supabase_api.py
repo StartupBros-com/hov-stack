@@ -12,9 +12,14 @@ PROJECT is an alias from the project map (config/supabase-projects.example.json
 shows the shape) or a 20-letter project ref. In api paths, {ref} takes --project,
 and an alias in /v1/projects/<alias> resolves to its ref.
 
-The token resolves env SUPABASE_ACCESS_TOKEN, then the named line in
-~/.secrets (parsed, never sourced). --where reports presence without reading
-a value. Output and errors are scrubbed of personal access tokens, secret API
+The token resolves env SUPABASE_ACCESS_TOKEN, then the bws record of that
+name, then the named line in ~/.secrets (parsed, never sourced). --where
+reports presence without reading a value. An env token that Supabase
+rejects (HTTP 401) is retried once with a different token from bws or
+~/.secrets, and the result then carries stale_env: true; a 401 from any
+other source, or with no other token, is reported as is, and so is a 401
+whose re-resolution itself fails (a malformed bws record included). Output and errors
+are scrubbed of personal access tokens, secret API
 keys, every JWT except an anon key, and string values under secret-named keys
 (passwords, *_secret, tokens, api, access and root keys, private JWKs, and
 each value on the project secrets endpoints) other than anon and publishable
@@ -43,6 +48,8 @@ import os
 from pathlib import Path
 import re
 import shlex
+import shutil
+import subprocess
 import sys
 import time
 import urllib.error
@@ -56,6 +63,7 @@ TOKEN_ENV = "SUPABASE_ACCESS_TOKEN"
 METHODS = ("GET", "POST", "PUT", "PATCH", "DELETE")
 MAX_BODY = 16 * 1024 * 1024
 MAX_RETRIES = 2
+BWS_TIMEOUT = 30
 MAX_WINDOW = timedelta(hours=24)
 PROJECTS_ENV = "SUPABASE_API_PROJECTS_FILE"
 PROJECTS_NAME = "supabase-projects.json"
@@ -376,12 +384,78 @@ def _stdin():
 
 def source_metadata():
     """Presence information only, not a claim that the token works."""
+    home = Path.home()
     return {
         "resolved": False,
         "env:" + TOKEN_ENV: bool(os.environ.get(TOKEN_ENV)),
-        "~/.secrets": (Path.home() / ".secrets").is_file(),
+        "bws:" + TOKEN_ENV: {
+            "binary_present": shutil.which("bws") is not None,
+            "access_token_configured": bool(os.environ.get("BWS_ACCESS_TOKEN")) or (home / ".config/bws/token").is_file(),
+            "project_configured": bool(os.environ.get("BWS_PROJECT_ID")) or (home / ".config/bws/sb-project-id").is_file(),
+        },
+        "~/.secrets": (home / ".secrets").is_file(),
         "projects": projects(),
     }
+
+
+def _bws_token():
+    """The bws record named like the env variable: (value, None), or (None, failure)."""
+    home = Path.home()
+    if shutil.which("bws") is None:
+        return None, None
+    access = os.environ.get("BWS_ACCESS_TOKEN")
+    if not access:
+        access = _read(home / ".config/bws/token", 65536)
+        access = access.strip() if access else None
+    project = os.environ.get("BWS_PROJECT_ID")
+    if not project:
+        project = _read(home / ".config/bws/sb-project-id", 1024)
+        project = project.strip() if project else None
+    if not access or not project:
+        return None, None
+    # One retry: a transient bws failure (rate limit, network) must not read as
+    # a missing record, whose fix (re-seeding) would overwrite a live value.
+    for attempt in range(2):
+        try:
+            result = subprocess.run(
+                ["bws", "--color", "no", "secret", "list", project],
+                capture_output=True, text=True, errors="replace", timeout=BWS_TIMEOUT,
+                env={**os.environ, "BWS_ACCESS_TOKEN": access},
+            )
+        except subprocess.TimeoutExpired:
+            return None, "bws_timeout"
+        except OSError:
+            return None, "bws_unavailable"
+        if not result.returncode:
+            break
+        if not attempt:
+            time.sleep(2)
+    if result.returncode or len(result.stdout) > 1024 * 1024:
+        return None, "bws_unavailable"
+    try:
+        entries = json.loads(result.stdout)
+    except (ValueError, TypeError):
+        return None, "bws_unavailable"
+    if not isinstance(entries, list):
+        return None, "bws_unavailable"
+    for item in entries:
+        if not (isinstance(item, dict) and item.get("key") == TOKEN_ENV):
+            continue
+        # The record is present: a value that is not a personal access token is a
+        # configuration error to surface, never an absence for ~/.secrets to paper
+        # over (dotfiles#1960). Only the value's JSON type is named, never the value.
+        value = item.get("value")
+        if not isinstance(value, str):
+            json_type = {type(None): "null", bool: "boolean", int: "number", float: "number",
+                         list: "array", dict: "object"}.get(type(value), type(value).__name__)
+            raise CliError(f"The bws record {TOKEN_ENV} is present but its value is not a string (JSON type: "
+                           f"{json_type}); fix the record, ~/.secrets is not consulted.", "credential_invalid")
+        if not TOKEN_PATTERN.fullmatch(value):
+            shape = "is empty" if not value else "has an invalid format"
+            raise CliError(f"The bws record {TOKEN_ENV} {shape} (expected a personal access token, sbp_...); "
+                           "fix the record, ~/.secrets is not consulted.", "credential_invalid")
+        return value, None
+    return None, None
 
 
 def _secrets_token():
@@ -401,17 +475,30 @@ def _secrets_token():
     return None
 
 
-def credentials():
-    value = os.environ.get(TOKEN_ENV)
+def credentials(skip_env=False):
+    """(token, source) in the order env, bws, ~/.secrets; skip_env re-resolves after Supabase rejected the env token."""
+    if not skip_env:
+        value = os.environ.get(TOKEN_ENV)
+        if value:
+            if not TOKEN_PATTERN.fullmatch(value):
+                raise CliError(f"{TOKEN_ENV} has an invalid format (expected a personal access token, sbp_...).", "credential_invalid")
+            return value, "env:" + TOKEN_ENV
+    value, failure = _bws_token()
     if value:
-        if not TOKEN_PATTERN.fullmatch(value):
-            raise CliError(f"{TOKEN_ENV} has an invalid format (expected a personal access token, sbp_...).", "credential_invalid")
-        return value, "env:" + TOKEN_ENV
+        return value, "bws:" + TOKEN_ENV
     value = _secrets_token()
     if value:
         return value, "~/.secrets"
-    raise CliError(f"No Supabase access token: checked env {TOKEN_ENV} and ~/.secrets. See the startupbros "
-                   "Supabase credential runbook; do not mint a new token as a diagnostic.", "credential_missing")
+    if failure == "bws_timeout":
+        raise CliError(f"bws did not respond within {BWS_TIMEOUT} seconds and ~/.secrets holds no {TOKEN_ENV}.",
+                       "credential_timeout")
+    if failure == "bws_unavailable":
+        raise CliError(f"bws could not be read (it failed twice or returned unreadable output) and ~/.secrets holds no "
+                       f"{TOKEN_ENV}. Retry later or check bws access; do not re-seed the record, which may still exist.",
+                       "credential_unavailable")
+    raise CliError(f"No Supabase access token: checked env {TOKEN_ENV}, the bws record {TOKEN_ENV} and ~/.secrets. "
+                   "See the Supabase section of harness/data-source-clis.md; do not mint a new token as a "
+                   "diagnostic.", "credential_missing")
 
 
 def _utc(text, flag):
@@ -658,13 +745,37 @@ def run(args, state):
     state["secrets"] = secret_forms([spec["body"], [{key: value} for key, value in spec["query"]]], keys=keys)
     token, source = credentials()
     state["token"] = token
-    if spec["method"] == "GET" and spec["path"].endswith("/analytics/endpoints/logs"):
-        data = _logs(spec, token, args.timeout)
-    else:
-        data = request(spec["method"], spec["path"], spec["query"], spec["body"], token, args.timeout,
+
+    def call(current):
+        if spec["method"] == "GET" and spec["path"].endswith("/analytics/endpoints/logs"):
+            return _logs(spec, current, args.timeout)
+        return request(spec["method"], spec["path"], spec["query"], spec["body"], current, args.timeout,
                        is_read(spec["method"], spec["path"]))
+
+    stale_env = False
+    try:
+        data = call(token)
+    except CliError as exc:
+        # A shell that outlived a token rotation still exports the old token.
+        # Supabase answers 401 before acting on any request, so one retry with
+        # a different token from bws or ~/.secrets is safe for every method.
+        # No other token, the same token again, or a failed re-resolution
+        # reports the original 401.
+        if exc.code != "http_error" or exc.status != 401 or not source.startswith("env:"):
+            raise
+        try:
+            fallback, fallback_source = credentials(skip_env=True)
+        except CliError:
+            raise exc from None
+        if fallback == token:
+            raise
+        state["token"] = fallback
+        data = call(fallback)
+        source, stale_env = fallback_source, True
     result = {"ok": True, "via": spec["via"], "method": spec["method"], "path": spec["path"],
               "credential_source": source}
+    if stale_env:
+        result["stale_env"] = True
     if args.command == "projects" and isinstance(data, list):
         aliases = {ref: name for name, ref in projects().items()}
         data = [{**p, "alias": aliases.get(p.get("ref") or p.get("id"))} if isinstance(p, dict) else p for p in data]

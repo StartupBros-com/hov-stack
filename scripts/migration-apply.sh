@@ -277,9 +277,19 @@ mkdir -p "$DIR/supabase/.temp"
 printf '%s\n' "$EXPECT_REF" >"$DIR/supabase/.temp/project-ref"
 chmod -R a-w "$DIR/supabase/migrations"
 
-[ -z "${SUPABASE_ACCESS_TOKEN:-}" ] && [ -f "$HOME/.secrets" ] && . "$HOME/.secrets"
-[ -n "${SUPABASE_ACCESS_TOKEN:-}" ] \
-  || { log "SUPABASE_ACCESS_TOKEN unavailable (checked env + ~/.secrets)" >&2; exit 1; }
+# Token order: env, the bws record SUPABASE_ACCESS_TOKEN, then ~/.secrets, through
+# the shared resolver in lib/supabase-access-token.sh. bws is pinned like every
+# other binary here; an absent bws is "no bws" (BWS_BIN set but empty), never a
+# PATH lookup inside the lib.
+# shellcheck source=lib/supabase-access-token.sh
+. "$SCRIPT_DIR/lib/supabase-access-token.sh"
+BWS_BIN=$(resolve_trusted_bin bws) || BWS_BIN=
+resolve_supabase_access_token
+case $? in
+  0) ;;
+  2) log "SUPABASE_ACCESS_TOKEN refused: the bws record is malformed (see above)" >&2; exit 1 ;;
+  *) log "SUPABASE_ACCESS_TOKEN unavailable (checked env, the bws record SUPABASE_ACCESS_TOKEN and ~/.secrets)" >&2; exit 1 ;;
+esac
 # The token may have arrived exported by the caller or ~/.secrets. Keep it as a
 # shell value and scope it only to validated network clients.
 export -n SUPABASE_ACCESS_TOKEN

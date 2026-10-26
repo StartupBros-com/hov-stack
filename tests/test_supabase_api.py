@@ -10,6 +10,7 @@ import io
 import json
 import os
 from pathlib import Path
+import subprocess
 import tempfile
 import unittest
 from unittest import mock
@@ -79,6 +80,10 @@ class SupabaseTests(unittest.TestCase):
         self.addCleanup(self.build.stop)
         self.opener = mock.Mock()
         self.build_opener.return_value = self.opener
+        # No test reaches a real bws: the binary is absent unless a case puts one on PATH.
+        self.which = mock.patch.object(cli.shutil, "which", return_value=None)
+        self.which.start()
+        self.addCleanup(self.which.stop)
 
     def main(self, *args, stdin=None):
         out, err = io.StringIO(), io.StringIO()
@@ -99,6 +104,21 @@ class SupabaseTests(unittest.TestCase):
 
     def http_error(self, status, body):
         return urllib.error.HTTPError("https://api.supabase.com/x", status, "fixture", {}, Response(body))
+
+    def bws_configured(self):
+        """A bws on PATH with its access token and project id under HOME; returns the which patch."""
+        (self.home / ".config/bws").mkdir(parents=True, exist_ok=True)
+        (self.home / ".config/bws/token").write_text("bws-access-fixture\n")
+        (self.home / ".config/bws/sb-project-id").write_text("project-fixture\n")
+        return mock.patch.object(cli.shutil, "which", return_value="/usr/local/bin/bws")
+
+    @staticmethod
+    def bws_listing(value):
+        listing = json.dumps([{"key": "OTHER", "value": "x"}, {"key": "SUPABASE_ACCESS_TOKEN", "value": value}])
+        return subprocess.CompletedProcess([], 0, stdout=listing, stderr="")
+
+    BWS_FAILED = subprocess.CompletedProcess([], 1, stdout="", stderr="429 Too Many Requests")
+    UNAUTHORIZED = {"message": "Unauthorized"}
 
     def assert_refused_untouched(self, *args):
         with mock.patch.object(cli, "credentials") as credentials:
@@ -569,14 +589,185 @@ class SupabaseTests(unittest.TestCase):
     def test_where_reports_presence_without_reading_a_value(self):
         self.token()
         (self.home / ".secrets").write_text("x=1\n")
-        with mock.patch.object(cli, "_secrets_token") as secrets, mock.patch.object(cli, "credentials") as credentials:
+        with mock.patch.object(cli, "_secrets_token") as secrets, mock.patch.object(cli, "credentials") as credentials, \
+                mock.patch.object(cli, "_bws_token") as bws:
             code, out = self.main("--where")
         self.assertEqual(code, 0)
         self.assertEqual((out["env:SUPABASE_ACCESS_TOKEN"], out["~/.secrets"], out["resolved"]), (True, True, False))
+        self.assertEqual(out["bws:SUPABASE_ACCESS_TOKEN"],
+                         {"binary_present": False, "access_token_configured": False, "project_configured": False})
         self.assertEqual(out["projects"]["prbot"], PRBOT)
         secrets.assert_not_called()
         credentials.assert_not_called()
+        bws.assert_not_called()
         self.assertNotIn(TOKEN, self.stdout)
+        with self.bws_configured(), mock.patch.object(cli.subprocess, "run") as run:
+            code, out = self.main("--where")
+        self.assertEqual(out["bws:SUPABASE_ACCESS_TOKEN"],
+                         {"binary_present": True, "access_token_configured": True, "project_configured": True})
+        run.assert_not_called()
+
+    def test_bws_record_resolves_when_env_is_empty(self):
+        (self.home / ".secrets").write_text(f"SUPABASE_ACCESS_TOKEN={OTHER_TOKEN}\n")
+        self.respond(Response([]))
+        with self.bws_configured(), mock.patch.object(cli.subprocess, "run", return_value=self.bws_listing(TOKEN)) as run:
+            code, out = self.main("projects")
+        self.assertEqual((code, out["credential_source"]), (0, "bws:SUPABASE_ACCESS_TOKEN"))
+        self.assertEqual(self.sent().get_header("Authorization"), "Bearer " + TOKEN)
+        self.assertEqual(run.call_count, 1)
+        self.assertEqual(run.call_args[0][0], ["bws", "--color", "no", "secret", "list", "project-fixture"])
+        self.assertEqual(run.call_args[1]["env"]["BWS_ACCESS_TOKEN"], "bws-access-fixture")
+        self.assertEqual(run.call_args[1]["timeout"], cli.BWS_TIMEOUT)
+        self.assertNotIn("stale_env", out)
+        self.assertNotIn(TOKEN, self.stdout)
+
+    def test_env_token_wins_without_calling_bws(self):
+        self.token()
+        self.respond(Response([]))
+        with self.bws_configured(), mock.patch.object(cli.subprocess, "run") as run:
+            code, out = self.main("projects")
+        self.assertEqual((code, out["credential_source"]), (0, "env:SUPABASE_ACCESS_TOKEN"))
+        run.assert_not_called()
+
+    def test_invalid_env_token_is_refused_before_bws_or_network(self):
+        os.environ[cli.TOKEN_ENV] = "sbp_short"
+        with self.bws_configured(), mock.patch.object(cli.subprocess, "run") as run:
+            code, out = self.main("projects")
+        self.assertEqual((code, out["error"]["code"]), (1, "credential_invalid"))
+        run.assert_not_called()
+        self.opener.open.assert_not_called()
+
+    def test_bws_failure_retries_once_then_falls_through_to_secrets(self):
+        (self.home / ".secrets").write_text(f"SUPABASE_ACCESS_TOKEN={OTHER_TOKEN}\n")
+        self.respond(Response([]))
+        outcomes = [self.BWS_FAILED, self.bws_listing(TOKEN)]
+        with self.bws_configured(), mock.patch.object(cli.subprocess, "run", side_effect=outcomes) as run:
+            code, out = self.main("projects")
+        self.assertEqual((code, out["credential_source"], run.call_count), (0, "bws:SUPABASE_ACCESS_TOKEN", 2))
+        cli.time.sleep.assert_called_once_with(2)
+        self.respond(Response([]))
+        with self.bws_configured(), mock.patch.object(cli.subprocess, "run", return_value=self.BWS_FAILED) as run:
+            code, out = self.main("projects")
+        self.assertEqual((code, out["credential_source"], run.call_count), (0, "~/.secrets", 2))
+        self.assertEqual(self.sent(1).get_header("Authorization"), "Bearer " + OTHER_TOKEN)
+        self.assertNotIn("stale_env", out)
+
+    def test_bws_failure_without_secrets_is_unavailable_or_timeout_not_missing(self):
+        with self.bws_configured(), mock.patch.object(cli.subprocess, "run", return_value=self.BWS_FAILED):
+            code, out = self.main("projects")
+        self.assertEqual((code, out["error"]["code"]), (1, "credential_unavailable"))
+        self.assertIn("do not re-seed", out["error"]["message"])
+        expired = subprocess.TimeoutExpired(["bws"], cli.BWS_TIMEOUT)
+        with self.bws_configured(), mock.patch.object(cli.subprocess, "run", side_effect=expired):
+            code, out = self.main("projects")
+        self.assertEqual((code, out["error"]["code"]), (1, "credential_timeout"))
+        self.opener.open.assert_not_called()
+
+    def test_malformed_bws_record_is_refused_before_secrets_or_network(self):
+        (self.home / ".secrets").write_text(f"SUPABASE_ACCESS_TOKEN={OTHER_TOKEN}\n")
+        with self.bws_configured(), mock.patch.object(cli.subprocess, "run", return_value=self.bws_listing("sbp_short")):
+            code, out = self.main("projects")
+        self.assertEqual((code, out["error"]["code"]), (1, "credential_invalid"))
+        self.assertIn("bws record", out["error"]["message"])
+        self.assertNotIn("sbp_short", self.stdout)
+        self.opener.open.assert_not_called()
+
+    def test_non_string_or_empty_bws_record_is_refused_not_read_as_absent(self):
+        # dotfiles#1960: a present record whose value is not a usable string fails closed and names
+        # the JSON type; before the fix a falsy value read as an absent record and the
+        # resolution fell through to ~/.secrets.
+        (self.home / ".secrets").write_text(f"SUPABASE_ACCESS_TOKEN={OTHER_TOKEN}\n")
+        cases = ((42, "number"), (0, "number"), (None, "null"), (False, "boolean"),
+                 ([], "array"), ({}, "object"), ("", "empty"))
+        for value, named in cases:
+            with self.subTest(value=value):
+                with self.bws_configured(), \
+                        mock.patch.object(cli.subprocess, "run", return_value=self.bws_listing(value)):
+                    code, out = self.main("projects")
+                self.assertEqual((code, out["error"]["code"]), (1, "credential_invalid"))
+                self.assertIn("bws record", out["error"]["message"])
+                self.assertIn(named, out["error"]["message"])
+                self.assertNotIn(OTHER_TOKEN, self.stdout)
+        self.opener.open.assert_not_called()
+
+    def test_bws_without_its_config_is_skipped(self):
+        (self.home / ".secrets").write_text(f"SUPABASE_ACCESS_TOKEN={TOKEN}\n")
+        self.respond(Response([]))
+        with mock.patch.object(cli.shutil, "which", return_value="/usr/local/bin/bws"), \
+                mock.patch.object(cli.subprocess, "run") as run:
+            code, out = self.main("projects")
+        self.assertEqual((code, out["credential_source"]), (0, "~/.secrets"))
+        run.assert_not_called()
+
+    def test_stale_env_token_retries_once_with_the_secrets_token(self):
+        self.token()
+        (self.home / ".secrets").write_text(f"SUPABASE_ACCESS_TOKEN={OTHER_TOKEN}\n")
+        self.respond(self.http_error(401, self.UNAUTHORIZED), Response([{"id": PRBOT, "name": "prbot"}]))
+        code, out = self.main("projects")
+        self.assertEqual((code, out["credential_source"], out["stale_env"]), (0, "~/.secrets", True))
+        self.assertEqual((out["row_count"], self.opener.open.call_count), (1, 2))
+        self.assertEqual(self.sent(0).get_header("Authorization"), "Bearer " + TOKEN)
+        self.assertEqual(self.sent(1).get_header("Authorization"), "Bearer " + OTHER_TOKEN)
+        self.assertNotIn(TOKEN, self.stdout)
+        self.assertNotIn(OTHER_TOKEN, self.stdout)
+
+    def test_stale_env_token_prefers_the_bws_record_and_covers_a_confirmed_write(self):
+        self.token()
+        (self.home / ".secrets").write_text(f"SUPABASE_ACCESS_TOKEN={TOKEN}\n")
+        self.respond(self.http_error(401, self.UNAUTHORIZED), Response([]))
+        with self.bws_configured(), mock.patch.object(cli.subprocess, "run", return_value=self.bws_listing(OTHER_TOKEN)):
+            code, out = self.main("sql", "prbot", "update t set x = 1", "--write", "--confirm-destructive")
+        self.assertEqual((code, out["credential_source"], out["stale_env"]), (0, "bws:SUPABASE_ACCESS_TOKEN", True))
+        self.assertEqual(self.opener.open.call_count, 2)
+        self.assertEqual(self.sent(1).get_header("Authorization"), "Bearer " + OTHER_TOKEN)
+        self.assertEqual(self.sent(1).full_url, f"https://api.supabase.com/v1/projects/{PRBOT}/database/query")
+
+    def test_rejected_env_token_without_a_different_fallback_surfaces_the_401(self):
+        self.token()
+        for secrets in (None, TOKEN):
+            self.opener.open.reset_mock()
+            if secrets:
+                (self.home / ".secrets").write_text(f"SUPABASE_ACCESS_TOKEN={secrets}\n")
+            self.respond(self.http_error(401, self.UNAUTHORIZED))
+            code, out = self.main("projects")
+            self.assertEqual((code, out["error"]["code"], out["error"]["http_status"]), (1, "http_error", 401))
+            self.assertNotIn("stale_env", out)
+            self.assertEqual(self.opener.open.call_count, 1)
+
+    def test_rejected_env_token_with_an_unreadable_bws_surfaces_the_401_not_unavailable(self):
+        self.token()
+        self.respond(self.http_error(401, self.UNAUTHORIZED))
+        with self.bws_configured(), mock.patch.object(cli.subprocess, "run", return_value=self.BWS_FAILED):
+            code, out = self.main("projects")
+        self.assertEqual((code, out["error"]["code"], out["error"]["http_status"]), (1, "http_error", 401))
+        self.assertNotIn("stale_env", out)
+        self.assertEqual(self.opener.open.call_count, 1)
+
+    def test_rejected_bws_or_secrets_token_does_not_retry(self):
+        (self.home / ".secrets").write_text(f"SUPABASE_ACCESS_TOKEN={TOKEN}\n")
+        self.respond(self.http_error(401, self.UNAUTHORIZED))
+        code, out = self.main("projects")
+        self.assertEqual((code, out["error"]["http_status"], self.opener.open.call_count), (1, 401, 1))
+        self.assertNotIn("stale_env", out)
+        self.opener.open.reset_mock()
+        self.respond(self.http_error(401, self.UNAUTHORIZED))
+        with self.bws_configured(), mock.patch.object(cli.subprocess, "run", return_value=self.bws_listing(OTHER_TOKEN)) as run:
+            code, out = self.main("projects")
+        self.assertEqual((code, out["error"]["http_status"], run.call_count, self.opener.open.call_count), (1, 401, 1, 1))
+        self.assertNotIn("stale_env", out)
+
+    def test_a_second_401_or_another_status_does_not_retry_again(self):
+        self.token()
+        (self.home / ".secrets").write_text(f"SUPABASE_ACCESS_TOKEN={OTHER_TOKEN}\n")
+        self.respond(self.http_error(401, self.UNAUTHORIZED), self.http_error(401, self.UNAUTHORIZED))
+        code, out = self.main("projects")
+        self.assertEqual((code, out["error"]["http_status"], self.opener.open.call_count), (1, 401, 2))
+        self.assertNotIn("stale_env", out)
+        self.opener.open.reset_mock()
+        self.respond(self.http_error(403, {"message": "forbidden"}))
+        code, out = self.main("projects")
+        self.assertEqual((code, out["error"]["http_status"], self.opener.open.call_count), (1, 403, 1))
+        self.assertNotIn("stale_env", out)
 
     # 5. Scrubbing and errors
     def test_output_scrubs_tokens_secret_keys_and_non_anon_jwts(self):
