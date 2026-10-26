@@ -1,0 +1,20 @@
+A1 - adds a new dependency (lodash.sumby) to sum a per-invoice property that the existing `src/util/sum.ts` (or a plain reduce) already covers; unjustified new dependency for a one-line operation.
+A11 - `IInvoiceExporter` uses the `I` prefix, which the repo's explicit style rule forbids for interfaces.
+A15-A19 - `CsvInvoiceExporter` duplicates the CSV branch of `exportInvoices`/`buildRows` as a second, class-based export path with no consumer anywhere in this change; two parallel ways to do the same thing.
+A33 - `TsvWriter.row` doesn't escape tabs/newlines in cell values, unlike `CsvWriter.row` (which uses `escapeCsv`), even though both implement the same `RowWriter` contract.
+A36-A38 - `getInvoiceId` is a pure pass-through (`return invoice.id`) that adds an indirection layer without adding clarity or behavior.
+A40-A42 - `formatMoney` reimplements money formatting instead of reusing the canonical `formatCurrency` from `src/money/format.ts` (already used in 14 files), creating a second, subtly different formatting implementation.
+A44-A53 - `computeSumOfEveryLineItemAcrossTheSelectedInvoices` is an overly verbose name wrapping a manual loop (with comments narrating each obvious step) that duplicates what `sum.ts` plus a map/reduce already does, and only exists to justify pulling in the new lodash dependency.
+A62 - `buildRows` silently falls back to `TsvWriter` for any format other than exactly `"csv"` instead of validating, while `exportInvoices`/`summarize` explicitly throw on unrecognized formats — the two dispatch paths disagree on how invalid formats are handled.
+A66-A74 - four nested `if` statements filter invoices instead of one combined guard/predicate; the `if (invoice)` null-check also doesn't match the declared `Invoice[]` element type, indicating either dead code or an unenforced invariant.
+A76-A78 - the try/catch wraps the entire loop over all invoices, so an error on a single invoice silently aborts processing of the remaining invoices (only logged, never rethrown) while the function still returns a truncated row list as if the export succeeded.
+A79 - leftover `console.log("DEBUG export rows", ...)` debug statement left in shipped code.
+A94-A103 - `summarize` duplicates the same `if("csv")/else if("tsv")/else if("json")/throw` dispatch chain already in `exportInvoices` (A83-A92), including the duplicated magic strings and duplicated "unknown format" error, instead of sharing one dispatcher.
+A105-A109 - `parseLegacyRow` performs a `raw as unknown as Invoice` double-cast based solely on a comment claiming validation happens elsewhere; the function is exported but has no caller or test in this change, so the cast's safety is unverifiable here.
+A112-A113 - `attachMeta` casts `invoice` to `any` (behind an eslint-disable) to bolt on a `meta` field rather than the `Invoice` type declaring it, hiding the real data shape behind a cast.
+B1 - no test exercises `taxCents`, even though its own comment warns that mishandling it causes cent-level drift against the ledger (ADR-014); the most failure-sensitive new function in the PR is untested.
+B7-B11 - the expected value is computed by re-implementing the same summation loop under test, so a shared bug/misunderstanding between test and implementation would not be caught; there is no assertion against an independently-known fixed value.
+B15-B19 - only the `"csv"` branch of `exportInvoices` is tested (via snapshot); the `"tsv"`, `"json"`, and unknown-format-throws branches are never exercised, and `summarize` has no test at all.
+C11 - the retry loop has no maximum attempt count, so a persistently non-ok response causes it to loop indefinitely.
+C14-C15 - when `res.ok` is false, the loop immediately re-fetches with no delay/backoff and no attempt limit, turning "retry" into an uncontrolled busy loop rather than a bounded, backed-off retry.
+C16-C18 - on a thrown fetch error the catch immediately rethrows via `PaymentsError` instead of retrying, so the exact failure this function claims to address per the HACK comment (retry after an ECONNRESET) is never actually retried; `fetchWithRetry` never retries on exceptions at all.

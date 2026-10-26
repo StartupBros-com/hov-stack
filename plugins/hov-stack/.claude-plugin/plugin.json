@@ -1,0 +1,18 @@
+{
+  "name": "hov-stack",
+  "version": "0.1.0",
+  "description": "The skill pack from the hov-stack Claude Code harness, installable on its own as one plugin.",
+  "author": {
+    "name": "StartupBros / House of Vibe",
+    "url": "https://houseofvibe.ai"
+  },
+  "homepage": "https://houseofvibe.ai",
+  "repository": "https://github.com/StartupBros-com/hov-stack",
+  "license": "MIT",
+  "keywords": [
+    "house-of-vibe",
+    "claude-code",
+    "agents",
+    "skills"
+  ]
+}

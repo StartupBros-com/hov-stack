@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# Agent-native Exa web search and page contents access.
+#
+# Stdlib-only Python (x-api-key header, DataForSEO shape), so like dfs there
+# is no venv to rot.
+#
+# Deploy mechanism: this wrapper is versioned at bin/exa-cli
+# and symlinked to ~/.local/bin/exa-cli by install.sh (lib/manifest.sh).
+# sync.sh symlinks the WHOLE bin directory to ~/.claude/bin (a
+# directory symlink, not a per-file copy), so exa.py is always this wrapper's
+# sibling: ~/.claude/bin/exa.py after deploy, or bin/exa.py in a
+# worktree before it. Resolving the sibling via our own real path -- instead
+# of hardcoding ~/.claude/bin/exa.py -- makes the wrapper correct in both.
+#
+# Credential order: env -> bws (canonical) -> ~/.secrets
+# Run `exa-cli --where` to see which source resolved. It never prints the key.
+set -euo pipefail
+exec python3 "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/exa.py" "$@"

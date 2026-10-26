@@ -1,0 +1,19 @@
+{
+  "requestId": "req_fixture_search_ok",
+  "results": [
+    {
+      "id": "result-1",
+      "title": "Example Result One",
+      "url": "https://one.example/page",
+      "highlights": ["First highlight snippet."]
+    },
+    {
+      "id": "result-2",
+      "title": "Example Result Two",
+      "url": "https://two.example/page",
+      "highlights": ["Second highlight snippet."]
+    }
+  ],
+  "costDollars": {"total": 0.005, "search": 0.005},
+  "searchTime": 123.4
+}

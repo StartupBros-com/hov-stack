@@ -1,0 +1,21 @@
+[wsl2]
+memory=40GB
+swap=16GB
+vmIdleTimeout=-1
+guiApplications=false
+localhostForwarding=true
+maxCrashDumpCount=-1
+
+[experimental]
+sparseVhd=true
+autoProxy=true
+# dropCache is the documented Microsoft default, not "gradual". gradual is popular
+# community advice, but microsoft/WSL#10675 (open) documents multi-minute command hangs
+# from gradual specifically on systemd-enabled distros (this box has systemd=true), and
+# microsoft/WSL#11066 documents gradual + Docker Desktop Resource Saver freezing WSL
+# outright. The candidate fix, PR #13154, was closed unmerged on 2026-01-29 (abandoned,
+# not pending) — no fix for #10675 is in flight upstream, which makes this revert to the
+# vendor default the durable answer, not a stopgap. Still not a fix for an observed
+# failure on this machine — do not "helpfully" change it back to gradual without
+# re-reading those issues.
+autoMemoryReclaim=dropCache

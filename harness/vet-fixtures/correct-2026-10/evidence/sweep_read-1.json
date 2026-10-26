@@ -1,0 +1,388 @@
+{
+ "notes": [
+  {
+   "file": "memory/-home-user-dotfiles/feedback-skill-review-one-by-one-not-by-recency.md",
+   "topic": "review skills individually, not by recency",
+   "correction": "Never bundle-demote or disable skills/plugins on zero-use alone; review each one, offer fix-the-trigger, never propose disabling hov plugins.",
+   "repeat_signal": "",
+   "enforcer_named": "",
+   "date": "2026-09-22"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/feedback_git_guard_compound_command_hardening_2026_07.md",
+   "topic": "guard hooks must split compound commands",
+   "correction": "Shell guardrail hooks must split on shell boundaries rather than anchor at command start; include compound-command test cases.",
+   "repeat_signal": "",
+   "enforcer_named": "git-guard.js",
+   "date": "2026-07-09"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/feedback_memory_dream_eval_methodology_lessons.md",
+   "topic": "consolidation eval needs noise-aware scoring",
+   "correction": "Use 3-pass median judging, score net-of-deltas, exclude broken anchors, run targeted A/B, and re-freeze suites after batches.",
+   "repeat_signal": "",
+   "enforcer_named": "",
+   "date": "2026-07-20"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/feedback_memory_dream_index_budget_discipline.md",
+   "topic": "keep memory index under load cap",
+   "correction": "Treat the ~200-line/25KB index cap as hard; keep descriptions router-only, clear the WARN before parking, add archive tier on repeat hits.",
+   "repeat_signal": "A project that repeatedly hits the cap",
+   "enforcer_named": "stderr WARN + report `index_over_cap` + regression test",
+   "date": "2026-07-20"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/feedback_memory_dream_verification_pipeline_lessons.md",
+   "topic": "independent verification stages per action class",
+   "correction": "Run separate fidelity, durability, repo-grounding, checker-check and panel stages; gate every new action class; adjudicate verifier fixes against ground truth.",
+   "repeat_signal": "mis-bucketed agents in two consecutive passes",
+   "enforcer_named": "Name==stem is now a build refusal",
+   "date": "2026-07-20"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/feedback_runner_guard_kill_grammar_bypass_lessons_2026_07.md",
+   "topic": "parse kill grammar, don't string-match",
+   "correction": "Hooks gating kill-family commands must parse flag and target grammar, treating negative PIDs after flags or -- as dangerous process-group kills.",
+   "repeat_signal": "",
+   "enforcer_named": "runner-guard hook (dotfiles#104)",
+   "date": "2026-07-21"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/feedback_workflow_fanout_orchestration_lessons.md",
+   "topic": "workflow fan-out orchestration pitfalls",
+   "correction": "Scope verifier prompts per file, stay under 512KB script cap, use distinct splice tokens, resume rather than relaunch, shard long-output agents under 180s.",
+   "repeat_signal": "",
+   "enforcer_named": "",
+   "date": "2026-07-19"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/fix-first-merge-premise-verification.md",
+   "topic": "verify merge premise against live gate",
+   "correction": "Before merging on 'passed review', re-check live gate output per PR; PR-body pass/fail claims can be stale, so surface conflicts.",
+   "repeat_signal": "",
+   "enforcer_named": "",
+   "date": "2026-08-02"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/flake-repro-measure-the-gated-quantity-not-the-verdict.md",
+   "topic": "measure gated quantity when reproducing flakes",
+   "correction": "When reproducing threshold flakes, log the thresholded quantity's distribution per run, not pass counts; fix by controlling input, never retuning the threshold.",
+   "repeat_signal": "",
+   "enforcer_named": "",
+   "date": "2026-09-03"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/fleet-does-not-check-facts-handed-as-context.md",
+   "topic": "label inferences in fleet grounding",
+   "correction": "Mark inferences as inferences in grounding summaries and give at least one skeptic the grounding itself as its target.",
+   "repeat_signal": "",
+   "enforcer_named": "",
+   "date": "2026-09-13"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/freeze-review-loops-on-advisory-heuristics.md",
+   "topic": "stop review loops on advisory heuristics",
+   "correction": "Before another review round on a warn-only heuristic, measure prevalence and gated impact; if under ~1% or non-converging, freeze and ship with disclosure.",
+   "repeat_signal": "The same pattern was measured on #1295 (shape-rewrite, 8 rounds) and #1302",
+   "enforcer_named": "",
+   "date": "2026-09-22"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/frozen-worktrees-defeat-in-repo-fixes.md",
+   "topic": "fix leaks at shared live reader",
+   "correction": "When a fixed leak recurs, suspect frozen worktree copies; filter at the live shared reader, count dropped and surviving records, match fixture shape not prefixes.",
+   "repeat_signal": "kept polluting the papercut store",
+   "enforcer_named": "`fixture_rule()` in papercut.py's `read_records` (PR #580)",
+   "date": "2026-08-28"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/gh-api-field-flag-flips-get-to-post.md",
+   "topic": "gh api -f flips GET to POST",
+   "correction": "Always pass --method GET with -f query params, branch on gh exit code not stdout emptiness, and make test stubs refuse the failing argv shape.",
+   "repeat_signal": "",
+   "enforcer_named": "",
+   "date": "2026-09-19"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/gh-pr-merge-delete-branch-worktree-gotcha.md",
+   "topic": "gh merge delete-branch fails in worktree",
+   "correction": "On gh pr merge --delete-branch exit 1 from a worktree, verify the merge landed, then delete the remote branch via API instead of retrying.",
+   "repeat_signal": "",
+   "enforcer_named": "",
+   "date": "2026-08-02"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/gh-resolves-to-upstream-remote-in-fork-clones.md",
+   "topic": "pass --repo in fork clones",
+   "correction": "In clones with an upstream remote, always pass --repo on gh issue/pr/api calls or set a default, and confirm title before posting.",
+   "repeat_signal": "",
+   "enforcer_named": "",
+   "date": "2026-09-05"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/github-env-vs-env-block-precedence-is-undocumented.md",
+   "topic": "avoid undocumented precedence in designs",
+   "correction": "Don't rely on undocumented GITHUB_ENV versus env: precedence; write GITHUB_ENV in a later step or use step-level env.",
+   "repeat_signal": "",
+   "enforcer_named": "",
+   "date": "2026-09-09"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/github-pr-diff-cache-permanently-stale.md",
+   "topic": "cross-check PR diff against local",
+   "correction": "Before marking a PR ready, compare its files-changed count to git diff origin/default...HEAD; if stale, close and open a fresh PR.",
+   "repeat_signal": "",
+   "enforcer_named": "",
+   "date": "2026-08-30"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/gnu-date-empty-string-local-midnight.md",
+   "topic": "guard empty vars before date -d",
+   "correction": "Never feed a possibly-empty variable to date -d; guard with [ -n ] at the substitution site, fall back, and warn visibly.",
+   "repeat_signal": "",
+   "enforcer_named": "",
+   "date": "2026-08-30"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/harness-clis-are-not-deployable-dependencies.md",
+   "topic": "harness CLIs unusable in CI",
+   "correction": "Before writing a repo tool against a harness CLI, ask where it runs; scheduled or CI tools should call vendor APIs directly, keeping CLI as fallback.",
+   "repeat_signal": "",
+   "enforcer_named": "",
+   "date": "2026-09-22"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/harness-doctor-symlink-check-edge-cases.md",
+   "topic": "symlink check per-file and ahead",
+   "correction": "Resolve per-file symlinks separately and warn when a default-branch checkout is dirty or ahead, using a three-dot comparison against origin.",
+   "repeat_signal": "",
+   "enforcer_named": "harness-doctor's parked-checkout symlink check (section 8c",
+   "date": "2026-08-30"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/harness-policy-activation-requires-canonical-main-checkout.md",
+   "topic": "respect main-checkout guard when activating",
+   "correction": "When the canonical main checkout is guard-blocked, apply the reviewed change atomically with backup to live config; don't ask a peer to bypass the guard.",
+   "repeat_signal": "",
+   "enforcer_named": "",
+   "date": "2026-08-30"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/harness-tests-yml-lists-suites-explicitly.md",
+   "topic": "add new test suites to CI workflow",
+   "correction": "When adding any *.test.sh in the repo, add its named step to harness-tests.yml in the same commit; avoid 3-digit # refs in strings.",
+   "repeat_signal": "Fixed there and again in #399",
+   "enforcer_named": ".github/workflows/harness-tests.yml",
+   "date": "2026-08-17"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/headless-implementer-refuses-outside-dot-claude-worktrees.md",
+   "topic": "create worktrees under .claude/worktrees",
+   "correction": "Create fix worktrees for headless implementers under <repo>/.claude/worktrees/<slug>, or the launchpad advisory makes them refuse to edit.",
+   "repeat_signal": "",
+   "enforcer_named": "hooks/SessionStart/launchpad-advisory.js",
+   "date": "2026-09-20"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/hook-reconcile-resolves-through-main-checkout.md",
+   "topic": "reconcile hooks only after merge",
+   "correction": "Run sync.sh reconcile-*-hook only after the hook file is on main and the main checkout has pulled, never from an unmerged worktree.",
+   "repeat_signal": "",
+   "enforcer_named": "`sync.sh` now fails closed on this (`hook_command_target` + existence check, PR #389)",
+   "date": "2026-08-18"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/hook-rejected-compound-rerun-every-part.md",
+   "topic": "rerun whole compound after hook rejection",
+   "correction": "After a hook rejects a compound command, reconstruct and re-run every part in order, and verify version files at the release sha before tagging.",
+   "repeat_signal": "",
+   "enforcer_named": "",
+   "date": "2026-08-08"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/host-state-diffs-compare-identity-not-volatile-bytes.md",
+   "topic": "snapshot diffs compare identity not bytes",
+   "correction": "Scope before/after host-state snapshots to the exact drift property (unit names, hooks/mcpServers), excluding volatile columns and self-matching lines.",
+   "repeat_signal": "four false positives in one onboarding night",
+   "enforcer_named": "",
+   "date": "2026-09-11"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/inversion-probe-must-anchor-on-unique-string.md",
+   "topic": "inversion probes anchor on unique strings",
+   "correction": "Anchor inversion edits on a string occurring exactly once, assert the count, and check git diff before concluding a test is vacuous.",
+   "repeat_signal": "",
+   "enforcer_named": "",
+   "date": "2026-08-27"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/jsm-skill-retired-vs-demoted-distinction.md",
+   "topic": "retire versus demote jsm skills",
+   "correction": "Use retired-skills.txt only to delete skills; use skillOverrides user-invocable-only to hide them; confirm intent before retiring and land manifest changes first.",
+   "repeat_signal": "",
+   "enforcer_named": "",
+   "date": "2026-08-02"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/lint-backlog-freeze-then-gate.md",
+   "topic": "freeze lint backlog then gate",
+   "correction": "Check the advised fix exists before planning burn-down; freeze with ESLint bulk suppressions; prove class conversions via tailwind-merge with inverted-proof tests.",
+   "repeat_signal": "",
+   "enforcer_named": "ESLint bulk suppressions",
+   "date": "2026-09-21"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/lint-finding-count-is-rule-fit-not-debt.md",
+   "topic": "select lint rules by precision",
+   "correction": "Choose lint rules by true-positive precision from hand-triaged hits, never frequency or detection fixtures; verify claims that existing rules cover a bug.",
+   "repeat_signal": "",
+   "enforcer_named": "",
+   "date": "2026-09-21"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/loop-guard-hard-stop-stranded-near-complete-work.md",
+   "topic": "budget loop calls for final step",
+   "correction": "For verification-heavy DoD loops, raise CLAUDE_LOOP_MAX up front or reserve the last 20-30 calls for summarizing and opening the PR.",
+   "repeat_signal": "",
+   "enforcer_named": "CLAUDE_LOOP_MAX=300",
+   "date": "2026-08-30"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/low-finding-count-hides-a-blind-tool.md",
+   "topic": "plant known-positive before trusting counts",
+   "correction": "Before trusting a finding count, plant a known positive in the real repo under the real invocation and confirm it is reported.",
+   "repeat_signal": "",
+   "enforcer_named": "",
+   "date": "2026-09-20"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/manifest-check-blind-spot-claude-domain.md",
+   "topic": "claude-domain manifest entries need explicit tests",
+   "correction": "Add explicit fail-if-absent test cases and install-smoke probes for any manifest entry sourced from the harness tree; generic scan skips them.",
+   "repeat_signal": "",
+   "enforcer_named": "tests/install-manifest.test.sh",
+   "date": "2026-08-30"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/memory-backup-guard-false-positives.md",
+   "topic": "memory backup guard false positives",
+   "correction": "Allowlist reviewed paths instead of renaming; avoid quoting token-shaped literals; match checker cadence to daily job cadence or add OnFailure.",
+   "repeat_signal": "Recurred + fixed 2026-08-10",
+   "enforcer_named": "`guard_memory_copy()`",
+   "date": "2026-08-26"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/merge-your-own-prs-dont-hand-back.md",
+   "topic": "merge own PRs, don't hand back",
+   "correction": "Open the PR, wait for the gate and merge it yourself (use --auto); ask about the change beforehand, never about the merge.",
+   "repeat_signal": "third and fourth occurrence",
+   "enforcer_named": "",
+   "date": "2026-08-07"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/nested-schema-independence-auditor-lesson.md",
+   "topic": "judge nested objects independently",
+   "correction": "Text-pattern structural auditors must blank nested subschemas before judging each object, with unit tests that flags don't leak across parent and child.",
+   "repeat_signal": "",
+   "enforcer_named": "wf-pin-audit.py",
+   "date": "2026-08-30"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/never-hand-the-human-a-command.md",
+   "topic": "never hand human a command",
+   "correction": "Finish deploys yourself (wt-done activation, ff main, skills-localize) and file the gap; never close with a 'run X' line for the operator.",
+   "repeat_signal": "why do you keep making me run those commands?",
+   "enforcer_named": "wt-done.sh",
+   "date": "2026-09-02"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/organic-adoption-signals.md",
+   "topic": "measure organic adoption",
+   "correction": "Measure adoption through unsolicited signals such as stars and issues rather than prompted responses.",
+   "repeat_signal": "Keep prompted responses separate from organic evidence",
+   "enforcer_named": "",
+   "date": "2026-09-02"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/parallel-fix-workers-need-the-exact-json-shape-pinned.md",
+   "topic": "pin JSON shape across parallel workers",
+   "correction": "Put literal JSON examples of cross-worker fields in both packets, grep writer and reader side by side, and make readers accept both shapes.",
+   "repeat_signal": "",
+   "enforcer_named": "",
+   "date": "2026-09-13"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/acme-evals-predictive-skip-not-throttling.md",
+   "topic": "check predictive_skip before diagnosing throttling",
+   "correction": "Before concluding throttling for ~90s sample kills, check the predictive_skip no_model_solves hard-skip; correct wrong memory notes same session.",
+   "repeat_signal": "",
+   "enforcer_named": "",
+   "date": "2026-08-02"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/pin-checks-must-compare-content-not-sha.md",
+   "topic": "pin checks compare content not SHA",
+   "correction": "Pin-drift checks should compare content hashes, resolve the blessed version at check time, and skip with notice on API failure.",
+   "repeat_signal": "",
+   "enforcer_named": "",
+   "date": "2026-08-11"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/pipeline-as-condition-with-unbounded-output.md",
+   "topic": "avoid pipeline-as-condition with large output",
+   "correction": "Don't use pipelines with large producers as conditions under pipefail (grep -q SIGPIPE); use here-strings or capture first; no pattern guard.",
+   "repeat_signal": "",
+   "enforcer_named": "",
+   "date": "2026-08-30"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/pr-checks-green-on-empty-start-commit.md",
+   "topic": "instant green PR means empty diff",
+   "correction": "Before reporting a PR ready, confirm nonzero diff and re-check CI at the final head; instant green on a new PR is the empty-commit check.",
+   "repeat_signal": "Twice in one session",
+   "enforcer_named": "",
+   "date": "2026-08-30"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/pr-scope-check-needs-three-dot-diff.md",
+   "topic": "use three-dot diff for scope",
+   "correction": "Use three-dot diff for PR scope checks and compare merge results (git merge-tree) rather than trees or blobs; two-dot shows main's files as deletions.",
+   "repeat_signal": "Same trap, second form",
+   "enforcer_named": "merge-semantics-check.sh",
+   "date": "2026-08-29"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/pro-gate-prod-change-review-and-deploy-gate.md",
+   "topic": "prod daemon changes need approval",
+   "correction": "Land prod lifecycle changes as draft PRs, run adversarial review regardless of size, wait for explicit deploy approval, and re-verify live state before restart.",
+   "repeat_signal": "",
+   "enforcer_named": "",
+   "date": "2026-08-02"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/pro-gate-round2-confirm-output-format.md",
+   "topic": "read round-2 pro-gate output correctly",
+   "correction": "On round-2 --confirm output, map each finding to RESOLVED or new before reacting; a FIX-FIRST verdict covers only unresolved new findings.",
+   "repeat_signal": "",
+   "enforcer_named": "",
+   "date": "2026-08-02"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/probe-argv-env-self-poisoning.md",
+   "topic": "probes self-poison via argv and env",
+   "correction": "Assemble query strings at runtime, run probe scripts outside the target dir, and identify the reported holder pid before believing presence.",
+   "repeat_signal": "three successive probes manufactured their own positive",
+   "enforcer_named": "proc_liveness.py's docstring",
+   "date": "2026-08-17"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/prod-daemon-restart-confirm-and-verify-cgroup-first.md",
+   "topic": "verify cgroup before daemon restart",
+   "correction": "Wait for explicit 'merge it' and 'yes' as separate boundaries, and inspect the daemon's cgroup is idle and isolated before restarting.",
+   "repeat_signal": "",
+   "enforcer_named": "",
+   "date": "2026-08-02"
+  }
+ ]
+}

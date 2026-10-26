@@ -1,0 +1,17 @@
+# TEMPLATE: Weekly Friday 02:05 trigger for reclaim-sweep.service.
+# Replace before enabling:
+#   nothing; the defaults are generic.
+# See systemd/README.md.
+[Unit]
+Description=Weekly reclaim-sweep residue cleanup (plan-only until promoted)
+
+[Timer]
+# Fri 02:05 — same quiet pre-03:00 corridor, a distinct weekday from
+# wt-sweep (Thu) and pkg-cache-prune (Tue), and 15 minutes after the daily
+# docker-hygiene run (01:50).
+OnCalendar=Fri *-*-* 02:05:00
+Persistent=true
+RandomizedDelaySec=10m
+
+[Install]
+WantedBy=timers.target

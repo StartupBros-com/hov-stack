@@ -1,0 +1,648 @@
+/**
+ * Permission Gate Extension
+ *
+ * Smart confirmation before running risky bash commands.
+ *
+ * This started life as Pi's example `permission-gate.ts`, but a blanket
+ * `rm -rf` prompt is too coarse for unattended autoresearch loops. The policy
+ * here is:
+ *
+ * - Always confirm `sudo` and `chmod/chown ... 777`
+ * - Auto-allow `rm` cleanup when every target is inside a disposable allowlist
+ * - Confirm or block any other destructive `rm`
+ *
+ * Allowlist prefixes can be extended without editing code via either:
+ * - ~/.pi/agent/permission-gate.json
+ * - <cwd>/.pi/permission-gate.json
+ *
+ * Example config:
+ * {
+ *   "autoAllowRmPrefixes": ["/tmp/", "/var/cache/nginx/"],
+ *   "autoAllowRmRelativePrefixes": ["undefined:"],
+ *   "debugNotifications": false
+ * }
+ */
+
+import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import { existsSync, readFileSync } from "fs";
+import { join } from "path";
+import { homedir } from "os";
+
+interface PermissionGateConfig {
+	autoAllowRmPrefixes?: string[];
+	autoAllowRmRelativePrefixes?: string[];
+	debugNotifications?: boolean;
+}
+
+type GateReasonCode = "sudo" | "chmod_777" | "unsafe_rm_target" | "suspicious_rm_expansion";
+
+interface RmAnalysis {
+	sawRm: boolean;
+	unsafeTargets: string[];
+	suspiciousTargets: string[];
+}
+
+interface GateDecision {
+	needsConfirmation: boolean;
+	reasonCode?: GateReasonCode;
+	details: string[];
+	offendingTargets: string[];
+	absoluteAllowlist: string[];
+	relativeAllowlist: string[];
+}
+
+type VariableBindings = Map<string, string>;
+
+const DEFAULT_AUTO_ALLOW_RM_PREFIXES = ["/tmp/", "/var/cache/nginx/"];
+const SHELL_WRAPPERS = new Set(["sh", "bash"]);
+const DISPOSABLE_WORKTREE_SEGMENTS = ["/.next", "/.turbo", "/node_modules/.cache"];
+const CI_HOST_DISCORD_BOT_COMPOSE_PATH = "/opt/example-bot/docker-compose.yml";
+
+function normalizePathLike(value: string): string {
+	return value.replace(/\\/g, "/").replace(/\/+/g, "/");
+}
+
+function isDisposableWorktreeTarget(token: string, cwd: string): boolean {
+	const normalizedCwd = normalizePathLike(cwd);
+	const normalizedToken = normalizePathLike(token);
+	const looksDisposable = DISPOSABLE_WORKTREE_SEGMENTS.some((segment) => {
+		return normalizedToken === segment.slice(1) || normalizedToken.endsWith(segment) || normalizedToken.includes(`${segment}/`);
+	});
+
+	if (!looksDisposable) return false;
+
+	if (token.startsWith("/")) {
+		return normalizedToken.includes("/.worktrees/");
+	}
+
+	return normalizedCwd.includes("/.worktrees/");
+}
+
+function splitShellSegments(command: string): string[] {
+	const segments: string[] = [];
+	let current = "";
+	let inSingle = false;
+	let inDouble = false;
+	let escaped = false;
+
+	const pushCurrent = () => {
+		const trimmed = current.trim();
+		if (trimmed) segments.push(trimmed);
+		current = "";
+	};
+
+	for (let i = 0; i < command.length; i += 1) {
+		const char = command[i];
+		const next = command[i + 1];
+
+		if (escaped) {
+			current += char;
+			escaped = false;
+			continue;
+		}
+
+		if (char === "\\" && !inSingle) {
+			current += char;
+			escaped = true;
+			continue;
+		}
+
+		if (char === "'" && !inDouble) {
+			inSingle = !inSingle;
+			current += char;
+			continue;
+		}
+
+		if (char === '"' && !inSingle) {
+			inDouble = !inDouble;
+			current += char;
+			continue;
+		}
+
+		if (!inSingle && !inDouble) {
+			if (char === "\n" || char === ";") {
+				pushCurrent();
+				continue;
+			}
+
+			if ((char === "&" || char === "|") && next === char) {
+				pushCurrent();
+				i += 1;
+				continue;
+			}
+
+			if (char === "&" || char === "|") {
+				pushCurrent();
+				continue;
+			}
+		}
+
+		current += char;
+	}
+
+	pushCurrent();
+	return segments;
+}
+
+function tokenizeShellSegment(segment: string): string[] {
+	const tokens: string[] = [];
+	let current = "";
+	let inSingle = false;
+	let inDouble = false;
+	let escaped = false;
+
+	const pushCurrent = () => {
+		if (current.length > 0) tokens.push(current);
+		current = "";
+	};
+
+	for (let i = 0; i < segment.length; i += 1) {
+		const char = segment[i];
+
+		if (escaped) {
+			current += char;
+			escaped = false;
+			continue;
+		}
+
+		if (char === "\\" && !inSingle) {
+			escaped = true;
+			continue;
+		}
+
+		if (char === "'" && !inDouble) {
+			inSingle = !inSingle;
+			continue;
+		}
+
+		if (char === '"' && !inSingle) {
+			inDouble = !inDouble;
+			continue;
+		}
+
+		if (!inSingle && !inDouble && /\s/.test(char)) {
+			pushCurrent();
+			continue;
+		}
+
+		current += char;
+	}
+
+	pushCurrent();
+	return tokens;
+}
+
+function normalizeExecutableName(token: string): string {
+	const basename = token
+		.trim()
+		.split(/[\\/]/)
+		.pop() ?? token;
+
+	return basename.toLowerCase().replace(/\.(?:exe|cmd|bat)$/i, "");
+}
+
+function isEnvAssignment(token: string): boolean {
+	return /^[A-Za-z_][A-Za-z0-9_]*=.*/.test(token);
+}
+
+function stripMatchingQuotes(value: string): string {
+	if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+		return value.slice(1, -1);
+	}
+	return value;
+}
+
+function parseLiteralAssignment(token: string): { name: string; value: string } | null {
+	if (!isEnvAssignment(token)) return null;
+
+	const equalsIndex = token.indexOf("=");
+	if (equalsIndex <= 0) return null;
+
+	const name = token.slice(0, equalsIndex);
+	const rawValue = stripMatchingQuotes(token.slice(equalsIndex + 1));
+	if (/[`$]/.test(rawValue) || rawValue.includes("$(") || rawValue.includes("${") || rawValue.startsWith("~")) {
+		return null;
+	}
+
+	return { name, value: rawValue };
+}
+
+function resolveLiteralVariableToken(token: string, bindings: VariableBindings): string | null {
+	const bareMatch = token.match(/^\$([A-Za-z_][A-Za-z0-9_]*)$/);
+	if (bareMatch) return bindings.get(bareMatch[1]) ?? null;
+
+	const bracedMatch = token.match(/^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$/);
+	if (bracedMatch) return bindings.get(bracedMatch[1]) ?? null;
+
+	return null;
+}
+
+function getEntrypointIndex(tokens: string[]): number {
+	let index = 0;
+
+	while (index < tokens.length) {
+		const token = tokens[index];
+		const normalized = normalizeExecutableName(token);
+
+		if (isEnvAssignment(token)) {
+			index += 1;
+			continue;
+		}
+
+		if (normalized === "env") {
+			index += 1;
+			while (index < tokens.length && isEnvAssignment(tokens[index])) {
+				index += 1;
+			}
+			continue;
+		}
+
+		if (normalized === "command" || normalized === "builtin" || normalized === "exec") {
+			index += 1;
+			continue;
+		}
+
+		break;
+	}
+
+	return index;
+}
+
+function parseConfigFile(path: string): PermissionGateConfig {
+	if (!existsSync(path)) return {};
+
+	try {
+		const parsed = JSON.parse(readFileSync(path, "utf8")) as PermissionGateConfig;
+		return parsed && typeof parsed === "object" ? parsed : {};
+	} catch {
+		return {};
+	}
+}
+
+function getConfig(cwd: string): Required<PermissionGateConfig> {
+	const globalConfig = parseConfigFile(join(homedir(), ".pi", "agent", "permission-gate.json"));
+	const projectConfig = parseConfigFile(join(cwd, ".pi", "permission-gate.json"));
+	const autoAllowRmPrefixes = [
+		...DEFAULT_AUTO_ALLOW_RM_PREFIXES,
+		...(globalConfig.autoAllowRmPrefixes ?? []),
+		...(projectConfig.autoAllowRmPrefixes ?? []),
+	];
+	const autoAllowRmRelativePrefixes = [
+		...(globalConfig.autoAllowRmRelativePrefixes ?? []),
+		...(projectConfig.autoAllowRmRelativePrefixes ?? []),
+	];
+
+	return {
+		autoAllowRmPrefixes: [...new Set(autoAllowRmPrefixes)],
+		autoAllowRmRelativePrefixes: [...new Set(autoAllowRmRelativePrefixes)],
+		debugNotifications: projectConfig.debugNotifications ?? globalConfig.debugNotifications ?? false,
+	};
+}
+
+function isSuspiciousPathToken(token: string): boolean {
+	return token.length === 0 || /[$`]/.test(token) || token.includes("$()") || token.includes("${") || token.startsWith("~");
+}
+
+function normalizeRelativeTarget(token: string): string {
+	return token.replace(/^\.\//, "").replace(/\/+/g, "/");
+}
+
+function isUnsafeRelativeTarget(token: string): boolean {
+	const normalized = normalizeRelativeTarget(token);
+	return normalized === "." || normalized === ".." || normalized.startsWith("../") || normalized.includes("/../");
+}
+
+function isAutoAllowedRmTarget(
+	token: string,
+	absoluteAllowlist: string[],
+	relativeAllowlist: string[],
+	cwd: string,
+): boolean {
+	if (token === "/" || token === "." || token === "..") return false;
+	if (isSuspiciousPathToken(token)) return false;
+	if (isDisposableWorktreeTarget(token, cwd)) return true;
+
+	if (token.startsWith("/")) {
+		return absoluteAllowlist.some((prefix) => token.startsWith(prefix));
+	}
+
+	if (isUnsafeRelativeTarget(token)) return false;
+	const normalized = normalizeRelativeTarget(token);
+	return relativeAllowlist.some((prefix) => normalized.startsWith(normalizeRelativeTarget(prefix)));
+}
+
+function extractRmTargets(tokens: string[]): string[] | null {
+	const entrypointIndex = getEntrypointIndex(tokens);
+	const entrypoint = tokens[entrypointIndex];
+	if (!entrypoint) return null;
+	if (normalizeExecutableName(entrypoint) !== "rm") return null;
+
+	const targets: string[] = [];
+	let parsingOptions = true;
+
+	for (let i = entrypointIndex + 1; i < tokens.length; i += 1) {
+		const token = tokens[i];
+
+		if (parsingOptions && token === "--") {
+			parsingOptions = false;
+			continue;
+		}
+
+		if (parsingOptions && token.startsWith("-")) {
+			continue;
+		}
+
+		parsingOptions = false;
+		targets.push(token);
+	}
+
+	return targets;
+}
+
+function findNestedShellScripts(tokens: string[]): string[] {
+	const scripts: string[] = [];
+
+	for (let i = 0; i < tokens.length; i += 1) {
+		if (!SHELL_WRAPPERS.has(normalizeExecutableName(tokens[i]))) continue;
+
+		for (let j = i + 1; j < tokens.length; j += 1) {
+			const token = tokens[j];
+
+			if (/^-[A-Za-z]*c$/.test(token)) {
+				const next = tokens[j + 1];
+				if (next) scripts.push(next);
+				break;
+			}
+
+			if (!token.startsWith("-")) {
+				break;
+			}
+		}
+	}
+
+	return scripts;
+}
+
+function analyzeRmSafety(
+	command: string,
+	absoluteAllowlist: string[],
+	relativeAllowlist: string[],
+	cwd: string,
+): RmAnalysis {
+	const unsafeTargets = new Set<string>();
+	const suspiciousTargets = new Set<string>();
+	let sawRm = false;
+
+	const visit = (script: string, inheritedBindings: VariableBindings = new Map()) => {
+		const bindings = new Map(inheritedBindings);
+
+		for (const segment of splitShellSegments(script)) {
+			const tokens = tokenizeShellSegment(segment);
+			if (tokens.length === 0) continue;
+
+			if (tokens.every(isEnvAssignment)) {
+				for (const token of tokens) {
+					const assignment = parseLiteralAssignment(token);
+					if (assignment) bindings.set(assignment.name, assignment.value);
+				}
+				continue;
+			}
+
+			const rmTargets = extractRmTargets(tokens);
+			if (rmTargets) {
+				sawRm = true;
+				if (rmTargets.length === 0) {
+					suspiciousTargets.add("<no-targets>");
+				}
+
+				for (const target of rmTargets) {
+					const resolvedTarget = resolveLiteralVariableToken(target, bindings) ?? target;
+					if (isSuspiciousPathToken(target) && resolvedTarget === target) {
+						suspiciousTargets.add(target);
+						continue;
+					}
+
+					if (isUnsafeRelativeTarget(resolvedTarget)) {
+						unsafeTargets.add(target);
+						continue;
+					}
+
+					if (!isAutoAllowedRmTarget(resolvedTarget, absoluteAllowlist, relativeAllowlist, cwd)) {
+						unsafeTargets.add(target === resolvedTarget ? target : `${target} -> ${resolvedTarget}`);
+					}
+				}
+			}
+
+			for (const nestedScript of findNestedShellScripts(tokens)) {
+				visit(nestedScript, bindings);
+			}
+		}
+	};
+
+	visit(command);
+	return {
+		sawRm,
+		unsafeTargets: [...unsafeTargets],
+		suspiciousTargets: [...suspiciousTargets],
+	};
+}
+
+function summarizeList(items: string[], max = 4): string {
+	if (items.length === 0) return "none";
+	if (items.length <= max) return items.join(", ");
+	return `${items.slice(0, max).join(", ")} (+${items.length - max} more)`;
+}
+
+function isCiHostDiscordBotComposeCommand(command: string): boolean {
+	return /\bssh\s+ci-host\b/.test(command)
+		&& command.includes("sudo")
+		&& command.includes("docker compose")
+		&& command.includes(CI_HOST_DISCORD_BOT_COMPOSE_PATH);
+}
+
+function isHarmlessSshSudoProbe(command: string): boolean {
+	const segments = splitShellSegments(command);
+	if (segments.length !== 1) return false;
+
+	const tokens = tokenizeShellSegment(segments[0]);
+	const entrypointIndex = getEntrypointIndex(tokens);
+	if (normalizeExecutableName(tokens[entrypointIndex] ?? "") !== "ssh") return false;
+
+	let index = entrypointIndex + 1;
+	while (index < tokens.length - 1) {
+		const token = tokens[index];
+		if (token === "--") {
+			index += 1;
+			break;
+		}
+
+		if (!token.startsWith("-")) break;
+		index += 1;
+
+		if (["-b", "-c", "-D", "-E", "-F", "-i", "-J", "-L", "-l", "-m", "-O", "-o", "-p", "-Q", "-R", "-S", "-W", "-w"].includes(token)) {
+			if (index >= tokens.length - 1) return false;
+			index += 1;
+		}
+	}
+
+	const remoteScript = tokens.at(-1);
+	if (!remoteScript || index >= tokens.length - 1) return false;
+	if (index !== tokens.length - 2) return false;
+
+	return /^sudo\s+-n\s+true\s+>\/dev\/null\s+2>&1\s*;\s*echo\s+\$\?$/.test(remoteScript);
+}
+
+function buildDecision(
+	command: string,
+	absoluteAllowlist: string[],
+	relativeAllowlist: string[],
+	cwd: string,
+): GateDecision {
+	if (/\bsudo\b/i.test(command)) {
+		if (isHarmlessSshSudoProbe(command)) {
+			return {
+				needsConfirmation: false,
+				details: [],
+				offendingTargets: [],
+				absoluteAllowlist,
+				relativeAllowlist,
+			};
+		}
+
+		const details = ["sudo always requires confirmation."];
+		if (isCiHostDiscordBotComposeCommand(command)) {
+			details.push(
+				"Tip: on ci-host the operator's login already has Docker access. Drop `sudo` or use the app's `discord:bot:prod:ps|logs` pnpm scripts from its checkout.",
+			);
+		}
+		return {
+			needsConfirmation: true,
+			reasonCode: "sudo",
+			details,
+			offendingTargets: [],
+			absoluteAllowlist,
+			relativeAllowlist,
+		};
+	}
+
+	if (/\b(?:chmod|chown)\b[^\n]*\b777\b/i.test(command)) {
+		return {
+			needsConfirmation: true,
+			reasonCode: "chmod_777",
+			details: ["chmod/chown with 777 always requires confirmation."],
+			offendingTargets: [],
+			absoluteAllowlist,
+			relativeAllowlist,
+		};
+	}
+
+	const rmAnalysis = analyzeRmSafety(command, absoluteAllowlist, relativeAllowlist, cwd);
+	if (rmAnalysis.suspiciousTargets.length > 0) {
+		return {
+			needsConfirmation: true,
+			reasonCode: "suspicious_rm_expansion",
+			details: [
+				"rm target uses shell expansion, indirection, or another non-literal path.",
+				`Suspicious targets: ${summarizeList(rmAnalysis.suspiciousTargets)}`,
+			],
+			offendingTargets: rmAnalysis.suspiciousTargets,
+			absoluteAllowlist,
+			relativeAllowlist,
+		};
+	}
+
+	if (rmAnalysis.unsafeTargets.length > 0) {
+		return {
+			needsConfirmation: true,
+			reasonCode: "unsafe_rm_target",
+			details: [
+				"rm target falls outside the disposable allowlist.",
+				`Offending targets: ${summarizeList(rmAnalysis.unsafeTargets)}`,
+			],
+			offendingTargets: rmAnalysis.unsafeTargets,
+			absoluteAllowlist,
+			relativeAllowlist,
+		};
+		}
+
+	return {
+		needsConfirmation: false,
+		details: rmAnalysis.sawRm ? ["All rm targets matched the disposable allowlist."] : [],
+		offendingTargets: [],
+		absoluteAllowlist,
+		relativeAllowlist,
+	};
+}
+
+function formatAllowlist(decision: GateDecision): string[] {
+	const lines: string[] = [];
+	if (decision.absoluteAllowlist.length > 0) {
+		lines.push(`Absolute allowlist prefixes: ${summarizeList(decision.absoluteAllowlist)}`);
+	}
+	if (decision.relativeAllowlist.length > 0) {
+		lines.push(`Repo-local allowlist prefixes: ${summarizeList(decision.relativeAllowlist)}`);
+	}
+	return lines;
+}
+
+function buildPrompt(command: string, decision: GateDecision): string {
+	const lines = [
+		`⚠️ Dangerous command [reason=${decision.reasonCode ?? "unknown"}]`,
+		"",
+		`  ${command}`,
+		"",
+		...decision.details.map((detail) => `- ${detail}`),
+		...formatAllowlist(decision).map((detail) => `- ${detail}`),
+		"",
+		"Allow?",
+	];
+
+	return lines.join("\n");
+}
+
+function buildBlockReason(decision: GateDecision): string {
+	const pieces = [`reason=${decision.reasonCode ?? "unknown"}`];
+	if (decision.offendingTargets.length > 0) {
+		pieces.push(`offending=${summarizeList(decision.offendingTargets)}`);
+	}
+	pieces.push(`absolute_allowlist=${summarizeList(decision.absoluteAllowlist)}`);
+	if (decision.relativeAllowlist.length > 0) {
+		pieces.push(`relative_allowlist=${summarizeList(decision.relativeAllowlist)}`);
+	}
+	return `Dangerous command blocked (no UI for confirmation): ${pieces.join(" | ")}`;
+}
+
+export default function (pi: ExtensionAPI) {
+	pi.on("tool_call", async (event, ctx) => {
+		if (event.toolName !== "bash") return undefined;
+
+		const command = event.input.command as string;
+		const config = getConfig(ctx.cwd);
+		const decision = buildDecision(
+			command,
+			config.autoAllowRmPrefixes,
+			config.autoAllowRmRelativePrefixes,
+			ctx.cwd,
+		);
+
+		if (!decision.needsConfirmation) {
+			return undefined;
+		}
+
+		if (!ctx.hasUI) {
+			return { block: true, reason: buildBlockReason(decision) };
+		}
+
+		const prompt = buildPrompt(command, decision);
+		if (config.debugNotifications) {
+			ctx.ui.notify(`permission-gate: reason=${decision.reasonCode ?? "unknown"}`, "warning");
+		}
+
+		const choice = await ctx.ui.select(prompt, ["Yes", "No"]);
+		if (choice !== "Yes") {
+			return { block: true, reason: `Blocked by user: reason=${decision.reasonCode ?? "unknown"}` };
+		}
+
+		return undefined;
+	});
+}

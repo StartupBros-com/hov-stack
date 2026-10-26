@@ -1,0 +1,40 @@
+{
+ "results": [
+  {
+   "cluster": "Verify PR/CI/merge status against live gate output before reporting ready or green",
+   "verdict": "REFUTED",
+   "enforcer": "none for the reporting behaviour; claimed merge-semantics-check.sh does not exist",
+   "evidence": "The claimed enforcer is absent. The only mention of merge-semantics-check.sh is memory/-home-user-dotfiles/pr-scope-check-needs-three-dot-diff.md:24, which says it lives in a 2026-08-29 job tmp dir. There is no such file under scripts, bin or hooks. Nearby machinery covers only mechanical merging, not what the agent reports. scripts/pr-owner.sh:645 merges with `gh pr merge --squash --match-head-commit`, and :384/:458 branch on mergeStateStatus DIRTY. But nothing blocks an agent from saying 'ready' or 'green' without reading live gate output. hooks/Stop/verify-on-stop.js is one-shot feedback and says itself it is 'not an unbypassable completion policy'. Treat the cluster as prose only."
+  },
+  {
+   "cluster": "Never hand the operator commands or the merge; run mechanics yourself",
+   "verdict": "PARTIAL",
+   "enforcer": "scripts/wt-done.sh and scripts/wt-sweep.sh (wt-sweep.timer is DRY_RUN by default); scripts/pr-owner.sh for merging",
+   "evidence": "The mechanics do exist as scripts. wt-done.sh (:96 refuses to run if its lib is missing; header explains it refuses when no merged PR exists). wt-sweep.sh:28 defaults `DRY_RUN=1` and :169 only prints 'would:' under it. systemd/wt-sweep.timer is weekly (Thu 01:15) and its description says 'observe-only until promoted'. pr-owner.sh:645 does the merge. These automate the work, but no hook or test stops an agent from handing the operator a command or the merge in its reply. The only nearby block, hooks/PreToolUse/loop-guard.js, denies `gh pr merge`/`gh pr ready` for autonomous loops. That pushes merging to pr-owner but does not police what the agent says. So the behaviour is not enforced; the automation only makes it possible."
+  },
+  {
+   "cluster": "Shell-parsing guard authoring must fail closed on unmodeled syntax",
+   "verdict": "PARTIAL",
+   "enforcer": "hooks/PreToolUse/git-guard.js with hooks/tests/git-guard.test.js; runner-guard.js with runner-guard.test.js; shape-rewrite.js with shape-rewrite.test.js; scripts/wf-pin-audit.py with tests/test_wf_pin_audit*.py",
+   "evidence": "Each named guard exists and has tests. The hook tests run in CI: .github/workflows/harness-tests.yml:2110 runs `bash hooks/tests/run.sh`, and :2072 runs python `unittest discover -s tests`. The guards are registered in ~/.claude/settings.json (git-guard at about line 718, runner-guard at about :727). Only the specific guards are tested. The authoring rule itself, that any new shell-parsing guard must fail closed on unmodeled syntax, has no lint or test that applies it to new guards. The loop-guard.js header also concedes it is 'a GUARDRAIL, NOT A JAIL'. The fail-closed property is therefore enforced guard by guard, not as a general rule."
+  },
+  {
+   "cluster": "Inspect before deleting or replacing (lost-found, peer job logs, shared dirs, scoped keys)",
+   "verdict": "REFUTED",
+   "enforcer": "none",
+   "evidence": "The cluster claims prose-only status. Greps of hooks/PreToolUse/git-guard.js for gc, lost-found, fsck and prune, and for rm -rf and job-dir handling, found no check that requires inspection first. The settings.json ask rules I saw concern vercel (including delete), not job dirs or lost-found. Nothing blocks `git gc`, deleting a peer job dir, or replacing scoped deploy keys without inspection."
+  },
+  {
+   "cluster": "claude-loop ceiling and silent-failure detection",
+   "verdict": "PARTIAL",
+   "enforcer": "hooks/PreToolUse/loop-guard.js (CLAUDE_LOOP_MAX), bin/claude-loop.sh stop-marker handling",
+   "evidence": "The ceiling is enforced but the claimed value is stale. loop-guard.js:76 defaults `CLAUDE_LOOP_MAX` to 300 and :618 hard-stops via `hardStop`. bin/claude-loop.sh:1193 exports `CLAUDE_LOOP_MAX` as 1000 by default (the comment cites dotfiles#968). So '=300' no longer applies to dispatched runs. Detection of a cut-short run exists: claude-loop.sh:1218 sets `CLAUDE_LOOP_STOP_MARKER` and :1693 sets `CUT_SHORT=budget` when the marker file is present. Tests are hooks/tests/loop-guard.test.js and loop-guard-state-integrity.test.js. I found no detector for the general 'dispatched run failed silently' pattern, and the guard cannot avoid stranding near-complete work."
+  },
+  {
+   "cluster": "Prod daemon restart needs separate merge and deploy confirmations",
+   "verdict": "REFUTED",
+   "enforcer": "none",
+   "evidence": "The cluster claims prose-only status. hooks/PreToolUse/runner-guard.js:6-17 blocks restart/stop/kill of CI runner units only. It does not cover prod daemons, and it has no separate merge-versus-deploy confirmation. The vercel ask rules in ~/.claude/settings.json (around :440, `vercel redeploy*` and `--prod`) cover Vercel production, not daemon restarts. A grep of PreToolUse/*.js for 'pro-gate', 'prod', 'deploy' and 'restart' found nothing that gates a prod daemon restart."
+  }
+ ]
+}

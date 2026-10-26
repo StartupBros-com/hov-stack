@@ -1,0 +1,383 @@
+{
+ "reports": [
+  {
+   "label": "r01",
+   "classes_found": [
+    "C1",
+    "C2",
+    "C3"
+   ],
+   "false_classes": [],
+   "enforced_control_misflagged": false,
+   "check_passes_at_head": true,
+   "fix_levels": "C1 architecture (single list)+lint; C2 lint (pricing/api/export only); C3 lint",
+   "rule_table_present": false,
+   "extra_real_findings": 0,
+   "replant": [
+    {
+     "mistake": "P1",
+     "outcome": "IMPOSSIBLE",
+     "note": "single source tuple"
+    },
+    {
+     "mistake": "P2",
+     "outcome": "CAUGHT",
+     "names_fix": true
+    },
+    {
+     "mistake": "P3",
+     "outcome": "CAUGHT",
+     "names_fix": true
+    },
+    {
+     "mistake": "P4",
+     "outcome": "CAUGHT",
+     "names_fix": true
+    },
+    {
+     "mistake": "P5",
+     "outcome": "CAUGHT",
+     "names_fix": true
+    }
+   ],
+   "notes": "Synthetic prove-it only; tests unbroken."
+  },
+  {
+   "label": "r02",
+   "classes_found": [
+    "C1",
+    "C2",
+    "C3"
+   ],
+   "false_classes": [],
+   "enforced_control_misflagged": false,
+   "check_passes_at_head": true,
+   "fix_levels": "C1 architecture+lint+test; C2 lint over src/; C3 lint",
+   "rule_table_present": true,
+   "extra_real_findings": 0,
+   "replant": [
+    {
+     "mistake": "P1",
+     "outcome": "IMPOSSIBLE",
+     "note": "single source tuple"
+    },
+    {
+     "mistake": "P2",
+     "outcome": "CAUGHT",
+     "names_fix": true
+    },
+    {
+     "mistake": "P3",
+     "outcome": "CAUGHT",
+     "names_fix": true
+    },
+    {
+     "mistake": "P4",
+     "outcome": "CAUGHT",
+     "names_fix": true
+    },
+    {
+     "mistake": "P5",
+     "outcome": "CAUGHT",
+     "names_fix": true
+    }
+   ],
+   "notes": "Rule table with judgment rows; stale rule removed; synthetic prove-it; 26 tests pass."
+  },
+  {
+   "label": "r03",
+   "classes_found": [
+    "C1",
+    "C2",
+    "C3"
+   ],
+   "false_classes": [],
+   "enforced_control_misflagged": false,
+   "check_passes_at_head": true,
+   "fix_levels": "C1 architecture+lint on *STATUSES names; C2 lint only pricing/export; C3 lint",
+   "rule_table_present": false,
+   "extra_real_findings": 0,
+   "replant": [
+    {
+     "mistake": "P1",
+     "outcome": "IMPOSSIBLE",
+     "note": "single source tuple"
+    },
+    {
+     "mistake": "P2",
+     "outcome": "CAUGHT",
+     "names_fix": true
+    },
+    {
+     "mistake": "P3",
+     "outcome": "CAUGHT",
+     "names_fix": true
+    },
+    {
+     "mistake": "P4",
+     "outcome": "PASSES",
+     "note": "PAID_STATES name not matched by *STATUSES check"
+    },
+    {
+     "mistake": "P5",
+     "outcome": "CAUGHT",
+     "names_fix": true
+    }
+   ],
+   "notes": "Float check also bans Decimal; narrow module list (MONEY_MODULES)."
+  },
+  {
+   "label": "r04",
+   "classes_found": [
+    "C1",
+    "C2",
+    "C3"
+   ],
+   "false_classes": [],
+   "enforced_control_misflagged": false,
+   "check_passes_at_head": true,
+   "fix_levels": "C1 architecture+name-based lint; C2 lint over src/; C3 lint",
+   "rule_table_present": false,
+   "extra_real_findings": 0,
+   "replant": [
+    {
+     "mistake": "P1",
+     "outcome": "IMPOSSIBLE",
+     "note": "single source tuple"
+    },
+    {
+     "mistake": "P2",
+     "outcome": "CAUGHT",
+     "names_fix": true
+    },
+    {
+     "mistake": "P3",
+     "outcome": "CAUGHT",
+     "names_fix": true
+    },
+    {
+     "mistake": "P4",
+     "outcome": "PASSES",
+     "note": "name-based status check evaded by PAID_STATES"
+    },
+    {
+     "mistake": "P5",
+     "outcome": "CAUGHT",
+     "names_fix": true
+    }
+   ],
+   "notes": "Synthetic prove-it only."
+  },
+  {
+   "label": "r05",
+   "classes_found": [
+    "C1",
+    "C2",
+    "C3"
+   ],
+   "false_classes": [],
+   "enforced_control_misflagged": false,
+   "check_passes_at_head": true,
+   "fix_levels": "C1 architecture+literal-list lint+test; C2 lint over src/; C3 lint",
+   "rule_table_present": true,
+   "extra_real_findings": 0,
+   "replant": [
+    {
+     "mistake": "P1",
+     "outcome": "IMPOSSIBLE",
+     "note": "single source tuple"
+    },
+    {
+     "mistake": "P2",
+     "outcome": "CAUGHT",
+     "names_fix": true
+    },
+    {
+     "mistake": "P3",
+     "outcome": "CAUGHT",
+     "names_fix": true
+    },
+    {
+     "mistake": "P4",
+     "outcome": "CAUGHT",
+     "names_fix": true
+    },
+    {
+     "mistake": "P5",
+     "outcome": "CAUGHT",
+     "names_fix": true
+    }
+   ],
+   "notes": "Replayed checks on pre-fix historical src (prove-it yes). Rule table. AGENTS.md describes an exceptions format that check.py does not parse (docs-only ceremony)."
+  },
+  {
+   "label": "r06",
+   "classes_found": [
+    "C1",
+    "C2",
+    "C3"
+   ],
+   "false_classes": [],
+   "enforced_control_misflagged": false,
+   "check_passes_at_head": true,
+   "fix_levels": "C1 architecture only (no backstop check); C2 lint over src/; C3 lint",
+   "rule_table_present": false,
+   "extra_real_findings": 0,
+   "replant": [
+    {
+     "mistake": "P1",
+     "outcome": "IMPOSSIBLE",
+     "note": "single source tuple"
+    },
+    {
+     "mistake": "P2",
+     "outcome": "CAUGHT",
+     "names_fix": true
+    },
+    {
+     "mistake": "P3",
+     "outcome": "CAUGHT",
+     "names_fix": true
+    },
+    {
+     "mistake": "P4",
+     "outcome": "PASSES",
+     "note": "no status-copy check added"
+    },
+    {
+     "mistake": "P5",
+     "outcome": "CAUGHT",
+     "names_fix": true
+    }
+   ],
+   "notes": "Smallest diff; synthetic prove-it."
+  },
+  {
+   "label": "r07",
+   "classes_found": [
+    "C1",
+    "C2",
+    "C3"
+   ],
+   "false_classes": [],
+   "enforced_control_misflagged": false,
+   "check_passes_at_head": true,
+   "fix_levels": "C1 architecture+tuple-redefinition lint; C2 lint over src/; C3 lint",
+   "rule_table_present": false,
+   "extra_real_findings": 0,
+   "replant": [
+    {
+     "mistake": "P1",
+     "outcome": "IMPOSSIBLE",
+     "note": "single source tuple"
+    },
+    {
+     "mistake": "P2",
+     "outcome": "CAUGHT",
+     "names_fix": true
+    },
+    {
+     "mistake": "P3",
+     "outcome": "CAUGHT",
+     "names_fix": true
+    },
+    {
+     "mistake": "P4",
+     "outcome": "PASSES",
+     "note": "status-list check did not flag PAID_STATES literal"
+    },
+    {
+     "mistake": "P5",
+     "outcome": "CAUGHT",
+     "names_fix": true
+    }
+   ],
+   "notes": "Synthetic prove-it only."
+  },
+  {
+   "label": "r08",
+   "classes_found": [
+    "C1",
+    "C2",
+    "C3"
+   ],
+   "false_classes": [],
+   "enforced_control_misflagged": false,
+   "check_passes_at_head": true,
+   "fix_levels": "C1 architecture+INVOICE_STATUSES-redefinition lint; C2 lint over src/; C3 lint",
+   "rule_table_present": false,
+   "extra_real_findings": 0,
+   "replant": [
+    {
+     "mistake": "P1",
+     "outcome": "IMPOSSIBLE",
+     "note": "single source tuple"
+    },
+    {
+     "mistake": "P2",
+     "outcome": "CAUGHT",
+     "names_fix": true
+    },
+    {
+     "mistake": "P3",
+     "outcome": "CAUGHT",
+     "names_fix": true
+    },
+    {
+     "mistake": "P4",
+     "outcome": "PASSES",
+     "note": "only INVOICE_STATUSES redefinition checked"
+    },
+    {
+     "mistake": "P5",
+     "outcome": "CAUGHT",
+     "names_fix": true
+    }
+   ],
+   "notes": "Synthetic prove-it only."
+  },
+  {
+   "label": "r09",
+   "classes_found": [
+    "C1",
+    "C2",
+    "C3"
+   ],
+   "false_classes": [],
+   "enforced_control_misflagged": false,
+   "check_passes_at_head": true,
+   "fix_levels": "C1 architecture+lint+test; C2 lint over src/ with replay tests; C3 lint with replay tests",
+   "rule_table_present": true,
+   "extra_real_findings": 0,
+   "replant": [
+    {
+     "mistake": "P1",
+     "outcome": "IMPOSSIBLE",
+     "note": "single source tuple"
+    },
+    {
+     "mistake": "P2",
+     "outcome": "CAUGHT",
+     "names_fix": true,
+     "note": "caught via tests/test_check.py running check.main plus check message"
+    },
+    {
+     "mistake": "P3",
+     "outcome": "CAUGHT",
+     "names_fix": true
+    },
+    {
+     "mistake": "P4",
+     "outcome": "CAUGHT",
+     "names_fix": true
+    },
+    {
+     "mistake": "P5",
+     "outcome": "CAUGHT",
+     "names_fix": true
+    }
+   ],
+   "notes": "Two commits; replay tests of historical mistakes (prove-it yes); rule table; adds an allow-comment exception mechanism with expiry (extra machinery). Tests pass."
+  }
+ ]
+}

@@ -1,0 +1,7 @@
+interface:
+  display_name: "Better Layout"
+  short_description: "Structure, grouping, alignment and adaptive layout"
+policy:
+  # Mirrors `disable-model-invocation: true` in the Claude frontmatter, which Codex
+  # does not read. Invoke-only on this harness (harness-vet 2026-09-01).
+  allow_implicit_invocation: false

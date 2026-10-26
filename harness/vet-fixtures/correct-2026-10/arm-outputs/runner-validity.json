@@ -1,0 +1,98 @@
+{
+ "runs": [
+  {
+   "arm_dir": "/tmp/hv-correct-2026-10-07/arms/a1-1",
+   "commits_made": 1,
+   "cost_usd": 0.1287,
+   "exit_code": 0,
+   "house_phrase_seen": false,
+   "skill_phrase_seen": false,
+   "tools": "assistant_turns=11; Bash=6",
+   "turns": 7
+  },
+  {
+   "arm_dir": "/tmp/hv-correct-2026-10-07/arms/a1-2",
+   "commits_made": 1,
+   "cost_usd": 0.0997,
+   "exit_code": 0,
+   "house_phrase_seen": false,
+   "skill_phrase_seen": false,
+   "tools": "assistant_turns=8; Bash=4",
+   "turns": 5
+  },
+  {
+   "arm_dir": "/tmp/hv-correct-2026-10-07/arms/a1-3",
+   "commits_made": 1,
+   "cost_usd": 0.1234,
+   "exit_code": 0,
+   "house_phrase_seen": false,
+   "skill_phrase_seen": false,
+   "tools": "assistant_turns=10; Bash=5",
+   "turns": 6
+  },
+  {
+   "arm_dir": "/tmp/hv-correct-2026-10-07/arms/a2-1",
+   "commits_made": 1,
+   "cost_usd": 0.2456,
+   "exit_code": 0,
+   "house_phrase_seen": false,
+   "skill_phrase_seen": true,
+   "tools": "assistant_turns=11; Bash=6",
+   "turns": 7
+  },
+  {
+   "arm_dir": "/tmp/hv-correct-2026-10-07/arms/a2-2",
+   "commits_made": 1,
+   "cost_usd": 0.1354,
+   "exit_code": 0,
+   "house_phrase_seen": false,
+   "skill_phrase_seen": true,
+   "tools": "assistant_turns=10; Bash=6",
+   "turns": 7
+  },
+  {
+   "arm_dir": "/tmp/hv-correct-2026-10-07/arms/a2-3",
+   "commits_made": 2,
+   "cost_usd": 0.1685,
+   "exit_code": 0,
+   "house_phrase_seen": false,
+   "skill_phrase_seen": true,
+   "tools": "assistant_turns=11; Bash=6",
+   "turns": 7
+  },
+  {
+   "arm_dir": "/tmp/hv-correct-2026-10-07/arms/a3-1",
+   "commits_made": 1,
+   "cost_usd": 0.2375,
+   "exit_code": 0,
+   "house_phrase_seen": true,
+   "skill_phrase_seen": false,
+   "tools": "assistant_turns=12; Bash=6",
+   "turns": 7
+  },
+  {
+   "arm_dir": "/tmp/hv-correct-2026-10-07/arms/a3-2",
+   "commits_made": 1,
+   "cost_usd": 0.1516,
+   "exit_code": 0,
+   "house_phrase_seen": true,
+   "skill_phrase_seen": false,
+   "tools": "assistant_turns=13; Bash=7",
+   "turns": 8
+  },
+  {
+   "arm_dir": "/tmp/hv-correct-2026-10-07/arms/a3-3",
+   "commits_made": 1,
+   "cost_usd": 0.1278,
+   "exit_code": 0,
+   "house_phrase_seen": true,
+   "skill_phrase_seen": false,
+   "tools": "assistant_turns=9; Bash=4; bash=1",
+   "turns": 6
+  }
+ ],
+ "mapping_path": "/tmp/hv-correct-2026-10-07/key/mapping.tsv",
+ "runner_change": "In the scratch copy /tmp/hv-correct-2026-10-07/run_arm.sh only: '--max-turns 35' -> '--max-turns 60' (sed in setup-arms.sh; grep confirmed 1 match). Nothing else changed.",
+ "blinding_scan": "grep -niE 'eval|judge|rubric|score|compare|benchmark|candidate|arena' over arms/*/prompt.txt: 0 matches. Path-name scan over arms/ and runs/ (find to depth 6, including repo and config paths): 0 matches. Prompt diff a1-1 vs a2-1 is only the added '/correct' line plus blank line.",
+ "validity_notes": "All 9 arms exited 0. Skill phrase 'highest level that works' seen in a2 transcripts only (3/3); house phrase 'one guard in the shared function' seen in a3 only (3/3); neither leaked into other arms. Identity leakage in report.md: occurrences of '/correct' and 'CLAUDE.md' are 0 in every report r01-r09 (no leakage via those strings). Caveat: every arm finished in 5-8 turns with 1 commit (a2-3 made 2), far under the 60-turn cap, so these are very short runs; one commit per arm likely cannot cover three separate classes with a per-class commit. Costs 0.10-0.25 USD per arm. Tool use is Bash only (a3-3 also logged one lowercase 'bash' call). Blind labels r01-r09 assigned by shuf; mapping in key/mapping.tsv (not read). Mapping and reports unedited. Setup used scripts (setup-arms.sh, relabel.sh) rather than Bash heredocs because dcg blocked a heredoc redirect to a dynamic path; run-all.sh and collect.py were written with the Write tool. run-all.sh was run in the background (the full run exceeded a single foreground call), and the first 'finished a3-3' match fired before a2-3 ended, so collect.py ran only after 'finished a2-3' appeared."
+}

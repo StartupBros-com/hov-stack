@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# Agent-native DataForSEO access.
+#
+# Stdlib-only Python (HTTP Basic auth), so unlike gsc there is no venv to rot.
+#
+# This wrapper and its implementation, dfs.py, sit side by side in the
+# harness's bin, which ./setup links as ~/.claude/bin (a directory
+# symlink, not a copy, so edits to the versioned source take effect at once).
+# The wrapper finds dfs.py next to its own resolved location, so it works from
+# ~/.claude/bin, through a ~/.local/bin symlink, or from a bare checkout.
+#
+# Until 2026-08-07 this header claimed both were already versioned and symlinked
+# and neither was: dfs.py was untracked and this wrapper existed nowhere but
+# ~/.local/bin, so the whole tool was one machine loss from gone.
+#
+# Credential order: env -> bws (canonical) -> ~/.secrets -> DFS_LEGACY_ENV (if set)
+#
+# ~/.secrets holds TWO DataForSEO pairs and only one works:
+#   DATAFORSEO_LOGIN / DATAFORSEO_PASSWORD          <- live
+#   DATAFORSEO_API_USER / DATAFORSEO_API_PASSWORD   <- stale, returns 40100
+# Run `dfs --where` before believing a 401. It names the source that resolved.
+set -euo pipefail
+SELF=$(readlink -f -- "${BASH_SOURCE[0]}")
+exec python3 "${SELF%/*}/dfs.py" "$@"

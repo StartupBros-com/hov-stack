@@ -1,0 +1,8 @@
+# Upstream clones kept current read-only (ff-only pulls)
+Dicklesworthstone/coding_agent_session_search
+Dicklesworthstone/frankensqlite
+chigwell/telegram-mcp
+izqui/whoop-mcp
+mariomosca/rizeio-mcp-server
+# EveryInc/tend removed 2026-08-29: the dogfood target is retired, its 5 systemd
+# units are deleted and ~/SITES/tend is purged, so ru had nothing left to pull.

@@ -1,0 +1,21 @@
+{
+  "name": "lookout",
+  "version": "0.1.0",
+  "description": "A second pair of eyes while Claude works. Every few model steps it asks one tool-less fork of the session (served from the prompt cache) whether there is something you should know and might miss, and shows the answer above the prompt. No model call while nothing draws the session.",
+  "author": {
+    "name": "StartupBros / House of Vibe",
+    "url": "https://houseofvibe.ai"
+  },
+  "license": "MIT",
+  "keywords": ["house-of-vibe", "claude-code", "mod", "review", "attention", "fork"],
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "every": {
+      "type": "number",
+      "title": "Model steps between checks",
+      "description": "How many main-thread model steps pass between two lookout checks. Default 6. 0 turns the automatic checks off; /lookout now still asks.",
+      "required": false,
+      "default": 6
+    }
+  }
+}

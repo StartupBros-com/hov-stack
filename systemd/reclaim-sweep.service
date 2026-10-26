@@ -1,0 +1,25 @@
+# TEMPLATE: Cleanup of self-heal and backup residue under $HOME through the 9-rule allowlist (shipped plan-only).
+# Replace before enabling:
+#   nothing; the defaults are generic.
+# See systemd/README.md.
+[Unit]
+Description=reclaim-sweep self-heal/backup residue cleanup (plan-only as shipped)
+Documentation=https://github.com/StartupBros-com/hov-stack
+
+OnFailure=harness-unit-failure-alert@%n.service
+
+[Service]
+Type=oneshot
+TimeoutStartSec=10m
+# Promoted RECLAIM_SWEEP_APPLY=0 -> 1 (2026-08-16). The promotion
+# blocker was liveness decided by /proc/*/fd alone, blind to the
+# cwd/environ/cmdline holders an idle background job actually has — since fixed
+# (shared 4-signal lib/proc_liveness.py, fail-closed: an answerless scan
+# aborts plan AND apply). Every candidate must still independently clear the
+# 9-rule allowlist (age floors 14-30d, MIN_DEPTH_BELOW_HOME=2, 4-signal
+# holder check) before removal. Terminal stage.
+# Shipped plan-only. To delete: RECLAIM_SWEEP_APPLY=1 (see README).
+Environment=RECLAIM_SWEEP_APPLY=0
+ExecStart=/usr/bin/python3 %h/.claude/scripts/reclaim-sweep.py
+Nice=10
+IOSchedulingClass=idle

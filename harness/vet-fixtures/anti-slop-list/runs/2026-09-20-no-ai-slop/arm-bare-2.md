@@ -1,0 +1,18 @@
+Line 15: "It isn't just a timer, it's a ledger for your attention." — false-contrast AI cliché ("not just X, it's Y") — fix: state the actual differentiator plainly, e.g. "Tally logs what you worked on, not just when."
+Line 20: "In an era of constant context-switching, knowing where your hours go is the first step toward getting them back." — cliché scene-setting opener + hollow "first step" phrase — fix: cut the sentence.
+Line 22: "Most engineers would tell you that time tracking is broken." — unsupported appeal-to-authority/weasel claim — fix: cut, or cite a specific, attributable reason.
+Line 23: "Ten commands. You'll only ever need one." — hollow contrastive claim, undercut by the multi-command Usage section — fix: cut, or name the one command if literally true.
+Line 32: "It is quick, dependable, and everything in between." — meaningless filler phrase — fix: cut "and everything in between" or name a concrete third trait.
+Line 38: "functions as the main entry point and sports a flexible export layer that empowers you to unpack your data through a streamlined, frictionless workflow" — buzzword/jargon overload, says nothing concrete — fix: "`report` is how you view and export your data."
+Line 52: "The stopwatch resumes from the edited chronometer value, so the tracker's totals stay consistent with the timer." — incoherent sentence from needless synonym-swapping (stopwatch/chronometer/tracker/timer for one concept) — fix: "The edit updates the entry directly, and totals recalculate from the new value," using one consistent term.
+Line 58: "Why should you care? Because your hours are your only non-renewable budget." — rhetorical-question opener cliché — fix: state the claim directly, e.g. "Your hours are the one resource you can't get back."
+Line 59: "We couldn't be more excited to share tally 0.9 with you!" — stock marketing-enthusiasm opener — fix: cut; open with what shipped.
+Line 60: "This release represents a defining milestone for the project, reflecting how seriously we take reliability." — unsupported grandiose claim — fix: cut, or name the concrete reliability fix that justifies it.
+Line 61: "It bears mentioning that the ledger format changed; run `tally migrate` once after upgrading." — throat-clearing filler that undersells a breaking change — fix: "The ledger format changed in this release; run `tally migrate` once after upgrading."
+Line 62: "empowering you to own your schedule" — hollow corporate filler tacked onto a routine config feature — fix: cut the clause; end at "...from the config file."
+Line 76: Marta Ruiz quote ("who runs a 12-person agency, said: \"We moved off a hosted tracker in an afternoon. The export was the whole migration.\"") — unverifiable/fabricated-sounding customer testimonial — fix: cut unless the quote is sourced and the customer consented to attribution.
+Line 77: "Tally has always been about one thing, and that thing has not changed. We think about it a lot. It shapes every decision we make, and we hope you can feel that in this release. There is a lot more to say about it, but that is the core of it." — circular, content-free filler paragraph — fix: cut, or name the "one thing" explicitly.
+Line 79: "✅ Local-only ledger" — emoji bullet in professional release copy — fix: use a plain "-" bullet, drop the emoji.
+Line 80: "🚀 Sub-5 ms start and stop" — emoji bullet in professional release copy — fix: use a plain "-" bullet, drop the emoji.
+Line 81: "🔒 No accounts, no telemetry" — emoji bullet in professional release copy — fix: use a plain "-" bullet, drop the emoji.
+Line 84: "You can earn back money. You can't earn back Tuesday." — hollow inspirational-aphorism closer — fix: cut, or replace with a concrete closing call-to-action.

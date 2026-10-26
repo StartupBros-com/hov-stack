@@ -1,0 +1,380 @@
+{
+ "notes": [
+  {
+   "file": "memory/-home-user-dotfiles/a-gate-that-cannot-compare-must-fail.md",
+   "topic": "ci gates must fail not skip",
+   "correction": "A CI gate that cannot resolve inputs must fail loudly, not skip; test the consumer of the verdict and read real step output once.",
+   "repeat_signal": "reproduced it anyway one step below",
+   "enforcer_named": "check-migration-code-coupling.mjs",
+   "date": "2026-09-22"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/a-named-directory-can-hold-shared-infrastructure.md",
+   "topic": "verify shared dependencies before deleting directory",
+   "correction": "Before deleting a directory named for a retiring thing, grep each file across other repos and read each candidate's own purpose statement; don't trust prior analysis.",
+   "repeat_signal": "The same collision cut the other way",
+   "enforcer_named": "",
+   "date": "2026-09-09"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/adversarial-lens-catches-inert-guards-topic-reviewers-miss.md",
+   "topic": "prove added guards are not inert",
+   "correction": "When a diff adds a guard or test, revert the fix and confirm it goes red; keep an adversarial reviewer slot; self-review is not enough.",
+   "repeat_signal": "measured 2026-09-10",
+   "enforcer_named": "",
+   "date": "2026-09-10"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/age-gated-delete-tests-must-age-survivors.md",
+   "topic": "delete test fixtures must pass other predicates",
+   "correction": "For multi-predicate destructive finds, plant negatives that pass every other predicate (e.g. aged files), and mutation-test each predicate; pin threshold values.",
+   "repeat_signal": "",
+   "enforcer_named": "",
+   "date": "2026-08-30"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/allow-destructive-git-does-not-bypass-dcg.md",
+   "topic": "git-guard bypass does not satisfy dcg",
+   "correction": "ALLOW_DESTRUCTIVE_GIT=1 does not clear dcg; get explicit approval or use wt-sweep.sh for branch deletion, and use the Write tool for dynamic-path files.",
+   "repeat_signal": "",
+   "enforcer_named": "git-guard hook; dcg rule core.git:branch-force-delete; core.filesystem:redirect-truncate-dynamic-path",
+   "date": "2026-08-07"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/always-on-rule-human-only-step-as-decision.md",
+   "topic": "human-only blockers phrased as decisions",
+   "correction": "Phrase human-only exceptions as a decision or credential to ask for plus the agent's next action, never a step to 'name'; re-measure exact shipped wording.",
+   "repeat_signal": "",
+   "enforcer_named": "",
+   "date": "2026-09-03"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/assert-the-precondition-not-just-the-outcome.md",
+   "topic": "negative tests must assert precondition reached",
+   "correction": "Fail-closed tests must assert execution reached the branch under test; build fixtures with production writers and grep tests when removing registry entries.",
+   "repeat_signal": "Measured, twice, in one commit",
+   "enforcer_named": "",
+   "date": "2026-09-21"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/audit-honesty-before-declaring-pipeline-complete.md",
+   "topic": "self-honesty audit before declaring complete",
+   "correction": "Before calling an autonomous PR workstream complete, re-check gates executed, mutation runs valid, planted negatives can fail, and reviews were independent.",
+   "repeat_signal": "",
+   "enforcer_named": "",
+   "date": "2026-08-30"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/automerge-armed-pr-drops-later-commits.md",
+   "topic": "treat automerge-armed PR as sealed",
+   "correction": "After arming auto-merge, put follow-ups in a new PR or disarm first; verify the merge commit contains your last commit.",
+   "repeat_signal": "",
+   "enforcer_named": "",
+   "date": "2026-09-04"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/bash-apostrophe-param-expansion-case-arm-trap.md",
+   "topic": "avoid apostrophes in case-arm expansions",
+   "correction": "Keep ${var:-default} fallbacks apostrophe-free inside case arms; don't trust bash -n line numbers, isolate with a minimal repro.",
+   "repeat_signal": "",
+   "enforcer_named": "",
+   "date": "2026-08-02"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/bash-digits-only-validation-is-not-base10-safe.md",
+   "topic": "normalise numeric env with 10#",
+   "correction": "Digits-only checks are unsafe for bash arithmetic; range-check by digit count, then normalise with 10# at the single validation loop.",
+   "repeat_signal": "",
+   "enforcer_named": "",
+   "date": "2026-09-05"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/bash-read-record-trailing-field-absorption.md",
+   "topic": "update all read-record sites together",
+   "correction": "When adding a field to a bash read-parsed record, update every reader and writer in one change and add a round-trip test.",
+   "repeat_signal": "",
+   "enforcer_named": "",
+   "date": "2026-08-02"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/bashrc-mkcd-anti-pattern-subshell-guidance.md",
+   "topic": "launcher functions use subshell and command",
+   "correction": "New .bashrc launcher functions should run in a subshell and invoke the target via `command <name>`, not copy mkcd's cd-the-caller pattern.",
+   "repeat_signal": "",
+   "enforcer_named": "",
+   "date": "2026-08-30"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/bashrc-test-gap-and-sites-root.md",
+   "topic": "mock SITES root in bashrc tests",
+   "correction": "Tests for the cad planted-negative must fixture a temporary HOME/SITES rather than rely on real environment; establish the first .bashrc test precedent.",
+   "repeat_signal": "",
+   "enforcer_named": "",
+   "date": "2026-08-30"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/blesh-pty-winsize-invalidates-shell-tests.md",
+   "topic": "size the pty when testing shells",
+   "correction": "Drive interactive shell tests via a pty with winsize set, feed stdin to bash -i, and mark runs INVALID if ble.sh errors appear.",
+   "repeat_signal": "two confidently-reported false root causes in one session",
+   "enforcer_named": "",
+   "date": "2026-08-29"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/bounds-beat-sweepers-for-shared-host-memory.md",
+   "topic": "kernel bounds over sweepers for memory",
+   "correction": "For memory pressure, use cgroup MemoryHigh/MemoryMax bounds and lifecycle coupling, gate watchdogs on PSI, don't offer restarts or another sweeper as the fix.",
+   "repeat_signal": "",
+   "enforcer_named": "",
+   "date": "2026-09-16"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/cass-locators-die-with-worktree-sessions.md",
+   "topic": "verify cass locators still exist",
+   "correction": "Check cass source_paths exist before trusting results; mark unresolvable signals unknown, never absent or present; prefer git/gh/filesystem anchors.",
+   "repeat_signal": "",
+   "enforcer_named": "",
+   "date": "2026-08-29"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/ce-ideate-distillers-need-a-write-capable-agent.md",
+   "topic": "use write-capable agents for dossiers",
+   "correction": "Route ce-ideate stages that write dossier files to general-purpose sonnet; reserve lean-reader for read-and-return stages.",
+   "repeat_signal": "",
+   "enforcer_named": "",
+   "date": "2026-09-23"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/check-lost-found-before-running-gc.md",
+   "topic": "check lost-found before git gc",
+   "correction": "Check .git/lost-found before git gc; surface rescue markers as an operator decision, and create real refs to rescue objects first.",
+   "repeat_signal": "",
+   "enforcer_named": "",
+   "date": "2026-08-12"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/checking-shipped-artifacts-is-not-checking-the-machine.md",
+   "topic": "check live machine not just artifacts",
+   "correction": "Prefer runtime sweeps over allowlists; ask what the live equivalent of a repo-file check is, and report failure age.",
+   "repeat_signal": "",
+   "enforcer_named": "",
+   "date": "2026-08-27"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/claude-loop-bg-ceiling-vet-findings.md",
+   "topic": "test ceiling detector edge cases",
+   "correction": "For timeout or ceiling detectors, test zero-disabled override, exit-code propagation under pipefail, and the true timer start point.",
+   "repeat_signal": "",
+   "enforcer_named": "",
+   "date": "2026-08-30"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/claude-loop-dispatched-run-silent-failure-pattern.md",
+   "topic": "keep empty-delivery check standalone",
+   "correction": "Preserve claude-loop's empty-delivery check as a standalone gate rather than enumerating kill reasons reactively.",
+   "repeat_signal": "Two independent silent-failure shapes",
+   "enforcer_named": "",
+   "date": "2026-08-30"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/claude-md-merge-not-live-until-checkout-pulls.md",
+   "topic": "merge is not deploy; pull yourself",
+   "correction": "After merging symlinked-dir changes, verify the symlink target yourself and fast-forward via ExitWorktree keep; re-check before telling anyone to run commands.",
+   "repeat_signal": "Recurred 2026-09-02",
+   "enforcer_named": "SessionStart hook fast-forwards a clean parked main checkout",
+   "date": "2026-09-03"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/closed-pr-can-be-deliberate-decision-not-dropped-ball.md",
+   "topic": "read tests before reviving closed work",
+   "correction": "Before reviving apparently abandoned fixes, read the test assertions; a closed PR may encode a deliberate decision. Verify recommendations against current source.",
+   "repeat_signal": "",
+   "enforcer_named": "sync-install-smoke.test.sh:534-543",
+   "date": "2026-08-30"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/codex-exec-exit-zero-can-mean-did-nothing.md",
+   "topic": "verify codex outcome not pipeline status",
+   "correction": "Don't pipe load-bearing codex exec into tail/tee without pipefail or PIPESTATUS; verify worktree status and classify quota errors separately.",
+   "repeat_signal": "",
+   "enforcer_named": "",
+   "date": "2026-08-26"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/codex-openai-yaml-invocation-gate.md",
+   "topic": "codex forks need openai.yaml gate",
+   "correction": "Claude-demoted skill forks must carry agents/openai.yaml with allow_implicit_invocation false for Codex; verify identity before deleting untracked blockers.",
+   "repeat_signal": "",
+   "enforcer_named": "skills-localize.sh deploy_codex advisory WARN",
+   "date": "2026-08-07"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/config-backup-push-detects-unmerged-live-work.md",
+   "topic": "land unmerged live work not track it",
+   "correction": "When a backup diff references untracked paths, check open own PRs first instead of adding the path to sync; remove staging copies.",
+   "repeat_signal": "Third recorded instance",
+   "enforcer_named": "tests/sync-install-smoke.test.sh",
+   "date": "2026-08-27"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/count-distinct-secrets-by-digest-without-reading-values.md",
+   "topic": "audit secrets by digest not value",
+   "correction": "Audit credentials by extracting names only and comparing truncated sha256 digests; report distinct counts and reused values, then shred scratch.",
+   "repeat_signal": "",
+   "enforcer_named": "",
+   "date": "2026-09-09"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/dcg-git-alias-false-positive-on-c-flag-paths.md",
+   "topic": "dcg alias false positive on -C",
+   "correction": "If dcg flags plain git -C $VAR with git-alias-semantic-unverified, resolve or quote the variable; fixed upstream as of v0.14.4.",
+   "repeat_signal": "",
+   "enforcer_named": "tests/dcg-worktree-shapes-guard.test.sh",
+   "date": "2026-08-30"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/dcg-guard-false-positives-pr-body-and-ledger-repair.md",
+   "topic": "dcg false positives on heredocs",
+   "correction": "If dcg blocks gh --body-file heredocs or dynamic redirects, use Write-tool temp files or stdin heredocs; historical, fixed upstream.",
+   "repeat_signal": "",
+   "enforcer_named": "",
+   "date": "2026-08-30"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/dcg-scans-heredoc-body-content.md",
+   "topic": "never launder around dcg heredoc blocks",
+   "correction": "When dcg blocks a legitimate heredoc script, author the file with the Write tool and isolate destructive steps in a reviewable script, not reshape commands.",
+   "repeat_signal": "",
+   "enforcer_named": "",
+   "date": "2026-08-30"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/derive-compact-review-returns-from-artifacts-not-by-retyping.md",
+   "topic": "project review returns via script",
+   "correction": "Never hand-copy reviewer findings; generate compact returns from on-disk artifacts with a projection script and pass later stages file paths.",
+   "repeat_signal": "",
+   "enforcer_named": "cr-compact.py",
+   "date": "2026-09-21"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/design-drift-satisfied-invariant-masked-both-bugs.md",
+   "topic": "test the property that matters",
+   "correction": "Check the property that matters, not its proxy invariant; verify tool output against the source of truth and mutation-check regression tests.",
+   "repeat_signal": "",
+   "enforcer_named": "",
+   "date": "2026-08-07"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/destructive-find-script-review-checklist.md",
+   "topic": "destructive find script checklist",
+   "correction": "Review destructive find scripts for symlinked roots, traversal races, near-threshold fixtures, and asserted reported totals.",
+   "repeat_signal": "",
+   "enforcer_named": "",
+   "date": "2026-08-30"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/dirty-pr-gets-no-workflow-runs.md",
+   "topic": "check mergeStateStatus when no checks",
+   "correction": "When a PR shows no checks, read mergeStateStatus first; DIRTY means resolve the conflict, and merge main before pushing long-running branches.",
+   "repeat_signal": "",
+   "enforcer_named": "",
+   "date": "2026-09-04"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/dispatcher-audit-correction-ended-row-gap.md",
+   "topic": "audit-correction must require ended row",
+   "correction": "Confirm dispatcher-ledger.sh audit-correction refuses to flip broken runs to kept or waste when no ended row exists.",
+   "repeat_signal": "",
+   "enforcer_named": "",
+   "date": "2026-08-30"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/dont-generalize-fleet-safety-from-small-branch-sample.md",
+   "topic": "state sample size with safety claims",
+   "correction": "Don't claim fleet-wide safety from a small sample; state the fraction checked in the same sentence or check the whole population.",
+   "repeat_signal": "",
+   "enforcer_named": "",
+   "date": "2026-08-30"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/dont-narrate-intended-behavior-as-observed-progress.md",
+   "topic": "report only observed job state",
+   "correction": "In status updates state only what you just checked; say 'expected to be doing X, not yet confirmed' for unverified intended behaviour.",
+   "repeat_signal": "repeatable dishonesty failure mode",
+   "enforcer_named": "",
+   "date": "2026-08-30"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/dont-replace-scoped-deployment-keys-with-operator-keys.md",
+   "topic": "keep scoped deployment keys",
+   "correction": "Before replacing a deployed key that differs from canonical, check if it is deliberately scoped and working; fix only documentation.",
+   "repeat_signal": "",
+   "enforcer_named": "",
+   "date": "2026-08-30"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/fable-cyber-content-refusal-auto-fallback-opus.md",
+   "topic": "cyber refusal auto-fallback to opus",
+   "correction": "If a pipeline stage silently switches models, check for model_refusal_fallback with apiRefusalCategory cyber before assuming a bug; account usage accordingly.",
+   "repeat_signal": "Observed twice",
+   "enforcer_named": "",
+   "date": "2026-08-02"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/fail-closed-on-every-input-gets-switched-off.md",
+   "topic": "gates must have a reachable pass",
+   "correction": "After building an opt-in verification, run it against the real artifact and confirm it reports a pass; ensure producer and consumer agree on layout.",
+   "repeat_signal": "",
+   "enforcer_named": "",
+   "date": "2026-08-27"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/fail-closed-self-updater-can-lock-itself-out.md",
+   "topic": "self-updater guards under unattended environment",
+   "correction": "Check what environment runs a fail-closed guard unattended; read dotup status before trusting currency; use %h in unit PATH.",
+   "repeat_signal": "",
+   "enforcer_named": "",
+   "date": "2026-08-27"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/feedback-agent-native-never-hand-will-commands.md",
+   "topic": "never hand back commands to operator",
+   "correction": "The agent runs every command itself (pull, start servers, generate files) and hands Will only a URL, result, or judgment call.",
+   "repeat_signal": "why do you keep making me run those commands?",
+   "enforcer_named": "",
+   "date": "2026-09-03"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/feedback-capability-before-instruments.md",
+   "topic": "ship capability before instruments",
+   "correction": "Ship the smallest running-agent edit first; build fixtures, gates, governance only when a consumer exists; run process-porn worksheet before presenting plans.",
+   "repeat_signal": "",
+   "enforcer_named": "",
+   "date": "2026-09-02"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/feedback-check-status-before-pulling-a-launchpad.md",
+   "topic": "check git status before launchpad pull",
+   "correction": "Run git status --short before any git pull in a ~/SITES launchpad; if dirty don't pull, move dirt to a rescue branch, never reset --hard.",
+   "repeat_signal": "hit again 2026-09-03",
+   "enforcer_named": "",
+   "date": "2026-09-03"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/feedback-diagnostics-inline-beats-fanout.md",
+   "topic": "diagnose inline before fanning out",
+   "correction": "Ask what single command settles it before spawning agents; cap corroboration fleets at about 5; never declare workflows done from a poll loop.",
+   "repeat_signal": "",
+   "enforcer_named": "",
+   "date": "2026-08-26"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/feedback-drive-the-mechanics-decisions-not-commands.md",
+   "topic": "hand back decisions not commands",
+   "correction": "Run all mechanics yourself, hand back only genuine decisions in plain language; use native tools over handrolled scripts; no operational run-this lines.",
+   "repeat_signal": "fourth round, same session; fifth round",
+   "enforcer_named": "wt-sweep.timer",
+   "date": "2026-09-02"
+  }
+ ]
+}

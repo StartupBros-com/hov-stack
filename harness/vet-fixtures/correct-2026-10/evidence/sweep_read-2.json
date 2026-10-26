@@ -1,0 +1,372 @@
+{
+ "notes": [
+  {
+   "file": "memory/-home-user-dotfiles/prod-daemon-restart-requires-explicit-confirmation-gate.md",
+   "topic": "separate merge and deploy confirmations",
+   "correction": "Treat merge and prod daemon restart as separate gates: after merge stop, re-verify live state fresh, and wait for a distinct 'yes' before restarting.",
+   "repeat_signal": "",
+   "enforcer_named": "",
+   "date": "2026-08-02"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/pull-autostash-strands-launchpad-changes.md",
+   "topic": "never bypass launchpad freshen refusal",
+   "correction": "Do not git pull on a dirty launchpad; after any pull check stash list for autostash, restore with apply not pop, and deploy via checkout of merge commit.",
+   "repeat_signal": "",
+   "enforcer_named": "launchpad-freshen.sh --heal",
+   "date": "2026-09-02"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/pytest-timeout-thread-method-kills-xdist-worker.md",
+   "topic": "use signal timeout method under xdist",
+   "correction": "Use pytest-timeout --timeout-method=signal with xdist; treat 'node down' as a timeout and compare passed-test counts against a known-full run before calling green.",
+   "repeat_signal": "",
+   "enforcer_named": "",
+   "date": "2026-09-03"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/quoting-untrusted-text-for-model-readers.md",
+   "topic": "quote untrusted text for model readers",
+   "correction": "Line-prefix every body line and defang marker-shaped text with a tolerant regex; use \\Z not $; prefer structurally impossible designs over sanitizing harder.",
+   "repeat_signal": "",
+   "enforcer_named": "",
+   "date": "2026-08-29"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/race-check-must-apply-symmetric-liveness-check.md",
+   "topic": "symmetric liveness check in race validation",
+   "correction": "Apply the same release-liveness predicate to your own claim and the foreign one, and branch explicitly when your own claim was voided mid-flight.",
+   "repeat_signal": "",
+   "enforcer_named": "",
+   "date": "2026-08-30"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/rank-build-order-by-measured-defect-density.md",
+   "topic": "measure defect density before building checkers",
+   "correction": "Sweep for real instances of a defect class before building its checker; defer zero-instance classes, and report sweep limits rather than claiming audited clean.",
+   "repeat_signal": "",
+   "enforcer_named": "",
+   "date": "2026-08-11"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/read-peer-job-out-log-before-deleting-job-dir.md",
+   "topic": "capture peer job logs before cleanup",
+   "correction": "Reap helpers must read or copy a peer job's out.log and events into the run dir and classify the failure before deleting the job directory.",
+   "repeat_signal": "",
+   "enforcer_named": "",
+   "date": "2026-09-23"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/reconcile-contradicting-agents-before-acting.md",
+   "topic": "reconcile contradicting subagent reports first",
+   "correction": "When subagents disagree on a fact, resolve it before acting; suspect a stale checkout, ask where each read, and use git show origin/main explicitly.",
+   "repeat_signal": "",
+   "enforcer_named": "`rent-check inventory` now reports a `checkout` record first (dotfiles#365) and `--strict` exits 1 on stale",
+   "date": "2026-08-11"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/reconciler-convergence-must-be-delivery-scoped.md",
+   "topic": "scope reconciler convergence to delivery",
+   "correction": "Define reconciler 'converged' as existence of the delivered artifact, not payload-hash equality, and enforce it at the storage layer; don't read gap counts as ground truth.",
+   "repeat_signal": "",
+   "enforcer_named": "the claim RPCs themselves refuse a row that is already announced-with-a-message-id",
+   "date": "2026-08-11"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/red-ci-run-hides-every-later-step.md",
+   "topic": "red CI hides later steps",
+   "correction": "When a single-job workflow goes red, run the skipped later suites locally before pushing the fix; never report green from a truncated run.",
+   "repeat_signal": "every prior CI run had truncated at the same place",
+   "enforcer_named": "",
+   "date": "2026-08-27"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/red-job-may-be-a-retry-pass-promoted-by-zero-flake-gate.md",
+   "topic": "read test summary before diagnosing red",
+   "correction": "Before diagnosing a red CI job, read the runner's own summary and gate error text; a retry-recovered pass promoted by a zero-flake gate is policy, not a bug.",
+   "repeat_signal": "",
+   "enforcer_named": "",
+   "date": "2026-09-11"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/refactor-coverage-proof-technique.md",
+   "topic": "prove refactor kept test coverage",
+   "correction": "Before committing a test-helper refactor, diff pre/post def names with comm -23 in both directions to mechanically prove coverage was not narrowed.",
+   "repeat_signal": "",
+   "enforcer_named": "",
+   "date": "2026-08-30"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/report-scope-not-just-outcome.md",
+   "topic": "diagnostics must print scope searched",
+   "correction": "Every sweep or scan must print its roots and candidate count at start and in summary; write a check instead of an issue for re-derivable follow-ups.",
+   "repeat_signal": "green for 15 consecutive weeks",
+   "enforcer_named": "",
+   "date": "2026-08-27"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/review-pipeline-overproduces-findings.md",
+   "topic": "gate review findings at filing time",
+   "correction": "Gate findings through a judge before filing issues, run adversarial-first with topic reviewers only when relevant, and re-verify and close dead follow-ups each release.",
+   "repeat_signal": "",
+   "enforcer_named": "",
+   "date": "2026-09-09"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/review-subagents-cannot-write-outside-the-worktree.md",
+   "topic": "review subagents write inside worktree",
+   "correction": "Tell review subagents to Write inside the worktree then cp with a single-line command, never heredocs, and collect results by completion notification not TaskOutput.",
+   "repeat_signal": "",
+   "enforcer_named": "",
+   "date": "2026-09-13"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/rewrite-gate-check-rule-scope-not-just-claims.md",
+   "topic": "diff safety rule scope when rewriting",
+   "correction": "When rewriting a safety rule, diff old versus new scope clause by clause; dropped named entities and absolutes are suspect; mutation-test restored invariants.",
+   "repeat_signal": "",
+   "enforcer_named": "",
+   "date": "2026-08-11"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/root-container-actions-poison-persistent-runner-workspaces.md",
+   "topic": "reclaim runner workspace ownership before checkout",
+   "correction": "In every job on a self-hosted pool, chown the workspace via a throwaway container before actions/checkout, using the host's runner uid/gid, with if: always() cleanup.",
+   "repeat_signal": "",
+   "enforcer_named": "",
+   "date": "2026-08-11"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/schema-validates-shape-not-work.md",
+   "topic": "schema success does not prove work",
+   "correction": "Read returned content before trusting success counters; keep default-refuted verifier prompts, re-derive from primary sources, and structurally check payload content, not just shape.",
+   "repeat_signal": "Second run: it returned a prose summary",
+   "enforcer_named": "",
+   "date": "2026-09-21"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/scope-frequency-based-permission-entries-by-execution-repo.md",
+   "topic": "scope permission entries by execution repo",
+   "correction": "Check per-repo call distribution before scoping allow entries; put cross-repo tool entries in global settings and insert at array head to avoid drift.",
+   "repeat_signal": "",
+   "enforcer_named": "",
+   "date": "2026-08-30"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/shell-parse-guards-fail-closed-on-unmodeled-syntax.md",
+   "topic": "shell parse guards fail closed",
+   "correction": "Refuse syntax a shell-parsing guard doesn't model rather than partially modeling it; measure fail-closed cost on the corpus first and run cross-model adversarial pass on hook changes.",
+   "repeat_signal": "Three rounds followed",
+   "enforcer_named": "shape-rewrite reach check",
+   "date": "2026-09-23"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/silent-fallback-tools-hide-outages.md",
+   "topic": "report silent tool fallbacks",
+   "correction": "Treat falling back from a broken tool to grep without saying so as a reportable event; score ablations on exit status or output validity, not invocation counts.",
+   "repeat_signal": "hit exit-1 three times in a row",
+   "enforcer_named": "",
+   "date": "2026-08-07"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/silent-ipv6-drop-stalls-dual-stack-clients.md",
+   "topic": "disable ipv6 behind dropping fence",
+   "correction": "When a fence blackholes an address family, disable that family in the guest or REJECT instead of DROP, and prove it with ip -6 addr show.",
+   "repeat_signal": "",
+   "enforcer_named": "",
+   "date": "2026-09-03"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/skill-slash-invocation-requires-first-position.md",
+   "topic": "slash skill needs first position",
+   "correction": "If a /skill mention does nothing, check token position before concluding the skill is missing or demoted; roster absence is a separate mechanism.",
+   "repeat_signal": "1,829/1,829 mid-message skill tokens failed to expand",
+   "enforcer_named": "UserPromptSubmit hook (\"skill-mention-resolver\")",
+   "date": "2026-08-30"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/skill-vetting-permission-gated-concerns-not-blockers.md",
+   "topic": "don't over-block skills on gated nitpicks",
+   "correction": "Separate unmitigated risks from nitpicks the permission system already gates; only the former justifies recommending a skill stay uninstalled.",
+   "repeat_signal": "",
+   "enforcer_named": "",
+   "date": "2026-08-30"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/slash-command-expands-only-in-first-position.md",
+   "topic": "never claim not installed from roster",
+   "correction": "Never say a skill is not installed on roster evidence alone; look in ~/.claude/skills, and treat mid-sentence /name as intent; keep hook context factual.",
+   "repeat_signal": "every one had the token mid-message",
+   "enforcer_named": "UserPromptSubmit/skill-mention-resolver.js",
+   "date": "2026-08-29"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/spot-check-before-shipping-masking-fix.md",
+   "topic": "spot-check live failures before shim fix",
+   "correction": "Before shipping a shim or alias fix, sample real failing transcripts and check whether it would silently mask a different underlying problem.",
+   "repeat_signal": "",
+   "enforcer_named": "",
+   "date": "2026-08-30"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/squash-merging-a-stack-auto-closes-its-children.md",
+   "topic": "retarget stacked PRs before parent merge",
+   "correction": "Retarget child PRs to main before squash-merging the bottom PR with --delete-branch; otherwise restore the base ref, reopen, retarget, and merge main in, never force-push.",
+   "repeat_signal": "",
+   "enforcer_named": "",
+   "date": "2026-08-27"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/stash-pop-conflict-froze-dotfiles-checkout.md",
+   "topic": "verify merged config is actually live",
+   "correction": "After merging harness config, grep the live symlink target; if ff refuses, check for unmerged index entries and resolve memory backups from canonical files.",
+   "repeat_signal": "",
+   "enforcer_named": "",
+   "date": "2026-08-17"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/sync-install-worktree-symlink-trap.md",
+   "topic": "run sync install only from canonical checkout",
+   "correction": "Run sync.sh install only from ~/dotfiles; update a dirty main with fetch plus merge --ff-only; repoint dangling symlinks if a wrong-checkout install happened.",
+   "repeat_signal": "",
+   "enforcer_named": "",
+   "date": "2026-08-02"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/synthesis-stage-fabricates-consensus-arbitrate-from-verdicts.md",
+   "topic": "arbitrate from verdicts not synthesis",
+   "correction": "Orchestrator should arbitrate the final set from verdicts and designs directly; require synthesis to cite judge lines and have the critic check graft traceability.",
+   "repeat_signal": "",
+   "enforcer_named": "",
+   "date": "2026-09-13"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/systemd-after-ordering-deadlocks-draining-stop.md",
+   "topic": "avoid After= on draining services",
+   "correction": "A service that does work during stop must not carry After=/Before= against units that work may reload; use runtime preconditions and cancel the wedged job if needed.",
+   "repeat_signal": "",
+   "enforcer_named": "",
+   "date": "2026-09-02"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/test-the-call-order-not-the-callees.md",
+   "topic": "test call order via real CLI",
+   "correction": "When ordering is the defect, drive the real CLI rather than calling units, and keep a mutation harness proving each load-bearing fix's test fails when broken.",
+   "repeat_signal": "",
+   "enforcer_named": "",
+   "date": "2026-08-07"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/the-inference-next-to-the-measurement.md",
+   "topic": "label measured versus inferred claims",
+   "correction": "Before publishing, mark each claim measured or inferred, measure or label inferences, state sample caps, and never act on unverified negatives.",
+   "repeat_signal": "Six retractions in one session",
+   "enforcer_named": "",
+   "date": "2026-09-21"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/transcript-corpus-detectors-count-the-review-itself.md",
+   "topic": "validate transcript detectors on real negatives",
+   "correction": "Validate detectors against real-corpus negatives, hand-classify hits, exclude sessions that worked on the component, and report unaudited counts as upper bounds.",
+   "repeat_signal": "",
+   "enforcer_named": "",
+   "date": "2026-09-22"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/transient-unit-setenv-path-bypasses-test-stubs.md",
+   "topic": "keep test stubs on every PATH",
+   "correction": "Give runners that set child PATH a seam, point it at the stub dir, and assert stub call logs; never invent recognizer aliases to pass validators.",
+   "repeat_signal": "",
+   "enforcer_named": "",
+   "date": "2026-09-11"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/unreachability-assertions-pass-vacuously-on-dead-targets.md",
+   "topic": "negative assertions pass vacuously on dead targets",
+   "correction": "When retiring a host, grep negative assertions for it separately; ask whether the check would still pass if the control broke.",
+   "repeat_signal": "",
+   "enforcer_named": "",
+   "date": "2026-09-09"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/validate-the-probe-before-trusting-absence.md",
+   "topic": "validate probe before trusting absence",
+   "correction": "Probe a known-positive before concluding something is absent; get real symbol names from diffs, never pair multi-path ls with || echo, and read output not exit codes.",
+   "repeat_signal": "Repeated verbatim minutes later",
+   "enforcer_named": "",
+   "date": "2026-08-12"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/vendored-plugin-clone-drifts-from-upstream-head.md",
+   "topic": "patch upstream against fresh clone",
+   "correction": "Build upstream contributions against a fresh clone of upstream HEAD, confirm target text verbatim, and cite the HEAD SHA; use local plugin copy only to find defects.",
+   "repeat_signal": "",
+   "enforcer_named": "",
+   "date": "2026-09-14"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/verify-from-a-clean-clone-not-local-disk.md",
+   "topic": "verify pushed tree from clean clone",
+   "correction": "After pushing, confirm expected files from a fresh shallow clone or check git status untracked files before commit; local green doesn't prove the pushed tree.",
+   "repeat_signal": "",
+   "enforcer_named": "",
+   "date": "2026-08-11"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/verify-stale-memory-architecture-claims.md",
+   "topic": "verify stale memory architecture claims",
+   "correction": "Treat old memory notes' architecture claims as hypotheses, spot-check the live code path, and correct the note in the same session if disproved.",
+   "repeat_signal": "",
+   "enforcer_named": "",
+   "date": "2026-08-02"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/verify-subagent-counts-before-classification.md",
+   "topic": "verify delegated scope counts independently",
+   "correction": "Have delegated subagents independently compute scope counts and report discrepancies from the dispatcher's stated number rather than silently reconciling.",
+   "repeat_signal": "",
+   "enforcer_named": "",
+   "date": "2026-08-30"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/widening-a-scanners-input-view-reopens-other-channels.md",
+   "topic": "widening scanner view reopens channels",
+   "correction": "When widening a scanner to raw text, check every consumer of that variable and pass separate rawText and blankedText; keep bare-pattern scans on the sanitized view.",
+   "repeat_signal": "",
+   "enforcer_named": "",
+   "date": "2026-09-22"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/workflow-arms-execute-the-relayed-user-request.md",
+   "topic": "workflow arms obey relayed user request",
+   "correction": "When the latest user message isn't the workflow's task, run stages via the Agent tool or lean-reader agentType, and audit gh, tasks, and memory after runs.",
+   "repeat_signal": "Third instance",
+   "enforcer_named": "",
+   "date": "2026-09-20"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/worktree-scratch-mktemp-command-substitution-blocked.md",
+   "topic": "no mktemp in worktree sessions",
+   "correction": "In worktree-isolated jobs, avoid mktemp command substitution; use a literal task-named /tmp path with mkdir -p for scratch directories.",
+   "repeat_signal": "still live",
+   "enforcer_named": "command-shape guard",
+   "date": "2026-08-30"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/wt-done-sh-inside-outside-catch-22.md",
+   "topic": "never hand back wt-done rerun",
+   "correction": "Never tell the operator to re-run wt-done.sh from outside; run it inside and let wt-sweep dispose of the worktree with no human step.",
+   "repeat_signal": "Reproduced twice in one session",
+   "enforcer_named": "wt-sweep.sh",
+   "date": "2026-08-30"
+  },
+  {
+   "file": "memory/-home-user-dotfiles/yaml-plain-scalar-hash-truncates-run.md",
+   "topic": "quote yaml scalars containing hash",
+   "correction": "Quote YAML scalars containing ' #' or drop the hash, and verify by parsing with yaml.safe_load and checking run bodies for odd quote counts.",
+   "repeat_signal": "",
+   "enforcer_named": "",
+   "date": "2026-08-27"
+  }
+ ]
+}

@@ -1,0 +1,35 @@
+{
+  "name": "loop-breaker",
+  "version": "0.1.0",
+  "description": "Stops Claude repeating the same failing tool call. Counts identical calls that error or are refused, hints after the second, refuses the next after the threshold with a reason Claude can act on, and shows a worsening face above the prompt with a one-key Stop and rethink.",
+  "author": {
+    "name": "StartupBros / House of Vibe",
+    "url": "https://houseofvibe.ai"
+  },
+  "license": "MIT",
+  "keywords": ["house-of-vibe", "claude-code", "mod", "loop", "guard"],
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "threshold": {
+      "type": "number",
+      "title": "Identical failures before refusing",
+      "description": "How many times the exact same tool call may fail in a row before loop-breaker refuses the next identical attempt. Default 3.",
+      "required": false,
+      "default": 3
+    },
+    "allow": {
+      "type": "string",
+      "title": "Tools never refused",
+      "description": "Comma-separated tool names loop-breaker leaves alone, for example \"Bash,Read\". Empty means every tool is watched.",
+      "required": false,
+      "default": ""
+    },
+    "retryLater": {
+      "type": "string",
+      "title": "Failures that mean try again later",
+      "description": "A regular expression (case-insensitive) matched against the first 400 characters of a failed call's text. A match is not counted as a failed attempt: an admission guard deferring a job, a rate limit, a dropped connection. Empty counts every failure. For a command that polls on purpose, allowlist its tool or add its own wording here.",
+      "required": false,
+      "default": "deferred|try again later|retry after|rate limit|too many requests|\\b429\\b|\\b503\\b|ECONNRESET|ETIMEDOUT|EAGAIN|temporarily unavailable|already running"
+    }
+  }
+}

@@ -1,0 +1,43 @@
+# .public-safety-allow: the exceptions scripts/public-safety-scan.sh grants, one per line:
+#   <path ERE> TAB <match ERE> TAB <reason> [TAB <shape>]
+# The path and match patterns are awk EREs, unanchored unless written with ^ and $; the
+# reason says why the text may stay; the optional fourth column confines the row to one
+# shape so a row cannot cover more than it names. A row that matched nothing is reported
+# as stale. A private-token row is reported as not exercised while the list is not
+# configured, which is every CI run: a fork's pull request sees no repository variable or
+# secret, so the author's list is applied by the --require-tokens run before a public push.
+# A private-token row writes its match pattern with the first letter bracketed, so the
+# fixed-string token search never finds the token in this file.
+# Placeholder users (the names the scan's header lists) and addresses at documentation-
+# reserved domains pass by construction and need no row.
+#
+# The old repository name is a private token (the staging repository stayed private); the
+# decision record and the restructure plan keep it as history (R19).
+^docs/decisions/2026-10-20-hovstack-architecture\.md$	^[w]stack$	the decision record names the staging repository the tree came from	private-token
+^docs/plans/2026-10-20-feat-hovstack-restructure-plan\.md$	^[w]stack$	the restructure plan's R19 and its old-token goal cite the name being removed	private-token
+# The release announce helper binds its audience to a fixed endpoint; its test also
+# plants an impostor product that the helper must refuse.
+^release/scripts/tool-drop-announce\.sh$	^[m]embers\.startupbros$	the announce helper's fixed endpoint; its test binds the OIDC audience to this endpoint and rejects a caller-supplied one, so it stays a literal	private-token
+^release/tests/tool-drop-announce\.test\.sh$	^[m]embers\.startupbros$	the announce test's copy of the endpoint it asserts the helper keeps	private-token
+^release/tests/tool-drop-announce\.test\.sh$	^[S]tartupBros-com/hov-router$	the announce test's impostor product, a repository that does not exist, which the helper must refuse	private-repo
+# A listed public repository whose name begins with the name of a private one.
+^\.public-safety-repos$	^[p]i-evals$	the public evidence repository's entry, whose name begins with a private project's name; the entry is the public repository	private-token
+# The setup suite plants a user outside the placeholder set so its own host-literal scan
+# must catch it; the planted line is the suite's negative, not a path on any machine. The
+# row brackets a letter of the name so the scan does not read the row itself as a path.
+^tests/repo/setup\.test\.sh$	^/home/[j]doe$	the setup suite's planted negative: a non-placeholder user its host-literal scan must catch	linux-home
+# Vendor addresses the tree must keep: the git-guard rule that denies AI-attribution
+# trailers matches the vendors' domains (one full address sits in its comment), its test
+# proves each address is denied, and one vet cites such a trailer as evidence; the vastai test asserts on the vendor's SSH
+# proxy login form. None is a person's address. Each row brackets a letter so the row
+# itself is not read as an address.
+^docs/vets/2026-09-20-retro-harness-vet\.md$	^noreply@[a]nthropic\.com$	the vet quotes a commit's vendor AI-trailer author address on purpose, as evidence of who authored a PR	email
+^hooks/PreToolUse/git-guard\.js$	^hi@[a]nthropic\.com$	a comment names the vendor address the AI-trailer rule catches; the hook's behaviour is unchanged	email
+^hooks/tests/git-guard\.test\.js$	^noreply@[a]nthropic\.com$	the git-guard test keeps the vendor AI-trailer address to prove the trailer rule denies it	email
+^hooks/tests/git-guard\.test\.js$	^hi@[a]nthropic\.com$	the git-guard test's vendor-domain trailer case	email
+^hooks/tests/git-guard\.test\.js$	^codex@[o]penai\.com$	the git-guard test's assistant-vendor trailer case	email
+^hooks/tests/git-guard\.test\.js$	^cursoragent@[c]ursor\.com$	the git-guard test's assistant-vendor trailer case	email
+^hooks/tests/git-guard\.test\.js$	^devin@[c]ognition\.ai$	the git-guard test's vendor-domain trailer case	email
+^hooks/tests/git-guard\.test\.js$	^yesreply@[h]appy\.engineering$	the git-guard test's vendor-domain trailer case	email
+^tests/vastai\.test\.sh$	^root@ssh5\.[v]ast\.ai$	the vastai wrapper test asserts on the vendor's documented SSH proxy login form, the behaviour under test	email
+^windows/ssh-config$	config\.[l]ocal	an ssh Include of a per-machine file, not a host	private-host

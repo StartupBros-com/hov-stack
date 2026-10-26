@@ -1,0 +1,15 @@
+# NO `policy` BLOCK ON PURPOSE — papercut must stay model-invocable in Codex.
+#
+# Every other fork in codex-skills.txt carries `allow_implicit_invocation: false` to
+# mirror its Claude-side `disable-model-invocation: true`. papercut carries no such
+# frontmatter in Claude and must not gain a gate here either: Codex has no
+# PostToolUseFailure event, so the automatic capture half of papercut does not exist
+# there. Model-initiated self-report is the ONLY path a Codex session has to record
+# friction. Gating it would silently delete the capability on that side.
+#
+# Shape matches the writing-for-agents fork: interface block only for a skill that is
+# model-invoked by design.
+interface:
+  display_name: "Papercut"
+  short_description: "Log small, non-blocking friction the moment you hit it"
+  default_prompt: "Use $papercut to record the friction just encountered — a misleading error, an undocumented step, a silently-wrong output, a footgun worked around."

@@ -1,0 +1,16 @@
+[
+  {"target":"loop","rule":"substitution execution","expected":true,"command":"printf %s \"$(gh pr merge)\""},
+  {"target":"loop","rule":"assignment substitution execution","expected":true,"command":"v=$(gh pr merge)"},
+  {"target":"loop","rule":"backtick execution","expected":true,"command":"printf %s \"`gh pr merge`\""},
+  {"target":"loop","rule":"outer heredoc suffix visibility (#1867)","expected":true,"command":"bash -c \": $(cat <<E\nx\nE\n); gh pr merge\""},
+  {"target":"loop","rule":"compact Bash heredoc suffix visibility (#1867)","expected":true,"command":"bash -c \": $(cat <<E\nx\nE); gh pr merge\""},
+  {"target":"loop","rule":"quoted data remains inert through a shell wrapper","expected":false,"command":"bash -c 'cat <<'\\''E'\\''\ngh pr merge\nE'"},
+  {"target":"loop","rule":"an inert quote must not hide the suffix","expected":true,"command":"bash -c 'cat <<'\\''E'\\''\n\"\nE\ngh pr merge'"},
+  {"target":"loop","rule":"two quote-preserving wrappers retain the suffix","expected":true,"command":"bash -c \"bash -c 'cat <<'\\\\''E'\\\\''\n\nE\ngh pr merge'\""},
+  {"target":"loop","rule":"single-quoted executable preserves argv","expected":true,"command":"'gh' pr merge"},
+  {"target":"loop","rule":"double-quoted executable preserves argv","expected":true,"command":"\"gh\" pr merge"},
+  {"target":"loop","rule":"adjacent fragments preserve argv","expected":true,"command":"g''h pr merge"},
+  {"target":"heavy","rule":"outer heredoc suffix visibility (#1868)","expected":true,"command":"bash -c \": $(cat <<E\nx\nE\n); pnpm build\""},
+  {"target":"heavy","rule":"compact Bash heredoc suffix visibility (#1868)","expected":true,"command":"bash -c \": $(cat <<E\nx\nE); pnpm build\""},
+  {"target":"heavy","rule":"backtick heredoc suffix visibility (#1868)","expected":true,"command":"bash -c \": `cat <<E\nx\nE\n`; pnpm build\""}
+]

@@ -1,0 +1,42 @@
+[Unit]
+Description=Package-manager cache prune (pnpm/npm/uv + hf partials; auto-apply)
+Documentation=https://github.com/StartupBros-com/hov-stack
+
+OnFailure=harness-unit-failure-alert@%n.service
+
+[Service]
+Type=oneshot
+TimeoutStartSec=20m
+# Promoted DRY_RUN=1 -> 0 (2026-08-16) after the first observe run:
+# all three commands are the package managers' own safe cache-GC entry points
+# (pnpm store prune / npm cache verify / uv cache prune — none touch anything a
+# lockfile still resolves to), and the script contains no other filesystem
+# mutation (reviewed line-by-line). 62G of caches at review time. Terminal
+# stage: there is no riskier level to graduate to.
+#
+# Amended 2026-08-29: the huggingface lane adds ONE direct
+# filesystem mutation beyond the tools' own GC entry points — an age-gated
+# `find -H ~/.cache/huggingface -ignore_readdir_race -type f -name
+# '*.incomplete' -mmin +1440 -delete` (-H dereferences a relocated/symlinked
+# cache root; -ignore_readdir_race keeps a concurrent download's vanishing
+# files from paging a successful prune as FAILED). Same review standard:
+# partials are unreadable garbage (hf/xet restarts an interrupted download
+# from zero), the name filter cannot match hub blobs/snapshots, and the mtime
+# gate keeps a live download out of reach. Planted-negative coverage:
+# tests/pkg-cache-prune-hf.test.sh.
+Environment=DRY_RUN=0
+# pnpm/npm/uv all live under ~/.local/bin or mise shims, neither of which is on
+# a systemd user service's default PATH — same fix already applied to
+# dcg-auto-update.service / tools-auto-update.service (2026-08-07: the first
+# live run of those skipped every tool and still exited 0).
+Environment=PATH=%h/.local/bin:%h/.local/share/mise/shims:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+# First live run (2026-08-18) lost the 29G uv cache to a lock timeout: uv's
+# default lock wait is 300s and this box's agent fleet keeps uv busy even at
+# 01:41. 900s outwaits routine contention while still fitting inside
+# TimeoutStartSec=20m alongside the pnpm/npm passes; on a genuinely wedged
+# lock the run still fails visibly (unit goes red) rather than forcing it —
+# `uv cache prune --force` could race a live writer, so we wait, not seize.
+Environment=UV_LOCK_TIMEOUT=900
+ExecStart=%h/.claude/scripts/pkg-cache-prune.sh
+Nice=10
+IOSchedulingClass=idle

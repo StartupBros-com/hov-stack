@@ -1,0 +1,26 @@
+{
+  "asyncByDefault": false,
+  "managerCommand": "subagents",
+  "preferCurrentSessionModel": true,
+  "fallbackModels": [
+    "openai-codex/gpt-5.4",
+    "google/gemini-2.5-pro"
+  ],
+  "cooldownMinutes": 15,
+  "defaultChildExtensions": [],
+  "requiredChildExtensions": [
+    "~/.pi/agent/extensions/dcg-guard.ts"
+  ],
+  "defaultSessionDir": "~/.pi/agent/sessions/subagents",
+  "maxSubagentDepth": 1,
+  "parallel": {
+    "maxTasks": 12,
+    "concurrency": 4
+  },
+  "control": {
+    "enabled": true,
+    "needsAttentionAfterMs": 180000,
+    "notifyOn": ["needs_attention"],
+    "notifyChannels": ["event", "async"]
+  }
+}

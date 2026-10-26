@@ -1,0 +1,17 @@
+{
+  "repository": "acme-org/app",
+  "apps": {
+    "acme-web": "abcdefghijklmnopqrst",
+    "acme-shop": "bcdefghijklmnopqrstu",
+    "acme-partners": "cdefghijklmnopqrstuv",
+    "acme-help": "defghijklmnopqrstuvw"
+  },
+  "legacy_identities": {
+    "acme-web": {
+      "20250101000000": {
+        "remote": "create_example",
+        "local": "create_example_copy"
+      }
+    }
+  }
+}

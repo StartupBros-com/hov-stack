@@ -1,0 +1,51 @@
+# .public-safety-repos: repositories this tree may cite by <owner>/<name>. The public-safety
+# scan (scripts/public-safety-scan.sh) watches every owner listed here and fails on any
+# <owner>/<name> under one of them that is not on this list, so a private repository
+# cannot be cited by accident. Add a line when a public repository is cited; a private one
+# is never listed. One entry per line, a trailing # comment allowed.
+# Rebuilt 2026-10-22 from the two owners' live public repository lists (gh repo list
+# --visibility public). An old spelling of a transferred or renamed repository is not
+# listed; the tree cites the current public name. The one exception is
+# StartupBros-com/hov-marketplace, the marketplace's name before the rename: dated
+# records and workflow-path fixtures keep it as history, and GitHub redirects it.
+# A public repository the tree never cites need not be listed.
+StartupBros-com/compound-engineering-pi
+StartupBros-com/design-rails
+StartupBros-com/discord-leaver
+StartupBros-com/fitbod-hevy-migration
+StartupBros-com/harness-optimizer
+StartupBros-com/harness-vet
+StartupBros-com/hass-renpho-health
+StartupBros-com/hevy-mcp
+StartupBros-com/house-of-vibe
+StartupBros-com/hov-marketplace   # renamed to StartupBros-com/hov-stack; GitHub redirects the historical name
+StartupBros-com/hov-stack   # the public name this tree takes at the flip (R26)
+StartupBros-com/memory-dream
+StartupBros-com/papercut
+StartupBros-com/pi-autoresearch
+StartupBros-com/pi-background-services
+StartupBros-com/pi-research-fabric
+StartupBros-com/pro-gate
+StartupBros-com/product-video
+StartupBros-com/reflection-engine
+StartupBros-com/renpho-mcp-server
+StartupBros-com/rent-check
+StartupBros-com/rizeio-mcp-server
+StartupBros-com/shared-workflows
+StartupBros-com/sign-it
+StartupBros-com/skill-tuner
+StartupBros-com/smaug
+StartupBros-com/synthetic-panel
+StartupBros-com/terminal-notifications
+StartupBros-com/token-eater
+StartupBros-com/whoop-mcp
+StartupBros-com/wsl-cdp
+StartupBros/ccusage
+StartupBros/coding_agent_session_search
+StartupBros/failure-class
+StartupBros/hov-router
+StartupBros/mlx-embeddings
+StartupBros/omlx
+StartupBros/oracle
+StartupBros/pi-evals-evidence
+StartupBros/startupbros

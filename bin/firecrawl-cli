@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Resolve the sibling module through symlinks, in a worktree or after deploy.
+set -euo pipefail
+exec python3 "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/firecrawl_cli.py" "$@"

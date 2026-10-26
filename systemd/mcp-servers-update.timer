@@ -1,0 +1,15 @@
+# TEMPLATE: Sunday 04:00 timer for mcp-servers-update.service.
+# Replace before enabling:
+#   nothing; the defaults are generic.
+# See systemd/README.md.
+
+[Unit]
+Description=Weekly MCP server updates
+
+[Timer]
+OnCalendar=Sun *-*-* 04:00:00
+Persistent=true
+RandomizedDelaySec=10m
+
+[Install]
+WantedBy=timers.target

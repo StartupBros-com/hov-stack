@@ -1,0 +1,9 @@
+interface:
+  display_name: "Review Animations"
+  short_description: "Review motion code against a high craft bar"
+  default_prompt: "Use $review-animations to review the motion in this diff; default to flagging, approval is earned."
+policy:
+  # Mirrors `disable-model-invocation: true` in the Claude frontmatter, which Codex
+  # does not read. A review bar is invoked against a diff on request; it is not an
+  # ambient commentator.
+  allow_implicit_invocation: false

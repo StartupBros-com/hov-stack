@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+MAIN_DIR="${PI_MAIN_CODING_AGENT_DIR:-$HOME/.pi/agent}"
+TRIAL_DIR="${PI_EDX_SUBAGENTS_DIR:-$HOME/.pi/agent-edx-subagents}"
+mkdir -p "$TRIAL_DIR"
+
+python3 - "$MAIN_DIR/settings.json" "$TRIAL_DIR/settings.json" <<'PY'
+import json
+import pathlib
+import sys
+
+main_settings = pathlib.Path(sys.argv[1])
+trial_settings = pathlib.Path(sys.argv[2])
+settings = json.loads(main_settings.read_text())
+# Keep provider/model/user settings, but keep package loading intentionally minimal.
+# A full package copy can cause unrelated third-party git packages to install/fail
+# before we even get to the Edxeth subagents experiment.
+settings["packages"] = ["git:github.com/edxeth/pi-subagents"]
+trial_settings.write_text(json.dumps(settings, indent=2) + "\n")
+PY
+
+# Share normal user resources while keeping package settings isolated.
+# Agents get their own directory so we can add Edxeth-specific smoke agents
+# without polluting the main Nico/local setup.
+agents_src="$MAIN_DIR/agents"
+agents_dst="$TRIAL_DIR/agents"
+if [ -L "$agents_dst" ]; then rm "$agents_dst"; fi
+mkdir -p "$agents_dst"
+if [ -d "$agents_src" ]; then
+  find "$agents_src" -maxdepth 1 -type f -name '*.md' -print0 | while IFS= read -r -d '' file; do
+    ln -sfn "$file" "$agents_dst/$(basename "$file")"
+  done
+fi
+cat > "$agents_dst/edx-scout.md" <<'EOF'
+---
+name: edx-scout
+description: Background codebase reconnaissance for Edxeth pi-subagents smoke tests.
+mode: background
+async: false
+auto-exit: true
+tools: read,grep,find,ls,bash
+session-mode: lineage-only
+spawning: false
+---
+
+You are a focused codebase scout. Inspect only what is needed for the assigned question, then return a concise summary with relevant files and risks. Do not edit files.
+EOF
+
+for name in skills prompts themes extensions optional-extensions mcp.json leader-key.json startup-cockpit.json; do
+  src="$MAIN_DIR/$name"
+  dst="$TRIAL_DIR/$name"
+  if [ -e "$src" ] || [ -L "$src" ]; then
+    ln -sfn "$src" "$dst"
+  fi
+done
+
+export PI_CODING_AGENT_DIR="$TRIAL_DIR"
+echo "Using Edxeth pi-subagents trial config at $TRIAL_DIR" >&2
+exec pi "$@"

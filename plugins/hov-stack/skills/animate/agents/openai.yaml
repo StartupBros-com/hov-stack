@@ -1,0 +1,9 @@
+interface:
+  display_name: "Animate"
+  short_description: "Build an animation, deciding in the order that matters"
+  default_prompt: "Use $animate to build this animation, working through the decisions in order: whether to animate, purpose, tool, properties, curve and duration, interruption, exit."
+policy:
+  # Mirrors `disable-model-invocation: true` in the Claude frontmatter, which Codex
+  # does not read. This skill writes implementation code; it should run when asked,
+  # not whenever motion is mentioned.
+  allow_implicit_invocation: false

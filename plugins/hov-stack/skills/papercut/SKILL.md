@@ -1,0 +1,392 @@
+---
+name: papercut
+description: Log a small, non-blocking friction you just hit — a confusing or undocumented setup step, a misleading error, a stale cache, a command that succeeded but did the wrong thing, a gotcha you had to work around. Use in the moment, even though it is not blocking. Also use to review the accumulated friction log (`papercut list`) or to mine the current session for friction you pushed through without recording.
+---
+
+# Log a papercut
+
+Friction you route around silently is friction nobody ever fixes. This is the
+cheap write path for it.
+
+**Hard tool failures are already captured automatically** by the
+`PostToolUseFailure` hook (`hooks/PostToolUseFailure/papercut-log.js`) — nonzero
+exits, missing commands, timeouts, guard blocks, ENOENT. Do **not** self-report
+those; it is duplicate work and costs tokens the hook does not.
+
+Use this skill for the class that has **no error signature**, which is the only
+class automation cannot see:
+
+- documentation or a setup step that was wrong, missing, or misleading
+- a command that **succeeded** but did the wrong thing, or silently truncated output
+- a stale cache, a stale index, a config that looked live but wasn't
+- an error message that pointed at the wrong cause
+- a non-obvious gotcha you had to discover by experiment
+- a tool that technically works but is hostile to call correctly
+
+## Log one
+
+```bash
+papercut add -m "what you were doing → what got in the way (+ a guess at cause/fix)"
+```
+
+One or two sentences. A guess at the cause or fix is a bonus, not required.
+Example:
+
+```bash
+papercut add -m "Ran gsc query --dim page,query to get a page's search terms; totals were 22 impressions against 13,834 on the page. Row limit truncates server-side without warning — --page returns the real 285 queries."
+```
+
+Log it **in the moment and keep working**. It is not blocking, it does not need
+permission, and it should not derail what you were doing. Duplicates are fine and
+in fact wanted — always log one even if you suspect it's already there — since
+the rollup ranks by how many distinct sessions hit a signature, so repetition is
+exactly how something gets prioritized.
+
+**Reuse a signature when one already fits.** Without `--sig`, the signature is
+slugged from your wording, so two agents describing the same friction differently
+never aggregate and neither ever crosses the rollup threshold. If
+`papercut list --days 30` already shows a signature that matches, pass it:
+
+```bash
+papercut add --sig guard_blocked:dcg -m "dcg blocked a truncating redirect into \$CLAUDE_JOB_DIR/tmp, which the background-job instructions tell agents to use"
+```
+
+That one flag is the difference between a note nobody reads and a ranked issue.
+
+## Set up the always-on convention (once per scope)
+
+The voluntary path above only happens if agents know it exists — models push
+through friction without mentioning it unless told otherwise. When this skill
+runs in a scope whose active CLAUDE.md / AGENTS.md never mentions
+`papercut add`, tell the user and offer this line for their instructions file:
+
+> Non-blocking friction you just worked around — misleading error,
+> undocumented step, silently-wrong output, a footgun? `papercut add -m "..."`
+> in the moment, then carry on. Hard tool failures are auto-logged; don't
+> double-report those. Duplicates are wanted (repetition ranks the fix).
+
+Add it only with the user's consent, in the scope they pick — instruction
+files are theirs. Automatic capture works without any of this; the line
+covers the class no hook can see.
+
+## What this is *not*
+
+| Use | For |
+|---|---|
+| `papercut` | small non-blocking friction; the repo needs sanding down |
+| memory note (`/memory-mine`) | a durable fact worth recalling later |
+| `ce-compound` | a solved, verified, non-trivial problem worth a written learning |
+| gh issue | a real tracked bug or a piece of planned work |
+
+If it is blocking, it is not a papercut — fix it or raise it.
+
+## Check before you rediscover
+
+Before unfamiliar or risky work in a repo, spend one command:
+
+```bash
+papercut list --cwd "$PWD" --days 30
+```
+
+The log is a cache, not just a report — someone (possibly you, last week) may
+already have paid for the answer. This is the cheapest use of the whole system.
+
+## Subagents
+
+The automatic hook captures subagent hard failures at full fidelity, attributed
+to the parent session — verified by probe. Only this **voluntary** path is blind
+there: a subagent will not self-report unless you tell it to. If you dispatch
+subagents into unfamiliar territory and want their judgment-class friction
+captured, say so in the prompt.
+
+## Review what has accumulated
+
+```bash
+papercut list --days 7 -v          # ranked by distinct sessions
+papercut list --quarantined        # junk fingerprints + advisory-rewrite receipts (not fixes)
+papercut show <signature>          # every occurrence of one signature
+papercut rollup --days 7           # what is over threshold (report only)
+papercut rollup --days 7 --apply   # legacy route: file/update unassigned raw-signature issues
+papercut resolve <signature>       # fixed — hide it until it recurs
+papercut staleness                 # is capture still alive?
+```
+
+`resolve` is not permanent silence: if a resolved signature happens again after
+the fix, that is a regression and it comes straight back. Use it freely.
+
+`harness-weekly.sh` runs the report-only rollup on demand; its Monday timer and
+the Windows toast it nagged through were retired with dotfiles#1893
+(2026-10-17), so nothing now stops the log quietly becoming write-only. Run
+`papercut rollup --days 7` when the log is due a look. `--apply` stays a
+deliberate legacy operator step for unassigned raw signatures; once a family
+exists, use the clinic below.
+
+## Run the clinic
+
+**Move a folded family through a dossier; do not promote a raw signature as if
+it were the work.** A raw signature is an immutable capture address. A family
+folds related signatures into the one judgment and remedy they share, so you
+can track the cause instead of filing near-duplicate issues.
+
+Create and assign the family before triage. Use one family for the causal
+cluster, not one family per spelling of its raw signature.
+
+```bash
+papercut family create <family>               # a short causal name, e.g. worktree-isolation
+papercut family assign <family> <signature>   # repeat per member; membership is reversible
+papercut family show <family>                 # what is folded in right now
+```
+
+Run triage, write the judgment half of each selected dossier, then adopt one
+completed family.
+
+```bash
+papercut triage --days 30       # write dossier drafts for flagged families (3 by default)
+papercut adopt <family>         # validate the completed dossier and file it, once
+papercut adopt <family> --json  # same, emitting the confirmed locator
+```
+
+Triage also lists the top unfamilied flagged signatures — high-volume raw
+material nobody has sorted into a family yet — each with a paste-ready
+`papercut family assign` command (`--unfamilied-limit` widens the list; any cut
+is named). It only proposes: grouping signatures under one cause is the
+judgment step the clinic reserves for you, and nothing joins a family until you
+run the assign yourself.
+
+Triage produces local candidate dossier drafts in
+`${PAPERCUT_STORE:-~/.claude/papercuts}/state/dossiers/`. It regenerates the
+machine-owned evidence half; do not edit it. It byte-preserves your judgment
+half, which must contain a non-empty value under every heading below or adopt
+exits 2 and names what is missing:
+
+- `## Causal hypothesis`
+- `## Strongest counterexample`
+- `## Owner class`
+- `## Destination repository`
+- `## Destination justification`
+- `## Cheapest remedy`
+- `## Acceptance Criteria`
+- `## Pre-registered success measure`
+- `## Planted negative`
+- `## No-Claim Boundary`
+- `## For humans`
+
+`## For humans` is the one section a non-operator reads: one short plain-language
+paragraph — what keeps going wrong and why it matters, no signatures, paths, or
+jargon. Adopt renders it at the top of the filed issue and collapses the full
+dossier into a details block below it, so write it for someone who has never
+seen this tool.
+
+Adopt never applies `loop-ok` — filing a work item and admitting it to an
+autonomous lane were two separate acts while the dispatcher ran, and the
+label is historical since that dispatcher retired (dotfiles#1873,
+2026-10-17). It was human-admitted only: the operator's tag, or a session
+tagging specific work the operator explicitly approved in that same session
+(amended 2026-08-28; the record lives in
+`harness/gh-tracking-and-claims.md`).
+
+### Adopt local work; escalate upstream work
+
+Route from the dossier's owner class. For `local-defect` or `target-repo`, use
+`papercut adopt` so the remedy enters our work queue. For `upstream`, file the
+report yourself and record its URL instead:
+
+```bash
+papercut family escalate <family> --to https://upstream.example/issues/123
+papercut family escalate <family> --to https://upstream.example/issues/123 \
+    -n "optional local context"
+```
+
+Escalate makes no GitHub calls: it records the supplied HTTPS locator verbatim.
+The family leaves the actionable/flagged lane, while every rollup keeps showing
+its live window volume under `escalated upstream`. Recurrence is expected and
+never comments on or reopens the upstream report. Use `family reopen` to undo
+the escalation, or `family dispose` to retire it finally.
+
+**After adopt, the handoff is the operator's.** Tagging a filed work-spec
+issue `loop-ok` was the one act that put it in the dispatcher's intake
+filter; that dispatcher retired with dotfiles#1873 (2026-10-17), so the tag
+now records operator admission and nothing picks the item up.
+`DISPATCH_READY_LABEL` has been blank since 2026-10-18, so adopt prints no
+tagging hint and the rollup's `dispatch handoff:` section stays off. With a
+label configured, that section (printed under `--refresh`) shows where
+adopted-open items stand — awaiting the tag, tagged, or blocked. Every
+state is a label fact read
+live during `rollup --refresh`, never stored, and never an inferred
+outcome: final readiness (native dependency blockers included) is
+`gh-ready.sh`'s call, and the trivial route's pull request sits outside the
+intake entirely — gh-ready reads issues only. Issue claims retired with
+dotfiles#1902 (2026-10-17), so nothing applies the `claimed` label any more;
+the section still prints `claimed` for an issue that carries the old label.
+The section covers up to the refresh read cap
+(`--limit`, default 10) per run; the quiet tail rotates oldest-checked
+first, so anything past the cap surfaces on a later run.
+
+**Keep the queue at the operator's keep-rate, not the backlog's size.** The
+cap defaults to 3; pass `--cap N` to override it. It counts all open
+papercut-originated work items: the loop's recorded adoption locators that are
+still open, unioned with open issues filed by legacy `rollup --apply`,
+deduplicated by locator, across every destination repository.
+
+Use the exit taxonomy:
+
+| Exit | Meaning |
+|---|---|
+| `0` | success or no candidates |
+| `2` | incomplete dossier, missing fields named |
+| `3` | policy refusal: cap, stale snapshot, already adopted or disposed, an open legacy per-signature issue covering a member, a destination label that cannot be provisioned, or a redaction that would alter the judgment half |
+| `4` | unconfirmed remote state: the artifact may exist remotely; retry reconciles via the marker rather than filing a second one |
+
+When the honest answer is no remedy, dispose rather than inventing a work item.
+Fill the causal hypothesis, strongest counterexample, owner class, and
+No-Claim Boundary, then record the verdict. Reopen reverses that disposition.
+
+```bash
+papercut family dispose <family> --verdict intended-policy
+#   verdicts: intended-policy | insufficient-evidence | upstream-reported
+papercut family reopen <family>   # reverses it, restoring the retained dossier
+```
+
+Dispose retains a redacted copy of the dossier in its own event, and reopen
+writes that copy back if no draft is present — so reversing a disposition does
+not cost you the judgment you authored. Two limits are worth knowing rather
+than discovering: a draft you re-authored after disposing is never clobbered by
+the retained copy, and the retained copy is redacted, so it can differ from the
+bytes the `dossier_digest` authenticates. A family is refused, not silently
+absorbed, if you try to assign into it or dispose it while it is already
+adopted or disposed; reopen it first.
+
+### Close the loop
+
+Adoption is not the end of the family. Record what upstream did with the work
+item, and the next `rollup` run reports a recurrence instead of filing a duplicate.
+
+```bash
+papercut family unassign <family> <signature>   # reversible; leaves an audit event
+papercut family close-observed <family> \
+    --repo owner/repo --kind issue --number 123 \
+    --url https://github.com/owner/repo/issues/123 --state closed
+papercut family recur-comment <family>          # comment once on a closed recurrence
+```
+
+`close-observed` records a local observation of one work item's state; it is
+refused if it would point an adopted family at a *different* item, because
+disposition, recurrence and the open-work cap all read that locator back. A
+`--state open` observation ends the disposition epoch, so a later close starts
+a fresh one.
+
+The closed observation is the verification boundary, so observe it when the
+fix *reaches the sessions that produce records*, not when the PR merges. For
+a fix that ships through a release or plugin version, wait for the release
+and pass `--observed-at <its published time>`. Sessions still running an
+older version count as recurrence regardless — a `regressed` read names its
+first post-closure record so that case is recognisable — and the dossier's
+No-Claim Boundary should say so up front.
+
+Once a family is closed upstream and member signatures keep arriving, that is a
+recurrence: the remedy did not hold. `rollup --apply` and `recur-comment` share
+one decision, so neither comments unless a member record postdates both the
+closure and the last comment. The comment carries a tool-owned marker keyed to
+the closure, and both paths read the item's existing comments first, so a
+crashed run reconciles on retry instead of posting a duplicate. If those
+comments cannot be read, the run skips that family rather than risk one.
+
+`rollup --apply` also honours a global open-work cap, shared with `adopt`:
+
+```bash
+papercut rollup --apply --cap 3   # default; --cap -1 disables the check
+```
+
+The cap counts open labeled issues *and* pull requests across every repository
+the store can enumerate, including ones recorded in the filing registry whose
+capture directories have since been swept. It exists so a backlog of open
+papercut work is not compounded by a weekly run that files more.
+
+### Did the fix actually hold?
+
+A closed work item is a claim, not a result. Once a family has a closed
+observation, `rollup` and `family show` both carry a verification stage,
+recomputed from the store on every read:
+
+```bash
+papercut rollup --days 7                    # the verification stage shows up here too
+papercut family show                        # every family's stage at a glance
+papercut family show <family> --window 60   # widen the verification window
+```
+
+| stage | what it means |
+|---|---|
+| `regressed` | a member signature recurred after the closure, or a recurrence comment was already posted |
+| `verifying` | the closure is younger than the window; days remaining are printed |
+| `verified` | exposure floor crossed after the 7-day minimum (or the window elapsed), no recurrence, and capture was demonstrably alive |
+| `provisional` | window elapsed and quiet, but too little capture happened to conclude anything |
+
+The distinction that makes this worth having is `verified` versus
+`provisional`. Silence has two causes — the fix worked, or nobody was around to
+hit the problem — so the stage never rests on silence alone. Exposure is
+measured as distinct capture sessions store-wide in the window after the
+closure, and must clear a floor of three sessions or half the equal-length
+pre-closure baseline, whichever is larger. Both measurements and the floor are
+printed, never a bare verdict — including while a family is still `verifying`,
+where the count so far shows whether it is on track to clear the floor or
+heading for `provisional`. The verdict arrives as soon as the exposure floor is
+crossed and 7 days have passed, rather than waiting for the full window; the
+30-day window remains the horizon for regressions.
+
+A recurrence counts only when the rollup would act on it. Member signatures
+that are quarantined (junk fingerprints, advisory-rewrite receipts), or that were individually resolved
+and have been quiet since, are already excluded from the rollup's recurrence
+lane — so the stage excludes them too. Otherwise a family could read
+`regressed` forever over a record the rollup deliberately ignores. The window
+must be a positive number of days; `--window 0` and negative values are
+refused rather than quietly replaced with the default.
+
+Be honest about what that proves. Store-wide capture liveness is a proxy: it
+says agents were working, not that the fixed mechanism was exercised. So
+`verified` means "no recurrence while capture was alive", and a low-traffic
+family can sit `provisional` indefinitely — that is the correct answer, not a
+gap to paper over. Nothing here writes: no event is appended, no verdict is
+stored, and GitHub is never contacted, so a regression shows up the next time
+anyone looks rather than being frozen into a stale verdict.
+
+**Pick member signatures whose silence is the success signal — or scope
+them.** When the only available signature counts a superset of the remedy's
+claim (measured three times now), record the claim boundary instead of
+disposing: `papercut family scope <family> <sig> --target-suffix .jsonl`
+makes recurrence and verification read only matching targets while ranking
+keeps full volume. The suffix must come from the dossier's No-Claim
+Boundary — scoping tighter than the written claim hides real recurrence.
+A remedy that breaks retry loops (a guard that denies the second attempt, a
+hook that rewrites it) never stops the first failure, so its signature keeps
+firing while the fix works; add `--repeats-only` and only the second and
+later occurrences for the same session, agent and target count. When targets
+are shape-coded (`keys:input=object`, `keys:input=json`), `--target-prefix`
+names the class the remedy covers. The flags combine, and a scope event
+replaces the whole boundary.
+
+**Pick member signatures whose silence is the success signal.** Recurrence
+and verification read member records, so a member signature that fires when
+the mechanism works *as intended* can never validate a fix — it reads
+`regressed` forever no matter how good the fix was. Live example
+(2026-08-28): the git-guard doc-gap family's one member was
+`guard_blocked:git-guard`, which fires every time the guard correctly blocks
+something; the fix was a documentation change whose real regression test
+lives in CI. For a family like that, close the loop with `family dispose`
+(verdict `intended-policy`) once the fix ships and its planted negative is
+enforced elsewhere — record-based verification is category-inapplicable, and
+pretending otherwise manufactures a permanent false `regressed`.
+
+**Dossier directory Ceremony Test**
+
+- consumer — `adopt`, immediately before it files or takes over the work item.
+- gate — `work-spec-check.sh`; non-zero exit means do not file it.
+- defect — OBSERVED: the papercut pipeline dead-ended at a weekly report; signatures were ranked and reported, and nothing carried judgment forward into tracked work.
+- delete-when — its draft is deleted when the family is adopted (the body lives in the filed item) or disposed (the verdict event carries the digest, plus a redacted copy of the body for reopen). Adopt and dispose each delete only after their own event is durably appended, so a crash loses the draft only once the record that replaces it is safe.
+
+## Mining a whole session
+
+If the user asks you to sweep this session for friction you pushed through
+without recording, re-read the session, and for each distinct piece of friction
+that fits the "no error signature" classes above, run one `papercut add`. Skip
+anything the hook would already have caught. **Only do this when asked** — it is
+not something to run on your own initiative at the end of a session.

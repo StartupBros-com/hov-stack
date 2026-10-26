@@ -1,0 +1,34 @@
+{
+  "_fixture": "Synthetic regression fixture for dotfiles#1722; not a raw GitHub API capture.",
+  "id": 172203,
+  "name": "⚫️ Test",
+  "run_id": 900,
+  "run_attempt": 1,
+  "head_sha": "fixture-head",
+  "status": "completed",
+  "conclusion": "failure",
+  "started_at": "2026-10-11T03:35:23Z",
+  "completed_at": "2026-10-11T03:35:27Z",
+  "steps": [
+    {
+      "name": "Set up job",
+      "conclusion": "success",
+      "status": "completed"
+    },
+    {
+      "name": "Judge leaf results against live PR state",
+      "conclusion": "failure",
+      "status": "completed"
+    },
+    {
+      "name": "Recheck added migration versions against live main",
+      "conclusion": "skipped",
+      "status": "completed"
+    },
+    {
+      "name": "Complete job",
+      "conclusion": "success",
+      "status": "completed"
+    }
+  ]
+}

@@ -1,0 +1,31 @@
+# Readline optimizations for bash
+
+# Case-insensitive tab completion
+set completion-ignore-case on
+
+# Show all completions on first tab (no double-tab)
+set show-all-if-ambiguous on
+
+# Color files by type in completion
+set colored-stats on
+
+# Append slash to directories
+set mark-directories on
+set mark-symlinked-directories on
+
+# Show completion type with color
+set visible-stats on
+
+# Faster completion (don't ring bell)
+set bell-style none
+
+# Up/Down arrow searches history with current prefix
+"\e[A": history-search-backward
+"\e[B": history-search-forward
+
+# Ctrl+Left/Right to move by word
+"\e[1;5C": forward-word
+"\e[1;5D": backward-word
+
+# Better word boundaries
+set skip-completed-text on

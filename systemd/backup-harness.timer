@@ -1,0 +1,14 @@
+# TEMPLATE: Daily 03:30 trigger for backup-harness.service.
+# Replace before enabling:
+#   nothing; the defaults are generic.
+# See systemd/README.md.
+[Unit]
+Description=Daily Claude harness memory backup
+
+[Timer]
+OnCalendar=*-*-* 03:30:00
+Persistent=true
+RandomizedDelaySec=20m
+
+[Install]
+WantedBy=timers.target

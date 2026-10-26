@@ -1,0 +1,15 @@
+{
+  "requestId": "req_fixture_search_extra",
+  "resolvedSearchType": "neural",
+  "results": [
+    {
+      "id": "result-1",
+      "title": "Extra Fields Result",
+      "url": "https://extra.example/page",
+      "highlights": ["A highlight."],
+      "highlightScores": [0.5]
+    }
+  ],
+  "costDollars": {"total": 0.005, "search": 0.005},
+  "searchTime": 10.0
+}

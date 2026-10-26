@@ -1,0 +1,31 @@
+# Ripgrep defaults
+
+# Smart case (case-insensitive unless uppercase used)
+--smart-case
+
+# Search hidden files
+--hidden
+
+# Follow symlinks
+--follow
+
+# Exclude directories
+--glob=!.git/
+--glob=!node_modules/
+--glob=!.venv/
+--glob=!__pycache__/
+--glob=!.next/
+--glob=!dist/
+--glob=!build/
+--glob=!coverage/
+--glob=!.turbo/
+
+# Max columns before truncating
+--max-columns=200
+--max-columns-preview
+
+# Add line numbers
+--line-number
+
+# Sort by path
+--sort=path

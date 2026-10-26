@@ -1,0 +1,197 @@
+{
+  "quota": {
+    "success": false,
+    "error": "Payment Required: Insufficient credits"
+  },
+  "injected": {
+    "success": false,
+    "error": "SCRAPE_PROMPT_INJECTION_DETECTED"
+  },
+  "rate-limit": {
+    "success": false,
+    "error": "Rate limit exceeded",
+    "details": {
+      "headers": {
+        "Retry-After": "12"
+      }
+    }
+  },
+  "concurrency-limit": {
+    "success": false,
+    "error": "Concurrency limit reached"
+  },
+  "unauthorized": {
+    "success": false,
+    "error": "Unauthorized: Invalid token"
+  },
+  "provider-failure": {
+    "success": false,
+    "error": "Service Unavailable"
+  },
+  "credit-usage": {
+    "success": true,
+    "data": {
+      "remainingCredits": 1000,
+      "planCredits": 3000,
+      "billingPeriodStart": "2026-01-01T00:00:00.000Z",
+      "billingPeriodEnd": "2026-02-01T00:00:00.000Z"
+    }
+  },
+  "scrape-session": {
+    "success": true,
+    "data": {
+      "markdown": "Page",
+      "metadata": {
+        "scrapeId": "scrape-1"
+      }
+    }
+  },
+  "agent-capped": {
+    "success": true,
+    "id": "capped-job",
+    "status": "failed",
+    "creditsUsed": 0
+  },
+  "agent-cost": {
+    "success": true,
+    "id": "agent-job",
+    "creditsUsed": 17
+  },
+  "parse": {
+    "markdown": "# Local document",
+    "metadata": {
+      "title": "report.pdf"
+    }
+  },
+  "scrape": {
+    "markdown": "# Example",
+    "metadata": {
+      "sourceURL": "https://x",
+      "statusCode": 200
+    }
+  },
+  "scrape-json": {
+    "json": {
+      "title": "Example"
+    },
+    "metadata": {
+      "sourceURL": "https://x"
+    }
+  },
+  "search": {
+    "success": true,
+    "data": {
+      "web": [
+        {
+          "url": "https://x",
+          "title": "Example"
+        }
+      ]
+    }
+  },
+  "map": {
+    "success": true,
+    "links": [
+      {
+        "url": "https://x",
+        "title": "Example"
+      }
+    ]
+  },
+  "agent": {
+    "success": true,
+    "id": "agent-job",
+    "status": "processing"
+  },
+  "interact": {
+    "success": true,
+    "output": "Example",
+    "sessionId": "session-1"
+  },
+  "empty": [],
+  "plain-success": {
+    "success": true,
+    "exitCode": 0,
+    "value": "opaque vendor payload"
+  },
+  "multi": {
+    "items": [
+      {
+        "url": "https://x",
+        "ok": true,
+        "credits_spent": 1,
+        "data": {
+          "markdown": "X"
+        }
+      },
+      {
+        "url": "https://y",
+        "ok": true,
+        "credits_spent": 2,
+        "data": {
+          "markdown": "Y"
+        }
+      }
+    ]
+  },
+  "partial": {
+    "items": [
+      {
+        "url": "https://x",
+        "ok": true,
+        "data": {
+          "markdown": "X"
+        }
+      },
+      {
+        "url": "https://y",
+        "ok": false,
+        "error": {
+          "code": 1,
+          "message": "vendor failure",
+          "next_action": "retry later"
+        },
+        "data": null
+      }
+    ]
+  },
+  "scrape-metered": {
+    "success": true,
+    "data": {
+      "markdown": "# Example",
+      "metadata": {
+        "sourceURL": "https://x",
+        "statusCode": 200,
+        "creditsUsed": 3
+      }
+    }
+  },
+  "search-id": {
+    "success": true,
+    "data": {
+      "web": [
+        {
+          "url": "https://x",
+          "title": "Example",
+          "category": "github"
+        }
+      ]
+    },
+    "creditsUsed": 2,
+    "id": "srch_fixture_1"
+  },
+  "search-dev": {
+    "success": true,
+    "data": {
+      "web": [
+        {
+          "url": "https://forums.example/t/1",
+          "title": "Forum thread",
+          "category": "developer"
+        }
+      ]
+    },
+    "creditsUsed": 2,
+    "id": "srch_dev_1"
+  }
+}

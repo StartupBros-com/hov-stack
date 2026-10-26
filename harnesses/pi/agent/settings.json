@@ -1,0 +1,133 @@
+{
+  "lastChangelogVersion": "0.80.6",
+  "defaultThinkingLevel": "xhigh",
+  "defaultProvider": "openai-codex",
+  "defaultModel": "gpt-5.5",
+  "transport": "sse",
+  "collapseChangelog": true,
+  "npmCommand": [
+    "mise",
+    "exec",
+    "node@24.12.0",
+    "--",
+    "npm"
+  ],
+  "doubleEscapeAction": "tree",
+  "enabledModels": [
+    "openai-codex/gpt-5.5",
+    "anthropic/claude-opus-4-6",
+    "anthropic/claude-sonnet-4-6",
+    "anthropic/claude-haiku-4-5",
+    "google/gemini-2.5-pro"
+  ],
+  "branchSummary": {
+    "skipPrompt": true
+  },
+  "reviewerLoop": {
+    "maxIterations": 3,
+    "freshContext": true
+  },
+  "skills": [
+    "~/.claude/skills",
+    "-~/.claude/skills/ast-grep/SKILL.md",
+    "-~/.agents/skills/ast-grep/SKILL.md",
+    "~/.pi/vendor/github.com/badlogic/pi-skills/brave-search",
+    "~/.pi/vendor/github.com/badlogic/pi-skills/browser-tools",
+    "~/.pi/vendor/github.com/badlogic/pi-skills/gccli",
+    "~/.pi/vendor/github.com/badlogic/pi-skills/gdcli",
+    "~/.pi/vendor/github.com/badlogic/pi-skills/gmcli",
+    "~/.pi/vendor/github.com/badlogic/pi-skills/transcribe",
+    "~/.pi/vendor/github.com/badlogic/pi-skills/vscode",
+    "~/.pi/vendor/github.com/badlogic/pi-skills/youtube-transcript",
+    "-~/.agents/skills/workflows-review/SKILL.md",
+    "-~/.agents/skills/workflows-plan/SKILL.md",
+    "-~/.agents/skills/workflows-work/SKILL.md",
+    "-~/.agents/skills/workflows-brainstorm/SKILL.md",
+    "-~/.agents/skills/workflows-compound/SKILL.md",
+    "-~/.agents/skills/deepen-plan/SKILL.md",
+    "-~/.agents/skills/feature-video/SKILL.md",
+    "-~/.agents/skills/test-browser/SKILL.md",
+    "-~/.agents/skills/resolve-todo-parallel/SKILL.md",
+    "-~/.agents/skills/resolve-pr-parallel/SKILL.md",
+    "-~/.agents/skills/agent-native-audit/SKILL.md",
+    "-~/.agents/skills/changelog/SKILL.md",
+    "-~/.agents/skills/lfg/SKILL.md",
+    "-~/.agents/skills/reproduce-bug/SKILL.md",
+    "-~/.agents/skills/slfg/SKILL.md"
+  ],
+  "packages": [
+    "npm:@benvargas/pi-exa-mcp",
+    "npm:@benvargas/pi-firecrawl",
+    "~/SITES/pi-research-fabric",
+    "npm:@benvargas/pi-cut-stack",
+    "~/SITES/acme-extension-c",
+    "~/SITES/acme-extension-a",
+    "~/SITES/acme-extension-b",
+    "~/SITES/pi-background-services",
+    {
+      "source": "~/SITES/pi-compound-engineering",
+      "prompts": []
+    },
+    "npm:@noahsaso/pi-remote",
+    {
+      "source": "git:github.com/aliou/pi-extensions",
+      "extensions": [
+        "extensions/the-dumb-zone/index.ts"
+      ],
+      "skills": [],
+      "prompts": [],
+      "themes": []
+    },
+    "~/SITES/pi-subagents",
+    "~/SITES/pi-autoresearch",
+    "npm:pi-rewind",
+    {
+      "source": "git:github.com/tomsej/pi-ext",
+      "extensions": [
+        "extensions/session-switch/index.ts"
+      ],
+      "skills": [],
+      "prompts": [],
+      "themes": []
+    },
+    {
+      "source": "git:github.com/hjanuschka/shitty-extensions",
+      "extensions": [
+        "extensions/clipboard.ts",
+        "extensions/oracle.ts",
+        "extensions/usage-bar.ts",
+        "extensions/cost-tracker.ts",
+        "extensions/branch-sessions.ts",
+        "extensions/status-widget.ts",
+        "extensions/memory-mode.ts",
+        "extensions/loop.ts"
+      ],
+      "skills": [],
+      "prompts": [],
+      "themes": []
+    },
+    {
+      "source": "npm:pi-amplike",
+      "extensions": [
+        "extensions/handoff.ts",
+        "extensions/session-query.ts",
+        "extensions/btw.ts",
+        "extensions/modes.ts",
+        "extensions/amp-skills.ts"
+      ],
+      "skills": [
+        "skills/session-query"
+      ],
+      "prompts": [],
+      "themes": []
+    },
+    "npm:pi-session-search",
+    "npm:pi-worktree-tui-status",
+    "npm:pi-continue",
+    "git:github.com/apmantza/pi-lens@v3.8.61"
+  ],
+  "hideThinkingBlock": false,
+  "httpIdleTimeoutMs": 300000,
+  "websocketConnectTimeoutMs": 300000,
+  "theme": "dark"
+}

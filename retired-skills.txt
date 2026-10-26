@@ -1,0 +1,89 @@
+# retired-skills.txt — jsm skills we've deliberately removed.
+# skills-localize.sh keeps these uninstalled: if `jsm install-all` / auto-update
+# re-adds one, the next `apply` re-trashes it. One skill name per line; # comments ok.
+#
+# Format: <skill-name>    # reason (audited YYYY-MM-DD)
+#
+# NOTE: the BASE name of every `-local` fork belongs here too — otherwise
+# `jsm install-all` resurrects the pristine upstream original *alongside* the
+# fork (double-load). The fork itself lives in plugins/hov-stack/skills/ and is deployed by
+# skills-localize.sh; retiring the base is the other half of that pattern.
+#
+# THE LINE (set 2026-07-30): retired == not installed AND not wanted. A skill the
+# operator wants to keep does NOT belong here even if it is heavy — heaviness is
+# handled by `skillOverrides: user-invocable-only` in settings.json, which keeps
+# the body out of the always-on budget while leaving `/<skill>` fully available.
+# Retirement is for deletion; demotion is for context. Don't conflate them.
+
+# --- Stack mismatch: Rust/native tooling, no target in a Next.js/Supabase/Vercel + trading operator's repos ---
+release-preparations       # Rust binary/crates.io release fleet (dsr/rch/musl); deploy is Vercel/npm — 2026-07-04; re-upheld 2026-08-01 (upstream v3 2026-07-24, scope unchanged)
+
+# --- Base upstreams of our -local forks: retire the base so install-all can't double-load it next to plugins/hov-stack/skills/<name>-local ---
+system-performance-remediation   # forked → system-performance-remediation-local [private overlay, not in the pack] (home-lab-retargeted) — 2026-07-04
+automating-your-automations      # forked → automating-your-automations-local [private overlay, not in the pack] — 2026-07-04
+ssh                              # forked → ssh-local [private overlay, not in the pack] (agent non-interactive safety flags + Mac known-host added; upstream v1 otherwise intact), audited 2026-07-06
+
+# --- Superseded by local tooling; unique value distilled into a lean local skill ---
+world-class-doctor-mode-for-cli-tools  # 166-file swarm monster; kernel (One Rule/mutate()-chokepoint/--fix⟷undo inverse/agent-caller surface/detector-fixer-fixture-test tuple/10-dim rubric) distilled → cli-doctor-mode [private overlay, not in the pack] — 2026-07-04
+agent-ergonomics-and-intuitiveness-maximization-for-cli-tools  # 192-file swarm monster; kernel (first-try-inevitability/error-teaches/intent-inference/mega-command/safe-alt/never-silent-fail/11-dim rubric/operators) distilled → cli-agent-ergonomics [private overlay, not in the pack] — 2026-07-04; re-upheld 2026-08-01 (upstream v11, no scope change; distill covers the payload); upstream v18 as of 2026-09-26 (jsm sha256 318d8967…), v12-v18 deltas not re-upheld, drift unwatched by vendored-drift-check (jsm source, no git pin) — 2026-10-07 vet: docs/vets/2026-10-07-correct-retro-family-harness-vet.md
+installer-workmanship  # method was "emulate /dp/DCG+RCH install.sh" (files absent on this machine); installer craft distilled self-contained (real bash inline, re-anchored on ~/SITES/pro-gate) → curl-bash-installer [private overlay, not in the pack] — 2026-07-04
+simplify-and-refactor-code-isomorphically  # CLAUDE.md-protected keeper; trimmed → simplify-and-refactor-code-isomorphically-local [private overlay, not in the pack] (jsm-swarm layer stripped, parallelism → /agent-swarm, beads→gh, 33 links fixed; P1-P40 depth kept) — 2026-07-04
+browser-extension-automation  # Mac-host/Claude-extension apparatus was never installed (smoke-tested 2026-07-06); pattern retargeted to Windows Brave → browser-console-setup [private overlay, not in the pack] (Google-OAuth + Stripe-webhook playbooks kept), audited 2026-07-06; re-upheld 2026-08-01 (upstream still v1)
+gdb-for-debugging  # trashed in the 2026-07 cleanup, content folded into deadlock-finder-and-fixer-local as self-contained gdb/strace guidance (see that fork's header) but never recorded here; reinstalled for batch-2 review 2026-08-01, re-retired same day
+agent-mail  # trashed 2026-07-03 (.trash/agent-mail-v2-20260703222607) with the beads stack, folded into deadlock-finder-and-fixer-local's advisory-lease guidance; never recorded here — recorded 2026-08-01 (upstream v2, name verified via jsm search)
+asupersync-mega-skill  # trashed 2026-06-17 (.trash/asupersync-mega-skill-v3-20260617045449); Tokio→Asupersync migration for a stack we don't run; never recorded here — recorded 2026-08-01 (upstream v4, name verified via jsm search)
+
+# --- Beads/br/bv family: rejected wholesale 2026-07-22 (concurrency bugs in worktree-per-agent
+# setups, ecosystem churn, anti-worktree stack design; see the harness-frontier blueprint in
+# docs/plans/). Already manually trashed under .trash/beads-*-20260702080620/; listed here so
+# `jsm install-all` can't resurrect them. Base names derived from the .trash dir names
+# (strip -v<N>-<timestamp>); confirm against `jsm search beads` if jsm auth is live.
+beads-workflow                                # worker-loop skill (br ready / bv robot-triage) - 2026-07-22
+beads-br                                      # br CLI wrapper skill - 2026-07-22
+beads-bv                                      # bv CLI wrapper skill - 2026-07-22
+beads-compliance-and-completion-verification  # beads-gated completion checker - 2026-07-22
+bd-to-br-migration                            # bd-to-br migration helper - 2026-07-22
+agent-fungibility-philosophy                  # runbook for the rejected br/bv/ntm/Agent-Mail swarm stack (all absent on this machine); fungibility doctrine covered natively by agent-swarm skill + Workflow/codex routing in CLAUDE.md - 2026-08-01
+
+# ============================================================================
+# UN-RETIRED 2026-07-30 — operator reversal. Kept installed; demoted instead.
+# ============================================================================
+# These seven were retired 2026-07-04 on a "distilled to a lean local fork" or
+# "depends on the trashed beads stack" rationale. The operator wants them back.
+# They are now KEPT, and each carries `user-invocable-only` in settings.json so
+# it costs a description line, not a body, until `/<skill>` is typed. The lean
+# -local forks stay auto-firing; the heavy jsm originals sit behind the slash.
+#
+# Do NOT re-add these without asking — a prior sweep re-retired skills without
+# approval and had to be reverted (commit c31ad38, 2026-07-04).
+#
+#   reality-check-for-project            un-retired; the "trashed idea-wizard" premise expired (idea-wizard is live again)
+#   planning-workflow                    un-retired; kept alongside /ce-plan
+#   deadlock-finder-and-fixer            un-retired; sits beside deadlock-finder-and-fixer-local
+#   git-worktree-branch-rationalization  un-retired; sits beside branch-harmonization, a private overlay outside the pack
+#   git-repo-janitor                     un-retired at v7 (was v5 when retired); sits beside repo-junk-triage, a private overlay outside the pack
+#   git-stash-janitor                    un-retired; sits beside stash-mining, a private overlay outside the pack
+#   de-monolithize-your-codebase-isomorphically  un-retired; sits beside its -local fork, a private overlay outside the pack
+
+sign-pdf   # renamed to sign-it on 2026-09-11 (dotfiles #1126); the deployed copy is reaped on the next apply
+
+ubs        # retired 2026-09-21 after a 4-round vet (docs/vets/2026-09-20-ubs-harness-vet.md):
+           # 0 true positives across ~24 critical + 24 warning samples and 70+ PR-evaluations
+           # on 7 repos. Every language we write already has a better-calibrated incumbent
+           # (eslint+tsc, ruff+mypy, shellcheck). Binary and module cache uninstalled too.
+           # Other skills reference /ubs as an OPTIONAL helper and degrade gracefully.
+           # Re-evaluate only if we take on a real Rust/Go/C++ codebase.
+
+# dotfiles#1320 (2026-09-23): the local memory-dream and memory-eval forks were
+# retired in favor of the memory-dream@hov plugin; keep their deployed copies trashed.
+memory-dream
+memory-eval
+
+# 2026-10-19 (staging-repo issue 8): the local harness-vet, rent-check and sign-it copies were
+# retired in favor of their hov plugins (harness-vet@hov, rent-check@hov, sign-it@hov).
+# The local changes went upstream first: harness-vet#20, rent-check#14, sign-it#16.
+# Keep their deployed copies trashed. papercut stays in the skill pack: it is the vendor
+# source that scripts/papercut-vendor.py turns into the papercut@hov package.
+harness-vet
+rent-check
+sign-it

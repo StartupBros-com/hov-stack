@@ -1,0 +1,33 @@
+#!/bin/sh
+# pi-local: Launch pi configured for a local model server.
+#
+# Routes through a LiteLLM proxy (localhost:14000 -> gateway:4000 -> the local
+# model server). LiteLLM provides retry logic, a 30-min timeout, rate limiting,
+# and cloud fallbacks.
+#
+# The SSH tunnel is managed by systemd: pi-local-champion-tunnel.service
+# (self-healing, restarts when the SSH connection drops).
+#
+# Requires:
+#   - ~/.pi-local/.litellm-key      (LiteLLM master key)
+#   - ~/.pi-local/agent/settings.json (provider config, model IDs)
+#   - ~/.pi-local/extensions/        (local-champion.ts, verify.ts, oracle.ts)
+#   - pi-local-champion-tunnel.service enabled (systemd --user)
+#
+# The verify and oracle extensions are symlinked from
+# ~/hov-stack/pi/agent/extensions/ so edits are tracked in git.
+# The local-champion extension is machine-specific.
+#
+# On a new machine:
+#   1. mkdir -p ~/.pi-local/agent ~/.pi-local/extensions
+#   2. ln -s ~/hov-stack/pi/agent/extensions/verify.ts ~/.pi-local/extensions/verify.ts
+#   3. ln -s ~/hov-stack/pi/agent/extensions/oracle.ts ~/.pi-local/extensions/oracle.ts
+#   4. ln -s ~/hov-stack/pi/agent/bin/pi-local ~/.local/bin/pi-local
+#   5. Create ~/.pi-local/agent/settings.json (copy from another machine, adjust provider)
+#   6. Create ~/.pi-local/extensions/local-champion.ts (machine-specific provider)
+#   7. echo 'your-litellm-key' > ~/.pi-local/.litellm-key
+#   8. Install the systemd tunnel service (pi-local-champion-tunnel.service)
+
+export PI_CODING_AGENT_DIR="$HOME/.pi-local/agent"
+export LITELLM_MASTER_KEY="$(cat "$HOME/.pi-local/.litellm-key" 2>/dev/null)"
+exec pi --no-skills "$@"

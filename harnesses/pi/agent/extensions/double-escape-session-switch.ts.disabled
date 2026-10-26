@@ -1,0 +1,104 @@
+/**
+ * Double Escape → Switch Sessions
+ *
+ * Power-user navigation behavior without conflicting with Pi's built-in
+ * `escape` shortcut.
+ *
+ * Implementation notes:
+ * - We listen to raw stdin for Escape presses.
+ * - Single Escape keeps Pi's normal built-in behavior.
+ * - A second idle Escape within a short window opens `/switch-session`.
+ */
+
+import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
+
+const DOUBLE_ESCAPE_MS = 350;
+const ESCAPE_BYTES = new Set(["\u001b", "\x1b"]);
+
+export default function (pi: ExtensionAPI) {
+	let latestCtx: ExtensionContext | null = null;
+	let lastIdleEscapeAt = 0;
+	let resetTimer: ReturnType<typeof setTimeout> | null = null;
+	let listenerAttached = false;
+
+	const clearPendingEscape = () => {
+		lastIdleEscapeAt = 0;
+		if (resetTimer) {
+			clearTimeout(resetTimer);
+			resetTimer = null;
+		}
+	};
+
+	const armIdleEscapeWindow = () => {
+		if (resetTimer) clearTimeout(resetTimer);
+		resetTimer = setTimeout(() => {
+			lastIdleEscapeAt = 0;
+			resetTimer = null;
+		}, DOUBLE_ESCAPE_MS);
+	};
+
+	const openSwitchSessions = (ctx: ExtensionContext) => {
+		if (!ctx.hasUI) return;
+		ctx.ui.setEditorText("/switch-session");
+		setTimeout(() => process.stdin.emit("data", "\r"), 0);
+	};
+
+	const onStdin = (chunk: Buffer | string) => {
+		const ctx = latestCtx;
+		if (!ctx || !ctx.hasUI) return;
+
+		const text = typeof chunk === "string" ? chunk : chunk.toString("utf8");
+		if (!ESCAPE_BYTES.has(text)) return;
+
+		const idle = ctx.isIdle() && !ctx.hasPendingMessages();
+		if (!idle) {
+			clearPendingEscape();
+			return;
+		}
+
+		const now = Date.now();
+		if (lastIdleEscapeAt && now - lastIdleEscapeAt <= DOUBLE_ESCAPE_MS) {
+			clearPendingEscape();
+			openSwitchSessions(ctx);
+			return;
+		}
+
+		lastIdleEscapeAt = now;
+		armIdleEscapeWindow();
+	};
+
+	const attachListener = () => {
+		if (listenerAttached) return;
+		process.stdin.on("data", onStdin);
+		listenerAttached = true;
+	};
+
+	const detachListener = () => {
+		if (!listenerAttached) return;
+		process.stdin.off("data", onStdin);
+		listenerAttached = false;
+		clearPendingEscape();
+	};
+
+	pi.on("session_start", async (_event, ctx) => {
+		latestCtx = ctx;
+		attachListener();
+	});
+
+	pi.on("session_switch", async (_event, ctx) => {
+		latestCtx = ctx;
+	});
+
+	pi.on("session_tree", async (_event, ctx) => {
+		latestCtx = ctx;
+	});
+
+	pi.on("session_fork", async (_event, ctx) => {
+		latestCtx = ctx;
+	});
+
+	pi.on("session_shutdown", async () => {
+		detachListener();
+		latestCtx = null;
+	});
+}

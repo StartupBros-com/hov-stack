@@ -1,0 +1,40 @@
+# TEMPLATE: Checksum-verified auto-update of upstream tool binaries (xf, csctf, ru) with rollback.
+# Replace before enabling:
+#   nothing; the defaults are generic.
+# See systemd/README.md.
+[Unit]
+# Covers xf, csctf, ru — the upstream binaries whose own installers fail open
+# (ubs left 2026-09-21, tru 2026-10-01; see tool-update.sh's header).
+# Deliberately NOT covered: dcg (has its own behavioural contract gate, see
+# dcg-auto-update.service) and cass (has its own provenance-aware promotion lane,
+# because tags and main builds can report the same version).
+#
+# This exists because the vendors' update paths cannot be trusted, not because the
+# artifacts cannot: every repo here publishes a checksummed release asset, and
+# tool-update.sh downloads the pinned tag, verifies sha256 fail-closed, installs under
+# the name we choose, then rolls back if the new binary will not run.
+Description=Verified auto-update for upstream tool binaries
+
+OnFailure=harness-unit-failure-alert@%n.service
+
+[Service]
+Type=oneshot
+Environment=DRY_RUN=0
+# systemd user services get PATH=/usr/local/sbin:...:/bin with NO ~/.local/bin, which is
+# where every tool this touches lives (including jq). The 2026-08-07 first live run
+# skipped all five tools and still exited 0. The scripts now resolve absolute paths
+# themselves; this is the second layer.
+Environment=PATH=%h/.local/bin:%h/.local/share/mise/shims:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+# No network-online.target exists in the user manager, so
+# readiness is this bounded probe of api.github.com, the host
+# tool-update.sh asks first (gh api .../releases/latest per tool). The
+# leading - keeps the script's own contract on the deadline: offline, each
+# installed tool is reported "latest unknown" and left in place, and the run
+# exits 0. ExecStartPre time counts against TimeoutStartSec, which is 1200s
+# so tool-update.sh keeps the 900s it had before the probe existed even when
+# the whole wait is spent (each tool may take 30s to ask and 300s to download).
+ExecStartPre=-%h/.claude/scripts/net-ready.sh --wait 300 --url https://api.github.com/
+ExecStart=%h/.claude/scripts/tool-update.sh
+Nice=10
+IOSchedulingClass=idle
+TimeoutStartSec=1200

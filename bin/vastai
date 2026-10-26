@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# Agent-native vast.ai CLI. Resolves VAST_API_KEY (env -> Bitwarden Secrets
+# Manager -> ~/.secrets) and execs the vendor `vastai` from its disposable venv
+# with the key in the child's environment only: never argv, never a key file.
+# The vendor binary itself stays off PATH; this wrapper owns the name.
+#
+# Deploy mechanism: versioned at bin/vastai and symlinked to
+# ~/.local/bin/vastai by install.sh (lib/manifest.sh). ~/.claude/bin is a
+# directory symlink, so vastai_wrap.py is always this wrapper's sibling.
+#
+# `vastai --where` prints which credential source resolved. It never prints the key.
+set -euo pipefail
+# A non-login caller (the Windows hop shims through `wsl.exe -e`, a systemd user
+# timer) arrives without ~/.local/bin on PATH, which is where bws lives; the
+# credential chain then reported bws unreadable (exit 5) although the same call
+# worked from a shell. Put it back once, in front, as ~/.profile does.
+if [ -n "${HOME:-}" ] && [ -d "$HOME/.local/bin" ]; then
+  case ":$PATH:" in
+    *":$HOME/.local/bin:"*) ;;
+    *) PATH="$HOME/.local/bin:$PATH" ;;
+  esac
+  export PATH
+fi
+exec python3 "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/vastai_wrap.py" "$@"

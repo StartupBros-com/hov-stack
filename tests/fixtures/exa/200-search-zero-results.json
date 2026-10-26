@@ -1,0 +1,6 @@
+{
+  "requestId": "req_fixture_search_zero",
+  "results": [],
+  "costDollars": {"total": 0.001, "search": 0.001},
+  "searchTime": 45.0
+}

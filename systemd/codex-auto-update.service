@@ -1,0 +1,27 @@
+[Unit]
+Description=Verified stable Codex CLI update through pnpm
+
+OnFailure=harness-unit-failure-alert@%n.service
+
+[Service]
+Type=oneshot
+Environment=DRY_RUN=0
+# pnpm is the standalone build in ~/.local/share/pnpm; the codex launcher's node comes
+# from the mise shims.
+Environment=PATH=%h/.local/bin:%h/.local/share/pnpm:%h/.local/share/mise/shims:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+# No network-online.target exists in the user manager, so
+# readiness is this bounded probe of registry.npmjs.org, the host
+# codex-update.sh asks first (the dist-tags fetch). This timer fires
+# OnBootSec=10min, so the race is a boot before connectivity rather than a
+# Persistent catch-up. The leading - keeps the script's own contract on
+# the deadline: an unreachable registry is exit 1 and pages. ExecStartPre
+# time counts against TimeoutStartSec; the 2h below clears the script's
+# longest path (six 900s installs, 90m) plus the whole wait.
+ExecStartPre=-%h/.claude/scripts/net-ready.sh --wait 300 --url https://registry.npmjs.org/
+ExecStart=%h/.claude/scripts/codex-update.sh
+Nice=10
+IOSchedulingClass=idle
+# Above the longest path's sum of the script's own 900 s per-install pnpm timeouts (a
+# failed promotion runs up to six installs: retain, stage, live, a --prefer-offline
+# retry, and the rollback's two). A kill mid-install would skip the script's rollback.
+TimeoutStartSec=2h

@@ -1,0 +1,9 @@
+interface:
+  display_name: "UX Writing & Docs"
+  short_description: "Review user-facing copy and docs: effective values, one canonical home per fact, no stale snapshots, no leftover intermediate state"
+  default_prompt: "Use $ux-writing to review the user-facing text and documentation in this change: CLI and diagnostic output, error and help text, README and docs structure, comments, titles, and generated artifacts."
+policy:
+  # Mirrors `disable-model-invocation: true` in the Claude frontmatter, which Codex
+  # does not read. Upstream's six-clause description would fire on most coding turns;
+  # this is a review pass reached for by name, not a passive rule set.
+  allow_implicit_invocation: false

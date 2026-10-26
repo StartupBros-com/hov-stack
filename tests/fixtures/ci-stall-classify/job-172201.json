@@ -1,0 +1,24 @@
+{
+  "_fixture": "Synthetic regression fixture for dotfiles#1722; not a raw GitHub API capture.",
+  "id": 172201,
+  "name": "🧪 Test Run (acme-boundaries)",
+  "run_id": 900,
+  "run_attempt": 1,
+  "head_sha": "fixture-head",
+  "status": "completed",
+  "conclusion": "failure",
+  "started_at": "2026-10-11T03:21:08Z",
+  "completed_at": "2026-10-11T03:35:08Z",
+  "steps": [
+    {
+      "name": "Set up job",
+      "conclusion": "success",
+      "status": "completed"
+    },
+    {
+      "name": "Build the app for the acme-boundaries suite",
+      "conclusion": null,
+      "status": "in_progress"
+    }
+  ]
+}

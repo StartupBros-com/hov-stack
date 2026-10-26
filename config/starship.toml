@@ -1,0 +1,63 @@
+# Starship - fast, minimal prompt
+
+# Reduce scan timeout for speed
+scan_timeout = 100
+command_timeout = 200
+
+format = """
+$directory\
+$git_branch\
+$git_status\
+$python\
+$nodejs\
+$character"""
+
+[directory]
+truncation_length = 3
+truncate_to_repo = true
+style = "bold cyan"
+
+[git_branch]
+format = "[$branch]($style) "
+style = "bold purple"
+
+[git_status]
+format = '([$all_status$ahead_behind]($style) )'
+style = "bold red"
+conflicted = "!"
+ahead = "+"
+behind = "-"
+diverged = "~"
+untracked = "?"
+stashed = "§"
+modified = "*"
+staged = "+"
+deleted = "x"
+
+[python]
+format = '[py$version]($style) '
+style = "yellow"
+
+[nodejs]
+format = '[node$version]($style) '
+style = "green"
+
+[character]
+success_symbol = "[>](bold green)"
+error_symbol = "[>](bold red)"
+
+# Disable slow/unused modules
+[aws]
+disabled = true
+
+[gcloud]
+disabled = true
+
+[package]
+disabled = true
+
+[docker_context]
+disabled = true
+
+[kubernetes]
+disabled = true

@@ -1,0 +1,25 @@
+{
+  "_comment": "Field-faithful subset of the live catalog probed 2026-09-04 (9 models, one hidden top entry, one deprecation pointer, one separately metered model that is not API-capable). Names here are fixture data only; the resolver keys on priority/visibility/upgrade/supported_reasoning_levels/default_reasoning_level/supported_in_api/display_name.",
+  "fetched_at": "2026-09-04T23:00:00.000000000Z",
+  "client_version": "0.147.0",
+  "models": [
+    { "slug": "gpt-reserve", "display_name": "GPT-Reserve", "priority": 3, "visibility": "hide", "upgrade": null, "default_reasoning_level": "medium", "supported_in_api": true,
+      "supported_reasoning_levels": [{ "effort": "low" }, { "effort": "medium" }, { "effort": "high" }, { "effort": "xhigh" }, { "effort": "max" }] },
+    { "slug": "gpt-5.6-sol", "display_name": "GPT-5.6-Sol", "priority": 6, "visibility": "list", "upgrade": null, "default_reasoning_level": "low", "supported_in_api": true,
+      "supported_reasoning_levels": [{ "effort": "low" }, { "effort": "medium" }, { "effort": "high" }, { "effort": "xhigh" }, { "effort": "max" }, { "effort": "ultra" }] },
+    { "slug": "gpt-5.6-terra", "display_name": "GPT-5.6-Terra", "priority": 7, "visibility": "list", "upgrade": null, "default_reasoning_level": "medium", "supported_in_api": true,
+      "supported_reasoning_levels": [{ "effort": "low" }, { "effort": "medium" }, { "effort": "high" }, { "effort": "xhigh" }, { "effort": "max" }, { "effort": "ultra" }] },
+    { "slug": "gpt-5.6-luna", "display_name": "GPT-5.6-Luna", "priority": 8, "visibility": "list", "upgrade": null, "default_reasoning_level": "medium", "supported_in_api": true,
+      "supported_reasoning_levels": [{ "effort": "low" }, { "effort": "medium" }, { "effort": "high" }, { "effort": "xhigh" }, { "effort": "max" }] },
+    { "slug": "gpt-daybreak-blue-latest", "display_name": "Daybreak Blue", "priority": 10, "visibility": "list", "upgrade": null, "default_reasoning_level": "low", "supported_in_api": true,
+      "supported_reasoning_levels": [{ "effort": "low" }, { "effort": "medium" }, { "effort": "high" }, { "effort": "xhigh" }, { "effort": "max" }, { "effort": "ultra" }] },
+    { "slug": "gpt-5.5", "display_name": "GPT-5.5", "priority": 12, "visibility": "list", "upgrade": null, "default_reasoning_level": "medium", "supported_in_api": true,
+      "supported_reasoning_levels": [{ "effort": "low" }, { "effort": "medium" }, { "effort": "high" }, { "effort": "xhigh" }] },
+    { "slug": "gpt-5.4-mini", "display_name": "GPT-5.4-Mini", "priority": 23, "visibility": "list", "upgrade": { "model": "gpt-5.6-luna" }, "default_reasoning_level": "medium", "supported_in_api": true,
+      "supported_reasoning_levels": [{ "effort": "low" }, { "effort": "medium" }, { "effort": "high" }, { "effort": "xhigh" }] },
+    { "slug": "gpt-5.3-codex-spark", "display_name": "GPT-5.3-Codex-Spark", "priority": 26, "visibility": "list", "upgrade": null, "default_reasoning_level": "high", "supported_in_api": false,
+      "supported_reasoning_levels": [{ "effort": "low" }, { "effort": "medium" }, { "effort": "high" }, { "effort": "xhigh" }] },
+    { "slug": "codex-auto-review", "display_name": "Codex Auto Review", "priority": 43, "visibility": "hide", "upgrade": null, "default_reasoning_level": "medium", "supported_in_api": true,
+      "supported_reasoning_levels": [{ "effort": "low" }, { "effort": "medium" }, { "effort": "high" }, { "effort": "xhigh" }, { "effort": "max" }] }
+  ]
+}

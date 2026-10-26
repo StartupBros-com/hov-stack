@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ext_dir="${1:-$HOME/.pi/agent/extensions}"
+
+if [[ ! -d "$ext_dir" ]]; then
+  echo "Extension directory not found: $ext_dir" >&2
+  exit 1
+fi
+
+declare -a builtins=(read write edit bash grep find ls)
+declare -A creators=(
+  [read]=Read
+  [write]=Write
+  [edit]=Edit
+  [bash]=Bash
+  [grep]=Grep
+  [find]=Find
+  [ls]=Ls
+)
+
+declare -A counts
+status=0
+
+echo "Auditing built-in tool ownership in: $ext_dir"
+echo
+
+while IFS= read -r -d '' file; do
+  for tool in "${builtins[@]}"; do
+    creator="${creators[$tool]}"
+    if rg -q "name:\\s*\"${tool}\"|create${creator}Tool\\(" "$file"; then
+      counts["$tool"]=$(( ${counts["$tool"]:-0} + 1 ))
+      printf '%-5s %s\n' "$tool" "$file"
+    fi
+  done
+done < <(find "$ext_dir" -type f \( -name '*.ts' -o -name '*.js' \) -print0 | sort -z)
+
+echo
+for tool in "${builtins[@]}"; do
+  count="${counts[$tool]:-0}"
+  if [[ "$count" -gt 1 ]]; then
+    echo "CONFLICT: built-in tool '$tool' has $count owners in $ext_dir" >&2
+    status=1
+  fi
+done
+
+if [[ "$status" -eq 0 ]]; then
+  echo "No built-in tool ownership conflicts detected."
+fi
+
+exit "$status"

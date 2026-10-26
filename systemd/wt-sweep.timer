@@ -1,0 +1,15 @@
+[Unit]
+Description=Weekly git-worktree fleet sweep (observe-only until promoted)
+
+[Timer]
+# Thu 01:15 — the harness's only quiet corridor, before the 03:00-05:30 nightly
+# block (jsm 03:00, dcg-auto-update + backup-harness 03:30, tools-auto-update
+# 03:45). A distinct weekday from pkg-cache-prune (Tue) and reclaim-sweep (Fri),
+# and a distinct time from docker-hygiene (daily 01:50), so none of them
+# contend for I/O.
+OnCalendar=Thu *-*-* 01:15:00
+Persistent=true
+RandomizedDelaySec=10m
+
+[Install]
+WantedBy=timers.target

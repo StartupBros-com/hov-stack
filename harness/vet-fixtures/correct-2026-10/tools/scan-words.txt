@@ -1,0 +1,13 @@
+eval
+judge
+rubric
+score
+compare
+benchmark
+candidate
+arena
+mistake class
+highest level
+rule table
+enforces it
+agent instruction file

@@ -1,0 +1,22 @@
+# ru configuration file
+# See: https://github.com/Dicklesworthstone/repo_updater
+#
+# Configuration priority: CLI args > environment variables > this file > defaults
+
+# Base directory for repositories
+PROJECTS_DIR=~/SITES
+
+# Directory layout: flat | owner-repo | full
+#   flat:       $PROJECTS_DIR/repo
+#   owner-repo: $PROJECTS_DIR/owner/repo
+#   full:       $PROJECTS_DIR/github.com/owner/repo
+LAYOUT=flat
+
+# Update strategy: ff-only | rebase | merge
+UPDATE_STRATEGY=ff-only
+
+# Auto-stash local changes before pull
+AUTOSTASH=false
+
+# Parallel operations (1 = serial)
+PARALLEL=4

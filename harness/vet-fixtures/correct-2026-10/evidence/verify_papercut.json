@@ -1,0 +1,34 @@
+{
+ "results": [
+  {
+   "claim": "(a) papercut captures operator corrections of agent BEHAVIOUR, not only tool/environment friction.",
+   "verdict": "REFUTED",
+   "evidence": "SKILL.md:8-24 scopes the tool to friction: auto-captured hard tool failures (hook) plus voluntary 'no error signature' classes (wrong docs, command that succeeded but did the wrong thing, stale cache, misleading error, gotcha, hostile tool). SKILL.md:72-81 routes everything else elsewhere. Grep of SKILL.md for architect|lint|behaviour|correction|operator: the only 'operator' hits are about the adopt handoff and the loop-ok label (lines 119, 172, 180-181, 202, 217), not corrections. papercut.py:2-11 describes the same two capture paths: PostToolUseFailure hook and 'add' for 'confusing docs, a misleading-but-successful command...'. No code path ingests user corrections.",
+   "note": "A user could in principle type 'papercut add -m \"operator corrected me ...\"', but nothing in the skill or script prescribes or captures this."
+  },
+  {
+   "claim": "(b) papercut's dossier template prescribes a fix-level ladder (architecture before lint before docs) for a family's remedy.",
+   "verdict": "REFUTED",
+   "evidence": "The template at papercut.py:844-865 (DOSSIER_JUDGMENT_TEMPLATE) has a bare '## Cheapest remedy' heading (line 854) with no guidance text. The same heading appears in DOSSIER_JUDGMENT_FIELDS (papercut.py:366) and SKILL.md:165. Adopt only checks that the section is non-empty (papercut.py:786). Grep of papercut.py for 'architect|lint|ladder' (case-insensitive) returned no matches; the same grep of SKILL.md returned none. 'Cheapest' ranks by cost, not by structural level, and no order such as architecture, then lint, then docs is stated anywhere.",
+   "note": "The ladder in the digest (E2 promotion ladder) lives in rent-check, not papercut."
+  },
+  {
+   "claim": "(c) papercut ranks signatures by repetition across distinct sessions and files/updates a gh issue once a threshold is crossed; name the threshold and where it is applied.",
+   "verdict": "PARTIAL",
+   "evidence": "Ranking by distinct sessions is real (papercut.py:15-16; SKILL.md:105). The threshold is >=3 distinct sessions AND >=3 occurrences. Defaults are set at papercut.py:4158-4159 for rollup (--min-count 3, --min-sessions 3), 4064-4065 for triage, and 4139-4140. It is applied in rollup_lanes at papercut.py:1533-1536: 'row[\"sessions\"] >= min_sessions and row[\"count\"] >= min_count'. Triage writes the thresholds into the dossier (papercut.py:812), and adopt re-reads and re-applies them from the snapshot (papercut.py:2232-2254, 3437, 3456). The report prints 'over threshold' at 3679. The qualification is that automatic file/update of an issue is only the legacy 'rollup --apply' route for unassigned raw signatures. Papercut.py:3809 says 'assigned family rows are adopted through the clinic, not --apply', and SKILL.md:108-120 calls --apply a deliberate legacy operator step. The weekly rollup is report-only (SKILL.md:117-120, papercut.py:3734). The family route files nothing until an operator or session runs 'adopt' on a completed dossier.",
+   "note": "I did not read the --apply issue-update body (about papercut.py:3750-3850) line by line. The 'update' behaviour rests on the module docstring (line 16) and the issue-body text (2115-2120)."
+  },
+  {
+   "claim": "(d) 'papercut adopt' lands a fix (as opposed to filing an issue for someone else to fix).",
+   "verdict": "REFUTED",
+   "evidence": "cmd_adopt files a GitHub issue. papercut.py:3537-3541 runs 'gh issue create --repo <destination> --title \"papercut: family X\" ... --label papercut --label work-spec'. It then records the locator (3550-3559) and deletes the local dossier draft (3562). The docstring says 'validate and file one completed family dossier' (papercut.py:44, 4073). SKILL.md:143 says 'file it, once', and SKILL.md:187-188 says adopt makes 'the remedy enter our work queue'. SKILL.md:178-182 says adopt never applies loop-ok, and SKILL.md:202-204 says the handoff to the dispatcher is the operator's. No code, branch or PR is created by adopt (the 'trivial route PR' at SKILL.md:208-209 is mentioned only in passing).",
+   "note": "The issue is a work item for the dispatcher or operator, not a landed fix."
+  },
+  {
+   "claim": "(e) the voluntary 'papercut add' path is reachable from subagents without being told.",
+   "verdict": "REFUTED",
+   "evidence": "SKILL.md:94-100 (Subagents): the automatic hook captures subagent hard failures, 'Only this voluntary path is blind there: a subagent will not self-report unless you tell it to... say so in the prompt.' SKILL.md:56-70 also says the voluntary path 'only happens if agents know it exists' and that the always-on CLAUDE.md/AGENTS.md line is not installed by default. It is offered only with user consent, and I did not check whether the active CLAUDE.md already contains it.",
+   "note": "The hook path (automatic hard-failure capture) does reach subagents. Only the voluntary 'add' path does not."
+  }
+ ]
+}

@@ -1,0 +1,32 @@
+{
+ "results": [
+  {
+   "claim": "(a) rent-check classifies every always-loaded rule by enforcement backing (redundant / advisory-only / backing-without-mention) and proposes PROMOTE to a hook, linter, or CI gate",
+   "verdict": "PARTIAL",
+   "evidence": "RUBRIC.md:179-184 (E1) classifies only rules containing always/never/must/before/after into redundant / advisory-only / backing-without-mention. It does not cover every always-loaded rule. RUBRIC.md:185-191 (E2) routes invariants to linter/CI for code shape, PreToolUse-style hooks for tool use, and permission config for access. SKILL.md:62-64 (doctrine #2) names the same three classes. SKILL.md:202 defines PROMOTE as a move to enforcement (hook / linter / CI gate). Verdicts ship only as proposed diffs, never auto-applied (SKILL.md:10, 350-351).",
+   "note": "The classification is scoped to enforcement-shaped prose, not every rule. Everything else in the claim holds."
+  },
+  {
+   "claim": "(b) rent-check's scope includes repo code architecture and repeated mistakes mined from commit history (as opposed to context-file rules)",
+   "verdict": "REFUTED",
+   "evidence": "SKILL.md:3-9 and 21-22 scope it to agent context files (CLAUDE.md, AGENTS.md, rules dirs) and the always-loaded surface around them. SKILL.md:127-129 adds only non-file sources: rules dirs, skill/agent/command descriptions, memory indexes, MCP listings and output styles. Phase 1 discovery is a find for context-file names (SKILL.md:117-122). The only `git log` use is resolving the ledger's applied/reverted status for the audited file (SKILL.md:287-289), which is not a mistake-mining step. The only mention of 'architecture' in the engine is incidental (rent-check.py:189). Nothing mines commit history for repeated mistakes or reviews repo code architecture."
+  },
+  {
+   "claim": "(c) rent-check is callable on this harness today (installed at the user skills path, user-invoked)",
+   "verdict": "CONFIRMED",
+   "evidence": "Glob returned ~/.claude/skills/rent-check/SKILL.md, so it is installed. SKILL.md:11 sets `disable-model-invocation: true`, so it is user-invoked only. SKILL.md:10 has argument-hint `[context-file-path | repo-root]`. I did not diff the installed copy against the worktree copy. The digest records open defect #1244 (it writes to the target repo 3/3); I did not re-check that.",
+   "note": "Callable, with the known open defect #1244 from the digest."
+  },
+  {
+   "claim": "(d) rent-check's E4 paper-tiger check verifies that a declared gate actually runs in CI or a hook",
+   "verdict": "PARTIAL",
+   "evidence": "RUBRIC.md:198-202 (E4) tells the auditor to check that lint/test scripts referenced by rules are invoked by CI or a hook, run on pull requests and not only pushes to main, and have not had their signal rules disabled. It also says to read gate output, not just exit codes. This is a rubric instruction carried out by the auditor, tagged `[single-source]`. I did not find a dedicated engine subcommand for E4. My grep of rent-check.py showed only ledger-write and ledger-resolve in the subcommand list at lines 950-958, and I did not read the full list.",
+   "note": "The check is specified in the rubric. Whether the engine automates it is unverified."
+  },
+  {
+   "claim": "(e) rent-check's E5 obedience telemetry is implemented (a per-rule violation ledger exists in code), not only proposed",
+   "verdict": "REFUTED",
+   "evidence": "RUBRIC.md:203-210 describes E5 as a conditional recommendation to the audited harness: 'where the harness supports post-edit hooks, a deterministic per-rule violation ledger ... turns PROMOTE into a data decision'. SKILL.md:289-291 says the skill 'demands obedience telemetry of the files it audits (E5) while never measuring its own hit rate'. The only ledger in rent-check.py is the L3 audit-run ledger (`ledger-write` at line 764, `ledger-resolve` at line 810, registered at lines 950-958). It records per-file fingerprints and verdicts from audit runs. My grep for 'violation' in the engine found no per-rule relevant/followed/violated tally keyed by rule hash. The digest also labels E5 'proposed'."
+  }
+ ]
+}

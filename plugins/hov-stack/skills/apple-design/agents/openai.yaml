@@ -1,0 +1,9 @@
+interface:
+  display_name: "Apple Design"
+  short_description: "Apple's interface design and fluid motion, for the web"
+  default_prompt: "Use $apple-design as the reference for gesture-driven UI, spring motion, materials, and typography foundations."
+policy:
+  # Mirrors `disable-model-invocation: true` in the Claude frontmatter, which Codex
+  # does not read. Broad reference material — auto-invoking it on any mention of
+  # design would flood context.
+  allow_implicit_invocation: false

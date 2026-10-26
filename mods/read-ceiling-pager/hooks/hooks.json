@@ -1,0 +1,4 @@
+{
+  "description": "read-ceiling-pager: clamps a Read window that would exceed the token cap to the lines that fit, and tells the model where to continue",
+  "modules": ["./register.ts"]
+}

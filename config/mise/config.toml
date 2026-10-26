@@ -1,0 +1,24 @@
+[tools]
+bun = "latest"
+# cosign remains available for releases that publish a Sigstore bundle. Major-pinned,
+# not "latest": cosign 2.x cannot parse the bundle format dcg previously published.
+# "3" resolves to the latest 3.x, which is also what keeps us clear of
+# CVE-2026-22703: upstream dcg's own cosign_version_is_patched() requires
+# >=2.6.2 or >=3.0.4 for the repaired bundle-verification logic. Do NOT pin an
+# exact 3.0.x here thinking it is safer -- that pins BELOW current and freezes
+# out later fixes.
+cosign = "3"
+# dcg/install.sh and dcg-update.sh both verify release signatures with this and
+# refuse to proceed without it (dotfiles#513). Not optional on any machine that
+# installs or auto-updates the guard.
+minisign = "latest"
+direnv = "latest"
+fzf = "latest"
+gcloud = "577.0.0"
+go = "latest"
+node = "24.12.0"
+pnpm = "latest"
+rust = "latest"
+shellcheck = "latest"
+gitleaks = "latest"
+actionlint = "latest"

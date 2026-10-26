@@ -1,0 +1,41 @@
+Usage: firecrawl parse [options] <file>
+
+Parse a local file (HTML, PDF, DOCX, DOC, ODT, RTF, XLSX, XLS) into markdown,
+HTML, links, JSON, and more. Uses /v2/parse.
+
+Arguments:
+  file                    Path to the local file to parse
+
+Options:
+  -H, --html              Output raw HTML (shortcut for --format html)
+  -f, --format <formats>  Output format(s). Multiple formats can be specified
+                          with commas (e.g., "markdown,links"). Available:
+                          markdown, html, rawHtml, links, images, summary, json,
+                          attributes. Single format outputs raw content;
+                          multiple formats output JSON.
+  --only-main-content     Include only main content (default: false)
+  -S, --summary           Output summary (shortcut for --format summary)
+  --include-tags <tags>   Comma-separated list of tags to include
+  --exclude-tags <tags>   Comma-separated list of tags to exclude
+  --timeout <ms>          Timeout in milliseconds for the parse job
+  -Q, --query <prompt>    Ask a question about the parsed content (query format)
+  -k, --api-key <key>     Firecrawl API key (overrides global --api-key)
+  --api-url <url>         API URL (overrides global --api-url)
+  -o, --output <path>     Output file path (default: stdout)
+  --json                  Output as JSON format (default: false)
+  --pretty                Pretty print JSON output (default: false)
+  --timing                Show request timing and other useful information
+                          (default: false)
+  -h, --help              display help for command
+
+Examples:
+  $ firecrawl parse ./report.pdf
+  $ firecrawl parse ./report.pdf -f markdown,links
+  $ firecrawl parse ./page.html -H
+  $ firecrawl parse ./contract.docx --only-main-content
+  $ firecrawl parse ./report.pdf -Q "What is the total revenue?"
+  $ firecrawl parse ./report.pdf --json --pretty -o report.json
+
+Supported file types: .html, .htm, .pdf, .docx, .doc, .odt, .rtf, .xlsx, .xls
+Max upload size: 50 MB
+

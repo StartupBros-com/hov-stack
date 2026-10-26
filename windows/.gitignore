@@ -1,0 +1,11 @@
+# Snapshot binaries
+snapshots/**/*.pow
+snapshots/**/*.evtx
+
+# Editor noise
+.vscode/
+*.swp
+*~
+
+# Local override
+local.ps1

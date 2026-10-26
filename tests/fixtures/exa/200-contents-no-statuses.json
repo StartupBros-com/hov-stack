@@ -1,0 +1,7 @@
+{
+  "requestId": "req_fixture_contents_no_statuses",
+  "results": [
+    {"id": "https://a.example", "title": "Page A", "url": "https://a.example", "highlights": ["x"]}
+  ],
+  "costDollars": {"total": 0.001, "contents": 0.001}
+}

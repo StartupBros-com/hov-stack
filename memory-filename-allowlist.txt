@@ -1,0 +1,25 @@
+# Memory paths whose FILENAME is reviewed-safe.
+#
+# memory-audit.py flags any note whose name contains secret/credential/password/
+# api_key/access_token/private_key. That heuristic cannot tell a note *about*
+# credential handling from a note *containing* a credential, and in this store
+# every match so far has been the former. An entry here records that a specific
+# path was reviewed and its name is not evidence.
+#
+# Scope: an entry suppresses the filename check for that exact path and nothing
+# else. Body scanning (--scan-content, on by default) and frontmatter key
+# scanning still apply in full, so an allowlisted note that later gains a real
+# secret is still caught and still quarantined out of the backup.
+#
+# Format: <project>/<relative-path>, one per line. '#' starts a comment.
+#
+# This public tree ships no entries. Every reviewed path names a project under
+# one operator's home, which makes the list overlay material (the
+# ~/.config/hov-stack/ overlay, restructure plan U16), not a tracked default:
+# memory-audit.py reads ~/.config/hov-stack/memory-filename-allowlist.txt (or
+# $HOV_STACK_OVERLAY/memory-filename-allowlist.txt) when it exists and this file
+# otherwise; --filename-allowlist overrides both.
+# Add your own reviewed paths below, one per line, each with the review that
+# cleared it, for example:
+#
+#   -home-user-SITES-example/prove-a-credential-revocation-two-independent-ways.md

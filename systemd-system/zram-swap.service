@@ -1,0 +1,60 @@
+# TEMPLATE: System unit that sets up a zram compressed-RAM swap tier at boot.
+# Replace before enabling:
+#   lines 30, 42: ExecStart=/ExecStop= name $HOME/.claude/scripts/zram-swap.sh; sync.sh install renders
+#   that prefix to your harness home (%h is /root in a system unit); by hand, substitute the absolute path.
+#   line 49: Environment=ZRAM_SIZE=4G, sized for a 39 GiB budget; set it to about 10% of your RAM.
+# See systemd/README.md.
+
+[Unit]
+# System-level (root) unit, NOT ~/.config/systemd/user like every other unit in
+# this repo. This box DOES carry unscoped NOPASSWD:ALL sudo (/etc/sudoers.d/<user>;
+# confirmed via `sudo -n journalctl` succeeding), so passwordless privilege was
+# never the blocker — a --user unit's ExecStart could shell out to `sudo mkswap`
+# etc. and it would work non-interactively too. The actual reason is lifecycle:
+# swap is kernel-global, boot-scoped state that must come up independent of any
+# login session (`multi-user.target`), not something that should depend on the
+# per-user `systemd --user` manager, which only runs during (or after enabling
+# lingering for) an active session. Absolute ExecStart/ExecStop paths for a
+# related reason: %h would resolve to /root here, not the login user's home.
+Description=zram compressed-RAM swap — bounded-size fast tier ABOVE the disk swapfile (see HARNESS.md Automation; design rationale in the introducing PR)
+Documentation=https://docs.kernel.org/admin-guide/blockdev/zram.html
+After=systemd-modules-load.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# zram-swap.sh degrades to a clean exit-0 no-op at every failure point (module
+# missing after a WSL kernel update, sysfs races, mkswap/swapon rejecting the
+# device) — see the script for the exact skip conditions. This unit must never
+# fail the boot over an optional performance tier.
+ExecStart=$HOME/.claude/scripts/zram-swap.sh start
+# stop(), unlike start(), CAN exit non-zero (see the script): a real teardown
+# failure — swapoff unable to page the device back into RAM under memory
+# pressure, or a busy sysfs reset — must surface as a failed unit, not a
+# silently-clean stop. TimeoutStopSec bounds how long that failure path (or a
+# swapoff that blocks under pressure) can hold up `systemctl disable --now` /
+# shutdown: 30s is generous for paging out this unit's 4G ZRAM_SIZE ceiling
+# under realistic pressure, while still being short enough that an operator
+# waiting on `disable --now` — or the system shutdown sequence — isn't stuck
+# indefinitely on an optional performance tier. Below the ~90s
+# DefaultTimeoutStopSec this unit would otherwise inherit.
+TimeoutStopSec=30s
+ExecStop=$HOME/.claude/scripts/zram-swap.sh stop
+
+# Conservative initial size (~10% of the 39 GiB WSL2 memory budget) — disksize
+# is a hard ceiling on the RAM the compressed pool can ever consume (worst case,
+# fully incompressible data, is 1:1 -> disksize bytes of RAM), so this number
+# IS the worst-case exposure. Raise only after watching /sys/block/zram0/mm_stat
+# in production.
+Environment=ZRAM_SIZE=4G
+# Only viable option, not just the default — see zram-swap.sh header: zstd/lz4/842
+# are not compiled into this kernel at all (CONFIG_CRYPTO_ZSTD/LZ4/LZ4HC/842 are
+# all unset), so lzo-rle is the sole compression backend available.
+Environment=ZRAM_ALGO=lzo-rle
+# Must beat the disk swap's auto-assigned -2 (confirmed via `swapon --show`) so
+# the kernel drains to the fast compressed tier first. 100 matches systemd
+# zram-generator's own convention for "clearly highest, no ambiguity".
+Environment=ZRAM_PRIORITY=100
+
+[Install]
+WantedBy=multi-user.target

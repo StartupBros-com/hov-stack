@@ -1,0 +1,9 @@
+interface:
+  display_name: "Emil Design Eng"
+  short_description: "UI polish, component design and motion decisions"
+  default_prompt: "Use $emil-design-eng as the craft reference for a UI polish, component design, or animation decision."
+policy:
+  # Mirrors `disable-model-invocation: true` in the Claude frontmatter, which Codex
+  # does not read. Without this the skill is auto-invocable in Codex while demoted in
+  # Claude. Reference material for a deliberate polish pass — never fires on its own.
+  allow_implicit_invocation: false

@@ -1,0 +1,87 @@
+#!/usr/bin/env bash
+# Install or rotate this host's better-ccflare API key into live Claude Code
+# settings as env.ANTHROPIC_CUSTOM_HEADERS = "x-api-key: <key>", migrating any
+# legacy env.ANTHROPIC_AUTH_TOKEN away. The custom-header channel keeps Claude
+# Code in claude.ai-login mode (connectors stay enabled — a token var is
+# treated as an auth source and disables them) while better-ccflare still
+# authenticates every request: x-api-key is checked FIRST server-side
+# (extract-api-key.ts), beating the login's own Authorization header. One
+# mechanism, both hosts, first-run and rotation (the author's infrastructure repository plan
+# 2026-08-30-0030, R12/KTD3).
+#
+# The key never enters the dotfiles canonical settings.json — it is host-local
+# by design (host-local doctrine: credentials are NOT managed by the
+# STABLE/VOLATILE tiers, on purpose), and sync.sh's reconcile deliberately
+# preserves a live-only ANTHROPIC_CUSTOM_HEADERS. guard_no_credentials only
+# matches PEM-shaped secrets, so keeping btr- tokens out of the tracked tree
+# is this tool's job, not the scanner's.
+#
+# Hygiene (KTD3): hidden prompt (no scrollback), the key never appears in
+# argv or output; atomic read-modify-write (os.replace) with a re-read
+# verify-and-retry-once so a racing live-session settings rewrite cannot
+# silently drop the key. Rotation reminder: revoke/delete the old server-side
+# key first — better-ccflare refuses to mint a duplicate name (see
+# docs/ccflare-shared-access.md in the author's infrastructure repository).
+set -euo pipefail
+
+SETTINGS="${CLAUDE_HOME:-$HOME/.claude}/settings.json"
+[ -f "$SETTINGS" ] || { echo "ccflare-key-install: $SETTINGS not found (run dotfiles sync first)" >&2; exit 1; }
+command -v jq >/dev/null 2>&1 || { echo "ccflare-key-install: jq is required" >&2; exit 1; }
+command -v python3 >/dev/null 2>&1 || { echo "ccflare-key-install: python3 is required" >&2; exit 1; }
+
+printf 'Paste the better-ccflare API key for this host (input hidden): ' >&2
+IFS= read -rs CCFLARE_KEY
+printf '\n' >&2
+[ -n "$CCFLARE_KEY" ] || { echo "ccflare-key-install: empty key; nothing written" >&2; exit 1; }
+case $CCFLARE_KEY in
+  btr-*) ;;
+  *) echo "ccflare-key-install: expected a btr-… key; nothing written" >&2; exit 1 ;;
+esac
+export CCFLARE_KEY
+export CCFLARE_SETTINGS="$SETTINGS"
+
+write_key() {
+  # Environment-passed (never argv), 0600 tmp, atomic rename that preserves
+  # every other live key — the proven pattern against sub-second settings
+  # rewrites by running sessions.
+  python3 - <<'PY'
+import json, os
+path = os.environ["CCFLARE_SETTINGS"]
+key = os.environ["CCFLARE_KEY"]
+with open(path) as f:
+    data = json.load(f)
+env = data.setdefault("env", {})
+env["ANTHROPIC_CUSTOM_HEADERS"] = "x-api-key: " + key
+# Legacy token var: migrated away — Claude Code treats it as an auth source
+# and disables claude.ai login/connectors while it exists.
+env.pop("ANTHROPIC_AUTH_TOKEN", None)
+tmp = path + ".ccflare-key.tmp"
+fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+with os.fdopen(fd, "w") as f:
+    json.dump(data, f, indent=2)
+    f.write("\n")
+os.replace(tmp, path)
+PY
+}
+
+verify_key() {
+  local current
+  current=$(jq -r '.env.ANTHROPIC_CUSTOM_HEADERS // empty' "$CCFLARE_SETTINGS" 2>/dev/null)
+  [ "$current" = "x-api-key: $CCFLARE_KEY" ] \
+    && ! jq -e '.env | has("ANTHROPIC_AUTH_TOKEN")' "$CCFLARE_SETTINGS" >/dev/null 2>&1
+}
+
+write_key
+if ! verify_key; then
+  # A concurrent live-session rewrite raced us between write and verify —
+  # one retry on the fresh file state (KTD3's concurrency contract).
+  write_key
+  verify_key || {
+    echo "ccflare-key-install: key did not survive verification after retry; inspect $CCFLARE_SETTINGS" >&2
+    exit 1
+  }
+fi
+# Belt-and-suspenders only: os.replace already carries the tmp file's 0600
+# onto the destination on every local filesystem; this guards exotic mounts.
+chmod 600 "$CCFLARE_SETTINGS" 2>/dev/null || true
+echo "ccflare-key-install: key installed into $CCFLARE_SETTINGS (env.ANTHROPIC_CUSTOM_HEADERS, x-api-key form; legacy ANTHROPIC_AUTH_TOKEN removed)"

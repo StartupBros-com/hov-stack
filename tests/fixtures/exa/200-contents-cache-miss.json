@@ -1,0 +1,8 @@
+{
+  "requestId": "req_fixture_contents_cache_miss",
+  "results": [],
+  "statuses": [
+    {"id": "https://uncached.example", "status": "error", "error": {"tag": "CRAWL_NOT_FOUND", "httpStatusCode": 404}}
+  ],
+  "costDollars": {"total": 0.0, "contents": 0.0}
+}

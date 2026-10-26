@@ -1,0 +1,502 @@
+#!/usr/bin/env bash
+# hov-stack setup: link this checkout into Claude Code's config directory, install dcg, and
+# install the default plugins from the hov marketplace.
+#
+#   ./setup            run every step below
+#   ./setup --no-dcg   the same, without downloading or installing dcg
+#   ./setup --check    change nothing: print each step's state, exit 1 if any is not in place
+#                      (add --no-dcg to leave dcg out of the check)
+#
+# Each step is reported ok, skipped with the command to run later, or failed:
+#   1. Symlinks the harness into $CLAUDE_CONFIG_DIR (default ~/.claude):
+#        CLAUDE.md agents/ bin/ commands/ hooks/ mods/ scripts/ workflows/ claude-env.sh
+#      plus one link per skill in plugins/hov-stack/skills/ and skills-stack/ into
+#      skills/, skipping the skills a default plugin provides
+#      (lib/default-plugin-skills.txt names them).
+#      Anything already at one of those paths is MOVED to ~/.hov-stack-backups/<timestamp>/,
+#      never deleted.
+#   2. Installs dcg, the destructive-command guard, with dcg/install.sh: one pinned release,
+#      checked against its checksum and a minisign signature before it lands. Its licence
+#      is shown first. A platform with no build, a missing tool or no network is a skip; a
+#      refused verification is a failure and installs nothing.
+#   3. Seeds settings.json only when none exists. The seed is an allow-list taken from
+#      settings.json: permissions, hooks (paths rewritten to this config dir),
+#      attribution, cache and compaction settings, and the Claude Code env knobs.
+#      Everything bound to my machine (API gateway, login method, pinned model, plugins,
+#      status line) is dropped and listed. An existing settings.json is left untouched
+#      and the seed is written next to it as settings.hov-stack.json for you to merge.
+#   4. Reads your private overlay: this machine's own files, kept out of the checkout, in
+#      $HOV_STACK_OVERLAY, else $XDG_CONFIG_HOME/hov-stack, else ~/.config/hov-stack. Each
+#      path must be absolute: a relative XDG_CONFIG_HOME is ignored, as the XDG spec says,
+#      and a relative HOV_STACK_OVERLAY is reported and read by nothing. Each file is
+#      optional, and setup writes nothing there:
+#        settings.json  merged into step 3's seed: its keys win, its lists add to the
+#                       template's, a null removes a key, and its hooks get the same dcg
+#                       rule. A value of another kind than the template's writes no seed.
+#                       It never changes an existing settings.json, only a seed setup writes.
+#        CLAUDE.md      imported by rules/hov-stack-overlay.md in the config dir, which
+#                       Claude Code loads in every project. A file of anyone else's at that
+#                       path is moved to the backup first, like step 1's. A rules/ that is a
+#                       symlink into another tree gets nothing written to it.
+#        env            NAME=value lines that claude-env.sh exports before each Bash call.
+#   5. With Claude Code 2.1.76 or later on PATH (older releases refuse the hov manifest),
+#      adds the hov marketplace and installs the plugins lib/default-plugins.txt names.
+#      --check reads what Claude Code reports installed; it writes no record of its own.
+#   6. Never reads or writes memory, projects/, credentials, or anything outside the config
+#      dir, ~/.hov-stack-backups, ~/.local (dcg) and this checkout, apart from reading the
+#      overlay. No sudo. Only dcg's download and the claude plugin commands use the network.
+#
+# Exit status: 0 when every step is in place or was skipped with its fix printed; 1 when
+# git or node is missing, dcg's verification refused an artifact, a link or the overlay's
+# import could not be made, no seed could be written (an overlay settings.json that is not
+# a JSON object, or gives a setting another kind of value than the template's), or --check
+# found a step not in place; 2 for an unknown option.
+# Re-running is a no-op. To undo: remove the symlinks it lists and restore the backup dir.
+set -euo pipefail
+
+HOV_STACK=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
+CFG=${CLAUDE_CONFIG_DIR:-$HOME/.claude}
+# The private overlay (restructure plan U16): the same root the scripts read their private
+# maps from (README, "What's not here"). The import written for its CLAUDE.md must be an
+# absolute path, since Claude Code reads a relative one against the rules directory.
+OVERLAY_XDG=${XDG_CONFIG_HOME:-}
+case $OVERLAY_XDG in /*) ;; *) OVERLAY_XDG=$HOME/.config ;; esac
+OVERLAY=${HOV_STACK_OVERLAY:-$OVERLAY_XDG/hov-stack}
+OVERLAY_RULE=$CFG/rules/hov-stack-overlay.md
+OVERLAY_RULE_HEAD='Private additions from the hov-stack overlay, imported by ./setup (edit the file named below, not this one):'
+STAMP=$(date +%Y%m%d-%H%M%S)
+BACKUP=$HOME/.hov-stack-backups/$STAMP
+T0=$(date +%s)
+# 2.1.68 to 2.1.75 refuse `marketplace add` on the manifest's metadata and card keys
+# (restructure plan gate-2 record); 2.1.76 is the first release that accepts it.
+CLAUDE_FLOOR=2.1.76
+MARKETPLACE=hov
+# The hov marketplace is this repository's root .claude-plugin/ manifest, served from
+# GitHub; it arrives with the repository flip (restructure plan U22, U23).
+MARKETPLACE_SOURCE=StartupBros-com/hov-stack
+DCG_LICENSE=https://github.com/Dicklesworthstone/destructive_command_guard/blob/main/LICENSE
+
+usage() { awk 'NR == 1 { next } /^#/ { sub(/^# ?/, ""); print; next } { exit }' "$0"; }
+
+check=0
+no_dcg=0
+for arg in "$@"; do
+  case "$arg" in
+    -h|--help) usage; exit 0 ;;
+    --check) check=1 ;;
+    --no-dcg) no_dcg=1 ;;
+    *) echo "setup: unknown option $arg (--no-dcg, --check, --help)" >&2; exit 2 ;;
+  esac
+done
+
+missing=()
+for c in git node; do command -v "$c" >/dev/null 2>&1 || missing+=("$c"); done
+if [ ${#missing[@]} -gt 0 ]; then
+  echo "setup: missing required commands: ${missing[*]}" >&2
+  echo "  node runs the hooks; git is how you got here. Install them and re-run." >&2
+  exit 1
+fi
+
+# shellcheck source=lib/link.sh
+. "$HOV_STACK/lib/link.sh"
+
+# The closing status block: one row per step. A row that is not ok counts against --check;
+# a failed row makes the run exit 1. "off" is a step the caller turned off with --no-dcg.
+rows=()
+not_ok=0
+failed=0
+row() {  # row <step> <state> <detail>
+  rows+=("$(printf '  %-12s %-8s %s' "$1" "$2" "$3")")
+  case "$2" in ok|off) ;; *) not_ok=$((not_ok + 1)) ;; esac
+  [ "$2" != failed ] || failed=1
+}
+
+version_ge() {  # version_ge A B: dotted version A is B or later
+  local IFS=. i x y
+  local -a a b
+  read -r -a a <<<"$1"
+  read -r -a b <<<"$2"
+  for i in 0 1 2; do
+    x=${a[i]:-0} y=${b[i]:-0}
+    [ "$x" -gt "$y" ] && return 0
+    [ "$x" -lt "$y" ] && return 1
+  done
+  return 0
+}
+
+find_dcg() {  # the dcg the seeded hook will run: the one on PATH, else dcg/install.sh's link
+  if command -v dcg >/dev/null 2>&1; then
+    command -v dcg
+  elif [ -x "$HOME/.local/bin/dcg" ]; then
+    echo "$HOME/.local/bin/dcg"
+  fi
+}
+
+# Every link setup makes: the harness entries, then the skills. A skill a default plugin
+# provides is not linked (restructure plan KTD12): the plugin's copy is the one that stays
+# current, and two copies under one name list twice. The pack is read from its real path;
+# the root `skills` link is a plain file in a checkout made without symlink support. The
+# lookup is a string, not an array: macOS ships bash 3.2. The `|| [ -n ]` keeps a last line
+# that lost its newline.
+# skills-stack/ holds the skills that run this checkout's scripts, which a plugin install
+# of the pack does not have (restructure plan R21's exception), so only setup links them.
+srcs=()
+dsts=()
+for name in CLAUDE.md agents bin commands hooks mods scripts workflows claude-env.sh; do
+  srcs+=("$HOV_STACK/$name")
+  dsts+=("$CFG/$name")
+done
+provided=" "
+while read -r name plugin _ || [ -n "$name" ]; do
+  case "$name" in ''|'#'*) continue ;; esac
+  provided="$provided$name=$plugin "
+done < "$HOV_STACK/lib/default-plugin-skills.txt"
+skip_lines=()
+for skill in "$HOV_STACK"/plugins/hov-stack/skills/*/ "$HOV_STACK"/skills-stack/*/; do
+  [ -d "$skill" ] || continue  # an unmatched glob stays literal
+  skill=${skill%/}
+  name=$(basename "$skill")
+  case "$provided" in
+    *" $name="*)
+      plugin=${provided#*" $name="}
+      skip_lines+=("  skipped $name: the ${plugin%% *} plugin provides it")
+      continue ;;
+  esac
+  srcs+=("$skill")
+  dsts+=("$CFG/skills/$name")
+done
+
+defaults=()
+while read -r name _ || [ -n "$name" ]; do
+  case "$name" in ''|'#'*) continue ;; esac
+  defaults+=("$name")
+done < "$HOV_STACK/lib/default-plugins.txt"
+
+# The claude CLI and its version, read once: the marketplace and plugin steps need it at
+# or above the floor. A version that does not parse is tried anyway and reported unknown.
+claude_state=missing
+claude_version=
+if command -v claude >/dev/null 2>&1; then
+  claude_out=$(claude --version) || claude_out=
+  claude_version=${claude_out%% *}
+  case "$claude_version" in
+    ''|*[!0-9.]*) claude_state=unknown ;;
+    *) if version_ge "$claude_version" "$CLAUDE_FLOOR"; then claude_state=ok; else claude_state=old; fi ;;
+  esac
+fi
+claude_row() {
+  case "$claude_state" in
+    ok) row claude ok "$claude_version (needs $CLAUDE_FLOOR or later)" ;;
+    missing) row claude missing "not on PATH: install Claude Code $CLAUDE_FLOOR or later, then re-run ./setup" ;;
+    old) row claude old "$claude_version is below the $CLAUDE_FLOOR floor, under which the CLI refuses the $MARKETPLACE manifest: run 'claude update', then re-run ./setup" ;;
+    *) row claude unknown "could not read a version from 'claude --version'; the plugin steps need $CLAUDE_FLOOR or later" ;;
+  esac
+}
+claude_usable() { [ "$claude_state" = ok ] || [ "$claude_state" = unknown ]; }
+
+# The claude plugin commands' JSON, read with node (setup already requires it).
+# marketplace_listed returns 3 when hov is not added; installed_plugins prints
+# "<plugin> <version>" for each user-scope plugin from hov (a project-scope install
+# elsewhere does not count). Any other non-zero return: unreadable.
+JS_MARKETPLACE='
+const rows = JSON.parse(require("fs").readFileSync(0, "utf8"));
+if (!rows.some((r) => r.name === process.argv[1])) process.exit(3);'
+JS_PLUGINS='
+const rows = JSON.parse(require("fs").readFileSync(0, "utf8"));
+const suffix = "@" + process.argv[1];
+for (const r of rows)
+  if (r.scope === "user" && r.id.endsWith(suffix)) console.log(r.id.slice(0, -suffix.length), r.version || "unknown");'
+marketplace_listed() {
+  local json
+  json=$(claude plugin marketplace list --json) || return 1
+  printf '%s' "$json" | node -e "$JS_MARKETPLACE" "$MARKETPLACE" || return $?
+}
+installed_plugins() {
+  local json
+  json=$(claude plugin list --json) || return 1
+  printf '%s' "$json" | node -e "$JS_PLUGINS" "$MARKETPLACE" || return $?
+}
+version_of() { printf '%s\n' "$2" | awk -v p="$1" '$1 == p { print $2; exit }'; }  # <plugin> <list>
+
+# The overlay's CLAUDE.md is imported by a two-line file setup writes, not by a link to it:
+# the header tells whoever opens it which file to edit, and Claude Code documents @ imports
+# in a rules file, not a rules file that is a symlink. An import whose file is gone is
+# skipped without a word (probed on Claude Code 2.1.310), so the additions would vanish
+# quietly: --check names a dangling import, and a rerun takes it away. Nothing is written
+# through a rules/ that is a symlink: it leads into another tree, often one that is shared,
+# and the import names a path in this HOME.
+overlay_usable() { case $OVERLAY in /*) return 0 ;; *) return 1 ;; esac; }
+overlay_rule_target() {  # the path setup's own rules file imports; fails when the file is not setup's
+  [ -f "$OVERLAY_RULE" ] && [ ! -L "$OVERLAY_RULE" ] || return 1
+  awk -v h="$OVERLAY_RULE_HEAD" '
+    NR == 1 { mine = ($0 == h) } NR == 2 { t = $0 }
+    END { if (!mine || NR != 2 || substr(t, 1, 1) != "@") exit 1; print substr(t, 2) }' "$OVERLAY_RULE"
+}
+overlay_import() {  # write setup's rules file for $OVERLAY/CLAUDE.md, or take it away; 1 when it could not
+  local target rel
+  overlay_usable && [ ! -L "$CFG/rules" ] || return 0
+  target=$(overlay_rule_target) || target=
+  if [ ! -f "$OVERLAY/CLAUDE.md" ]; then
+    [ -n "$target" ] || return 0
+    rm -f "$OVERLAY_RULE" || return 1
+    echo "  removed $(_lf_display "$OVERLAY_RULE"): it imported $target, and there is no $OVERLAY/CLAUDE.md"
+    return 0
+  fi
+  [ "$target" != "$OVERLAY/CLAUDE.md" ] || return 0
+  if [ -z "$target" ] && { [ -e "$OVERLAY_RULE" ] || [ -L "$OVERLAY_RULE" ]; }; then
+    rel=${OVERLAY_RULE#"$HOME"/}
+    [ "$rel" != "$OVERLAY_RULE" ] || rel=$(basename "$OVERLAY_RULE")
+    mkdir -p "$BACKUP/$(dirname "$rel")" || return 1
+    mv "$OVERLAY_RULE" "$BACKUP/$rel" || return 1
+    echo "  backed up $(_lf_display "$OVERLAY_RULE") -> $BACKUP/$rel"
+  fi
+  mkdir -p "$CFG/rules" || return 1
+  printf '%s\n@%s\n' "$OVERLAY_RULE_HEAD" "$OVERLAY/CLAUDE.md" > "$OVERLAY_RULE" || return 1
+  echo "  $(_lf_display "$OVERLAY_RULE") imports $OVERLAY/CLAUDE.md"
+}
+JS_OBJECT='
+let v;
+try { v = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")); }
+catch (err) { console.log(err.message); process.exit(1); }
+if (v === null || typeof v !== "object" || Array.isArray(v)) { console.log("not an object"); process.exit(1); }'
+# One overlay row for --check and the run alike. A rules file out of step with the overlay is
+# a fix to run in --check; in a run it is a failure, because the import step could not write.
+overlay_problem() {  # overlay_problem <state> <text>: the first names overlay_row's state; a failure wins
+  problems+=("$2")
+  if [ "$state" = ok ] || [ "$1" = failed ]; then state=$1; fi
+}
+overlay_row() {  # overlay_row check|run
+  local mode=$1 state=ok target want why detail unimported=missing stale=stale
+  local -a parts=() problems=()
+  if ! overlay_usable; then
+    row overlay invalid "HOV_STACK_OVERLAY is $OVERLAY, not an absolute path, so ./setup reads nothing there and claude-env.sh reads no env from it"
+    return 0
+  fi
+  if [ "$mode" = run ]; then unimported=failed stale=failed; fi
+  if [ -f "$OVERLAY/settings.json" ]; then
+    if ! why=$(node -e "$JS_OBJECT" "$OVERLAY/settings.json"); then
+      overlay_problem invalid "$OVERLAY/settings.json is not a JSON object ($why), so ./setup writes no seed"
+    elif [ "$mode" = check ]; then
+      # The merge itself, into /dev/null: the one way to see an overlay the run would refuse.
+      if why=$(node "$HOV_STACK/lib/settings-seed.js" "$HOV_STACK/settings.json" /dev/null "$CFG" "$HOME" "" "$OVERLAY/settings.json" 2>&1 >/dev/null); then
+        parts+=("settings.json merged only into a seed ./setup writes, never an existing settings.json")
+      else
+        why=${why%%$'\n'*}
+        why=${why#settings-seed: }
+        overlay_problem invalid "${why%; no seed was written}, so ./setup writes no seed"
+      fi
+    elif [ "$seed_ok" = 1 ]; then parts+=("settings.json merged into the seed at $seed_target")
+    else overlay_problem failed "$OVERLAY/settings.json was not merged: lib/settings-seed.js wrote no seed (see above)"
+    fi
+  fi
+  target=$(overlay_rule_target) || target=
+  want=
+  if [ -f "$OVERLAY/CLAUDE.md" ]; then want=$OVERLAY/CLAUDE.md; fi
+  if [ -n "$want" ] && [ "$target" = "$want" ]; then
+    parts+=("CLAUDE.md imported by rules/hov-stack-overlay.md")
+  elif [ -L "$CFG/rules" ]; then
+    if [ -n "$want" ] && [ -d "$CFG/rules/" ] && grep -rqxF "@$want" "$CFG/rules/"; then
+      parts+=("CLAUDE.md imported by a rules file under rules/, a symlink")
+    elif [ -n "$want" ]; then
+      overlay_problem missing "rules/ is a symlink, so ./setup writes no import into it: add the line @$want to a rules file there"
+    elif [ -n "$target" ]; then
+      overlay_problem missing "rules/ is a symlink, so ./setup leaves rules/hov-stack-overlay.md, which imports $target, for you to remove"
+    fi
+  elif [ -n "$want" ]; then
+    if [ -n "$target" ]; then overlay_problem "$stale" "rules/hov-stack-overlay.md imports $target, not $want: run ./setup"
+    else overlay_problem "$unimported" "$want is not imported by rules/hov-stack-overlay.md: run ./setup"
+    fi
+  elif [ -n "$target" ]; then
+    if [ -f "$target" ]; then overlay_problem "$stale" "rules/hov-stack-overlay.md imports $target, but there is no $OVERLAY/CLAUDE.md: run ./setup"
+    else overlay_problem "$stale" "rules/hov-stack-overlay.md imports $target, which is gone: run ./setup"
+    fi
+  fi
+  if [ -f "$OVERLAY/env" ]; then
+    if why=$(bash -n "$OVERLAY/env" 2>&1); then parts+=("env read before each Bash call")
+    else overlay_problem invalid "$OVERLAY/env does not parse under bash (${why%%$'\n'*}); claude-env.sh sources it before every Bash call"
+    fi
+  fi
+  if [ ${#problems[@]} -gt 0 ]; then
+    detail=$(printf '%s; ' "${problems[@]}")
+    row overlay "$state" "${detail%; }"
+  elif [ ${#parts[@]} -gt 0 ]; then
+    detail=$(printf '%s; ' "${parts[@]}")
+    row overlay ok "$OVERLAY: ${detail%; }"
+  else
+    row overlay ok "nothing at $OVERLAY (settings.json, CLAUDE.md and env there are optional)"
+  fi
+}
+seed_ok=0
+
+if [ "$check" = 1 ]; then
+  echo "hov-stack: checking $HOV_STACK against $CFG (nothing is changed)"
+  absent="" i=0
+  while [ "$i" -lt "${#srcs[@]}" ]; do
+    if [ ! -L "${dsts[i]}" ] || [ ! "${dsts[i]}" -ef "${srcs[i]}" ]; then absent="$absent ${dsts[i]#"$CFG"/}"; fi
+    i=$((i + 1))
+  done
+  if [ -z "$absent" ]; then row links ok "${#srcs[@]} links in place"; else row links missing "not linked:$absent; run ./setup"; fi
+
+  if [ "$no_dcg" = 1 ]; then
+    row dcg off "left out of the check (--no-dcg)"
+  else
+    dcg_path=$(find_dcg)
+    if [ -n "$dcg_path" ]; then row dcg ok "$dcg_path"; else row dcg missing "not installed: run ./dcg/install.sh (./setup --check --no-dcg leaves it out)"; fi
+  fi
+
+  if [ -e "$CFG/settings.json" ]; then row settings ok "$CFG/settings.json"; else row settings missing "no settings.json: run ./setup to seed it"; fi
+  overlay_row check
+
+  claude_row
+  if claude_usable; then
+    rc=0; marketplace_listed || rc=$?
+    case "$rc" in
+      0) row marketplace ok "$MARKETPLACE is added" ;;
+      3) row marketplace missing "$MARKETPLACE is not added: run ./setup" ;;
+      *) row marketplace unknown "could not read 'claude plugin marketplace list --json'" ;;
+    esac
+    rc=0; have=$(installed_plugins) || rc=$?
+    if [ "$rc" -ne 0 ]; then
+      row plugins unknown "could not read 'claude plugin list --json'"
+    else
+      absent=""
+      for p in "${defaults[@]}"; do
+        [ -n "$(version_of "$p" "$have")" ] || absent="$absent $p"
+      done
+      if [ -n "$absent" ]; then row plugins missing "not installed:$absent; run ./setup"
+      else row plugins ok "${defaults[*]}"; fi
+    fi
+  else
+    row marketplace skipped "needs Claude Code $CLAUDE_FLOOR or later on PATH"
+    row plugins skipped "needs Claude Code $CLAUDE_FLOOR or later on PATH"
+  fi
+
+  printf '%s\n' "${rows[@]}"
+  if [ "$not_ok" -eq 0 ]; then
+    echo "hov-stack --check: every step is in place."
+    exit 0
+  fi
+  echo "hov-stack --check: $not_ok not in place."
+  exit 1
+fi
+
+mkdir -p "$CFG/skills"
+echo "hov-stack: linking $HOV_STACK into $CFG"
+[ ${#skip_lines[@]} -eq 0 ] || printf '%s\n' "${skip_lines[@]}"
+linked=0
+unlinked=0
+i=0
+while [ "$i" -lt "${#srcs[@]}" ]; do
+  if link_file "${srcs[i]}" "${dsts[i]}" "$BACKUP"; then linked=$((linked + 1)); else unlinked=$((unlinked + 1)); fi
+  i=$((i + 1))
+done
+echo "  $linked links in place"
+overlay_import || echo "  could not import $OVERLAY/CLAUDE.md from $(_lf_display "$OVERLAY_RULE") (see above)"
+[ -d "$BACKUP" ] && echo "  replaced files were moved to $BACKUP (nothing was deleted)"
+if [ "$unlinked" -eq 0 ]; then row links ok "$linked links in place"; else row links failed "$unlinked could not be made (see above)"; fi
+
+if [ "$no_dcg" = 1 ]; then
+  echo "dcg: skipped (--no-dcg). Run ./dcg/install.sh to add it later, then re-run ./setup."
+  row dcg off "--no-dcg: ./dcg/install.sh adds it later"
+else
+  # OQ4: the licence, before anything is downloaded.
+  echo "dcg, the destructive-command guard, is MIT-licensed with an added rider that GitHub's"
+  echo "licence detection does not recognise: it grants no rights to OpenAI or Anthropic, their"
+  echo "affiliates, or anyone acting for them. Read it at"
+  echo "  $DCG_LICENSE"
+  echo "To leave dcg out, run ./setup --no-dcg instead."
+  rc=0
+  bash "$HOV_STACK/dcg/install.sh" || rc=$?
+  case "$rc" in
+    0) row dcg ok "$(find_dcg)" ;;
+    3) row dcg skipped "see the 'dcg: skipped' lines above; run ./dcg/install.sh once that is fixed, then re-run ./setup" ;;
+    *) row dcg failed "dcg/install.sh exited $rc and installed nothing; see the 'dcg: error' line above" ;;
+  esac
+fi
+
+seed_target=$CFG/settings.json
+if [ -e "$seed_target" ] || [ -L "$seed_target" ]; then
+  seed_target=$CFG/settings.hov-stack.json
+  echo "  settings.json already exists and was left alone; the hov-stack seed is at $seed_target"
+fi
+dcg_path=$(find_dcg)
+overlay_settings=
+if overlay_usable && [ -f "$OVERLAY/settings.json" ]; then overlay_settings=$OVERLAY/settings.json; fi
+if node "$HOV_STACK/lib/settings-seed.js" "$HOV_STACK/settings.json" "$seed_target" "$CFG" "$HOME" "$dcg_path" "$overlay_settings"; then
+  seed_ok=1
+  row settings ok "seed written to $seed_target"
+else
+  row settings failed "lib/settings-seed.js wrote no seed; the lines above say why"
+fi
+overlay_row run
+if [ -z "$dcg_path" ]; then
+  echo "  dcg (the destructive-command guard) is not installed, so its hook was left out."
+  echo "  It is the one third-party guard this setup leans on:"
+  echo "    https://github.com/Dicklesworthstone/destructive_command_guard"
+  echo "  Install it, then re-run ./setup (the seed is rebuilt only if settings.json is absent)."
+fi
+
+claude_row
+if ! claude_usable; then
+  row marketplace skipped "needs Claude Code $CLAUDE_FLOOR or later on PATH; then re-run ./setup"
+  row plugins skipped "needs the $MARKETPLACE marketplace"
+else
+  mk_rc=0
+  marketplace_listed || mk_rc=$?
+  mk_note="$MARKETPLACE was already added"
+  add_rc=0
+  if [ "$mk_rc" -eq 3 ]; then
+    echo "hov-stack: adding the $MARKETPLACE marketplace from $MARKETPLACE_SOURCE"
+    claude plugin marketplace add "$MARKETPLACE_SOURCE" || add_rc=$?
+    if [ "$add_rc" -eq 0 ]; then
+      mk_note="added from $MARKETPLACE_SOURCE"
+      mk_rc=0
+      marketplace_listed || mk_rc=$?
+    fi
+  fi
+  if [ "$add_rc" -ne 0 ]; then
+    row marketplace skipped "'claude plugin marketplace add $MARKETPLACE_SOURCE' exited $add_rc (offline?): run it when online, then re-run ./setup"
+  elif [ "$mk_rc" -eq 3 ]; then
+    row marketplace failed "$MARKETPLACE_SOURCE was added, but no marketplace named $MARKETPLACE is listed"
+  elif [ "$mk_rc" -ne 0 ]; then
+    row marketplace skipped "could not read 'claude plugin marketplace list --json': re-run ./setup"
+  else
+    row marketplace ok "$mk_note"
+  fi
+
+  if [ "$add_rc" -ne 0 ] || [ "$mk_rc" -ne 0 ]; then
+    row plugins skipped "needs the $MARKETPLACE marketplace"
+  else
+    p_rc=0
+    have=$(installed_plugins) || p_rc=$?
+    not_added=""
+    added=""
+    if [ "$p_rc" -eq 0 ]; then
+      for p in "${defaults[@]}"; do
+        [ -z "$(version_of "$p" "$have")" ] || continue
+        echo "hov-stack: installing $p@$MARKETPLACE"
+        # No -y: it only confirms a command a marketplace entry declares, and no default declares one.
+        if claude plugin install "$p@$MARKETPLACE" --scope user; then added="$added $p"; else not_added="$not_added $p"; fi
+      done
+      if [ -n "$added" ]; then have=$(installed_plugins) || p_rc=$?; fi
+    fi
+    if [ "$p_rc" -ne 0 ]; then
+      row plugins skipped "could not read 'claude plugin list --json': re-run ./setup"
+    elif [ -n "$not_added" ]; then
+      row plugins skipped "not installed:$not_added (offline?): run 'claude plugin install <name>@$MARKETPLACE' for each when online, then re-run ./setup"
+    elif [ -n "$added" ]; then
+      row plugins ok "installed:$added"
+    else
+      row plugins ok "${defaults[*]} were already installed"
+    fi
+    echo "  Plugins from $MARKETPLACE stay at these versions until you turn on auto-update: in Claude Code"
+    echo "  run /plugin, open Marketplaces, select $MARKETPLACE, then Enable auto-update."
+  fi
+fi
+
+echo "hov-stack: status"
+printf '%s\n' "${rows[@]}"
+echo "  left alone on purpose: memory, projects/, credentials, settings.local.json, shell rc files."
+echo "hov-stack: done in $(( $(date +%s) - T0 ))s. Start a new Claude Code session; ./setup --check shows what is in place."
+echo "  Then type /hov-setup in that session for the plugins that need a login or a choice (pro-gate, wsl-cdp, token-eater, product-video, sign-it)."
+exit "$failed"

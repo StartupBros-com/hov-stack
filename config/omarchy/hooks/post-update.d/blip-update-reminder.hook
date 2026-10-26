@@ -1,0 +1,66 @@
+#!/bin/bash
+
+set -e
+
+# Blip is a git-managed plugin, so `omarchy update` never moves it. This only
+# says when upstream has moved on. Updating stays a reviewed step: the plugin
+# can send iMessages, and its Mac half needs blip-setup when bridge/ changes.
+
+dir="$HOME/.config/omarchy/plugins/nixfred.blip"
+self=$(readlink -f "${BASH_SOURCE[0]}")
+
+case ${1:-} in
+--apply)
+  # Clicked from the toast, in a terminal: the plugin update shows the diff and
+  # asks, and declining leaves HEAD where it was, so nothing else runs.
+  before=$(git -C "$dir" rev-parse HEAD)
+  omarchy-plugin-update nixfred.blip
+  after=$(git -C "$dir" rev-parse HEAD)
+
+  if [[ $before == "$after" ]]; then
+    echo "Blip was not updated."
+    exit 0
+  fi
+
+  if ! git -C "$dir" diff --quiet "$before" "$after" -- bridge/; then
+    "$dir/scripts/blip-setup"
+    # blip-setup rewrites the Mac mini's Blip key line and adds no from= pin
+    # over the LAN, so a pin added by hand is now gone.
+    echo "If the Mac mini's Blip key was pinned with from=, blip-setup just removed the pin."
+    echo "Re-pin it using your infrastructure runbook's Blip setup instructions."
+  fi
+
+  omarchy-restart-shell
+  exit 0
+  ;;
+--toast)
+  # The update restarts the shell as its last step, and a toast sent before
+  # that dies with the old shell, so wait for the update to release its lock.
+  flock -w 10800 "${XDG_RUNTIME_DIR:-/tmp}/omarchy-update.lock" true || true
+  omarchy-notification-wait || true
+  exec omarchy-notification-send -u critical -g 󰍡 "Blip update available" "$2" \
+    --exec omarchy-launch-floating-terminal-with-presentation bash "$self" --apply
+  ;;
+esac
+
+[[ -d $dir/.git ]] || exit 0
+
+GIT_TERMINAL_PROMPT=0 timeout 20 git -C "$dir" fetch --quiet origin HEAD 2>/dev/null || exit 0
+behind=$(git -C "$dir" rev-list --count HEAD..FETCH_HEAD)
+((behind > 0)) || exit 0
+
+if ((behind == 1)); then
+  what="1 new commit upstream"
+else
+  what="$behind new commits upstream"
+fi
+
+if ! git -C "$dir" diff --quiet HEAD FETCH_HEAD -- bridge/; then
+  what+=", including Mac-side changes"
+fi
+
+message="$what. Click to review and update."
+echo "Blip: $message Or run: bash $self --apply"
+
+systemd-run --user --quiet --collect --unit=blip-update-reminder \
+  bash "$self" --toast "$message" >/dev/null 2>&1 || true

@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Account</title>
+<style>
+  :root { --bg:#fff; --fg:#1a1a1a; --muted:#595959; --hint:#9a9a9a; --accent:#2f6fed; --card:#f7f7f8; }
+  body { margin:0; font-family: Inter, system-ui, sans-serif; color:var(--fg); background:var(--bg); }
+  .page { width: 1200px; margin: 0 auto; display:grid; grid-template-columns: 1fr 1fr 1fr; gap: 24px; padding: 32px; }
+  .card { background: var(--card); border-radius: 16px; padding: 8px; }
+  .card .cta { border-radius: 16px; }
+  h1 { font-size: 28px; margin: 0 0 8px; }
+  h2 { font-size: 20px; margin: 0 0 8px; }
+  p.lead { font-size: 16px; line-height: 1.0; letter-spacing: 0.12em; }
+  p.hint { color: var(--hint); font-size: 14px; }
+  p.note { color: var(--muted); font-size: 14px; }
+  label { display:block; font-size: 14px; margin-top: 12px; }
+  input { display:block; width:100%; box-sizing:border-box; padding: 8px 10px; border:1px solid #c9c9cf; border-radius: 8px; font: inherit; }
+  input:focus { outline: none; }
+  .btn { display:inline-flex; align-items:center; gap:8px; padding: 10px 16px; border:0; border-radius: 8px; background: var(--accent); color:#fff; font: inherit; cursor:pointer; transition: all 0.6s; }
+  .btn:hover { width: 220px; }
+  .btn:focus:not(:focus-visible) { outline: none; }
+  .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .icon-btn { width: 20px; height: 20px; padding: 0; border: 0; background: transparent; display:inline-flex; align-items:center; justify-content:center; }
+  .toolbar { display:flex; gap: 4px; margin-bottom: 16px; }
+  .sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
+  table { border-collapse: collapse; width: 100%; }
+  th { text-align: left; font-size: 14px; }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .toast { position: fixed; bottom: 16px; right: 16px; padding: 12px 16px; background: #1a1a1a; color: #fff; border-radius: 8px; animation: rise 240ms ease-out; }
+  @keyframes rise { from { transform: translateY(8px); opacity: 0; } to { transform: none; opacity: 1; } }
+  @media (prefers-reduced-motion: reduce) { .toast { animation: none; } }
+  .error { color: #b3261e; font-size: 14px; }
+</style>
+</head>
+<body>
+<main class="page">
+  <section class="card">
+    <h1>Sign in</h1>
+    <p class="lead">Welcome back. Enter your details to continue to your workspace and pick up where you left off.</p>
+    <form>
+      <label for="email">Email address</label>
+      <input id="email" type="email" autocomplete="email">
+      <label for="pw">Password</label>
+      <input id="pw" type="password" autocomplete="current-password">
+      <p class="error" style="margin-top:24px">Oops! Something went wrong :(</p>
+      <button class="btn cta" type="submit">
+        <svg aria-hidden="true" width="16" height="16" viewBox="0 0 16 16"><path d="M2 8h12M9 3l5 5-5 5" stroke="currentColor" fill="none"/></svg>
+        Log In
+      </button>
+      <button class="btn" type="button">Cancel</button>
+    </form>
+    <p class="hint">By continuing you agree to the terms.</p>
+    <p class="note">Need an account? Ask your admin for an invite.</p>
+  </section>
+
+  <section class="card">
+    <div class="toolbar">
+      <button class="icon-btn" type="button">
+        <svg width="16" height="16" viewBox="0 0 16 16"><path d="M3 4h10M3 8h10M3 12h10" stroke="currentColor"/></svg>
+      </button>
+      <div class="icon-btn" onclick="share()">
+        <svg width="16" height="16" viewBox="0 0 16 16"><path d="M8 2v8M4 6l4-4 4 4M3 13h10" stroke="currentColor" fill="none"/></svg>
+      </div>
+      <button class="icon-btn" type="button">
+        <span class="sr-only">Settings</span>
+        <svg aria-hidden="true" width="16" height="16" viewBox="0 0 16 16"><circle cx="8" cy="8" r="3" stroke="currentColor" fill="none"/></svg>
+      </button>
+    </div>
+    <table>
+      <thead><tr><th scope="col">Month</th><th scope="col">Sessions</th></tr></thead>
+      <tbody>
+        <tr><td>July</td><td class="num">1,204</td></tr>
+        <tr><td>August</td><td class="num">987</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section class="card">
+    <h2>Notifications</h2>
+    <p class="note">You have no unread notifications.</p>
+  </section>
+</main>
+<div class="toast" role="status">Saved</div>
+</body>
+</html>

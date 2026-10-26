@@ -1,0 +1,18 @@
+# commit 389c9d51a628808dba77cc27734fa32ab750f398
+# StartupBros-com/hov-marketplace at that commit pins each plugin below. One line per skill:
+# <plugin> <pinned commit> <directory under the plugin's skills/ at that commit>.
+# Refresh: take each plugin's source.sha from .claude-plugin/marketplace.json at the new
+# marketplace commit, fetch the plugin at that sha, then: git ls-tree -d --name-only <sha> skills/
+#
+# The plugins are the four defaults the restructure plan names for ./setup (U15). harness-vet
+# and rent-check join the defaults once the author runs them, and are not listed yet.
+# Consumer: tests/repo/setup.test.sh's duplicate-name check (KTD12). This is the record of what
+# each plugin ships, kept apart from lib/default-plugin-skills.txt (the filter setup reads) so
+# that a name dropped from the filter fails the check instead of passing it.
+# Delete when ./setup installs the default plugins (U15) and the test reads the names from them.
+papercut c6e0fad59846d90ec32882a4d15f0be975c7e2f4 papercut
+skill-tuner 1252134da1b98b19a705e5c145fb82227a235a23 portfolio
+skill-tuner 1252134da1b98b19a705e5c145fb82227a235a23 skill-tuner
+skill-tuner 1252134da1b98b19a705e5c145fb82227a235a23 tune
+memory-dream 687cf4f147ed313c2604a209729ba4073c82b9af memory-dream
+design-rails b8c02f2e72a9c00d10fd79d84426568b43ea6d52 design-rails

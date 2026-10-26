@@ -1,0 +1,18 @@
+#!/bin/sh
+# python -> python3 shim (papercut dotfiles#577).
+#
+# This box ships only `python3` (system + mise), but agents across ~21 projects
+# keep generating `python ...` in non-interactive shells: 50 failed calls in 19
+# sessions over the 7d triage window, each costing a failed Bash call plus a
+# retry round. lib/manifest.sh deploys this to ~/.local/bin/python so the
+# conventional spelling resolves wherever ~/.local/bin is on PATH — which on
+# this box includes agents' non-interactive `bash -c` shells (they inherit the
+# session environment). A bare-PATH shell without ~/.local/bin still won't
+# see it; that surface is out of scope here.
+#
+# NOT a preference change: repo convention stays python3/uv (see CLAUDE.md).
+# A venv's own bin/python still wins — activation prepends it to PATH ahead of
+# ~/.local/bin, and mise-installed interpreters also precede it. PATH-resolved
+# (not a hardcoded /usr/bin/python3) so a mise python3, if ever installed,
+# takes over without touching this file.
+exec python3 "$@"

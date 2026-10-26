@@ -1,0 +1,48 @@
+{
+ "component": "mattpocock/skills skills/engineering/retro/SKILL.md @ a7d038f (re-ask after 2026-09-20 SKIP of c55ee46)",
+ "purpose": "User-invoked prose skill (disable-model-invocation: true, SKILL.md:4) that has the agent review a coding session's record and propose environment improvements (navigation pointers, automated checks, reviewer standards, AGENTS.md trimming, tool economy, no-ops, information access), ordered by severity (SKILL.md:7, 15-25).",
+ "mechanism": "1. Step 1 loads the `writing-for-agents` skill (current SKILL.md:11). 2. Step 2 reads the session's primary sources, defaulting to the current session (:13). 3. Step 3 walks seven categories, each with a \"Use when\" trigger (:17-23). Automated checks says to read the repo's own check command and CI first and to treat a repo with no guardrail as a finding (:18). Coding standards says to classify the violation as mechanical or judgement, build a deterministic check for mechanical ones, and keep CODING_STANDARDS.md for judgement calls (:19). 4. Step 4 presents candidates by severity (:25). The Reference section (:27-44) gives the implementation-vs-review framing and file roles. There are no scripts, schemas or state, so it is pure prose. It proposes only and applies nothing.\n\nIDENTITY CHECK. I read both files in full and compared them line by line. Both are 45 lines. Frontmatter, steps, categories and reference text are identical in what I read, and I found no difference. I have no shell, so I could not run cmp or sha256sum. The digest's byte-identical claim (line 5) therefore rests on its sha256 evidence, not on my read. A trailing-whitespace or newline difference is invisible to my read.",
+ "fit_and_overlap": "The four do-not-retry triggers (vet note :203-213) against the 2026-10-07 digest status:\n\n(a) Graduation AND executable procedure (vet :205-207). HALF FIRED, so the trigger does not fire. Graduation is true (a7d038f, 2026-09-24, digest :5). The file is identical to c55ee46, so there is still no script, schema or step-level structure, and the \"and\" clause fails. The note also says \"a further prose commit do not reopen this\" (:215).\n\n(b) Raw-session-JSONL fixture beating bare and rent-check (:208-210). NOT FIRED, because it has not been run (digest :5). This remains the recorded evidence gap (vet :154-157).\n\n(c) Harness gains a session-end trigger (:211-212). NOT FIRED. ~/.claude/settings.json has no SessionEnd hook (digest :5). Stop has 2 hooks, and the vet note says the only Stop hook is verify-on-stop.js, a verification gate (vet :238-242). The trigger is also conjunctive: it needs a body of doctrine to hang on the trigger AND rent-check's scope to be demonstrably too narrow. The vet note says adopting retro would not close the trigger gap anyway, because retro is manual (:240-242). The aihero FAQ agrees: no hooks, manual only.\n\n(d) rent-check unavailable or narrowed out of categories 3, 4, 6 (:213). NOT FIRED. rent-check is present (digest :5, :15). Open defect #1244 is a write-boundary defect, not unavailability or a scope narrowing.\n\nNet: no trigger fires. One is half-met, and the missing half is the substantive one. The 2026-09-20 SKIP stands on its own stated terms.\n\nIncumbent coverage per category, from the vet note (:177-184): coding standards, CLAUDE.md size and no-ops are covered by rent-check (RUBRIC E1/E2, Q1/Q2), via the user-invoked /rent-check control surface. Navigation, tool economy and information access have no covering mechanism, but the 2026-09 fixture showed bare, retro and rent-check all found those defects (vet :187-191), so the demonstrated need is nil. Automated checks are partly covered by rent-check E4. The digest says coverage is unverified and defaults to REFUTED. I did not re-verify the vet note's coverage claims today.\n\nOverlap with /correct: retro's mechanical-vs-judgement rule (SKILL.md:19) is the same doctrine as the poteto hierarchy and the pstack principle (digest :6-7). The one possible EXTRACT, \"no guardrail at all is a finding\", is already filed as #1245 and not landed (vet :167).",
+ "red_flags": [
+  "aihero FAQ: 'invents generic advice to satisfy the retro categories' is called the strongest criticism (paraphrase :27). CORROBORATES the SKIP. The 2026-09-20 fixture found retro had no measured edge over bare (7.00 vs 6.67 of 8, n=3), and its No-ops category was surfaced 0 of 3 times (vet :82-86). The author's counter (candidates must trace to the session) is a discard-it-yourself instruction, not a mechanism.",
+  "aihero FAQ: rules pile up is its weakest area, and it never audits previously added lint rules, hooks or CI jobs (paraphrase :26). CORROBORATES the SKIP. rent-check E4 and E5 cover that gap (digest :16), so the author concedes the incumbent is stronger here.",
+  "aihero FAQ: 'retro is not a memory system' and it resists adding repeated-mistake lines to CLAUDE.md (paraphrase :29). MIXED. It matches the correction hierarchy, but this harness holds 1,095 feedback notes with an update-not-escalate doctrine (digest :15), so retro's routing would not add to the memory-feedback pattern.",
+  "aihero FAQ: no auto-apply, no hooks, manual invocation, no dry-run, and the author was burned by auto-hooks (paraphrase :25-26). CORROBORATES that retro does not fill the SessionEnd gap (vet :240-242) and undercuts any trigger-(c) reading.",
+  "Nothing in the FAQ CONTRADICTS the prior SKIP reasoning. Every admission corroborates it or is neutral. The 'It's working if' criteria (paraphrase :33-37) are qualitative with no measurement.",
+  "andrestaltz endorsement (2106708022676389916, 2026-10-04): it establishes only that one practitioner reports retro surfaced unnoticed agent problems and calls it a 'game changer'. It establishes no method, no fixture, no baseline and no numbers. There is no bare or incumbent arm, so the benefit cannot be attributed to retro rather than to any careful session review. The vet note already ruled that upstream popularity does not reopen the SKIP (vet :215). It carries no weight toward any trigger.",
+  "The SKIP depends on a fixture the vet itself called an approximation. It handed arms a pre-digested transcript rather than raw JSONL (vet :154-157), so the SKIP is scoped, not absolute. Fixture flaws D7, T2, T3 were disclosed (vet :140-151).",
+  "Delivery: the documented `--skill=retro` install form silently installs everything in an agent session (vet :193-201), so the REJECT of the install path also still stands.",
+  "The aihero source is a close paraphrase, not verbatim, so FAQ wording is second-hand."
+ ],
+ "maintenance": "If vendored, it would carry an UPSTREAM.md pin and vendored-drift-check coverage per the create-verification-skill pattern (digest :32). The text is stable (identical across two revisions). The prior vet recorded four commits, with the last by an AI agent (vet :125-128). Graduation reduced the risk of the bucket disappearing but did not remove it.",
+ "dependencies": "`writing-for-agents`, already vendored and pinned at 8b36d4f, resolves in ~/.claude and ~/.codex (vet :119-121). Ships agents/openai.yaml, the Codex implicit-invocation gate (vet :116-118). No scripts and no postinstall (vet :107-113). If ever installed, the form is `npx skills@latest add mattpocock/skills -g -s retro -a claude-code codex -y` (vet :199-201).",
+ "claims_to_verify": [
+  {
+   "claim": "The two SKILL.md files are byte-identical. My read found no textual difference, but I could not run cmp or sha256sum. Confirm that a7d038f and c55ee46 hash equal, including trailing whitespace and the final newline.",
+   "why_verdict_changing": "If any byte differs, trigger (a) could be half-met on different grounds. The digest's sha evidence probably settles it, so this is a low-risk check."
+  },
+  {
+   "claim": "No SessionEnd hook is wired in ~/.claude/settings.json, and no other mechanism fires at session end.",
+   "why_verdict_changing": "Trigger (c) needs a session-end trigger. If one exists, only the doctrine-body condition and rent-check's narrowness remain to be shown."
+  },
+  {
+   "claim": "rent-check still covers retro categories 3, 4 and 6, and #1244 has not narrowed its scope.",
+   "why_verdict_changing": "Trigger (d) fires if rent-check is unavailable or narrowed out of those categories."
+  },
+  {
+   "claim": "A raw-session-JSONL fixture would let retro beat both bare and rent-check (trigger (b), not run).",
+   "why_verdict_changing": "This is the one result that could reverse the SKIP."
+  },
+  {
+   "claim": "The aihero FAQ wording is as paraphrased ('weakest area', 'strongest criticism'). Check against the primary page.",
+   "why_verdict_changing": "The corroboration argument leans on these admissions, though the SKIP does not depend on them."
+  }
+ ],
+ "unread_files": [
+  "~/dotfiles/memory/-home-user-dotfiles/retro-harness-vet-2026-09.md",
+  "~/dotfiles/harness/vet-fixtures/retro-2026-09/ (fixture and graded outputs; relied on via the vet note)",
+  "~/.claude/settings.json (hook inventory taken from the digest, not re-read)",
+  "~/dotfiles/skills-local/rent-check/SKILL.md and RUBRIC.md (coverage claims relied on via vet note and digest)",
+  "Primary aihero.dev/skills-retro page and andrestaltz tweet (paraphrase only)"
+ ]
+}

@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "note": "CLOSED list (KD4, session-settled 2026-08-17): these are the only categories that legitimize a `needs input:` exit with work still open. Agents cite a category; they never add one. New categories require explicit operator sign-off -- see CLAUDE.md and docs/plans/2026-08-17-2205-feat-positive-handoff-protocol-plan.md (R8, KD4). Consumed by scripts/needs-human.sh, which rejects any id not listed here.",
+  "categories": [
+    {
+      "id": "external-send",
+      "label": "External message send",
+      "applies_when": "The remaining work requires sending an outbound message (Discord, Slack, email, webhook) that is not already gated by config."
+    },
+    {
+      "id": "prod-data-mutation",
+      "label": "Production data mutation",
+      "applies_when": "The remaining work requires a write against production data (e.g. psql/redis-cli/supabase DELETE, DROP, or UPDATE)."
+    },
+    {
+      "id": "persistence-change",
+      "label": "Persistence change",
+      "applies_when": "The remaining work requires changing a persistent system surface (e.g. crontab, systemctl unit) outside normal code review."
+    },
+    {
+      "id": "credentials",
+      "label": "Credential login or rotation",
+      "applies_when": "The remaining work requires a credential login or rotation (e.g. gh auth) that changes security posture."
+    },
+    {
+      "id": "mcp-plugin-enable",
+      "label": "MCP server or plugin enablement",
+      "applies_when": "The remaining work requires enabling a new MCP server or plugin."
+    },
+    {
+      "id": "permission-surface-edit",
+      "label": "Permission-surface edit",
+      "applies_when": "The remaining work requires editing the permission surface itself (settings.json allow/ask/deny, hook files, or CLAUDE.md)."
+    }
+  ]
+}

@@ -1,0 +1,78 @@
+{
+ "source": "arms/<arm>/result.json from the recorded run (claude -p --output-format json), copied by script on 2026-10-07; not retyped",
+ "wall_s_rule": "the note's 'wall s' column is duration_ms / 1000 rounded to the nearest second",
+ "runs": [
+  {
+   "arm": "a1-1",
+   "blind_label": "r06",
+   "duration_ms": 34741,
+   "duration_api_ms": 34013,
+   "num_turns": 7,
+   "total_cost_usd": 0.1287455
+  },
+  {
+   "arm": "a1-2",
+   "blind_label": "r04",
+   "duration_ms": 20343,
+   "duration_api_ms": 19565,
+   "num_turns": 5,
+   "total_cost_usd": 0.09974519999999999
+  },
+  {
+   "arm": "a1-3",
+   "blind_label": "r08",
+   "duration_ms": 33340,
+   "duration_api_ms": 32541,
+   "num_turns": 6,
+   "total_cost_usd": 0.12337129999999999
+  },
+  {
+   "arm": "a2-1",
+   "blind_label": "r05",
+   "duration_ms": 36988,
+   "duration_api_ms": 35917,
+   "num_turns": 7,
+   "total_cost_usd": 0.2455545
+  },
+  {
+   "arm": "a2-2",
+   "blind_label": "r02",
+   "duration_ms": 34652,
+   "duration_api_ms": 33596,
+   "num_turns": 7,
+   "total_cost_usd": 0.1354012
+  },
+  {
+   "arm": "a2-3",
+   "blind_label": "r09",
+   "duration_ms": 43971,
+   "duration_api_ms": 42881,
+   "num_turns": 7,
+   "total_cost_usd": 0.168472
+  },
+  {
+   "arm": "a3-1",
+   "blind_label": "r01",
+   "duration_ms": 37281,
+   "duration_api_ms": 36508,
+   "num_turns": 7,
+   "total_cost_usd": 0.2375017
+  },
+  {
+   "arm": "a3-2",
+   "blind_label": "r03",
+   "duration_ms": 36760,
+   "duration_api_ms": 35873,
+   "num_turns": 8,
+   "total_cost_usd": 0.15157030000000002
+  },
+  {
+   "arm": "a3-3",
+   "blind_label": "r07",
+   "duration_ms": 28075,
+   "duration_api_ms": 27289,
+   "num_turns": 6,
+   "total_cost_usd": 0.1277919
+  }
+ ]
+}

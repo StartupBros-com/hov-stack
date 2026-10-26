@@ -1,0 +1,65 @@
+# TEMPLATE: Docker hygiene run: exited-container and image reclaim, orphan Supabase stack stop, dangling Supabase volume reap (shipped plan-only).
+# Replace before enabling:
+#   nothing; the defaults are generic.
+# See systemd/README.md.
+[Unit]
+Description=Docker hygiene (plan-only as shipped; AGGRESSIVE image reclaim and undeclared Supabase volume reap when enabled)
+Documentation=https://github.com/StartupBros-com/hov-stack
+
+OnFailure=harness-unit-failure-alert@%n.service
+
+[Service]
+Type=oneshot
+TimeoutStartSec=20m
+# Stage 2 (2026-08-21): AGGRESSIVE 0 -> 1 after the first live
+# stage-1 cycle (2026-08-19) ran clean — 6 exited containers removed with
+# ok: lines, 0 docker errors — and reclaimable kept growing (46 GB; the
+# script's own WARN says escalate). AGGRESSIVE removes every image
+# unreferenced by ANY container, snapshotted before removal; the promotion
+# review verified live, twice, that this set has zero overlap with running
+# containers' images. Some candidates are locally built with no registry
+# copy — rebuild, not re-pull, if needed again. Volumes are handled only by
+# REAP_VOLUMES (stage 4 below). Terminal stage; the 2026-08-21 disk-full
+# emergency reset is why this is not parked.
+# Shipped plan-only. To delete: DRY_RUN=0 STOP_ORPHANS=1 REAP_VOLUMES=1 (see README).
+Environment=DRY_RUN=1
+Environment=AGGRESSIVE=1
+# Stage 3 (2026-09-16): STOP_ORPHANS=1. An orphan stack has NO
+# supabase/config.toml anywhere under $SITES and no live process cwd — a
+# worktree removed (wt-sweep, wt-done, Agent View, by hand) while its
+# containers kept running; nothing in the worktree lifecycle stops them.
+# Observed the day this landed: 24 orphan stacks / 38 containers, 14 from one
+# finished campaign, up to two weeks old, ~4 GB RAM plus swap, WARNed on every
+# weekly run and never acted on. STOP_IDLE stays OFF on purpose: a quiet
+# checkout is still someone's checkout. An orphan has no owner to preserve it
+# for. The stop runs through the same identity + liveness guards as the idle
+# path and re-scans for a checkout at action time. The stop keeps the
+# volumes, but stage 4 below removes them later in the same run once they are
+# past the grace and no checkout declares the project, so a later
+# `supabase start` gets an empty database.
+Environment=STOP_ORPHANS=0
+# Stage 4 (2026-10-06): REAP_VOLUMES=1, with the timer made daily.
+# Removes a dangling volume only when it carries a Supabase project label, no
+# supabase/config.toml under $SITES (worktrees and _archive included) declares
+# that project, no $SITES/<project> directory exists, and it is older than
+# VOLUME_GRACE_HOURS (24). Unlabelled and anonymous volumes are never touched.
+# Dangling Supabase volumes grew 4-61 GB a day (246 GB in a week) and filled
+# the root disk twice in eight days; the CRIT toast went unread for three days.
+# A failed checkout scan (an unreadable config.toml included) or volume
+# inspection removes nothing.
+Environment=REAP_VOLUMES=0
+# Intentional holds stay successful; inspection and attempted-action errors fail.
+Environment=STRICT=1
+# PATH (2026-10-04): the systemd user manager's PATH is the stock
+# /usr/local/sbin:...:/bin with no ~/.local/bin and no mise shims, which is
+# where the supabase CLI lives. Without this line every `supabase stop` was
+# exit 127 with its stderr discarded: STOP_ORPHANS=1 (enabled 2026-09-16)
+# stopped nothing, and its first stop attempts, 25 of them on 2026-09-30, all
+# failed with an alert that said only Result=exit-code. The script
+# preflights `command -v supabase`: a miss refuses every stop, keeps the
+# exited-container and image reclaim running, and fails the run under STRICT
+# with the cause, so a PATH regression pages instead of hiding for weeks.
+Environment=PATH=%h/.local/bin:%h/.local/share/mise/shims:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=%h/.claude/scripts/docker-hygiene.sh
+Nice=10
+IOSchedulingClass=idle

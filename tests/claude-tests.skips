@@ -1,0 +1,16 @@
+# tests/claude-tests.skips: suites under tests/ that cannot pass from this repo, and why.
+# One TAB-separated line each: <xfail|skip> <path> <reason> [<signature>]. A skip suite is
+# not run. tests/run-claude-tests.sh still runs an xfail suite, which must fail for the
+# listed reason: its fourth field is a grep -E pattern the suite's log must match. The
+# runner exits 2 the day an xfail passes (remove the line then) or a path is no longer a
+# discovered suite, and fails an xfail that times out, is killed, or whose log lacks its
+# signature, so a new way of failing cannot hide behind the entry.
+#
+# Files that describe the author's machines and stay in the private repo.
+xfail	tests/host-roles.test.sh	reads the author's host roster (hosts.tsv), which is private	^FAIL: hosts\.tsv declares .*hosts, expected >=2
+xfail	tests/install-manifest.test.sh	asserts the private install manifest's files exist (.gitmessage, ssh/config, ssh/bin/pishosts, ssh/bin/pissh)	FAIL: manifest declares root file that does not exist: \.gitmessage
+xfail	tests/test_install_manifest.py	asserts the private install manifest's files exist (.gitmessage, ssh/config, ssh/bin/pishosts, ssh/bin/pissh)	FAIL: manifest declares root file that does not exist: \.gitmessage
+xfail	tests/install-smoke-launcher.test.sh	needs .github/install-smoke/start-container.sh, the private install-smoke launcher	^FAIL: .*/\.github/install-smoke/start-container\.sh does not exist
+#
+# Suites that need the author's live machine, not a checkout.
+skip	tests/docker-init-runtime.test.sh	a real-Docker proof that refuses (exit 64) without DOCKER_INIT_RUNTIME_TEST=1 and --allow-real-docker; its header says it is intentionally absent from hermetic CI

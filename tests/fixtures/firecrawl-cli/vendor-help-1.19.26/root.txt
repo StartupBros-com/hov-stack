@@ -1,0 +1,37 @@
+Usage: firecrawl [options] [command]
+
+CLI tool for Firecrawl web scraping
+
+Options:
+  -V, --version                                output the version number
+  -k, --api-key <key>                          Firecrawl API key (or set FIRECRAWL_API_KEY env var)
+  --api-url <url>                              API URL (or set FIRECRAWL_API_URL env var)
+  --status                                     Show version, auth status, concurrency, and credits
+  -h, --help                                   display help for command
+
+Commands:
+  scrape [options] [urls...]                   Scrape one or more URLs. Multiple URLs are scraped concurrently and saved to .firecrawl/
+  crawl [options] [url-or-job-id]              Crawl a website using Firecrawl
+  map [options] [url]                          Map URLs on a website using Firecrawl
+  parse [options] <file>                       Parse a local file (HTML, PDF, DOCX, DOC, ODT, RTF, XLSX, XLS) into markdown, HTML, links, JSON, and more. Uses /v2/parse.
+  monitor                                      Schedule recurring scrapes/crawls/searches and track content changes
+  search [options] <query>                     Search the web using Firecrawl
+  research                                     Research arXiv papers and GitHub history using Firecrawl
+  feedback [options] <endpoint> <jobId>        Send feedback on a Firecrawl endpoint job.
+  search-feedback [options] <searchId>         Send feedback on a previous search result. Refunds 1 credit on first submission.
+  agent [options] <prompt-or-job-id>           Run an AI agent to extract data from the web
+  interact [options] [args...]                 Interact with a scraped page in a live browser session. Run AI prompts or execute code against any previous scrape.
+  experimental|x                               Experimental commands (download)
+  config [options]                             Configure Firecrawl (login if not authenticated)
+  view-config                                  View current configuration and authentication status
+  login [options]                              Login to Firecrawl (alias for config)
+  logout                                       Logout and clear stored credentials
+  init [options] [template]                    Set up Firecrawl: install CLI, authenticate, add integrations, and scaffold a template
+  setup [options] [subcommand]                 Set up individual firecrawl integrations (skills, workflows, mcp, defaults)
+  make [options] <target>                      Make Firecrawl the default provider for supported workflows
+  launch|launcher [options] [agent] [args...]  Configure Firecrawl MCP for an AI agent, then launch it
+  env [options]                                Pull FIRECRAWL_API_KEY into a local .env file
+  credit-usage [options]                       Get team credit usage information
+  doctor [options] [job-id]                    Run environment diagnostics, or diagnose a specific run by job ID
+  version [options]                            Display version information
+  help [command]                               display help for command

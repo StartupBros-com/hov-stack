@@ -1,0 +1,31 @@
+{
+ "results": [
+  {
+   "claim": "(a) Hook tests prove each guard fails on a REAL past mistake (six-file sample)",
+   "verdict": "PARTIAL",
+   "evidence": "Sampled six: hooks/tests/git-guard.test.js, grep-cost-guard.test.js, settings-guard.test.js, whatsapp-guard.test.js, tests/dcg-reap.test.sh and cass-search-health.test.sh. Four cite an incident or issue. git-guard.test.js cites dotfiles#823, #840 and the 114 real scoped-identity commits (:376, :474, :527). grep-cost-guard.test.js:57 says 'blocks the incident pattern', but its inputs are paraphrased synthetic regexes on page.html. dcg-reap.test.sh:3-6 cites issue #1215 and PR #1207, though it runs against synthetic $LIB trees. cass-search-health.test.sh:3-17 cites issue #1235 and the 2026-09-20 outage; its N2 case is described as 'the live 2026-09-20 shape'. The other two have no incident or issue in the matched patterns: settings-guard.test.js and whatsapp-guard.test.js. Their cases are synthetic inputs (e.g. ~/.claude/settings.json edits). Only a keyword grep was run, not a read of every case. So 4 of 6 cite incidents, 2 of 6 are synthetic. Citing an incident is not proof that the exact past command is the red case. Only git-guard.test.js:527 pins real measured history, and only as a pass-through case.",
+   "note": "Counts come from grep -m5 for incident, issue number, regress, observed and dates. Citation is not the same as replaying the real command."
+  },
+  {
+   "claim": "(b) Every *.test.sh under tests/ and every hooks/tests test is run by harness-tests.yml; a step fails the build if a suite on disk is not in the workflow",
+   "verdict": "PARTIAL",
+   "evidence": "Suites are named individually, not globbed. Each step is `bash tests/<name>.test.sh`, gated on fromJSON(needs.scope.outputs.suites).suites['<name>']=='run'. The workflow comment at harness-tests.yml:1171-1172 says: 'This workflow names every suite explicitly -- there is no glob over tests/*.test.sh, so a suite left unlisted is a suite CI never runs'. The only match for 'suite on disk' is the comment at :1100-1102 ('A suite on disk is not a suite in CI... an unlisted file fails silently'). That is documentation of the hazard, not a failing step. Comments at :1248 and :1592 record suites that were found unlisted after the fact. Counts: 172 test files under tests/ (ls tests/*.test.* | wc -l) and 46 *.test.js under hooks/tests/. tests/test_ci_suite_scope.py:407 asserts 'suites with an unlisted real dependency', which concerns scoping dependencies, not unlisted suites. A hook-test runner step does exist near :2075-2096, which uses find over *.test.mjs under skills-local. I did not verify that every one of the 172 and 46 files is named. So no step that fails on an unlisted suite was found.",
+   "note": "Unknown: whether any on-disk suite is currently unlisted. I did not diff the file list against the workflow's step names."
+  },
+  {
+   "claim": "(c) ALLOW_MAIN_COMMIT=1, ALLOW_DESTRUCTIVE_GIT=1, ALLOW_GIT_CONFIG_EXEC=1 and ALLOW_AI_TRAILER=1 require a reason, expiry or approver to be recorded",
+   "verdict": "REFUTED",
+   "evidence": "hooks/PreToolUse/git-guard.js:225-231: escapeLeads(command,name) returns true if process.env[name]==='1', or if the command has a leading `NAME=1` env assignment (regex over the scrubbed command). It is a boolean check only. The call sites at :430, :454, :517, :565 and :597 take no reason, expiry or approver. The only side effect when an escape is used is a message such as 'ALLOW_MAIN_COMMIT=1 set — proceeding' (:568, :600). HARNESS.md:49 describes the escapes as 'parsed as a leading env assignment or an earlier export' and says nothing about recording a reason, expiry or approver."
+  },
+  {
+   "claim": "(d) HARNESS.md keeps a table pairing each CLAUDE.md rule with its enforcer",
+   "verdict": "REFUTED",
+   "evidence": "grep -n -i enforc HARNESS.md finds only prose mentions. Line 46 says 'The enforced tiers ARE settings.json permissions + managed floor + git-guard hook. Do not transcribe entries into prose'. Line 49 is the 'Guard hooks (enforcement beyond settings.json)' bullet list. The other hits (:64, :91, :142, :226, :232) are unrelated uses of the word. The only mapping from rules to enforcers is in the '## Autonomy & permission model' section (:44), and it is bullets and prose, not a table. No other section (Doctrine :12, Config surfaces :25, PR ownership :96, Model & usage infra :199, Automation :206, Autoresearch :240, Standing decisions :247, Playbooks :254) has an enforcement mapping by this grep. So one section has a prose map and none has a table."
+  },
+  {
+   "claim": "(e) harness-doctor.sh has a check that flags a CLAUDE.md or HARNESS.md rule with no enforcing hook or test",
+   "verdict": "REFUTED",
+   "evidence": "Section headers in scripts/harness-doctor.sh run from '== 1.' (:267) to '== 34.' (:2291). None audits rules for enforcers. The closest are '== 5. Repo AGENTS.md / CLAUDE.md pairs' (:356, pointer shape only), '== 8. Hook files all registered in settings.json' (:505, the direction hook to settings, not rule to hook), '== 8a. Registered hook commands resolve to a file on disk' (:531), and '== 15. Harness detail docs stay current-state' (:1209). A grep for 'rule.*enforc', 'unenforced' and 'paper-tiger' in the script returned nothing relevant."
+  }
+ ]
+}

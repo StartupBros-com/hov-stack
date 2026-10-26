@@ -1,0 +1,110 @@
+#!/usr/bin/env python3
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+SETTINGS_PATH = Path.home() / ".pi" / "agent" / "settings.json"
+AUDIT_SCRIPT = Path.home() / ".pi" / "agent" / "bin" / "pi-audit-local-packages"
+DEFAULT_PACKAGE_MANAGER = "pnpm"
+
+
+def load_settings() -> dict:
+    with SETTINGS_PATH.open("r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def iter_local_packages(settings: dict):
+    for pkg in settings.get("packages", []):
+        source = pkg.get("source") if isinstance(pkg, dict) else pkg
+        if isinstance(source, str) and source.startswith("/"):
+            yield Path(source).resolve()
+
+
+def missing_peer_deps(root: Path, package_json: dict) -> list[str]:
+    missing: list[str] = []
+    for dep in sorted((package_json.get("peerDependencies") or {}).keys()):
+        dep_path = root / "node_modules" / dep.replace("/", os.sep)
+        if not dep_path.exists():
+            missing.append(dep)
+    return missing
+
+
+def detect_package_manager(root: Path, package_json: dict) -> str:
+    package_manager = package_json.get("packageManager")
+    if isinstance(package_manager, str) and package_manager:
+        return package_manager.split("@", 1)[0]
+    if (root / "pnpm-lock.yaml").exists():
+        return "pnpm"
+    if (root / "package-lock.json").exists():
+        return "npm"
+    if (root / "yarn.lock").exists():
+        return "yarn"
+    return DEFAULT_PACKAGE_MANAGER
+
+
+def run_install(root: Path, package_manager: str) -> int:
+    if package_manager == "npm":
+        cmd = ["npm", "install"]
+    elif package_manager == "yarn":
+        cmd = ["yarn", "install"]
+    else:
+        cmd = ["pnpm", "install"]
+
+    print(f"→ {root} :: {' '.join(cmd)}", flush=True)
+    proc = subprocess.run(cmd, cwd=root)
+    return proc.returncode
+
+
+def main(argv: list[str]) -> int:
+    run_all = "--all" in argv
+
+    if not SETTINGS_PATH.exists():
+        print(f"settings not found: {SETTINGS_PATH}", file=sys.stderr)
+        return 1
+    if not AUDIT_SCRIPT.exists():
+        print(f"audit script not found: {AUDIT_SCRIPT}", file=sys.stderr)
+        return 1
+
+    settings = load_settings()
+    local_packages = list(iter_local_packages(settings))
+    if not local_packages:
+        print("No local path packages configured.")
+        return 0
+
+    installed_any = False
+    install_failures = False
+
+    for root in local_packages:
+        package_json_path = root / "package.json"
+        if not package_json_path.exists():
+            continue
+        with package_json_path.open("r", encoding="utf-8") as f:
+            package_json = json.load(f)
+
+        missing = missing_peer_deps(root, package_json)
+        should_install = run_all or not (root / "node_modules").exists() or bool(missing)
+        if not should_install:
+            print(f"✓ {root} :: already healthy enough for dependency install", flush=True)
+            continue
+
+        package_manager = detect_package_manager(root, package_json)
+        code = run_install(root, package_manager)
+        installed_any = True
+        if code != 0:
+            install_failures = True
+            print(f"✗ install failed for {root}", file=sys.stderr)
+
+    if not installed_any:
+        print("No package installs were needed.", flush=True)
+
+    print("\nRunning audit...\n", flush=True)
+    audit = subprocess.run([str(AUDIT_SCRIPT)])
+    if install_failures:
+        return 1
+    return audit.returncode
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

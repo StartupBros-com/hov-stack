@@ -1,0 +1,12 @@
+[
+  {
+    "annotation_level": "failure",
+    "message": "a leaf job failed - failing the required check",
+    "title": ""
+  },
+  {
+    "annotation_level": "failure",
+    "message": "Process completed with exit code 1.",
+    "title": ""
+  }
+]
