@@ -47,7 +47,9 @@ function fixture(t, { prs = [12], pending = 0, rows: extra = [], mode = 'enforce
       now += ms;
       if (!isGit) return '';
       gitCalls += 1;
-      const args = String(command).slice(4);
+      // The real helper passes git's global --no-optional-locks before the
+      // subcommand (dotfiles#1590); strip it so the subcommand match below holds.
+      const args = String(command).slice(4).replace(/^--no-optional-locks /, '');
       if (args.startsWith('status ')) return ' M src/a.js\n';
       if (args.startsWith('symbolic-ref ')) return 'refs/remotes/origin/main\n';
       if (args.startsWith('merge-base ')) return 'abc123\n';

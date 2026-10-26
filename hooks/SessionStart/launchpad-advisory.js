@@ -57,8 +57,10 @@ const ROUTER = process.env.REPO_ROUTE_RESOLVER
 // nudge: "behind 0" is only as trustworthy as the last fetch.
 const STALE_FETCH_DAYS = 7;
 
+// --no-optional-locks: a probe killed at GIT_TIMEOUT_MS mid-status must not leave a
+// partial index.lock on the launch pad (dotfiles#1590).
 function sh(cwd, args) {
-  return execFileSync('git', args, {
+  return execFileSync('git', ['--no-optional-locks', ...args], {
     cwd,
     timeout: GIT_TIMEOUT_MS,
     stdio: ['ignore', 'pipe', 'ignore'],

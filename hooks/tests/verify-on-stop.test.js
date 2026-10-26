@@ -22,8 +22,8 @@ function project(code) {
   return { dir, canary };
 }
 
-// Build a temp GIT project whose package.json typecheck script writes the value
-// of $CI to a canary file (proving both execution and the CI=1 env) and exits
+// Build a temp GIT project whose package.json typecheck script writes `$CI|$GIT_OPTIONAL_LOCKS`
+// to a canary file (proving execution and the CI=1, GIT_OPTIONAL_LOCKS=0 env) and exits
 // with `typecheckExit`. The baseline commit is back-dated to 2020 so it can
 // never be mistaken for a commit made "during" a test's fake session.
 function gitProject({ typecheckExit = 0, nodeModules = false } = {}) {
@@ -36,7 +36,7 @@ function gitProject({ typecheckExit = 0, nodeModules = false } = {}) {
   const canary = path.join(dir, 'CANARY');
   fs.writeFileSync(
     path.join(dir, 'check.js'),
-    `require('fs').writeFileSync(${JSON.stringify(canary)}, process.env.CI || '');process.exit(${typecheckExit});`
+    `require('fs').writeFileSync(${JSON.stringify(canary)}, (process.env.CI || '') + '|' + (process.env.GIT_OPTIONAL_LOCKS || ''));process.exit(${typecheckExit});`
   );
   fs.writeFileSync(
     path.join(dir, 'package.json'),
@@ -161,7 +161,7 @@ test('fresh code change runs the gate with CI=1', async () => {
     const p = { cwd: dir, stop_hook_active: false, transcript_path: transcriptFor(dir) };
     assertQuietPassThrough(await runHook(HOOK, p, { env: trustEnv(dir) }));
     assert.ok(fs.existsSync(canary), 'a session-fresh .ts change must trigger verification');
-    assert.strictEqual(fs.readFileSync(canary, 'utf8'), '1', 'verify command must run with CI=1');
+    assert.strictEqual(fs.readFileSync(canary, 'utf8'), '1|0', 'verify command must run with CI=1 and GIT_OPTIONAL_LOCKS=0');
   } finally {
     rmTmp(dir);
   }

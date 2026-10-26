@@ -410,11 +410,12 @@ function cacheSegment(pc, level) {
   return out;
 }
 
-// best-effort git summary for cwd; empty strings when not a repo
+// best-effort git summary for cwd; empty strings when not a repo. --no-optional-locks: a render
+// killed at its 400 ms timeout mid-status must not leave a partial index.lock (dotfiles#1590).
 function git(cwd) {
   const run = (args) => {
     try {
-      return execFileSync('git', ['-C', cwd, ...args], {
+      return execFileSync('git', ['--no-optional-locks', '-C', cwd, ...args], {
         encoding: 'utf8', timeout: 400, stdio: ['ignore', 'pipe', 'ignore'],
       }).trim();
     } catch { return ''; }
