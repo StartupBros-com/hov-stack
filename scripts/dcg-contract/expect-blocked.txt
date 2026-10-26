@@ -49,12 +49,12 @@ git branch -d merged && git push --force origin main
 
 # --- truncating redirect to a target dcg cannot resolve ------------------------
 # core.filesystem:redirect-truncate-dynamic-path (and credential-file-write for
-# the dotfile). dcg resolves a variable target only from a literal /tmp
-# assignment made before any && or ||; these must stay refused whatever a later
-# release learns to resolve, because the target is not provably scratch.
+# the dotfile). dcg resolves a variable target only from a /tmp path it can
+# prove (a literal assignment, or from 0.15.3 a `mktemp -d /tmp/...`); these must
+# stay refused whatever a later release learns to resolve, because the target is
+# not provably scratch.
 cat notes.txt > "$f"
 S=/etc; echo x > "$S/passwd"
 S=/home/user/.claude/jobs/abc/tmp; echo x > "$S/out"
-S=$(mktemp -d /tmp/x.XXXXXX); echo hi > "$S/out"
 S=/tmp/d; for f in $(cat names); do echo hi > "$S/$f"; done
 echo x > "$HOME/.bashrc"

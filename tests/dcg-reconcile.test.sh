@@ -66,7 +66,8 @@ jq -e --arg cmd "$SYMLINK" --arg resolved "$RESOLVED" '
   .custom.keep == true
   # The live "Bash" block must survive reconciliation INTACT, asserted by CONTENT
   # rather than by index. reconcile_dcg_hook prepends dcg'"'"'s canonical block, and
-  # 0.9.2 widened that matcher to "Bash|PowerShell" (#157), so array position is not
+  # 0.9.2 widened that matcher to "Bash|PowerShell" (#157) and 0.15.3 to
+  # "Bash|PowerShell|Monitor" (upstream #529), so array position is not
   # a stable identity for the user'"'"'s block. This is strictly stronger than the
   # `.PreToolUse[0].matcher == "Bash"` / `.hooks[0].command == $cmd` pair it
   # replaces: it pins the block'"'"'s exact command list, not just its first entry.
@@ -75,7 +76,7 @@ jq -e --arg cmd "$SYMLINK" --arg resolved "$RESOLVED" '
         == ["/tmp/custom-guard", $cmd])
   # And the canonical block reconcile is responsible for must exist, carrying the
   # RESOLVED binary path (see DCG_COMMAND in sync.sh) rather than the symlink.
-  and ([.hooks.PreToolUse[] | select(.matcher == "Bash|PowerShell") | .hooks[].command]
+  and ([.hooks.PreToolUse[] | select(.matcher == "Bash|PowerShell|Monitor") | .hooks[].command]
         == [$resolved])
   and ([.hooks.PreToolUse[].hooks[]? | select(.command == $cmd)] | length == 1)
   and ([.hooks.PreToolUse[].hooks[]? | select(.command == "/tmp/custom-guard")] | length == 1)

@@ -923,18 +923,21 @@ What the official docs and issue tracker add on top of the probes:
 4. **Git stays bare or worktree-pinned**: `git status`, `git -C <abs worktree path> …`,
    and worktree-targeted chains all pass. Never `-C`/`cd` to the shared checkout.
 5. **Scratch redirects → literal `/tmp/<unique-dir>/` paths.** dcg refuses a truncating
-   `>` to any target it cannot resolve before the shell runs. As of dcg 0.15.2 a
-   variable resolves only from a literal `/tmp` assignment made before any `&&`/`||`:
-   `S=/tmp/d; mkdir -p "$S" && cmd > "$S/out" 2>&1` passes, and
-   `mkdir -p /tmp/d && S=/tmp/d && cmd > "$S/out"` is refused. Also refused: `$$` in the
-   path or the assigned value, a variable built from another (`F="$D/x"`), a loop
-   variable, `$(mktemp …)`, anything under `$HOME`, and a `2> file` next to the
-   variable target (`2>&1` is fine). Append (`>>`) passes. For loops, use item 6.
+   `>` to any target it cannot resolve before the shell runs. As of dcg 0.15.3 a
+   variable resolves from a literal `/tmp` assignment, from a variable built on one
+   (`F="$D/x"`), or from `$(mktemp -d /tmp/…)`, including after `&&` and with `$$` in
+   the path: `S=/tmp/d; mkdir -p "$S" && cmd > "$S/out" 2>&1` and
+   `mkdir -p /tmp/d && S=/tmp/d && cmd > "$S/out"` both pass. Still refused: a loop
+   variable (even over literal words), a `2> file` next to the variable target (`2>&1`
+   is fine), an assignment behind `||`, any other `$( )` value, a mktemp template or
+   `-p`/`--tmpdir` outside `/tmp`, `..` out of `/tmp`, and anything under `$HOME`. New
+   in 0.15.3: an assignment dcg cannot model between the `/tmp` assignment and the
+   redirect (`S=/tmp/d; N=$(python3 -c …); cmd > "$S/out"`) ends the proof, so redirect
+   before it. Append (`>>`) passes. For loops, use item 6.
    `scripts/dcg-contract/` pins the passing forms, and the refusals that must
-   hold in any release (unresolved, non-`/tmp`, `$(mktemp …)`, a loop over words read at
-   run time, `$HOME` targets). The `&&`, `$$`, chained-assignment, literal-word-loop and
-   `2> file` refusals are 0.15.2 limits, left unpinned so a release that lifts them can
-   still be promoted.
+   hold in any release (unresolved, non-`/tmp`, a loop over words read at run time,
+   `$HOME` targets). The literal-word-loop and `2> file` refusals are 0.15.3 limits,
+   left unpinned so a release that lifts them can still be promoted.
 6. **Anything genuinely multi-step → put it in a script file and run the file.** A script's
    own loops, `$( )` and redirects are never parsed; only the invoking command is
    (`bash /abs/path/runner.sh` — verified PASS, and how the 52-suite local test run in this
