@@ -711,8 +711,20 @@ supabase-api advisors "$PROJECT" security
 supabase-api api GET /v1/projects/{ref}/config/auth --project "$PROJECT"
 ```
 
-- The token resolves env `SUPABASE_ACCESS_TOKEN`, then the named line in
+- The token resolves env `SUPABASE_ACCESS_TOKEN`, then the bws record of
+  that name (seeded 2026-10-19 with the token minted that day, read through
+  `bws secret list` like the Stripe keys), then the named line in
   `~/.secrets`, parsed and never sourced; `--where` reports presence only.
+  A failed bws read (retried once) with no `~/.secrets` line is
+  `credential_unavailable`: retry later, never re-seed. Only
+  `credential_missing` means bws answered without the record. An env token
+  that Supabase rejects with 401 is retried once with a different bws or
+  `~/.secrets` token, and the result then carries `stale_env: true`: the
+  shell outlived a rotation and still exports the revoked token. The
+  `supabase` CLI and the migration scripts (`migration-apply.sh`, through
+  `scripts/lib/supabase-access-token.sh`) take the same env → bws →
+  `~/.secrets` order but never retry, so run them with
+  `env -u SUPABASE_ACCESS_TOKEN` from such a shell.
   Output and errors redact `sbp_` tokens, `sb_secret_` keys, every JWT whose
   role is not `anon`, and string values under secret-named keys (`smtp_pass`,
   `jwt_secret`, `*_secret`, passwords, tokens, `*_api_key`, `*_access_key`,

@@ -178,7 +178,12 @@ writes, needs `--confirm-destructive` spelled in full, which prompts, and the
 flag alone is not authorization. After a configuration write, GET it back
 yourself. Output redacts tokens, secret keys, non-anon JWTs and secret-named
 fields; a write carrying a `[redacted]` placeholder is refused, so omit the
-field. Details:
+field. The token resolves env `SUPABASE_ACCESS_TOKEN`, then the bws record of
+that name, then `~/.secrets`; `credential_unavailable` means bws failed to
+answer (retry, never re-seed), and a result carrying `stale_env: true` means
+the shell's env token is revoked: run `env -u SUPABASE_ACCESS_TOKEN` for the
+`supabase` CLI and the migration scripts, which share the order but never
+retry. Details:
 `harness/data-source-clis.md`.
 
 ## Vercel — `vercel`, including `vercel api`

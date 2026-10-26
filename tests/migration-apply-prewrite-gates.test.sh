@@ -87,6 +87,7 @@ STUB
 cat >"$TMP/bin/supabase" <<'STUB'
 #!/usr/bin/env bash
 printf '%s\n' "$PWD" >>"$SUPABASE_CWDS"
+printf '%s\n' "${SUPABASE_ACCESS_TOKEN-<unset>}" >>"$SUPABASE_TOKENS"
 if [ -f "$PWD/supabase/.temp/pooler-url" ]; then
   printf '%s\n' "$(<"$PWD/supabase/.temp/pooler-url")" >>"$POOLER_URLS"
   tail -c 1 "$PWD/supabase/.temp/pooler-url" | od -An -tu1 | tr -d ' ' >>"$POOLER_TERMINATORS"
@@ -130,6 +131,8 @@ setup_case() {
   DIR="$REPO_FIXTURE/apps/$APP_FIXTURE/supabase"
   SUPABASE_CALLS="$CASE/supabase-calls"
   SUPABASE_CWDS="$CASE/supabase-cwds"
+  SUPABASE_TOKENS="$CASE/supabase-tokens"
+  BWS_CALLS="$CASE/bws-calls"
   POOLER_URLS="$CASE/pooler-urls"
   POOLER_TERMINATORS="$CASE/pooler-terminators"
   PUSHED_SQL_HASHES="$CASE/pushed-sql-hashes"
@@ -153,6 +156,9 @@ setup_case() {
   printf '%s\n' "$LINKED_REF_FIXTURE" >"$DIR/.temp/project-ref"
   : >"$SUPABASE_CALLS"
   : >"$SUPABASE_CWDS"
+  : >"$SUPABASE_TOKENS"
+  : >"$BWS_CALLS"
+  rm -f "$TMP/bin/bws"
   : >"$POOLER_URLS"
   : >"$POOLER_TERMINATORS"
   : >"$PUSHED_SQL_HASHES"
@@ -174,7 +180,8 @@ run_apply_with() {
   fi
   set +e
   OUT=$(HOME="$HOME_FIXTURE" REPO="$REPO_FIXTURE" DRY_RUN="$dry_run" \
-    PATH="$TMP/bin:$PATH" SUPABASE_ACCESS_TOKEN=x GIT_STATUS_OUTPUT="$GIT_STATUS_OUTPUT" \
+    PATH="$TMP/bin:$PATH" SUPABASE_ACCESS_TOKEN="${APPLY_TOKEN_ENV-x}" BWS_ACCESS_TOKEN='' BWS_PROJECT_ID='' \
+    SUPABASE_TOKENS="$SUPABASE_TOKENS" BWS_CALLS="$BWS_CALLS" GIT_STATUS_OUTPUT="$GIT_STATUS_OUTPUT" \
     GIT_CALLS="$GIT_CALLS" GIT_SECRET_LEAKS="$GIT_SECRET_LEAKS" GIT_CONFIG_LEAKS="$GIT_CONFIG_LEAKS" GIT_MAIN_SHA="$GIT_MAIN_SHA" \
     GIT_ORIGIN_OUTPUT="$GIT_ORIGIN_OUTPUT" GIT_REPO_ROOT="$REPO_FIXTURE" COMMIT_FIXTURE="$COMMIT_FIXTURE" \
     SUPABASE_CALLS="$SUPABASE_CALLS" SUPABASE_CWDS="$SUPABASE_CWDS" POOLER_URLS="$POOLER_URLS" POOLER_TERMINATORS="$POOLER_TERMINATORS" PUSHED_SQL_HASHES="$PUSHED_SQL_HASHES" SUPABASE_REMOTE="$SUPABASE_REMOTE" \
@@ -603,5 +610,83 @@ assert_eq "14: unparseable post-push history exits verification status" "$RC" 5
 assert_has "14: unparseable post-push history is named" "$OUT" 'POST-VERIFY FAILED: could not parse post-push migration history'
 assert_not_has "14: the parse failure is not reported as a history delta" "$OUT" 'remote history differs from preflight + approved set'
 [ "$(grep -c '^db push$' "$SUPABASE_CALLS" || true)" = 1 ] || fail "14: expected the simulated write before post-verify failure"
+
+# B1. bws sits between env and ~/.secrets. With no env token the script resolves
+# the bws record through resolve_trusted_bin (a stub on PATH), the supabase
+# client sees that token on every call, git never does, and ~/.secrets (which
+# holds a different token so a fallthrough would show) is never consulted.
+setup_case
+printf '%s\n' '-- | 20270701000000 | fixture' >"$CASE/remote"
+SUPABASE_REMOTE=$(<"$CASE/remote")
+SUPABASE_LEDGER_JSON='[{"version":"20270701000000","name":"baseline"}]'
+SUPABASE_DRY_OUTPUT='Applying migration 20270801000000_unique.sql...'
+printf '%s\n' '-- baseline' >"$DIR/migrations/20270701000000_baseline.sql"
+printf '%s\n' '-- unique' >"$DIR/migrations/20270801000000_unique.sql"
+mkdir -p "$HOME_FIXTURE/.config/bws"
+printf 'bws-access-fixture\n' >"$HOME_FIXTURE/.config/bws/token"
+printf 'project-fixture\n' >"$HOME_FIXTURE/.config/bws/sb-project-id"
+printf 'SUPABASE_ACCESS_TOKEN=sbp_secretsfixture0000000000000000000000000\n' >"$HOME_FIXTURE/.secrets"
+cat >"$TMP/bin/bws" <<'STUB'
+#!/usr/bin/env bash
+printf '%s|%s\n' "$*" "${BWS_ACCESS_TOKEN:-<unset>}" >>"$BWS_CALLS"
+printf '[{"key":"OTHER","value":"x"},{"key":"SUPABASE_ACCESS_TOKEN","value":"sbp_bwsfixture00000000000000000000000000000"}]\n'
+STUB
+chmod +x "$TMP/bin/bws"
+APPLY_TOKEN_ENV=
+run_apply
+unset APPLY_TOKEN_ENV
+assert_eq "B1: bws-resolved default dry-run exits clean" "$RC" 0
+assert_has "B1: bws-resolved dry-run reaches the identity proof" "$OUT" 'every recorded version/name identity agrees'
+[ "$(cat "$BWS_CALLS")" = '--color no secret list project-fixture|bws-access-fixture' ] \
+  || fail "B1: expected exactly one bws listing with the configured project and access token (saw: $(tr '\n' '|' <"$BWS_CALLS"))"
+[ -s "$SUPABASE_TOKENS" ] || fail "B1: the supabase stub recorded no token"
+[ "$(grep -vc '^sbp_bwsfixture00000000000000000000000000000$' "$SUPABASE_TOKENS" || true)" = 0 ] \
+  || fail "B1: a supabase call ran without the bws token (saw: $(sort -u "$SUPABASE_TOKENS" | tr '\n' '|'))"
+[ ! -s "$GIT_SECRET_LEAKS" ] || fail "B1: the bws-resolved token reached git: $(cat "$GIT_SECRET_LEAKS")"
+assert_not_has "B1: the bws token is never printed" "$OUT" 'sbp_bwsfixture'
+assert_not_has "B1: the ~/.secrets token is never printed" "$OUT" 'sbp_secretsfixture'
+
+# B2. PLANTED NEGATIVE: bws is configured but fails twice and ~/.secrets is
+# absent. The script stops before any supabase call with a message naming all
+# three sources, after exactly the one retry.
+setup_case
+mkdir -p "$HOME_FIXTURE/.config/bws"
+printf 'bws-access-fixture\n' >"$HOME_FIXTURE/.config/bws/token"
+printf 'project-fixture\n' >"$HOME_FIXTURE/.config/bws/sb-project-id"
+cat >"$TMP/bin/bws" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$BWS_CALLS"
+echo 'bws: 429 Too Many Requests' >&2
+exit 1
+STUB
+chmod +x "$TMP/bin/bws"
+APPLY_TOKEN_ENV=
+run_apply
+unset APPLY_TOKEN_ENV
+assert_eq "B2: bws failing twice with no ~/.secrets exits 1" "$RC" 1
+assert_has "B2: the failure names every source" "$OUT" 'SUPABASE_ACCESS_TOKEN unavailable (checked env, the bws record SUPABASE_ACCESS_TOKEN and ~/.secrets)'
+[ "$(wc -l <"$BWS_CALLS")" = 2 ] || fail "B2: expected exactly two bws attempts (saw $(wc -l <"$BWS_CALLS"))"
+[ ! -s "$SUPABASE_CWDS" ] || fail "B2: supabase was called without a token"
+
+# B3. PLANTED NEGATIVE: the bws record exists but is not an sbp_ token. A valid
+# ~/.secrets line must not paper over the malformed canonical record.
+setup_case
+mkdir -p "$HOME_FIXTURE/.config/bws"
+printf 'bws-access-fixture\n' >"$HOME_FIXTURE/.config/bws/token"
+printf 'project-fixture\n' >"$HOME_FIXTURE/.config/bws/sb-project-id"
+printf 'SUPABASE_ACCESS_TOKEN=sbp_secretsfixture0000000000000000000000000\n' >"$HOME_FIXTURE/.secrets"
+cat >"$TMP/bin/bws" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$BWS_CALLS"
+printf '[{"key":"SUPABASE_ACCESS_TOKEN","value":"sbp_short"}]\n'
+STUB
+chmod +x "$TMP/bin/bws"
+APPLY_TOKEN_ENV=
+run_apply
+unset APPLY_TOKEN_ENV
+assert_eq "B3: a malformed bws record exits 1" "$RC" 1
+assert_has "B3: the refusal names the record" "$OUT" 'the bws record SUPABASE_ACCESS_TOKEN is not a personal access token'
+[ ! -s "$SUPABASE_CWDS" ] || fail "B3: supabase was called after a malformed bws record"
+assert_not_has "B3: ~/.secrets did not stand in for the malformed record" "$OUT" 'every recorded version/name identity agrees'
 
 echo "ok — migration-apply gates: isolated bare Git, immutable snapshots, content-bound approval, duplicate/identity/incoherence negatives, and exact post-write verification are load-bearing"
