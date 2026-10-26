@@ -89,6 +89,7 @@ DOTFILES_LINKS=(
   "bin/stripe-api|.local/bin/stripe-api"
   "bin/posthog-api|.local/bin/posthog-api"
   "bin/supabase-api|.local/bin/supabase-api"
+  "bin/fal-api|.local/bin/fal-api"
   "bin/dfs|.local/bin/dfs"
   "bin/exa-cli|.local/bin/exa-cli"
   "bin/firecrawl-cli|.local/bin/firecrawl-cli"

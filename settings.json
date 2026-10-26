@@ -322,6 +322,7 @@
       "Bash(posthog-api:*)",
       "Bash(stripe-api:*)",
       "Bash(supabase-api:*)",
+      "Bash(fal-api:*)",
       "Bash(vastai:*)",
       "Bash(vast-ssh:*)"
     ],
@@ -433,6 +434,7 @@
       "Bash(*resend_cli.py *--confirm-write*)",
       "Bash(*resend_cli.py *--confirm-destructive*)",
       "Bash(supabase-api *--confirm-destructive*)",
+      "Bash(fal-api *--confirm-destructive*)",
       "Bash(posthog-api *--confirm*)",
       "Bash(posthog-cli api *--confirm*)",
       "Bash(vercel rm *)",

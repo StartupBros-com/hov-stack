@@ -1,4 +1,4 @@
-# Data-source CLIs: gsc, ga4, discord-cli, resend-cli, dfs, exa-cli, firecrawl-cli, stripe-api, posthog-api, supabase-api, and vercel
+# Data-source CLIs: gsc, ga4, discord-cli, resend-cli, dfs, exa-cli, firecrawl-cli, stripe-api, posthog-api, supabase-api, vercel, vastai, and fal-api
 
 Detail demoted out of the always-loaded `CLAUDE.md` (2026-08-11). That
 file keeps the routing decision and the measured traps — the facts that change
@@ -943,6 +943,69 @@ Rules that bite on the first call:
   token (`runas /trustlevel:0x20000`) hops fine, and Claude Code on native
   Windows runs its shell commands unsandboxed.
 
+## fal.ai model runs: `fal-api`, live money
+
+`fal-api` (`bin/fal-api`, a shim to `fal_api.py`) is a stdlib client for
+fal.ai's queue (`queue.fal.run`), storage (`rest.fal.ai` and the
+`v3.fal.media` CDN) and Platform API (`api.fal.ai/v1`), so agents can find a
+hosted model, price it, upload its inputs, run it and collect the result. No
+vendor package is installed; the upload flow follows `fal_client` 1.0.3's
+source. `fal-api --help` is the command surface.
+
+**This spends real money.** `run`, `submit` and `upload` spend credits with no
+prompt. Price a model before running it:
+`fal-api api GET /v1/models/pricing -d endpoint_id=<id>` gives the unit price,
+and `fal-api api POST /v1/models/pricing/estimate --body <file>` with
+`{"estimate_type":"historical_api_price","endpoints":{"<id>":{"call_quantity":1}}}`
+gives a per-call estimate. The two can disagree by far: for
+`minimax/h3-max/recast` the first said $0.05 per unit and the second $4.52 per
+call (both read 2026-10-23), so read the model page for what a unit is.
+
+| Step | Command |
+|---|---|
+| Find a model | `fal-api api GET /v1/models -d q=kling -d limit=20`; `--paginate` follows `next_cursor` (20 pages unless `--max-pages`) and warns on stderr. |
+| Upload an input | `fal-api upload clip.mp4` prints the CDN URL under `data.url`; pass it as the model's `video_url` or `image_url`. Up to 100 MiB goes through a short-lived CDN token; larger files (to 4 GiB) go through a signed upload URL, a path not yet exercised live. A 32-byte upload was fetched back byte-identical on 2026-10-23. |
+| Run and wait | `fal-api run fal-ai/flux/schnell -d prompt='a red cube'`, or `--input in.json` (`-` reads stdin) for nested inputs; `-d` sets string fields on top. It polls every `--poll` seconds (default 5) for up to `--wait` (default 600, at most 1500, under the Bash tool's 30-minute ceiling). |
+| Long job | `fal-api submit <endpoint> --input in.json` prints `request_id`; then `fal-api status <endpoint> <id> --logs` and `fal-api result <endpoint> <id>`. |
+| Cancel | `fal-api cancel <endpoint> <id>`; a request that already finished counts as success. |
+
+Rules that bite on the first call:
+
+- **Pass the full model id to every verb.** Submission goes to the whole id
+  (`fal-ai/kling-video/o3/pro/video-to-video/edit`); status, result and cancel
+  go to its first two segments (`fal-ai/kling-video/requests/<id>`), and the
+  wrapper builds both from the id you give. Asking for status under the full
+  id answers 405 (observed for four deep ids on 2026-10-23).
+- **A `timeout` leaves the job running and billing.** The error carries the
+  `request_id` and the `status` and `result` commands to continue; collect it
+  or cancel it. `model_failed` means fal finished the request with an error
+  (its `error` and `error_type` are in the output).
+- **Submissions are sent once.** A 5xx or transport failure on `submit` (or
+  `run`'s submit) is not retried, because fal may already have queued it:
+  check fal.ai/dashboard/requests before submitting again. Reads retry
+  transient failures; a 429 is retried everywhere.
+- **`billing`** (HTTP 402, or a 403 whose message says balance, locked,
+  billing, credit, top up, payment or insufficient) means top up at fal.ai/dashboard/billing; retrying will not help.
+  The mapping is inferred from those words: fal's real out-of-credit body has
+  not been seen yet, so a plain `forbidden` may be the same condition.
+- **The key goes only to fal's hosts.** It is sent to `queue.fal.run`,
+  `api.fal.ai` and `rest.fal.ai` only, the CDN token only to `v3.fal.media`,
+  and never through a redirect (`redirect_refused`). Queue URLs are built from
+  the endpoint and a checked request id, never taken from a response.
+  `fal_webhook` is refused: it would send the output to an arbitrary URL. All
+  output is scrubbed of the key.
+- **Platform API writes need `--confirm-destructive`.** Under `api`, GET and
+  the pricing estimate POST run as-is; every other write (keys, secrets,
+  compute, apps) is refused before any key read unless the flag is given,
+  spelled in full, and the shell guard prompts on it. The flag is an
+  invocation guard, not human approval: get the operator's word first.
+- **Exit codes:** 0 success, 1 fal or the credential chain refused (read
+  `error.code`: `auth_failed`, `not_found`, `wrong_path`, `invalid_input`,
+  `rate_limited`, `billing`, `forbidden`, `server_error`, `timeout`,
+  `model_failed`, `credential_unavailable`, ...), 2 invalid input or a missing
+  confirmation. `credential_unavailable` means bws failed to answer: retry,
+  never re-seed.
+
 ## Credentials and permissions
 
 - GSC and GA4 use the same service-account credential chain (see Per-host
@@ -974,6 +1037,12 @@ Rules that bite on the first call:
   `secrets.sh seed VAST_API_KEY`. The agent ssh key `vastai-agent@wsl-host`
   is `~/.ssh/vastai_ed25519`; `vast-ssh` uses it by
   default.
+- `fal-api` credential resolution order: env (`FAL_KEY`) → **bws
+  (canonical, key `FAL_KEY`)** → `~/.secrets`; `fal-api --where` names the
+  candidates and never reads the value. The stored key uses fal's Full access
+  preset (the ADMIN scope), all models, no expiry. Rotation is dashboard-only
+  (fal.ai/dashboard/keys): mint the new key, replace the bws value, delete
+  the old key there.
 - Firecrawl has TWO live credentials and neither is in bws yet:
   `FIRECRAWL_API_KEY` in `~/.secrets` (the official `firecrawl` CLI reads it
   from the environment; `firecrawl --status` prints the auth source,
@@ -1101,10 +1170,10 @@ Every deployed copy is a **symlink**, so edits to the versioned source take
 effect immediately — no re-install step. `lib/manifest.sh`'s
 `DOTFILES_LINKS` maps each wrapper (`bin/gsc`, `bin/dfs`,
 `bin/exa-cli`, `bin/firecrawl-cli`, `bin/ga4`,
-`bin/discord-cli`, `bin/resend-cli`, `bin/stripe-api`, `bin/posthog-api`, `bin/supabase-api`, `bin/vastai`, `bin/vast-ssh`) to `~/.local/bin/`, applied by `install.sh` through
+`bin/discord-cli`, `bin/resend-cli`, `bin/stripe-api`, `bin/posthog-api`, `bin/supabase-api`, `bin/fal-api`, `bin/vastai`, `bin/vast-ssh`) to `~/.local/bin/`, applied by `install.sh` through
 `lib/link.sh` as a direct symlink into the repo checkout. Separately,
 `sync.sh` symlinks the whole `bin` directory to
-`~/.claude/bin` (not on PATH), so `gsc.py`, `ga4.py`, `discord_cli.py`, `resend_cli.py`, `stripe_api.py`, `posthog_api.py`, `supabase_api.py`, `dfs.py`, and `exa.py` resolve
+`~/.claude/bin` (not on PATH), so `gsc.py`, `ga4.py`, `discord_cli.py`, `resend_cli.py`, `stripe_api.py`, `posthog_api.py`, `supabase_api.py`, `fal_api.py`, `dfs.py`, and `exa.py` resolve
 back into the checkout the same way. `resend-cli` additionally needs the
 pinned vendor prefix from `scripts/resend-cli-install.sh install`
 (see "Resend" above); the wrapper's `--where` says whether it is converged.
