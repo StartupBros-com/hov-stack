@@ -1,0 +1,11 @@
+{
+  "name": "read-ceiling-pager",
+  "version": "0.1.0",
+  "description": "A Read whose window would exceed Claude Code's token cap is clamped to the lines that fit, and the result says where to continue. Turns a failed round into a successful partial read with an explicit continuation.",
+  "author": {
+    "name": "StartupBros / House of Vibe",
+    "url": "https://houseofvibe.ai"
+  },
+  "license": "MIT",
+  "keywords": ["house-of-vibe", "claude-code", "mod", "read", "pagination", "tokens"]
+}

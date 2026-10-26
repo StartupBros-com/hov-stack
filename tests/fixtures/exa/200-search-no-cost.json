@@ -1,0 +1,12 @@
+{
+  "requestId": "req_fixture_search_no_cost",
+  "results": [
+    {
+      "id": "result-1",
+      "title": "No Cost Result",
+      "url": "https://nocost.example/page",
+      "highlights": ["A highlight without a cost field."]
+    }
+  ],
+  "searchTime": 12.0
+}

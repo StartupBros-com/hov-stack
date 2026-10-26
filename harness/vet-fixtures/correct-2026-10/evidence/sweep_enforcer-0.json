@@ -1,0 +1,46 @@
+{
+ "results": [
+  {
+   "cluster": "Prove tests and guards are not vacuous (mutation, planted negatives, precondition reached)",
+   "verdict": "REFUTED",
+   "enforcer": "none (claimed check-migration-code-coupling.mjs does not exist)",
+   "evidence": "No file named check-migration-code-coupling* exists in the worktree. The name appears only in memory notes. None of the 16 PreToolUse hooks (hooks/PreToolUse/) checks for vacuous tests. The behaviour is prose and review practice."
+  },
+  {
+   "cluster": "Label measured vs inferred; report only observed state; verify delegated or stale claims",
+   "verdict": "REFUTED",
+   "enforcer": "none (claimed sync-install-smoke.test.sh:534-543 is unrelated)",
+   "evidence": "tests/sync-install-smoke.test.sh:525-543 tests the EnterPlanMode deny refusal in sync push, not `rent-check inventory --strict`. rent-check is not referenced in tests or bin; it appears only in docs and one workflow line unrelated to the claim. Even if it existed, a stale-checkout check would cover one note (verify-stale-memory-architecture-claims), not the cluster. Nothing blocks unlabeled inference or unverified subagent counts."
+  },
+  {
+   "cluster": "Guard/hook/dcg false positives and workarounds (heredoc, mktemp, bypass flags)",
+   "verdict": "PARTIAL",
+   "enforcer": "hooks/PreToolUse/git-guard.js:517-537; tests/dcg-worktree-shapes-guard.test.sh; sync.sh:479 guard_memory_copy",
+   "evidence": "These enforcers exist and fire. git-guard.js:517-537 honors ALLOW_DESTRUCTIVE_GIT=1 for its own guard only and says dcg still blocks, which is what allow-destructive-git-does-not-bypass-dcg describes. scripts/dcg-contract/expect-blocked.txt:51 pins the dcg rule redirect-truncate-dynamic-path. dcg-worktree-shapes-guard.test.sh runs in CI (harness-tests.yml:793-794). sync.sh:479 guard_memory_copy now quarantines per file instead of refusing the whole push. shape-rewrite.js:1572 handles the glued `SCRATCH=$(mktemp)` form. But this cluster is about false positives and workarounds. These are fixes and regression tests, not enforcement of an operator behaviour. hook-rejected-compound-rerun-every-part is prose only."
+  },
+  {
+   "cluster": "Stop over-investing in advisory/lint review; ship capability before instruments",
+   "verdict": "REFUTED",
+   "enforcer": "none in this harness (claimed ESLint bulk suppressions live in app repos)",
+   "evidence": "ESLint bulk suppressions are a tool in product repos, not in this dotfiles harness. In this repo, `eslint-suppressions` and `bulk-suppressions` appear only in docs/vets and an experiments file, not in a hook, test or workflow. Bulk suppressions would also only freeze lint debt. They would not enforce the behaviours 'ship capability before instruments' or 'freeze review loops'. No hook or test checks review-loop effort."
+  },
+  {
+   "cluster": "Memory-dream consolidation pipeline lessons",
+   "verdict": "PARTIAL",
+   "enforcer": "scripts/memory-audit.py:832-852,923-926 plus tests/test_memory_audit.py:852 test_index_over_budget_warns",
+   "evidence": "The index-budget lesson has an enforcer, but it is advisory. memory-audit.py emits a `WARN <project>: MEMORY.md at N/200 lines` line at >=70% of the load cap. The summary key is `index_over_budget`, not the claimed `index_over_cap`, and the note's `Name==stem is now a build refusal` claim found no matching code. A regression test covers the warning, but the audit never blocks. The eval-methodology and verification-pipeline lessons are prose only. I did not confirm that test_memory_audit.py runs in CI (grep of harness-tests.yml for it returned nothing)."
+  },
+  {
+   "cluster": "Check git status before pulling in a launchpad; never bypass freshen refusal",
+   "verdict": "CONFIRMED",
+   "enforcer": "scripts/launchpad-freshen.sh:105-138",
+   "evidence": "launchpad-freshen.sh refuses to touch a launchpad that has rebase/merge in progress (line 106). It also refuses one with tracked modifications (line 117-118, 'not touched; rescue to a branch'), one with recent unpushed work (line 126-128), and one that cannot switch to the default branch (line 134-136). It only runs `git switch` after those checks pass. tests/launchpad-freshen-diagnosis.test.sh runs in CI (harness-tests.yml:1051-1052). Limits: the refusals print WARN and return, so they are script refusals rather than agent-blocking hooks. Nothing stops an agent from running `git pull` by hand in a launchpad. The script covers the freshen path, which is the failure the notes describe."
+  },
+  {
+   "cluster": "Vet skills one by one; separate real risk from permission-gated nitpicks; retire vs demote",
+   "verdict": "REFUTED",
+   "enforcer": "none",
+   "evidence": "The cluster is marked prose-only, with no claimed enforcer. I found no hook, test or CI step that checks skill-vetting order or the retire-versus-demote distinction. These are judgment guidance in memory notes."
+  }
+ ]
+}

@@ -1,0 +1,19 @@
+[Unit]
+Description=Weekly global skills updates
+OnFailure=harness-unit-failure-alert@%n.service
+
+[Service]
+Type=oneshot
+TimeoutStartSec=35m
+Environment=PATH=%h/.local/bin:%h/.local/share/mise/shims:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+# No network-online.target exists in the user manager, so
+# readiness is this bounded probe of registry.npmjs.org, the host
+# update-skills.sh asks first (npx skills@latest). The leading - keeps the
+# script's own contract on the deadline: npx runs and its exit is the
+# unit's, so a failure pages. ExecStartPre time counts against
+# TimeoutStartSec, which is 35m so update-skills.sh keeps the 30m it had
+# before the probe existed even when the whole wait is spent.
+ExecStartPre=-%h/.claude/scripts/net-ready.sh --wait 300 --url https://registry.npmjs.org/
+ExecStart=%h/.claude/scripts/update-skills.sh
+Nice=10
+IOSchedulingClass=idle

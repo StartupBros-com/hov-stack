@@ -1,0 +1,20 @@
+{
+  "_comment": "Field-faithful subset of better-ccflare's GET /v1/models (route-profile discovery: id + display_name only) and GET /api/accounts (codex rows) as observed 2026-09-05 after the codex-pool-astra profile went live. Profile ids follow the codex-pool-<tier> convention; the tier is ranked against the live catalog by slug suffix, never by a name in code.",
+  "models": {
+    "data": [
+      { "id": "claude-bccf-route-acct-a-sol[1m]", "display_name": "GPT-5.6 Sol · acct-a" },
+      { "id": "claude-bccf-route-grok-primary", "display_name": "Grok 4.6 · grok" },
+      { "id": "claude-bccf-route-codex-pool-sol", "display_name": "Codex pool: GPT-5.6 Sol" },
+      { "id": "claude-bccf-route-codex-pool-astra[1m]", "display_name": "Codex pool: GPT-6 Astra (all Pro accounts, 1M)" },
+      { "id": "claude-bccf-route-codex-pool-nosuchtier", "display_name": "a pool whose tier is not in the catalog" }
+    ],
+    "has_more": false
+  },
+  "accounts": [
+    { "name": "acct-c", "provider": "anthropic", "paused": false, "requiresReauth": false, "rateLimitStatus": "allowed (38m)", "priority": 30 },
+    { "name": "acct-b", "provider": "codex", "paused": false, "requiresReauth": false, "rateLimitStatus": "OK", "priority": 30 },
+    { "name": "acct-d", "provider": "codex", "paused": false, "requiresReauth": false, "rateLimitStatus": "usage_exhausted (3985m)", "priority": 30 },
+    { "name": "acct-e", "provider": "codex", "paused": true, "requiresReauth": false, "rateLimitStatus": "OK", "priority": 30 },
+    { "name": "grok", "provider": "xai", "paused": false, "requiresReauth": false, "rateLimitStatus": "allowed", "priority": 50 }
+  ]
+}

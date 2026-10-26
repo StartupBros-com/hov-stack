@@ -1,0 +1,4 @@
+{
+  "description": "loop-breaker: counts identical failing tool calls per agent, hints then refuses, and draws the face band above the prompt",
+  "modules": ["./register.tsx"]
+}

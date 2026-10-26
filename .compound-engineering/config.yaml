@@ -1,0 +1,12 @@
+# Issue #1345: this ChatGPT-login Codex (~/.codex/config.toml,
+# preferred_auth_method=chatgpt) serves gpt-6-astra plus the 5.6 tiers of
+# sol, terra, and luna (~/.codex/models_cache.json, fetched 2026-09-23);
+# it does not serve gpt-6-luna, the plugin's hardcoded cross-model default
+# (skills/ce-code-review/references/cross-model-review.md:65 documents this
+# cross_model_model override key, compound-engineering 3.28.2 cache).
+cross_model_model: gpt-5.6-luna
+# The model pin above applies to whichever peer target resolves, and every
+# non-Codex route refuses a gpt-* value (the pass is skipped, never
+# substituted). Pinning the target keeps the two keys consistent; a peer named
+# in conversation still outranks both (cross-model-review.md, Step 1).
+cross_model_peer: codex

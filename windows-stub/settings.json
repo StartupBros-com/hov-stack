@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:github.com)",
+      "Bash(gh repo view:*)",
+      "Bash(gh repo clone:*)",
+      "Bash(gh auth:*)",
+      "Bash(gh repo create:*)",
+      "Bash(git remote set-url:*)",
+      "Bash(git push:*)"
+    ],
+    "deny": ["EnterPlanMode"],
+    "ask": [],
+    "disableAutoMode": "disable"
+  },
+  "enabledPlugins": {
+    "token-eater@hov": true,
+    "pro-gate@hov": true
+  },
+  "extraKnownMarketplaces": {
+    "hov": {
+      "source": {
+        "source": "git",
+        "url": "https://github.com/StartupBros-com/hov-stack.git"
+      }
+    }
+  },
+  "effortLevel": "xhigh",
+  "theme": "dark-daltonized",
+  "feedbackSurveyState": {
+    "lastShownTime": 1754087353919
+  }
+}

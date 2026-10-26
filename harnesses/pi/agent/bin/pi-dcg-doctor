@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+PI_HOME=${PI_AGENT_HOME:-$HOME/.pi/agent}
+EXPECTED_CHILD_EXTENSION=${DCG_CHILD_EXTENSION:-'~/.pi/agent/extensions/dcg-guard.ts'}
+CONFIG=$PI_HOME/extensions/subagent/config.json
+GUARD=$PI_HOME/extensions/dcg-guard.ts
+PI_SUBAGENTS_SOURCE=${PI_SUBAGENTS_SOURCE:-$HOME/SITES/pi-subagents}
+drift=0
+
+command -v jq >/dev/null 2>&1 || {
+  echo "DRIFT: jq is required to validate Pi DCG configuration" >&2
+  exit 1
+}
+
+[ -f "$GUARD" ] || {
+  echo "DRIFT: Pi DCG extension is missing: $GUARD" >&2
+  drift=1
+}
+
+if [ ! -f "$CONFIG" ] || ! jq -e --arg ext "$EXPECTED_CHILD_EXTENSION" '
+  (.defaultChildExtensions | type == "array" and length == 0)
+  and (.requiredChildExtensions | type == "array" and index($ext) != null)
+' "$CONFIG" >/dev/null 2>&1; then
+  echo "DRIFT: Pi child sandbox/required DCG extension is not configured exactly" >&2
+  drift=1
+fi
+
+# The required extension must be enforced in pi-subagents itself so project,
+# package, and user agents all receive it even with explicit extension lists.
+#
+# NOT-APPLICABLE vs BROKEN. install.sh's header states that a skip must be
+# explicit and logged, never auto-detected, because auto-detection can mask a
+# genuinely broken box. That reasoning holds for a checkout that EXISTS and has
+# lost the wiring -- that is a regression and stays fatal below. It does not
+# hold for a machine that has no pi-subagents checkout at all: there is no
+# wiring to regress, and treating absence as drift made install.sh (set -e)
+# abort outright on every machine that does not develop pi-subagents. Observed
+# 2026-08-27 bootstrapping satellite-host; CI never saw it because install-smoke.yml
+# passes INSTALL_SKIP_PI_DOCTOR=1. The skip is still explicit and still logged --
+# it is simply keyed on an observable fact rather than on the operator
+# remembering an undocumented environment variable.
+if [ ! -d "$PI_SUBAGENTS_SOURCE" ]; then
+  echo "SKIP: pi-subagents checkout absent, nothing to verify: $PI_SUBAGENTS_SOURCE"
+  echo "      (set PI_SUBAGENTS_SOURCE to point at it, if this machine should have one)"
+elif ! grep -Fqs 'requiredChildExtensions?: string[];' "$PI_SUBAGENTS_SOURCE/src/shared/types.ts" \
+  || ! grep -Fqs 'resolveRequiredChildExtensions(config)' "$PI_SUBAGENTS_SOURCE/src/runs/foreground/subagent-executor.ts" \
+  || ! grep -Fqs '...requiredExtensions' "$PI_SUBAGENTS_SOURCE/src/runs/foreground/subagent-executor.ts"; then
+  echo "DRIFT: live pi-subagents lacks requiredChildExtensions support: $PI_SUBAGENTS_SOURCE" >&2
+  drift=1
+fi
+
+if [ "$drift" -ne 0 ]; then
+  exit 1
+fi
+
+echo "Pi DCG wiring healthy; required extension applies across all child discovery roots"

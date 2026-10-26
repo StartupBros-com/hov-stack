@@ -1,0 +1,15 @@
+#!/bin/sh
+# vast-ssh from Git Bash on Windows (Claude Code's Bash tool): hop into the WSL
+# wrapper, which owns the agent ssh key, the sibling vastai wrapper and every
+# guard. Nothing vast.ai is installed or stored on the Windows side.
+# Deployed as a real copy into %USERPROFILE%\.local\bin by install.sh
+# (DOTFILES_COPIES in lib/manifest.sh). Context: harness/data-source-clis.md.
+#
+# The hop runs `sh -c` inside WSL so $HOME resolves there, in the WSL account's
+# own home: no user name is spelled here, and "$@" passes every argument
+# untouched (an argv probe kept spaces, = and /-leading arguments, 2026-10-22).
+# MSYS_NO_PATHCONV: Git Bash otherwise rewrites any argument that starts with /
+# (a remote path after --) into a C:\Program Files\Git\... path before wsl.exe sees it.
+# The single quotes are the point: $HOME and "$@" must expand in WSL's sh, not here.
+# shellcheck disable=SC2016
+MSYS_NO_PATHCONV=1 exec wsl.exe -e sh -c 'exec "$HOME/.local/bin/vast-ssh" "$@"' vast-ssh "$@"

@@ -1,0 +1,131 @@
+#!/usr/bin/env bash
+# open-deliverable — show a file or URL in the operator's real browser on whatever host this is.
+#
+# Usage: open-deliverable [--print] <path-or-url>
+#   --print   resolve the branch and URL, print them, launch nothing
+#
+# Exit codes: 0 launched (or printed with --print), 2 usage / missing file,
+#             3 no viewer on this host (headless or SSH, or the only launcher failed): the path
+#               and URL are printed so the caller can report them; nothing else to do here.
+#
+# Why this exists (dotfiles #908): under Claude Code, `open`/`xdg-open` exit 0 and show nothing
+# (the session env carries BROWSER=true), Windows' default browser on the WSL host is Edge, and
+# the wsl-cdp bridge is attached to a separate agent instance of Brave, not the operator's daily
+# one. Skills call this by name after writing a deliverable; no skill carries per-host logic.
+#
+# Override: DELIVERABLE_BROWSER=<executable or macOS app name> forces a browser on any host,
+# including a headless one (an executable there is launched as given).
+#
+# "launched:" means the browser process was handed the URL and detached; a detached launch
+# cannot confirm rendering, so the caller still reports the path.
+set -u
+
+print_only=0
+case "${1:-}" in
+  --print) print_only=1; shift ;;
+  -h|--help) sed -n '2,19p' "$0"; exit 0 ;;
+esac
+target=${1:-}
+[ -n "$target" ] || { echo "usage: open-deliverable [--print] <path-or-url>" >&2; exit 2; }
+
+abs_path() { ( cd "$(dirname "$1")" 2>/dev/null && printf '%s/%s\n' "$(pwd -P)" "$(basename "$1")" ); }
+
+# Percent-encode a filesystem path for a file:// URL: keep unreserved characters and '/',
+# encode everything else (space, #, ?, %, quotes, non-ASCII bytes) so the browser sees one path.
+url_encode_path() {
+  local s=$1 out="" i c
+  for (( i = 0; i < ${#s}; i++ )); do
+    c=${s:i:1}
+    case $c in
+      [A-Za-z0-9._~/-]) out+=$c ;;
+      *) out+=$(printf '%%%02X' "'$c") ;;
+    esac
+  done
+  printf '%s' "$out"
+}
+
+# A file:// URL naming a local path is a file, so the WSL rewrite below applies to it too.
+case $target in
+  file://localhost/*) target=${target#file://localhost} ;;
+  file:///*)          target=${target#file://} ;;
+esac
+
+if printf '%s' "$target" | grep -Eq '^[a-zA-Z][a-zA-Z0-9+.-]*://'; then
+  kind="url"; abs=""; url=$target
+else
+  [ -e "$target" ] || { echo "open-deliverable: no such file: $target" >&2; exit 2; }
+  kind="file"; abs=$(abs_path "$target")
+  [ -n "$abs" ] || { echo "open-deliverable: cannot resolve $target" >&2; exit 2; }
+  url="file://$(url_encode_path "$abs")"
+fi
+
+# Detached launch: never blocks the caller, never inherits our stdio. LAUNCH_CWD lets the WSL
+# branch start from a Windows-visible directory (interop warns on a Linux cwd).
+LAUNCH_CWD=/
+launch() { ( cd "$LAUNCH_CWD" 2>/dev/null || cd /; setsid nohup "$@" >/dev/null 2>&1 & ); }
+
+os=$(uname -s 2>/dev/null || echo unknown)
+is_wsl=0
+if [ -n "${WSL_DISTRO_NAME:-}" ] || grep -qi microsoft /proc/version 2>/dev/null; then is_wsl=1; fi
+
+if [ "$os" = Darwin ]; then
+  app=${DELIVERABLE_BROWSER:-}
+  if [ -z "$app" ] && [ -d "/Applications/Brave Browser.app" ]; then app="Brave Browser"; fi
+  if [ "$print_only" = 1 ]; then echo "would open: $url via macos ${app:-default-browser}"; exit 0; fi
+  if [ -n "$app" ]; then
+    open -a "$app" "$url" || { echo "open-deliverable: could not open $app, using the default browser" >&2; app=""; open "$url"; }
+  else
+    open "$url"
+  fi || { echo "open-deliverable: open failed for $url" >&2; [ "$kind" = file ] && echo "$abs"; exit 3; }
+  echo "opened: $url via macos ${app:-default-browser}"; exit 0
+
+elif [ "$is_wsl" = 1 ]; then
+  distro=${WSL_DISTRO_NAME:-}
+  if [ -z "$distro" ] && [ -r /proc/1/environ ]; then
+    distro=$(tr '\0' '\n' < /proc/1/environ | grep -E '^WSL_DISTRO_NAME=' | head -1 | cut -d= -f2)
+  fi
+  if [ "$kind" = file ]; then url="file://wsl.localhost/${distro:-Ubuntu}$(url_encode_path "$abs")"; fi
+  exe=${DELIVERABLE_BROWSER:-}
+  if [ -z "$exe" ]; then
+    for c in /mnt/c/Users/*/AppData/Local/BraveSoftware/Brave-Browser/Application/brave.exe \
+             "/mnt/c/Program Files/BraveSoftware/Brave-Browser/Application/brave.exe"; do
+      [ -x "$c" ] && { exe=$c; break; }
+    done
+  fi
+  LAUNCH_CWD=/mnt/c
+  if [ -n "$exe" ]; then
+    if [ "$print_only" = 1 ]; then echo "would open: $url via wsl $(basename "$exe")"; exit 0; fi
+    launch "$exe" "$url"
+    echo "launched: $url via wsl $(basename "$exe")"; exit 0
+  fi
+  # No Brave: Windows' default browser (Edge here), better than nothing.
+  if [ "$kind" = file ]; then win=$(wslpath -w "$abs" 2>/dev/null) || win=""; else win=$url; fi
+  [ -n "$win" ] || { echo "open-deliverable: wslpath could not translate $abs" >&2; echo "$abs"; exit 3; }
+  if [ "$print_only" = 1 ]; then echo "would open: $win via wsl cmd.exe start (default browser)"; exit 0; fi
+  if ( cd /mnt/c 2>/dev/null || cd /; cmd.exe /c start "" "$win" >/dev/null 2>&1 ); then
+    echo "launched: $win via wsl cmd.exe start (default browser)"; exit 0
+  fi
+  echo "open-deliverable: cmd.exe start failed for $win" >&2; [ "$kind" = file ] && echo "$abs"; exit 3
+
+elif [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]; then
+  bin=${DELIVERABLE_BROWSER:-}
+  if [ -z "$bin" ]; then
+    for c in brave-browser brave google-chrome chromium chromium-browser firefox; do
+      command -v "$c" >/dev/null 2>&1 && { bin=$c; break; }
+    done
+  fi
+  if [ "$print_only" = 1 ]; then echo "would open: $url via linux ${bin:-xdg-open}"; exit 0; fi
+  if [ -n "$bin" ]; then launch "$bin" "$url"; else launch env -u BROWSER xdg-open "$url"; fi
+  echo "launched: $url via linux ${bin:-xdg-open}"; exit 0
+
+else
+  # Headless: only an explicit, executable override can launch anything here.
+  if [ -n "${DELIVERABLE_BROWSER:-}" ] && command -v "$DELIVERABLE_BROWSER" >/dev/null 2>&1; then
+    if [ "$print_only" = 1 ]; then echo "would open: $url via headless $(basename "$DELIVERABLE_BROWSER")"; exit 0; fi
+    launch "$DELIVERABLE_BROWSER" "$url"
+    echo "launched: $url via headless $(basename "$DELIVERABLE_BROWSER")"; exit 0
+  fi
+  echo "no viewer on this host (no display, not WSL, not macOS): $url" >&2
+  [ "$kind" = file ] && echo "$abs"
+  exit 3
+fi

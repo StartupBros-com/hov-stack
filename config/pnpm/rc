@@ -1,0 +1,116 @@
+# pnpm global config. Symlinked to ~/.config/pnpm/rc by install.sh (lib/manifest.sh).
+#
+# Adopted into the repo 2026-08-07. Before that this was a plain untracked file from
+# 2026-03-20 sitting in a config layer nothing installed, linked, diffed or backed up —
+# so the malformed allowlist below went unnoticed for months. That is the exact defect
+# class lib/manifest.sh was written for; it just never covered pnpm.
+
+# pnpm expands ${HOME} in rc values.
+global-bin-dir=${HOME}/.local/bin
+
+# --- build-script allowlist --------------------------------------------------
+#
+# pnpm 10 blocks dependency install/preinstall/postinstall scripts by default. Only the
+# packages named here may run one.
+#
+# THE SYNTAX IS LOAD-BEARING AND FAILS SILENTLY. This file previously held:
+#
+#     only-built-dependencies="['@tailwindcss/oxide','@sentry/cli','supabase','puppeteer']"
+#
+# pnpm parsed that as ONE OPAQUE STRING, not a four-element array, so the allowlist
+# approved ZERO packages and every build script on the box stayed blocked. There is no
+# warning, no parse error, no log line — a wrong value here is indistinguishable from a
+# correct one until something fails to build.
+#
+# Only two forms parse as a real array (verified empirically against pnpm 10.33.2, and
+# against its bundled source: types.js declares this key as `[String]`):
+#   1. repeated `only-built-dependencies[]=pkg` lines   <- used here, one-line diffs
+#   2. single-quoted bare JSON: only-built-dependencies='["a","b"]'
+# Comma-separated and unquoted-JSON forms both silently degrade back to a string.
+#
+# VERIFY AFTER ANY EDIT — do not trust this file by eye:
+#     pnpm config get only-built-dependencies --json
+# It must print a real JSON array. The non-json form printing pnpm's "would display an
+# array as comma-separated list" WARN is the positive signal that it parsed as an array.
+#
+# This rc is also the ONLY place that works for global installs: for any `--global`
+# command pnpm deletes workspaceDir and forcibly overwrites manifest-derived build
+# settings with the rc-derived value, so onlyBuiltDependencies in the global package.json
+# or a pnpm-workspace.yaml beside it is inert. Don't "fix" it there.
+only-built-dependencies[]=@tailwindcss/oxide
+only-built-dependencies[]=@sentry/cli
+only-built-dependencies[]=supabase
+only-built-dependencies[]=puppeteer
+# Added 2026-08-07. @ast-grep/cli ships a 261-byte shim as its `ast-grep` entrypoint and
+# relies on postinstall.js hardlinking the real ~48MB binary from its platform package
+# over the top. With builds blocked the shim survived, and `ast-grep` exited 1 with a
+# decoy message in 43 distinct agent sessions across 27 checkouts before anyone reported
+# it (nobody did — grep is a perfect silent fallback). Its postinstall is a pure local
+# hardlink-or-copy: no network, no compiler, deterministic. Safe to allow.
+only-built-dependencies[]=@ast-grep/cli
+#
+# THE RULE FOR ADDING TO THIS LIST: allow a package whose install script is deterministic and
+# local (unpack, hardlink, copy). Do NOT allow one that fetches a prebuilt native module or
+# falls back to a node-gyp compile — that turns a silent degradation into a possible hard
+# install failure on a box without the toolchain.
+#
+# The worked example was keytar and node-pty. Both were broken here, both were left out on
+# exactly that reasoning, and both left with `pnpm rm -g @google/gemini-cli` on 2026-08-07 —
+# they were its exclusive optionalDependencies and nothing else on the box wanted them.
+# Neither is installed now, so neither needs an entry; the rule is what survives.
+
+# --- supply-chain release cooldown -------------------------------------------
+#
+# Refuse packages published less than 1440 minutes (24h) ago, so a compromised release
+# has to survive a detection window before it can install here. 1440 is what a private app repository's
+# pnpm-workspace.yaml already uses, and is the default pnpm 11 ships on by default.
+#
+# SAME SYNTAX TRAP AS THE ALLOWLIST ABOVE, different shape. Measured on pnpm 10.33.2:
+#     minimum-release-age=1440   ->  pnpm config get minimumReleaseAge  ->  1440
+#     minimumReleaseAge=1440     ->  pnpm config get minimumReleaseAge  ->  undefined
+# The camelCase spelling is accepted, stored, and completely inert. No warning.
+#
+# VERIFY AFTER ANY EDIT — do not trust this file by eye:
+#     pnpm config get minimumReleaseAge      # must print 1440, never undefined
+minimum-release-age=1440
+#
+# WHAT THIS ACTUALLY DOES — all four measured against the live registry on 10.33.2,
+# because the two failure modes look nothing alike:
+#   * An EXACT pin that is too young hard-fails: ERR_PNPM_NO_MATURE_MATCHING_VERSION.
+#   * A RANGE or dist-tag that is too young silently resolves one release back, exit 0,
+#     with only pnpm's generic "(1.2.3 is available)" note — which is byte-identical to
+#     an ordinary outdated-dependency hint and says nothing about the cooldown.
+#   * `pnpm dlx tool@latest` also silently serves the older release, and prints NOTHING
+#     at all. That is the quietest path here: a script expecting today's release gets
+#     yesterday's with no signal. Nothing on this box currently does that (the one
+#     `pnpm dlx` in hooks/lib/package-manager.js is a descriptor-table string,
+#     not a live invocation), but check that before adding one.
+#   * `pnpm install --frozen-lockfile` skips resolution entirely, so the cooldown is
+#     NOT evaluated and CI is unaffected. The corollary matters: already-locked deps get
+#     no retroactive protection. This guards new adds and dependency bumps, nothing else.
+#
+# SCOPE: a global value here applies to `pnpm install` in any project with no local
+# override, to `pnpm add -g`, and to `pnpm dlx` — all three verified by real installs,
+# not by reading config. A project's own pnpm-workspace.yaml fully OVERRIDES this value
+# in both directions (a project setting 0 disables it; a project setting more is stricter),
+# so a private app repository keeps deciding for itself and its matching 1440 changes nothing there.
+#
+# ESCAPE HATCH for a genuine urgent install inside the window — verified working:
+#     pnpm add -g --config.minimum-release-age=0 <pkg>
+# Prefer that over editing this file. pnpm gives no hint that this flag exists or that a
+# version was ever filtered, so a future operator will not find it without this comment.
+#
+# If some package ever needs a standing exemption, the exclude list takes the SAME
+# bracket-suffix form as the allowlist above, and degrades the same silent way:
+#     minimum-release-age-exclude[]=some-pkg     # parses as a real array
+#     minimum-release-age-exclude=some-pkg       # parses as a bare string, protects nothing
+# Deliberately empty right now: every standing exemption is a permanent hole, and the
+# per-invocation flag above covers the real urgent case without leaving one.
+#
+# THE ONE AUTOMATED PER-RUN EXCEPTION: scripts/codex-update.sh (dotfiles#1377)
+# adopts stable Codex releases the day they ship. It never edits this file and never
+# sets the age to 0: each install gets a private npm_config_userconfig rc naming EXACT
+# @openai/codex versions — the candidate plus every native alias its manifest declares,
+# because pnpm checks all of them, not just the host's. Measured 2026-09-26 on 10.33.2:
+# the --config.minimum-release-age-exclude CLI forms are silently ignored and a cwd
+# .npmrc does not reach `add -g`; under the userconfig override this file still applies.

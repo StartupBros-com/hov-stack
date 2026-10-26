@@ -1,0 +1,452 @@
+# dcg configuration
+# https://github.com/Dicklesworthstone/destructive_command_guard
+#
+# Created 2026-08-05 during a permission-friction audit. Rationale:
+# routine agentic work (feature-branch push, chmod +x, docker exec into the
+# known local dev containers) runs without prompting, so DCG is the mechanical
+# backstop for the genuinely destructive cases rather than a second prompt tier.
+#
+# Measured before enabling these packs (dcg 0.6.5, dry-run):
+#   docker system prune -a ............ ALLOWED  -> blocked by containers.docker
+#   docker compose down -v ............ ALLOWED  -> blocked by containers.compose
+#   psql -c "DROP TABLE ..." .......... ALLOWED  -> blocked by database.postgresql
+#
+# Known gaps these packs do NOT close (verified allowed with all packs on) —
+# do not treat DCG as an authorization layer for these:
+#   docker run --privileged -v /:/host          ALLOWED
+#   docker run -v /var/run/docker.sock:...      ALLOWED
+#   docker compose -f /tmp/arbitrary.yml up -d  ALLOWED
+#   chmod 777 / a+rwx / 0777 / 1777             ALLOWED (settings deny covers these)
+#   psql -c "DELETE FROM t"  (no WHERE)         ALLOWED
+# `docker run` and `docker compose` therefore remain permission-prompted.
+
+[general]
+color = "auto"
+verbose = false
+
+# Re-register the DCG hook in settings.json on every invocation. The statusline
+# ad daemon rewrites settings.json sub-second and Claude Code caches hooks at
+# session start, so without this a guard can silently stop firing mid-session.
+self_heal_hook = true
+
+# Overall hook evaluation budget. Raised from the 200ms default because the
+# heredoc scanner below is now fail-closed and must not run out of budget on
+# legitimately large inline scripts.
+hook_timeout_ms = 1000
+
+[packs]
+# `core` (core.filesystem + core.git) is always enabled implicitly.
+# system.disk was already active before this file existed — keep it listed so a
+# future edit cannot silently drop catastrophic device-operation coverage.
+#
+# Guard-coverage additions (davidondrej-skills audit, 2026-08-10):
+#   platform.github — gh repo/release/secret/ssh-key/variable delete, gh api
+#     DELETE, gh run cancel. Whole pack is set to policy mode "ask" below
+#     (not deny) because gh run cancel and gh api DELETE cleanup are
+#     documented legitimate workflows (see gh-tracking-and-claims.md /
+#     the single-slot-merge-gate + cancel-superseded-runs rules).
+#   strict_git — the only reason to enable this is to get 3 specific rule
+#     IDs registered (reflog-expire, gc-aggressive, push-mirror), pulled
+#     back to "deny" in [policy.rules] below. A 4th target (+refspec force
+#     push) is covered by this pack's push-force-any rule too, but that
+#     rule ALSO matches plain --force-with-lease — which core.git already
+#     allows deliberately — so push-force-any is left at the pack's "log"
+#     default and the +refspec case is closed instead via a narrow custom
+#     [overrides] block pattern further down. Every other strict_git rule
+#     (rebase, commit --amend, cherry-pick, add -A/., push-master/push-main)
+#     would break required, documented workflows (worktree
+#     rebase-on-checkpoint is CLAUDE.md Worktree-Lifecycle policy) — so the
+#     pack default is neutralized to "log" in [policy.packs].
+enabled = [
+  "core",
+  "system.disk",
+  "containers.docker",
+  "containers.compose",
+  "database.postgresql",
+  # Enabled 2026-08-29 after a forensic dig found an agent had applied a
+  # migration to a private app's PRODUCTION database from an unmerged worktree
+  # branch, unprompted. Its own transcript: "Applying the migration to
+  # production (applied-first, since the cron and webhook call these RPCs)."
+  # `dcg explain "supabase db push --linked"` returned ALLOW / "quick-rejected
+  # (no keywords)" because this pack was off, and that app's settings.local.json
+  # pre-allows `Bash(supabase db *)`, so nothing prompted either.
+  #
+  # Not a one-off: the same pre-merge apply happened for three other
+  # migrations inside 48h, and memory already recorded
+  # "six of one tracked issue's nine migrations were applied to prod BEFORE
+  # their PR even merged" plus the 2026-08-03 collision where a pre-merge apply
+  # consumed a version slot and orphaned a sibling PR. With dozens of
+  # worktrees able to reach the production database, this is a live race,
+  # not a hypothetical.
+  #
+  # Cost is low: the pack ships 35 SAFE patterns covering db diff/lint/dump,
+  # migration list/new/fetch, gen types, test db, status, and — critically —
+  # `db push --dry-run`. Only the 18 destructive verbs deny, and `dcg
+  # allow-once <code>` remains the operator escape for a deliberate apply.
+  "database.supabase",
+  "system.permissions",
+  "platform.github",
+  "strict_git",
+]
+disabled = []
+
+[policy.packs]
+"platform.github" = "ask"
+"strict_git" = "log"
+
+[policy.rules]
+"strict_git:reflog-expire" = "deny"
+"strict_git:gc-aggressive" = "deny"
+"strict_git:push-mirror" = "deny"
+# windows.filesystem is not in `enabled` above, yet dcg 0.15.2 loads it anyway.
+# Its windows-filesystem-semantic-unverified rule has a regex that can never
+# match (`\b\B`): it fires only from the hook's semantic layer, which `dcg
+# explain` does not run, so it cannot be reproduced there. In dcg's own block
+# log (pending_exceptions.jsonl, 105 blocks 2026-10-14T16:59Z to
+# 2026-10-15T16:45Z) it denied 8 commands, 7 of them python3/node heredoc
+# scripts run inside Linux repos; replayed through the hook with this line, 7
+# become ALLOW and the 8th is still denied by heredoc.shell:launcher-unverified.
+# One rule to log, not the pack disabled: disabling the pack drops every rule
+# in it. `Remove-Item -Recurse -Force` stays denied, by
+# core.filesystem:powershell-remove-item-recursive, which is not in this pack.
+# Of 20 Windows destructive forms replayed through the hook, the 13 denied are
+# denied by core.filesystem, windows.system or heredoc.shell rules, none by this
+# one, with or without this line.
+# KNOWN GAP, stated rather than implied: `cmd.exe /c` with rd, rmdir, del or
+# format (absolute cmd.exe path too), `powershell.exe -File <script>`, and
+# `robocopy /MIR` are ALLOWED with or without this line (measured on 0.15.2).
+"windows.filesystem:windows-filesystem-semantic-unverified" = "log"
+# strict_git:push-force-any deliberately NOT pulled back to deny: its pattern
+# is (--force|--force-with-lease|-f) OR (+refspec) OR'd together. Enabling it
+# would newly deny --force-with-lease, which core.git's OWN push-force-long
+# rule deliberately excludes via a negative lookahead ("(?![-a-z])") and
+# recommends in its suggestion text as the safe alternative to plain --force.
+# That would narrow an existing, intentional allowance as a side effect —
+# see the custom "+refspec"-only block override below instead, which closes
+# only the +refspec gap and leaves --force / --force-with-lease exactly as
+# core.git already (correctly) handles them.
+
+[overrides]
+# NB: the keys are `allow` / `block`. `allow_patterns` / `block_patterns` are
+# NOT the schema — dcg ignores them silently, so a rule written that way looks
+# installed and enforces nothing.
+#
+# MUST STAY EMPTY. `[overrides] allow` is a WHOLE-COMMAND bypass, not a
+# per-segment one: if the pattern matches anywhere, every rule is skipped for
+# the entire command, including the parts it never described.
+#
+# Measured 2026-08-05 while trying to re-allow the safe `git branch -d` that
+# 0.9.2 newly denies. The pattern was carefully scoped — anchored, with
+# lookaheads excluding `--force` so `-D` and `--delete --force` still denied,
+# 11/11 on the branch-flag matrix. It was still unsafe, because an allowed
+# prefix launders whatever follows it:
+#
+#   git branch -d merged && git reset --hard HEAD      -> ALLOWED
+#   git branch -d merged && git checkout -- src/       -> ALLOWED
+#   git branch -d merged && docker system prune -a     -> ALLOWED
+#
+# (`rm -rf /` and force-push survived as blocks, so the laundering is partial
+# and therefore even easier to miss.) No amount of tightening the pattern fixes
+# this — the flaw is in what an allow entry means, not in the regex.
+#
+# For a recurring false positive prefer `dcg allowlist add-command "<exact>"`,
+# which pins a complete command string and so cannot be extended with a
+# destructive suffix, or `dcg allow-once <code>` for a one-off. `[overrides]
+# block` (below) is unaffected: adding denials cannot launder anything.
+allow = []
+
+# containers.compose:down-volumes only fires when `down` sits IMMEDIATELY after
+# `compose`. Any global flag in between defeats it — including `-f prod.yml`,
+# which is the ordinary way to target a specific compose file, so the rule
+# misses exactly the case it exists for. Measured on 0.6.5: the bare form is
+# blocked, while `-f`, `--file`, `-p`, `--project-name`, `--profile`, `--ansi`,
+# `--progress`, `--project-directory` and the legacy `docker-compose` spelling
+# all sail through. (`rm -fsv` in the same pack tolerates intervening flags, so
+# this is a bug in that one rule's pattern, not a parser limitation.)
+#
+# These two patterns are position-independent. Verified: blocks all 14 bypass
+# variants, and 18 routine compose commands stay allowed — `down` without `-v`,
+# `up -d --verbose` (`-v\b` does not match `--verbose`), and
+# `down && up -d` across a separator all pass.
+block = [
+  { pattern = "docker[- ]compose\\s+.*\\bdown\\b.*(?:-v\\b|--volumes\\b)", reason = "compose down with volume removal destroys database volumes and user uploads permanently; drop the -v/--volumes flag, or list volumes first with docker volume ls" },
+  { pattern = "docker[- ]compose\\s+.*\\bdown\\b.*--rmi\\b", reason = "compose down --rmi deletes built images and forces a full rebuild; plain `docker compose down` stops containers without touching images" },
+
+  # Guard-coverage additions (davidondrej-skills audit, 2026-08-10). `[overrides] block` has no
+  # `mode`/severity field (confirmed via `dcg config schema`) — every entry
+  # here is unconditional hard deny; there is no way to make a custom
+  # override "ask" or "warn" short of authoring a full external pack YAML
+  # (packs.custom_paths) with its own severity field.
+
+  # Classic self-forking shell function bomb. Rust's regex crate has no
+  # backreferences, so this cannot enforce "same name 3x" the way the shell
+  # semantics do; it matches the structural shape (empty-arg function whose
+  # body is exactly "X | Y &") for the ':'-named canonical form and common
+  # word-named variants (bomb, fork, f...). An attacker using an unlisted
+  # name or a differently-shaped bomb (e.g. a background `while true` loop)
+  # is NOT caught by this pattern; a partial mitigation by design.
+  { pattern = "[:\\w][:\\w]*\\s*\\(\\s*\\)\\s*\\{\\s*[:\\w][:\\w]*\\s*\\|\\s*[:\\w][:\\w]*\\s*&\\s*;?\\s*\\}\\s*;\\s*[:\\w][:\\w]*", reason = "self-forking shell function (fork bomb) will exhaust the process table / memory and can hang or crash the host" },
+
+  # Closes two confirmed regex bugs/gaps in the built-in (disabled-by-default
+  # but would-be-enabled) system.permissions:chown-recursive-root rule:
+  #   1. its `/(?:$|bin|boot|...)\b` alternation can never match bare `/`
+  #      because `\b` requires a word/non-word transition, and both sides of
+  #      "/" at end-of-string are non-word — verified via `dcg dev
+  #      test-pattern`, 'chown -R x /' -> no match even with the rule's own
+  #      regex tested standalone.
+  #   2. `/home` is not in its protected-path list at all (only
+  #      bin/boot/dev/etc/lib/lib64/opt/proc/root/run/sbin/srv/sys/usr/var).
+  #   (dcg 0.15.2, measured 2026-10-15: its built-in rules now deny
+  #   `chown -R nobody /home`, `chown -R nobody:nogroup /` and, via chmod-777,
+  #   `chmod -R 777 /home`, so for those forms these entries are a second layer.
+  #   They are still the only rule that denies `chown -hR`, a trailing `-R`, and
+  #   a recursive chmod/chown of a path under /home such as /home/user/x.)
+  # chmod has the identical two bugs in system.permissions:chmod-recursive-root
+  # (same regex shape) — closed here too since it's the same failure class,
+  # not because chmod -R / was in the original target list.
+  #
+  # ONE COMMAND SEGMENT (2026-10-15). The first version used `.*` and a bare
+  # `-[rR]`, so it read across `&&` and `;`, and the `-r` inside any hyphenated
+  # word (`ce-code-review`, `--repo`, `review-run.sh`) counted as the recursive
+  # flag whenever a /home path came later in the line. In dcg's own block log (105 blocks,
+  # 2026-10-14T16:59Z to 2026-10-15T16:45Z) these four entries denied 8
+  # commands and none was a recursive chmod or chown: 5 were `chmod +x <file>`
+  # or `chmod 700 <tmp dir>` followed by another command, 3 only quoted the
+  # shape in a message or test string. Both lookaheads now read one command:
+  # an unquoted `|`, `;`, `&` or newline ends it, while a quoted string, a
+  # backslash escape or continuation, a one-level `$( )` or backtick
+  # substitution, and an `N>&M` or `&>` redirect each count as one unit, so a
+  # separator inside them does not. The recursive flag and the target must be
+  # in that one command, in either order, and the flag must be a whole
+  # short-option cluster containing r/R, or `--recursive`. Forms the first
+  # version let through that now deny: `chmod -fR 700 /home`,
+  # `chmod 700 /home -R`, `chmod 700 /home -R;` and `(chmod 700 /home -R)`.
+  # KNOWN GAPS, stated rather than implied: a quoted literal that contains the
+  # shape (a message naming "chmod -R" and "/home") can still deny, as 2 of the
+  # 8 still do: `\bchmod\b` matches inside the quotes, so the outcome depends
+  # on the quotes that follow; and a `$( )` nested two deep with `;` or `&` inside, placed
+  # before the target, ends the command early, so it is allowed.
+  { pattern = "\\bchown\\b(?=(?:\\\\(?:\\r?\\n|.)|\"(?:[^\"\\\\\\n]|\\\\.)*\"|'[^'\\n]*'|\\$\\([^()\\n]*\\)|`[^`\\n]*`|[0-9]*[<>]&-?[0-9]*|&>>?|[^|;&\\n\\\"'`\\\\])*\\s(?:-[A-Za-z]*[rR][A-Za-z]*|--recursive)(?=[\\s|;&)`]|$))(?=(?:\\\\(?:\\r?\\n|.)|\"(?:[^\"\\\\\\n]|\\\\.)*\"|'[^'\\n]*'|\\$\\([^()\\n]*\\)|`[^`\\n]*`|[0-9]*[<>]&-?[0-9]*|&>>?|[^|;&\\n\\\"'`\\\\])*\\s['\\\"]?/['\\\"]?(?=[\\s|;&)`]|$))", reason = "chown -R on bare root (/) — dcg's built-in chown-recursive-root rule has a regex bug (trailing \\b never matches after a bare slash at end of string) that lets this slip through; use an explicit subdirectory" },
+  { pattern = "\\bchown\\b(?=(?:\\\\(?:\\r?\\n|.)|\"(?:[^\"\\\\\\n]|\\\\.)*\"|'[^'\\n]*'|\\$\\([^()\\n]*\\)|`[^`\\n]*`|[0-9]*[<>]&-?[0-9]*|&>>?|[^|;&\\n\\\"'`\\\\])*\\s(?:-[A-Za-z]*[rR][A-Za-z]*|--recursive)(?=[\\s|;&)`]|$))(?=(?:\\\\(?:\\r?\\n|.)|\"(?:[^\"\\\\\\n]|\\\\.)*\"|'[^'\\n]*'|\\$\\([^()\\n]*\\)|`[^`\\n]*`|[0-9]*[<>]&-?[0-9]*|&>>?|[^|;&\\n\\\"'`\\\\])*\\s['\\\"]?/home\\b)", reason = "chown -R on /home is not in dcg's built-in protected-path list; recursively re-owning /home can lock out every user account" },
+  { pattern = "\\bchmod\\b(?=(?:\\\\(?:\\r?\\n|.)|\"(?:[^\"\\\\\\n]|\\\\.)*\"|'[^'\\n]*'|\\$\\([^()\\n]*\\)|`[^`\\n]*`|[0-9]*[<>]&-?[0-9]*|&>>?|[^|;&\\n\\\"'`\\\\])*\\s(?:-[A-Za-z]*[rR][A-Za-z]*|--recursive)(?=[\\s|;&)`]|$))(?=(?:\\\\(?:\\r?\\n|.)|\"(?:[^\"\\\\\\n]|\\\\.)*\"|'[^'\\n]*'|\\$\\([^()\\n]*\\)|`[^`\\n]*`|[0-9]*[<>]&-?[0-9]*|&>>?|[^|;&\\n\\\"'`\\\\])*\\s['\\\"]?/['\\\"]?(?=[\\s|;&)`]|$))", reason = "chmod -R on bare root (/) — same trailing-\\b regex bug as chown-recursive-root; use an explicit subdirectory" },
+  { pattern = "\\bchmod\\b(?=(?:\\\\(?:\\r?\\n|.)|\"(?:[^\"\\\\\\n]|\\\\.)*\"|'[^'\\n]*'|\\$\\([^()\\n]*\\)|`[^`\\n]*`|[0-9]*[<>]&-?[0-9]*|&>>?|[^|;&\\n\\\"'`\\\\])*\\s(?:-[A-Za-z]*[rR][A-Za-z]*|--recursive)(?=[\\s|;&)`]|$))(?=(?:\\\\(?:\\r?\\n|.)|\"(?:[^\"\\\\\\n]|\\\\.)*\"|'[^'\\n]*'|\\$\\([^()\\n]*\\)|`[^`\\n]*`|[0-9]*[<>]&-?[0-9]*|&>>?|[^|;&\\n\\\"'`\\\\])*\\s['\\\"]?/home\\b)", reason = "chmod -R on /home is not in dcg's built-in protected-path list; recursively changing permissions on /home can break every user's login shell and SSH keys" },
+
+  # gh auth token prints a live, usable credential to stdout (and therefore
+  # into the transcript/log). There is essentially never a legitimate agent
+  # reason to do this: `gh api`/`gh` subcommands authenticate internally
+  # without exposing the raw token. Deny (not ask) — an exposed token in a
+  # transcript is not something a later "yes, do it" can undo.
+  { pattern = "\\bgh\\s+auth\\s+token\\b", reason = "gh auth token prints a live GitHub credential to stdout/transcript; use gh api or gh <cmd> directly instead of exporting the raw token" },
+
+  # Narrow +refspec-only force-push detector — see the [policy.rules] comment
+  # above for why strict_git:push-force-any is not used wholesale. This is
+  # exactly the "+refspec" half of that rule's own pattern, with the
+  # --force/--force-with-lease/-f half deliberately dropped.
+  # ONE COMMAND (2026-10-15): the first version's `(?:\s+\S+)*` let `\s` cross
+  # newlines and `\S` cross `;`, `&&` and `|`, so its one denial in the
+  # 105-block window above was a heredoc whose `git push` line was followed,
+  # on a later line, by `$(date -u +%FT%TZ)`. Tokens are now joined only by
+  # spaces, tabs or a backslash-newline continuation, and both the stretch
+  # from `git` to `push` and each token use the one-command units of the
+  # chmod/chown entries above, so the `+` token must be an argument of that
+  # push. Deliberate allows: `git push ssh://h/a?x=1&y=2 +main` and
+  # `--push-option=a&b ... +main`, where the unquoted `&` backgrounds a
+  # non-force push and runs the rest as another command (their quoted forms
+  # deny); and a commit message or title that only names "push +main".
+  # KNOWN GAP: a `$( )` nested two deep with `;` or `&` inside, before the
+  # `+` token.
+  { pattern = "\\bgit\\b(?:\\\\(?:\\r?\\n|.)|\"(?:[^\"\\\\\\n]|\\\\.)*\"|'[^'\\n]*'|\\$\\([^()\\n]*\\)|`[^`\\n]*`|[0-9]*[<>]&-?[0-9]*|&>>?|[^|;&\\n\\\"'`\\\\])*?\\bpush\\b(?:(?:[ \\t]|\\\\\\r?\\n)+(?:\\\\.|\"(?:[^\"\\\\\\n]|\\\\.)*\"|'[^'\\n]*'|\\$\\([^()\\n]*\\)|`[^`\\n]*`|[0-9]*[<>]&-?[0-9]*|&>>?|[^\\s|;&\\\"'`\\\\])+)*?(?:[ \\t]|\\\\\\r?\\n)+(?:\\$?[\\\"']|\\\\)*\\+[^\\s|;&]+", reason = "git push with a leading '+' refspec force-updates the remote ref, bypassing the fast-forward check the same way --force does; confirm the target branch and history loss before pushing" },
+
+  # A DENIAL THAT NAMES THE SANCTIONED PATH (2026-08-29).
+  # database.supabase's own supabase-db-push reason says only "Use --dry-run to
+  # preview first". That is true and useless: --dry-run never applies anything,
+  # so an agent that needs a migration live dry-runs it, succeeds, and reaches
+  # for `dcg allow-once` — routing around the guard instead of using the safe
+  # route. Measured: the pack's reason names no alternative at all.
+  #
+  # The alternative already exists and dcg already permits it. migration-apply.sh
+  # runs `supabase db push` INTERNALLY, so the hook (which only ever sees the
+  # outer command line) does not fire — verified: `bash migration-apply.sh --app
+  # acme-web` is ALLOW in every form, including the --confirm write call. It
+  # carries independent pending-set computation, a remote-identity ledger
+  # cross-check, dry-run-vs-computed-set agreement, out-of-order and
+  # version-collision STOPs, and post-apply history verification. It is strictly
+  # better than the raw push it replaces.
+  #
+  # So this entry exists for its REASON STRING, not for its denial: the pattern
+  # is already denied by the pack. Errors should teach the next step.
+  # The negative lookahead is load-bearing and is NOT decoration: [overrides]
+  # block is an unconditional deny that beats the pack's own
+  # supabase-db-push-dry-run SAFE pattern, so without it this entry denies
+  # `db push --dry-run` too — the one preview an agent SHOULD run, and the exact
+  # thing the reason tells them to do. Caught by dcg-migration-guard.test.sh's
+  # ALLOW half within a minute of writing it, which is what that half is for.
+  # (dcg's engine supports lookaround: core.git's push-force-long uses
+  # "(?![-a-z])" for the same kind of carve-out.)
+  { pattern = "supabase(?:\\s+--?\\S+(?:\\s+\\S+)?)*\\s+db\\s+push(?!.*--dry-run)", reason = "applying migrations to a remote database directly is denied; use the sanctioned path instead, which dcg permits and which adds pending-set verification, collision/out-of-order STOPs and post-apply verify: ~/.claude/scripts/migration-apply.sh --app <app>   (dry-run first, then re-run with DRY_RUN=0 and --confirm <token>). `supabase db push --dry-run` stays allowed but never applies anything, and `dcg allow-once` skips every one of those checks" },
+
+  # Raw-psql migration apply (2026-08-29). database.supabase closes the CLI
+  # route (`supabase db push`); this closes the one that goes around it.
+  # `Bash(psql:*)` is a global ALLOW in settings.json and database.postgresql
+  # only catches DROP/TRUNCATE/DELETE-without-WHERE, so feeding a migration
+  # file to psql was — verified via `dcg explain` on the real path — ALLOW.
+  #
+  # MATCHES THE FILE, NOT THE HOST, deliberately. The shape actually observed
+  # in this codebase is `psql "$POSTGRES_URL_NON_POOLING" -f <migration>.sql`,
+  # where the host lives in an env var and never appears in the command text —
+  # so any host-based pattern (supabase.co, a db.* subdomain) matches nothing
+  # at exactly the moment it matters. The migration path is the part that is
+  # always literal.
+  #
+  # Rust's regex crate has no lookaheads, so "remote but not localhost" is not
+  # expressible here anyway; targeting supabase/migrations/ is both simpler and
+  # strictly better-aimed. Local `psql -c 'select ...'`, psql against a dev DB,
+  # and `supabase db diff` are all untouched.
+  #
+  # KNOWN GAPS, stated rather than implied: a heredoc (`psql <<'SQL'`), SQL
+  # pasted inline with -c, a file copied out of supabase/migrations/ to another
+  # path first, or a wrapper script that reads the file itself. This raises the
+  # cost of the accidental path; it is not a capability boundary against an
+  # agent that means to route around it.
+  { pattern = "\\bpsql\\b[^|;&]*\\s-f\\s+[^\\s|;&]*supabase/migrations/", reason = "applying a migration file to a database with psql -f bypasses the supabase CLI and every review gate; migrations belong on a merged PR, applied by the sanctioned path (~/.claude/scripts/migration-apply.sh) — use `dcg allow-once <code>` for a deliberate operator-run apply" },
+  { pattern = "\\bpsql\\b[^|;&]*<\\s*[^\\s|;&]*supabase/migrations/", reason = "redirecting a migration file into psql applies it to the connected database with no review gate; same route as psql -f — use the sanctioned apply path, or `dcg allow-once <code>`" },
+  { pattern = "supabase/migrations/[^\\s|;&]*\\.sql[^|;&]*\\|\\s*psql\\b", reason = "piping a migration file into psql applies it to the connected database with no review gate; use the sanctioned apply path, or `dcg allow-once <code>`" },
+
+  # jsm prune --yes deletes EVERY skills-localize fork (dotfiles#1217).
+  #
+  # `jsm prune` removes "orphaned skill directories left behind after rename /
+  # retirement". It has no concept of skills-localize.sh, which deploys local
+  # forks into the same managed roots, so it calls all of them orphans.
+  # Measured 2026-09-19: prune lists 132 directories, skills-localize deploys
+  # 51 forks, and the overlap is 51 — every single one. Among them agent-swarm,
+  # design-drift, papercut, writing-for-agents, review-animations, cass-vec.
+  #
+  # Dry-run-by-default is the only thing that has been standing between that
+  # command and the whole overlay, and dry-run defaults are exactly what an
+  # agent overrides when a command "did not do anything".
+  #
+  # NOT AN UPSTREAM GAP TO WAIT ON. dcg and jsm share a maintainer
+  # (Dicklesworthstone / jeffreys-skills.md) but are not integrated in either
+  # direction: `dcg explain "jsm prune --yes"` returned ALLOW / "quick-rejected
+  # (no keywords)" in 2.4ms, none of the 104 packs mention jsm or skills, the
+  # dcg binary carries no jsm strings, and `jsm --help` never mentions dcg.
+  #
+  # TWO-SIDED ON PURPOSE. Only `--yes` denies. The bare `jsm prune` dry run is
+  # the correct way to inspect what it would do and must stay frictionless, or
+  # the next person to hit the friction deletes this entry. `[^|;&]*` keeps the
+  # flag match inside one command segment while staying position-independent,
+  # so an intervening flag cannot defeat it the way `-f` defeats
+  # containers.compose:down-volumes above.
+  { pattern = "\\bjsm\\s+prune\\b[^|;&]*--yes\\b", reason = "jsm prune --yes deletes every skills-localize fork: measured 2026-09-19 it targets 132 directories, 51 of which are live local forks (agent-swarm, design-drift, papercut, writing-for-agents, ...). jsm has no concept of the localize overlay, so it calls them orphans. Run `jsm prune` WITHOUT --yes to see the list, and reconcile skills-localize first; `dcg allow-once <code>` for a deliberate operator-run prune" },
+
+  # cass's live archive (~/.local/share/coding-agent-search/agent_search.db).
+  # On 2026-09-29 workflow agents ran `sqlite3 -readonly` aggregates on it and
+  # locked cass out of its own database: a stock reader rewrites the -shm WAL
+  # index even in read-only mode, cass's fsqlite rejects that header, and every
+  # cass read failed until the sidecars were cleared. An `immutable=1` open
+  # skips the sidecars but returns torn counts while cass checkpoints. Details:
+  # docs/solutions/integration-issues/a-read-only-sqlite-open-is-not-read-only-for-another-programs-live-wal-database.md
+  #
+  # This rule used to live in lean-collector's own Bash hook (#1483), which the
+  # operator retired on 2026-10-17 as ceremony; dcg runs for every agent, so
+  # the one rule that guarded real damage moved here. Of 28 recorded
+  # sqlite3-on-archive commands (lean-collector transcripts, 2026-09-23 to
+  # 2026-10-17), 26 name the archive in the same command as sqlite3 (first
+  # entry) and 2 assign it to a variable first, `DB=...agent_search.db;
+  # sqlite3 -readonly $DB` (second entry, which reads across `;` on purpose).
+  # Python's `sqlite3.connect(".../agent_search.db")` matches the first.
+  # KNOWN GAPS, stated rather than implied: the match is on text, so a symlink,
+  # a copy kept under the same name, `cd` into the directory and an unrelated
+  # assignment all go by name only; a quoted message naming both words (a
+  # commit -m or an rg pattern) also denies, so write those through a file.
+  { pattern = "\\bsqlite3\\b[^|;&]*agent_search\\.db", reason = "stock sqlite3 on cass's live archive (agent_search.db), even -readonly, rewrites its -shm WAL index and locks cass out of its own database (2026-09-29); query it with `CASS_AUTO_REFRESH=0 cass search QUERY --no-maintenance --mode lexical --json`, or copy the db with its -wal and -shm to /tmp under another name and open the copy" },
+  { pattern = "\\b[A-Za-z_]\\w*=[\"']?[^\\s|;&\"']*agent_search\\.db[\\s\\S]*\\bsqlite3\\b", reason = "a variable naming cass's live archive (agent_search.db) followed by sqlite3: a stock open, even -readonly, rewrites its -shm WAL index and locks cass out (2026-09-29); query it with `CASS_AUTO_REFRESH=0 cass search QUERY --no-maintenance --mode lexical --json`, or copy the db with its -wal and -shm to /tmp under another name and open the copy" },
+
+  # Worktree-command-shapes false-positive/gap audit (dotfiles#1270, 2026-09-21).
+  # Issue #1270 asked for an allowlist entry per benign shape for FOUR shapes:
+  # git -C $WT <read-only>, gh pr edit --body-file - <<heredoc, an apply-patch
+  # heredoc into git apply/patch, and mktemp -d $(...) assigned to a variable.
+  #
+  # RE-MEASURED against the live dcg binary (0.14.4) before writing any of the
+  # three entries below: all four POSITIVE shapes already ALLOW on this config
+  # — the false positives the 2026-08-29/30 memory notes recorded were fixed by
+  # dcg's own nightly auto-update sometime after 0.6.5. No allow-side change is
+  # needed or added here; tests/dcg-worktree-shapes-guard.test.sh locks
+  # that as a regression test instead.
+  #
+  # What IS still open, measured the same way: three of the four PLANTED
+  # NEGATIVES from #1270 also ALLOW unmodified. The three entries below close
+  # exactly those three gaps — nothing on the allow side changes.
+
+  # gh pr/issue --body-file reading a system credential file posts its contents
+  # into a PR/issue body, which can be public — an exfiltration path, not a
+  # legitimate body source. NOT scoped to "must be stdin": the harness's own
+  # documented convention (harness/gh-tracking-and-claims.md,
+  # scripts/wt-new.sh, scripts/pro-gate-loop.sh) is "write the
+  # body to a real scratch file, then pass --body-file <path>" — a blanket
+  # "--body-file must be - or /tmp" rule would deny that whole convention. This
+  # is a specific-file list instead, same "closes this one shape" scope as the
+  # gh-auth-token and psql-migration-path entries above. Scoped to `gh pr|issue
+  # edit|create|comment` so it cannot sweep in unrelated `-F`/curl form uploads.
+  # KNOWN GAP, stated rather than implied: this is a fixed list, not a general
+  # sensitive-path classifier, and only matches the long `--body-file` spelling
+  # (not the `-F` shorthand, which collides with curl's unrelated `-F`).
+  { pattern = "\\bgh\\s+(?:pr|issue)\\s+(?:edit|create|comment)\\b[^|;&]*--body-file\\s+\\S*(?:/etc/passwd|/etc/shadow|/etc/sudoers|\\.ssh/id_(?:rsa|ed25519|ecdsa|dsa)|\\.ssh/authorized_keys|\\.aws/credentials|\\.netrc|\\.npmrc|credentials\\.json)", reason = "gh pr/issue edit|create|comment --body-file reading /etc/passwd, /etc/shadow, an SSH private key, or an AWS/npm/generic credentials file posts that file's contents into a PR/issue body, which can become public; write the body to your own scratch file (/tmp/<unique-dir>/ or a Write-tool path under $CLAUDE_JOB_DIR/tmp/) and pass that path, or use --body-file - fed by a quoted heredoc on stdin" },
+
+  # An UNQUOTED heredoc delimiter (<<PATCH instead of <<'PATCH'/<<\"PATCH\") lets
+  # the shell expand $(...) / `...` / $VAR inside the patch body before git
+  # apply or patch ever sees it — the patch body becomes an injectable command.
+  # The quoted form is unaffected (verified: <<'PATCH' and <<\"PATCH\" both stay
+  # ALLOW), so this does not touch the sanctioned apply-patch-heredoc shape.
+  { pattern = "\\b(?:git\\s+apply|patch)\\b.*<<-?\\s*(?!['\\\"])[A-Za-z_]\\w*", reason = "an unquoted heredoc delimiter (<<PATCH instead of <<'PATCH') lets the shell expand $(...) / `...` / $VAR inside the patch body before git apply or patch ever sees it, turning a patch body into an injectable command; quote the delimiter (<<'PATCH' or <<\\\"PATCH\\\") so the body is passed through literally" },
+
+  # mktemp with a FULLY LITERAL absolute path outside /tmp or /var/tmp writes
+  # session scratch into $HOME or a live checkout instead of disposable space —
+  # CLAUDE.md requires shell scratch under /tmp/<unique-dir>/. Deliberately
+  # narrow: repo audit found 60+ existing mktemp call sites, almost all
+  # `mktemp "$VAR/name.XXXXXX"` (atomic-write siblings, e.g. dcg's own
+  # installer: `mktemp -d "${tmp_base%/}/dcg-install.XXXXXX"`) or literal
+  # `mktemp -d /tmp/...`. A pattern that flags ANY non-/tmp path would deny
+  # that entire variable-prefixed idiom, since the guard only ever sees command
+  # TEXT and cannot know `$tmp_base` resolves to /tmp at runtime. Matching only
+  # a path with no `$` in it targets exactly the worktree-escape/literal-
+  # dotfiles-checkout shape in the planted negative and leaves the
+  # variable-prefixed idiom untouched. KNOWN GAP, stated rather than implied,
+  # same scope philosophy as the psql-migration-path entries above: a
+  # variable- or command-substitution-built path is not evaluated here.
+  { pattern = "\\bmktemp\\b(?:\\s+-\\S+)*\\s+[\\\"']?(/(?!tmp/|var/tmp/)[A-Za-z0-9_./-]+)\\b", reason = "mktemp with a literal absolute path outside /tmp or /var/tmp writes scratch into $HOME or a live checkout instead of disposable space; CLAUDE.md requires shell scratch under /tmp/<unique-dir>/ — use an explicit /tmp path (mktemp -d /tmp/<name>-XXXXXX) instead" },
+]
+
+[heredoc]
+enabled = true
+
+# Default is 50ms, which is tight now that a timeout denies instead of passing.
+timeout_ms = 200
+max_body_bytes = 1048576
+max_body_lines = 10000
+max_heredocs = 10
+
+# Both default to `true` upstream: an unparseable or slow inline script was
+# allowed through unexamined. Inline `python -c` / `sh -c` bodies are exactly
+# where a destructive command hides, so failure now denies instead.
+#
+# NB: the *input* keys are `fallback_on_*`; `dcg config --format json` reports
+# them back as `fail_open_on_*`. Writing the fail_open_* spelling here parses
+# without error and silently does nothing — verify via the JSON dump, not the
+# absence of a warning.
+# fallback_on_parse_error MUST stay true on 0.6.5. Setting it false was tested
+# here and is unusable: an ordinary plain-text heredoc (`<<'EOF'`) reports
+# "unsupported language for AST matching: Unknown", which is the parse-error
+# path, so every `git commit -F - <<'EOF'` and similar got BLOCKED. The setting
+# does not distinguish "language I cannot identify" from "body I could not
+# scan", making it a false-positive generator rather than a safety gain.
+fallback_on_parse_error = true
+
+# Timeouts are genuinely rare at the 200ms budget above and a timeout really
+# does mean "this body went unexamined", so this one stays fail-closed.
+fallback_on_timeout = false
+
+# NB: `dcg config --format json` renders this as the string "all", but the
+# parser expects a sequence — setting `languages = "all"` is a TOML type error
+# that makes dcg discard this entire file (packs silently revert to defaults).
+# Omitted here so the built-in default (all languages) applies.

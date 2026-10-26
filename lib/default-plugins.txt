@@ -1,0 +1,12 @@
+# default-plugins.txt: the plugins ./setup installs from the hov marketplace (restructure
+# plan R24). One plugin name per line. harness-vet and rent-check join once the author has
+# run them; the guided opt-ins (pro-gate and the rest) belong to setup stage 2, the
+# hov-setup skill (plugins/hov-stack/skills/hov-setup), so they are not listed here.
+#
+# Consumer: setup's plugin step and `./setup --check`. Gate: tests/repo/setup.test.sh
+# checks that a fake claude is asked to install each name here once, and that every plugin
+# lib/default-plugin-skills.txt names is here.
+papercut
+skill-tuner
+memory-dream
+design-rails

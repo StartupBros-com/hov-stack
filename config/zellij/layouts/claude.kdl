@@ -1,0 +1,10 @@
+// Claude layout - optimized for AI coding sessions
+layout {
+    pane size=1 borderless=true {
+        plugin location="compact-bar"
+    }
+    pane split_direction="horizontal" {
+        pane size="80%" name="claude" command="claude"
+        pane size="20%" name="shell"
+    }
+}

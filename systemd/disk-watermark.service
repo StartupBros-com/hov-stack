@@ -1,0 +1,25 @@
+# TEMPLATE: Disk-fill watermark check on / and /mnt/c that alerts on WARN, CRIT or a free-GB floor breach.
+# Replace before enabling:
+#   22: WARN_PCT tuned to the author's 1.7T /mnt/c drive; set it for your disks (script default 85).
+# See systemd/README.md.
+[Unit]
+Description=Disk-fill watermark check (/ and /mnt/c; alerts on WARN/CRIT/free-GB floor breach)
+
+# NO OnFailure= ON PURPOSE.
+# exit 1 means a watermark BREACH, deliberately: its header states
+# "systemd failed-unit = visibility" and it already makes one notify.sh call.
+# A finding, not a fault.
+[Service]
+Type=oneshot
+TimeoutStartSec=15m
+# Box-level tuning (2026-08-21): this host's /mnt/c sits chronically at 88%
+# used on a 1.7T drive (~217G free), so the script's default WARN_PCT=85
+# would fire -- and notify -- daily from day one, training the operator to
+# ignore the alert. Raised to 90 here, not in the script default, which
+# stays 85 for general/smaller-drive use elsewhere. CRIT_PCT=92 and the
+# MIN_FREE_GB=40 floor are left unchanged: on a drive this large they still
+# carry the real emergency signal (217G free is nowhere near a 40G floor).
+Environment=WARN_PCT=90
+ExecStart=%h/.claude/scripts/disk-watermark.sh
+Nice=10
+IOSchedulingClass=idle

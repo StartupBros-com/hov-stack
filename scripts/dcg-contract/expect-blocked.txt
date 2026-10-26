@@ -1,0 +1,60 @@
+# Commands that MUST stay blocked. Checked against a candidate dcg build before
+# it is ever promoted to the live symlink. A miss here means the upgrade would
+# quietly weaken enforcement, so the candidate is rejected and the old binary
+# keeps running.
+#
+# Blank lines and #-comments ignored. Nothing here is executed — every line is
+# passed to `dcg test`, which is a dry run.
+
+# --- containers.compose:down-volumes, flag-position-independent -------------
+# Upstream only matches `down` immediately after `compose`; these are covered by
+# the [overrides] block patterns in config.toml. Filed upstream as
+# Dicklesworthstone/destructive_command_guard#276 — if a future release fixes
+# the rule, these keep passing and the local override becomes belt-and-braces.
+docker compose down -v
+docker compose -f a.yml down -v
+docker compose --file a.yml down -v
+docker compose -p myproj down -v
+docker compose --project-name myproj down -v
+docker compose --profile dev down -v
+docker compose --ansi never down -v
+docker compose --progress plain down -v
+docker compose -f a.yml -f b.yml down -v
+docker compose --project-directory . down -v
+docker compose -f a.yml down --rmi all
+docker compose -f a.yml rm -fsv
+docker-compose -f a.yml down -v
+docker compose -f /srv/app/docker-compose.prod.yml down -v
+
+# --- pack coverage we rely on ------------------------------------------------
+docker system prune -a
+docker volume prune -f
+docker exec db psql -U wp -c "DROP TABLE wp_posts"
+docker exec db psql -U wp -c "TRUNCATE wp_posts"
+git push --force origin main
+git reset --hard HEAD
+git branch -D unmerged-feature
+
+# --- laundering guard --------------------------------------------------------
+# These encode the invariant that [overrides] allow stays EMPTY. An allow entry
+# is a whole-command bypass: a matching prefix skips every rule for the rest of
+# the command. Adding one to re-permit `git branch -d` silently un-blocked all
+# of the following on 2026-08-05. If these start passing, someone added an
+# allow pattern — see the comment block in config.toml.
+git branch -d merged && git reset --hard HEAD
+git branch -d merged && git checkout -- src/
+git branch -d merged && docker system prune -a
+git branch -d merged && rm -rf /home/user/SITES
+git branch -d merged && git push --force origin main
+
+# --- truncating redirect to a target dcg cannot resolve ------------------------
+# core.filesystem:redirect-truncate-dynamic-path (and credential-file-write for
+# the dotfile). dcg resolves a variable target only from a literal /tmp
+# assignment made before any && or ||; these must stay refused whatever a later
+# release learns to resolve, because the target is not provably scratch.
+cat notes.txt > "$f"
+S=/etc; echo x > "$S/passwd"
+S=/home/user/.claude/jobs/abc/tmp; echo x > "$S/out"
+S=$(mktemp -d /tmp/x.XXXXXX); echo hi > "$S/out"
+S=/tmp/d; for f in $(cat names); do echo hi > "$S/$f"; done
+echo x > "$HOME/.bashrc"

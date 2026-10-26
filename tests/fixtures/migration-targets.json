@@ -1,0 +1,65 @@
+{
+  "repository": "acme-org/app",
+  "apps": {
+    "acme-web": "abcdefghijklmnopqrst",
+    "acme-shop": "bcdefghijklmnopqrstu",
+    "acme-partners": "cdefghijklmnopqrstuv",
+    "acme-help": "defghijklmnopqrstuvw"
+  },
+  "legacy_identities": {
+    "acme-web": {
+      "20250501000003": {
+        "remote": "create_example_1",
+        "local": "create_example_1 copy"
+      },
+      "20250823000000": {
+        "remote": "create_example_2",
+        "local": "create_example_2_copy"
+      },
+      "20250829000000": {
+        "remote": "create_example_3",
+        "local": "create_example_3_copy"
+      },
+      "20261462000000": {
+        "remote": "create_example_4",
+        "local": "create_example_4_copy"
+      },
+      "20261471000000": {
+        "remote": "create_example_5",
+        "local": "create_example_5_copy"
+      },
+      "20270610000100": {
+        "remote": "create_example_6",
+        "local": "create_example_6_copy"
+      }
+    },
+    "acme-shop": {
+      "20260331030000": {
+        "remote": "create_example_7",
+        "local": "create_example_7_copy"
+      }
+    },
+    "acme-help": {
+      "20260805000300": {
+        "remote": null,
+        "local": "create_example_8_copy"
+      },
+      "20260805000400": {
+        "remote": null,
+        "local": "create_example_9_copy"
+      },
+      "20260806000100": {
+        "remote": null,
+        "local": "create_example_10_copy"
+      },
+      "20260806000200": {
+        "remote": null,
+        "local": "create_example_11_copy"
+      },
+      "20260806000300": {
+        "remote": null,
+        "local": "create_example_12_copy"
+      }
+    }
+  }
+}

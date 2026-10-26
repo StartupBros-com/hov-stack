@@ -1,0 +1,292 @@
+#!/usr/bin/env python3
+import hashlib
+import json
+import os
+import subprocess
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Iterable
+
+CONFIG_PATH = Path.home() / ".pi" / "agent" / "maintenance.repos.json"
+AUDIT_SCRIPT = Path.home() / ".pi" / "agent" / "bin" / "pi-audit-local-packages"
+REPORT_DIR = Path.home() / ".pi" / "agent" / "tmp"
+
+
+def run(cmd: list[str], cwd: Path | None = None, check: bool = False) -> subprocess.CompletedProcess[str]:
+    proc = subprocess.run(cmd, cwd=str(cwd) if cwd else None, text=True, capture_output=True)
+    if check and proc.returncode != 0:
+        raise subprocess.CalledProcessError(proc.returncode, cmd, proc.stdout, proc.stderr)
+    return proc
+
+
+def load_config() -> dict:
+    with CONFIG_PATH.open("r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def output_text(proc: subprocess.CompletedProcess[str]) -> str:
+    text = "\n".join(part.strip() for part in [proc.stdout, proc.stderr] if part and part.strip())
+    return text.strip()
+
+
+def sha_for_path(path: Path) -> str:
+    if path.is_symlink():
+        return f"symlink:{os.readlink(path)}"
+    if path.is_file():
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+    return "dir"
+
+
+def collect_tree(root: Path, rel: str) -> dict[str, str]:
+    base = root / rel
+    results: dict[str, str] = {}
+    if not base.exists() and not base.is_symlink():
+        return results
+
+    materialized = base.resolve() if base.is_symlink() else base
+    if materialized.is_file() or (base.is_symlink() and materialized.is_file()):
+        results[rel] = sha_for_path(materialized)
+        return results
+
+    if materialized.is_dir():
+        for path in sorted(materialized.rglob("*")):
+            if path.is_dir() and not path.is_symlink():
+                continue
+            rel_path = str(Path(rel) / path.relative_to(materialized))
+            results[rel_path] = sha_for_path(path)
+        return results
+
+    if base.is_symlink():
+        results[rel] = sha_for_path(base)
+        return results
+
+    return results
+
+
+def compare_backup(config: dict) -> dict:
+    local_root = Path(config["localAgentDir"]).expanduser().resolve()
+    backup_root = Path(config["backupPiAgentDir"]).expanduser().resolve()
+    sync_paths: Iterable[str] = config.get("syncPaths", [])
+    local_map: dict[str, str] = {}
+    backup_map: dict[str, str] = {}
+    for rel in sync_paths:
+        local_map.update(collect_tree(local_root, rel))
+        backup_map.update(collect_tree(backup_root, rel))
+    all_paths = sorted(set(local_map) | set(backup_map))
+    changed = [path for path in all_paths if local_map.get(path) != backup_map.get(path)]
+    return {
+        "changed": changed,
+        "in_sync": not changed,
+    }
+
+
+def git_text(repo: Path, *args: str) -> str:
+    proc = run(["git", *args], cwd=repo)
+    return output_text(proc)
+
+
+def rev_list_counts(repo: Path, left: str, right: str) -> tuple[int | None, int | None]:
+    proc = run(["git", "rev-list", "--left-right", "--count", f"{left}...{right}"], cwd=repo)
+    if proc.returncode != 0:
+        return None, None
+    parts = (proc.stdout or "").strip().split()
+    if len(parts) != 2:
+        return None, None
+    try:
+        return int(parts[0]), int(parts[1])
+    except ValueError:
+        return None, None
+
+
+def exists_ref(repo: Path, ref: str) -> bool:
+    return run(["git", "show-ref", "--verify", "--quiet", ref], cwd=repo).returncode == 0
+
+
+def fetch_repo(repo: Path, remotes: list[str]) -> list[str]:
+    failures: list[str] = []
+    for remote in remotes:
+        proc = run(["git", "fetch", remote, "--prune"], cwd=repo)
+        if proc.returncode != 0:
+            failures.append(f"{remote}: {output_text(proc) or 'fetch failed'}")
+    return failures
+
+
+def inspect_repo(entry: dict, fetch: bool) -> dict:
+    repo = Path(entry["path"]).expanduser().resolve()
+    info: dict = {
+        "name": entry["name"],
+        "path": str(repo),
+        "policy": entry["policy"],
+        "exists": repo.exists(),
+    }
+    if not repo.exists() or not (repo / ".git").exists():
+        info["error"] = "missing repo or .git directory"
+        return info
+
+    primary_remote = entry.get("primaryRemote", "origin")
+    upstream_remote = entry.get("upstreamRemote")
+    default_branch = entry.get("defaultBranch", "main")
+    remotes = [primary_remote] + ([upstream_remote] if upstream_remote else [])
+
+    if fetch:
+        fetch_failures = fetch_repo(repo, [remote for remote in remotes if remote])
+        if fetch_failures:
+            info["fetchFailures"] = fetch_failures
+
+    info["currentBranch"] = git_text(repo, "branch", "--show-current") or "DETACHED"
+    status = git_text(repo, "status", "--short")
+    info["dirty"] = bool(status)
+    info["statusLines"] = status.splitlines()[:25] if status else []
+
+    remote_info = {}
+    for remote in remotes:
+        if not remote:
+            continue
+        proc = run(["git", "remote", "get-url", remote], cwd=repo)
+        if proc.returncode == 0:
+            remote_info[remote] = proc.stdout.strip()
+    info["remotes"] = remote_info
+
+    primary_ref = f"refs/remotes/{primary_remote}/{default_branch}"
+    local_default_ref = f"refs/heads/{default_branch}"
+    if exists_ref(repo, primary_ref):
+        ahead, behind = rev_list_counts(repo, local_default_ref if exists_ref(repo, local_default_ref) else "HEAD", f"{primary_remote}/{default_branch}")
+        info["primaryRemoteStatus"] = {
+            "remote": primary_remote,
+            "branch": default_branch,
+            "behind": behind,
+            "ahead": ahead,
+        }
+
+    if upstream_remote and exists_ref(repo, f"refs/remotes/{upstream_remote}/{default_branch}") and exists_ref(repo, primary_ref):
+        fork_ahead, fork_behind = rev_list_counts(repo, f"{primary_remote}/{default_branch}", f"{upstream_remote}/{default_branch}")
+        info["upstreamStatus"] = {
+            "forkRemote": primary_remote,
+            "upstreamRemote": upstream_remote,
+            "branch": default_branch,
+            "forkBehindUpstream": fork_behind,
+            "forkAheadUpstream": fork_ahead,
+        }
+
+    recommendation = "none"
+    reason = ""
+    if info.get("dirty"):
+        recommendation = "manual-review"
+        reason = "repo has local modifications; avoid automated sync/PR work"
+    elif entry["policy"] == "fork-upstream" and info.get("upstreamStatus", {}).get("forkBehindUpstream"):
+        recommendation = "review-upstream"
+        reason = "upstream has changes not yet in the maintained fork"
+    elif entry["policy"] == "owned-public" and info.get("primaryRemoteStatus", {}).get("behind"):
+        recommendation = "pull-origin"
+        reason = "local default branch is behind origin"
+    elif entry["policy"] == "owned-public" and info.get("primaryRemoteStatus", {}).get("ahead"):
+        recommendation = "review-push"
+        reason = "local default branch has commits not on origin"
+    elif entry["policy"] == "private-backup":
+        recommendation = "backup-only"
+        reason = "private backup repo; review manually when needed"
+    else:
+        reason = "no action needed"
+
+    info["recommendation"] = recommendation
+    info["recommendationReason"] = reason
+    return info
+
+
+def build_report(config: dict, audit: dict, backup: dict, repos: list[dict]) -> str:
+    lines: list[str] = []
+    lines.append("# Pi maintenance report")
+    lines.append("")
+    lines.append(f"Generated: {datetime.now(timezone.utc).isoformat()}")
+    lines.append("")
+
+    lines.append("## Runtime health")
+    lines.append(f"- audit status: {'pass' if audit['ok'] else 'fail'}")
+    for line in audit["text"].splitlines():
+        lines.append(f"  {line}")
+    lines.append("")
+
+    lines.append("## Dotfiles backup drift")
+    lines.append(f"- in sync: {'yes' if backup['in_sync'] else 'no'}")
+    lines.append(f"- changed paths: {len(backup['changed'])}")
+    for path in backup["changed"][:40]:
+        lines.append(f"  - {path}")
+    if len(backup["changed"]) > 40:
+        lines.append(f"  - ... {len(backup['changed']) - 40} more")
+    lines.append("")
+
+    lines.append("## Managed repos")
+    for repo in repos:
+        lines.append(f"### {repo['name']} ({repo['policy']})")
+        lines.append(f"- path: {repo['path']}")
+        if not repo.get("exists"):
+            lines.append(f"- status: missing ({repo.get('error', 'unknown error')})")
+            lines.append("")
+            continue
+        lines.append(f"- branch: {repo.get('currentBranch', 'unknown')}")
+        lines.append(f"- dirty: {'yes' if repo.get('dirty') else 'no'}")
+        if repo.get("primaryRemoteStatus"):
+            status = repo["primaryRemoteStatus"]
+            lines.append(
+                f"- local vs {status['remote']}/{status['branch']}: behind={status['behind']} ahead={status['ahead']}"
+            )
+        if repo.get("upstreamStatus"):
+            status = repo["upstreamStatus"]
+            lines.append(
+                f"- fork vs upstream: behind={status['forkBehindUpstream']} ahead={status['forkAheadUpstream']} ({status['forkRemote']} vs {status['upstreamRemote']})"
+            )
+        if repo.get("fetchFailures"):
+            for failure in repo["fetchFailures"]:
+                lines.append(f"- fetch failure: {failure}")
+        if repo.get("statusLines"):
+            lines.append("- local modifications:")
+            for line in repo["statusLines"]:
+                lines.append(f"  - {line}")
+        lines.append(f"- recommendation: {repo['recommendation']} — {repo['recommendationReason']}")
+        lines.append("")
+
+    lines.append("## Safety rules for the monthly maintenance run")
+    lines.append("- Never overwrite or auto-commit over a dirty repo.")
+    lines.append("- For StartupBros-owned repos, small targeted PRs are acceptable after local verification.")
+    lines.append("- For fork/upstream repos, default to review-only unless the diff is isolated, reviewable, and clearly upstreamable.")
+    lines.append("- Close or avoid misleading PRs rather than pushing a large diff under a small title.")
+    return "\n".join(lines).strip() + "\n"
+
+
+def main(argv: list[str]) -> int:
+    fetch = "--no-fetch" not in argv
+    if not CONFIG_PATH.exists():
+        print(f"CONFIG_MISSING={CONFIG_PATH}", file=sys.stderr)
+        return 1
+    if not AUDIT_SCRIPT.exists():
+        print(f"AUDIT_SCRIPT_MISSING={AUDIT_SCRIPT}", file=sys.stderr)
+        return 1
+
+    config = load_config()
+    REPORT_DIR.mkdir(parents=True, exist_ok=True)
+
+    audit_proc = run([str(AUDIT_SCRIPT)])
+    audit = {
+        "ok": audit_proc.returncode == 0,
+        "text": output_text(audit_proc) or "(no audit output)",
+    }
+    backup = compare_backup(config)
+    repos = [inspect_repo(entry, fetch=fetch) for entry in config.get("repos", [])]
+
+    report = build_report(config, audit, backup, repos)
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    report_path = REPORT_DIR / f"pi-maintenance-{timestamp}.md"
+    report_path.write_text(report, encoding="utf-8")
+
+    print(f"REPORT_PATH={report_path}")
+    print(f"AUDIT_OK={'1' if audit['ok'] else '0'}")
+    print(f"BACKUP_IN_SYNC={'1' if backup['in_sync'] else '0'}")
+    print(f"REPO_COUNT={len(repos)}")
+    for repo in repos:
+        print(f"REPO={repo['name']}|{repo.get('recommendation', 'none')}|dirty={'1' if repo.get('dirty') else '0'}")
+    return 0 if audit["ok"] else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

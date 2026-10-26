@@ -1,0 +1,5 @@
+# Written by the Claude Code engine each time it loads a mod from one of these
+# folders: this build's API declarations and a tsconfig that extends them.
+# Per-build artifacts, never source.
+*/.claude-plugin/types/
+*/tsconfig.json

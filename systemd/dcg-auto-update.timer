@@ -1,0 +1,12 @@
+[Unit]
+Description=Daily dcg guard auto-update
+
+[Timer]
+# 03:30, offset from the other nightly update jobs so they do not contend for the
+# GitHub API or the gh CLI's token refresh at once.
+OnCalendar=*-*-* 03:30:00
+Persistent=true
+RandomizedDelaySec=15m
+
+[Install]
+WantedBy=timers.target

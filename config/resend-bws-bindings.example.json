@@ -1,0 +1,10 @@
+{
+  "_comment": "Exact-record Bitwarden Secrets Manager bindings for bin/resend-cli. Each record is {id: <secret UUID>, key: <record name>}; the wrapper checks id, key and project before accepting the value. Replace these placeholder UUIDs in your private overlay.",
+  "project_id": "00000000-0000-4000-8000-000000000000",
+  "records": {
+    "RESEND_API_KEY_MAIN": {
+      "id": "00000000-0000-4000-8000-000000000001",
+      "key": "RESEND_API_KEY_MAIN"
+    }
+  }
+}

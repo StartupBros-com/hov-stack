@@ -1,0 +1,87 @@
+# codex-skills.txt — which plugins/hov-stack/skills/ forks ALSO deploy to ~/.codex/skills.
+#
+# WHY AN ALLOWLIST AND NOT A BLANKET SYNC
+#   plugins/hov-stack/skills/ holds Claude-specific skills (verify,
+#   cass-rerank-local...) that reference Claude subagents, hooks or tooling. Syncing
+#   the whole directory into Codex would ship broken or meaningless skills.
+#
+#   Second reason: a Codex deployment costs per-prompt budget there. Keep this list
+#   short and justify additions.
+#
+# MODEL-INVOCATION GATING IN CODEX — READ BEFORE ADDING A SKILL
+#   Codex never reads Claude's `disable-model-invocation` frontmatter. It has its own
+#   gate in a SIBLING FILE, `agents/openai.yaml` inside the skill dir:
+#
+#       interface:
+#         display_name: "Review Animations"
+#         short_description: "Review motion code against a high craft bar"
+#         default_prompt: "Use $review-animations to ..."
+#       policy:
+#         allow_implicit_invocation: false     # <- the gate
+#
+#   Verified 2026-08-06 against Codex CLI v0.145.0: the native musl binary carries the
+#   validation string "`policy.allow_implicit_invocation` must be a boolean" and the
+#   key set {"interface","policy","dependencies"}; OpenAI's own first-party skill ships
+#   it at ~/.codex/skills/.system/review-agent/agents/openai.yaml. (`strings` on the
+#   node_modules/.bin/codex wrapper finds nothing — it is a shim. Use the vendor path.)
+#
+#   THIS FILE PREVIOUSLY CLAIMED THE OPPOSITE — that no evidence existed Codex honours
+#   any such gate, so anything listed here should be assumed ALWAYS-ON. The premise
+#   (Codex ignores Claude's frontmatter key) was true; the conclusion was false, and it
+#   left six deliberately-demoted forks silently auto-invocable in Codex until #219.
+#
+#   RULE: a fork listed below that is invoke-only in Claude MUST carry
+#   plugins/hov-stack/skills/<name>/agents/openai.yaml with allow_implicit_invocation: false.
+#   A fork that is model-invoked BY DESIGN (papercut) ships the interface block and no
+#   policy block. skills-localize.sh warns on a listed fork with no gate file.
+#
+# HOW IT WORKS
+#   skills-localize.sh apply  → rsync each listed plugins/hov-stack/skills/<name>/ into
+#                               ~/.codex/skills/<name>/ (same copy semantics as the
+#                               Claude tree; symlinked entries are never touched).
+#                               The rsync is recursive, so agents/openai.yaml and any
+#                               scripts/ dir travel with the fork.
+#   skills-localize.sh check  → DRIFT: lines when a listed fork differs.
+#   No-op when ~/.codex/skills does not exist (Codex not installed on this box).
+#
+# One skill name per line; must be a directory under plugins/hov-stack/skills/. `#` comments ok.
+
+# --- Design/motion reference + build. Pure knowledge or single-file authoring;
+#     no agent fan-out, no dev server, useful identically in both tools.
+emil-design-eng
+pick-ui-library
+animate
+apple-design
+
+# --- Authoring theory for agent-consumed documents (skills, AGENTS.md, pointers).
+#     Pure abstract reference, zero cross-repo refs; upstream made it Codex
+#     model-invokable 2026-08-05 (commit 4aaccb5). Same value both sides: Codex
+#     sessions author AGENTS.md and skill files too.
+writing-for-agents
+
+# --- Review bar. Operates on a diff, no fan-out, framework-agnostic.
+review-animations
+
+# --- Friction capture. One stdlib CLI call, no fan-out, no Claude-specific tooling.
+#     Listed deliberately even though it costs always-on budget in Codex: Codex has
+#     no PostToolUseFailure event, so the automatic capture half does NOT exist
+#     there. Self-report is the ONLY papercut path a Codex session has, which makes
+#     the skill more load-bearing there than in Claude, not less.
+papercut
+
+# --- Deliberately NOT deployed to Codex (add here if that changes):
+#   improve-animations          fans out subagents and hands off to ce-plan/wt-new.sh;
+#                               drive it from the Claude side where that chain lives.
+#   find-animation-opportunities  same handoff shape; also always-on cost in Codex for
+#                               a skill that should only ever run on request.
+#   prototype                   needs a dev server or a browser to be worth anything,
+#                               and is explicitly invoke-only by design.
+#   kill-ai-slop                a judgement call, not a technical blocker. An earlier
+#                               note here worried that a bundled scripts/ dir might not
+#                               survive into ~/.codex/skills — that premise is FALSE:
+#                               33 skills already there carry one (checked 2026-08-06),
+#                               which is why the design-drift detector was listed here
+#                               until it moved to the design-rails plugin. The open
+#                               question for this one is only whether its scan+triage+FIX
+#                               workflow is wanted on the Codex side, since unlike that
+#                               detector it proposes edits.

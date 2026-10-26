@@ -1,0 +1,16 @@
+# Transient Claude Code worktree and workflow state (created by EnterWorktree / Workflow).
+# The harness itself is tracked at the repo root (hooks/, scripts/, settings.json ...), not here.
+.claude/
+
+# Scaffold bookkeeping from the one-time split out of the private dotfiles repo.
+.hov-stack-excludes
+
+# Proposal-only rent-check reports and drafts; durable receipts live under ~/.claude/rent-check/.
+.rent-check/
+
+# Python bytecode from the versioned CLIs in bin.
+__pycache__/
+*.pyc
+
+# Compound Engineering skill scratch; durable CE artifacts live under docs/.
+.context/compound-engineering/

@@ -1,0 +1,27 @@
+{
+  "_comment": "Everything out: main window at 100% and Spark's own meter limit_reached too. No banked reset.",
+  "plan_type": "pro",
+  "rate_limit": {
+    "allowed": false,
+    "limit_reached": true,
+    "primary_window": { "used_percent": 100, "limit_window_seconds": 604800, "reset_after_seconds": 340000, "reset_at": 1788906519 },
+    "secondary_window": null
+  },
+  "rate_limit_reached_type": "primary",
+  "rate_limit_reset_credits": { "available_count": 0, "applicable_available_count": 0 },
+  "credits": { "has_credits": false, "unlimited": false, "overage_limit_reached": false, "balance": "0" },
+  "additional_rate_limits": [
+    {
+      "limit_name": "GPT-5.3-Codex-Spark",
+      "metered_feature": "codex_bengalfox",
+      "rate_limit": {
+        "allowed": false,
+        "limit_reached": true,
+        "primary_window": { "used_percent": 100, "limit_window_seconds": 18000, "reset_after_seconds": 9000, "reset_at": 1788581363 },
+        "secondary_window": { "used_percent": 40, "limit_window_seconds": 604800, "reset_after_seconds": 604800, "reset_at": 1789168163 }
+      },
+      "normal_model_slug": null
+    }
+  ],
+  "model_usage": {}
+}

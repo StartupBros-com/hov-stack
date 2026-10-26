@@ -1,0 +1,64 @@
+#!/usr/bin/env python3
+"""Load a per-MCP env file, expand ${VARS} in argv, then exec the command.
+
+Usage: mcp-with-env <profile> <command> [args...]
+Env file: ~/.pi/agent/secrets/mcp/<profile>.env
+"""
+from __future__ import annotations
+
+import os
+import re
+import shlex
+import sys
+from pathlib import Path
+
+VAR_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
+
+
+def load_env(path: Path) -> None:
+    if not path.exists():
+        raise SystemExit(f"missing MCP env file: {path}")
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[len("export "):].strip()
+        if "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip()
+        if not key:
+            continue
+        try:
+            value = shlex.split(value, posix=True)[0] if value else ""
+        except ValueError:
+            # Fall back to unquoting common .env forms rather than failing to start.
+            value = value.strip('"').strip("'")
+        os.environ[key] = value
+
+
+def expand_arg(arg: str) -> str:
+    def repl(match: re.Match[str]) -> str:
+        name = match.group(1)
+        if name not in os.environ:
+            raise SystemExit(f"missing environment variable for MCP arg expansion: {name}")
+        return os.environ[name]
+    return VAR_RE.sub(repl, arg)
+
+
+def main() -> None:
+    if len(sys.argv) < 3:
+        raise SystemExit("usage: mcp-with-env <profile> <command> [args...]")
+    profile = sys.argv[1]
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+", profile):
+        raise SystemExit(f"invalid MCP env profile: {profile!r}")
+    env_file = Path.home() / ".pi" / "agent" / "secrets" / "mcp" / f"{profile}.env"
+    load_env(env_file)
+    argv = [expand_arg(part) for part in sys.argv[2:]]
+    os.execvp(argv[0], argv)
+
+
+if __name__ == "__main__":
+    main()

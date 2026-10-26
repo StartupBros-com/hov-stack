@@ -1,0 +1,117 @@
+#!/usr/bin/env python3
+import json
+import os
+import shutil
+import sys
+from pathlib import Path
+
+CONFIG_PATH = Path.home() / ".pi" / "agent" / "maintenance.repos.json"
+
+
+def load_config() -> dict:
+    with CONFIG_PATH.open("r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def ensure_parent(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+
+def remove_path(path: Path) -> None:
+    if path.is_symlink() or path.is_file():
+        path.unlink()
+    elif path.exists():
+        shutil.rmtree(path)
+
+
+def files_equal(src: Path, dst: Path) -> bool:
+    try:
+        return src.read_bytes() == dst.read_bytes()
+    except FileNotFoundError:
+        return False
+
+
+def same_location(src: Path, dst: Path) -> bool:
+    try:
+        return src.resolve() == dst.resolve()
+    except FileNotFoundError:
+        return False
+
+
+def sync_path(src: Path, dst: Path, rel: str, changed: list[str]) -> None:
+    if same_location(src, dst):
+        return
+
+    if src.is_symlink() and src.resolve().is_dir():
+        sync_path(src.resolve(), dst, rel, changed)
+        return
+
+    if src.is_symlink() and src.resolve().is_file():
+        sync_path(src.resolve(), dst, rel, changed)
+        return
+
+    if src.is_symlink():
+        target = os.readlink(src)
+        if dst.exists() or dst.is_symlink():
+            if dst.is_symlink() and os.readlink(dst) == target:
+                return
+            remove_path(dst)
+        ensure_parent(dst)
+        os.symlink(target, dst)
+        changed.append(rel)
+        return
+
+    if src.is_dir():
+        if dst.exists() and not dst.is_dir():
+            remove_path(dst)
+            changed.append(rel)
+        dst.mkdir(parents=True, exist_ok=True)
+        src_children = {child.name for child in src.iterdir()}
+        dst_children = {child.name for child in dst.iterdir()} if dst.exists() else set()
+        for extra in sorted(dst_children - src_children):
+            remove_path(dst / extra)
+            changed.append(f"{rel}/{extra}" if rel else extra)
+        for child in sorted(src.iterdir(), key=lambda p: p.name):
+            child_rel = f"{rel}/{child.name}" if rel else child.name
+            sync_path(child, dst / child.name, child_rel, changed)
+        return
+
+    if dst.is_symlink() or dst.is_dir():
+        remove_path(dst)
+        changed.append(rel)
+    if not dst.exists() or not files_equal(src, dst):
+        ensure_parent(dst)
+        shutil.copy2(src, dst)
+        changed.append(rel)
+
+
+def main() -> int:
+    if not CONFIG_PATH.exists():
+        print(f"CONFIG_MISSING={CONFIG_PATH}", file=sys.stderr)
+        return 1
+
+    config = load_config()
+    src_root = Path(config["localAgentDir"]).expanduser().resolve()
+    dst_root = Path(config["backupPiAgentDir"]).expanduser().resolve()
+    sync_paths = config.get("syncPaths", [])
+
+    changed: list[str] = []
+    for rel in sync_paths:
+        src = src_root / rel
+        dst = dst_root / rel
+        if not src.exists() and not src.is_symlink():
+            if dst.exists() or dst.is_symlink():
+                remove_path(dst)
+                changed.append(rel)
+            continue
+        sync_path(src, dst, rel, changed)
+
+    changed = sorted(dict.fromkeys(changed))
+    print(f"SYNC_CHANGED_COUNT={len(changed)}")
+    for rel in changed[:200]:
+        print(f"SYNC_CHANGED={rel}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

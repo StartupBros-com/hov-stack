@@ -1,0 +1,12 @@
+{
+  "name": "install-preflight",
+  "version": "0.1.0",
+  "description": "/preflight <folder | owner/repo | git url> shows, in plain language, what a plugin or mod can do before you install it, with the raw hooks: and calls: lines as the authority.",
+  "author": {
+    "name": "StartupBros / House of Vibe",
+    "url": "https://houseofvibe.ai"
+  },
+  "license": "MIT",
+  "keywords": ["house-of-vibe", "claude-code", "mod", "security", "preflight"],
+  "types": "./types/index.d.ts"
+}

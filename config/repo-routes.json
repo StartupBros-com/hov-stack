@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "routes": [
+    {
+      "id": "github-acme-org-announce-bot",
+      "identities": ["github.com/acme-org/announce-bot"],
+      "aliases": ["github.com/acme/announce-bot"],
+      "coordination": {
+        "origin": "same-repo",
+        "fork": {
+          "enabled": false,
+          "upstreamMayCoordinate": false,
+          "pushRemote": "origin"
+        }
+      },
+      "directWorktreeDefaultMode": "observe"
+    }
+  ]
+}

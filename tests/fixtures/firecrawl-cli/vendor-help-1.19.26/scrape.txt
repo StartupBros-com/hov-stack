@@ -1,0 +1,50 @@
+Usage: firecrawl scrape [options] [urls...]
+
+Scrape one or more URLs. Multiple URLs are scraped concurrently and saved to
+.firecrawl/
+
+Arguments:
+  urls                      URL(s) to scrape
+
+Options:
+  -u, --url <url>           URL to scrape (alternative to positional argument)
+  -H, --html                Output raw HTML (shortcut for --format html)
+  -f, --format <formats>    Output format(s). Multiple formats can be specified
+                            with commas (e.g., "markdown,links,images").
+                            Available: markdown, html, rawHtml, links, images,
+                            screenshot, summary, changeTracking, json,
+                            attributes, branding. Single format outputs raw
+                            content; multiple formats output JSON.
+  --only-main-content       Include only main content (default: false)
+  --wait-for <ms>           Wait time before scraping in milliseconds
+  -S, --summary             Output summary (shortcut for --format summary)
+  --screenshot              Take a screenshot (default: false)
+  --full-page-screenshot    Take a full page screenshot (default: false)
+  --include-tags <tags>     Comma-separated list of tags to include
+  --exclude-tags <tags>     Comma-separated list of tags to exclude
+  -k, --api-key <key>       Firecrawl API key (overrides global --api-key)
+  --api-url <url>           API URL (overrides global --api-url)
+  -o, --output <path>       Output file path (default: stdout)
+  --json                    Output as JSON format (default: false)
+  --pretty                  Pretty print JSON output (default: false)
+  --timing                  Show request timing and other useful information
+                            (default: false)
+  --max-age <milliseconds>  Maximum age of cached content in milliseconds
+  --country <code>          ISO country code for geo-targeted scraping (e.g.,
+                            US, DE, BR)
+  --languages <codes>       Comma-separated language codes for scraping (e.g.,
+                            en,es)
+  -Q, --query <prompt>      Ask a question about the page content (query format)
+  --profile <name>          Persistent browser profile name for maintaining
+                            state across scrapes
+  --no-save-changes         Load existing profile data without saving changes
+                            (default: saves changes)
+  --lockdown                Enable lockdown mode for the scrape (default: false)
+  --redact-pii              Redact personally identifiable information from
+                            returned content (default: false)
+  --schema <json>           JSON schema for structured extraction
+  --schema-file <path>      Path to JSON schema file
+  --actions <json>          JSON actions array to run during scrape
+  --actions-file <path>     Path to JSON actions file
+  --proxy <proxy>           Proxy mode for scraping (e.g., auto, basic)
+  -h, --help                display help for command

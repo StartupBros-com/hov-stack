@@ -1,0 +1,18 @@
+# TEMPLATE: Daily 01:50 trigger for docker-hygiene.service.
+# Replace before enabling:
+#   nothing; the defaults are generic.
+# See systemd/README.md.
+[Unit]
+Description=Daily Docker hygiene: AGGRESSIVE image reclaim and undeclared Supabase volume reap
+
+[Timer]
+# Daily since 2026-10-06, was Wed only: dangling Supabase volumes grew
+# up to 61 GB a day and filled the root disk twice in eight days between
+# weekly runs. 01:50 stays in the quiet pre-03:00 corridor, clear of
+# wt-sweep (01:15), pkg-cache-prune (01:35) and reclaim-sweep (02:05).
+OnCalendar=*-*-* 01:50:00
+Persistent=true
+RandomizedDelaySec=10m
+
+[Install]
+WantedBy=timers.target

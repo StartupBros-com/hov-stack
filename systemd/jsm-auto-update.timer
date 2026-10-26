@@ -1,0 +1,15 @@
+# TEMPLATE: Daily 03:00 timer for jsm-auto-update.service.
+# Replace before enabling:
+#   nothing; the defaults are generic.
+# See systemd/README.md.
+
+[Unit]
+Description=JSM skill auto-update timer
+
+[Timer]
+OnCalendar=*-*-* 03:00:00
+Persistent=true
+AccuracySec=60
+
+[Install]
+WantedBy=timers.target

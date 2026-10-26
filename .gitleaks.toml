@@ -1,0 +1,31 @@
+# gitleaks config for hov-stack. Default rules, plus an allowlist for the test fixtures
+# that carry deliberately fake credentials (each one is a string a test asserts gets
+# redacted or rejected). Add a path here only after reading the hit.
+#
+# The allowlist paths are unanchored regexes. The 2026-10 flatten moved every fixture up
+# one directory, out of the old mirror prefix, and gitleaks scans the full history, so an
+# unanchored path still matches a fixture at both its old and its new location.
+#
+# The singular [allowlist] table is honoured by the gitleaks 8.30.1 CLI pinned in
+# ci.yml; keep this form for the full-history scan.
+title = "hov-stack"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Test fixtures with fake credentials the tests assert on"
+paths = [
+  # History only: an older copy of the submit test sent a fake API key in a header.
+  '''tests/tokscale-submit\.test\.sh''',
+  # History only: an older copy of the billing skill had a table reference that reads
+  # as a generic secret.
+  '''skills-patches/saas-billing-patterns-for-stripe-and-paypal/SKILL\.md''',
+  '''hooks/tests/papercut-log\.test\.js''',
+  '''tests/test_stripe_api\.py''',
+  '''tests/test_memory_recall_eval\.py''',
+  '''tests/test_memory_mine\.py''',
+  '''tests/test_resend_cli\.py''',
+  '''tests/test_supabase_api\.py''',
+  '''tests/vastai\.test\.sh''',
+]

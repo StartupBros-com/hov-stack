@@ -1,0 +1,296 @@
+{
+ "notes_total": 141,
+ "singletons": 31,
+ "clusters": [
+  {
+   "name": "Prove tests and guards are not vacuous (mutation, planted negatives, precondition reached)",
+   "kind": "behaviour-correction",
+   "correction_count": 15,
+   "enforcement_status_claimed": "enforced",
+   "claimed_enforcer": "check-migration-code-coupling.mjs",
+   "note_files": [
+    "a-gate-that-cannot-compare-must-fail.md",
+    "adversarial-lens-catches-inert-guards-topic-reviewers-miss.md",
+    "age-gated-delete-tests-must-age-survivors.md",
+    "assert-the-precondition-not-just-the-outcome.md",
+    "design-drift-satisfied-invariant-masked-both-bugs.md",
+    "inversion-probe-must-anchor-on-unique-string.md",
+    "unreachability-assertions-pass-vacuously-on-dead-targets.md",
+    "test-the-call-order-not-the-callees.md",
+    "rewrite-gate-check-rule-scope-not-just-claims.md",
+    "refactor-coverage-proof-technique.md",
+    "fail-closed-on-every-input-gets-switched-off.md",
+    "destructive-find-script-review-checklist.md"
+   ]
+  },
+  {
+   "name": "Validate the probe and report scope before trusting absence or counts",
+   "kind": "behaviour-correction",
+   "correction_count": 15,
+   "enforcement_status_claimed": "enforced",
+   "claimed_enforcer": "proc_liveness.py's docstring",
+   "note_files": [
+    "low-finding-count-hides-a-blind-tool.md",
+    "validate-the-probe-before-trusting-absence.md",
+    "probe-argv-env-self-poisoning.md",
+    "transcript-corpus-detectors-count-the-review-itself.md",
+    "host-state-diffs-compare-identity-not-volatile-bytes.md",
+    "report-scope-not-just-outcome.md",
+    "flake-repro-measure-the-gated-quantity-not-the-verdict.md",
+    "rank-build-order-by-measured-defect-density.md",
+    "checking-shipped-artifacts-is-not-checking-the-machine.md",
+    "silent-fallback-tools-hide-outages.md"
+   ]
+  },
+  {
+   "name": "Verify PR/CI/merge status against live gate output before reporting ready or green",
+   "kind": "behaviour-correction",
+   "correction_count": 13,
+   "enforcement_status_claimed": "enforced",
+   "claimed_enforcer": "merge-semantics-check.sh",
+   "note_files": [
+    "pr-checks-green-on-empty-start-commit.md",
+    "github-pr-diff-cache-permanently-stale.md",
+    "dirty-pr-gets-no-workflow-runs.md",
+    "red-ci-run-hides-every-later-step.md",
+    "red-job-may-be-a-retry-pass-promoted-by-zero-flake-gate.md",
+    "fix-first-merge-premise-verification.md",
+    "verify-from-a-clean-clone-not-local-disk.md",
+    "automerge-armed-pr-drops-later-commits.md",
+    "pr-scope-check-needs-three-dot-diff.md",
+    "squash-merging-a-stack-auto-closes-its-children.md"
+   ]
+  },
+  {
+   "name": "Label measured vs inferred; report only observed state; verify delegated or stale claims",
+   "kind": "behaviour-correction",
+   "correction_count": 12,
+   "enforcement_status_claimed": "enforced",
+   "claimed_enforcer": "sync-install-smoke.test.sh:534-543, `rent-check inventory` now reports a `checkout` record first (dotfiles#365) and `--strict` exits 1 on stale",
+   "note_files": [
+    "the-inference-next-to-the-measurement.md",
+    "dont-narrate-intended-behavior-as-observed-progress.md",
+    "dont-generalize-fleet-safety-from-small-branch-sample.md",
+    "fleet-does-not-check-facts-handed-as-context.md",
+    "audit-honesty-before-declaring-pipeline-complete.md",
+    "verify-subagent-counts-before-classification.md",
+    "reconcile-contradicting-agents-before-acting.md",
+    "verify-stale-memory-architecture-claims.md",
+    "cass-locators-die-with-worktree-sessions.md",
+    "closed-pr-can-be-deliberate-decision-not-dropped-ball.md"
+   ]
+  },
+  {
+   "name": "Workflow/subagent orchestration pitfalls (write access, pinned shapes, synthesis, relayed request)",
+   "kind": "behaviour-correction",
+   "correction_count": 11,
+   "enforcement_status_claimed": "enforced",
+   "claimed_enforcer": "cr-compact.py",
+   "note_files": [
+    "review-subagents-cannot-write-outside-the-worktree.md",
+    "ce-ideate-distillers-need-a-write-capable-agent.md",
+    "feedback_workflow_fanout_orchestration_lessons.md",
+    "workflow-arms-execute-the-relayed-user-request.md",
+    "parallel-fix-workers-need-the-exact-json-shape-pinned.md",
+    "synthesis-stage-fabricates-consensus-arbitrate-from-verdicts.md",
+    "derive-compact-review-returns-from-artifacts-not-by-retyping.md",
+    "feedback-diagnostics-inline-beats-fanout.md",
+    "schema-validates-shape-not-work.md"
+   ]
+  },
+  {
+   "name": "Never hand the operator commands or the merge; run mechanics yourself",
+   "kind": "behaviour-correction",
+   "correction_count": 10,
+   "enforcement_status_claimed": "enforced",
+   "claimed_enforcer": "wt-sweep.timer, wt-done.sh, wt-sweep.sh",
+   "note_files": [
+    "feedback-agent-native-never-hand-will-commands.md",
+    "feedback-drive-the-mechanics-decisions-not-commands.md",
+    "never-hand-the-human-a-command.md",
+    "wt-done-sh-inside-outside-catch-22.md",
+    "merge-your-own-prs-dont-hand-back.md",
+    "always-on-rule-human-only-step-as-decision.md"
+   ]
+  },
+  {
+   "name": "Guard/hook/dcg false positives and workarounds (heredoc, mktemp, bypass flags)",
+   "kind": "tool-friction",
+   "correction_count": 9,
+   "enforcement_status_claimed": "enforced",
+   "claimed_enforcer": "git-guard hook; dcg rule core.git:branch-force-delete; core.filesystem:redirect-truncate-dynamic-path, tests/dcg-worktree-shapes-guard.test.sh, command-shape guard, `guard_memory_copy()`",
+   "note_files": [
+    "allow-destructive-git-does-not-bypass-dcg.md",
+    "dcg-git-alias-false-positive-on-c-flag-paths.md",
+    "dcg-guard-false-positives-pr-body-and-ledger-repair.md",
+    "dcg-scans-heredoc-body-content.md",
+    "worktree-scratch-mktemp-command-substitution-blocked.md",
+    "memory-backup-guard-false-positives.md",
+    "hook-rejected-compound-rerun-every-part.md"
+   ]
+  },
+  {
+   "name": "Merge is not deploy: verify live checkout/symlink target and sync from canonical checkout",
+   "kind": "behaviour-correction",
+   "correction_count": 7,
+   "enforcement_status_claimed": "enforced",
+   "claimed_enforcer": "SessionStart hook fast-forwards a clean parked main checkout, `sync.sh` now fails closed on this (`hook_command_target` + existence check, PR #389), harness-doctor's parked-checkout symlink check (section 8c",
+   "note_files": [
+    "claude-md-merge-not-live-until-checkout-pulls.md",
+    "stash-pop-conflict-froze-dotfiles-checkout.md",
+    "sync-install-worktree-symlink-trap.md",
+    "hook-reconcile-resolves-through-main-checkout.md",
+    "harness-policy-activation-requires-canonical-main-checkout.md",
+    "harness-doctor-symlink-check-edge-cases.md"
+   ]
+  },
+  {
+   "name": "Shell-parsing guard authoring must fail closed on unmodeled syntax",
+   "kind": "behaviour-correction",
+   "correction_count": 6,
+   "enforcement_status_claimed": "enforced",
+   "claimed_enforcer": "git-guard.js, runner-guard hook (dotfiles#104), shape-rewrite reach check, wf-pin-audit.py",
+   "note_files": [
+    "feedback_git_guard_compound_command_hardening_2026_07.md",
+    "feedback_runner_guard_kill_grammar_bypass_lessons_2026_07.md",
+    "shell-parse-guards-fail-closed-on-unmodeled-syntax.md",
+    "widening-a-scanners-input-view-reopens-other-channels.md",
+    "nested-schema-independence-auditor-lesson.md"
+   ]
+  },
+  {
+   "name": "Stop over-investing in advisory/lint review; ship capability before instruments",
+   "kind": "behaviour-correction",
+   "correction_count": 6,
+   "enforcement_status_claimed": "enforced",
+   "claimed_enforcer": "ESLint bulk suppressions",
+   "note_files": [
+    "freeze-review-loops-on-advisory-heuristics.md",
+    "review-pipeline-overproduces-findings.md",
+    "feedback-capability-before-instruments.md",
+    "lint-finding-count-is-rule-fit-not-debt.md",
+    "lint-backlog-freeze-then-gate.md"
+   ]
+  },
+  {
+   "name": "Bash scripting pitfalls (apostrophes, base-10, read records, pipefail conditions, date -d)",
+   "kind": "tool-friction",
+   "correction_count": 5,
+   "enforcement_status_claimed": "prose-only",
+   "claimed_enforcer": "",
+   "note_files": [
+    "bash-apostrophe-param-expansion-case-arm-trap.md",
+    "bash-digits-only-validation-is-not-base10-safe.md",
+    "bash-read-record-trailing-field-absorption.md",
+    "pipeline-as-condition-with-unbounded-output.md",
+    "gnu-date-empty-string-local-midnight.md"
+   ]
+  },
+  {
+   "name": "Inspect before deleting or replacing (lost-found, peer job logs, shared dirs, scoped keys)",
+   "kind": "behaviour-correction",
+   "correction_count": 5,
+   "enforcement_status_claimed": "prose-only",
+   "claimed_enforcer": "",
+   "note_files": [
+    "check-lost-found-before-running-gc.md",
+    "read-peer-job-out-log-before-deleting-job-dir.md",
+    "a-named-directory-can-hold-shared-infrastructure.md",
+    "dont-replace-scoped-deployment-keys-with-operator-keys.md"
+   ]
+  },
+  {
+   "name": "Memory-dream consolidation pipeline lessons",
+   "kind": "fact",
+   "correction_count": 5,
+   "enforcement_status_claimed": "enforced",
+   "claimed_enforcer": "stderr WARN + report `index_over_cap` + regression test, Name==stem is now a build refusal",
+   "note_files": [
+    "feedback_memory_dream_eval_methodology_lessons.md",
+    "feedback_memory_dream_index_budget_discipline.md",
+    "feedback_memory_dream_verification_pipeline_lessons.md"
+   ]
+  },
+  {
+   "name": "Slash-skill mention only expands in first position; do not claim not installed",
+   "kind": "behaviour-correction",
+   "correction_count": 4,
+   "enforcement_status_claimed": "enforced",
+   "claimed_enforcer": "UserPromptSubmit hook (\"skill-mention-resolver\"), UserPromptSubmit/skill-mention-resolver.js",
+   "note_files": [
+    "skill-slash-invocation-requires-first-position.md",
+    "slash-command-expands-only-in-first-position.md"
+   ]
+  },
+  {
+   "name": "claude-loop ceiling and silent-failure detection",
+   "kind": "fact",
+   "correction_count": 4,
+   "enforcement_status_claimed": "enforced",
+   "claimed_enforcer": "CLAUDE_LOOP_MAX=300",
+   "note_files": [
+    "claude-loop-bg-ceiling-vet-findings.md",
+    "claude-loop-dispatched-run-silent-failure-pattern.md",
+    "loop-guard-hard-stop-stranded-near-complete-work.md"
+   ]
+  },
+  {
+   "name": "Check git status before pulling in a launchpad; never bypass freshen refusal",
+   "kind": "behaviour-correction",
+   "correction_count": 3,
+   "enforcement_status_claimed": "enforced",
+   "claimed_enforcer": "launchpad-freshen.sh --heal",
+   "note_files": [
+    "feedback-check-status-before-pulling-a-launchpad.md",
+    "pull-autostash-strands-launchpad-changes.md"
+   ]
+  },
+  {
+   "name": "gh CLI pitfalls (-f flips to POST, delete-branch in worktree, fork upstream resolution)",
+   "kind": "tool-friction",
+   "correction_count": 3,
+   "enforcement_status_claimed": "prose-only",
+   "claimed_enforcer": "",
+   "note_files": [
+    "gh-api-field-flag-flips-get-to-post.md",
+    "gh-pr-merge-delete-branch-worktree-gotcha.md",
+    "gh-resolves-to-upstream-remote-in-fork-clones.md"
+   ]
+  },
+  {
+   "name": "Prod daemon restart needs separate merge and deploy confirmations",
+   "kind": "behaviour-correction",
+   "correction_count": 3,
+   "enforcement_status_claimed": "prose-only",
+   "claimed_enforcer": "",
+   "note_files": [
+    "pro-gate-prod-change-review-and-deploy-gate.md",
+    "prod-daemon-restart-confirm-and-verify-cgroup-first.md",
+    "prod-daemon-restart-requires-explicit-confirmation-gate.md"
+   ]
+  },
+  {
+   "name": "Vet skills one by one; separate real risk from permission-gated nitpicks; retire vs demote",
+   "kind": "behaviour-correction",
+   "correction_count": 3,
+   "enforcement_status_claimed": "prose-only",
+   "claimed_enforcer": "",
+   "note_files": [
+    "feedback-skill-review-one-by-one-not-by-recency.md",
+    "skill-vetting-permission-gated-concerns-not-blockers.md",
+    "jsm-skill-retired-vs-demoted-distinction.md"
+   ]
+  },
+  {
+   "name": "Register new test suites and manifest entries explicitly in CI/test lists",
+   "kind": "behaviour-correction",
+   "correction_count": 3,
+   "enforcement_status_claimed": "enforced",
+   "claimed_enforcer": ".github/workflows/harness-tests.yml, tests/install-manifest.test.sh",
+   "note_files": [
+    "harness-tests-yml-lists-suites-explicitly.md",
+    "manifest-check-blind-spot-claude-domain.md"
+   ]
+  }
+ ]
+}

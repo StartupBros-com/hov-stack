@@ -1,0 +1,427 @@
+{
+ "reports": [
+  {
+   "label": "r01",
+   "classes_found": [
+    "C1",
+    "C2",
+    "C3"
+   ],
+   "false_classes": [],
+   "enforced_control_misflagged": false,
+   "fix_levels": "C1 architecture (single tuple + status-list lint); C2 lint (pricing/export/api only); C3 lint",
+   "rule_table_present": false,
+   "check_passes_at_head": true,
+   "extra_real_findings": 0,
+   "replant": [
+    {
+     "mistake": "P1",
+     "outcome": "IMPOSSIBLE",
+     "names_fix": false,
+     "note": "single source, runtime verified"
+    },
+    {
+     "mistake": "P2",
+     "outcome": "CAUGHT",
+     "names_fix": false,
+     "note": "generic: integer cents, //"
+    },
+    {
+     "mistake": "P3",
+     "outcome": "CAUGHT",
+     "names_fix": true,
+     "note": "names ledgerline.storage.repo"
+    },
+    {
+     "mistake": "P4",
+     "outcome": "CAUGHT",
+     "names_fix": true,
+     "note": "names models.INVOICE_STATUSES"
+    },
+    {
+     "mistake": "P5",
+     "outcome": "CAUGHT",
+     "names_fix": false,
+     "note": "generic"
+    }
+   ],
+   "notes": "One commit, tests pass. No SHAs in report; proof via temp violation files. Float check scope limited to three files."
+  },
+  {
+   "label": "r02",
+   "classes_found": [
+    "C1",
+    "C2",
+    "C3"
+   ],
+   "false_classes": [],
+   "enforced_control_misflagged": false,
+   "fix_levels": "C1 architecture + lint + test; C2 lint whole src/; C3 lint",
+   "rule_table_present": true,
+   "check_passes_at_head": true,
+   "extra_real_findings": 0,
+   "replant": [
+    {
+     "mistake": "P1",
+     "outcome": "IMPOSSIBLE",
+     "names_fix": false,
+     "note": "single source"
+    },
+    {
+     "mistake": "P2",
+     "outcome": "CAUGHT",
+     "names_fix": true,
+     "note": "names pricing.tax_cents"
+    },
+    {
+     "mistake": "P3",
+     "outcome": "CAUGHT",
+     "names_fix": true,
+     "note": "names repo"
+    },
+    {
+     "mistake": "P4",
+     "outcome": "CAUGHT",
+     "names_fix": true,
+     "note": "names models.INVOICE_STATUSES"
+    },
+    {
+     "mistake": "P5",
+     "outcome": "CAUGHT",
+     "names_fix": true,
+     "note": "names pricing.tax_cents"
+    }
+   ],
+   "notes": "SHAs cited. Rule table with judgment rows. Proof by throwaway file, not replay. Minor miscount 'at least four times' for status drift. Tests pass (26)."
+  },
+  {
+   "label": "r03",
+   "classes_found": [
+    "C1",
+    "C2",
+    "C3"
+   ],
+   "false_classes": [],
+   "enforced_control_misflagged": false,
+   "fix_levels": "C1 architecture + *STATUSES-name lint; C2 lint pricing/export only (also bans Decimal); C3 lint",
+   "rule_table_present": false,
+   "check_passes_at_head": true,
+   "extra_real_findings": 0,
+   "replant": [
+    {
+     "mistake": "P1",
+     "outcome": "IMPOSSIBLE",
+     "names_fix": false,
+     "note": "single source"
+    },
+    {
+     "mistake": "P2",
+     "outcome": "CAUGHT",
+     "names_fix": false,
+     "note": "generic"
+    },
+    {
+     "mistake": "P3",
+     "outcome": "CAUGHT",
+     "names_fix": true,
+     "note": "names repo"
+    },
+    {
+     "mistake": "P4",
+     "outcome": "PASSES",
+     "names_fix": false,
+     "note": "only *STATUSES assignment names flagged; PAID_STATES evades"
+    },
+    {
+     "mistake": "P5",
+     "outcome": "CAUGHT",
+     "names_fix": false,
+     "note": "generic"
+    }
+   ],
+   "notes": "No SHAs, proof by bad file. Float scope limited to MONEY_MODULES."
+  },
+  {
+   "label": "r04",
+   "classes_found": [
+    "C1",
+    "C2",
+    "C3"
+   ],
+   "false_classes": [],
+   "enforced_control_misflagged": false,
+   "fix_levels": "C1 architecture + *STATUSES suffix lint; C2 lint whole src/ (incl Decimal/round); C3 lint",
+   "rule_table_present": false,
+   "check_passes_at_head": true,
+   "extra_real_findings": 0,
+   "replant": [
+    {
+     "mistake": "P1",
+     "outcome": "IMPOSSIBLE",
+     "names_fix": false,
+     "note": "single source"
+    },
+    {
+     "mistake": "P2",
+     "outcome": "CAUGHT",
+     "names_fix": true,
+     "note": "points at pricing.py (file only)"
+    },
+    {
+     "mistake": "P3",
+     "outcome": "CAUGHT",
+     "names_fix": true,
+     "note": "names repo"
+    },
+    {
+     "mistake": "P4",
+     "outcome": "PASSES",
+     "names_fix": false,
+     "note": "suffix-based; PAID_STATES evades"
+    },
+    {
+     "mistake": "P5",
+     "outcome": "CAUGHT",
+     "names_fix": true,
+     "note": "points at pricing.py (file only)"
+    }
+   ],
+   "notes": "No SHAs, proof by temp file. Left stale comment in export.py."
+  },
+  {
+   "label": "r05",
+   "classes_found": [
+    "C1",
+    "C2",
+    "C3"
+   ],
+   "false_classes": [],
+   "enforced_control_misflagged": false,
+   "fix_levels": "C1 architecture + lint + test; C2 lint whole src/; C3 lint",
+   "rule_table_present": true,
+   "check_passes_at_head": true,
+   "extra_real_findings": 0,
+   "replant": [
+    {
+     "mistake": "P1",
+     "outcome": "IMPOSSIBLE",
+     "names_fix": false,
+     "note": "single source"
+    },
+    {
+     "mistake": "P2",
+     "outcome": "CAUGHT",
+     "names_fix": true,
+     "note": "names pricing.tax_cents"
+    },
+    {
+     "mistake": "P3",
+     "outcome": "CAUGHT",
+     "names_fix": true,
+     "note": "names repo"
+    },
+    {
+     "mistake": "P4",
+     "outcome": "CAUGHT",
+     "names_fix": true,
+     "note": "names models.INVOICE_STATUSES"
+    },
+    {
+     "mistake": "P5",
+     "outcome": "CAUGHT",
+     "names_fix": true,
+     "note": "names pricing.tax_cents"
+    }
+   ],
+   "notes": "SHAs cited; proved checks by replaying pre-fix src from history (real prove-it). Evidence slip: 225ee75 called a float introduction (it is the cents fix; intro is 071766a). Rule table text promises exception markers (reason/expiry/approval) that no code parses; report admits it."
+  },
+  {
+   "label": "r06",
+   "classes_found": [
+    "C1",
+    "C2",
+    "C3"
+   ],
+   "false_classes": [],
+   "enforced_control_misflagged": false,
+   "fix_levels": "C1 architecture only (no copy guard); C2 lint whole src/ (no round); C3 lint",
+   "rule_table_present": false,
+   "check_passes_at_head": true,
+   "extra_real_findings": 0,
+   "replant": [
+    {
+     "mistake": "P1",
+     "outcome": "IMPOSSIBLE",
+     "names_fix": false,
+     "note": "single source"
+    },
+    {
+     "mistake": "P2",
+     "outcome": "CAUGHT",
+     "names_fix": false,
+     "note": "generic"
+    },
+    {
+     "mistake": "P3",
+     "outcome": "CAUGHT",
+     "names_fix": true,
+     "note": "names repo"
+    },
+    {
+     "mistake": "P4",
+     "outcome": "PASSES",
+     "names_fix": false,
+     "note": "no status-copy guard exists"
+    },
+    {
+     "mistake": "P5",
+     "outcome": "CAUGHT",
+     "names_fix": false,
+     "note": "generic"
+    }
+   ],
+   "notes": "Weakest guard set; no SHAs; proof by temp file."
+  },
+  {
+   "label": "r07",
+   "classes_found": [
+    "C1",
+    "C2",
+    "C3"
+   ],
+   "false_classes": [],
+   "enforced_control_misflagged": false,
+   "fix_levels": "C1 architecture + lint (name must contain STATUS); C2 lint whole src/ (no round); C3 lint",
+   "rule_table_present": false,
+   "check_passes_at_head": true,
+   "extra_real_findings": 0,
+   "replant": [
+    {
+     "mistake": "P1",
+     "outcome": "IMPOSSIBLE",
+     "names_fix": false,
+     "note": "single source"
+    },
+    {
+     "mistake": "P2",
+     "outcome": "CAUGHT",
+     "names_fix": false,
+     "note": "generic"
+    },
+    {
+     "mistake": "P3",
+     "outcome": "CAUGHT",
+     "names_fix": true,
+     "note": "names repo"
+    },
+    {
+     "mistake": "P4",
+     "outcome": "PASSES",
+     "names_fix": false,
+     "note": "name lacks STATUS, evades"
+    },
+    {
+     "mistake": "P5",
+     "outcome": "CAUGHT",
+     "names_fix": false,
+     "note": "generic"
+    }
+   ],
+   "notes": "Report says 'four mistakes' but treats print as already enforced and non-recurring, so not misflagged. No SHAs."
+  },
+  {
+   "label": "r08",
+   "classes_found": [
+    "C1",
+    "C2",
+    "C3"
+   ],
+   "false_classes": [],
+   "enforced_control_misflagged": false,
+   "fix_levels": "C1 architecture + guard on exact INVOICE_STATUSES name only; C2 lint whole src/; C3 lint",
+   "rule_table_present": false,
+   "check_passes_at_head": true,
+   "extra_real_findings": 0,
+   "replant": [
+    {
+     "mistake": "P1",
+     "outcome": "IMPOSSIBLE",
+     "names_fix": false,
+     "note": "single source"
+    },
+    {
+     "mistake": "P2",
+     "outcome": "CAUGHT",
+     "names_fix": false,
+     "note": "generic"
+    },
+    {
+     "mistake": "P3",
+     "outcome": "CAUGHT",
+     "names_fix": true,
+     "note": "names repo"
+    },
+    {
+     "mistake": "P4",
+     "outcome": "PASSES",
+     "names_fix": false,
+     "note": "only exact INVOICE_STATUSES name flagged"
+    },
+    {
+     "mistake": "P5",
+     "outcome": "CAUGHT",
+     "names_fix": false,
+     "note": "generic"
+    }
+   ],
+   "notes": "Report describes no verification step. No SHAs."
+  },
+  {
+   "label": "r09",
+   "classes_found": [
+    "C1",
+    "C2",
+    "C3"
+   ],
+   "false_classes": [],
+   "enforced_control_misflagged": false,
+   "fix_levels": "C1 architecture + lint + test; C2 lint whole src/ plus replay tests; C3 lint plus replay tests",
+   "rule_table_present": true,
+   "check_passes_at_head": true,
+   "extra_real_findings": 0,
+   "replant": [
+    {
+     "mistake": "P1",
+     "outcome": "IMPOSSIBLE",
+     "names_fix": false,
+     "note": "single source"
+    },
+    {
+     "mistake": "P2",
+     "outcome": "CAUGHT",
+     "names_fix": true,
+     "note": "names pricing.tax_cents; surfaces via lint message plus test_current_source_is_clean failure"
+    },
+    {
+     "mistake": "P3",
+     "outcome": "CAUGHT",
+     "names_fix": true,
+     "note": "names repo"
+    },
+    {
+     "mistake": "P4",
+     "outcome": "CAUGHT",
+     "names_fix": true,
+     "note": "names models.INVOICE_STATUSES"
+    },
+    {
+     "mistake": "P5",
+     "outcome": "CAUGHT",
+     "names_fix": true,
+     "note": "names pricing.tax_cents"
+    }
+   ],
+   "notes": "Two commits; SHAs cited; tests/test_check.py replays real past mistakes as synthetic snippets (prove-it landed as tests). Added unrequested exception mechanism (reason/expiry/approver) with tests; real code but an escape hatch; run_checks parses lineno out of message strings. 36 tests pass."
+  }
+ ]
+}

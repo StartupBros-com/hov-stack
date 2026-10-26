@@ -1,0 +1,13 @@
+#!/bin/bash
+set -euo pipefail
+
+script_dir="$(cd "$(dirname "$0")" && pwd)"
+real_path="$(printf '%s' "$PATH" | awk -v RS=: -v ORS=: -v dir="$script_dir" '$0 != dir { print }' | sed 's/:$//')"
+real_npx="$(PATH="$real_path" command -v npx || true)"
+
+if [ -z "$real_npx" ]; then
+  echo "Error: real npx binary not found on PATH" >&2
+  exit 1
+fi
+
+exec "$real_npx" "$@"

@@ -1,0 +1,438 @@
+#!/usr/bin/env python3
+"""Project compressed Codex rollouts into metadata-only JSONL for ccusage 20.0.19.
+
+Keep session_meta and turn_context with the prototype's reduced payload keys,
+and token_count events; never export message, tool, or instruction bodies.
+Remove this bridge and its launcher wiring when the ccusage pin both reads .zst
+and dedupes requestless resp_ IDs. Newer readers currently inflate those IDs.
+Sources are read-only; failed exports preserve the previous immutable generation.
+Launchers hold .readers.lock shared from generation resolution until the reader
+exits; old generations are pruned only while no reader holds it.
+"""
+
+import argparse
+import errno
+import fcntl
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import shutil
+import stat
+import subprocess
+import sys
+import tempfile
+import time
+
+META_KEYS = (
+    "id",
+    "timestamp",
+    "cwd",
+    "originator",
+    "cli_version",
+    "source",
+    "model_provider",
+    "forked_from_id",
+    "parent_thread_id",
+    "session_id",
+    "thread_source",
+    "agent_role",
+    "subagent_history_start_ordinal",
+    "history_mode",
+    "multi_agent_version",
+)
+TURN_KEYS = ("turn_id", "model", "cwd", "timestamp")
+LEAVES = ("sessions", "archived_sessions")
+HEX = re.compile(r"[0-9a-f]{64}")
+
+
+class InvalidSource(ValueError):
+    """Only fixed metadata descriptions may appear in diagnostics."""
+
+
+def encoded(value):
+    return json.dumps(
+        value,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        allow_nan=False,
+    )
+
+
+def refuse_symlinks(path):
+    for part in (path, *path.parents):
+        if part.is_symlink():
+            raise InvalidSource("export state must not follow symlinks")
+
+
+def open_lock(path, label):
+    fd = os.open(path, os.O_CREAT | os.O_WRONLY | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600)
+    lock = os.fdopen(fd, "a")
+    if not stat.S_ISREG(os.fstat(lock.fileno()).st_mode):
+        lock.close()
+        raise InvalidSource(f"{label} lock must be a regular file")
+    return lock
+
+
+def file_digest(path):
+    hasher = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            hasher.update(chunk)
+    return hasher.hexdigest()
+
+
+def signature(path):
+    info = path.stat()
+    if not stat.S_ISREG(info.st_mode):
+        raise InvalidSource("source must be a regular file")
+    return [
+        str(path.resolve()),
+        info.st_dev,
+        info.st_ino,
+        info.st_size,
+        info.st_mtime_ns,
+    ]
+
+
+def project(raw, stats):
+    try:
+        row = json.loads(raw)
+    except (ValueError, UnicodeError):
+        stats["badLines"] += 1
+        return None
+    if not isinstance(row, dict) or not isinstance(row.get("payload"), dict):
+        return None
+    kind, payload = row.get("type"), row["payload"]
+    if kind in ("session_meta", "turn_context"):
+        keys = META_KEYS if kind == "session_meta" else TURN_KEYS
+        payload = {key: payload[key] for key in keys if key in payload}
+    elif kind != "event_msg" or payload.get("type") != "token_count":
+        return None
+    # Whitelist the envelope too: unexpected top-level fields may contain bodies.
+    return (
+        encoded(
+            {
+                **({"timestamp": row["timestamp"]} if "timestamp" in row else {}),
+                "type": kind,
+                "payload": payload,
+            }
+        ).encode()
+        + b"\n"
+    )
+
+
+def decompress(path, objects, sig, stats):
+    fd, name = tempfile.mkstemp(prefix=".project-", dir=objects)
+    temporary = Path(name)
+    try:
+        hasher = hashlib.sha256()
+        with os.fdopen(fd, "wb") as output:
+            with subprocess.Popen(
+                ["zstd", "-q", "-dc", "--", str(path)],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+            ) as process:
+                try:
+                    for raw in process.stdout:
+                        line = project(raw, stats)
+                        if line is not None:
+                            output.write(line)
+                            hasher.update(line)
+                except BaseException:
+                    process.kill()
+                    raise
+                failed = process.wait() != 0
+            output.flush()
+            os.fsync(output.fileno())
+        if failed or signature(path) != sig:
+            if time.time_ns() - path.stat().st_mtime_ns <= 900 * 10**9:
+                stats["inFlightSkipped"] += 1
+                return None
+            raise InvalidSource(
+                "compressed source failed decoding or changed during read"
+            )
+        digest = hasher.hexdigest()
+        target = objects / (digest + ".jsonl")
+        refuse_symlinks(target)
+        if not target.exists():
+            os.replace(temporary, target)
+        elif file_digest(target) != digest:
+            raise InvalidSource("cached object digest disagrees")
+        # Bodies can change while the projection remains identical. Refresh
+        # source timing even then; hardlinked generation contents stay immutable.
+        os.utime(target, ns=(sig[-1], sig[-1]))
+        return digest
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def atomic_json(path, value):
+    fd, name = tempfile.mkstemp(prefix=".index-", dir=path.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            stream.write(encoded(value))
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(name, path)
+    finally:
+        Path(name).unlink(missing_ok=True)
+
+
+def manifest_for(generation):
+    refuse_symlinks(generation)
+    if not HEX.fullmatch(generation.name) or not generation.is_dir():
+        raise InvalidSource("invalid owned generation")
+    manifest = []
+    for path in sorted(generation.rglob("*")):
+        refuse_symlinks(path)
+        if path.is_file():
+            rel = path.relative_to(generation).as_posix()
+            if path.suffix != ".jsonl" or rel.split("/")[0] not in LEAVES:
+                raise InvalidSource("unexpected generation file")
+            manifest.append([rel, file_digest(path)])
+        elif not path.is_dir():
+            raise InvalidSource("invalid generation entry")
+    if hashlib.sha256(encoded(manifest).encode()).hexdigest() != generation.name:
+        raise InvalidSource("generation digest disagrees")
+    return manifest
+
+
+def export(homes, state):
+    stats = dict(
+        sources=0,
+        reused=0,
+        projected=0,
+        twinSkipped=0,
+        inFlightSkipped=0,
+        badLines=0,
+        generation=None,
+    )
+    state = state.absolute()
+    refuse_symlinks(state)
+    state = state.resolve()
+    for name in (
+        "generations",
+        "objects",
+        ".export.lock",
+        ".readers.lock",
+        "index.json",
+        "previous.json",
+    ):
+        refuse_symlinks(state / name)
+    state.mkdir(mode=0o700, parents=True, exist_ok=True)
+    with open_lock(state / ".export.lock", "export") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        # Create the readers lock before any generation can be published, so a
+        # launcher that sees the export target can always open it.
+        open_lock(state / ".readers.lock", "readers").close()
+        generations, objects, target = (
+            state / "generations",
+            state / "objects",
+            state / "codex",
+        )
+        previous = None
+        if os.path.lexists(target):
+            if not target.is_symlink():
+                raise InvalidSource("refusing unmanaged export target")
+            previous = target.resolve(strict=True)
+            if previous.parent != generations:
+                raise InvalidSource("active generation escapes export state")
+            manifest_for(previous)
+        sources = {}
+        for home in homes:
+            home = home.resolve()
+            plains = {
+                path.name
+                for leaf in LEAVES
+                for path in (home / leaf).rglob("rollout-*.jsonl")
+            }
+            for leaf in LEAVES:
+                for path in (home / leaf).rglob("rollout-*.jsonl.zst"):
+                    sources[str(path)] = (
+                        path,
+                        path.relative_to(home).as_posix()[:-4],
+                        path.name[:-4] in plains,
+                    )
+        stats["sources"] = len(sources)
+        if sources and not shutil.which("zstd"):
+            raise InvalidSource("zstd executable is required for compressed sources")
+        if not sources and previous is None:
+            return stats
+        generations.mkdir(mode=0o700, exist_ok=True)
+        objects.mkdir(mode=0o700, exist_ok=True)
+        index_path = state / "index.json"
+        index = json.loads(index_path.read_text()) if index_path.exists() else {}
+        if not isinstance(index, dict):
+            raise InvalidSource("invalid projection cache index")
+        # Validate bridge-owned paths before publishing or trusting cache entries.
+        for directory in (objects, generations):
+            for entry in directory.rglob("*"):
+                refuse_symlinks(entry)
+        next_index, manifest = {}, {}
+        for path, rel, twin in sorted(sources.values()):
+            if twin:
+                stats["twinSkipped"] += 1
+                continue
+            sig = signature(path)
+            key = encoded(sig)
+            cached = index.get(key)
+            if cached is not None and (
+                not isinstance(cached, dict)
+                or not isinstance(cached.get("digest"), str)
+                or not HEX.fullmatch(cached["digest"])
+                or type(cached.get("badLines")) is not int
+                or cached["badLines"] < 0
+            ):
+                raise InvalidSource("invalid cached projection entry")
+            obj = objects / (cached["digest"] + ".jsonl") if cached else None
+            if cached and HEX.fullmatch(cached["digest"]) and obj.is_file():
+                refuse_symlinks(obj)
+                digest = cached["digest"]
+                if file_digest(obj) != digest:
+                    raise InvalidSource("cached object digest disagrees")
+                stats["reused"] += 1
+                stats["badLines"] += cached["badLines"]
+            else:
+                before = stats["badLines"]
+                digest = decompress(path, objects, sig, stats)
+                if digest is None:
+                    continue
+                cached = {"digest": digest, "badLines": stats["badLines"] - before}
+                stats["projected"] += 1
+            # Name the rollout on every export, cached or not: its unreadable
+            # lines stay uncounted until the source itself changes.
+            if cached["badLines"]:
+                print(
+                    f"codex-zst-bridge: skipped {cached['badLines']} malformed"
+                    f" line(s) in {rel}",
+                    file=sys.stderr,
+                )
+            next_index[key] = cached
+            if rel in manifest and manifest[rel] != digest:
+                raise InvalidSource("conflicting cross-home projection path")
+            manifest[rel] = digest
+        ordered = sorted([rel, digest] for rel, digest in manifest.items())
+        digest = hashlib.sha256(encoded(ordered).encode()).hexdigest()
+        generation = generations / digest
+        if generation.exists() or generation.is_symlink():
+            if manifest_for(generation) != ordered:
+                raise InvalidSource("existing generation disagrees with source")
+        else:
+            staging = Path(tempfile.mkdtemp(prefix=".building-", dir=generations))
+            try:
+                for leaf in LEAVES:
+                    (staging / leaf).mkdir(mode=0o700)
+                for rel, object_digest in ordered:
+                    destination = staging / rel
+                    destination.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+                    source = objects / (object_digest + ".jsonl")
+                    try:
+                        os.link(source, destination)
+                    except OSError as error:
+                        if error.errno not in (errno.EXDEV, errno.EPERM):
+                            raise
+                        shutil.copy2(source, destination)
+                os.rename(staging, generation)
+            finally:
+                if staging.exists():
+                    shutil.rmtree(staging)
+        # Commit the cache before publication: any pre-publication failure leaves
+        # the reader target untouched. Cache entries never determine source presence.
+        atomic_json(index_path, next_index)
+        prior_path = state / "previous.json"
+        history = json.loads(prior_path.read_text()) if prior_path.exists() else {}
+        if not isinstance(history, dict) or any(
+            not isinstance(key, str)
+            or not HEX.fullmatch(key)
+            or (
+                value is not None
+                and (not isinstance(value, str) or not HEX.fullmatch(value))
+            )
+            for key, value in history.items()
+        ):
+            raise InvalidSource("invalid previous generation identities")
+        if previous != generation:
+            # Key the predecessor by the generation being published. If the
+            # symlink swap fails, the current generation's predecessor survives
+            # too; a retry cannot accidentally prune an in-flight reader.
+            history = {
+                **({previous.name: history.get(previous.name)} if previous else {}),
+                digest: previous.name if previous else None,
+            }
+            atomic_json(prior_path, history)
+        prior_name = history.get(digest)
+        if previous != generation:
+            fd, name = tempfile.mkstemp(prefix=".codex-next-", dir=state)
+            os.close(fd)
+            link = Path(name)
+            link.unlink()
+            try:
+                link.symlink_to(Path("generations") / digest, target_is_directory=True)
+                os.replace(link, target)
+            finally:
+                link.unlink(missing_ok=True)
+        stats["generation"] = digest
+        # Pruning is maintenance after the commit. A cleanup error cannot turn a
+        # successfully published transaction into a reported failed export.
+        try:
+            with open_lock(state / ".readers.lock", "readers") as readers:
+                # A running reader may still traverse any older generation.
+                try:
+                    fcntl.flock(readers, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except BlockingIOError:
+                    print(
+                        "codex-zst-bridge: generation cleanup deferred while a"
+                        " reader is active",
+                        file=sys.stderr,
+                    )
+                    return stats
+                kept = {generation}
+                if prior_name is not None:
+                    kept.add(generations / prior_name)
+                referenced = {
+                    item[1] for folder in kept for item in manifest_for(folder)
+                }
+                for folder in generations.iterdir():
+                    refuse_symlinks(folder)
+                    if folder not in kept:
+                        shutil.rmtree(folder)
+                for obj in objects.iterdir():
+                    refuse_symlinks(obj)
+                    if obj.stem not in referenced:
+                        obj.unlink()
+        except (OSError, ValueError):
+            print("codex-zst-bridge: generation cleanup deferred", file=sys.stderr)
+    return stats
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--state-dir",
+        type=Path,
+        default=Path(
+            os.environ.get(
+                "CODEX_ZST_BRIDGE_STATE_DIR",
+                str(Path.home() / ".local/state/codex-zst-bridge"),
+            )
+        ),
+    )
+    parser.add_argument("--codex-home", type=Path, action="append", default=[])
+    args = parser.parse_args()
+    try:
+        stats = export(args.codex_home, args.state_dir)
+    except (OSError, ValueError, TypeError, KeyError) as error:
+        reason = (
+            str(error) if isinstance(error, InvalidSource) else type(error).__name__
+        )
+        print(f"codex-zst-bridge: {reason}; previous export preserved", file=sys.stderr)
+        return 1
+    print(json.dumps(stats))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,0 +1,11 @@
+{
+  "name": "reminder-diet",
+  "version": "0.1.0",
+  "description": "Leaves out a task reminder that repeats, word for word, the last one the same loop was sent. The model already has that copy in its context; the repeat only fills the window and brings the next compaction sooner.",
+  "author": {
+    "name": "StartupBros / House of Vibe",
+    "url": "https://houseofvibe.ai"
+  },
+  "license": "MIT",
+  "keywords": ["house-of-vibe", "claude-code", "mod", "reminder", "context", "tokens"]
+}

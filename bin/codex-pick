@@ -1,0 +1,139 @@
+#!/usr/bin/env node
+/**
+ * codex-pick — the Codex best-available-model resolver as a CLI (dotfiles#991).
+ *
+ * The PreToolUse quota guard rewrites Codex commands that pass through Claude
+ * Code's Bash tool. Scripts, cron, and the Codex host never do, so they call
+ * this instead. Same resolver module, same receipt.
+ *
+ *   codex-pick --json [-- codex exec …]     print the receipt for that command
+ *                                           (default command: `codex exec`)
+ *   codex-pick --exec -- codex exec …       rewrite per the receipt and run it;
+ *                                           the child's exit code is yours
+ *   codex-pick --version | --help
+ *
+ * Exit codes: 0 resolved; 2 usage; 3 exhausted under --exec (nothing run, the
+ * receipt goes to stderr so a script never spends a window it cannot use).
+ * Uncertainty (no auth, timeout, no catalog) fails open exactly like the guard:
+ * --exec runs the command unchanged.
+ *
+ * Deploy: versioned at bin/codex-pick, symlinked to
+ * ~/.local/bin/codex-pick by install.sh (lib/manifest.sh). The resolver is
+ * reached through this file's real path, so the worktree copy works before
+ * deploy and ~/.claude/bin/codex-pick after (sync.sh symlinks the whole
+ * bin directory). Never prints a token, an account id, or a key.
+ *
+ * Test hooks (hermetic fixtures, neutralized by the hook suite):
+ *   CODEX_PICK_USAGE_FIXTURE=<file>    usage body for the active account
+ *   CODEX_PICK_CATALOG_FIXTURE=<file>  catalog `models` array or {models:[…]}
+ *   CODEX_PICK_ACCOUNTS=none           active account only (skip caam discovery)
+ *
+ * Opt-in (not a test hook): CODEX_PICK_API_LANE=1 enables the pay-per-token
+ * rung when OPENAI_API_KEY is also present. Off by default — the standing
+ * posture is OAuth subscription limits, never API spend (issue 993).
+ */
+'use strict';
+
+const fs = require('fs');
+const path = require('path');
+const { spawn } = require('child_process');
+
+const VERSION = '0.1.0';
+const resolver = require(path.join(path.dirname(fs.realpathSync(__filename)), '..', 'hooks', 'lib', 'codex-model-resolver.js'));
+
+const USAGE = `usage: codex-pick [--json] [-- codex exec …]
+       codex-pick --exec -- codex exec …
+       codex-pick --version | --help
+
+Resolve the best Codex model that is actually available for a command, from
+OpenAI's live catalog (priority, visibility, upgrade, supported_reasoning_levels)
+and usage (account window, separately metered models, banked resets).
+--json prints the receipt; --exec rewrites and runs. Exit 3 under --exec when
+every verified rung is exhausted; uncertainty fails open (runs unchanged).`;
+
+function parseArgs(argv) {
+  const opts = { json: false, exec: false, command: null };
+  let i = 0;
+  for (; i < argv.length; i += 1) {
+    const a = argv[i];
+    if (a === '--') { opts.command = argv.slice(i + 1); break; }
+    if (a === '--json') opts.json = true;
+    else if (a === '--exec') opts.exec = true;
+    else if (a === '--version' || a === '-V') return { version: true };
+    else if (a === '--help' || a === '-h') return { help: true };
+    else return { error: `unknown argument: ${a}` };
+  }
+  return opts;
+}
+
+function readJsonFile(file) {
+  return JSON.parse(fs.readFileSync(file, 'utf8'));
+}
+
+function fixtureDeps(env) {
+  const deps = {};
+  if (env.CODEX_PICK_USAGE_FIXTURE) {
+    const usage = readJsonFile(env.CODEX_PICK_USAGE_FIXTURE);
+    deps.readAuth = () => ({ token: 'fixture', account: 'fixture' });
+    deps.fetchUsage = async () => ({ ...resolver.evaluateUsage(usage), usage });
+  }
+  if (env.CODEX_PICK_CATALOG_FIXTURE) {
+    const raw = readJsonFile(env.CODEX_PICK_CATALOG_FIXTURE);
+    const models = Array.isArray(raw) ? raw : raw.models;
+    deps.loadCatalog = async () => ({ models, fetchedAt: 'fixture', source: 'fixture' });
+  }
+  if (env.CODEX_PICK_ACCOUNTS === 'none') {
+    deps.listAccounts = (e) => [{ name: 'active', authPath: resolver.activeAuthPath(e), execPrefix: null }];
+  }
+  if (env.CODEX_PICK_CCFLARE_FIXTURE) {
+    const fx = readJsonFile(env.CODEX_PICK_CCFLARE_FIXTURE);
+    deps.ccflarePool = async ({ catalog }) => resolver.rankCcflarePools((fx.models && fx.models.data) || [], fx.accounts || [], catalog);
+    deps.configModelProvider = () => null;
+  }
+  return deps;
+}
+
+async function main() {
+  const opts = parseArgs(process.argv.slice(2));
+  if (opts.help) { process.stdout.write(`${USAGE}\n`); return 0; }
+  if (opts.version) { process.stdout.write(`codex-pick ${VERSION}\n`); return 0; }
+  if (opts.error) { process.stderr.write(`codex-pick: ${opts.error}\n${USAGE}\n`); return 2; }
+  if (opts.exec && !opts.command) { process.stderr.write('codex-pick: --exec needs a command after --\n'); return 2; }
+
+  const argv = opts.command && opts.command.length ? opts.command : ['codex', 'exec'];
+  if (!resolver.parseArgv(argv)) {
+    process.stderr.write('codex-pick: the command after -- must be a direct `codex exec|e|review …`\n');
+    return 2;
+  }
+
+  let receipt;
+  try {
+    receipt = await resolver.resolve({ argv, env: process.env, deps: fixtureDeps(process.env) });
+  } catch (e) {
+    process.stderr.write(`codex-pick: resolver failed (${e && e.message}); running unchanged\n`);
+    receipt = { reason: 'uncertain', changed: false, argv: null, note: String(e && e.message) };
+  }
+
+  if (!opts.exec) {
+    if (opts.json) process.stdout.write(`${JSON.stringify(receipt, null, 2)}\n`);
+    else process.stdout.write(`${receipt.reason}: ${receipt.note}${receipt.rewrite ? `\n${receipt.rewrite}` : ''}\n`);
+    return 0;
+  }
+
+  if (receipt.reason === 'exhausted') {
+    process.stderr.write(`codex-pick: exhausted — ${receipt.note}\n${JSON.stringify(receipt)}\n`);
+    return 3;
+  }
+  const finalArgv = receipt.changed && Array.isArray(receipt.argv) ? receipt.argv : argv;
+  if (receipt.changed) process.stderr.write(`codex-pick: ${receipt.note}\n`);
+  return new Promise((resolve) => {
+    const child = spawn(finalArgv[0], finalArgv.slice(1), { stdio: 'inherit' });
+    child.on('error', (e) => { process.stderr.write(`codex-pick: cannot run ${finalArgv[0]}: ${e.message}\n`); resolve(127); });
+    child.on('close', (code, signal) => resolve(signal ? 128 : (code == null ? 1 : code)));
+  });
+}
+
+main().then((code) => { process.exitCode = code; }, (e) => {
+  process.stderr.write(`codex-pick: ${e && e.message}\n`);
+  process.exitCode = 1;
+});

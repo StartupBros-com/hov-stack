@@ -1,0 +1,153 @@
+{
+  "schema_version": 1,
+  "vendor_version": "1.19.26",
+  "notes": [
+    "Hand-maintained from the wrapper registry and vendor_arguments; raw passthrough has no fixed flag contract.",
+    "Null means the vendor help states no default; it does not assert an API default.",
+    "Parse --only-main-content states false in CLI help; the API-side default is true.",
+    "The injection check is unavailable through vendor CLI 1.19.26, as recorded by the wrapper; there is no exposed flag or stated default to compare.",
+    "Agent --max-credits is forwarded when supplied; its API default is not stated in CLI help. Model routing is not a help-text default.",
+    "search --categories developer is answered by the API directly (firecrawl/cli#222); the verb map lists only flags the vendor help states."
+  ],
+  "command_groups": {
+    "": [
+      "scrape",
+      "crawl",
+      "map",
+      "parse",
+      "monitor",
+      "search",
+      "research",
+      "feedback",
+      "search-feedback",
+      "agent",
+      "interact",
+      "experimental",
+      "config",
+      "view-config",
+      "login",
+      "logout",
+      "init",
+      "setup",
+      "make",
+      "launch",
+      "env",
+      "credit-usage",
+      "doctor",
+      "version",
+      "help"
+    ],
+    "interact": [
+      "stop"
+    ]
+  },
+  "commands": {
+    "scrape": {
+      "flags": [
+        "--format",
+        "--only-main-content",
+        "--screenshot",
+        "--schema",
+        "--schema-file",
+        "--query",
+        "--actions",
+        "--actions-file",
+        "--max-age",
+        "--json"
+      ],
+      "defaults": {
+        "--format": null,
+        "--only-main-content": "false",
+        "--screenshot": "false",
+        "--json": "false",
+        "--max-age": null
+      }
+    },
+    "parse": {
+      "flags": [
+        "--format",
+        "--only-main-content",
+        "--query",
+        "--timeout",
+        "--json"
+      ],
+      "defaults": {
+        "--format": null,
+        "--only-main-content": "false",
+        "--json": "false"
+      }
+    },
+    "agent": {
+      "flags": [
+        "--schema",
+        "--schema-file",
+        "--max-credits",
+        "--model",
+        "--status",
+        "--wait",
+        "--cancel",
+        "--json"
+      ],
+      "defaults": {
+        "--max-credits": null,
+        "--json": "false"
+      }
+    },
+    "interact": {
+      "flags": [
+        "--code",
+        "--prompt",
+        "--scrape-id",
+        "--node",
+        "--python",
+        "--bash",
+        "--timeout",
+        "--json"
+      ],
+      "defaults": {
+        "--scrape-id": "last scrape",
+        "--timeout": "30",
+        "--json": "false"
+      }
+    },
+    "interact stop": {
+      "flags": [
+        "--json"
+      ],
+      "defaults": {
+        "--json": "false"
+      }
+    },
+    "search": {
+      "flags": [
+        "--limit",
+        "--categories",
+        "--sources",
+        "--tbs",
+        "--location",
+        "--json"
+      ],
+      "defaults": {
+        "--json": "false",
+        "--sources": "web"
+      }
+    },
+    "map": {
+      "flags": [
+        "--limit",
+        "--json"
+      ],
+      "defaults": {
+        "--json": "false"
+      }
+    },
+    "credit-usage": {
+      "flags": [
+        "--json"
+      ],
+      "defaults": {
+        "--json": "false"
+      }
+    }
+  }
+}

@@ -1,0 +1,46 @@
+{
+ "results": [
+  {
+   "cluster": "Validate the probe and report scope before trusting absence or counts",
+   "verdict": "PARTIAL",
+   "enforcer": "scripts/lib/proc_liveness.py with tests/test_proc_liveness.py",
+   "evidence": "The claimed enforcer exists. Its docstring (lines 1-40) shows the scanner excludes its own PID and exits 2 when procfs is unreadable instead of reporting 'nothing alive'. Tests exist at tests/test_proc_liveness.py and tests/wt-sweep-alive.test.sh, and CI runs the python unittest discover at harness-tests.yml:2072. That covers only the narrow probe-argv self-poisoning note. The general rules are prose only: validate a probe before trusting absence, report scope, flake repro, build-order ranking, transcript detectors counting the review itself. I found no hook or test for them."
+  },
+  {
+   "cluster": "Workflow/subagent orchestration pitfalls (write access, pinned shapes, synthesis, relayed request)",
+   "verdict": "PARTIAL",
+   "enforcer": "hooks/PreToolUse/fanout-admission.js; hooks/PreToolUse/structured-output-unwrap.js; scripts/wf-pin-audit.py",
+   "evidence": "The claimed enforcer cr-compact.py does not exist: no file by that name anywhere in the worktree, and the name appears only in memory/-home-user-dotfiles/derive-compact*.md:20. Related enforcement covers other facets. fanout-admission.js is warn-only by default and denies only with CLAUDE_FANOUT_GATE_BLOCK=1 (header lines 20-25). structured-output-unwrap.js rewrites one wrapped-input schema failure shape. wf-pin-audit.py audits model pins after the fact. No enforcer covers subagent write access outside the worktree, synthesis fabricating consensus, relayed-request execution, or pinning the exact JSON shape."
+  },
+  {
+   "cluster": "Merge is not deploy: verify live checkout/symlink target and sync from canonical checkout",
+   "verdict": "PARTIAL",
+   "enforcer": "sync.sh:686-697; scripts/harness-doctor.sh section 8c (lines 618-745); hooks/SessionStart/launchpad-advisory.js",
+   "evidence": "sync.sh:686-697 uses hook_command_target and refuses with return 1 when the hook target does not exist, saying 'merge it and pull the main checkout first', so that part blocks. The SessionStart launchpad-advisory.js heals a stale clean default-branch checkout (note at line 250) and skips worktrees. launchpad-freshen.sh:181 does the ff-only merge. harness-doctor 8c only calls warn() on a parked checkout (lines 731-737), so it is advisory, and the doctor runs on the operator's box rather than as a CI gate. Nothing forces an agent to verify the live checkout after a merge, and nothing blocks claiming 'merged' as 'deployed'."
+  },
+  {
+   "cluster": "Bash scripting pitfalls (apostrophes, base-10, read records, pipefail conditions, date -d)",
+   "verdict": "REFUTED",
+   "enforcer": "",
+   "evidence": "No enforcer claimed or found. tests/test_harness_test_registration.py:162 has a shellcheck test for extensionless bin scripts, but I found no check for the specific traps: apostrophe in a case-arm parameter expansion, base-10 digit validation, trailing-field absorption in read, a pipeline used as a condition with unbounded output, or GNU date -d with an empty string. The notes are prose only."
+  },
+  {
+   "cluster": "Slash-skill mention only expands in first position; do not claim not installed",
+   "verdict": "PARTIAL",
+   "enforcer": "hooks/UserPromptSubmit/skill-mention-resolver.js",
+   "evidence": "The hook exists and is registered (settings.json:874). Test hooks/tests/skill-mention-resolver.test.js is run by CI via 'bash hooks/tests/run.sh' (harness-tests.yml:2110). The hook is advisory. It injects an informational note naming installed skills that are hidden from the model, and its header (line 14) says it fails open silently. It never blocks a prompt. It also does not stop the model asserting 'not installed' or fix the mid-message no-expansion. It only supplies a hint."
+  },
+  {
+   "cluster": "gh CLI pitfalls (-f flips to POST, delete-branch in worktree, fork upstream resolution)",
+   "verdict": "REFUTED",
+   "enforcer": "",
+   "evidence": "No claimed enforcer. In PreToolUse, git-guard.js only mentions 'gh pr merge --delete-branch' as the recommended safe alternative (lines 135 and 164). That is the opposite of guarding against the delete-branch-in-worktree gotcha. I found no hook or test for 'gh api -f' flipping GET to POST or for gh resolving to the upstream remote in fork clones. The notes are prose only."
+  },
+  {
+   "cluster": "Register new test suites and manifest entries explicitly in CI/test lists",
+   "verdict": "PARTIAL",
+   "enforcer": ".github/workflows/harness-tests.yml + tests/test_harness_test_registration.py; tests/install-manifest.test.sh",
+   "evidence": "The suite-registration half is enforced. test_harness_test_registration.py:182 fails when a shell suite is unregistered, and :203 fails when one is registered more than once. :220 requires a scope-manifest entry, :312 and :370 check relevance gating, and CI runs it through the python unittest discover at harness-tests.yml:2072. This is a real failing test. It covers shell suites only. The manifest half is weaker. install-manifest.test.sh:347 hand-asserts only the one bin/python entry, and install-manifest.test.sh is wired into CI at harness-tests.yml:712-713. The generic manifest_check still skips harness-domain targets, so each new harness entry still depends on someone adding its own case."
+  }
+ ]
+}

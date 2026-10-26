@@ -1,0 +1,18 @@
+# TEMPLATE: Daily backup of the Claude harness memory into a git backup branch (needs a clone at $DOTFILES, default ~/dotfiles, with an origin).
+# Replace before enabling:
+#   line 17: Environment=DOTFILES= the path of your clone of this repo; uncomment and set it (the script defaults to ~/dotfiles, and the clone needs an origin to push to).
+# See systemd/README.md.
+[Unit]
+Description=Claude harness memory backup (sync mirror + commit + push, offsite-safe)
+# Daily job, weekly checker: without this, a failure that starts on a Tuesday is
+# invisible until Monday's doctor. That window turned three separate false
+# positives into multi-day outages, the last one running six consecutive nights.
+# The doctor stays the backstop for the one case OnFailure= cannot
+# see -- a timer that never fired at all.
+OnFailure=harness-unit-failure-alert@%n.service
+
+[Service]
+Type=oneshot
+TimeoutStartSec=15m
+# Environment=DOTFILES=%h/hov-stack
+ExecStart=%h/.claude/scripts/backup-harness.sh

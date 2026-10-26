@@ -1,0 +1,69 @@
+{
+  "$schema": "https://ccusage.com/config-schema.json",
+  "_note": "Runtime pricing overrides keyed by raw model name. Codex logs the better-ccflare route alias it was configured with as its model, so ccusage prices those ids at $0 and straude.com refuses any day with zero-cost Codex tokens (better-ccflare #343). Each alias is priced at its pool's physical model from LiteLLM: *astra -> gpt-6-astra, *sol -> gpt-5.6-sol; values are per token. Top-level defaults is the placement the unified `ccusage daily` report honors (verified 2026-09-11: the per-agent codex namespace only affects `ccusage codex daily`). Symlinked to ~/.config/claude/ccusage.json by lib/manifest.sh.",
+  "defaults": {
+    "pricingOverrides": {
+      "claude-bccf-route-codex-pool-astra": {
+        "inputCostPerToken": 1e-05,
+        "outputCostPerToken": 5e-05,
+        "cacheReadInputTokenCost": 1e-06,
+        "cacheCreationInputTokenCost": 1.25e-05,
+        "maxInputTokens": 922000
+      },
+      "claude-bccf-route-acct-a-sol[1m]": {
+        "inputCostPerToken": 4e-06,
+        "outputCostPerToken": 2e-05,
+        "cacheReadInputTokenCost": 4e-07,
+        "cacheCreationInputTokenCost": 5e-06,
+        "maxInputTokens": 922000
+      },
+      "claude-bccf-route-acct-a-sol": {
+        "inputCostPerToken": 4e-06,
+        "outputCostPerToken": 2e-05,
+        "cacheReadInputTokenCost": 4e-07,
+        "cacheCreationInputTokenCost": 5e-06,
+        "maxInputTokens": 922000
+      },
+      "claude-bccf-route-sol-capability": {
+        "inputCostPerToken": 4e-06,
+        "outputCostPerToken": 2e-05,
+        "cacheReadInputTokenCost": 4e-07,
+        "cacheCreationInputTokenCost": 5e-06,
+        "maxInputTokens": 922000
+      },
+      "claude-bccf-route-real-codex-sol": {
+        "inputCostPerToken": 4e-06,
+        "outputCostPerToken": 2e-05,
+        "cacheReadInputTokenCost": 4e-07,
+        "cacheCreationInputTokenCost": 5e-06,
+        "maxInputTokens": 922000
+      },
+      "unknown": {
+        "inputCostPerToken": 3e-06,
+        "outputCostPerToken": 1.5e-05,
+        "cacheReadInputTokenCost": 3e-07,
+        "cacheCreationInputTokenCost": 3.75e-06,
+        "maxInputTokens": 200000
+      },
+      "stealth/ox-alpha": {
+        "inputCostPerToken": 1e-06,
+        "outputCostPerToken": 5e-06,
+        "cacheReadInputTokenCost": 1e-07,
+        "cacheCreationInputTokenCost": 1.25e-06,
+        "maxInputTokens": 200000
+      },
+      "codex-cloud-unattributed": {
+        "inputCostPerToken": 1e-05,
+        "outputCostPerToken": 5e-05,
+        "cacheReadInputTokenCost": 1e-06,
+        "cacheCreationInputTokenCost": 1.25e-05,
+        "maxInputTokens": 922000
+      }
+    }
+  },
+  "_estimates": [
+    "unknown: OpenRouter's literal model label from Anthropic-compatible Claude requests before better-ccflare #261 (2026-08-14..18 here); priced at Claude Sonnet class as a middle estimate so cost-ranked boards that refuse $0 rows (straude.com) accept those days",
+    "stealth/ox-alpha: OpenRouter stealth preview model routed via better-ccflare (one day, 2026-08-25); nominal estimate for the same reason",
+    "codex-cloud-unattributed: cloud collector token deltas the attestation could not tie to a model; priced at gpt-6-astra because almost all attributed cloud usage ran on that model"
+  ]
+}

@@ -1,0 +1,18 @@
+# Bat configuration
+
+# Theme (use `bat --list-themes` to see options)
+--theme="Dracula"
+
+# Show line numbers
+--style="numbers,changes,header"
+
+# Use italic text
+--italic-text=always
+
+# Pager settings
+--pager="less -FR"
+
+# Map extensions to languages
+--map-syntax "*.conf:INI"
+--map-syntax ".gitignore:Git Ignore"
+--map-syntax "*.envrc:Bash"

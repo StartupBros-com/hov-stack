@@ -1,0 +1,66 @@
+# Secrets
+.secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# OS
+.DS_Store
+._*
+Thumbs.db
+Desktop.ini
+
+# Editors
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+.idea/
+*.swp
+*.swo
+*~
+*.sublime-*
+
+# Dependencies
+node_modules/
+.pnpm-store/
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Build artifacts
+dist/
+build/
+*.egg-info/
+.next/
+.nuxt/
+.turbo/
+.cache/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# Test/Coverage
+coverage/
+.nyc_output/
+.pytest_cache/
+
+# Misc
+.terraform/
+*.tfstate*
+autoresearch.state.json
+
+# Local agent state
+.pi/
+.claude/settings.local.json
+.claude/scratch/
+.claude/deliverables/
+
+**/.claude/settings.local.json

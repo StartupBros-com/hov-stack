@@ -1,0 +1,12 @@
+[
+  {
+    "annotation_level": "failure",
+    "message": "the 🧪 Test Run matrix did not succeed (result: failure, any_app=true, any_suite=true). With fail-fast disabled this means at least one suite failed, was cancelled, or never ran - failing the required check.",
+    "title": ""
+  },
+  {
+    "annotation_level": "failure",
+    "message": "Process completed with exit code 1.",
+    "title": ""
+  }
+]

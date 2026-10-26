@@ -1,0 +1,238 @@
+#!/usr/bin/env python3
+"""cass-rerank — cass lexical retrieval + semantic rerank for session search.
+
+Runs `cass search` (BM25, local, fast) to get top-N candidates, then reorders them
+with the cross-encoder rerank lane published by the gateway host (LiteLLM), which
+proxies the Mac host's oMLX over the tailnet.
+
+Routing follows the lab's target architecture: consumers reach models through the
+one gateway with a scoped virtual key, never a raw SSH tunnel. The previous
+workstation -> gateway:18000 -> Mac host tunnel chain is retired; its middle hop was
+an unmanaged `ssh -L` that died with the gateway host's 2026-07-10 reboot and silently
+degraded this tool to lexical-only for weeks.
+
+Candidates are collapsed to one per source conversation before reranking: the
+lexical index returns per-match offsets, so a single long transcript can take
+many slots and leave the cross-encoder ranking a document against itself. Pass
+--no-dedupe for the old behaviour.
+
+Usage:
+  cass-rerank "query" [--limit K] [--candidates N] [--overfetch N]
+                      [--no-dedupe] [--model NAME] [--json] [--require-rerank]
+
+Env: CASS_RERANK_ENDPOINT (required, no default: the base URL of the gateway rerank lane),
+     CASS_RERANK_MODEL, CASS_RERANK_API_KEY (else ~/.config/cass-rerank/key).
+Never run bare `cass` in an agent context — it launches a blocking TUI.
+"""
+import argparse
+import json
+import math
+import os
+import subprocess
+import sys
+import urllib.request
+
+CASS = os.environ.get("CASS_BIN", os.path.expanduser("~/.local/bin/cass"))
+ENDPOINT = os.environ.get("CASS_RERANK_ENDPOINT", "")
+DEFAULT_MODEL = os.environ.get("CASS_RERANK_MODEL", "local-rerank")
+KEY_FILE = os.path.expanduser("~/.config/cass-rerank/key")
+
+
+def api_key():
+    """Scoped virtual key (local-rerank + local-embed only); never the master key."""
+    key = os.environ.get("CASS_RERANK_API_KEY")
+    if key:
+        return key.strip()
+    try:
+        with open(KEY_FILE, encoding="utf-8") as fh:
+            return fh.read().strip()
+    except OSError:
+        return ""
+
+def diagnostic(error):
+    """Keep external errors bounded and on one line in JSON and stderr."""
+    return " ".join(str(error)[:600].split())
+
+
+def fail(stage, error, as_json):
+    message = f"{stage}: {diagnostic(error)}"
+    sys.stderr.write(f"cass-rerank: {message}\n")
+    if as_json:
+        print(json.dumps({"results": [], "rerank_status": "failed", "error": message}))
+    return 1
+
+
+def cass_search(query, n):
+    env = os.environ.copy()
+    env["CASS_AUTO_REFRESH"] = "0"
+    try:
+        p = subprocess.run(
+            [CASS, "search", query, "--robot", "--no-maintenance",
+             "--limit", str(n), "--mode", "lexical"],
+            capture_output=True, text=True, timeout=45, env=env,
+        )
+    except subprocess.TimeoutExpired as e:
+        raise RuntimeError("cass search timed out after 45 seconds") from e
+    except OSError as e:
+        raise RuntimeError(f"cannot run cass search (check CASS_BIN): {diagnostic(e)}") from e
+    if p.returncode != 0:
+        detail = diagnostic(p.stderr or p.stdout) or "no diagnostic output"
+        raise RuntimeError(f"cass search exited {p.returncode}: {detail}")
+    try:
+        payload = json.loads(p.stdout)
+    except json.JSONDecodeError as e:
+        raise ValueError("cass search returned malformed JSON; inspect native search output") from e
+    if not isinstance(payload, dict) or not isinstance(payload.get("hits"), list):
+        raise ValueError("cass search response must contain a hits list; inspect native search output")
+    budget = payload.get("budget")
+    if isinstance(budget, dict) and budget.get("timed_out") is True:
+        detail = diagnostic(p.stderr) or "no native diagnostic output"
+        raise RuntimeError("cass search exhausted its budget; results are incomplete; "
+                           "check CASS_SEARCH_TIMEOUT_MS/CASS_SEARCH_BUDGET_MS "
+                           f"or cass.toml deadlines: {detail}")
+    hits = payload["hits"]
+    if any(not isinstance(hit, dict) for hit in hits):
+        raise ValueError("cass search hits must be objects; inspect native search output")
+    return hits
+
+def dedupe_by_source(hits, want):
+    """Collapse hits to one per source conversation, keeping the best-ranked.
+
+    The lexical index returns per-match offsets, so one long transcript can
+    occupy many candidate slots. Measured over 20 queries (2026-09-11): a
+    40-candidate pool held a mean of 26.1 distinct conversations, i.e. ~35% of
+    the reranker's window was the same document repeated, worst case 9 distinct
+    out of 40. Those slots are spent asking a cross-encoder to rank a document
+    against itself.
+
+    Hits arrive in lexical relevance order, so first occurrence wins. Falls back
+    to title, then object identity, so a hit missing source_path is never
+    silently merged with an unrelated one.
+    """
+    seen = {}
+    for h in hits:
+        key = h.get("source_path") or h.get("title") or id(h)
+        if key not in seen:
+            seen[key] = h
+            if len(seen) >= want:
+                break
+    return list(seen.values())
+
+def doc_text(h):
+    t = h.get("title", "") or ""
+    c = h.get("content") or h.get("snippet") or ""
+    return f"{t} — {c}".strip(" —")[:2000]
+
+def rerank(query, docs, model, top_n):
+    # No return_documents=false here: LiteLLM's cohere RerankResponse requires
+    # `document` to be a dict, and oMLX returns null for it when documents are
+    # suppressed, which fails validation with a 500. Echoing them back costs a
+    # few bytes; we only read `index` anyway.
+    body = json.dumps({"model": model, "query": query, "documents": docs,
+                       "top_n": top_n}).encode()
+    if not ENDPOINT:
+        raise RuntimeError("CASS_RERANK_ENDPOINT is not set; export the gateway rerank base URL")
+    headers = {"Content-Type": "application/json"}
+    key = api_key()
+    if key:
+        headers["Authorization"] = f"Bearer {key}"
+    req = urllib.request.Request(ENDPOINT.rstrip("/") + "/v1/rerank", data=body,
+                                 headers=headers)
+    with urllib.request.urlopen(req, timeout=60) as r:
+        payload = json.loads(r.read())
+    if not isinstance(payload, dict):
+        raise ValueError("rerank response must be an object with results")
+    results = payload.get("results")
+    if not isinstance(results, list) or not results:
+        raise ValueError("rerank response must contain a nonempty results list")
+    if len(results) > min(top_n, len(docs)):
+        raise ValueError("rerank response exceeds the requested available result count")
+    seen = set()
+    for result in results:
+        if not isinstance(result, dict):
+            raise ValueError("rerank results must be objects")
+        index = result.get("index")
+        if type(index) is not int or not 0 <= index < len(docs) or index in seen:
+            raise ValueError("rerank indices must be unique integers within the candidate range")
+        score = result.get("relevance_score")
+        try:
+            finite_score = (not isinstance(score, bool)
+                            and isinstance(score, (int, float)) and math.isfinite(score))
+        except OverflowError:
+            finite_score = False
+        if not finite_score:
+            raise ValueError("rerank relevance_score must be a finite number")
+        seen.add(index)
+    return results
+
+def main():
+    ap = argparse.ArgumentParser(description="cass lexical retrieval + semantic rerank")
+    ap.add_argument("query")
+    ap.add_argument("--limit", type=int, default=5,
+                    help="maximum final results (default 5); valid scoring may return fewer")
+    ap.add_argument("--candidates", type=int, default=40, help="DISTINCT conversations to rerank (default 40)")
+    ap.add_argument("--overfetch", type=int, default=3,
+                    help="fetch candidates*N lexical hits before collapsing to one "
+                         "per conversation, so dedupe still fills the window (default 3)")
+    ap.add_argument("--no-dedupe", action="store_true",
+                    help="feed raw lexical hits to the reranker, repeats included (pre-2026-09 behaviour)")
+    ap.add_argument("--model", default=DEFAULT_MODEL)
+    ap.add_argument("--json", action="store_true", help="machine-readable output")
+    ap.add_argument("--require-rerank", action="store_true",
+                    help="fail instead of returning lexical fallback when scoring fails")
+    a = ap.parse_args()
+
+    try:
+        if a.no_dedupe:
+            raw = cass_search(a.query, a.candidates)
+            hits = raw
+        else:
+            # Over-fetch, then collapse: asking for exactly `candidates` and then
+            # deduping would shrink the window rather than diversify it.
+            raw = cass_search(a.query, min(a.candidates * max(1, a.overfetch), 500))
+            hits = dedupe_by_source(raw, a.candidates)
+    except Exception as e:
+        return fail("lexical retrieval failed", e, a.json)
+    if not hits:
+        print(json.dumps({"results": [], "note": "no lexical candidates",
+                          "rerank_status": "no_candidates"}) if a.json else "no results")
+        return 0
+    docs = [doc_text(h) for h in hits]
+    status = "reranked"
+    try:
+        ranked = rerank(a.query, docs, a.model, a.limit)
+    except Exception as e:
+        if a.require_rerank:
+            return fail("rerank failed", e, a.json)
+        # Fail open to lexical order so the tool is still useful if the endpoint is down.
+        sys.stderr.write(f"cass-rerank: rerank endpoint error ({diagnostic(e)}); "
+                         "falling back to lexical order\n")
+        status = "lexical_fallback"
+        ranked = [{"index": i, "relevance_score": None} for i in range(min(a.limit, len(hits)))]
+    out = [{**hits[x["index"]], "rerank_score": x.get("relevance_score")} for x in ranked]
+    if a.json:
+        print(json.dumps({
+            "results": out,
+            "rerank_status": status,
+            "model": a.model,
+            # Observable so pool quality can be measured without re-deriving it;
+            # a low distinct/fetched ratio is the signal that reranking has
+            # little to discriminate between.
+            "pool": {
+                "fetched": len(raw),
+                "distinct": len(hits),
+                "deduped": not a.no_dedupe,
+            },
+        }))
+    else:
+        for i, h in enumerate(out, 1):
+            score = h.get("rerank_score")
+            tag = f"[{score:.3f}] " if isinstance(score, (int, float)) else ""
+            path = h.get("source_path", "")
+            print(f"{i}. {tag}{doc_text(h)[:100]}")
+            if path:
+                print(f"     {path}:{h.get('line_number','')}")
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())

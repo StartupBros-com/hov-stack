@@ -1,0 +1,11 @@
+# Example repository list for ru, in the flat layout (repo name == dir name) under
+# ~/SITES. The real list of an operator's own repositories is overlay material: replace
+# these placeholder entries on your machine.
+#
+# Repositories whose local directory name differs from the repository name would clone a
+# duplicate directory in the flat layout, so leave them out or list them with a custom
+# local name.
+acme-org/app
+acme-org/announce-bot
+acme-org/shared-workflows
+acme-org/tools

@@ -1,0 +1,7 @@
+interface:
+  display_name: "Better Colors"
+  short_description: "Building, naming and applying color systems"
+policy:
+  # Mirrors `disable-model-invocation: true` in the Claude frontmatter, which Codex
+  # does not read. Invoke-only on this harness (harness-vet 2026-09-01).
+  allow_implicit_invocation: false

@@ -1,0 +1,17 @@
+# TEMPLATE: Daily 03:45 trigger for tools-auto-update.service.
+# Replace before enabling:
+#   nothing; the defaults are generic.
+# See systemd/README.md.
+[Unit]
+Description=Daily verified auto-update for upstream tool binaries
+
+[Timer]
+# 03:45 — after dcg (03:30). The guard goes first: if a night's
+# updates are going to contend for the GitHub API, the destructive-command guard is the
+# one that should win the race.
+OnCalendar=*-*-* 03:45:00
+Persistent=true
+RandomizedDelaySec=15m
+
+[Install]
+WantedBy=timers.target

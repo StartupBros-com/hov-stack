@@ -1,0 +1,88 @@
+{
+  "action": "prepare-matching-review-evidence",
+  "contract": {
+    "contract_digest": "7f5ece9bfa5aa19f858431da23302a9bc02a4a8f5770830d529f22484e5982ee",
+    "contract_id": "review-decision/v1",
+    "contract_version": 1,
+    "corpus_digest": "2a1e347e4c15766ab9c530074ae75aead7397349f5e13328c40183ced8b70b69"
+  },
+  "effect_request": {
+    "action": "prepare-matching-review-evidence",
+    "applicable_ref": null,
+    "contract_digest": "7f5ece9bfa5aa19f858431da23302a9bc02a4a8f5770830d529f22484e5982ee",
+    "effect": "prepare-matching-review-evidence",
+    "execution_class": "agent-task",
+    "snapshot_digest": "7db63c4833d53c0f8ebf83c8104e407a0aebcfe38f45ef1b09a4c0325a90614e",
+    "target": {
+      "head_oid": "f4b52d2edb1ed2ec39bbc5cc1dab7b1bd2fe76ba",
+      "host": "github.com",
+      "owner": "StartupBros-com",
+      "pr": 686,
+      "repo": "dotfiles"
+    }
+  },
+  "facts": {
+    "active_index": {
+      "binding_valid": false,
+      "charged_spend_epoch": 0,
+      "marker": "",
+      "state": "none"
+    },
+    "completed_results": [],
+    "contract": {
+      "contract_digest": "7f5ece9bfa5aa19f858431da23302a9bc02a4a8f5770830d529f22484e5982ee",
+      "contract_id": "review-decision/v1",
+      "contract_version": 1,
+      "corpus_digest": "2a1e347e4c15766ab9c530074ae75aead7397349f5e13328c40183ced8b70b69"
+    },
+    "evidence": {
+      "identity": "evidence:none",
+      "safe_to_prepare": true,
+      "state": "missing"
+    },
+    "governor": {
+      "granted": true
+    },
+    "input": {
+      "binding_valid": false,
+      "identity": "github.com:StartupBros-com/hov-stack:686:f4b52d2edb1ed2ec39bbc5cc1dab7b1bd2fe76ba",
+      "proven": false
+    },
+    "named_choice": {
+      "outcomes": [],
+      "selected_id": null,
+      "snapshot_digest": ""
+    },
+    "observation": {
+      "kind": "idle"
+    },
+    "prior_review": {
+      "applicable": false,
+      "binding_valid": false,
+      "code_identity": "",
+      "evidence_identity": "",
+      "legacy": false,
+      "marker": "",
+      "provenance_valid": false,
+      "verdict": "NONE"
+    },
+    "reservation": {
+      "binding_valid": false,
+      "legacy": false,
+      "marker": "",
+      "state": "none"
+    },
+    "target": {
+      "head_oid": "f4b52d2edb1ed2ec39bbc5cc1dab7b1bd2fe76ba",
+      "host": "github.com",
+      "owner": "StartupBros-com",
+      "pr": 686,
+      "repo": "dotfiles"
+    },
+    "transport": "review-decision/v1"
+  },
+  "observation": {
+    "kind": "idle"
+  },
+  "reason": "matching-evidence-requires-preparation"
+}

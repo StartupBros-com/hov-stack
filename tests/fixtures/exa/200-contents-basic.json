@@ -1,0 +1,22 @@
+{
+  "requestId": "req_fixture_contents_basic",
+  "results": [
+    {
+      "id": "https://a.example",
+      "title": "Page A",
+      "url": "https://a.example",
+      "highlights": ["Content from page A."]
+    },
+    {
+      "id": "https://b.example",
+      "title": "Page B",
+      "url": "https://b.example",
+      "highlights": ["Content from page B."]
+    }
+  ],
+  "statuses": [
+    {"id": "https://a.example", "status": "success", "source": "crawled"},
+    {"id": "https://b.example", "status": "success", "source": "cached"}
+  ],
+  "costDollars": {"total": 0.002, "contents": 0.002}
+}

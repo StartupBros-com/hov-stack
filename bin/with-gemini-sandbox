@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+set +x
+set -euo pipefail
+
+if (($# == 0)); then
+  echo "usage: with-gemini-sandbox <command> [args...]" >&2
+  exit 64
+fi
+
+secret_id=${GEMINI_SANDBOX_BWS_ID:-}
+if [[ ! $secret_id =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]]; then
+  echo "with-gemini-sandbox: set GEMINI_SANDBOX_BWS_ID to the bws secret id of the Gemini authorization key" >&2
+  exit 1
+fi
+
+BWS_TOKEN_FILE=${BWS_TOKEN_FILE:-$HOME/.config/bws/token}
+if [[ ! -r "$BWS_TOKEN_FILE" ]]; then
+  echo "with-gemini-sandbox: cannot read $BWS_TOKEN_FILE" >&2
+  exit 1
+fi
+
+bws_token=$(<"$BWS_TOKEN_FILE")
+response=$(BWS_ACCESS_TOKEN=$bws_token bws --color no secret get "$secret_id" 2>/dev/null)
+unset bws_token
+value=$(jq -r '.value // empty' <<<"$response")
+unset response
+
+if [[ ! $value =~ ^AQ\.[^[:space:]]{20,200}$ ]]; then
+  echo "with-gemini-sandbox: bws returned no Gemini authorization key" >&2
+  exit 1
+fi
+
+export GEMINI_API_KEY=$value
+export GOOGLE_API_KEY=$value
+export GOOGLE_GENERATIVE_AI_API_KEY=$value
+unset value
+
+exec "$@"

@@ -1,0 +1,26 @@
+# TEMPLATE: Weekly update of the host MCP server checkout (runs update-mcp-servers.sh).
+# Replace before enabling:
+#   line 15: uncomment and set Environment=EXPECTED_ORIGIN=<owner>/<repo>, the GitHub origin the checkout must match.
+# See systemd/README.md.
+
+[Unit]
+Description=Weekly MCP server updates
+OnFailure=harness-unit-failure-alert@%n.service
+
+[Service]
+Type=oneshot
+TimeoutStartSec=35m
+Environment=PATH=%h/.local/bin:%h/.local/share/mise/shims:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+# Set the origin the checkout must match (update-mcp-servers.sh refuses any other):
+# Environment=EXPECTED_ORIGIN=<owner>/<repo>
+# No network-online.target exists in the user manager, so
+# readiness is this bounded probe of github.com, the host
+# update-mcp-servers.sh asks first (git fetch origin). The leading - keeps
+# the script's own contract on the deadline: a failed fetch is a required
+# failure, exit 1, which pages. ExecStartPre time counts against
+# TimeoutStartSec, which is 35m so update-mcp-servers.sh keeps the 30m it
+# had before the probe existed even when the whole wait is spent.
+ExecStartPre=-%h/.claude/scripts/net-ready.sh --wait 300 --url https://github.com/
+ExecStart=%h/.claude/scripts/update-mcp-servers.sh
+Nice=10
+IOSchedulingClass=idle

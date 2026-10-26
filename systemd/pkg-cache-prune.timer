@@ -1,0 +1,13 @@
+[Unit]
+Description=Weekly package-manager cache prune (observe-only until promoted)
+
+[Timer]
+# Tue 01:35 — same quiet pre-03:00 corridor as wt-sweep.timer, offset 20
+# minutes and a different weekday so the two never overlap even under
+# RandomizedDelaySec jitter.
+OnCalendar=Tue *-*-* 01:35:00
+Persistent=true
+RandomizedDelaySec=10m
+
+[Install]
+WantedBy=timers.target

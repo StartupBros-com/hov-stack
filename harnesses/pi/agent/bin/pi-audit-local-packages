@@ -1,0 +1,106 @@
+#!/usr/bin/env python3
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+SETTINGS_PATH = Path.home() / ".pi" / "agent" / "settings.json"
+
+
+def load_settings() -> dict:
+    with SETTINGS_PATH.open("r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def iter_local_packages(settings: dict):
+    for pkg in settings.get("packages", []):
+        source = pkg.get("source") if isinstance(pkg, dict) else pkg
+        if isinstance(source, str) and source.startswith("/"):
+            yield Path(source).resolve()
+
+
+def collect_extension_entrypoints(root: Path, package_json: dict) -> list[Path]:
+    pi = package_json.get("pi") or {}
+    extensions = pi.get("extensions") or []
+    entrypoints: list[Path] = []
+    for ext in extensions:
+        path = (root / ext).resolve()
+        if path.is_dir():
+            entrypoints.extend(sorted(path.glob("*.ts")))
+            entrypoints.extend([p for p in sorted(path.glob("*.js")) if p not in entrypoints])
+        elif path.exists():
+            entrypoints.append(path)
+    return entrypoints
+
+
+def check_peer_deps(root: Path, package_json: dict) -> list[str]:
+    missing: list[str] = []
+    for dep in sorted((package_json.get("peerDependencies") or {}).keys()):
+        dep_path = root / "node_modules" / dep.replace("/", os.sep)
+        if not dep_path.exists():
+            missing.append(dep)
+    return missing
+
+
+def import_entrypoint(root: Path, entrypoint: Path) -> tuple[bool, str]:
+    rel = "./" + os.path.relpath(entrypoint, root).replace("\\", "/")
+    cmd = [
+        "node",
+        "--input-type=module",
+        "-e",
+        f"import('{rel}').then(() => process.stdout.write('ok\\n')).catch((e) => {{ console.error(e.stack || e); process.exit(1); }})",
+    ]
+    proc = subprocess.run(cmd, cwd=root, text=True, capture_output=True)
+    if proc.returncode == 0:
+        return True, "ok"
+    return False, (proc.stderr or proc.stdout or "unknown error").strip()
+
+
+def main() -> int:
+    if not SETTINGS_PATH.exists():
+        print(f"settings not found: {SETTINGS_PATH}", file=sys.stderr)
+        return 1
+
+    settings = load_settings()
+    local_packages = list(iter_local_packages(settings))
+    if not local_packages:
+        print("No local path packages configured.")
+        return 0
+
+    failures: list[str] = []
+    checked_entrypoints = 0
+
+    for root in local_packages:
+        package_json_path = root / "package.json"
+        if not package_json_path.exists():
+            continue
+        with package_json_path.open("r", encoding="utf-8") as f:
+            package_json = json.load(f)
+
+        missing_peers = check_peer_deps(root, package_json)
+        if missing_peers:
+            failures.append(
+                f"[{root}] missing peer deps in local node_modules: {', '.join(missing_peers)}"
+            )
+
+        for entrypoint in collect_extension_entrypoints(root, package_json):
+            checked_entrypoints += 1
+            ok, detail = import_entrypoint(root, entrypoint)
+            if not ok:
+                failures.append(f"[{root}] import failed: {entrypoint.relative_to(root)}\n{detail}")
+
+    print(f"Checked {checked_entrypoints} extension entrypoints across {len(local_packages)} local path packages.")
+    if failures:
+        print("\nFAILURES:\n")
+        for failure in failures:
+            print(failure)
+            print()
+        return 1
+
+    print("All local path packages look healthy.")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

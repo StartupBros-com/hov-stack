@@ -1,0 +1,88 @@
+#!/usr/bin/env bash
+# vast-ssh <instance-id> [-- command...]: ssh into a vast.ai instance with the
+# dedicated agent key, headless.
+#
+# Resolves the instance's ssh endpoint through the sibling `vastai ssh-url`
+# (so the API key follows the wrapper's env -> bws -> ~/.secrets chain), then
+# execs ssh with:
+#   -i ~/.ssh/vastai_ed25519        the agent key registered on the vast.ai
+#                                   account (override: VAST_SSH_KEY)
+#   BatchMode=yes                   never prompt for a passphrase or password
+#   StrictHostKeyChecking=accept-new with a per-instance known_hosts file
+#                                   (~/.ssh/known_hosts.vastai/<id>): trust on
+#                                   first use per instance, and a changed host
+#                                   key on the same instance still fails. vast.ai
+#                                   proxies reuse host:port across instances, so
+#                                   one shared known_hosts would false-alarm.
+#   ConnectTimeout=20               a not-yet-booted instance fails fast; poll
+#                                   `vastai show instance <id> --raw` for
+#                                   actual_status == "running" and retry.
+#   LogLevel=ERROR                  no "Permanently added" notice and no vast.ai
+#                                   login banner on first contact, so stderr
+#                                   carries only errors and a script never needs
+#                                   to filter it (a `2>&1 | grep -v` filter
+#                                   replaces ssh's exit status with grep's;
+#                                   seen on ~30 calls in the first live run).
+#                                   Connection refused, timeouts, host-key
+#                                   changes and "Permission denied (publickey)"
+#                                   still print; a missing key file shows as
+#                                   that last one.
+#
+# Exit codes: 2 usage, 3 ssh-url did not return an ssh:// URL (its output is
+# relayed), otherwise ssh's own exit status.
+set -euo pipefail
+
+usage() {
+  echo "usage: vast-ssh <instance-id> [-- command...]" >&2
+  echo "       vast-ssh --help" >&2
+  exit 2
+}
+
+[ $# -ge 1 ] || usage
+case "$1" in
+  -h|--help) sed -n '2,/^set -euo/{/^set -euo/!p}' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+  -*) usage ;;
+esac
+instance=$1
+shift
+[ "${1:-}" = "--" ] && shift
+case "$instance" in
+  ''|*[!0-9]*) echo "vast-ssh: instance id must be numeric, got '$instance'" >&2; exit 2 ;;
+esac
+
+here=$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")
+answer=$("$here/vastai" ssh-url "$instance") || {
+  echo "vast-ssh: vastai ssh-url failed: $answer" >&2
+  exit 3
+}
+# The vendor prints the URL on its own line; take that line and nothing else,
+# so a notice printed to stdout (a 2FA session expiry, a key warning) cannot
+# become part of the host name.
+# A grep no-match is an empty URL, not a fatal pipeline failure under set -e.
+url=$(printf '%s\n' "$answer" | { grep -E '^ssh://[^@[:space:]]+@[^:[:space:]]+:[0-9]+$' || [ "$?" -eq 1 ]; } | tail -n 1)
+if [ -z "$url" ]; then
+  echo "vast-ssh: ssh-url did not return an ssh:// URL: $answer" >&2
+  exit 3
+fi
+rest=${url#ssh://}
+user=${rest%%@*}
+hostport=${rest#*@}
+host=${hostport%%:*}
+port=${hostport##*:}
+case "$port" in
+  ''|*[!0-9]*) echo "vast-ssh: unparseable port in $url" >&2; exit 3 ;;
+esac
+
+key=${VAST_SSH_KEY:-$HOME/.ssh/vastai_ed25519}
+known_dir=$HOME/.ssh/known_hosts.vastai
+mkdir -p "$known_dir"
+chmod 700 "$known_dir"
+
+exec ssh -i "$key" \
+  -o IdentitiesOnly=yes \
+  -o BatchMode=yes \
+  -o StrictHostKeyChecking=accept-new \
+  -o UserKnownHostsFile="$known_dir/$instance" \
+  -o ConnectTimeout=20 \
+  -o LogLevel=ERROR \
+  -p "$port" "$user@$host" "$@"

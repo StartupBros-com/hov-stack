@@ -1,0 +1,147 @@
+# git/config.shared — the tracked, drift-checked half of git configuration.
+#
+# Spliced into ~/.gitconfig via `include.path` (registered once by git-setup.sh).
+# The include sits at the END of ~/.gitconfig, so values here override stale
+# machine-local ones (that is the point: live config had drifted to
+# init.defaultbranch=master while git-setup.sh asserted main, dotfiles#210).
+# A deliberate machine-local override goes BELOW the include line in ~/.gitconfig.
+#
+# Machine-local and NEVER here: user.name / user.email, credential helpers.
+#
+# Deliberately absent, each a decision not an omission (dotfiles#210):
+#   core.fsmonitor    — CLOSED by operator 2026-08-07: skip permanently. Its
+#                       benefit exists only at 100k+-file scale; measured here,
+#                       biggest repo is 8.6k files with `git status` at
+#                       0.01-0.09s under untrackedCache — nothing to save. Also
+#                       git-guard G1 denies writes to this key as an
+#                       exec-on-next-git-op vector; adopting would carve our own
+#                       guard. Do not re-raise without a 10x-bigger repo.
+#   maintenance.*     — CLOSED by operator 2026-08-07: skip; revisit only if a
+#                       repo grows ~10x, and then via a commit-graph task in
+#                       harness-weekly, never `git maintenance start` (adds a
+#                       persistent timer + a background writer on object stores
+#                       ~20 concurrent sessions contend on). Fetch freshness is
+#                       already owned by ru + launchpad-freshen; housekeeping by
+#                       git's auto-gc.
+#   help.autocorrect  — `prompt` waits on a TTY; agent Bash calls have none and
+#                       would hang to timeout on any git typo.
+#   diff.mnemonicPrefix — changes `--- a/` headers that patch tooling parses;
+#                       delta re-renders for humans anyway, so all cost no gain.
+#   diff.renames      — git default since 2.9; a no-op line.
+#   blame.ignoreRevsFile — TRAP, do not add globally: git blame HARD-FAILS in
+#                       any repo missing the named file. Per-repo config only.
+#   fetch.writeCommitGraph / core.commitGraph — the timer-free sliver of git
+#                       maintenance; same closure applies (millisecond wins at
+#                       8.6k files, see maintenance.* above — 10x trigger).
+
+[core]
+	pager = delta
+	excludesfile = ~/.gitignore_global
+	# Cached untracked-file scan; measured ~2s -> 0.8s `git status` on large
+	# trees (Chromium-dev, plain Linux). Index extension only: no daemon, no
+	# exec surface, unlike fsmonitor.
+	untrackedCache = true
+
+[interactive]
+	diffFilter = delta --color-only
+
+[delta]
+	navigate = true
+	light = false
+	side-by-side = true
+	line-numbers = true
+
+[diff]
+	# Strictly better hunk boundaries than myers; the diff every AI review
+	# pass reads. Git-core-dev consensus (Chacon's survey config).
+	algorithm = histogram
+	colorMoved = default
+
+[merge]
+	# zdiff3 (git >=2.35): diff3's base view minus the redundant context both
+	# sides share. CAVEAT (reproduced dotfiles#210): with rerere.autoupdate a
+	# remembered WRONG resolution can be auto-staged with "All conflicts fixed"
+	# text — diff staged content before committing a conflicted merge/rebase.
+	conflictstyle = zdiff3
+	# Symmetry with rebase.autoStash: agents merging with a dirty tree (PR
+	# conflict resolution) get the same convenience — and the same exit-0
+	# pop-conflict caveat documented under [rebase].
+	# AUTOMATION CONSEQUENCE (dotfiles#481): a scripted `--ff-only` whose
+	# contract is refuse-on-overlap must switch this off per call site:
+	# `merge --ff-only --no-autostash` (or -c merge.autostash=false), and for
+	# `pull --ff-only` ONLY `--no-autostash` — since git 2.36, under
+	# pull.rebase=true, pull passes an explicit --autostash to its merge, so
+	# the -c form is a no-op there (measured 2026-09-03 on 2.43.0).
+	# harness-doctor check 30 and tests/test_ff_only_autostash_audit.py
+	# enforce it on every site.
+	autoStash = true
+
+[rerere]
+	enabled = true
+	# Auto-stage remembered resolutions. See merge.conflictstyle caveat above.
+	autoupdate = true
+
+[rebase]
+	# CAVEAT (reproduced dotfiles#210): rebase exits 0 and prints "Successfully
+	# rebased" even when the autostash POP conflicted — markers land in the
+	# working tree, stash survives undropped. Gate automation on
+	# `git status --porcelain` (UU entries), never on $? alone.
+	autoStash = true
+	# Stacked-branch refs follow a rebase. CAVEAT (reproduced dotfiles#210):
+	# a ref checked out in a SIBLING WORKTREE is silently skipped — no warning
+	# distinguishes "nothing to update" from "skipped, now orphaned". In the
+	# worktree-per-task fleet, cross-check `git worktree list` after stack
+	# rebases that touch shared branches.
+	updateRefs = true
+	# Only affects -i. Scripted GIT_SEQUENCE_EDITOR automation must not assume
+	# chronological todo order once fixup!/squash! commits reorder it.
+	autoSquash = true
+	# The enforcement half of the autoSquash caveat: a todo list that silently
+	# DROPS commits (the positional-sed failure mode) errors instead of
+	# discarding work. Interactive-only, so plain scripted rebases pay nothing.
+	missingCommitsCheck = error
+
+[branch]
+	# Promotes the intent of the existing `branches` alias to plain `git branch`.
+	sort = -committerdate
+
+[tag]
+	sort = version:refname
+
+[fetch]
+	prune = true
+	pruneTags = true
+
+[commit]
+	template = ~/.gitmessage
+	# Show the diff in the commit-message editor. No-op for agent heredoc -m
+	# commits; pure QoL for the rare human interactive commit.
+	verbose = true
+
+[push]
+	autoSetupRemote = true
+	# --force-with-lease checks the lease against the REMOTE-TRACKING ref —
+	# which ru and launchpad-freshen silently advance by fetching in the
+	# background, making a stale lease this fleet's own manufactured hazard.
+	# This adds the reflog check: the push refuses unless the remote tip was
+	# actually seen locally. Belt under the ask-tier's suspenders (git >=2.30).
+	useForceIfIncludes = true
+
+[pull]
+	rebase = true
+
+[init]
+	defaultBranch = main
+
+[alias]
+	co = checkout
+	br = branch
+	ci = commit
+	st = status
+	unstage = reset HEAD --
+	last = log -1 HEAD
+	lg = log --oneline --graph --decorate -20
+	wip = !git add -A && git commit -m \"WIP\"
+	undo = reset --soft HEAD~1
+	amend = commit --amend --no-edit
+	branches = branch -a --sort=-committerdate

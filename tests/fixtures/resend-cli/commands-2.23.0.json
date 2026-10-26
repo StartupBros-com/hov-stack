@@ -1,0 +1,1055 @@
+{
+  "_comment": "Trimmed `resend commands` tree (names, aliases, option flags, subcommands) captured from the pinned vendor; regenerate when VENDOR_PIN changes.",
+  "vendor": "resend-cli",
+  "version": "2.23.0",
+  "tree": {
+    "name": "resend",
+    "options": [
+      "--version",
+      "-v",
+      "--api-key",
+      "--profile",
+      "-p",
+      "--json",
+      "--quiet",
+      "-q",
+      "--insecure-storage"
+    ],
+    "subcommands": [
+      {
+        "name": "login",
+        "options": [
+          "--key"
+        ]
+      },
+      {
+        "name": "emails",
+        "subcommands": [
+          {
+            "name": "list",
+            "aliases": [
+              "ls"
+            ],
+            "options": [
+              "--limit",
+              "--after",
+              "--before"
+            ]
+          },
+          {
+            "name": "send",
+            "options": [
+              "--from",
+              "--to",
+              "--subject",
+              "--html",
+              "--html-file",
+              "--text",
+              "--text-file",
+              "--react-email",
+              "--cc",
+              "--bcc",
+              "--reply-to",
+              "--scheduled-at",
+              "--attachment",
+              "--attachments-file",
+              "--headers",
+              "--tags",
+              "--idempotency-key",
+              "--dry-run",
+              "--template",
+              "--var"
+            ]
+          },
+          {
+            "name": "get"
+          },
+          {
+            "name": "batch",
+            "options": [
+              "--file",
+              "--react-email",
+              "--idempotency-key",
+              "--batch-validation"
+            ]
+          },
+          {
+            "name": "cancel"
+          },
+          {
+            "name": "update",
+            "options": [
+              "--scheduled-at"
+            ]
+          },
+          {
+            "name": "share",
+            "options": [
+              "--expires-in"
+            ]
+          },
+          {
+            "name": "metrics",
+            "options": [
+              "--start-date",
+              "--end-date",
+              "--timezone",
+              "--granularity",
+              "--metrics",
+              "--dimensions",
+              "--domain-id",
+              "--email-id",
+              "--broadcast-id"
+            ]
+          },
+          {
+            "name": "attachments",
+            "options": [
+              "--limit",
+              "--after",
+              "--before"
+            ]
+          },
+          {
+            "name": "attachment"
+          },
+          {
+            "name": "receiving",
+            "subcommands": [
+              {
+                "name": "list",
+                "aliases": [
+                  "ls"
+                ],
+                "options": [
+                  "--limit",
+                  "--after",
+                  "--before"
+                ]
+              },
+              {
+                "name": "get"
+              },
+              {
+                "name": "listen",
+                "options": [
+                  "--interval"
+                ]
+              },
+              {
+                "name": "attachments",
+                "options": [
+                  "--limit",
+                  "--after",
+                  "--before"
+                ]
+              },
+              {
+                "name": "attachment"
+              },
+              {
+                "name": "forward",
+                "options": [
+                  "--to",
+                  "--from"
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "broadcasts",
+        "subcommands": [
+          {
+            "name": "create",
+            "options": [
+              "--from",
+              "--subject",
+              "--segment-id",
+              "--html",
+              "--html-file",
+              "--text",
+              "--text-file",
+              "--react-email",
+              "--name",
+              "--reply-to",
+              "--preview-text",
+              "--topic-id",
+              "--send",
+              "--scheduled-at",
+              "--dry-run"
+            ]
+          },
+          {
+            "name": "open"
+          },
+          {
+            "name": "send",
+            "options": [
+              "--scheduled-at"
+            ]
+          },
+          {
+            "name": "get"
+          },
+          {
+            "name": "list",
+            "aliases": [
+              "ls"
+            ],
+            "options": [
+              "--limit",
+              "--after",
+              "--before"
+            ]
+          },
+          {
+            "name": "recipients",
+            "options": [
+              "--type",
+              "--email",
+              "--bounce-type",
+              "--limit",
+              "--after",
+              "--before"
+            ]
+          },
+          {
+            "name": "update",
+            "options": [
+              "--from",
+              "--subject",
+              "--html",
+              "--html-file",
+              "--text",
+              "--text-file",
+              "--react-email",
+              "--name"
+            ]
+          },
+          {
+            "name": "cancel"
+          },
+          {
+            "name": "duplicate"
+          },
+          {
+            "name": "delete",
+            "aliases": [
+              "rm"
+            ],
+            "options": [
+              "--yes"
+            ]
+          },
+          {
+            "name": "clicked-links",
+            "options": [
+              "--limit",
+              "--after",
+              "--before"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "automations",
+        "subcommands": [
+          {
+            "name": "create",
+            "options": [
+              "--name",
+              "--status",
+              "--steps",
+              "--connections",
+              "--file"
+            ]
+          },
+          {
+            "name": "get"
+          },
+          {
+            "name": "list",
+            "aliases": [
+              "ls"
+            ],
+            "options": [
+              "--limit",
+              "--after",
+              "--before"
+            ]
+          },
+          {
+            "name": "update",
+            "options": [
+              "--status"
+            ]
+          },
+          {
+            "name": "delete",
+            "aliases": [
+              "rm"
+            ],
+            "options": [
+              "--yes"
+            ]
+          },
+          {
+            "name": "duplicate"
+          },
+          {
+            "name": "stop"
+          },
+          {
+            "name": "open"
+          },
+          {
+            "name": "runs",
+            "subcommands": [
+              {
+                "name": "list",
+                "aliases": [
+                  "ls"
+                ],
+                "options": [
+                  "--status",
+                  "--limit",
+                  "--after",
+                  "--before"
+                ]
+              },
+              {
+                "name": "get",
+                "options": [
+                  "--automation-id",
+                  "--run-id"
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "events",
+        "subcommands": [
+          {
+            "name": "create",
+            "options": [
+              "--name",
+              "--schema"
+            ]
+          },
+          {
+            "name": "get"
+          },
+          {
+            "name": "list",
+            "aliases": [
+              "ls"
+            ],
+            "options": [
+              "--limit",
+              "--after",
+              "--before"
+            ]
+          },
+          {
+            "name": "update",
+            "options": [
+              "--schema"
+            ]
+          },
+          {
+            "name": "delete",
+            "aliases": [
+              "rm"
+            ],
+            "options": [
+              "--yes"
+            ]
+          },
+          {
+            "name": "open"
+          },
+          {
+            "name": "send",
+            "options": [
+              "--event",
+              "--contact-id",
+              "--email",
+              "--payload"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "templates",
+        "subcommands": [
+          {
+            "name": "create",
+            "options": [
+              "--name",
+              "--html",
+              "--html-file",
+              "--subject",
+              "--text",
+              "--text-file",
+              "--react-email",
+              "--from",
+              "--reply-to",
+              "--alias",
+              "--var"
+            ]
+          },
+          {
+            "name": "get"
+          },
+          {
+            "name": "open"
+          },
+          {
+            "name": "list",
+            "aliases": [
+              "ls"
+            ],
+            "options": [
+              "--limit",
+              "--after",
+              "--before"
+            ]
+          },
+          {
+            "name": "update",
+            "options": [
+              "--name",
+              "--html",
+              "--html-file",
+              "--subject",
+              "--text",
+              "--text-file",
+              "--react-email",
+              "--from",
+              "--reply-to",
+              "--alias",
+              "--var"
+            ]
+          },
+          {
+            "name": "delete",
+            "aliases": [
+              "rm"
+            ],
+            "options": [
+              "--yes"
+            ]
+          },
+          {
+            "name": "publish"
+          },
+          {
+            "name": "duplicate"
+          }
+        ]
+      },
+      {
+        "name": "contacts",
+        "subcommands": [
+          {
+            "name": "create",
+            "options": [
+              "--email",
+              "--first-name",
+              "--last-name",
+              "--unsubscribed",
+              "--properties",
+              "--segment-id"
+            ]
+          },
+          {
+            "name": "get"
+          },
+          {
+            "name": "list",
+            "aliases": [
+              "ls"
+            ],
+            "options": [
+              "--limit",
+              "--after",
+              "--before"
+            ]
+          },
+          {
+            "name": "update",
+            "options": [
+              "--unsubscribed",
+              "--no-unsubscribed",
+              "--properties"
+            ]
+          },
+          {
+            "name": "delete",
+            "aliases": [
+              "rm"
+            ],
+            "options": [
+              "--yes"
+            ]
+          },
+          {
+            "name": "segments"
+          },
+          {
+            "name": "add-segment",
+            "options": [
+              "--segment-id"
+            ]
+          },
+          {
+            "name": "remove-segment"
+          },
+          {
+            "name": "topics"
+          },
+          {
+            "name": "update-topics",
+            "options": [
+              "--topics"
+            ]
+          },
+          {
+            "name": "imports",
+            "subcommands": [
+              {
+                "name": "create",
+                "options": [
+                  "--file",
+                  "--column-map",
+                  "--on-conflict",
+                  "--segment-id",
+                  "--topics"
+                ]
+              },
+              {
+                "name": "get"
+              },
+              {
+                "name": "list",
+                "aliases": [
+                  "ls"
+                ],
+                "options": [
+                  "--limit",
+                  "--after",
+                  "--before",
+                  "--status"
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "contact-properties",
+        "subcommands": [
+          {
+            "name": "create",
+            "options": [
+              "--key",
+              "--type",
+              "--fallback-value"
+            ]
+          },
+          {
+            "name": "get"
+          },
+          {
+            "name": "list",
+            "aliases": [
+              "ls"
+            ],
+            "options": [
+              "--limit",
+              "--after",
+              "--before"
+            ]
+          },
+          {
+            "name": "update",
+            "options": [
+              "--fallback-value",
+              "--clear-fallback-value"
+            ]
+          },
+          {
+            "name": "delete",
+            "aliases": [
+              "rm"
+            ],
+            "options": [
+              "--yes"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "segments",
+        "subcommands": [
+          {
+            "name": "contacts",
+            "options": [
+              "--limit",
+              "--after",
+              "--before"
+            ]
+          },
+          {
+            "name": "create",
+            "options": [
+              "--name"
+            ]
+          },
+          {
+            "name": "get"
+          },
+          {
+            "name": "list",
+            "aliases": [
+              "ls"
+            ],
+            "options": [
+              "--limit",
+              "--after",
+              "--before"
+            ]
+          },
+          {
+            "name": "update",
+            "options": [
+              "--name"
+            ]
+          },
+          {
+            "name": "delete",
+            "aliases": [
+              "rm"
+            ],
+            "options": [
+              "--yes"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "topics",
+        "subcommands": [
+          {
+            "name": "create",
+            "options": [
+              "--name",
+              "--description",
+              "--default-subscription"
+            ]
+          },
+          {
+            "name": "get"
+          },
+          {
+            "name": "list",
+            "aliases": [
+              "ls"
+            ]
+          },
+          {
+            "name": "update",
+            "options": [
+              "--name",
+              "--description"
+            ]
+          },
+          {
+            "name": "delete",
+            "aliases": [
+              "rm"
+            ],
+            "options": [
+              "--yes"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "domains",
+        "subcommands": [
+          {
+            "name": "create",
+            "options": [
+              "--name",
+              "--region",
+              "--tls",
+              "--tracking-subdomain",
+              "--custom-return-path",
+              "--sending",
+              "--receiving"
+            ]
+          },
+          {
+            "name": "verify"
+          },
+          {
+            "name": "get"
+          },
+          {
+            "name": "list",
+            "aliases": [
+              "ls"
+            ],
+            "options": [
+              "--limit",
+              "--after",
+              "--before"
+            ]
+          },
+          {
+            "name": "update",
+            "options": [
+              "--tls",
+              "--open-tracking",
+              "--no-open-tracking",
+              "--click-tracking",
+              "--no-click-tracking",
+              "--tracking-subdomain"
+            ]
+          },
+          {
+            "name": "delete",
+            "aliases": [
+              "rm"
+            ],
+            "options": [
+              "--yes"
+            ]
+          },
+          {
+            "name": "claim",
+            "subcommands": [
+              {
+                "name": "create",
+                "options": [
+                  "--name",
+                  "--region",
+                  "--tracking-subdomain",
+                  "--custom-return-path",
+                  "--open-tracking",
+                  "--no-open-tracking",
+                  "--click-tracking",
+                  "--no-click-tracking"
+                ]
+              },
+              {
+                "name": "get"
+              },
+              {
+                "name": "verify"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "logs",
+        "subcommands": [
+          {
+            "name": "get"
+          },
+          {
+            "name": "list",
+            "aliases": [
+              "ls"
+            ],
+            "options": [
+              "--limit",
+              "--after",
+              "--before"
+            ]
+          },
+          {
+            "name": "open"
+          }
+        ]
+      },
+      {
+        "name": "usage"
+      },
+      {
+        "name": "careers",
+        "subcommands": [
+          {
+            "name": "apply",
+            "options": [
+              "--name",
+              "--email",
+              "--resume",
+              "--field",
+              "--yes"
+            ]
+          },
+          {
+            "name": "list"
+          }
+        ]
+      },
+      {
+        "name": "suppressions",
+        "subcommands": [
+          {
+            "name": "list",
+            "aliases": [
+              "ls"
+            ],
+            "options": [
+              "--limit",
+              "--after",
+              "--before",
+              "--origin"
+            ]
+          },
+          {
+            "name": "add"
+          },
+          {
+            "name": "get"
+          },
+          {
+            "name": "delete",
+            "aliases": [
+              "rm"
+            ],
+            "options": [
+              "--yes"
+            ]
+          },
+          {
+            "name": "batch",
+            "subcommands": [
+              {
+                "name": "add",
+                "options": [
+                  "--file"
+                ]
+              },
+              {
+                "name": "remove",
+                "aliases": [
+                  "rm"
+                ],
+                "options": [
+                  "--file",
+                  "--ids"
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "api-keys",
+        "subcommands": [
+          {
+            "name": "create",
+            "options": [
+              "--name",
+              "--permission",
+              "--domain-id"
+            ]
+          },
+          {
+            "name": "list",
+            "aliases": [
+              "ls"
+            ],
+            "options": [
+              "--limit",
+              "--after",
+              "--before"
+            ]
+          },
+          {
+            "name": "update",
+            "options": [
+              "--name"
+            ]
+          },
+          {
+            "name": "delete",
+            "aliases": [
+              "rm"
+            ],
+            "options": [
+              "--yes"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "webhooks",
+        "subcommands": [
+          {
+            "name": "create",
+            "options": [
+              "--endpoint",
+              "--events"
+            ]
+          },
+          {
+            "name": "get"
+          },
+          {
+            "name": "events",
+            "subcommands": [
+              {
+                "name": "list",
+                "aliases": [
+                  "ls"
+                ],
+                "options": [
+                  "--limit",
+                  "--after"
+                ]
+              },
+              {
+                "name": "get"
+              },
+              {
+                "name": "attempts",
+                "options": [
+                  "--limit",
+                  "--after"
+                ]
+              },
+              {
+                "name": "replay"
+              }
+            ]
+          },
+          {
+            "name": "listen",
+            "options": [
+              "--url",
+              "--forward-to",
+              "--events",
+              "--port"
+            ]
+          },
+          {
+            "name": "list",
+            "aliases": [
+              "ls"
+            ],
+            "options": [
+              "--limit",
+              "--after",
+              "--before"
+            ]
+          },
+          {
+            "name": "update",
+            "options": [
+              "--endpoint",
+              "--events",
+              "--status"
+            ]
+          },
+          {
+            "name": "rotate-signing-secret"
+          },
+          {
+            "name": "delete",
+            "aliases": [
+              "rm"
+            ],
+            "options": [
+              "--yes"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "oauth-grants",
+        "subcommands": [
+          {
+            "name": "list",
+            "aliases": [
+              "ls"
+            ],
+            "options": [
+              "--limit",
+              "--after",
+              "--before"
+            ]
+          },
+          {
+            "name": "revoke",
+            "options": [
+              "--yes"
+            ]
+          }
+        ]
+      },
+      {
+        "name": "auth",
+        "subcommands": [
+          {
+            "name": "login",
+            "options": [
+              "--key"
+            ]
+          },
+          {
+            "name": "logout"
+          },
+          {
+            "name": "list"
+          },
+          {
+            "name": "switch"
+          },
+          {
+            "name": "rename"
+          },
+          {
+            "name": "remove"
+          }
+        ]
+      },
+      {
+        "name": "logout"
+      },
+      {
+        "name": "whoami"
+      },
+      {
+        "name": "doctor"
+      },
+      {
+        "name": "open"
+      },
+      {
+        "name": "docs"
+      },
+      {
+        "name": "update"
+      },
+      {
+        "name": "commands"
+      },
+      {
+        "name": "completion",
+        "options": [
+          "--install"
+        ]
+      }
+    ]
+  }
+}

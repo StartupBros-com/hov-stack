@@ -1,0 +1,777 @@
+/**
+ * LSP Extension for Pi
+ *
+ * Provides Language Server Protocol integration for code intelligence.
+ * Spawns typescript-language-server on demand and registers an `lsp` tool
+ * for diagnostics, definition, hover, references, and symbols.
+ *
+ * Auto-injects diagnostics after write/edit tool calls.
+ *
+ * Prerequisites: pnpm add -g typescript-language-server typescript
+ */
+
+import type { ExtensionAPI, ExtensionContext, ToolResultEvent } from "@mariozechner/pi-coding-agent"
+import { Type } from "@sinclair/typebox"
+import { StringEnum } from "@mariozechner/pi-ai"
+import * as fs from "node:fs"
+import * as path from "node:path"
+import { spawn, spawnSync } from "node:child_process"
+import { Readable, Writable } from "node:stream"
+
+// =============================================================================
+// LSP Protocol Types (minimal subset)
+// =============================================================================
+
+interface Position { line: number; character: number }
+interface Range { start: Position; end: Position }
+interface Location { uri: string; range: Range }
+interface LocationLink { targetUri: string; targetRange: Range; targetSelectionRange: Range }
+interface Diagnostic { range: Range; severity?: 1 | 2 | 3 | 4; code?: string | number; source?: string; message: string }
+interface DocumentSymbol { name: string; detail?: string; kind: number; range: Range; selectionRange: Range; children?: DocumentSymbol[] }
+interface SymbolInformation { name: string; kind: number; location: Location; containerName?: string }
+interface Hover { contents: { kind: string; value: string } | string | Array<string | { language: string; value: string }> }
+
+type LspProcess = {
+  stdin: Writable
+  stdout: ReadableStream<Uint8Array>
+  stderr: ReadableStream<Uint8Array>
+  kill: () => void
+  exited: Promise<number | null>
+}
+
+interface LspClient {
+  proc: LspProcess
+  cwd: string
+  requestId: number
+  diagnostics: Map<string, Diagnostic[]>
+  diagnosticsVersion: number
+  openFiles: Map<string, number>
+  pendingRequests: Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>
+  buffer: Buffer
+  reading: boolean
+  capabilities: Record<string, unknown> | null
+}
+
+// =============================================================================
+// Constants
+// =============================================================================
+
+const TS_FILE_TYPES = new Set([".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"])
+const DIAGNOSTICS_WAIT_MS = 3000
+const INIT_TIMEOUT_MS = 15000
+
+const SEVERITY_NAMES: Record<number, string> = { 1: "error", 2: "warning", 3: "info", 4: "hint" }
+const SYMBOL_ICONS: Record<number, string> = {
+  1: "📄", 2: "📦", 3: "🏷️", 4: "📦", 5: "🔷", 6: "🔹", 7: "🔸",
+  8: "🔸", 9: "🔧", 10: "📋", 11: "🔶", 12: "ƒ", 13: "𝑥", 14: "π",
+}
+
+const LANGUAGE_MAP: Record<string, string> = {
+  ".ts": "typescript", ".tsx": "typescriptreact",
+  ".js": "javascript", ".jsx": "javascriptreact",
+  ".mjs": "javascript", ".cjs": "javascript",
+  ".mts": "typescript", ".cts": "typescript",
+}
+
+// =============================================================================
+// URI Helpers
+// =============================================================================
+
+function fileToUri(filePath: string): string {
+  return `file://${path.resolve(filePath)}`
+}
+
+function uriToFile(uri: string): string {
+  if (!uri.startsWith("file://")) return uri
+  return decodeURIComponent(uri.slice(7))
+}
+
+function detectLanguageId(filePath: string): string {
+  return LANGUAGE_MAP[path.extname(filePath).toLowerCase()] ?? "plaintext"
+}
+
+// =============================================================================
+// JSON-RPC Protocol
+// =============================================================================
+
+function findHeaderEnd(buf: Buffer): number {
+  for (let i = 0; i < buf.length - 3; i++) {
+    if (buf[i] === 13 && buf[i + 1] === 10 && buf[i + 2] === 13 && buf[i + 3] === 10) return i
+  }
+  return -1
+}
+
+function parseMessage(buf: Buffer): { message: any; remaining: Buffer } | null {
+  const headerEnd = findHeaderEnd(buf)
+  if (headerEnd === -1) return null
+  const header = buf.subarray(0, headerEnd).toString("utf8")
+  const match = header.match(/Content-Length: (\d+)/i)
+  if (!match) return null
+  const contentLength = parseInt(match[1], 10)
+  const messageStart = headerEnd + 4
+  const messageEnd = messageStart + contentLength
+  if (buf.length < messageEnd) return null
+  const message = JSON.parse(buf.subarray(messageStart, messageEnd).toString("utf8"))
+  return { message, remaining: buf.subarray(messageEnd) }
+}
+
+function resolveCommandOnPath(command: string): string | null {
+  const result = spawnSync("bash", ["-lc", `command -v ${JSON.stringify(command)}`], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "ignore"],
+  })
+  if (result.status !== 0) return null
+  const resolved = result.stdout.trim()
+  return resolved || null
+}
+
+function spawnProcess(command: string, args: string[], cwd: string): LspProcess {
+  const child = spawn(command, args, {
+    cwd,
+    stdio: ["pipe", "pipe", "pipe"],
+  })
+
+  return {
+    stdin: child.stdin,
+    stdout: Readable.toWeb(child.stdout) as ReadableStream<Uint8Array>,
+    stderr: Readable.toWeb(child.stderr) as ReadableStream<Uint8Array>,
+    kill: () => {
+      child.kill()
+    },
+    exited: new Promise((resolve) => {
+      child.once("close", (code) => resolve(code))
+    }),
+  }
+}
+
+function readTextFile(filePath: string): Promise<string> {
+  return fs.promises.readFile(filePath, "utf8")
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+async function writeMessage(proc: LspProcess, message: Record<string, unknown>): Promise<void> {
+  const content = JSON.stringify(message)
+  const header = `Content-Length: ${Buffer.byteLength(content, "utf8")}\r\n\r\n`
+  await new Promise<void>((resolve, reject) => {
+    proc.stdin.write(header + content, (error) => {
+      if (error) reject(error)
+      else resolve()
+    })
+  })
+}
+
+// =============================================================================
+// LSP Client Management
+// =============================================================================
+
+let client: LspClient | null = null
+let clientPromise: Promise<LspClient> | null = null
+
+async function startMessageReader(c: LspClient): Promise<void> {
+  if (c.reading) return
+  c.reading = true
+  const reader = (c.proc.stdout as ReadableStream<Uint8Array>).getReader()
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      c.buffer = Buffer.concat([c.buffer, Buffer.from(value)])
+      let parsed = parseMessage(c.buffer)
+      while (parsed) {
+        const { message, remaining } = parsed
+        c.buffer = remaining
+        if ("id" in message && message.id !== undefined) {
+          const pending = c.pendingRequests.get(message.id)
+          if (pending) {
+            c.pendingRequests.delete(message.id)
+            if (message.error) pending.reject(new Error(`LSP: ${message.error.message}`))
+            else pending.resolve(message.result)
+          } else if ("method" in message && message.method === "workspace/configuration") {
+            await writeMessage(c.proc, { jsonrpc: "2.0", id: message.id, result: [{}] })
+          }
+        } else if ("method" in message) {
+          if (message.method === "textDocument/publishDiagnostics" && message.params) {
+            c.diagnostics.set(message.params.uri, message.params.diagnostics ?? [])
+            c.diagnosticsVersion++
+          }
+        }
+        parsed = parseMessage(c.buffer)
+      }
+    }
+  } catch { /* connection closed */ }
+  finally {
+    reader.releaseLock()
+    c.reading = false
+  }
+}
+
+function sendRequest(c: LspClient, method: string, params: unknown, timeoutMs?: number): Promise<unknown> {
+  const id = ++c.requestId
+  return new Promise((resolve, reject) => {
+    c.pendingRequests.set(id, { resolve, reject })
+    const timeout = timeoutMs ?? 30000
+    const timer = setTimeout(() => {
+      c.pendingRequests.delete(id)
+      reject(new Error(`LSP request timed out: ${method}`))
+    }, timeout)
+    const wrapped = {
+      resolve: (v: unknown) => { clearTimeout(timer); resolve(v) },
+      reject: (e: Error) => { clearTimeout(timer); reject(e) },
+    }
+    c.pendingRequests.set(id, wrapped)
+    writeMessage(c.proc, { jsonrpc: "2.0", id, method, params }).catch(reject)
+  })
+}
+
+async function sendNotification(c: LspClient, method: string, params: unknown): Promise<void> {
+  await writeMessage(c.proc, { jsonrpc: "2.0", method, params })
+}
+
+function resolveLocalBin(cwd: string, command: string): string | null {
+  const localBin = path.join(cwd, "node_modules", ".bin", command)
+  return fs.existsSync(localBin) ? localBin : null
+}
+
+function resolveServerBinary(cwd: string): string | null {
+  return resolveLocalBin(cwd, "typescript-language-server") ?? resolveCommandOnPath("typescript-language-server")
+}
+
+function resolveTscBinary(cwd: string): string | null {
+  return resolveLocalBin(cwd, "tsc") ?? resolveCommandOnPath("tsc")
+}
+
+function isTypeScriptProject(cwd: string): boolean {
+  return fs.existsSync(path.join(cwd, "tsconfig.json")) || fs.existsSync(path.join(cwd, "package.json"))
+}
+
+async function getClient(cwd: string): Promise<LspClient | null> {
+  if (client) return client
+  if (clientPromise) return clientPromise
+
+  if (!isTypeScriptProject(cwd)) return null
+
+  const binary = resolveServerBinary(cwd)
+  if (!binary) return null
+
+  clientPromise = (async () => {
+    const proc = spawnProcess(binary, ["--stdio"], cwd)
+
+    const c: LspClient = {
+      proc,
+      cwd,
+      requestId: 0,
+      diagnostics: new Map(),
+      diagnosticsVersion: 0,
+      openFiles: new Map(),
+      pendingRequests: new Map(),
+      buffer: Buffer.alloc(0),
+      reading: false,
+      capabilities: null,
+    }
+
+    // Clean up on exit
+    proc.exited.then(() => {
+      if (client === c) {
+        client = null
+        clientPromise = null
+      }
+      for (const pending of c.pendingRequests.values()) {
+        pending.reject(new Error("LSP server exited"))
+      }
+      c.pendingRequests.clear()
+    })
+
+    startMessageReader(c)
+
+    const initResult = await sendRequest(c, "initialize", {
+      processId: process.pid,
+      rootUri: fileToUri(cwd),
+      rootPath: cwd,
+      capabilities: {
+        textDocument: {
+          synchronization: { didSave: true },
+          hover: { contentFormat: ["markdown", "plaintext"] },
+          definition: { linkSupport: true },
+          references: {},
+          documentSymbol: { hierarchicalDocumentSymbolSupport: true },
+          publishDiagnostics: { relatedInformation: true },
+        },
+        workspace: {
+          configuration: true,
+          symbol: {},
+        },
+      },
+      initializationOptions: {
+        hostInfo: "pi-coding-agent",
+        preferences: {
+          includeInlayParameterNameHints: "all",
+          includeInlayVariableTypeHints: true,
+        },
+      },
+      workspaceFolders: [{ uri: fileToUri(cwd), name: path.basename(cwd) }],
+    }, INIT_TIMEOUT_MS) as { capabilities?: Record<string, unknown> }
+
+    c.capabilities = (initResult as any)?.capabilities ?? null
+    await sendNotification(c, "initialized", {})
+    client = c
+    clientPromise = null
+    return c
+  })()
+
+  try {
+    return await clientPromise
+  } catch (err) {
+    clientPromise = null
+    return null
+  }
+}
+
+async function ensureFileOpen(c: LspClient, filePath: string): Promise<void> {
+  const uri = fileToUri(filePath)
+  if (c.openFiles.has(uri)) return
+  let content: string
+  try { content = await readTextFile(filePath) } catch { return }
+  const languageId = detectLanguageId(filePath)
+  await sendNotification(c, "textDocument/didOpen", {
+    textDocument: { uri, languageId, version: 1, text: content },
+  })
+  c.openFiles.set(uri, 1)
+}
+
+async function refreshFile(c: LspClient, filePath: string): Promise<void> {
+  const uri = fileToUri(filePath)
+  let content: string
+  try { content = await readTextFile(filePath) } catch { return }
+  const version = (c.openFiles.get(uri) ?? 0) + 1
+  c.openFiles.set(uri, version)
+  const languageId = detectLanguageId(filePath)
+  if (version === 1) {
+    await sendNotification(c, "textDocument/didOpen", {
+      textDocument: { uri, languageId, version, text: content },
+    })
+  } else {
+    await sendNotification(c, "textDocument/didChange", {
+      textDocument: { uri, version },
+      contentChanges: [{ text: content }],
+    })
+  }
+  await sendNotification(c, "textDocument/didSave", { textDocument: { uri } })
+}
+
+async function waitForDiagnostics(c: LspClient, uri: string, timeoutMs = DIAGNOSTICS_WAIT_MS, minVersion?: number): Promise<Diagnostic[]> {
+  const start = Date.now()
+  while (Date.now() - start < timeoutMs) {
+    const diags = c.diagnostics.get(uri)
+    const versionOk = minVersion === undefined || c.diagnosticsVersion > minVersion
+    if (diags !== undefined && versionOk) return diags
+    await sleep(100)
+  }
+  return c.diagnostics.get(uri) ?? []
+}
+
+// =============================================================================
+// Formatting Helpers
+// =============================================================================
+
+function formatDiagnostic(d: Diagnostic, relPath: string): string {
+  const sev = SEVERITY_NAMES[d.severity ?? 1] ?? "error"
+  const line = d.range.start.line + 1
+  const col = d.range.start.character + 1
+  const source = d.source ? ` (${d.source})` : ""
+  const code = d.code ? ` [${d.code}]` : ""
+  return `${relPath}:${line}:${col} [${sev}]${source}${code} ${d.message}`
+}
+
+function formatDiagnosticsSummary(diagnostics: Diagnostic[]): string {
+  let errors = 0, warnings = 0, infos = 0
+  for (const d of diagnostics) {
+    if (d.severity === 1 || d.severity === undefined) errors++
+    else if (d.severity === 2) warnings++
+    else infos++
+  }
+  const parts: string[] = []
+  if (errors > 0) parts.push(`${errors} error(s)`)
+  if (warnings > 0) parts.push(`${warnings} warning(s)`)
+  if (infos > 0) parts.push(`${infos} info/hint(s)`)
+  return parts.join(", ") || "no issues"
+}
+
+function formatLocation(loc: Location, cwd: string): string {
+  const file = path.relative(cwd, uriToFile(loc.uri))
+  return `${file}:${loc.range.start.line + 1}:${loc.range.start.character + 1}`
+}
+
+async function readLocationContext(filePath: string, line: number, context: number): Promise<string[]> {
+  try {
+    const content = await readTextFile(filePath)
+    const lines = content.split("\n")
+    const start = Math.max(0, line - 1 - context)
+    const end = Math.min(lines.length, line + context)
+    return lines.slice(start, end).map((l, i) => {
+      const lineNum = start + i + 1
+      const marker = lineNum === line ? ">" : " "
+      return `${marker} ${lineNum.toString().padStart(4)} | ${l}`
+    })
+  } catch { return [] }
+}
+
+function extractHoverText(contents: Hover["contents"]): string {
+  if (typeof contents === "string") return contents
+  if (Array.isArray(contents)) {
+    return contents.map(c => typeof c === "string" ? c : c.value).join("\n\n")
+  }
+  if ("value" in contents) return contents.value
+  return ""
+}
+
+function formatDocumentSymbol(s: DocumentSymbol, indent = 0): string[] {
+  const icon = SYMBOL_ICONS[s.kind] ?? "•"
+  const detail = s.detail ? ` : ${s.detail}` : ""
+  const line = s.range.start.line + 1
+  const prefix = "  ".repeat(indent)
+  const lines = [`${prefix}${icon} ${s.name}${detail} @ line ${line}`]
+  if (s.children) {
+    for (const child of s.children) {
+      lines.push(...formatDocumentSymbol(child, indent + 1))
+    }
+  }
+  return lines
+}
+
+async function resolveSymbolColumn(filePath: string, line: number, symbol?: string): Promise<number> {
+  if (!symbol) return 0
+  try {
+    const content = await readTextFile(filePath)
+    const lines = content.split("\n")
+    const lineText = lines[line - 1] ?? ""
+    const col = lineText.indexOf(symbol)
+    return col >= 0 ? col : 0
+  } catch { return 0 }
+}
+
+// =============================================================================
+// Extension Entry Point
+// =============================================================================
+
+export default function lspExtension(pi: ExtensionAPI) {
+  let extensionCwd = ""
+
+  // Register LSP tool
+  pi.registerTool({
+    name: "lsp",
+    label: "LSP",
+    description: "Language Server Protocol operations for code intelligence: diagnostics, definition, hover, references, symbols.",
+    promptSnippet: "lsp - Get diagnostics, definitions, hover info, references, and symbols via LSP",
+    promptGuidelines: [
+      "Use `lsp` with action 'diagnostics' after writing/editing files to check for type errors",
+      "Use `lsp` with action 'definition' to find where a symbol is defined",
+      "Use `lsp` with action 'hover' to get type information for a symbol",
+      "Use `lsp` with action 'references' to find all usages of a symbol",
+      "Use `lsp` with action 'symbols' to list symbols in a file or search workspace",
+      "The `symbol` parameter resolves the column position automatically — pass the function/variable name, not a column number",
+    ],
+    parameters: Type.Object({
+      action: StringEnum(["diagnostics", "definition", "hover", "references", "symbols", "status"] as const, {
+        description: "LSP operation to perform",
+      }),
+      file: Type.Optional(Type.String({ description: "File path (relative or absolute)" })),
+      line: Type.Optional(Type.Number({ description: "Line number (1-indexed)" })),
+      symbol: Type.Optional(Type.String({ description: "Symbol name on the line to locate column" })),
+      query: Type.Optional(Type.String({ description: "Search query for workspace symbols" })),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const cwd = ctx?.cwd ?? extensionCwd
+      const { action, file, line, symbol, query } = params
+
+      if (action === "status") {
+        const c = client
+        if (!c) {
+          return {
+            content: [{ type: "text" as const, text: "No LSP server running. Will start on first TS file access." }],
+            details: { action },
+          }
+        }
+        return {
+          content: [{ type: "text" as const, text: `typescript-language-server active (cwd: ${c.cwd})` }],
+          details: { action },
+        }
+      }
+
+      const c = await getClient(cwd)
+      if (!c) {
+        return {
+          content: [{ type: "text" as const, text: "No TypeScript project detected or typescript-language-server not found. Install: pnpm add -g typescript-language-server" }],
+          details: { action },
+        }
+      }
+
+      const resolvedFile = file ? path.resolve(cwd, file) : null
+
+      try {
+        switch (action) {
+          case "diagnostics": {
+            if (!resolvedFile) {
+              const tscBinary = resolveTscBinary(cwd)
+              if (!tscBinary) {
+                return {
+                  content: [{ type: "text" as const, text: "TypeScript compiler not found. Install typescript locally or globally." }],
+                  details: { action },
+                }
+              }
+
+              const proc = spawnProcess(tscBinary, ["--noEmit", "--pretty", "false"], cwd)
+              const [stdout, stderr] = await Promise.all([
+                new Response(proc.stdout).text(),
+                new Response(proc.stderr).text(),
+              ])
+              await proc.exited
+              const output = (stdout + stderr).trim()
+              if (!output) {
+                return { content: [{ type: "text" as const, text: "No issues found" }], details: { action } }
+              }
+              const lines = output.split("\n")
+              const limited = lines.length > 50 ? lines.slice(0, 50).join("\n") + `\n... and ${lines.length - 50} more` : output
+              return { content: [{ type: "text" as const, text: limited }], details: { action } }
+            }
+
+            const uri = fileToUri(resolvedFile)
+            const minVersion = c.diagnosticsVersion
+            await refreshFile(c, resolvedFile)
+            const diagnostics = await waitForDiagnostics(c, uri, DIAGNOSTICS_WAIT_MS, minVersion)
+            const relPath = path.relative(cwd, resolvedFile)
+
+            if (diagnostics.length === 0) {
+              return { content: [{ type: "text" as const, text: "No diagnostics" }], details: { action } }
+            }
+
+            diagnostics.sort((a, b) => (a.severity ?? 1) - (b.severity ?? 1))
+            const summary = formatDiagnosticsSummary(diagnostics)
+            const formatted = diagnostics.map(d => formatDiagnostic(d, relPath))
+            return {
+              content: [{ type: "text" as const, text: `${summary}:\n${formatted.map(f => `  ${f}`).join("\n")}` }],
+              details: { action },
+            }
+          }
+
+          case "definition": {
+            if (!resolvedFile || !line) {
+              return { content: [{ type: "text" as const, text: "Error: file and line required for definition" }], details: { action } }
+            }
+            await ensureFileOpen(c, resolvedFile)
+            const col = await resolveSymbolColumn(resolvedFile, line, symbol)
+            const result = await sendRequest(c, "textDocument/definition", {
+              textDocument: { uri: fileToUri(resolvedFile) },
+              position: { line: line - 1, character: col },
+            }) as Location | Location[] | LocationLink[] | null
+
+            const locations = normalizeLocations(result)
+            if (locations.length === 0) {
+              return { content: [{ type: "text" as const, text: "No definition found" }], details: { action } }
+            }
+            const lines: string[] = []
+            for (const loc of locations) {
+              const header = formatLocation(loc, cwd)
+              const context = await readLocationContext(uriToFile(loc.uri), loc.range.start.line + 1, 1)
+              lines.push(`  ${header}`)
+              if (context.length > 0) lines.push(...context.map(l => `    ${l}`))
+            }
+            return {
+              content: [{ type: "text" as const, text: `Found ${locations.length} definition(s):\n${lines.join("\n")}` }],
+              details: { action },
+            }
+          }
+
+          case "hover": {
+            if (!resolvedFile || !line) {
+              return { content: [{ type: "text" as const, text: "Error: file and line required for hover" }], details: { action } }
+            }
+            await ensureFileOpen(c, resolvedFile)
+            const col = await resolveSymbolColumn(resolvedFile, line, symbol)
+            const result = await sendRequest(c, "textDocument/hover", {
+              textDocument: { uri: fileToUri(resolvedFile) },
+              position: { line: line - 1, character: col },
+            }) as Hover | null
+
+            if (!result || !result.contents) {
+              return { content: [{ type: "text" as const, text: "No hover information" }], details: { action } }
+            }
+            return {
+              content: [{ type: "text" as const, text: extractHoverText(result.contents) }],
+              details: { action },
+            }
+          }
+
+          case "references": {
+            if (!resolvedFile || !line) {
+              return { content: [{ type: "text" as const, text: "Error: file and line required for references" }], details: { action } }
+            }
+            await ensureFileOpen(c, resolvedFile)
+            const col = await resolveSymbolColumn(resolvedFile, line, symbol)
+            const result = await sendRequest(c, "textDocument/references", {
+              textDocument: { uri: fileToUri(resolvedFile) },
+              position: { line: line - 1, character: col },
+              context: { includeDeclaration: true },
+            }) as Location[] | null
+
+            if (!result || result.length === 0) {
+              return { content: [{ type: "text" as const, text: "No references found" }], details: { action } }
+            }
+            const contextLimit = 30
+            const lines: string[] = []
+            for (let i = 0; i < result.length; i++) {
+              const loc = result[i]
+              const header = formatLocation(loc, cwd)
+              if (i < contextLimit) {
+                const context = await readLocationContext(uriToFile(loc.uri), loc.range.start.line + 1, 0)
+                lines.push(`  ${header}`)
+                if (context.length > 0) lines.push(...context.map(l => `    ${l}`))
+              } else {
+                lines.push(`  ${header}`)
+              }
+            }
+            return {
+              content: [{ type: "text" as const, text: `Found ${result.length} reference(s):\n${lines.join("\n")}` }],
+              details: { action },
+            }
+          }
+
+          case "symbols": {
+            if (resolvedFile) {
+              // Document symbols
+              await ensureFileOpen(c, resolvedFile)
+              const result = await sendRequest(c, "textDocument/documentSymbol", {
+                textDocument: { uri: fileToUri(resolvedFile) },
+              }) as (DocumentSymbol | SymbolInformation)[] | null
+
+              if (!result || result.length === 0) {
+                return { content: [{ type: "text" as const, text: "No symbols found" }], details: { action } }
+              }
+              const relPath = path.relative(cwd, resolvedFile)
+              if ("selectionRange" in result[0]) {
+                const lines = (result as DocumentSymbol[]).flatMap(s => formatDocumentSymbol(s))
+                return { content: [{ type: "text" as const, text: `Symbols in ${relPath}:\n${lines.join("\n")}` }], details: { action } }
+              }
+              const lines = (result as SymbolInformation[]).map(s => {
+                const icon = SYMBOL_ICONS[s.kind] ?? "•"
+                return `${icon} ${s.name} @ line ${s.location.range.start.line + 1}`
+              })
+              return { content: [{ type: "text" as const, text: `Symbols in ${relPath}:\n${lines.join("\n")}` }], details: { action } }
+            }
+
+            // Workspace symbols
+            if (!query) {
+              return { content: [{ type: "text" as const, text: "Error: query required for workspace symbol search" }], details: { action } }
+            }
+            const result = await sendRequest(c, "workspace/symbol", { query }) as SymbolInformation[] | null
+            if (!result || result.length === 0) {
+              return { content: [{ type: "text" as const, text: `No symbols matching "${query}"` }], details: { action } }
+            }
+            const limited = result.slice(0, 100)
+            const lines = limited.map(s => {
+              const icon = SYMBOL_ICONS[s.kind] ?? "•"
+              const loc = formatLocation(s.location, cwd)
+              return `${icon} ${s.name} @ ${loc}`
+            })
+            const truncation = result.length > 100 ? `\n... ${result.length - 100} more` : ""
+            return {
+              content: [{ type: "text" as const, text: `Found ${result.length} symbol(s):\n${lines.join("\n")}${truncation}` }],
+              details: { action },
+            }
+          }
+
+          default:
+            return { content: [{ type: "text" as const, text: `Unknown action: ${action}` }], details: { action } }
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        return { content: [{ type: "text" as const, text: `LSP error: ${msg}` }], details: { action } }
+      }
+    },
+  })
+
+  // Auto-inject diagnostics after write/edit
+  pi.on("tool_result", async (event: ToolResultEvent, ctx: ExtensionContext) => {
+    const toolName = (event as any).toolName
+    if (toolName !== "write" && toolName !== "edit") return
+    if ((event as any).isError) return
+
+    const input = (event as any).input as Record<string, unknown> | undefined
+    const filePath = typeof input?.file_path === "string" ? input.file_path
+      : typeof input?.path === "string" ? input.path
+      : typeof input?.file === "string" ? input.file
+      : null
+    if (!filePath) return
+
+    const ext = path.extname(filePath).toLowerCase()
+    if (!TS_FILE_TYPES.has(ext)) return
+
+    const c = await getClient(ctx.cwd)
+    if (!c) return
+
+    try {
+      const resolvedPath = path.resolve(ctx.cwd, filePath)
+      const uri = fileToUri(resolvedPath)
+      const minVersion = c.diagnosticsVersion
+      await refreshFile(c, resolvedPath)
+      const diagnostics = await waitForDiagnostics(c, uri, DIAGNOSTICS_WAIT_MS, minVersion)
+
+      if (diagnostics.length === 0) return
+
+      const errors = diagnostics.filter(d => d.severity === 1 || d.severity === undefined)
+      if (errors.length === 0) return // Only inject on errors, not warnings
+
+      const relPath = path.relative(ctx.cwd, resolvedPath)
+      const summary = formatDiagnosticsSummary(errors)
+      const formatted = errors.slice(0, 10).map(d => formatDiagnostic(d, relPath))
+      const diagText = `\n\nLSP Diagnostics (${summary}):\n${formatted.join("\n")}`
+
+      // Append diagnostics to the existing tool result
+      const content = (event as any).content as Array<{ type: string; text: string }> | undefined
+      if (content && content.length > 0) {
+        const last = content[content.length - 1]
+        if (last && last.type === "text") {
+          return { content: [...content.slice(0, -1), { type: "text", text: last.text + diagText }] }
+        }
+      }
+      return { content: [{ type: "text", text: diagText }] }
+    } catch { /* diagnostics injection is best-effort */ }
+  })
+
+  // Track cwd from session
+  pi.on("session_start", async (_event, ctx) => {
+    extensionCwd = ctx.cwd
+  })
+
+  // Shutdown LSP server on session end
+  pi.on("session_shutdown", async () => {
+    if (client) {
+      try {
+        await sendRequest(client, "shutdown", null, 3000)
+        await sendNotification(client, "exit", null)
+      } catch { /* best-effort */ }
+      client.proc.kill()
+      client = null
+      clientPromise = null
+    }
+  })
+}
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+function normalizeLocations(result: unknown): Location[] {
+  if (!result) return []
+  const raw = Array.isArray(result) ? result : [result]
+  return raw.flatMap(loc => {
+    if ("uri" in loc) return [loc as Location]
+    if ("targetUri" in loc) {
+      const link = loc as LocationLink
+      return [{ uri: link.targetUri, range: link.targetSelectionRange ?? link.targetRange }]
+    }
+    return []
+  })
+}

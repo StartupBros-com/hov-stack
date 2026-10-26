@@ -1,0 +1,9 @@
+{
+  "requestId": "req_fixture_contents_all_error",
+  "results": [],
+  "statuses": [
+    {"id": "https://a.example", "status": "error", "error": {"tag": "CRAWL_NOT_FOUND", "httpStatusCode": 404}},
+    {"id": "https://b.example", "status": "error", "error": {"tag": "TIMEOUT", "httpStatusCode": 504}}
+  ],
+  "costDollars": {"total": 0.0, "contents": 0.0}
+}

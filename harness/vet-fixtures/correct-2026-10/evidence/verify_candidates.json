@@ -1,0 +1,42 @@
+{
+ "results": [
+  {
+   "claim": "(a) PR #494's verification establishes that the /correct SKILL beats the BARE model (no doctrine) on the author's scratch repo.",
+   "verdict": "REFUTED",
+   "evidence": "correct-PR-494-body.md:14 says 'one run for each input' and compares the 'raw-prompt run' with the 'skill run'. The raw prompt is the source prompt, which carries the same doctrine (body line 6: the skill 'keeps the source prompt's content and order'; line 12: all 29 source sentences are present). There is no no-doctrine arm. The digest (line 4) also states there was no bare arm. The outcome was parity: both runs found all 3 classes, skipped the decoy, and all 5 re-planted mistakes failed in both runs. The only differences were design choices, and the skill run was smaller (542 vs 1143 lines) and 'lost nothing'. The sample is n=1 per arm on one scratch repo, so it shows the skill matches its own source prompt and says nothing about beating a bare model."
+  },
+  {
+   "claim": "(b) /correct SKILL.md contains no execution surface: no shell command, URL, script, network call, or instruction to fetch or self-update.",
+   "verdict": "CONFIRMED",
+   "evidence": "I read correct-SKILL.md lines 1-32 in full. It has no shell command, URL, script reference, fetch instruction or self-update instruction. The nearest text is line 26, 'Run the same command locally and in CI', which names no concrete command. 'make check' appears only in the PR body (line 14), not in the skill.",
+   "note": "The skill is not inert. It tells the agent to edit the repo, make one commit per class (line 26), add lint and CI checks (line 20), and run the repo's own check command. The enumerated surfaces are absent, but it is still a behavior-changing, repo-writing procedure."
+  },
+  {
+   "claim": "(c) /correct ships 'disable-model-invocation: true' (file:line).",
+   "verdict": "CONFIRMED",
+   "evidence": "/tmp/hv-correct-2026-10-07/cand/correct-SKILL.md:4 reads 'disable-model-invocation: true'. PR body line 6 also says the PR sets it."
+  },
+  {
+   "claim": "(d) /correct's threshold for a mistake class is two occurrences (file:line).",
+   "verdict": "CONFIRMED",
+   "evidence": "correct-SKILL.md:15 reads 'A class counts once it has happened twice.' The threshold applies to the discovery sweep. Line 30 uses a separate 'repeat' trigger: a rule that already exists but has no enforcer."
+  },
+  {
+   "claim": "(e) the poteto tweet's four-level ordering and /correct's ladder are the same ordering; name every difference, and do the same for encode-lessons' 'strongest mechanism' ordering.",
+   "verdict": "REFUTED",
+   "evidence": "Poteto (digest line 6): 1 architecture/data structures; 2 lint rule or test; 3 skill or rule; 4 human review. /correct (correct-SKILL.md:19-22): 1 architecture; 2 types, then a lint whose error names the fix; 3 test; 4 docs or agent rules, last and only for judgment calls. The description (line 3) lists five steps: architecture, types, lint, test, docs.\n\nDifferences between /correct and poteto:\n- INSERTED: types (a new level). Poteto's 'data structures' sits inside his level 1.\n- SPLIT: poteto's level 2 ('lint rule or test') becomes two. Lint moves up into /correct's level 2 with types, and test is demoted to its own level 3 below lint. Tests are now ranked below lint, where poteto ranked them equal.\n- DROPPED: poteto's level 4, human review. /correct has no review level. Humans appear only as the approver of inline exceptions (line 26).\n- CHANGED: poteto's 'skill or rule' (level 3) becomes 'docs or agent rules', moved to last place (level 4) and restricted to judgment calls. 'Docs' is new.\n- ADDED: 'fail only when a change adds more' for common patterns (line 20), and a rule-to-enforcer table (line 30).\n\nWhat matches: architecture is first and written rules are last or near last.\n\nencode-lessons (pstack-encode-lessons-SKILL.md:19) orders: unrepresentable state, then lint or banned API, then canonical helper, then runtime check.\n- Against poteto, it has no architecture level, no test level, no skill/rule/doc level and no human-review level. Instructions are the anti-pattern (lines 11, 21), with a fallback at line 17 for judgment calls.\n- 'Unrepresentable state' is closest to /correct's types, and 'lint' is the same in both.\n- 'Canonical helper' is not a level in poteto or /correct. It is nearest to /correct's level 1 ('one supported way', line 19) but is ranked below lint, so it is reordered.\n- 'Runtime check' is a new level that neither /correct nor poteto has.\n- Its routing ladder (line 25) is a different axis: one-off goes to a brain note, recurring to a skill or lint rule, systemic to a principle. There a skill sits alongside lint, unlike poteto's level 3.",
+   "note": "Poteto's ordering comes only from the digest's quote of the tweet. I did not fetch the tweet itself."
+  },
+  {
+   "claim": "(f) the current /retro SKILL.md is character-identical to the vetted c55ee46 revision (read both fully and compare).",
+   "verdict": "CONFIRMED",
+   "evidence": "I read retro-SKILL.md (lines 1-44) and retro-SKILL-c55ee46-vetted-2026-09-20.md (lines 1-44) in full and compared them line by line: the frontmatter, all 7 category bullets, the Reference section and the final line are identical. This matches the digest's byte-identical and sha256 note (line 5).",
+   "note": "The comparison is visual because I have no diff or hash tool. I could not run a checksum. A trailing-whitespace or newline difference would not be visible, so the digest's hash is the byte-level backing."
+  },
+  {
+   "claim": "(g) /retro's text instructs the agent to RUN the repo's check command (as opposed to READ it).",
+   "verdict": "REFUTED",
+   "evidence": "retro-SKILL.md:18 says 'Read the repo's own check command first (its package.json/build-tool lint/check scripts, its CI workflow)'. The verb is Read, and the targets are script definitions and the CI workflow. The word 'running' on the same line describes what a CI job does ('no CI job running its lint/typecheck/test command') and is not an instruction. No other line tells the agent to run a check. The only actions are: call the Skill tool for writing-for-agents (line 11), read primary sources and session logs (line 13), and present candidates (line 25)."
+  }
+ ]
+}

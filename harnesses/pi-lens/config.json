@@ -1,0 +1,20 @@
+{
+  "widget": {
+    "visible": false
+  },
+  "format": {
+    "enabled": true,
+    "mode": "deferred"
+  },
+  "actionableWarnings": {
+    "enabled": false,
+    "includeLspCodeActions": false,
+    "deltaOnly": true,
+    "autoFix": {
+      "enabled": false
+    }
+  },
+  "contextInjection": {
+    "enabled": false
+  }
+}

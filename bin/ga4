@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# On-demand GA4 reads. Reuses gsc's disposable google-auth environment.
+# uv venv ~/.local/share/gsc-cli/venv --python 3.12
+# uv pip install --python ~/.local/share/gsc-cli/venv/bin/python google-auth
+set -euo pipefail
+
+SELF=$(readlink -f -- "${BASH_SOURCE[0]}")
+IMPL="${SELF%/*}/ga4.py"
+VENV="${HOME}/.local/share/gsc-cli/venv/bin/python"
+if [[ -x "$VENV" ]]; then
+  exec "$VENV" "$IMPL" "$@"
+fi
+# The Python implementation imports auth lazily; help/version/where stay usable.
+exec python3 "$IMPL" "$@"

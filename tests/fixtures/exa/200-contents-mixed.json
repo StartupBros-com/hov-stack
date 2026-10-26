@@ -1,0 +1,23 @@
+{
+  "requestId": "req_fixture_contents_mixed",
+  "results": [
+    {
+      "id": "https://a.example",
+      "title": "Page A",
+      "url": "https://a.example",
+      "highlights": ["Crawled content from page A."]
+    },
+    {
+      "id": "https://b.example",
+      "title": "Page B",
+      "url": "https://b.example",
+      "highlights": ["Cached content from page B."]
+    }
+  ],
+  "statuses": [
+    {"id": "https://a.example", "status": "success", "source": "crawled"},
+    {"id": "https://b.example", "status": "success", "source": "cached"},
+    {"id": "https://c.example", "status": "error", "error": {"tag": "CRAWL_NOT_FOUND", "httpStatusCode": 404}}
+  ],
+  "costDollars": {"total": 0.002, "contents": 0.002}
+}

@@ -1,0 +1,9 @@
+interface:
+  display_name: "Pick UI Library"
+  short_description: "Choose the right frontend library for a given task"
+  default_prompt: "Use $pick-ui-library to choose a library for this frontend task from the curated list."
+policy:
+  # Mirrors `disable-model-invocation: true` in the Claude frontmatter, which Codex
+  # does not read. The skill's own description says it "only runs when explicitly
+  # invoked; it does not trigger on its own" — this is what enforces that in Codex.
+  allow_implicit_invocation: false

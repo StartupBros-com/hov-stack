@@ -1,0 +1,29 @@
+{
+  "_fixture": "Synthetic regression fixture for dotfiles#1722; not a raw GitHub API capture.",
+  "id": 172202,
+  "name": "🧪 Test Run",
+  "run_id": 900,
+  "run_attempt": 1,
+  "head_sha": "fixture-head",
+  "status": "completed",
+  "conclusion": "failure",
+  "started_at": "2026-10-11T03:35:14Z",
+  "completed_at": "2026-10-11T03:35:17Z",
+  "steps": [
+    {
+      "name": "Set up job",
+      "conclusion": "success",
+      "status": "completed"
+    },
+    {
+      "name": "Require every test suite to have succeeded",
+      "conclusion": "failure",
+      "status": "completed"
+    },
+    {
+      "name": "Complete job",
+      "conclusion": "success",
+      "status": "completed"
+    }
+  ]
+}

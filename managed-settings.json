@@ -1,0 +1,38 @@
+{
+  "permissions": {
+    "deny": [
+      "mcp__telegram__delete_chat_history",
+      "mcp__telegram__delete_messages_bulk",
+      "mcp__telegram__delete_contact",
+      "mcp__telegram__ban_user",
+      "mcp__telegram__edit_admin_rights",
+      "mcp__telegram__promote_admin",
+      "mcp__telegram__demote_admin",
+      "mcp__telegram__set_privacy_settings",
+      "mcp__telegram__export_contacts",
+      "Bash(rm -rf /)",
+      "Bash(rm -rf ~)",
+      "Bash(rm -rf ~/*)",
+      "Bash(rm -rf $HOME:*)",
+      "Bash(rm -rf --no-preserve-root:*)",
+      "Bash(dd:*)",
+      "Bash(mkfs:*)",
+      "Bash(wipefs:*)",
+      "Bash(shred:*)",
+      "Bash(blkdiscard:*)",
+      "Bash(fdisk:*)",
+      "Bash(parted:*)",
+      "Bash(hdparm:*)",
+      "Bash(gparted:*)",
+      "Bash(format:*)",
+      "Bash(diskpart:*)",
+      "Bash(Clear-Disk:*)",
+      "Bash(Format-Volume:*)",
+      "Bash(Initialize-Disk:*)",
+      "Bash(Remove-Partition:*)",
+      "Bash(Set-Disk:*)",
+      "Bash(New-Partition:*)"
+    ],
+    "disableAutoMode": "disable"
+  }
+}

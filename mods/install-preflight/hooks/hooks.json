@@ -1,0 +1,4 @@
+{
+  "description": "install-preflight: runs claude plugin validate on a folder or repo and lists what the plugin can do in plain language",
+  "modules": ["./register.tsx"]
+}

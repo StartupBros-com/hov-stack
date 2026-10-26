@@ -1,0 +1,74 @@
+{
+  "localAgentDir": "~/.pi/agent",
+  "dotfilesRepo": "~/hov-stack",
+  "backupPiAgentDir": "~/hov-stack/harnesses/pi/agent",
+  "syncPaths": [
+    "settings.json",
+    "AGENTS.md",
+    "maintenance.repos.json",
+    "extensions",
+    "prompts",
+    "bin"
+  ],
+  "repos": [
+    {
+      "name": "pi-research-fabric",
+      "path": "~/SITES/pi-research-fabric",
+      "policy": "owned-public",
+      "primaryRemote": "origin",
+      "defaultBranch": "main"
+    },
+    {
+      "name": "acme-extension-c",
+      "path": "~/SITES/acme-extension-c",
+      "policy": "owned-public",
+      "primaryRemote": "origin",
+      "defaultBranch": "main"
+    },
+    {
+      "name": "acme-extension-a",
+      "path": "~/SITES/acme-extension-a",
+      "policy": "owned-public",
+      "primaryRemote": "origin",
+      "defaultBranch": "main"
+    },
+    {
+      "name": "acme-extension-b",
+      "path": "~/SITES/acme-extension-b",
+      "policy": "owned-public",
+      "primaryRemote": "origin",
+      "defaultBranch": "main"
+    },
+    {
+      "name": "pi-background-services",
+      "path": "~/SITES/pi-background-services",
+      "policy": "owned-public",
+      "primaryRemote": "origin",
+      "defaultBranch": "main"
+    },
+    {
+      "name": "compound-engineering-pi",
+      "path": "~/SITES/pi-compound-engineering",
+      "policy": "fork-upstream",
+      "primaryRemote": "origin",
+      "upstreamRemote": "upstream",
+      "defaultBranch": "main"
+    },
+    {
+      "name": "pi-subagents",
+      "path": "~/SITES/pi-subagents",
+      "policy": "fork-upstream",
+      "primaryRemote": "origin",
+      "upstreamRemote": "upstream",
+      "defaultBranch": "main"
+    },
+    {
+      "name": "pi-autoresearch",
+      "path": "~/SITES/pi-autoresearch",
+      "policy": "fork-upstream",
+      "primaryRemote": "origin",
+      "upstreamRemote": "upstream",
+      "defaultBranch": "main"
+    }
+  ]
+}

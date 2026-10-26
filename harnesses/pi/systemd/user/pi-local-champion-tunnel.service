@@ -1,0 +1,51 @@
+# TEMPLATE: SSH tunnel that keeps a local port forwarded to the model gateway used by pi-local.
+# Replace before enabling:
+#   line 33: Environment=TUNNEL_USER= the SSH user on the gateway host.
+#   line 34: Environment=TUNNEL_HOST= the gateway host (the shipped gateway.invalid cannot resolve).
+#   line 35: Environment=TUNNEL_LOCAL_PORT= the local port pi-local connects to.
+#   line 36: Environment=TUNNEL_REMOTE_PORT= the LiteLLM port on the gateway host.
+# See systemd/README.md.
+
+[Unit]
+Description=SSH tunnel to the local model gateway for pi-local
+# No network-readiness probe: the user manager has no network-online.target,
+# so the After=/Wants= pair this unit carried ordered nothing,
+# and none is needed here: ssh gives up within ConnectTimeout=10, Restart=always
+# tries again after RestartSec=5, and at one start per 5s the manager's default
+# start limit (DefaultStartLimitBurst=5 in DefaultStartLimitIntervalSec=10s)
+# cannot trip, so the tunnel comes up by itself once the network does.
+
+# SSH forward to a LiteLLM proxy on the local model gateway, which routes
+# the "chat" model alias to a local model server and provides cloud
+# fallbacks.
+#
+# LiteLLM adds value over a direct tunnel to the model server:
+#   - num_retries: 10 — rides out 503s while the model pages in
+#   - timeout: 1800 (30 min) — handles slow prefill under memory pressure
+#   - rpm: 60 — rate limiting
+#   - cloud fallbacks when the local model is down
+#
+# The old ad-hoc tunnel (a bare ssh -fN with no supervisor) died silently when
+# the SSH connection dropped; systemd Restart=always makes it self-healing.
+
+[Service]
+Type=simple
+Environment=TUNNEL_USER=root
+Environment=TUNNEL_HOST=gateway.invalid
+Environment=TUNNEL_LOCAL_PORT=14000
+Environment=TUNNEL_REMOTE_PORT=4000
+ExecStart=/usr/bin/ssh -NT \
+  -o BatchMode=yes \
+  -o ExitOnForwardFailure=yes \
+  -o ConnectTimeout=10 \
+  -o ServerAliveInterval=20 \
+  -o ServerAliveCountMax=3 \
+  -o ControlMaster=no \
+  -o ControlPath=none \
+  -L 127.0.0.1:${TUNNEL_LOCAL_PORT}:127.0.0.1:${TUNNEL_REMOTE_PORT} \
+  ${TUNNEL_USER}@${TUNNEL_HOST}
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,119 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'USAGE'
+Usage: git-preflight [-C <repo>] [--json] [--dry-run]
+
+Run the three read-only Git checks repeatedly used before commit/review:
+  git status --short --branch
+  git diff --stat
+  git diff --check
+
+Options:
+  -C <repo>   Inspect this repository instead of the current directory
+  --json      Emit one machine-readable JSON object
+  --dry-run   Print the commands without running the three checks
+  -h, --help  Show this help
+
+Exit codes:
+  0  checks ran and git diff --check passed
+  1  git diff --check found whitespace errors
+  2  usage, dependency, or repository error
+USAGE
+}
+
+repo=.
+json=0
+dry_run=0
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -C)
+      repo=${2:-}
+      [[ -n "$repo" ]] || { echo 'git-preflight: -C needs a repository path' >&2; exit 2; }
+      shift 2
+      ;;
+    --json)
+      json=1
+      shift
+      ;;
+    --dry-run)
+      dry_run=1
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      printf 'git-preflight: unknown option %q\n' "$1" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+done
+
+command -v git >/dev/null 2>&1 || { echo 'git-preflight: git is not installed' >&2; exit 2; }
+root=$(git -C "$repo" rev-parse --show-toplevel 2>/dev/null) || {
+  printf 'git-preflight: %s is not inside a Git worktree\n' "$repo" >&2
+  exit 2
+}
+
+commands=(
+  "git -C $(printf '%q' "$root") status --short --branch"
+  "git -C $(printf '%q' "$root") diff --stat"
+  "git -C $(printf '%q' "$root") diff --check"
+)
+
+if [[ $dry_run -eq 1 ]]; then
+  if [[ $json -eq 1 ]]; then
+    command -v jq >/dev/null 2>&1 || { echo 'git-preflight: --json requires jq' >&2; exit 2; }
+    printf '%s\n' "${commands[@]}" | jq -R -s --arg root "$root" '
+      {schema:"git-preflight.v1", root:$root, dry_run:true,
+       commands:(split("\n") | map(select(length > 0)))}'
+  else
+    printf 'git-preflight: dry run for %s\n' "$root"
+    printf '  %s\n' "${commands[@]}"
+  fi
+  exit 0
+fi
+
+status=$(git -C "$root" status --short --branch)
+diff_stat=$(git -C "$root" diff --stat)
+diff_check=""
+git_check_rc=0
+diff_check=$(git -C "$root" diff --check 2>&1) || git_check_rc=$?
+# Reserve exit 2 for invocation/repository errors. Git currently returns 2 for
+# whitespace findings, so exposing its raw code would make a failed check
+# indistinguishable from a command that never ran.
+check_rc=0
+if [[ $git_check_rc -ne 0 ]]; then check_rc=1; fi
+
+dirty=false
+case "$status" in
+  *$'\n'*) dirty=true ;;
+esac
+
+if [[ $json -eq 1 ]]; then
+  command -v jq >/dev/null 2>&1 || { echo 'git-preflight: --json requires jq' >&2; exit 2; }
+  jq -n \
+    --arg root "$root" \
+    --arg status "$status" \
+    --arg diff_stat "$diff_stat" \
+    --arg diff_check "$diff_check" \
+    --argjson dirty "$dirty" \
+    --argjson exit_code "$check_rc" \
+    '{schema:"git-preflight.v1", root:$root, dry_run:false,
+      dirty:$dirty, status:$status, diff_stat:$diff_stat,
+      diff_check:$diff_check, ok:($exit_code == 0), exit_code:$exit_code}'
+else
+  printf 'git-preflight: %s\n' "$root"
+  printf '\n## status\n%s\n' "$status"
+  printf '\n## diff --stat\n'
+  if [[ -n "$diff_stat" ]]; then printf '%s\n' "$diff_stat"; else printf '(clean)\n'; fi
+  printf '\n## diff --check\n'
+  if [[ -n "$diff_check" ]]; then printf '%s\n' "$diff_check"; else printf 'OK\n'; fi
+fi
+
+exit "$check_rc"

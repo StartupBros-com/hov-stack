@@ -1,0 +1,54 @@
+[Unit]
+# The one MUTATING timer in this harness's update surface, and the only tool with a
+# gate that earns it: dcg-update.sh verifies sha256, checks the candidate can read our
+# config and still loads >=6 packs, then runs the full expect-blocked/expect-allowed
+# corpus through the CANDIDATE binary. The live symlink moves only if all of that
+# passes; any failure leaves the running guard untouched and exits 1.
+#
+# Why daily rather than on harness-weekly: dcg IS the destructive-command guard, so a
+# gap in it fails OPEN and is invisible — nothing happening is what success looks like.
+# The 2026-08 incident that motivated this was a compose-flag bypass (`docker compose
+# -f prod.yml down -v` was ALLOWED) that shipped as a PATCH release; the weekly report
+# rated it "within tolerance" and would not have said a word for seven more days.
+Description=dcg guard auto-update (contract-gated promote)
+Documentation=https://github.com/Dicklesworthstone/destructive_command_guard
+
+# The whole point of splitting ERROR from REFUSAL is that an error reaches a
+# human. Without this, the new nonzero exits -- a tampered artifact, a failed
+# signature, a contract suite that could not run -- die in the journal until
+# Monday, which is the same silence the split was written to end.
+#
+# A REFUSAL still exits 0 and does not page: upstream shipping something we
+# decline is the gate working, and paging for it is how a fleet learns to ignore
+# the pager. Repeated refusals surface through the weekly sweep instead, which
+# reads the durable record this script now writes.
+# (This was held back on purpose until the reject/fail split existed, on the
+# grounds that exit 1 still conflated REJECTED with FAILED. That split is this
+# branch, so the precondition it named is met and the alert lands with it.)
+OnFailure=harness-unit-failure-alert@%n.service
+
+[Service]
+Type=oneshot
+# DRY_RUN=0 is what distinguishes this from harness-weekly's report-only calls. It is
+# safe unattended ONLY because promotion is gated on the contract corpus, not on the
+# version gap — see dcg-update.sh "--- 3. contract ---".
+Environment=DRY_RUN=0
+# systemd user services get PATH=/usr/local/sbin:...:/bin with NO ~/.local/bin, which is
+# where every tool this touches lives (including jq). The 2026-08-07 first live run
+# skipped all five tools and still exited 0. The scripts now resolve absolute paths
+# themselves; this is the second layer.
+Environment=PATH=%h/.local/bin:%h/.local/share/mise/shims:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+# No network-online.target exists in the user manager, so
+# readiness is this bounded probe of api.github.com, the host of the gh
+# release download (the binary's own update check is not visible from
+# dcg-update.sh). The leading - keeps the script's own contract on the
+# deadline: a healthy binary that cannot check records SKIPPED and exits 0.
+# ExecStartPre time counts against TimeoutStartSec, so the 900s below leaves
+# dcg-update.sh the 600s it had before the probe existed even when the whole
+# wait is spent (a late-recovering link is exactly the case the probe is for).
+ExecStartPre=-%h/.claude/scripts/net-ready.sh --wait 300 --url https://api.github.com/
+ExecStart=%h/.claude/scripts/dcg-update.sh
+# Be gentle; this competes with nothing and can wait.
+Nice=10
+IOSchedulingClass=idle
+TimeoutStartSec=900

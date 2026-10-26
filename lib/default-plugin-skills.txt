@@ -1,0 +1,19 @@
+# default-plugin-skills.txt: the skills ./setup does not link because a default plugin
+# provides them (restructure plan KTD12). One `<skill> <plugin>` pair per line; setup
+# skips each name here and prints it with its plugin, on every run, whether or not the
+# plugin could be installed: a copy linked while offline would list twice once the plugin
+# lands. papercut stays last: it is the one name here the pack also carries, and
+# tests/repo/setup.test.sh's missing-final-newline case needs a pack skill on the last line.
+#
+# Consumer: setup's skill loop. Gate: tests/repo/setup.test.sh checks that no linked name
+# is one tests/fixtures/default-plugin-skills.txt records a default plugin shipping, that
+# every recorded name is here, and that every plugin named here is in
+# lib/default-plugins.txt.
+# Delete when the pack carries no skill a default plugin ships (today only papercut) and
+# the setup test checks the pack against the record directly.
+portfolio     skill-tuner
+skill-tuner   skill-tuner
+tune          skill-tuner
+memory-dream  memory-dream
+design-rails  design-rails
+papercut      papercut

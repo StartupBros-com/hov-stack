@@ -1,0 +1,28 @@
+{
+ "results": [
+  {
+   "claim": "(a) some harness doctrine or script says a SECOND operator correction on the same behaviour should be escalated to an enforcer rather than merely updating the note.",
+   "verdict": "REFUTED",
+   "evidence": "No such rule found in the files read. A grep of CLAUDE.md, HARNESS.md, harness/*.md, skills-local/*/SKILL.md and scripts/memory*.py for 'second time/correction', 'corrected twice/again', 'same mistake/correction' and 'promote to hook/enforce' returned only skills-local/rent-check/SKILL.md:202 (`| PROMOTE | Move to enforcement (hook / linter / CI gate); prune the prose after the gate exists |`). That is a verdict for context-file rules audited by hand. It has no repeat-count trigger and does not read feedback notes. The memory doctrine in the digest says to update the existing file, not escalate. memory-dream-pass.md has no escalation rule.",
+   "note": "Not checked: CLAUDE.md files outside the worktree, and docs/solutions/. A rule could exist there. Within the searched set the claim is unsupported."
+  },
+  {
+   "claim": "(b) memory-audit.py, memory-mine, or memory-dream detects REPEATED corrections across feedback notes and surfaces them.",
+   "verdict": "REFUTED",
+   "evidence": "memory-audit.py triage scores structure only. score_note (memory-audit.py:660-686) adds points for supersession markers (3 per marker), body size, age, inbound wikilinks and description problems. memory-dream-pass.md:47-52 says triage 'scores every live note on structure only'. The only 'duplicate' checks are duplicate_frontmatter_name (memory-audit.py:450) and duplicated descriptions (memory-audit.py:699-714), which exist so descriptions stay recallable. Neither compares behaviours or corrections. memory-mine/SKILL.md:9-59 delegates to memory-mine-controller.py, which is a bounded capture of two sessions per batch. Its only mention of feedback is the allowed note-type enum (memory-mine-controller.py:1502, 1665). memory-dream's `repeat_deferral` (plugin commands/dream.md:81-83) counts clusters deferred across consecutive passes. It does not count repeated operator corrections. The plugin's triage checks (skills/memory-dream/SKILL.md:25-28) are supersession markers, oversized bodies, decayed confidence, stale dates and index load cap.",
+   "note": "Not checked: plugin memory_dream/audit.py internals and the clustering code, which I did not read. The stated check lists and the docs I read show no cross-note behaviour-repeat signal."
+  },
+  {
+   "claim": "(c) memory-dream's consolidation can propose demoting a feedback note into an enforcement mechanism.",
+   "verdict": "REFUTED",
+   "evidence": "In memory-dream, 'demotion' means index tiering. plugin commands/dream.md:739 says 'the binding constraint is hot-index bytes, and the remedy is DEMOTION', and dream.md:758-767 describes the archive tier and 'Promotion back is a hand move'. Skills/memory-dream/SKILL.md:27-28 says 'the pass's archive tier demotes rather than deletes'. The drafter produces consolidated or split notes. The only references to feedback in drafter.md (lines 83, 123, 134) and dream.md (175, 211) say to extract typed `feedback` or `reference` notes. No path proposes creating a hook, test or deny rule. The drafter has a Glob-only tool list (skills/memory-dream/SKILL.md:44-48), and memory-dream-pass.md:137-139 says changes are memory edits only.",
+   "note": "The word 'demotion' is a false-positive lookalike. It refers to the memory index archive tier, not to enforcement."
+  },
+  {
+   "claim": "(d) feedback-type notes have any automated consumer other than being loaded into context via MEMORY.md.",
+   "verdict": "PARTIAL",
+   "evidence": "Only index housekeeping and validation consumers were found, none acting on the guidance. memory-audit.py:1575 REHOOK_TYPE_ORDER = {user:0, feedback:1, project:2, reference:3} ranks feedback second when `rehook` decides which index lines stay in MEMORY.md under the load cap. memory-audit.py:22 and :389 validate type as one of user|feedback|project|reference. memory-mine-controller.py:1502 and :1665 accept feedback as a valid candidate type. The memory-dream drafter may extract feedback notes (agents/drafter.md:83, 134). The recall eval scores description routing across all notes, with no feedback-specific treatment found.",
+   "note": "Nothing found that parses feedback content to drive a hook, test, papercut dossier or enforcement action. 'Consumer' is satisfied only in the weak sense of index ordering and schema validation. The grep covered scripts, hooks, bin, harness and skills-local. It did not cover the plugin's Python modules in depth."
+  }
+ ]
+}

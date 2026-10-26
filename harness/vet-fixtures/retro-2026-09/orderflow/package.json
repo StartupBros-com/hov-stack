@@ -1,0 +1,19 @@
+{
+  "name": "orderflow",
+  "private": true,
+  "scripts": {
+    "dev": "tsx watch src/cli/serve.ts > /dev/null 2>&1",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "db:generate": "tsx scripts/gen-types.ts",
+    "status-report": "cat docs/status-dump.txt"
+  },
+  "devDependencies": {
+    "eslint": "^9.12.0",
+    "typescript": "^5.6.0",
+    "vitest": "^4.1.11",
+    "tsx": "^4.19.0"
+  }
+}

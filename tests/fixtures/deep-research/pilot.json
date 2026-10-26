@@ -1,0 +1,67 @@
+{
+  "purpose": "Deployment pilot for the owned research coordinator; not a population-wide improvement benchmark.",
+  "as_of": "2026-09-24",
+  "arms": ["owned-coordinator", "synced-coordinator", "direct-tools"],
+  "controls": {
+    "same_model_and_effort": true,
+    "same_tool_versions": true,
+    "integration_fixes_in_all_arms": true,
+    "private_data_allowed": false,
+    "repository_clones_allowed": false,
+    "retrieved_code_execution_allowed": false,
+    "budget_bypass_allowed": false
+  },
+  "scoring": {
+    "claim_support": "Supported material claims / all material factual claims; open cited sources rather than grading plausible prose.",
+    "question_coverage": "Correctly answered required questions / all required questions, with unsupported answers not counted as covered.",
+    "countermetrics": ["elapsed_seconds", "reported_model_cost_usd", "provider_cost_measured_or_estimated", "source_failures", "unresolved_questions"],
+    "activation_blockers": ["Fabricated decisive claim", "Hidden known retrieval failure", "Consent/privacy boundary crossed", "Required question lost that a baseline answers"],
+    "inconclusive": "Retain an inconclusive label; do not change criteria or expand the pilot solely to obtain a favorable verdict."
+  },
+  "cases": [
+    {
+      "id": "software_choice",
+      "prompt": "For a public hypothetical application with two API processes on one Linux host, mostly reads and occasional overlapping writes, compare SQLite in WAL mode with PostgreSQL. We do not currently need multi-host failover. As of 2026-09-24, explain the concurrency guarantees, operational tradeoffs, what workload evidence would change the choice, and give a conditional recommendation. Use current primary documentation; don't invent throughput numbers or write setup code. Keep the answer within 800 words, excluding sources.",
+      "required_questions": [
+        "What concurrency does SQLite WAL actually permit, and what remains serialized?",
+        "What operational/coordination requirements materially distinguish PostgreSQL for this workload?",
+        "Which workload or deployment changes would reverse the recommendation?",
+        "What is the supported conditional recommendation without invented performance measurements?"
+      ],
+      "critical_checks": ["Do not claim WAL permits simultaneous independent writers.", "Do not present an unmeasured throughput threshold as fact."]
+    },
+    {
+      "id": "literature_comparison",
+      "prompt": "Compare the original speculative-decoding approaches described by Leviathan et al. in Fast Inference from Transformers via Speculative Decoding and Chen et al. in Accelerating Large Language Model Decoding with Speculative Sampling. Explain the acceptance/correction idea, the conditions for preserving the target distribution, the actual scope of their speedup measurements, and what prevents those measurements from guaranteeing a production speedup. Read evidence beyond search snippets; don't clone code. Keep the answer within 800 words, excluding sources.",
+      "required_questions": [
+        "What mechanism permits speculative tokens to be accepted or corrected?",
+        "Under what assumptions is the target distribution preserved?",
+        "What settings and measured results do the two papers actually report?",
+        "Why do those results not establish a universal deployment speedup?"
+      ],
+      "critical_checks": ["Distinguish distributional exactness from reproducing the same random sample.", "Tie empirical speedup numbers to the paper and measured setting."]
+    },
+    {
+      "id": "disputed_claim",
+      "prompt": "Assess the claim that retrieval-augmented generation eliminates hallucinations. As of 2026-09-24, weigh primary experimental evidence for improved factuality against evidence of remaining errors. Separate finding an answer in retrieved material from generating a faithful answer, explain the scope of the evidence, and state what cannot be concluded. Do not treat a vendor's claim or a benchmark score as a universal guarantee. Keep the answer within 800 words, excluding sources.",
+      "required_questions": [
+        "What does primary evidence show RAG can improve?",
+        "What primary evidence demonstrates remaining failure modes?",
+        "How do retrieval quality and generation faithfulness differ?",
+        "What bounded conclusion is justified, and what remains uncertain?"
+      ],
+      "critical_checks": ["No universal hallucination-elimination claim without evidence.", "At least one primary evidence source must support the stated residual failure mode."]
+    },
+    {
+      "id": "followup_update",
+      "prompt": "Update these dated research notes as of 2026-09-24: 'March 2024: Redis 7.2 uses BSD licensing. Starting with 7.4, new Redis server releases are offered under RSALv2 or SSPLv1 rather than an OSI-approved open-source license. Therefore the newest Redis server cannot be selected under an OSI-approved license.' Recheck the affected claims against official licensing/release sources, distinguish historical versions from later releases, and state precisely what changed and what the older evidence still establishes. Do not turn this into a general database comparison. Keep the answer within 800 words, excluding sources.",
+      "required_questions": [
+        "Which dated licensing claims remain accurate for their named versions?",
+        "What licensing options are documented for the relevant later Redis releases?",
+        "Does the blanket conclusion about the newest server still follow?",
+        "Which conclusions change, and which historical findings remain valid?"
+      ],
+      "critical_checks": ["Do not retroactively apply a newer license choice to all historical versions.", "Support current license options with official version-specific evidence."]
+    }
+  ]
+}

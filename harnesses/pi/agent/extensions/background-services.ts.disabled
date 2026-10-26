@@ -1,0 +1,435 @@
+import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import { Type } from "@sinclair/typebox";
+import { randomUUID } from "node:crypto";
+import { openSync, closeSync } from "node:fs";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { spawn } from "node:child_process";
+
+const SERVICE_PATTERNS: RegExp[] = [
+	/\bbackground\b/i,
+	/\bdaemon\b/i,
+	/\bserver\b/i,
+	/\bservice\b/i,
+	/\bssh\b/i,
+	/\bport\s+\d+/i,
+	/\blisten(?:ing)?\b/i,
+	/\bstart\b.*\b(qemu|server|service|ssh)\b/i,
+	/\brun\b.*\b(background|server|service)\b/i,
+	/\baccessible\b/i,
+	/\bendpoint\b/i,
+	/\b0\.0\.0\.0\b/i,
+	/\bqemu\b/i,
+	/\bvm\b/i,
+	/\bkeep\s+running\b/i,
+	/\bdropped into a shell\b/i,
+];
+
+const TOOL_PARAMS = Type.Object({
+	label: Type.Optional(Type.String({ description: "Short label for log/pid directory naming." })),
+	command: Type.String({
+		description:
+			"Shell command to launch as a persistent detached service. This command should start the server, VM, worker, tunnel, or daemon.",
+	}),
+	cwd: Type.Optional(Type.String({ description: "Working directory for both the service command and readiness probe." })),
+	readyCommand: Type.Optional(Type.String({
+		description:
+			"Shell probe command that must succeed before the service is considered ready. Use the real user-facing interface, e.g. curl/ssh/pg_isready.",
+	})),
+	attempts: Type.Optional(Type.Number({ description: "Maximum readiness attempts.", default: 30, minimum: 1 })),
+	delayMs: Type.Optional(Type.Number({ description: "Delay between readiness attempts in milliseconds.", default: 2000, minimum: 100 })),
+	stablePasses: Type.Optional(Type.Number({ description: "Consecutive successful readiness probes required before declaring readiness.", default: 2, minimum: 1 })),
+	probeTimeoutMs: Type.Optional(Type.Number({ description: "Timeout per readiness probe in milliseconds.", default: 15000, minimum: 1000 })),
+});
+
+type ToolParams = {
+	label?: string;
+	command: string;
+	cwd?: string;
+	readyCommand?: string;
+	attempts?: number;
+	delayMs?: number;
+	stablePasses?: number;
+	probeTimeoutMs?: number;
+};
+
+type CapturedCommandResult = {
+	code: number | null;
+	stdout: string;
+	stderr: string;
+	timedOut: boolean;
+};
+
+function looksLikeServiceTask(prompt: string): boolean {
+	return SERVICE_PATTERNS.some((pattern) => pattern.test(prompt));
+}
+
+const LONG_RUNNING_LAUNCH_PATTERNS: RegExp[] = [
+	/\bqemu-system(?:-[\w-]+)?\b/i,
+	/\buvicorn\b/i,
+	/\bpython(?:3)?\s+-m\s+http\.server\b/i,
+	/\bpython(?:3)?\s+-m\s+simplehttpserver\b/i,
+	/\brails\s+server\b/i,
+	/\b(bin\/dev|npm\s+run\s+dev|pnpm\s+dev|yarn\s+dev)\b/i,
+	/\bsshd\b/i,
+	/\bdocker\s+compose\s+up\b/i,
+	/\bdocker-compose\s+up\b/i,
+];
+
+const FOLLOW_UP_ORCHESTRATION_PATTERNS: RegExp[] = [
+	/\bexpect\b/i,
+	/\bssh-keyscan\b/i,
+	/\btelnet\b/i,
+	/\bnc\b/i,
+	/\bfor\s+\w+\s+in\s+\$\(seq\b/i,
+	/\bwhile\b/i,
+	/\bsleep\s+\d+/i,
+	/\bcurl\b/i,
+	/\bsshpass\b/i,
+	/\budhcpc\b/i,
+];
+
+function getServiceLaunchGuardMessage(command: string): string | null {
+	if (!LONG_RUNNING_LAUNCH_PATTERNS.some((pattern) => pattern.test(command))) {
+		return null;
+	}
+
+	const lineCount = command.split(/\n|;/).map((part) => part.trim()).filter(Boolean).length;
+	const hasFollowUp = FOLLOW_UP_ORCHESTRATION_PATTERNS.some((pattern) => pattern.test(command));
+	if (!hasFollowUp && lineCount < 4) {
+		return null;
+	}
+
+	return [
+		"This bash command mixes a long-running service launch with follow-up orchestration in one shell invocation.",
+		"",
+		"Use start_background_service for the service/VM launch, then do setup/verification in separate steps.",
+		"That keeps the shell from hanging on fragile orchestration and improves readiness reliability.",
+	].join("\n");
+}
+
+function resolvePath(inputPath: string | undefined, cwd: string): string {
+	if (!inputPath || !inputPath.trim()) return cwd;
+	let value = inputPath.trim();
+	if (value.startsWith("@")) value = value.slice(1);
+	if (value === "~") return os.homedir();
+	if (value.startsWith("~/")) return path.join(os.homedir(), value.slice(2));
+	return path.isAbsolute(value) ? value : path.resolve(cwd, value);
+}
+
+function slugify(value: string | undefined): string {
+	const input = (value ?? "service").trim().toLowerCase();
+	const slug = input.replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+	return slug || "service";
+}
+
+function trimOutput(value: string, maxChars: number = 4000): string {
+	if (value.length <= maxChars) return value;
+	return `${value.slice(0, maxChars)}\n...[truncated]`;
+}
+
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+	if (signal?.aborted) return Promise.reject(new Error("Cancelled"));
+	return new Promise((resolve, reject) => {
+		const timeout = setTimeout(() => {
+			cleanup();
+			resolve();
+		}, ms);
+		const onAbort = () => {
+			cleanup();
+			reject(new Error("Cancelled"));
+		};
+		const cleanup = () => {
+			clearTimeout(timeout);
+			signal?.removeEventListener("abort", onAbort);
+		};
+		signal?.addEventListener("abort", onAbort, { once: true });
+	});
+}
+
+function isProcessAlive(pid: number): boolean {
+	try {
+		process.kill(pid, 0);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+async function readIfExists(filePath: string): Promise<string> {
+	try {
+		return await fs.readFile(filePath, "utf8");
+	} catch {
+		return "";
+	}
+}
+
+async function runShell(command: string, cwd: string, timeoutMs: number, signal?: AbortSignal): Promise<CapturedCommandResult> {
+	return await new Promise((resolve, reject) => {
+		if (signal?.aborted) {
+			reject(new Error("Cancelled"));
+			return;
+		}
+
+		const child = spawn("bash", ["-lc", command], {
+			cwd,
+			env: process.env,
+			stdio: ["ignore", "pipe", "pipe"],
+		});
+
+		let stdout = "";
+		let stderr = "";
+		let timedOut = false;
+		const maxBytes = 32 * 1024;
+
+		child.stdout.on("data", (chunk) => {
+			if (stdout.length < maxBytes) stdout += String(chunk);
+		});
+		child.stderr.on("data", (chunk) => {
+			if (stderr.length < maxBytes) stderr += String(chunk);
+		});
+
+		const timer = setTimeout(() => {
+			timedOut = true;
+			child.kill("SIGTERM");
+			setTimeout(() => child.kill("SIGKILL"), 1000).unref();
+		}, timeoutMs);
+
+		const onAbort = () => {
+			child.kill("SIGTERM");
+			setTimeout(() => child.kill("SIGKILL"), 1000).unref();
+		};
+		signal?.addEventListener("abort", onAbort, { once: true });
+
+		child.on("error", (error) => {
+			clearTimeout(timer);
+			signal?.removeEventListener("abort", onAbort);
+			reject(error);
+		});
+
+		child.on("close", (code) => {
+			clearTimeout(timer);
+			signal?.removeEventListener("abort", onAbort);
+			resolve({ code, stdout, stderr, timedOut });
+		});
+	});
+}
+
+export default function backgroundServicesExtension(pi: ExtensionAPI) {
+	pi.on("tool_call", async (event) => {
+		if (event.toolName !== "bash") return;
+		const command = typeof event.input?.command === "string" ? event.input.command : "";
+		const reason = getServiceLaunchGuardMessage(command);
+		if (!reason) return;
+		return { block: true, reason };
+	});
+
+	pi.registerTool({
+		name: "start_background_service",
+		label: "Start background service",
+		description:
+			"Launch a persistent process fully detached with pid/log files, and optionally wait for stable readiness by repeatedly running a probe command.",
+		promptSnippet:
+			"Start a server/VM/daemon/worker detached from the current shell and optionally wait for stable readiness.",
+		promptGuidelines: [
+			"Use this tool instead of ad-hoc bash detachment when you need a long-running service, VM, SSH daemon, tunnel, watcher, or worker to keep running after the current step.",
+			"When possible, provide readyCommand so the tool can verify the real user-facing interface at least twice before you declare success.",
+		],
+		parameters: TOOL_PARAMS,
+		async execute(_toolCallId, params: ToolParams, signal, onUpdate, ctx) {
+			const resolvedCwd = resolvePath(params.cwd, ctx.cwd);
+			const serviceId = `${slugify(params.label)}-${randomUUID().slice(0, 8)}`;
+			const serviceDir = path.join(os.tmpdir(), "pi-background-services", serviceId);
+			const stdoutPath = path.join(serviceDir, "stdout.log");
+			const stderrPath = path.join(serviceDir, "stderr.log");
+			const pidPath = path.join(serviceDir, "service.pid");
+			const probeLogPath = path.join(serviceDir, "probe.log");
+			const metaPath = path.join(serviceDir, "meta.json");
+
+			await fs.mkdir(serviceDir, { recursive: true });
+			const stdoutFd = openSync(stdoutPath, "a");
+			const stderrFd = openSync(stderrPath, "a");
+
+			let pid = 0;
+			try {
+				onUpdate?.({
+					content: [{ type: "text", text: `Starting background service in ${serviceDir}...` }],
+					details: { stage: "launch", serviceDir },
+				});
+
+				const child = spawn("bash", ["-lc", params.command], {
+					cwd: resolvedCwd,
+					env: process.env,
+					detached: true,
+					stdio: ["ignore", stdoutFd, stderrFd],
+				});
+
+				pid = child.pid ?? 0;
+				child.unref();
+			} finally {
+				closeSync(stdoutFd);
+				closeSync(stderrFd);
+			}
+
+			if (!pid) {
+				throw new Error("Failed to start background service: no PID returned");
+			}
+
+			await fs.writeFile(pidPath, `${pid}\n`, "utf8");
+			await fs.writeFile(
+				metaPath,
+				JSON.stringify(
+					{
+						serviceId,
+						label: params.label ?? serviceId,
+						cwd: resolvedCwd,
+						pid,
+						command: params.command,
+						readyCommand: params.readyCommand ?? null,
+						createdAt: new Date().toISOString(),
+						stdoutPath,
+						stderrPath,
+						probeLogPath,
+					},
+					null,
+					2,
+				),
+				"utf8",
+			);
+
+			if (params.readyCommand) {
+				const attempts = Math.max(1, Math.floor(params.attempts ?? 30));
+				const delayMs = Math.max(100, Math.floor(params.delayMs ?? 2000));
+				const stablePasses = Math.max(1, Math.floor(params.stablePasses ?? 2));
+				const probeTimeoutMs = Math.max(1000, Math.floor(params.probeTimeoutMs ?? 15000));
+				let consecutivePasses = 0;
+				let lastProbe = "";
+
+				for (let attempt = 1; attempt <= attempts; attempt += 1) {
+					if (!isProcessAlive(pid)) {
+						const stderr = trimOutput(await readIfExists(stderrPath));
+						throw new Error(
+							`Background service exited before becoming ready. PID=${pid}. Last stderr:\n${stderr || "<empty>"}`,
+						);
+					}
+
+					onUpdate?.({
+						content: [
+							{ type: "text", text: `Readiness probe ${attempt}/${attempts} for service ${serviceId}...` },
+						],
+						details: { stage: "probe", attempt, attempts, pid, serviceId },
+					});
+
+					const result = await runShell(params.readyCommand, resolvedCwd, probeTimeoutMs, signal);
+					lastProbe = [result.stdout.trim(), result.stderr.trim()].filter(Boolean).join("\n");
+					await fs.appendFile(
+						probeLogPath,
+						[
+							`=== attempt ${attempt} @ ${new Date().toISOString()} ===`,
+							`code: ${result.code}`,
+							`timedOut: ${result.timedOut}`,
+							result.stdout ? `stdout:\n${result.stdout}` : "stdout:<empty>",
+							result.stderr ? `stderr:\n${result.stderr}` : "stderr:<empty>",
+							"",
+						].join("\n"),
+					);
+
+					if (result.code === 0 && !result.timedOut) {
+						consecutivePasses += 1;
+						if (consecutivePasses >= stablePasses) {
+							const summary = [
+								`Background service started and verified.`,
+								`serviceId=${serviceId}`,
+								`pid=${pid}`,
+								`cwd=${resolvedCwd}`,
+								`pidFile=${pidPath}`,
+								`stdoutLog=${stdoutPath}`,
+								`stderrLog=${stderrPath}`,
+								`probeLog=${probeLogPath}`,
+							].join("\n");
+							return {
+								content: [{ type: "text", text: summary }],
+								details: {
+									serviceId,
+									pid,
+									cwd: resolvedCwd,
+									pidPath,
+									stdoutPath,
+									stderrPath,
+									probeLogPath,
+									readyCommand: params.readyCommand,
+								},
+							};
+						}
+					} else {
+						consecutivePasses = 0;
+					}
+
+					if (attempt < attempts) {
+						await sleep(delayMs, signal);
+					}
+				}
+
+				const stderr = trimOutput(await readIfExists(stderrPath));
+				throw new Error(
+					[
+						`Background service never reached stable readiness after ${attempts} attempts.`,
+						`serviceId=${serviceId}`,
+						`pid=${pid}`,
+						`Last probe output:`,
+						lastProbe || "<empty>",
+						`Last stderr:`,
+						stderr || "<empty>",
+						`Probe log: ${probeLogPath}`,
+					].join("\n"),
+				);
+			}
+
+			return {
+				content: [
+					{
+						type: "text",
+						text: [
+							`Background service started.`,
+							`serviceId=${serviceId}`,
+							`pid=${pid}`,
+							`cwd=${resolvedCwd}`,
+							`pidFile=${pidPath}`,
+							`stdoutLog=${stdoutPath}`,
+							`stderrLog=${stderrPath}`,
+						].join("\n"),
+					},
+				],
+				details: { serviceId, pid, cwd: resolvedCwd, pidPath, stdoutPath, stderrPath, probeLogPath },
+			};
+		},
+	});
+
+	pi.on("before_agent_start", async (event) => {
+		if (!looksLikeServiceTask(event.prompt)) {
+			return;
+		}
+
+		return {
+			systemPrompt: `${event.systemPrompt}
+
+## Long-running service launch protocol
+When a task requires starting a persistent process (server, VM, SSH daemon, tunnel, worker, watcher, or anything that must keep running after you finish), strongly prefer the start_background_service tool over ad-hoc bash detachment when practical.
+
+Use this protocol unless the user explicitly asks for a different approach:
+- Prefer a fully detached launch. Do not leave the long-running process attached to the active shell or tool invocation.
+- Redirect stdin from /dev/null.
+- Redirect stdout and stderr to log files.
+- Save the PID to a pidfile.
+- If available, prefer setsid or nohup so the process is not tied to the current shell.
+- Do not leave behind tail -f, watch, or foreground log-following processes.
+- After launch, verify real readiness with the actual interface the user will use: HTTP request, SSH command, socket probe, etc.
+- Require stability, not one lucky success: perform the readiness probe at least twice with a short delay before declaring success.
+- If a probe fails, inspect logs and retry rather than immediately claiming success.
+- Once readiness is confirmed, stop probing and finish the task promptly. Do not keep the bash tool open waiting on the background process.
+
+If the task is to make a service reachable on a port, optimize for a robust detached launch and stable readiness verification before you finish.`,
+		};
+	});
+}

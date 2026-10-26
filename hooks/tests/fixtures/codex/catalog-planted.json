@@ -1,0 +1,13 @@
+{
+  "_comment": "Planted negative (#991): the top-priority listed model is a slug nobody has seen, and the only known slug points at it through `upgrade`. A resolver that keys on a known name picks the wrong model here.",
+  "fetched_at": "2026-09-04T23:00:00.000000000Z",
+  "client_version": "0.147.0",
+  "models": [
+    { "slug": "gpt-zz-9-newname", "display_name": "GPT-ZZ-9", "priority": 4, "visibility": "list", "upgrade": null, "default_reasoning_level": "medium", "supported_in_api": true,
+      "supported_reasoning_levels": [{ "effort": "low" }, { "effort": "medium" }, { "effort": "high" }] },
+    { "slug": "gpt-5.6-luna", "display_name": "GPT-5.6-Luna", "priority": 8, "visibility": "list", "upgrade": { "model": "gpt-zz-9-newname" }, "default_reasoning_level": "medium", "supported_in_api": true,
+      "supported_reasoning_levels": [{ "effort": "low" }, { "effort": "medium" }, { "effort": "high" }, { "effort": "xhigh" }, { "effort": "max" }] },
+    { "slug": "gpt-hidden-top", "display_name": "Hidden Top", "priority": 1, "visibility": "hide", "upgrade": null, "default_reasoning_level": "medium", "supported_in_api": true,
+      "supported_reasoning_levels": [{ "effort": "low" }, { "effort": "medium" }] }
+  ]
+}

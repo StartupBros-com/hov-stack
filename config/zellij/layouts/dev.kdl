@@ -1,0 +1,12 @@
+// Dev layout - main terminal + secondary pane for logs/servers
+layout {
+    pane size=1 borderless=true {
+        plugin location="compact-bar"
+    }
+    pane split_direction="vertical" {
+        pane size="70%"
+        pane size="30%" {
+            pane name="logs"
+        }
+    }
+}

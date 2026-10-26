@@ -1,0 +1,17 @@
+# TEMPLATE: Pager that posts a Discord alert when a harness unit with OnFailure= fails.
+# Replace before enabling:
+#   14: needs DISCORD_WEBHOOK_URL (in this unit's environment or in ~/.secrets) for scripts/discord-notify.sh; without it the alert exits 3 and shows failed.
+# See systemd/README.md.
+[Unit]
+Description=Page the operator when a harness unit fails (%i)
+Documentation=https://github.com/StartupBros-com/hov-stack
+
+[Service]
+Type=oneshot
+# The alert and notifier use root-owned system helpers only. Never put a
+# user-writable directory before bash/systemctl/journalctl/jq/curl here.
+Environment=PATH=/usr/bin:/bin
+ExecStart=%h/.claude/scripts/unit-failure-alert.sh %i
+# The alerter is the last line of defence: if it hangs, the failure it was
+# meant to report stays invisible. Bound it well under any plausible retry.
+TimeoutStartSec=60

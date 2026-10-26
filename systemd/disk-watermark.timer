@@ -1,0 +1,20 @@
+# TEMPLATE: Daily 06:30 trigger for disk-watermark.service.
+# Replace before enabling:
+#   nothing; the defaults are generic.
+# See systemd/README.md.
+[Unit]
+Description=Daily disk-fill watermark check
+
+[Timer]
+# Daily, randomized: this watches the one resource every other hygiene timer
+# (wt-sweep, reclaim-sweep, docker-hygiene, pkg-cache-prune) assumes plenty of
+# -- the disk itself. The 2026-08-21 emergency-reset incident happened because
+# nothing did. Daily is frequent enough to catch fill trending toward the
+# floor before it becomes an emergency, without adding meaningful I/O load
+# (the check itself is two `df` calls).
+OnCalendar=*-*-* 06:30:00
+Persistent=true
+RandomizedDelaySec=10m
+
+[Install]
+WantedBy=timers.target

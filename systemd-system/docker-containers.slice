@@ -1,0 +1,28 @@
+# TEMPLATE: System slice that bounds memory for every Docker container (needs "cgroup-parent" in /etc/docker/daemon.json).
+# Replace before enabling:
+#   line 27: MemoryHigh=12G, sized for the author's machine; set it to a share of your RAM.
+#   line 28: MemorySwapMax=6G, sized for the author's machine; set it to a share of your swap.
+# See systemd/README.md.
+
+# Memory bound for every Docker container (2026-09-16).
+# Why: per-worktree Supabase stacks (12 containers each) outlive their
+# worktrees — 31 orphaned stacks / 87 containers were holding ~10 GB with no
+# checkout behind them. Cleanup scripts need heuristics to act; this bound
+# needs none. Containers land here via "cgroup-parent" in
+# /etc/docker/daemon.json (existing containers stay in system.slice until
+# recreated — the fleet migrates as stacks are restarted). systemd places
+# this unit under docker.slice because of the dash in its name; the bound
+# applies to everything below it.
+# MemoryHigh throttles and reclaims above the line; reclaim pushes anonymous
+# pages to swap, which MemoryHigh does not count, so MemorySwapMax caps that
+# outlet too — without it the "bound" only caps RAM while containers keep
+# growing in swap (7 GB observed). No MemoryMax: never OOM-kill a database,
+# and unless-stopped would just restart it. Under the combined cap a runaway
+# stack is throttled, not killed.
+[Unit]
+Description=Docker containers (memory-bounded)
+Before=slices.target
+
+[Slice]
+MemoryHigh=12G
+MemorySwapMax=6G

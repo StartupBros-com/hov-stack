@@ -1,0 +1,12 @@
+# Narrow exceptions for reproducible project caches. Keep these as exact
+# commands: allowing core.filesystem:rm-rf-general would be far too broad.
+
+[[allow]]
+exact_command = "rm -rf node_modules/.cache"
+reason = "Disposable dependency-tool cache cleanup"
+added_at = "2026-07-10T00:00:00Z"
+
+[[allow]]
+exact_command = "rm -rf .next/cache"
+reason = "Disposable Next.js cache cleanup"
+added_at = "2026-07-10T00:00:00Z"

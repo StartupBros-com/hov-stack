@@ -1,0 +1,74 @@
+[
+  {
+    "case_id": "positive__software_choice",
+    "kind": "obvious",
+    "target_id": "deep-research",
+    "prompt": "Compare pgvector and Qdrant for filtered semantic search. Investigate current capabilities, operational tradeoffs, and limits using primary sources, then recommend when each is the better choice rather than giving me installation steps."
+  },
+  {
+    "case_id": "positive__literature_comparison",
+    "kind": "obvious",
+    "target_id": "deep-research",
+    "prompt": "Compare the main approaches to speculative decoding across the published literature. Explain their assumptions, exactness guarantees, measured speedups, and conflicting findings, with evidence from the papers rather than a bibliography alone."
+  },
+  {
+    "case_id": "positive__disputed_claim",
+    "kind": "obvious",
+    "target_id": "deep-research",
+    "prompt": "I keep seeing the claim that retrieval-augmented generation eliminates hallucinations. Investigate whether the evidence supports that claim, distinguish experimental settings, and explain the strongest counterevidence and remaining uncertainty."
+  },
+  {
+    "case_id": "positive__policy_comparison",
+    "kind": "obvious",
+    "target_id": "deep-research",
+    "prompt": "Compare the obligations the EU AI Act imposes on a model provider and on a startup deploying a third-party model. Use official sources, distinguish the applicable dates and exceptions, and explain which facts change the answer."
+  },
+  {
+    "case_id": "positive__decision_paraphrase",
+    "kind": "paraphrase",
+    "target_id": "deep-research",
+    "prompt": "Help me decide whether our next product should offer a hosted search service or embedded search. Look beyond vendor marketing, investigate failure modes and the evidence for the tradeoffs, and tell me what findings would reverse your recommendation."
+  },
+  {
+    "case_id": "positive__followup",
+    "kind": "paraphrase",
+    "target_id": "deep-research",
+    "prompt": "Our March 2024 comparison said Redis's newest server releases were not open source. Revisit that conclusion as of September 2026, reconcile what changed in the licenses and releases, and update only the conclusions affected by new evidence."
+  },
+  {
+    "case_id": "negative__single_fact",
+    "kind": "near_miss",
+    "target_id": null,
+    "prompt": "What is the capital of Portugal? Just the city name."
+  },
+  {
+    "case_id": "negative__single_page",
+    "kind": "near_miss",
+    "target_id": null,
+    "prompt": "Read https://www.sqlite.org/wal.html and summarize that page in five bullets. Do not investigate other sources."
+  },
+  {
+    "case_id": "negative__paper_download",
+    "kind": "near_miss",
+    "target_id": null,
+    "prompt": "Download the PDF of Attention Is All You Need, arXiv 1706.03762, without cloning its code. No analysis or literature search."
+  },
+  {
+    "case_id": "negative__routine_docs",
+    "kind": "near_miss",
+    "target_id": null,
+    "prompt": "Look up Python pathlib.Path.read_text's current arguments and show a minimal example that specifies UTF-8."
+  },
+  {
+    "case_id": "negative__code_review",
+    "kind": "near_miss",
+    "target_id": null,
+    "prompt": "Review my current git diff for bugs and regressions. Report concrete findings; don't change files or survey external alternatives."
+  },
+  {
+    "case_id": "negative__named_paper_lookup",
+    "kind": "near_miss",
+    "target_id": null,
+    "prompt": "Find the canonical paper page and author list for the 2017 paper Attention Is All You Need. I only need that record, not related papers or synthesis."
+  }
+]

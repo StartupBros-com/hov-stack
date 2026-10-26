@@ -1,0 +1,34 @@
+[Unit]
+Description=Git worktree fleet sweep (wt-sweep.sh; fleet-wide, plan-only as shipped)
+Documentation=https://github.com/StartupBros-com/hov-stack
+
+OnFailure=harness-unit-failure-alert@%n.service
+
+[Service]
+Type=oneshot
+# 45m, not 15m: the first fleet-wide auto-apply cycle (2026-08-21, ~190
+# worktrees, ~100 removals with WIP-preserve commits and git status over
+# large trees) was SIGTERMed at 15m mid-fleet — killed between a preserve
+# and its removal, the safe direction by design, but the cycle never
+# finished. Steady-state weekly runs are far lighter; 45m covers the
+# post-backlog bulk case without masking a genuine hang forever.
+TimeoutStartSec=45m
+# Stage 2 (2026-08-21): dropped the single-private-repository ONLY scope
+# after the first live stage-1 cycle (2026-08-20) ran clean — 11 worktrees
+# removed, all 11 WIP-preserved as local branches first, 0 failures, live
+# worktrees correctly skipped. The stage-1 promotion review had verified
+# 16/16 sampled clean-remove candidates zero-loss fleet-wide (every HEAD
+# reachable from a remote ref) and all 24 checkable live-session worktrees
+# skipped. PUSH stays unset (script default 0, preserved branches stay
+# local) for several more cycles — separate decision. Still watch the first
+# dropped:N>0 (bundle then branch -D; code-verified zero-loss, never fired
+# under this timer), and remember wt-sweep has no PR/claim awareness: a
+# claimed wt-new placeholder with an open draft PR reads like junk.
+# The 2026-08-06 incident's liveness check lives in the shared
+# lib/proc_liveness.py (4 signals, fail-closed), in the script,
+# not in this unit.
+# Shipped plan-only. To delete: DRY_RUN=0 (see README).
+Environment=DRY_RUN=1
+ExecStart=%h/.claude/scripts/wt-sweep.sh
+Nice=10
+IOSchedulingClass=idle

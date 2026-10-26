@@ -1,0 +1,99 @@
+# Commands that MUST stay allowed. A miss here means the upgrade would start
+# prompting or denying routine agentic work — the friction this harness exists
+# to avoid — so the candidate is rejected and the old binary keeps running.
+#
+# Blank lines and #-comments ignored. Nothing here is executed — every line is
+# passed to `dcg test`, which is a dry run.
+
+# --- routine compose (the everyday dev loop) --------------------------------
+# Note `down` WITHOUT -v belongs here: stopping containers is not destructive,
+# and a block pattern that catches it would be a false positive.
+docker compose down
+docker compose -f a.yml down
+docker compose down --remove-orphans
+docker compose up -d
+docker compose up -d --build
+docker compose -f a.yml up -d
+docker compose build --no-cache
+docker compose logs -f
+docker compose ps
+docker compose restart
+docker compose exec db psql -U wp -c "SELECT 1"
+docker compose run --rm app sh
+docker compose config
+docker compose pull
+docker compose down && docker compose up -d
+# `-v\b` must not match inside `--verbose`
+docker compose up -d --verbose
+
+# --- routine agentic work ----------------------------------------------------
+git push origin feature-branch
+git status
+chmod +x ./scripts/deploy.sh
+chmod 600 /home/user/.config/creds.json
+docker exec acme-php php -v
+docker exec acme-wpcli wp plugin list
+docker exec acme-db psql -U wp -c "SELECT setval('x_seq', 42)"
+docker ps -a
+docker logs acme-nginx --tail 50
+pnpm install
+
+# --- false positives fixed upstream; guard against regression ---------------
+# An arrow inside a quoted replacement used to match redirect-truncate
+# (upstream #221). Blocked on 0.6.5, allowed from 0.9.2.
+readlink /home/user/.claude/hooks | sed 's/^/  hooks -> /'
+printf '%s -> %s\n' a b
+# A destructive-sounding word in a commit message is data, not a command
+# (upstream #257).
+git commit -m "restore compose defaults after the audit"
+git commit -m "reset the counter to zero"
+
+# --- agent shell idioms: the SAFE form of each recurring block ---------------
+# Added 2026-08-06 after a session hit four dcg blocks and the operator's first
+# read was "dcg is over-blocking, narrow it". Re-measured with `dcg test`: dcg
+# was right four times out of four. Every block was a true positive on a command
+# that genuinely could not be proven safe, and each has a safe form one edit
+# away. Those safe forms had no contract coverage — this corpus was
+# compose/docker/git-porcelain only — so a future release could start blocking
+# them and nothing would notice.
+#
+# Pinned here, NOT in expect-blocked.txt. Pinning the blocked counterparts would
+# reject a future upstream release that legitimately learns to prove them safe,
+# which is a fix we want rather than a regression we guard against.
+#
+# Nothing was allowlisted and `[overrides] allow` stays empty; see the comment
+# block in config.toml for why an allow entry cannot be made safe.
+
+# `git -C $VAR` (UNQUOTED) is blocked: the repo path is shell-expanded, so the
+# alias/args cannot be resolved statically. Quoting it is the whole fix — one
+# character, no cd, no wrapper.
+git -C "$WD" status --porcelain
+git -C "$WD" rev-parse --abbrev-ref HEAD
+git -C "$WD" merge-base --is-ancestor "$SHA" HEAD
+
+# A variable used AS THE EXECUTABLE with inline code — `"$PY" -c '...'` — is
+# blocked: the interpreter is dynamically assembled and the code never reaches
+# disk for scanning. Two safe forms, both common: name the interpreter
+# literally, or keep the resolved variable and hand it a script FILE.
+python3 -c 'import json,sys; print(json.dumps({"ok": True}))'
+"$PY" "$SKILL_DIR/scripts/review-scope.py" --base abc --docs-root docs
+NODE="$(for c in node nodejs; do command -v "$c" >/dev/null 2>&1 && "$c" -e '' >/dev/null 2>&1 && { echo "$c"; break; }; done)"; "$NODE" "$SKILL_DIR/scripts/context.mjs"
+
+# Truncating redirect to a shell-expanded or home path is blocked because the
+# target cannot be proven before O_TRUNC opens it. Three safe forms: a literal
+# /tmp path, append instead of truncate, or let a literal interpreter do the
+# write (which also keeps the path visible to the scanner).
+cat > /tmp/scratch/out.json
+echo line >> /home/user/.claude/jobs/log.txt
+gh issue view 172 --json body --jq .body | python3 -c "import sys,pathlib; pathlib.Path(sys.argv[1]).write_text(sys.stdin.read())" /tmp/scratch/issue.md
+
+# A variable target passes when a literal /tmp assignment comes before any
+# && or || (dcg 0.15.2). harness/worktree-command-shapes.md item 5
+# steers agents to exactly these forms, so a release that stops resolving them
+# must not be promoted silently.
+S=/tmp/scratch; echo hi > "$S/out"
+S=/tmp/d; mkdir -p "$S" && echo hi > "$S/out" 2>&1
+mkdir -p /tmp/d; S=/tmp/d; echo hi > "$S/out"
+S=/tmp/d; cd /home/user/dotfiles && echo hi > "$S/out"
+S=/tmp/d; for f in a b; do echo hi >> "$S/$f.out"; done
+

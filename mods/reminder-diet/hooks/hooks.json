@@ -1,0 +1,4 @@
+{
+  "description": "reminder-diet: leaves out a task reminder identical to the last one the same loop was sent",
+  "modules": ["./register.ts"]
+}

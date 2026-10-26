@@ -1,0 +1,2 @@
+- Identify the full scope of affected components — not just what's mentioned.
+- Diagnose root causes, not symptoms. No band-aid patches — grep every caller before editing; one guard in the shared function beats one per call site.

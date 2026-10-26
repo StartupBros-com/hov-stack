@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Resolve the sibling module in a worktree or through the installed symlink.
+set -euo pipefail
+exec python3 "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/supabase_api.py" "$@"
