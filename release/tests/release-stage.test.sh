@@ -45,7 +45,24 @@ if [ "$1" = release ]; then
     view)
       [ -f "$FIX/release.json" ] || exit 1
       if [ "${6:-}" = --jq ]; then jq -r "$7" "$FIX/release.json"; else cat "$FIX/release.json"; fi ;;
-    create) printf '{"id":900,"isDraft":true}\n' >"$FIX/release.json" ;;
+    create)
+      # Positional files follow the tag; DROP_ASSET plays an upload that never landed.
+      # CREATE_FAIL=before fails before any release exists; CREATE_FAIL=after keeps the
+      # partial draft and then fails, as gh does for an explicit --draft.
+      [ "${CREATE_FAIL:-}" != before ] || exit 1
+      shift 3; names=(); pre=false
+      while [ "$#" -gt 0 ] && [ "${1#--}" = "$1" ]; do
+        n="$(basename "$1")"; [ "$n" = "${DROP_ASSET:-}" ] || names+=("$n"); shift
+      done
+      for a in "$@"; do [ "$a" != --prerelease ] || pre=true; done
+      [ "${IGNORE_PRERELEASE:-0}" != 1 ] || pre=false
+      jq -nc --argjson pre "$pre" --args '{id:900,isDraft:true,isPrerelease:$pre,assets:[$ARGS.positional[]|{name:.}]}' "${names[@]}" >"$FIX/release.json"
+      [ "${CREATE_FAIL:-}" != after ] || exit 1 ;;
+    edit)
+      [ "${EDIT_FAIL:-0}" != 1 ] || exit 1
+      [ "$4" = --prerelease=false ] || exit 94
+      [ "${EDIT_NOOP:-0}" = 1 ] || { jq -c '.isPrerelease = false' "$FIX/release.json" >"$FIX/edit.json"; mv "$FIX/edit.json" "$FIX/release.json"; } ;;
+    delete) [ "${DELETE_FAIL:-0}" != 1 ] || exit 1; rm -f "$FIX/release.json" ;;
     *) exit 90 ;;
   esac
   exit 0
@@ -141,7 +158,8 @@ printf '{"jobs":[{"name":"a","conclusion":"success"}]}\n' >"$FIX/jobs-10"
 : >"$CALLS"
 bash "$SCRIPT" >"$TMP/out" 2>"$TMP/err" || { cat "$TMP/err"; die 'valid stage failed'; }
 grep -Fq '::notice::staged draft a--v1.0.0 (id 900)' "$TMP/out" || die 'draft notice/id'
-grep -Fq 'release create a--v1.0.0 --draft --verify-tag --title a v1.0.0 --notes-file plugins/a/docs/release-notes/v1.0.0.md' "$CALLS" || die 'draft create args'
+grep -Fxq 'release create a--v1.0.0 --draft --verify-tag --title a v1.0.0 --notes-file plugins/a/docs/release-notes/v1.0.0.md' "$CALLS" || die 'draft create args'
+if grep -q '^release edit' "$CALLS"; then die 'hookless draft was edited'; fi
 pass 'green exact plugin job stages a draft with authored notes'
 : >"$CALLS"
 bash "$SCRIPT" >"$TMP/out" 2>"$TMP/err" || die 'rerun failed'
@@ -152,5 +170,111 @@ printf '{"id":900,"isDraft":false}\n' >"$FIX/release.json"
 bash "$SCRIPT" >"$TMP/out" 2>"$TMP/err" || die 'published release rerun failed'
 grep -Fq 'draft false' "$TMP/out" || die 'published state'
 pass 'existing published release is left untouched'
+printf '{"id":900,"isDraft":true,"isPrerelease":true}\n' >"$FIX/release.json"
+: >"$CALLS"
+bash "$SCRIPT" >"$TMP/out" 2>"$TMP/err" || die 'hookless prerelease draft rerun failed'
+grep -Fq 'already exists (id 900, draft true); nothing to stage' "$TMP/out" || die 'hookless prerelease notice'
+if grep -Eq '^release (create|delete|edit)' "$CALLS"; then die 'hookless prerelease draft was rewritten'; fi
+pass 'a plugin without an asset hook never deletes a prerelease draft it did not stage'
+
+# Asset hook: plugins/<name>/release/stage-assets.sh builds files the draft must carry.
+git switch -q main
+plugin b; notes b 1.0.0
+mkdir -p plugins/b/release
+cat >plugins/b/release/stage-assets.sh <<'HOOK'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s %s %s\n' "$RELEASE_TAG" "$RELEASE_VERSION" "$(ls -A "$1" | wc -l)" >>"$HOOK_LOG"
+case "${HOOK_MODE:-}" in fail) echo 'packaging broke' >&2; exit 3 ;; empty) exit 0 ;; esac
+printf 'runtime\n' >"$1/b-runtime-$RELEASE_VERSION.tar.gz"
+printf 'digest\n' >"$1/b-runtime-$RELEASE_VERSION.tar.gz.sha256"
+HOOK
+chmod +x plugins/b/release/stage-assets.sh
+commit; git push -q origin main
+git tag b--v1.0.0; git switch -q --detach b--v1.0.0
+SHA="$(git rev-parse HEAD)"; export RELEASE_TAG=b--v1.0.0 HOOK_LOG="$TMP/hook.log"
+rm -f "$FIX/release.json"
+printf '{"workflow_runs":[{"id":11,"head_sha":"%s","head_branch":"main","event":"push","status":"completed"}]}\n' "$SHA" >"$FIX/plugins-ci.yml"
+printf '{"jobs":[{"name":"b","conclusion":"success"}]}\n' >"$FIX/jobs-11"
+chmod -x plugins/b/release/stage-assets.sh
+: >"$CALLS"
+reject 'asset hook plugins/b/release/stage-assets.sh is not executable' bash "$SCRIPT"
+[ ! -s "$CALLS" ] || die 'non-executable hook called gh'
+pass 'a non-executable hook is refused, never skipped'
+chmod +x plugins/b/release/stage-assets.sh
+HOOK_MODE=fail reject 'asset hook plugins/b/release/stage-assets.sh failed' bash "$SCRIPT"
+grep -Fq 'packaging broke' "$TMP/err" || die 'hook stderr not shown'
+[ ! -s "$CALLS" ] || die 'failed hook called gh'
+pass 'a failing hook stops the stage before gh'
+HOOK_MODE=empty reject 'asset hook plugins/b/release/stage-assets.sh produced no files' bash "$SCRIPT"
+[ ! -s "$CALLS" ] || die 'empty hook called gh'
+pass 'a hook that builds nothing stops the stage before gh'
+: >"$HOOK_LOG"
+bash "$SCRIPT" >"$TMP/out" 2>"$TMP/err" || { cat "$TMP/err"; die 'hooked stage failed'; }
+[ "$(cat "$HOOK_LOG")" = 'b--v1.0.0 1.0.0 0' ] || die "hook env or outdir: $(cat "$HOOK_LOG")"
+grep -Eq '^release create b--v1\.0\.0 [^ ]+/b-runtime-1\.0\.0\.tar\.gz [^ ]+/b-runtime-1\.0\.0\.tar\.gz\.sha256 --draft --prerelease --verify-tag --title b v1\.0\.0 --notes-file plugins/b/docs/release-notes/v1\.0\.0\.md$' "$CALLS" \
+  || { cat "$CALLS"; die 'hooked create args'; }
+grep -Fq '::notice::staged draft b--v1.0.0 (id 900)' "$TMP/out" || die 'hooked draft notice'
+if grep -q '^release delete' "$CALLS"; then die 'complete draft was deleted'; fi
+[ "$(jq -r '[.assets[].name] | join(",")' "$FIX/release.json")" = 'b-runtime-1.0.0.tar.gz,b-runtime-1.0.0.tar.gz.sha256' ] || die 'assets not on the draft'
+pass 'a hook runs with the tag and an empty outdir, and every file it builds rides the draft'
+# The flag clears only after the asset check, so the draft turns eligible only when complete.
+[ "$(grep -nE '^release (view b--v1\.0\.0 --json assets|edit)' "$CALLS" | cut -d: -f2- | paste -sd '|' -)" = 'release view b--v1.0.0 --json assets --jq .assets[].name|release edit b--v1.0.0 --prerelease=false' ] \
+  || { cat "$CALLS"; die 'flag cleared before the asset check'; }
+[ "$(jq -r '[.isDraft, .isPrerelease] | join(",")' "$FIX/release.json")" = 'true,false' ] || die 'staged draft is not an eligible draft'
+pass 'a hooked draft stays a prerelease until its assets check out, then becomes an eligible draft'
+: >"$CALLS"
+bash "$SCRIPT" >"$TMP/out" 2>"$TMP/err" || { cat "$TMP/err"; die 'hooked rerun failed'; }
+grep -Fq 'already exists (id 900, draft true); nothing to stage' "$TMP/out" || die 'hooked idempotent notice'
+if grep -Eq '^api |^release (create|delete|edit)' "$CALLS"; then die 'hooked rerun wrote or consulted the gate'; fi
+pass 'a rerun over a draft with every asset stages nothing'
+printf '{"id":900,"isDraft":true,"isPrerelease":false,"assets":[{"name":"b-runtime-1.0.0.tar.gz"}]}\n' >"$FIX/release.json"
+: >"$CALLS"
+reject 'release b--v1.0.0 already exists (id 900, draft true) but lacks b-runtime-1.0.0.tar.gz.sha256' bash "$SCRIPT"
+grep -Fq 'it may already be pinned, so it is left alone' "$TMP/err" || die 'eligible short draft reason'
+if grep -Eq '^release (create|delete|edit)' "$CALLS"; then die 'incomplete existing release was rewritten'; fi
+pass 'an eligible release missing a hook asset fails, names it, and is left alone'
+rm -f "$FIX/release.json"
+: >"$CALLS"
+DROP_ASSET=b-runtime-1.0.0.tar.gz.sha256 reject 'draft b--v1.0.0 lacked b-runtime-1.0.0.tar.gz.sha256 after upload and was deleted' bash "$SCRIPT"
+grep -Fxq 'release delete b--v1.0.0 --yes' "$CALLS" || die 'short draft not deleted'
+if grep -q '^release edit' "$CALLS"; then die 'short draft was made eligible'; fi
+[ ! -f "$FIX/release.json" ] || die 'short draft still exists'
+pass 'a draft that comes back short of an asset is deleted while still ineligible, keeping the tag'
+: >"$CALLS"
+CREATE_FAIL=after DROP_ASSET=b-runtime-1.0.0.tar.gz.sha256 reject 'could not stage draft b--v1.0.0; the partial staging draft was deleted' bash "$SCRIPT"
+grep -Fxq 'release delete b--v1.0.0 --yes' "$CALLS" || die 'partial draft from a failed create not deleted'
+if grep -q '^release edit' "$CALLS"; then die 'failed create was made eligible'; fi
+[ ! -f "$FIX/release.json" ] || die 'partial draft from a failed create still exists'
+pass 'a create that keeps a partial draft and then fails deletes that draft before exiting'
+: >"$CALLS"
+CREATE_FAIL=before reject 'could not stage draft b--v1.0.0' bash "$SCRIPT"
+if grep -q '^release delete' "$CALLS"; then die 'a create that made nothing still deleted'; fi
+pass 'a create that made no release fails without deleting anything'
+: >"$CALLS"
+IGNORE_PRERELEASE=1 DROP_ASSET=b-runtime-1.0.0.tar.gz.sha256 reject 'staging draft b--v1.0.0 lacks b-runtime-1.0.0.tar.gz.sha256 and could not be deleted' bash "$SCRIPT"
+if grep -q '^release delete' "$CALLS"; then die 'an eligible draft was deleted'; fi
+[ -f "$FIX/release.json" ] || die 'eligible draft vanished'
+pass 'cleanup refuses to delete a draft that is not still a prerelease'
+rm -f "$FIX/release.json"
+: >"$CALLS"
+EDIT_FAIL=1 reject 'staging draft b--v1.0.0 has every asset but its prerelease flag could not be cleared' bash "$SCRIPT"
+[ "$(jq -r .isPrerelease "$FIX/release.json")" = true ] || die 'failed edit left an eligible draft'
+pass 'a flag that will not clear leaves the draft ineligible and fails'
+: >"$CALLS"
+bash "$SCRIPT" >"$TMP/out" 2>"$TMP/err" || { cat "$TMP/err"; die 'rerun over an unfinished staging draft failed'; }
+grep -Fq '::notice::deleted unfinished staging draft b--v1.0.0 (id 900); staging it again' "$TMP/out" || die 'unfinished draft notice'
+[ "$(grep -E '^release (delete|create|edit)' "$CALLS" | cut -d' ' -f1-2 | paste -sd ',' -)" = 'release delete,release create,release edit' ] || { cat "$CALLS"; die 'unfinished draft rerun order'; }
+[ "$(jq -r '[.isDraft, .isPrerelease] | join(",")' "$FIX/release.json")" = 'true,false' ] || die 'restaged draft is not eligible'
+pass 'a rerun over an unfinished staging draft deletes it and stages a complete one'
+printf '{"id":900,"isDraft":true,"isPrerelease":true,"assets":[]}\n' >"$FIX/release.json"
+: >"$CALLS"
+DELETE_FAIL=1 reject 'release b--v1.0.0 is an unfinished staging draft (id 900) and could not be deleted' bash "$SCRIPT"
+if grep -Eq '^api |^release create' "$CALLS"; then die 'undeletable unfinished draft still staged'; fi
+pass 'an unfinished staging draft that cannot be deleted stops the rerun before the gate'
+rm -f "$FIX/release.json"
+: >"$CALLS"
+EDIT_NOOP=1 reject 'staging draft b--v1.0.0 still reads prerelease true after clearing the flag' bash "$SCRIPT"
+pass 'a flag clear that does not take is caught, not reported as staged'
 
 printf '%s release-stage checks passed\n' "$PASS"
