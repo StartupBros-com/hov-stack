@@ -45,7 +45,14 @@ if [ "$1" = release ]; then
     view)
       [ -f "$FIX/release.json" ] || exit 1
       if [ "${6:-}" = --jq ]; then jq -r "$7" "$FIX/release.json"; else cat "$FIX/release.json"; fi ;;
-    create) printf '{"id":900,"isDraft":true}\n' >"$FIX/release.json" ;;
+    create)
+      # Positional files follow the tag; DROP_ASSET plays an upload that never landed.
+      shift 3; names=()
+      while [ "$#" -gt 0 ] && [ "${1#--}" = "$1" ]; do
+        n="$(basename "$1")"; [ "$n" = "${DROP_ASSET:-}" ] || names+=("$n"); shift
+      done
+      jq -nc --args '{id:900,isDraft:true,assets:[$ARGS.positional[]|{name:.}]}' "${names[@]}" >"$FIX/release.json" ;;
+    delete) rm -f "$FIX/release.json" ;;
     *) exit 90 ;;
   esac
   exit 0
@@ -152,5 +159,63 @@ printf '{"id":900,"isDraft":false}\n' >"$FIX/release.json"
 bash "$SCRIPT" >"$TMP/out" 2>"$TMP/err" || die 'published release rerun failed'
 grep -Fq 'draft false' "$TMP/out" || die 'published state'
 pass 'existing published release is left untouched'
+
+# Asset hook: plugins/<name>/release/stage-assets.sh builds files the draft must carry.
+git switch -q main
+plugin b; notes b 1.0.0
+mkdir -p plugins/b/release
+cat >plugins/b/release/stage-assets.sh <<'HOOK'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s %s %s\n' "$RELEASE_TAG" "$RELEASE_VERSION" "$(ls -A "$1" | wc -l)" >>"$HOOK_LOG"
+case "${HOOK_MODE:-}" in fail) echo 'packaging broke' >&2; exit 3 ;; empty) exit 0 ;; esac
+printf 'runtime\n' >"$1/b-runtime-$RELEASE_VERSION.tar.gz"
+printf 'digest\n' >"$1/b-runtime-$RELEASE_VERSION.tar.gz.sha256"
+HOOK
+chmod +x plugins/b/release/stage-assets.sh
+commit; git push -q origin main
+git tag b--v1.0.0; git switch -q --detach b--v1.0.0
+SHA="$(git rev-parse HEAD)"; export RELEASE_TAG=b--v1.0.0 HOOK_LOG="$TMP/hook.log"
+rm -f "$FIX/release.json"
+printf '{"workflow_runs":[{"id":11,"head_sha":"%s","head_branch":"main","event":"push","status":"completed"}]}\n' "$SHA" >"$FIX/plugins-ci.yml"
+printf '{"jobs":[{"name":"b","conclusion":"success"}]}\n' >"$FIX/jobs-11"
+chmod -x plugins/b/release/stage-assets.sh
+: >"$CALLS"
+reject 'asset hook plugins/b/release/stage-assets.sh is not executable' bash "$SCRIPT"
+[ ! -s "$CALLS" ] || die 'non-executable hook called gh'
+pass 'a non-executable hook is refused, never skipped'
+chmod +x plugins/b/release/stage-assets.sh
+HOOK_MODE=fail reject 'asset hook plugins/b/release/stage-assets.sh failed' bash "$SCRIPT"
+grep -Fq 'packaging broke' "$TMP/err" || die 'hook stderr not shown'
+[ ! -s "$CALLS" ] || die 'failed hook called gh'
+pass 'a failing hook stops the stage before gh'
+HOOK_MODE=empty reject 'asset hook plugins/b/release/stage-assets.sh produced no files' bash "$SCRIPT"
+[ ! -s "$CALLS" ] || die 'empty hook called gh'
+pass 'a hook that builds nothing stops the stage before gh'
+: >"$HOOK_LOG"
+bash "$SCRIPT" >"$TMP/out" 2>"$TMP/err" || { cat "$TMP/err"; die 'hooked stage failed'; }
+[ "$(cat "$HOOK_LOG")" = 'b--v1.0.0 1.0.0 0' ] || die "hook env or outdir: $(cat "$HOOK_LOG")"
+grep -Eq '^release create b--v1\.0\.0 [^ ]+/b-runtime-1\.0\.0\.tar\.gz [^ ]+/b-runtime-1\.0\.0\.tar\.gz\.sha256 --draft --verify-tag --title b v1\.0\.0 --notes-file plugins/b/docs/release-notes/v1\.0\.0\.md$' "$CALLS" \
+  || { cat "$CALLS"; die 'hooked create args'; }
+grep -Fq '::notice::staged draft b--v1.0.0 (id 900)' "$TMP/out" || die 'hooked draft notice'
+if grep -q '^release delete' "$CALLS"; then die 'complete draft was deleted'; fi
+[ "$(jq -r '[.assets[].name] | join(",")' "$FIX/release.json")" = 'b-runtime-1.0.0.tar.gz,b-runtime-1.0.0.tar.gz.sha256' ] || die 'assets not on the draft'
+pass 'a hook runs with the tag and an empty outdir, and every file it builds rides the draft'
+: >"$CALLS"
+bash "$SCRIPT" >"$TMP/out" 2>"$TMP/err" || { cat "$TMP/err"; die 'hooked rerun failed'; }
+grep -Fq 'already exists (id 900, draft true); nothing to stage' "$TMP/out" || die 'hooked idempotent notice'
+if grep -Eq '^api |^release (create|delete)' "$CALLS"; then die 'hooked rerun wrote or consulted the gate'; fi
+pass 'a rerun over a draft with every asset stages nothing'
+printf '{"id":900,"isDraft":true,"assets":[{"name":"b-runtime-1.0.0.tar.gz"}]}\n' >"$FIX/release.json"
+: >"$CALLS"
+reject 'release b--v1.0.0 already exists (id 900, draft true) but lacks b-runtime-1.0.0.tar.gz.sha256' bash "$SCRIPT"
+if grep -Eq '^release (create|delete)' "$CALLS"; then die 'incomplete existing release was rewritten'; fi
+pass 'an existing release missing a hook asset fails, names it, and is left alone'
+rm -f "$FIX/release.json"
+: >"$CALLS"
+DROP_ASSET=b-runtime-1.0.0.tar.gz.sha256 reject 'draft b--v1.0.0 lacked b-runtime-1.0.0.tar.gz.sha256 after upload and was deleted' bash "$SCRIPT"
+grep -Fxq 'release delete b--v1.0.0 --yes' "$CALLS" || die 'short draft not deleted'
+[ ! -f "$FIX/release.json" ] || die 'short draft still exists'
+pass 'a draft that comes back short of an asset is deleted, keeping the tag for a clean re-run'
 
 printf '%s release-stage checks passed\n' "$PASS"
