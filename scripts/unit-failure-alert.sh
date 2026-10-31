@@ -246,7 +246,7 @@ read_jsm_summary() {
       select([.MESSAGE_ID, .JSM_INVOCATION_ID, .JSM_STAGE, .JSM_CAUSE, .JSM_SKILLS]
         | all(type == "string")) |
       select(.MESSAGE_ID == "8e4f3a61b7c24df0a9d6502e1384c5ab" and .JSM_INVOCATION_ID == $invocation) |
-      select(.JSM_STAGE == "list" or .JSM_STAGE == "upgrade") |
+      select(.JSM_STAGE == "list" or .JSM_STAGE == "upgrade" or .JSM_STAGE == "forks") |
       select(.JSM_CAUSE == "manual-attention" or .JSM_CAUSE == "stage-failed" or
         .JSM_CAUSE == "reported-failure" or .JSM_CAUSE == "output-unavailable") |
       select(.JSM_SKILLS | length <= 519) |
@@ -263,6 +263,8 @@ read_jsm_summary() {
     *)
       if [ "$stage" = list ]; then
         printf 'Checking for skill updates failed; no skill was updated. Inspect this invocation in the local journal.'
+      elif [ "$stage" = forks ]; then
+        printf 'The fork check got no answer from JSM for any fork, usually expired JSM credentials. Skill updates themselves did not fail. Inspect this invocation in the local journal.'
       else
         printf 'Skill upgrades failed or were incomplete. Inspect this invocation in the local journal before retrying.'
       fi

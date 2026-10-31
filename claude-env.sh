@@ -3,6 +3,16 @@
 # system tools exist. Prefer the real PATH commands; notably, this avoids the
 # embedded ugrep bounded-repeat OOM tracked upstream.
 unset -f grep find 2>/dev/null || true
+
+# Go makes every module cache it fills read-only (0555 dirs), and Claude Code's
+# session delete is a plain recursive rm that can't empty one: an agent that
+# pointed GOMODCACHE into $CLAUDE_JOB_DIR/tmp left that job undeletable
+# ("couldn't remove the session's state directory (EACCES ...)", 2026-10-30).
+# Keep new caches writable; a GOFLAGS a command sets itself still wins.
+case " ${GOFLAGS-} " in
+  *" -modcacherw "*) ;;
+  *) export GOFLAGS="${GOFLAGS:+$GOFLAGS }-modcacherw" ;;
+esac
 # design-rails' `decide.mjs --open` tries this opener before its platform launchers
 # (harness/deliverable-locations.md); a value already set wins.
 export DESIGN_RAILS_OPENER="${DESIGN_RAILS_OPENER:-open-deliverable}"

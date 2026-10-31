@@ -192,7 +192,7 @@ coverage_class() {
 # --- the unit set: loaded, timers, failed now, or failed in the window --------
 # A Restart= daemon may be active again by the time we look. Timer targets and
 # failed state alone omitted both SSH tunnels despite 1,910 failures in a week.
-units_file=$(mktemp)
+units_file=$(mktemp) || exit 1
 trap 'rm -f "$units_file"' EXIT
 
 # A QUERY THAT FAILED AND A BOX WITH NOTHING ON IT ARE DIFFERENT ANSWERS.
