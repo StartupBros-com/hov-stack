@@ -31,10 +31,10 @@
   "credit-usage": {
     "success": true,
     "data": {
-      "remainingCredits": 1000,
-      "planCredits": 3000,
-      "billingPeriodStart": "2026-01-01T00:00:00.000Z",
-      "billingPeriodEnd": "2026-02-01T00:00:00.000Z"
+      "remainingCredits": 2856,
+      "planCredits": 8677,
+      "billingPeriodStart": "2025-11-12T09:10:33.000Z",
+      "billingPeriodEnd": "2026-11-12T09:10:33.000Z"
     }
   },
   "scrape-session": {
@@ -113,6 +113,84 @@
     "success": true,
     "exitCode": 0,
     "value": "opaque vendor payload"
+  },
+  "raw-crawl-completed": {
+    "id": "crawl-job",
+    "status": "completed",
+    "completed": 2,
+    "total": 2,
+    "creditsUsed": 2,
+    "next": null,
+    "data": [
+      {
+        "markdown": "# Page"
+      }
+    ]
+  },
+  "raw-crawl-failed": {
+    "id": "crawl-job",
+    "status": "failed",
+    "completed": 1,
+    "total": 2,
+    "creditsUsed": 1,
+    "next": null,
+    "data": [
+      {
+        "markdown": "# Page"
+      }
+    ]
+  },
+  "raw-crawl-cancelled-free": {
+    "id": "crawl-job",
+    "status": "cancelled",
+    "completed": 0,
+    "total": 2,
+    "creditsUsed": 0,
+    "next": null,
+    "data": []
+  },
+  "raw-crawl-running": {
+    "id": "crawl-job",
+    "status": "scraping",
+    "completed": 1,
+    "total": 2,
+    "creditsUsed": 2
+  },
+  "raw-crawl-started": {
+    "success": true,
+    "data": {
+      "jobId": "crawl-job",
+      "url": "https://api.firecrawl.dev/v2/crawl/crawl-job",
+      "status": "processing"
+    }
+  },
+  "raw-agent-running": {
+    "success": true,
+    "data": {
+      "id": "agent-job",
+      "status": "processing",
+      "creditsUsed": 5
+    }
+  },
+  "raw-agent-completed": {
+    "success": true,
+    "data": {
+      "id": "agent-job",
+      "status": "completed",
+      "creditsUsed": 5
+    }
+  },
+  "raw-running-parent": {
+    "status": "scraping",
+    "data": {
+      "creditsUsed": 2
+    }
+  },
+  "raw-opaque-status": {
+    "status": {
+      "phase": "done"
+    },
+    "creditsUsed": 2
   },
   "multi": {
     "items": [
@@ -193,5 +271,91 @@
     },
     "creditsUsed": 2,
     "id": "srch_dev_1"
+  },
+  "search-research": {
+    "success": true,
+    "data": {
+      "web": [],
+      "research": [
+        {
+          "paperId": "p-1",
+          "primaryId": "pmid:12345678",
+          "ids": {"pmid": "12345678", "doi": "10.1000/example"},
+          "title": "Base editing in vivo",
+          "abstract": "Example abstract.",
+          "score": 0.91
+        }
+      ]
+    },
+    "warnings": ["The research category changes on 2026-11-16."],
+    "creditsUsed": 2,
+    "id": "srch_research_1"
+  },
+  "search-news": {
+    "success": true,
+    "data": {
+      "web": [],
+      "news": [{"url": "https://news.example/a", "title": "Edition news"}]
+    },
+    "creditsUsed": 2,
+    "id": "srch_news_1"
+  },
+  "search-all-empty": {
+    "success": true,
+    "data": {"web": [], "news": [], "research": []},
+    "creditsUsed": 2,
+    "id": "srch_empty_1"
+  },
+  "gov": {
+    "success": true,
+    "data": {
+      "web": [
+        {
+          "url": "https://leginfo.legislature.ca.gov/faces/codes_displaySection.xhtml?lawCode=CIV&sectionNum=1798.82",
+          "title": "California Code, CIV 1798.82",
+          "description": "1798.82. (a) (1) An individual or business that conducts business in California, and that owns or licenses computerized data that includes personal information, shall disclose a breach of the security of the system following discovery or notification of the breach [...]",
+          "position": 1
+        },
+        {
+          "url": "https://leginfo.legislature.ca.gov/faces/codes_displaySection.xhtml?lawCode=CIV&sectionNum=1798.29",
+          "title": "California Code, CIV 1798.29",
+          "description": "1798.29. (a) Any agency that owns or licenses computerized data that includes personal information shall disclose any breach of the security of the system [...]",
+          "position": 2
+        }
+      ]
+    }
+  },
+  "developer": {
+    "success": true,
+    "partial": false,
+    "results": [
+      {
+        "id": "issue:tokio-rs/tokio#8175",
+        "url": "https://github.com/tokio-rs/tokio/issues/8175",
+        "title": "Inconsistent cancel safety documentation#8175",
+        "passages": [
+          {
+            "text": "# Inconsistent cancel safety documentation#8175\n## Description\n- `mpsc::Receiver`: This method is cancel safe. If `recv` is used as the event in a `tokio::select!` statement and some other branch completes first, it is guaranteed that no messages were received on this channel."
+          }
+        ],
+        "license": "MIT"
+      },
+      {
+        "id": "doc:tokio.rs/tokio/tutorial/select",
+        "url": "https://tokio.rs/tokio/tutorial/select",
+        "passages": [
+          {
+            "text": "The `select!` macro runs all branches concurrently on the same task. When one branch completes, the others are dropped; a branch is cancel safe when dropping it loses no data."
+          }
+        ]
+      }
+    ],
+    "coverage": {
+      "doc": "ok",
+      "issue": "ok",
+      "pull_request": "skipped",
+      "readme": "skipped"
+    },
+    "reranked": true
   }
 }

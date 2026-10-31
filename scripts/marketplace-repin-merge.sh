@@ -38,7 +38,7 @@ while [ "$#" -gt 0 ]; do
     *) say "usage: unknown option $1"; exit 2 ;;
   esac
 done
-S=$(mktemp -d /tmp/marketplace-repin-merge.XXXXXX)
+S=$(mktemp -d /tmp/marketplace-repin-merge.XXXXXX) || exit 1
 trap 'rm -rf "$S"' EXIT
 
 # 1. Identity and scope.

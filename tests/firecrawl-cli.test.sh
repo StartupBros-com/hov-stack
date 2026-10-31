@@ -6,7 +6,7 @@ REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 CLI="$REPO/bin/firecrawl-cli"
 MODULE="$REPO/bin/firecrawl_cli.py"
 FIXTURES="$REPO/tests/fixtures/firecrawl-cli"
-TMP=$(mktemp -d /tmp/firecrawl-cli-test.XXXXXX)
+TMP=$(mktemp -d /tmp/firecrawl-cli-test.XXXXXX) || exit 1
 trap 'rm -rf "$TMP"' EXIT
 mkdir -p "$TMP/home" "$TMP/bin" "$TMP/no-vendor" "$TMP/work" "$TMP/fixtures"
 for tool in python3 bash dirname readlink; do
@@ -23,6 +23,9 @@ export FIRECRAWL_TEST_FIXTURES="$TMP/fixtures"
 unset CLAUDE_CODE_SESSION_ID
 # Do not inherit an operator's budget overrides into this hermetic suite.
 for name in ${!FIRECRAWL_CLI_@}; do unset "$name"; done
+# Free-first keyless routing (#2118) is off for the legacy blocks, which pin keyed
+# behavior; the keyless block turns it back on per call.
+export FIRECRAWL_CLI_KEYLESS=0
 export PYTHONDONTWRITEBYTECODE=1
 python3 - "$FIXTURES/responses.json" "$TMP/fixtures" <<'PY'
 import json, pathlib, sys
@@ -30,6 +33,7 @@ for name, data in json.loads(pathlib.Path(sys.argv[1]).read_text()).items():
     pathlib.Path(sys.argv[2], name + '.json').write_text(json.dumps(data))
 PY
 cp "$FIXTURES/usage.txt" "$TMP/fixtures/usage.txt"
+cp "$FIXTURES/login-menu.txt" "$TMP/fixtures/login-menu.txt"
 
 pass=0 fail=0
 RESET_LEDGER=1
@@ -212,6 +216,16 @@ configure '{"credit-usage":{"fixture":"unauthorized.json","exit":1}}'
 run_cli fetch https://x --json
 status_is 2 'auth during credit preflight'
 jcheck 'preflight keeps auth template' "$OUT" "assert d['error']['code']=='auth_failure' and d['error']['retryable']; assert 'firecrawl --status' in d['error']['next_action']"
+# Live 2026-10-30: with no FIRECRAWL_API_KEY and no stored login, vendor 1.19.26
+# prints its interactive login menu (ANSI colour included) on stdout and exits 0.
+# That is a missing credential, not vendor drift: no retries and no drift check.
+configure '{"credit-usage":{"fixture":"login-menu.txt"}}'
+run_cli fetch https://x --json
+status_is 1 'login menu during credit preflight'
+jcheck 'login menu names the missing credential' "$OUT" "e=d['error']; assert e['code']=='credentials_missing' and not e['retryable'], e; assert 'FIRECRAWL_API_KEY' in e['next_action'] and 'firecrawl login' in e['next_action'], e"
+[[ "$(wc -l <"$FIRECRAWL_TEST_LOG")" -eq 1 ]] && ok || bad 'login menu preflight retried'
+omits "$ERR" 'failed transiently' 'login menu is not transient'
+omits "$ERR" 'harness-doctor check 32' 'login menu is not vendor drift'
 
 # Date-valued Retry-After and shell quoting are deterministic without a provider.
 RESULT=$(PYTHONDONTWRITEBYTECODE=1 python3 - "$MODULE" "$TMP/bin" "$TMP/work" <<'PY'
@@ -222,11 +236,13 @@ spec = importlib.util.spec_from_file_location('firecrawl_cli', sys.argv[1])
 m = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(m)
 with patch.object(m.time, 'time', return_value=1000):
-    assert m.error_metadata({'details': {'headers': {'Retry-After': formatdate(1090, usegmt=True)}}}, '') == (None, 90)
+    assert m.error_metadata({'details': {'headers': {'Retry-After': formatdate(1090, usegmt=True)}}}, '') == (None, 90, 90)
 for value in ('nonsense', 'NaN', '-2', 'Infinity'):
-    assert m.error_metadata({'headers': {'Retry-After': value}}, '') == (None, 5)
-assert m.error_metadata({'error': 'Request failed with status code 402'}, '') == (402, 5)
-assert m.error_metadata({'data': {'markdown': 'HTTP 402'}}, '') == (None, 5)
+    assert m.error_metadata({'headers': {'Retry-After': value}}, '') == (None, 5, None)
+assert m.error_metadata({'error': 'Request failed with status code 402'}, '') == (402, 5, None)
+assert m.error_metadata({'data': {'markdown': 'HTTP 402'}}, '') == (None, 5, None)
+# The keyless refusal's body names its window as retry_after_seconds (#2118).
+assert m.error_metadata({'reason': 'credits', 'retry_after_seconds': 13600}, 'HTTP 429') == (429, 13600, 13600)
 query = 'a "quote"; $(touch forbidden) `false` $HOME \\ literal'
 with patch.object(m.subprocess, 'run', return_value=m.subprocess.CompletedProcess([], 0, 'env\n', '')) as run:
     line = m.exa_fallback(query)
@@ -283,7 +299,7 @@ fixture scrape
 run_cli capabilities --json
 status_is 0 capabilities
 no_calls capabilities
-jcheck 'capabilities verbs and exits' "$OUT" "c=d['data']; assert set(c['verbs'])=={'fetch','extract','shot','act','agent','interact','search','map','raw','capabilities','budget'}; assert set(c['exit_codes'])==set(map(str,range(7))); assert all(isinstance(v['retryable'],bool) for v in c['exit_codes'].values()); assert c['exit_codes']['2']['retryable']; assert all('flags' in v and 'cost_class' in v for v in c['verbs'].values()); assert '--schema' in c['verbs']['fetch']['flags']; assert 'limits' in c; assert 'monitor' in str(c['warnings']) and 'crawl' in str(c['warnings'])"
+jcheck 'capabilities verbs and exits' "$OUT" "c=d['data']; assert set(c['verbs'])=={'fetch','extract','shot','act','agent','interact','search','gov','developer','map','raw','capabilities','budget'}; assert set(c['exit_codes'])==set(map(str,range(7))); assert all(isinstance(v['retryable'],bool) for v in c['exit_codes'].values()); assert c['exit_codes']['2']['retryable']; assert all('flags' in v and 'cost_class' in v for v in c['verbs'].values()); assert '--schema' in c['verbs']['fetch']['flags']; assert 'limits' in c; assert 'monitor' in str(c['warnings']) and 'crawl' in str(c['warnings'])"
 CAPS=$OUT
 run_cli --json capabilities
 status_is 0 'parent JSON flag'
@@ -296,7 +312,7 @@ done
 # U1 contract: --help, --version, and capabilities never touch the ledger. A read-only
 # HOME proves it (an unwritable state directory would otherwise exit 4); the stronger
 # check, that no ~/.claude appears at all, holds even when the suite runs as root.
-RO_HOME=$(mktemp -d "$TMP/ro-home.XXXXXX")
+RO_HOME=$(mktemp -d "$TMP/ro-home.XXXXXX") || exit 1
 chmod 500 "$RO_HOME"
 for offline in '--help' '--version' 'capabilities --json'; do
   ST=0
@@ -347,8 +363,10 @@ if [[ "$(id -u)" -ne 0 ]]; then
   rm -rf "$TMP/sandbox-state"
 fi
 run_cli --help
-contains "$OUT" 'after the verb' 'canonical JSON placement'
-contains "$OUT" 'cron callers must alert' 'AE16 unattended budget advice'
+# argparse reflows the epilog, so a phrase can straddle a line break.
+HELP_TEXT=$(printf '%s' "$OUT" | tr -s ' \n' '  ')
+contains "$HELP_TEXT" 'after the verb' 'canonical JSON placement'
+contains "$HELP_TEXT" 'cron callers must alert' 'AE16 unattended budget advice'
 run_cli budget --json
 jcheck 'U3 ledger schema' "$OUT" "assert d['data']['available']; assert isinstance(d['budget_remaining'], (int,float)); assert d['data']['tags']==[]"
 run_cli capabilities --json
@@ -367,12 +385,13 @@ status_is 0 'empty search'
 jcheck 'empty list' "$OUT" "assert d['ok'] and d['data']==[]"
 contains "$ERR" 'hint' 'empty result hint'
 
-# No vendor on PATH: offline still works; paid verb teaches mise location.
+# No vendor on PATH: offline still works; paid verb names the pinned reinstall.
 ST=0
 HOME="$TMP/home" PATH="$TMP/no-vendor" "$CLI" fetch https://x --json >"$TMP/out" 2>"$TMP/err" || ST=$?
 status_is 4 'missing vendor'
-# shellcheck disable=SC2088 # The CLI deliberately names the portable mise path.
-contains "$(cat "$TMP/err")" '~/.local/share/mise/installs/node/<version>/bin/firecrawl' 'mise remedy'
+contains "$(cat "$TMP/err")" 'pnpm add -g firecrawl-cli@1.19.26' 'pinned reinstall remedy'
+# Issue #2105: nothing installs the vendor under mise, so that path was a dead end.
+omits "$(cat "$TMP/err")" 'mise/installs/node' 'no dead mise remedy'
 
 # Raw is exact passthrough (including unknown flags), wrapped without mutation.
 fixture plain-success
@@ -449,10 +468,66 @@ fixture search
 run_cli search example --json
 status_is 0 search
 jcheck 'search payload' "$OUT" "assert d['data']['data']['web'][0]['title']=='Example'"
+# Issue #2108: an empty bucket beside a populated one is not an empty result.
+fixture search-research
+run_cli search 'base editing' --categories research --json
+status_is 0 'research-bucket search'
+jcheck 'research papers pass through' "$OUT" "p=d['data']['data']; assert p['web']==[] and p['research'][0]['paperId']=='p-1'"
+omits "$ERR" 'hint: empty result' 'no empty hint beside research papers'
+fixture search-news
+run_cli search 'edition' --sources web,news --json
+status_is 0 'news-bucket search'
+omits "$ERR" 'hint: empty result' 'no empty hint beside news items'
+fixture search-all-empty
+run_cli search 'nothing' --sources web,news --json
+status_is 0 'all-buckets-empty search'
+contains "$ERR" 'hint: empty result' 'empty hint when every bucket is empty'
 fixture scrape-json
 run_cli extract https://x -Q 'What is the title?' --json
 status_is 0 'extract prompt'
 argv_is 'extract prompt argv' "assert d==['scrape','https://x','--only-main-content','--query','What is the title?','--json']"
+# #2123: vendor 1.19.26 prints a --query answer, and an empty search, as text despite --json.
+configure '{"default":{"text":"Example Domain is a reserved page.\n","stderr_text":"Scrape ID: s-1\n"}}'
+run_cli extract https://x -Q 'What is this page?' --json
+status_is 0 'text query answer'
+jcheck 'text query answer envelope' "$OUT" "assert d['ok'] and d['data']=={'answer':'Example Domain is a reserved page.'}; assert d['credits_spent']==5 and 'cost estimated, not measured' in d['degraded']"
+run_cli extract report.pdf -Q 'What is this?' --json
+status_is 0 'local text query answer'
+jcheck 'local text query answer envelope' "$OUT" "assert d['data']=={'answer':'Example Domain is a reserved page.'} and d['credits_spent']==25"
+configure '{"default":{"text":"42"}}'
+run_cli extract https://x -Q 'How many?' --json
+status_is 0 'JSON-scalar query answer'
+jcheck 'JSON-scalar answer stays text' "$OUT" "assert d['data']=={'answer':'42'}"
+configure '{"default":{"text":"{\"title\":\"Example\"}"}}'
+run_cli extract https://x -Q 'Return the title as JSON' --json
+status_is 0 'JSON-object query answer'
+jcheck 'JSON-object answer stays text' "$OUT" "assert d['data']=={'answer':'{\"title\":\"Example\"}'}"
+fixture scrape-json
+run_cli extract https://x -Q 'What is this page?' --json
+jcheck 'empty-answer document passes through' "$OUT" "assert 'metadata' in d['data'] and 'answer' not in d['data']"
+configure '{"default":{"text":""}}'
+run_cli extract https://x -Q 'What is this page?' --json
+status_is 2 'empty query output stays malformed'
+jcheck 'empty query output code' "$OUT" "assert d['error']['code']=='vendor_output_changed' and d['credits_spent']==0"
+for printed in 'No results found.\n' ''; do
+  configure "{\"default\":{\"text\":\"$printed\"}}"
+  run_cli search nothing --sources web,news --json
+  status_is 0 "text empty search: '$printed'"
+  jcheck "text empty search buckets: '$printed'" "$OUT" "assert d['ok'] and d['data']=={'success':True,'data':{'web':[],'news':[]}}; assert d['credits_spent']==2"
+  contains "$ERR" 'hint: empty result' "text empty search hint: '$printed'"
+done
+configure '{"default":{"text":"No results found.\n"}}'
+run_cli search nothing --json
+jcheck 'text empty search defaults to web' "$OUT" "assert d['data']['data']=={'web':[]}"
+omits "$OUT" 'research-bucket' 'no research note without the category'
+run_cli search nothing --categories research --json
+jcheck 'text empty research search note' "$OUT" "assert any('research-bucket' in note for note in d['degraded'])"
+run_cli fetch https://x --json
+status_is 2 'no-results text outside search stays malformed'
+jcheck 'no-results text outside search code' "$OUT" "assert d['error']['code']=='vendor_output_changed'"
+configure '{"default":{"text":"No results found.\n","exit":1}}'
+run_cli search nothing --json
+status_is 1 'failed search printing no-results stays a failure'
 fixture scrape
 run_cli extract https://x --json
 status_is 4 'extract needs schema or prompt'
@@ -484,7 +559,13 @@ status_is 4 'missing local file'
 no_calls 'missing local file'
 run_cli crawl https://x --json
 status_is 4 'raw-only command'
-contains "$ERR" 'firecrawl-cli raw -- crawl' 'raw-only remedy'
+# Vendor crawl and monitor print JSON by default and reject --json (live
+# 2026-10-30), so the remedy keeps --json on the wrapper side of the separator.
+contains "$ERR" 'next: firecrawl-cli raw --json -- crawl https://x' 'raw-only remedy'
+omits "$ERR" 'crawl https://x --json' 'raw-only remedy passes no vendor --json'
+run_cli --json monitor list
+status_is 4 'raw-only monitor'
+contains "$ERR" 'next: firecrawl-cli raw --json -- monitor list' 'raw-only monitor remedy keeps a leading --json'
 
 # The fake can model file-writing without littering the checkout.
 configure '{"default":{"fixture":"plain-success.json","write":"vendor-artifact.txt"}}'
@@ -744,6 +825,8 @@ OUT=$(cat "$TMP/out") ERR=$(cat "$TMP/err")
 status_is 4 'research help without vendor is a normal missing-vendor error'
 jcheck 'missing research vendor envelope' "$OUT" "assert not d['ok'] and d['error']['code']==4 and d['credits_spent']==0 and d['credits_remaining'] is None"
 contains "$ERR" 'vendor firecrawl is missing from PATH' 'research help missing vendor detail'
+# Issue #2105: nothing installs the vendor into mise; name the pinned reinstall.
+contains "$ERR" 'pnpm add -g firecrawl-cli@1.19.26' 'missing vendor names the pinned reinstall'
 no_calls 'missing research vendor invokes nothing'
 run_cli budget --json
 jcheck 'missing research vendor creates no reservation' "$OUT" "assert not d['data']['reservations'] and d['data']['session']['spent']==0"
@@ -803,7 +886,7 @@ done
 fixture scrape
 run_cli fetch https://x --json
 status_is 0 'AE13 first uncosted scrape'
-jcheck 'AE13 documented estimate' "$OUT" "assert d['credits_spent']==1; assert d['credits_remaining']==1000; assert d['budget_remaining']==299; assert 'cost estimated, not measured' in d['degraded']"
+jcheck 'AE13 documented estimate' "$OUT" "assert d['credits_spent']==1; assert d['credits_remaining']==2856; assert d['budget_remaining']==299; assert 'cost estimated, not measured' in d['degraded']"
 run_cli budget --json
 jcheck 'AE13 recorded charge' "$OUT" "assert d['data']['session']['spent']==1; assert d['data']['session_id']=='session-full-value-abcdefgh'; assert not d['data']['reservations']"
 python3 - "$LEDGER" <<'PY'
@@ -835,7 +918,7 @@ export FIRECRAWL_CLI_FLOOR=3000
 fixture scrape
 run_cli fetch https://x --json
 status_is 3 'host credit shape floor refusal'
-jcheck 'floor reads remaining rather than period total' "$(error_json)" "assert d['credits_remaining']==1000 and d['budget_remaining']==300 and d['credits_spent']==0"
+jcheck 'floor reads remaining rather than period total' "$(error_json)" "assert d['credits_remaining']==2856 and d['budget_remaining']==300 and d['credits_spent']==0"
 [[ "$(paid_calls)" == 0 ]] && ok || bad 'host credit shape floor allowed paid call'
 unset FIRECRAWL_CLI_FLOOR
 
@@ -848,7 +931,7 @@ status_is 3 'AE3 pre-call refusal'
 contains "$ERR" '1 credits remaining' 'AE3 remaining amount'
 contains "$ERR" '--raise-budget' 'AE3 remedy'
 [[ "$(paid_calls)" == 0 ]] && ok || bad 'AE3 paid vendor invoked'
-jcheck 'refusal accounting envelope' "$(error_json)" "assert d['credits_spent']==0 and d['credits_remaining']==1000 and d['budget_remaining']==1"
+jcheck 'refusal accounting envelope' "$(error_json)" "assert d['credits_spent']==0 and d['credits_remaining']==2856 and d['budget_remaining']==1"
 run_cli budget --raise-budget 50 --reason 'one-off crawl' --json
 status_is 0 'reasoned raise'
 jcheck 'recorded raise' "$OUT" "assert d['data']['raises'][0]['amount']==50 and d['data']['raises'][0]['reason']=='one-off crawl'; assert d['budget_remaining']==51"
@@ -902,6 +985,38 @@ jcheck 'raw hold stays reserved' "$OUT" "assert sum(r['amount'] for r in d['data
 ledger_edit "[r.update(created=0) for r in h['reservations'].values()]"
 run_cli budget --json
 jcheck 'settled hold becomes spent, never free' "$OUT" "assert not d['data']['reservations']; assert d['data']['day_state']['spent']==100 and d['budget_remaining']==200"
+
+# Issue #2117, live 2026-10-30: a finished raw job's creditsUsed is the charge.
+# A terminal status, or none at all (a synchronous answer), makes it final; the
+# reported cost is still held until settle_window, then settles as reported.
+# A failed job bills its partial work, and a reported 0 is a charge of 0.
+for shape in raw-crawl-completed:2 raw-agent-completed:5 search-id:2 raw-crawl-failed:1 raw-crawl-cancelled-free:0; do
+  name=${shape%%:*} charge=${shape##*:}
+  fixture "$name"
+  run_cli raw --json -- crawl https://x --wait
+  status_is 0 "finished raw job: $name"
+  jcheck "finished raw job charges the reported cost: $name" "$OUT" "assert d['credits_spent']==$charge and d['budget_remaining']==300-$charge; assert 'cost estimated, not measured' not in (d['degraded'] or [])"
+  run_cli budget --json
+  jcheck "finished raw job holds only the reported cost: $name" "$OUT" "r=list(d['data']['reservations'].values()); assert len(r)==1 and r[0]['amount']==$charge and r[0]['state']=='held'"
+  ledger_edit "[r.update(created=0) for r in h['reservations'].values()]"
+  run_cli budget --json
+  jcheck "finished raw job settles as reported: $name" "$OUT" "assert not d['data']['reservations']; assert d['data']['day_state']['spent']==$charge and d['budget_remaining']==300-$charge"
+done
+
+# Planted negatives: a running job's creditsUsed is a running total, a started
+# job reports nothing yet, and a status the wrapper cannot read is not terminal.
+# Each keeps today's 100-credit hold and settles 100.
+for name in raw-crawl-running raw-crawl-started raw-agent-running raw-running-parent raw-opaque-status; do
+  fixture "$name"
+  run_cli raw --json -- crawl https://x
+  status_is 0 "unfinished raw job: $name"
+  jcheck "unfinished raw job is labelled an estimate: $name" "$OUT" "assert 'cost estimated, not measured' in d['degraded']"
+  run_cli budget --json
+  jcheck "unfinished raw job keeps the 100-credit hold: $name" "$OUT" "r=list(d['data']['reservations'].values()); assert len(r)==1 and r[0]['amount']==100 and r[0]['state']=='held'"
+  ledger_edit "[r.update(created=0) for r in h['reservations'].values()]"
+  run_cli budget --json
+  jcheck "unfinished raw job settles the full hold: $name" "$OUT" "assert d['data']['day_state']['spent']==100 and d['budget_remaining']==200"
+done
 
 # AE12 and concurrency: a novel raw verb blocks so its reservation is observable.
 export FIRECRAWL_CLI_SESSION_BUDGET=150
@@ -957,6 +1072,8 @@ PY
 run_cli search query --json
 status_is 3 'newer snapshot charge survives interrupted write'
 jcheck 'newer snapshot budget retained' "$(error_json)" "assert d['budget_remaining']==1"
+# A session-bucket refusal keeps naming --raise-budget: that remedy does lift it (#2105).
+jcheck 'session refusal names --raise-budget' "$(error_json)" "e=d['error']; assert e['message'].startswith('session budget refused') and '--raise-budget' in e['next_action'], e"
 RESET_LEDGER=0
 configure '{"credit-usage":{"remaining":[200]},"default":{"fixture":"scrape.json"}}'
 printf 'garbage\n' >"$LEDGER"
@@ -969,6 +1086,15 @@ printf 'garbage\n' >"${LEDGER%/*}/snapshot.json"
 run_cli budget --json
 status_is 0 'both ledger copies recover without latching'
 jcheck 'both-copy corruption keeps finite ceiling' "$OUT" "assert 0 < d['budget_remaining'] < 300"
+# Issue #2105: an overdrawn account reports a negative balance. That is a real
+# reading below any floor: refuse (exit 3) naming the balance, never retry it as
+# a transient credit-read failure (exit 2), and never point at --raise-budget.
+configure '{"credit-usage":{"remaining":[-384]},"default":{"fixture":"scrape.json"}}'
+run_cli fetch https://x --json
+status_is 3 'overdrawn account is a budget refusal'
+[[ "$(paid_calls)" == 0 ]] && ok || bad 'overdrawn account allowed a paid call'
+all_argv_is 'overdrawn balance is read once, not retried' "assert d==[['credit-usage','--json']], d"
+jcheck 'overdrawn refusal names the balance and the account remedy' "$(error_json)" "e=d['error']; assert e['code']==3 and e['retryable'] is False, e; assert 'has -384 credits' in e['message'], e; assert 'top up Firecrawl credits' in e['next_action'] and '--raise-budget' not in e['next_action'], e; assert d['credits_remaining']==-384, d"
 
 # Full session values stay distinct even when their last eight characters match.
 fixture scrape
@@ -1312,7 +1438,7 @@ status_is 0 'parse is fetch here'
 
 # capabilities: extension list, cost classes that name real constants, error.code rule.
 run_cli capabilities --json
-jcheck 'capabilities contract additions' "$OUT" "c=d['data']; assert {'.pdf','.docx','.xlsx'} <= set(c['parse_extensions']); assert c['verbs']['interact']['cost_class']=='interact_per_minute' and c['verbs']['extract']['cost_class']=='json_extraction'; assert 'json_extraction' in c['verbs']['fetch']['cost_classes']; assert all(v['cost_class'] in c['budget'] or v['cost_class'] in {'offline','raw-unknown','scrape','map','search'} for v in c['verbs'].values()); assert any('error.code' in w for w in c['warnings'])"
+jcheck 'capabilities contract additions' "$OUT" "c=d['data']; assert {'.pdf','.docx','.xlsx'} <= set(c['parse_extensions']); assert c['verbs']['interact']['cost_class']=='interact_per_minute' and c['verbs']['extract']['cost_class']=='json_extraction'; assert 'json_extraction' in c['verbs']['fetch']['cost_classes']; assert all(v['cost_class'] in c['budget'] or v['cost_class'] in {'offline','raw-unknown','scrape','map','search','free'} for v in c['verbs'].values()); assert any('error.code' in w for w in c['warnings'])"
 contains "$(cd "$TMP/work" && HOME="$TMP/home" PATH="$TMP/bin" "$CLI" --help)" 'infers fetch' 'help names the inference'
 
 # A symlinked state directory refuses.
@@ -1474,7 +1600,7 @@ api_control '{"status":200,"body":{}}'
 run_cli search 'example query' --categories developer --json
 status_is 4 'developer without a key refused'
 contains "$ERR" 'needs FIRECRAWL_API_KEY in the environment' 'missing key named'
-contains "$ERR" 'research search-github' 'missing key alternative named'
+contains "$ERR" 'firecrawl-cli developer' 'missing key alternative named'
 no_calls 'missing key refused before the vendor'
 no_api_calls 'missing key refused before the API'
 fixture search-dev
@@ -1524,6 +1650,534 @@ api_control '{"status":200,"sleep":3,"body":{}}'
 run_api search 'example query' --categories developer --timeout 1 --json
 status_is 1 'API timeout is a wrapper timeout'
 contains "$ERR" 'wrapper request timeout' 'API timeout named'
+
+# API-direct verbs. gov is free and keyless; developer is keyless
+# and ledger-free, or 2 credits per 10 results with a key. Both need no vendor binary.
+run_keyless() {
+  ST=0
+  (cd "$TMP/work" && HOME="$TMP/home" PATH="$TMP/bin" FIRECRAWL_API_URL="http://127.0.0.1:$API_PORT" "$CLI" "$@") >"$TMP/out" 2>"$TMP/err" || ST=$?
+  OUT=$(cat "$TMP/out") ERR=$(cat "$TMP/err")
+}
+run_keyless_no_vendor() {
+  ST=0
+  (cd "$TMP/work" && HOME="$TMP/home" PATH="$TMP/no-vendor" FIRECRAWL_API_URL="http://127.0.0.1:$API_PORT" "$CLI" "$@") >"$TMP/out" 2>"$TMP/err" || ST=$?
+  OUT=$(cat "$TMP/out") ERR=$(cat "$TMP/err")
+}
+api_requests() { python3 -c 'import os; print(sum(1 for _ in open(os.environ["FIRECRAWL_API_TEST_LOG"])))'; }
+# The ledger baseline (the suite runs in unattended-day mode, so this is the day bucket);
+# free calls leave it untouched and keyed developer calls draw their estimate from it.
+configure '{}'
+run_cli budget --json
+BASE=$(printf '%s' "$OUT" | python3 -c 'import json,sys; print(int(json.load(sys.stdin)["budget_remaining"]))')
+gov_body() { cat "$TMP/fixtures/gov.json"; }
+dev_body() { cat "$TMP/fixtures/developer.json"; }
+
+configure '{}'
+api_control "{\"status\":200,\"body\":$(gov_body)}"
+run_keyless gov 'California data breach notification statute' --jurisdiction US-CA --limit 2 --json
+status_is 0 'gov answered keyless'
+jcheck 'gov envelope' "$OUT" "assert d['ok'] and d['surface']=='gov' and d['verb']=='gov' and d['credits_spent']==0 and d['credits_remaining'] is None and d['budget_remaining']==$BASE and d['degraded'] is None and 'search_id' not in d; web=d['data']['data']['web']; assert len(web)==2 and web[0]['url'].startswith('https://leginfo') and web[0]['position']==1"
+# Planted negative (#2070): a body carrying limit instead of k is the live 400 "Unrecognized key: limit".
+api_request 'gov request shape' "assert d['path']=='/v2/search/gov' and d['body']=={'query':'California data breach notification statute','k':2,'jurisdiction':'us-ca'} and 'limit' not in d['body']; assert d['authorization'] is None and d['content_type']=='application/json' and d['user_agent'].startswith('firecrawl-cli/')"
+no_calls 'gov never reads credit-usage'
+omits "$ERR" 'hint: empty' 'gov hits are not empty'
+# Keyed: the Bearer rides along for rate limits; the call stays free and ledger-free.
+configure '{}'
+api_control "{\"status\":200,\"body\":$(gov_body)}"
+run_api gov 'qualified immunity excessive force' --court ca9 --court-type federal-appellate --cites '42 U.S.C. § 1983' --domain irs.gov --limit 100 --json
+status_is 0 'gov keyed'
+jcheck 'gov keyed stays free' "$OUT" "assert d['ok'] and d['credits_spent']==0 and d['budget_remaining']==$BASE and d['degraded'] is None"
+api_request 'gov filters reach the body under API names' "assert d['authorization']=='Bearer $API_KEY'; assert d['body']=={'query':'qualified immunity excessive force','k':100,'court':'ca9','courtType':'federal-appellate','cites':'42 U.S.C. § 1983','domain':'irs.gov'}"
+no_calls 'gov keyed never reads credit-usage'
+omits "$OUT$ERR" "$API_KEY" 'gov key never printed'
+# Bare output is the API payload; the vendor binary is not needed.
+configure '{}'
+api_control "{\"status\":200,\"body\":$(gov_body)}"
+run_keyless_no_vendor gov 'allergen labeling' --jurisdiction us
+status_is 0 'gov runs without the vendor binary and without --json'
+jcheck 'gov bare output is the API payload' "$OUT" "assert 'ok' not in d and d['success'] is True and d['data']['web'][1]['position']==2"
+api_request 'gov federal jurisdiction' "assert d['body']=={'query':'allergen labeling','jurisdiction':'us'}"
+no_calls 'gov no-vendor never touches the vendor'
+# Client-side validation exits 4 before any network or ledger contact.
+gov_refused() {
+  local label=$1; shift
+  configure '{}'
+  api_control '{"status":200,"body":{}}'
+  run_keyless gov 'q' "$@" --json
+  status_is 4 "gov refused: $label"
+  no_api_calls "gov refused before the API: $label"
+  no_calls "gov refused before the vendor: $label"
+}
+gov_refused 'court type' --court-type bogus
+contains "$ERR" 'valid court types: federal-supreme' 'gov court types listed'
+gov_refused 'jurisdiction shape' --jurisdiction ca
+contains "$ERR" 'us- plus a two-letter' 'gov jurisdiction rule named'
+gov_refused 'jurisdiction three letters' --jurisdiction us-cal
+gov_refused 'limit 0' --limit 0
+gov_refused 'limit 101' --limit 101
+gov_refused 'blank court' --court ' '
+gov_refused 'blank cites' --cites ''
+gov_refused 'blank domain' --domain ''
+configure '{}'
+api_control '{"status":200,"body":{}}'
+run_keyless gov '' --json
+status_is 4 'gov empty query refused'
+contains "$ERR" 'query must not be empty' 'gov empty query named'
+no_api_calls 'gov empty query refused before the API'
+# Free text the API validates: its 400 text is the error message, and the fix is a flag.
+configure '{}'
+api_control "{\"status\":400,\"body\":{\"success\":false,\"error\":\"invalid 'court' parameter: pass a CourtListener court id such as scotus, ca9, nh or calctapp\"}}"
+run_keyless gov 'qualified immunity' --court bogus --json
+status_is 1 'gov API 400 is a vendor error'
+jcheck 'gov API 400 envelope' "$OUT" "e=d['error']; assert e['code']==1 and e['http_status']==400 and e['retryable'] is False; assert \"invalid 'court' parameter: pass a CourtListener court id\" in e['message']; assert 'firecrawl-cli gov --help' in e['next_action']; assert d['credits_spent']==0"
+api_request 'gov bad court id reaches the API' "assert d['body']['court']=='bogus'"
+configure '{}'
+api_control '{"status":429,"headers":{"Retry-After":"7"},"body":{"success":false,"error":"Rate limit exceeded"}}'
+run_keyless gov 'q' --json
+status_is 2 'gov API 429 is retryable'
+jcheck 'gov 429 envelope' "$OUT" "assert d['error']['code']=='rate_limited' and d['error']['retryable'] and d['credits_spent']==0"
+contains "$ERR" 'retry after 7s' 'gov Retry-After honored'
+api_control '{"status":503,"body":{"success":false,"error":"Service Unavailable"}}'
+run_keyless gov 'q' --json
+status_is 2 'gov API 503 is retryable'
+jcheck 'gov 503 envelope' "$OUT" "assert d['error']['code']=='provider_failure'"
+api_control '{"status":200,"body":{"success":true,"data":{"web":[]}}}'
+run_keyless gov 'nothing here' --json
+status_is 0 'gov empty result'
+contains "$ERR" 'hint: empty result' 'gov empty hint'
+api_control '{"status":302,"headers":{"Location":"http://127.0.0.1:1/elsewhere"},"body":{}}'
+run_keyless gov 'q' --json
+status_is 1 'gov redirect refused'
+jcheck 'gov redirect never followed' "$(api_requests)" "assert d==1, d"
+configure '{}'
+api_control '{"status":200,"body":{}}'
+ST=0
+(cd "$TMP/work" && HOME="$TMP/home" PATH="$TMP/bin" FIRECRAWL_API_URL="http://api.example.test" "$CLI" gov 'q' --json) >"$TMP/out" 2>"$TMP/err" || ST=$?
+status_is 4 'gov plain http to a non-loopback base refused'
+no_api_calls 'gov bad base refused before the API'
+# Statute excerpts are long; the body bound and --full behave as for every verb.
+configure '{}'
+api_control "$(python3 -c 'import json; print(json.dumps({"status":200,"body":{"success":True,"data":{"web":[{"url":"https://law.example/x","title":"t","description":"x"*30000,"position":1}]}}}))')"
+run_keyless gov 'long statute' --json
+status_is 0 'gov long excerpt bounded'
+jcheck 'gov body bound' "$OUT" "assert len(d['data']['data']['web'][0]['description'])==24576; assert 'body truncated at 24576 chars; --full lifts the bound' in d['degraded']; assert any(n.startswith('next: firecrawl-cli gov') and n.endswith('--full') for n in d['degraded'])"
+run_keyless gov 'long statute' --full --json
+status_is 0 'gov --full lifts the bound'
+jcheck 'gov full body' "$OUT" "assert len(d['data']['data']['web'][0]['description'])==30000 and d['degraded'] is None"
+api_request 'gov --full never reaches the body' "assert d['body']=={'query':'long statute'}"
+
+configure '{}'
+api_control "{\"status\":200,\"body\":$(dev_body)}"
+run_keyless developer 'tokio select cancellation safety' --types issue,doc --passages 1 --limit 2 --json
+status_is 0 'developer answered keyless'
+# Planted negative (#2070): a keyless developer call that reads credit-usage or
+# reserves credits fails here (no_calls, credits_spent 0, budget untouched).
+jcheck 'developer keyless envelope' "$OUT" "assert d['ok'] and d['surface']=='developer' and d['verb']=='developer' and d['credits_spent']==0 and d['credits_remaining'] is None and d['budget_remaining']==$BASE; assert d['degraded']==[\"keyless developer search: account floor unchecked; Firecrawl's keyless allowance applies\"]; r=d['data']['results']; assert r[0]['id']=='issue:tokio-rs/tokio#8175' and r[1]['id'].startswith('doc:') and 'title' not in r[1]; assert d['data']['coverage']['pull_request']=='skipped' and d['data']['partial'] is False"
+api_request 'developer request shape' "assert d['path']=='/v2/search/developer' and d['body']=={'query':'tokio select cancellation safety','k':2,'types':['issue','doc'],'passages':1} and 'limit' not in d['body']; assert d['authorization'] is None"
+no_calls 'keyless developer never reads credit-usage'
+configure '{}'
+api_control "{\"status\":200,\"body\":$(dev_body)}"
+run_api developer 'tokio select cancellation safety' --limit 11 --json
+status_is 0 'developer keyed'
+jcheck 'developer keyed envelope' "$OUT" "assert d['ok'] and d['credits_spent']==4 and d['credits_remaining']==2856 and d['budget_remaining']==$BASE-4; assert 'cost estimated, not measured' in d['degraded'] and not any('keyless' in n for n in d['degraded'])"
+api_request 'developer keyed sends the Bearer' "assert d['authorization']=='Bearer $API_KEY' and d['body']=={'query':'tokio select cancellation safety','k':11}"
+all_argv_is 'developer keyed reads credit-usage before and after' "assert d==[['credit-usage','--json'],['credit-usage','--json']], d"
+omits "$OUT$ERR" "$API_KEY" 'developer key never printed'
+configure '{}'
+api_control "{\"status\":200,\"body\":$(dev_body)}"
+run_api developer 'axum middleware ordering' --limit 2 --json
+status_is 0 'developer keyed limit 2'
+jcheck 'developer keyed reserves 2 per 10 rounded up' "$OUT" "assert d['credits_spent']==2 and d['budget_remaining']==$BASE-2"
+# Issue #2105: keyed developer on an overdrawn account is refused before the API,
+# and the refusal names the keyless rerun, which the account balance cannot block.
+configure '{"credit-usage":{"remaining":[-384]}}'
+api_control "{\"status\":200,\"body\":$(dev_body)}"
+run_api developer 'axum middleware ordering' --limit 2 --json
+status_is 3 'developer keyed on an overdrawn account is refused'
+no_api_calls 'overdrawn developer never reaches the API'
+jcheck 'overdrawn developer names the keyless rerun' "$(error_json)" "e=d['error']; assert 'has -384 credits' in e['message'], e; assert \"env -u FIRECRAWL_API_KEY firecrawl-cli developer 'axum middleware ordering'\" in e['next_action'], e; assert 'top up Firecrawl credits' in e['next_action'], e"
+configure '{}'
+api_control "{\"status\":200,\"body\":$(dev_body)}"
+ST=0
+(cd "$TMP/work" && HOME="$TMP/home" PATH="$TMP/no-vendor" FIRECRAWL_API_KEY="$API_KEY" FIRECRAWL_API_URL="http://127.0.0.1:$API_PORT" "$CLI" developer 'q' --limit 2 --json) >"$TMP/out" 2>"$TMP/err" || ST=$?
+OUT=$(cat "$TMP/out") ERR=$(cat "$TMP/err")
+status_is 0 'developer keyed without the vendor binary'
+jcheck 'developer keyed no-vendor envelope' "$OUT" "assert d['ok'] and d['credits_spent']==2 and d['credits_remaining'] is None; assert any('credit floor unchecked: vendor firecrawl absent' in n for n in d['degraded'])"
+no_calls 'no vendor invoked without a binary (developer)'
+configure '{}'
+api_control "{\"status\":200,\"body\":$(dev_body)}"
+run_keyless_no_vendor developer 'q' --limit 2
+status_is 0 'developer keyless without the vendor binary'
+jcheck 'developer keyless no-vendor is wrapped by its degraded note' "$OUT" "assert d['ok'] and d['credits_spent']==0 and d['degraded']==[\"keyless developer search: account floor unchecked; Firecrawl's keyless allowance applies\"]"
+configure '{}'
+api_control "{\"status\":200,\"body\":$(dev_body)}"
+run_keyless developer 'who else hit this' --repos tokio-rs/tokio,rust-lang/rust --sources a,b --skills-only --passages 5 --language Rust --topic async --license MIT --min-stars 100 --max-stars 5000 --archived FALSE --fork true --json
+status_is 0 'developer every filter accepted'
+api_request 'developer filters reach the body under API names' "assert d['body']=={'query':'who else hit this','repos':['tokio-rs/tokio','rust-lang/rust'],'sources':['a','b'],'skills':'only','passages':5,'language':'Rust','topic':'async','license':'MIT','min_stars':100,'max_stars':5000,'archived':False,'fork':True}"
+dev_refused() {
+  local label=$1; shift
+  configure '{}'
+  api_control '{"status":200,"body":{}}'
+  run_keyless developer 'q' "$@" --json
+  status_is 4 "developer refused: $label"
+  no_api_calls "developer refused before the API: $label"
+  no_calls "developer refused before the vendor: $label"
+}
+dev_refused 'types' --types bogus
+contains "$ERR" 'valid types: doc, issue, pull_request, readme' 'developer types listed'
+dev_refused 'duplicate types' --types issue,issue
+dev_refused 'passages 6' --passages 6
+dev_refused 'passages 0' --passages 0
+dev_refused 'limit 0' --limit 0
+dev_refused 'limit 101' --limit 101
+dev_refused 'negative stars' --min-stars -1
+dev_refused 'stars inverted' --min-stars 10 --max-stars 5
+contains "$ERR" '--min-stars exceeds --max-stars' 'developer star order named'
+dev_refused 'archived word' --archived maybe
+contains "$ERR" 'use true or false' 'developer boolean rule named'
+dev_refused 'fork word' --fork yes
+dev_refused 'blank repo' --repos 'a/b,'
+dev_refused 'too many sources' --sources "$(python3 -c 'print(",".join("s%d" % i for i in range(21)))')"
+contains "$ERR" 'at most 20 ids' 'developer sources cap named'
+dev_refused 'blank language' --language ''
+configure '{}'
+api_control '{"status":200,"body":{}}'
+run_keyless developer '' --json
+status_is 4 'developer empty query refused'
+no_api_calls 'developer empty query refused before the API'
+configure '{}'
+api_control '{"status":400,"body":{"success":false,"code":"BAD_REQUEST","error":"unknown type: bogus (expected doc, issue, pull_request, readme)"}}'
+run_keyless developer 'q' --json
+status_is 1 'developer API 400 is a vendor error'
+jcheck 'developer 400 envelope' "$OUT" "e=d['error']; assert e['code']==1 and e['http_status']==400 and 'unknown type: bogus' in e['message'] and 'firecrawl-cli developer --help' in e['next_action']"
+configure '{}'
+api_control '{"status":401,"body":{"success":false,"error":"Unauthorized: Invalid token"}}'
+run_api developer 'q' --json
+status_is 2 'developer keyed 401 is an auth failure'
+jcheck 'developer 401 envelope' "$OUT" "assert d['error']['code']=='auth_failure' and d['credits_spent']==0"
+contains "$ERR" 'credential source: env (FIRECRAWL_API_KEY)' 'developer 401 names the env source'
+omits "$OUT$ERR" "$API_KEY" 'developer key never printed on failure'
+configure '{}'
+api_control '{"status":200,"body":{"success":true,"partial":true,"results":[],"coverage":{"doc":"unavailable"}}}'
+run_keyless developer 'nothing' --json
+status_is 0 'developer empty results'
+contains "$ERR" 'hint: empty result' 'developer empty hint'
+# The developer category keeps its key requirement; the refusal now names the keyless verb.
+configure '{}'
+api_control '{"status":200,"body":{}}'
+run_cli search 'example query' --categories developer --json
+status_is 4 'developer category still needs a key'
+contains "$ERR" 'next: firecrawl-cli developer' 'developer category refusal names the verb'
+
+run_cli capabilities --json
+jcheck 'capabilities API-direct contract' "$OUT" "c=d['data']; assert c['api_direct_verbs']==['gov','developer'] and c['api_direct_paths']=={'gov':'/v2/search/gov','developer':'/v2/search/developer'}; assert c['gov_filters']['--court-type']=='courtType' and c['gov_filters']['--limit']=='k' and len(c['gov_court_types'])==11; assert c['developer_filters']['--min-stars']=='min_stars' and c['developer_filters']['--skills-only']=='skills' and c['developer_types']==['doc','issue','pull_request','readme']; assert c['verbs']['gov']['cost_class']=='free' and c['verbs']['developer']['cost_class']=='search'; assert {'--jurisdiction','--court','--court-type','--cites','--domain','--limit','--timeout','--full','-o'} <= set(c['verbs']['gov']['flags']); assert {'--types','--repos','--sources','--skills-only','--passages','--language','--topic','--license','--min-stars','--max-stars','--archived','--fork'} <= set(c['verbs']['developer']['flags']); assert any('API-direct' in w for w in c['warnings']) and not any('skills-only filter have no shaped' in w for w in c['warnings'])"
+contains "$(cd "$TMP/work" && HOME="$TMP/home" PATH="$TMP/bin" COLUMNS=400 "$CLI" gov --help)" 'legal advice' 'gov help carries the legal caveat'
+contains "$(cd "$TMP/work" && HOME="$TMP/home" PATH="$TMP/bin" COLUMNS=400 "$CLI" developer --help)" 'outside the ledger' 'developer help names the keyless rule'
+# The gov value flags are vendor 1.26.x flags; a value must never stand in for login.
+fixture scrape
+run_cli raw --json -- --jurisdiction us-ca login
+status_is 4 'raw denylist: gov value flag before login'
+no_calls 'raw denylist: gov value flag before login'
+contains "$ERR" 'account administration' 'raw denylist names the refusal after a gov flag'
+# The developer filters take a value in the wrapper; that value must never stand in for login.
+for flag in --types --repos --passages --language --topic --license --min-stars --max-stars --archived --fork; do
+  fixture scrape
+  run_cli raw --json -- "$flag" x login
+  status_is 4 "raw denylist: $flag before login"
+  no_calls "raw denylist: $flag before login"
+done
+
+# Free-first routing (#2118): a call whose keyed and keyless outputs were probed
+# equivalent tries Firecrawl's free keyless tier first and runs keyed once when it
+# refuses. FIRECRAWL_CLI_KEYLESS=1 turns the routing back on for these calls. The
+# env log records which credentials each vendor call saw, never their values.
+export FIRECRAWL_TEST_ENV_LOG="$TMP/env.jsonl"
+COOLDOWN="$TMP/home/.claude/state/firecrawl-cli/keyless-cooldown.json"
+# A placeholder claim link: the live refusal carries a per-install signup URL.
+REFUSAL="Error: You've hit Firecrawl's keyless free tier rate limit. To continue now, create a free API key at https://firecrawl.dev/k/placeholder-claim-id"
+REFUSED_RULE="{\"default\":{\"fixture\":\"scrape.json\",\"keyless\":{\"stderr_text\":\"$REFUSAL\",\"exit\":1}}}"
+API_REFUSAL="{\"status\":429,\"headers\":{\"Retry-After\":\"13600\"},\"body\":{\"success\":false,\"error\":\"$REFUSAL\",\"reason\":\"credits\",\"retry_after_seconds\":13600}}"
+kl_configure() { configure "$1"; : >"$FIRECRAWL_TEST_ENV_LOG"; }
+run_kl() {  # no key, the vendor's default API URL
+  ST=0
+  (cd "$TMP/work" && HOME="$TMP/home" PATH="$TMP/bin" FIRECRAWL_CLI_KEYLESS=1 "$CLI" "$@") >"$TMP/out" 2>"$TMP/err" || ST=$?
+  OUT=$(cat "$TMP/out") ERR=$(cat "$TMP/err")
+}
+run_kl_keyed() {  # a key, the vendor's default API URL
+  ST=0
+  (cd "$TMP/work" && HOME="$TMP/home" PATH="$TMP/bin" FIRECRAWL_CLI_KEYLESS=1 FIRECRAWL_API_KEY="$API_KEY" "$CLI" "$@") >"$TMP/out" 2>"$TMP/err" || ST=$?
+  OUT=$(cat "$TMP/out") ERR=$(cat "$TMP/err")
+}
+run_kl_api() {  # a key and the loopback API
+  ST=0
+  (cd "$TMP/work" && HOME="$TMP/home" PATH="$TMP/bin" FIRECRAWL_CLI_KEYLESS=1 FIRECRAWL_API_KEY="$API_KEY" FIRECRAWL_API_URL="http://127.0.0.1:$API_PORT" "$CLI" "$@") >"$TMP/out" 2>"$TMP/err" || ST=$?
+  OUT=$(cat "$TMP/out") ERR=$(cat "$TMP/err")
+}
+# [verb, saw a key, saw an API URL] per vendor call; credit-usage reads left out.
+env_seen() { python3 -c 'import json,os; print(json.dumps([[e["argv"][0],e["key"],e["url"]] for e in map(json.loads,open(os.environ["FIRECRAWL_TEST_ENV_LOG"])) if e["argv"][0]!="credit-usage"]))'; }
+api_auth() { python3 -c 'import json,os; print(json.dumps([json.loads(l)["authorization"] for l in open(os.environ["FIRECRAWL_API_TEST_LOG"])]))'; }
+cooldown_left() { python3 -c 'import json,sys,time; print(round(json.load(open(sys.argv[1]))["until"]-time.time()))' "$COOLDOWN" 2>&1; }
+no_cooldown() { [[ ! -e "$COOLDOWN" ]] && ok || bad "$1: cooldown armed"; }
+
+# No key: an eligible call is answered keyless, outside the ledger.
+kl_configure '{"default":{"fixture":"scrape.json"}}'
+run_kl fetch https://x --json
+status_is 0 'keyless fetch without a key'
+jcheck 'keyless fetch envelope' "$OUT" "assert d['ok'] and d['credits_spent']==0 and d['credits_remaining'] is None and d['budget_remaining']==$BASE; g=d['degraded']; assert len(g)==1 and g[0].startswith('keyless: answered by'), g; assert d['data']['markdown']=='# Example'"
+jcheck 'keyless fetch reads no credit-usage' "$(vendor_verbs)" "assert d==['scrape'], d"
+jcheck 'keyless leg saw no credentials' "$(env_seen)" "assert d==[['scrape',False,False]], d"
+run_kl fetch https://x
+status_is 0 'keyless plain fetch'
+jcheck 'keyless routing note keeps plain output bare' "$OUT" "assert 'ok' not in d and d['markdown']=='# Example'"
+# A key: eligible calls still go keyless first, with the key and the default URL stripped.
+kl_configure '{"default":{"fixture":"scrape.json"}}'
+run_kl_keyed fetch https://x --json
+status_is 0 'keyed eligible fetch runs keyless first'
+jcheck 'keyless-first envelope spends nothing' "$OUT" "assert d['ok'] and d['credits_spent']==0 and d['credits_remaining'] is None and d['budget_remaining']==$BASE; g=d['degraded']; assert len(g)==1 and g[0].startswith('keyless: answered by'), g"
+jcheck 'keyless-first reads no credit-usage' "$(vendor_verbs)" "assert d==['scrape'], d"
+jcheck 'keyless-first leg saw no key' "$(env_seen)" "assert d==[['scrape',False,False]], d"
+omits "$OUT$ERR" "$API_KEY" 'keyless-first never prints the key'
+kl_configure '{"default":{"fixture":"scrape.json"}}'
+ST=0
+(cd "$TMP/work" && HOME="$TMP/home" PATH="$TMP/bin" FIRECRAWL_CLI_KEYLESS=1 FIRECRAWL_API_KEY="$API_KEY" FIRECRAWL_API_URL=https://api.firecrawl.dev "$CLI" fetch https://x --json) >"$TMP/out" 2>"$TMP/err" || ST=$?
+status_is 0 'the default API URL stays keyless-eligible'
+jcheck 'keyless leg strips the default API URL' "$(env_seen)" "assert d==[['scrape',False,False]], d"
+kl_configure '{"default":{"fixture":"scrape-session.json"}}'
+run_kl_keyed fetch https://x --json
+jcheck 'keyless scrape id carries the interact caveat' "$OUT" "assert any(n.startswith('keyless: scrape_id comes from a keyless fetch') and 'FIRECRAWL_CLI_KEYLESS=0' in n for n in d['degraded']), d['degraded']"
+kl_configure '{"default":{"fixture":"scrape-session.json"}}'
+run_kl_keyed shot https://x --json
+jcheck 'only fetch carries the interact caveat' "$OUT" "assert d['ok'] and not any(n.startswith('keyless: scrape_id') for n in d['degraded']), d['degraded']"
+
+# Only the probed-equivalent shapes go keyless; everything else runs keyed as before.
+kl_shape() {
+  local label=$1 want=$2 fixture=$3; shift 3
+  kl_configure "{\"default\":{\"fixture\":\"$fixture.json\"}}"
+  run_kl_keyed "$@" --json
+  status_is 0 "shape $label"
+  jcheck "shape $label routed $want" "$(env_seen)" "assert d and d[0][1] is ('$want'=='keyed'), d"
+}
+kl_shape 'summary' keyless scrape fetch https://x
+kl_shape 'full markdown' keyless scrape fetch https://x --full
+kl_shape 'links,html' keyless scrape fetch https://x --format links,html
+kl_shape 'max-age 0' keyless scrape fetch https://x --max-age 0
+kl_shape 'rawHtml' keyed scrape fetch https://x --format rawHtml
+kl_shape 'summary,changeTracking' keyed scrape fetch https://x --format summary,changeTracking
+kl_shape 'shot' keyless scrape shot https://x
+kl_shape 'map' keyed map map https://x
+kl_shape 'schema' keyless scrape-json extract https://x --schema '{"type":"object"}'
+kl_shape 'schema plus markdown' keyed scrape-json extract https://x --schema '{"type":"object"}' --format markdown
+kl_shape 'question plus markdown' keyed scrape extract https://x -Q 'What is this page?' --format markdown
+kl_shape 'schema plus question' keyed scrape-json extract https://x --schema '{"type":"object"}' -Q 'What is this page?'
+kl_shape 'raw research help' keyed search-research raw -- research search-papers --help
+kl_shape 'raw research -h' keyed search-research raw -- research search-github -h
+kl_shape 'PDF summary' keyless parse fetch report.pdf
+kl_shape 'PDF markdown' keyless parse fetch report.pdf --full
+touch "$TMP/work/page.docx"
+kl_shape 'docx parse' keyed parse fetch page.docx
+kl_shape 'search' keyless search-id search 'example query'
+kl_shape 'search github,research web,images limit 10' keyless search-id search 'example query' --categories github,research --sources web,images --limit 10
+kl_shape 'search limit 11' keyed search-id search 'example query' --limit 11
+kl_shape 'search pdf category' keyed search-id search 'example query' --categories pdf
+kl_shape 'search news source' keyed search-id search 'example query' --sources news
+kl_configure '{"default":{"text":"Example Domain is a reserved page.\n","stderr_text":"Scrape ID: s-1\n"}}'
+run_kl_keyed extract https://x -Q 'What is this page?' --json
+status_is 0 'question alone keyless'
+jcheck 'question alone went keyless' "$(env_seen)" "assert d==[['scrape',False,False]], d"
+jcheck 'keyless question answer read as text' "$OUT" "assert d['data']=={'answer':'Example Domain is a reserved page.'} and d['credits_spent']==0"
+kl_configure '{"default":{"text":"Example Domain is a reserved page.\n"}}'
+run_kl_keyed extract report.pdf -Q 'What is this?' --json
+jcheck 'PDF question stays keyed' "$(env_seen)" "assert d==[['parse',True,False]], d"
+kl_configure '{"default":{"fixture":"search-id.json"}}'
+run_kl_keyed search 'example query' --json
+jcheck 'keyless search charges nothing' "$OUT" "assert d['ok'] and d['credits_spent']==0 and d['budget_remaining']==$BASE"
+kl_configure '{"default":{"fixture":"search-research.json"}}'
+run_kl_keyed raw --json -- research search-papers crispr
+status_is 0 'raw research search keyless'
+jcheck 'raw research keyless envelope' "$OUT" "assert d['ok'] and d['credits_spent']==0 and d['budget_remaining']==$BASE"
+jcheck 'raw research went keyless without a credit read' "$(vendor_verbs)" "assert d==['research'], d"
+kl_configure '{"default":{"fixture":"scrape.json"}}'
+run_kl_keyed raw --json -- scrape https://x
+status_is 0 'other raw stays keyed'
+jcheck 'other raw keyed after a credit read' "$(vendor_verbs)" "assert d[0]=='credit-usage' and 'scrape' in d, d"
+jcheck 'other raw keyed leg' "$(env_seen)" "assert d==[['scrape',True,False]], d"
+# Keyed developer goes keyless first only at the probed limit; without a key it always was.
+kl_configure '{}'
+api_control "{\"status\":200,\"body\":$(dev_body)}"
+run_kl_api developer 'tokio select cancellation safety' --limit 2 --json
+status_is 0 'keyed developer at limit 2 runs keyless first'
+jcheck 'keyless-first developer envelope' "$OUT" "assert d['credits_spent']==0 and d['budget_remaining']==$BASE and d['degraded']==[\"keyless developer search: account floor unchecked; Firecrawl's keyless allowance applies\"]"
+jcheck 'keyless-first developer sent no Bearer' "$(api_auth)" "assert d==[None], d"
+no_calls 'keyless-first developer never reads credit-usage'
+kl_configure '{}'
+api_control "{\"status\":200,\"body\":$(dev_body)}"
+run_kl_api developer 'tokio select cancellation safety' --limit 11 --json
+jcheck 'keyed developer past limit 10 stays keyed' "$(api_auth)" "assert d==['Bearer $API_KEY'], d"
+kl_configure '{}'
+api_control "{\"status\":200,\"body\":$(dev_body)}"
+run_kl_api developer 'tokio select cancellation safety' --limit 10 --json
+jcheck 'keyed developer at limit 10 runs keyless first' "$(api_auth)" "assert d==[None], d"
+kl_configure '{}'
+api_control "{\"status\":200,\"body\":$(cat "$TMP/fixtures/search-dev.json")}"
+run_kl_api search 'example query' --categories developer --limit 2 --json
+jcheck 'developer search category stays keyed' "$(api_auth)" "assert d==['Bearer $API_KEY'], d"
+
+# The keyless refusal: fall back keyed once, then hold eligible calls keyed.
+kl_configure "$REFUSED_RULE"
+run_kl_keyed fetch https://x --json
+status_is 0 'refused keyless leg falls back keyed'
+jcheck 'fallback ran keyless then keyed' "$(env_seen)" "assert d==[['scrape',False,False],['scrape',True,False]], d"
+jcheck 'keyless leg ran before the credit read' "$(vendor_verbs)" "assert d[:2]==['scrape','credit-usage'], d"
+jcheck 'fallback envelope names the refusal' "$OUT" "g=d['degraded']; assert d['ok'] and d['credits_spent']>0, d; assert g[0].startswith('keyless: keyless_rate_limited: ') and g[0].endswith('; ran keyed instead'), g; assert g[1].startswith('keyless: eligible calls run keyed until '), g"
+jcheck 'refusal arms the default hour' "$(cooldown_left)" "assert 3500<=d<=3600, d"
+omits "$OUT$ERR" 'placeholder-claim-id' 'fallback redacts the claim link'
+RESET_LEDGER=0
+kl_configure "$REFUSED_RULE"
+run_kl_keyed fetch https://x --json
+status_is 0 'cooldown runs eligible calls keyed'
+jcheck 'cooldown skips the keyless leg' "$(env_seen)" "assert d==[['scrape',True,False]], d"
+jcheck 'cooldown note names when keyless resumes' "$OUT" "assert d['degraded'][0].startswith('keyless: skipped, ran keyed: the free tier refused a call recently; it is tried again after '), d['degraded']"
+python3 -c 'import json,sys,time; json.dump({"until":time.time()-1},open(sys.argv[1],"w"))' "$COOLDOWN"
+kl_configure '{"default":{"fixture":"scrape.json"}}'
+run_kl_keyed fetch https://x --json
+jcheck 'expired cooldown tries keyless again' "$(env_seen)" "assert d==[['scrape',False,False]], d"
+printf '{"until": 1e18}' >"$COOLDOWN"
+kl_configure '{"default":{"fixture":"scrape.json"}}'
+run_kl_keyed fetch https://x --json
+jcheck 'a planted marker holds calls keyed six hours at most' "$OUT" "import time; from datetime import datetime; n=d['degraded'][0]; assert n.startswith('keyless: skipped'), n; assert datetime.fromisoformat(n.rsplit('after ',1)[1]).timestamp()<=time.time()+6*3600+60, n"
+printf '{"until": NaN}' >"$COOLDOWN"
+kl_configure '{"default":{"fixture":"scrape.json"}}'
+run_kl_keyed fetch https://x --json
+jcheck 'a non-finite marker is no cooldown' "$(env_seen)" "assert d==[['scrape',False,False]], d"
+RESET_LEDGER=1
+# The second target of a refused call runs keyed under the cooldown the first armed.
+kl_configure "$REFUSED_RULE"
+run_kl_keyed fetch https://x https://y --json
+status_is 0 'multi-target fallback'
+jcheck 'one keyless attempt per call' "$(env_seen)" "assert d==[['scrape',False,False],['scrape',True,False],['scrape',True,False]], d"
+# The API states its window: Retry-After and retry_after_seconds set the cooldown.
+kl_configure '{}'
+api_control "{\"status\":200,\"body\":$(dev_body),\"keyless\":$API_REFUSAL}"
+run_kl_api developer 'tokio select cancellation safety' --limit 2 --json
+status_is 0 'developer keyless 429 falls back keyed'
+jcheck 'developer fallback sent the Bearer second' "$(api_auth)" "assert d==[None,'Bearer $API_KEY'], d"
+jcheck 'developer fallback envelope' "$OUT" "g=d['degraded']; assert d['credits_spent']==2, d; assert g[0].startswith('keyless: keyless_rate_limited: ') and g[1].startswith('keyless: eligible calls run keyed until '), g; assert not any(n.startswith('keyless developer search') for n in g), g"
+jcheck 'API-stated window sets the cooldown' "$(cooldown_left)" "assert 13500<=d<=13600, d"
+omits "$OUT$ERR" 'placeholder-claim-id' 'API refusal redacts the claim link'
+omits "$OUT$ERR" "$API_KEY" 'developer fallback never prints the key'
+# A stated window past six hours is capped when armed, in the marker and the note.
+kl_configure '{}'
+api_control "{\"status\":200,\"body\":$(dev_body),\"keyless\":${API_REFUSAL//13600/1000000}}"
+run_kl_api developer 'tokio select cancellation safety' --limit 2 --json
+status_is 0 'long stated window falls back keyed'
+jcheck 'long stated window armed at the cap' "$(cooldown_left)" "assert 21500<=d<=21600, d"
+jcheck 'long stated window note names the capped time' "$OUT" "import time; from datetime import datetime; n=d['degraded'][1]; assert n.startswith('keyless: eligible calls run keyed until '), n; assert datetime.fromisoformat(n.rsplit('until ',1)[1]).timestamp()<=time.time()+6*3600+60, n"
+# A key-shaped failure falls back without arming: it may be one combination's limit.
+for status in 401 402 429; do
+  case "$status" in
+    401) tag=auth_failure body='{"success":false,"error":"Unauthorized: Invalid token"}' ;;
+    402) tag=quota_exhausted body='{"success":false,"error":"Insufficient credits to perform this request."}' ;;
+    429) tag=rate_limited body='{"success":false,"error":"Rate limit exceeded. Consumed (req/min): 61"}' ;;
+  esac
+  kl_configure '{}'
+  api_control "{\"status\":200,\"body\":$(dev_body),\"keyless\":{\"status\":$status,\"body\":$body}}"
+  run_kl_api developer 'tokio select cancellation safety' --limit 2 --json
+  status_is 0 "keyless $status falls back keyed"
+  jcheck "keyless $status then keyed" "$(api_auth)" "assert d==[None,'Bearer $API_KEY'], d"
+  jcheck "keyless $status fallback note" "$OUT" "g=[n for n in d['degraded'] if n.startswith('keyless: ')]; assert len(g)==1 and g[0].startswith('keyless: $tag: '), g"
+  no_cooldown "keyless $status"
+done
+kl_configure '{"default":{"fixture":"scrape.json","keyless":{"fixture":"login-menu.txt"}}}'
+run_kl_keyed fetch https://x --json
+status_is 0 'keyless login menu falls back keyed'
+jcheck 'login menu fallback note' "$OUT" "assert d['degraded'][0].startswith('keyless: credentials_missing: '), d['degraded']"
+no_cooldown 'keyless login menu'
+# Anything else raises as-is; the keyed leg never runs.
+kl_configure '{}'
+api_control "{\"status\":200,\"body\":$(dev_body),\"keyless\":{\"status\":503,\"body\":{\"success\":false,\"error\":\"Service Unavailable\"}}}"
+run_kl_api developer 'tokio select cancellation safety' --limit 2 --json
+status_is 2 'keyless 503 raises'
+jcheck 'keyless 503 envelope' "$OUT" "assert d['error']['code']=='provider_failure' and d['credits_spent']==0, d"
+jcheck 'keyless 503 ran no keyed leg' "$(api_auth)" "assert d==[None], d"
+no_calls 'keyless 503 read no credit-usage'
+for name in injected unsupported malformed; do
+  case "$name" in
+    injected) want=1 tag=injection_blocked rule='{"fixture":"injected.json","stderr_text":"HTTP 403","exit":1}' ;;
+    unsupported) want=1 tag=unsupported_site rule='{"stderr_text":"Error: We do not support this site","exit":1}' ;;
+    malformed) want=2 tag=vendor_output_changed rule='{"text":"not json"}' ;;
+  esac
+  kl_configure "{\"default\":{\"fixture\":\"scrape.json\",\"keyless\":$rule}}"
+  run_kl_keyed fetch https://x --json
+  status_is "$want" "keyless $name raises"
+  jcheck "keyless $name envelope" "$OUT" "assert d['error']['code']=='$tag', d['error']"
+  jcheck "keyless $name ran no keyed leg" "$(vendor_verbs)" "assert d==['scrape'], d"
+  no_cooldown "keyless $name"
+done
+
+# Without a key keyless is the only leg: its refusal exits 1 and names the key.
+kl_configure "$REFUSED_RULE"
+run_kl fetch https://x --json
+status_is 1 'no-key keyless refusal exits 1'
+jcheck 'no-key refusal envelope' "$OUT" "e=d['error']; assert e['code']=='keyless_rate_limited', e; assert 'FIRECRAWL_API_KEY' in e['next_action'] and 'retry keyless after about ' in e['next_action'], e"
+contains "$ERR" 'keyless free tier refused the call' 'no-key refusal named'
+omits "$OUT$ERR" 'placeholder-claim-id' 'no-key refusal redacts the claim link'
+jcheck 'no-key refusal arms the cooldown' "$(cooldown_left)" "assert 3500<=d<=3600, d"
+RESET_LEDGER=0
+kl_configure "$REFUSED_RULE"
+run_kl fetch https://x --json
+status_is 1 'no-key call during the cooldown'
+jcheck 'the cooldown never blocks a call with no key' "$(env_seen)" "assert d==[['scrape',False,False]], d"
+RESET_LEDGER=1
+kl_configure "$REFUSED_RULE"
+run_kl fetch https://x https://y --json
+jcheck 'a refused call sends no second keyless request' "$(env_seen)" "assert d==[['scrape',False,False]], d"
+jcheck 'the later target names the earlier refusal' "$OUT" "i=d['data']['items']; assert [x['ok'] for x in i]==[False,False], i; assert i[1]['error']['code']=='keyless_rate_limited' and 'not sent' in i[1]['error']['message'], i"
+# A marker that cannot be written costs a later refused attempt, never this call.
+kl_configure "$REFUSED_RULE"
+run_cli budget --json
+mkdir "$COOLDOWN"
+run_kl fetch https://x --json
+status_is 1 'unrecorded cooldown still reports the refusal'
+jcheck 'unrecorded cooldown is named' "$OUT" "assert any(n.startswith('keyless: cooldown not recorded: ') for n in d['degraded']), d['degraded']"
+rmdir "$COOLDOWN"
+# Unrecorded, the cooldown still holds the same call's later targets keyed.
+kl_configure "$REFUSED_RULE"
+run_cli budget --json
+mkdir "$COOLDOWN"
+run_kl_keyed fetch https://x https://y --json
+status_is 0 'unrecorded cooldown multi-target fallback'
+jcheck 'unrecorded cooldown sends one keyless request per call' "$(env_seen)" "assert d==[['scrape',False,False],['scrape',True,False],['scrape',True,False]], d"
+rmdir "$COOLDOWN"
+
+# Routing stays off for the opt-out, a stored vendor login, and a custom API URL.
+kl_configure '{"default":{"fixture":"scrape.json"}}'
+ST=0
+(cd "$TMP/work" && HOME="$TMP/home" PATH="$TMP/bin" FIRECRAWL_CLI_KEYLESS=OFF FIRECRAWL_API_KEY="$API_KEY" "$CLI" fetch https://x --json) >"$TMP/out" 2>"$TMP/err" || ST=$?
+status_is 0 'opt-out runs keyed'
+jcheck 'opt-out skips the keyless leg' "$(env_seen)" "assert d==[['scrape',True,False]], d"
+mkdir -p "$TMP/home/.config/firecrawl-cli"
+printf '{}' >"$TMP/home/.config/firecrawl-cli/credentials.json"
+kl_configure '{"default":{"fixture":"scrape.json"}}'
+run_kl_keyed fetch https://x --json
+jcheck 'a stored vendor login keeps vendor calls keyed' "$(env_seen)" "assert d==[['scrape',True,False]], d"
+rm -r "$TMP/home/.config/firecrawl-cli"
+kl_configure '{"default":{"fixture":"scrape.json"}}'
+run_kl_api fetch https://x --json
+jcheck 'a custom API URL keeps vendor calls keyed' "$(env_seen)" "assert d==[['scrape',True,True]], d"
+# A keyed fallback the budget refuses says both legs failed, and keeps the cooldown.
+kl_configure '{"credit-usage":{"remaining":[-384]}}'
+api_control "{\"status\":200,\"body\":$(dev_body),\"keyless\":$API_REFUSAL}"
+run_kl_api developer 'axum middleware ordering' --limit 2 --json
+status_is 3 'refused keyless and refused keyed exits 3'
+jcheck 'both legs named' "$(error_json)" "e=d['error']; assert e['message'].startswith('keyless leg unavailable, and the keyed fallback was refused: '), e; assert 'has -384 credits' in e['message'], e; assert 'env -u FIRECRAWL_API_KEY' not in e['next_action'], e; assert d['degraded'][0].startswith('keyless: keyless_rate_limited: '), d['degraded']"
+jcheck 'cooldown survives the keyed refusal' "$(cooldown_left)" "assert 13500<=d<=13600, d"
+jcheck 'the refused keyed leg never reached the API' "$(api_auth)" "assert d==[None], d"
+# The contract names free-first routing, its opt-out, and the keyed developer limit.
+run_cli capabilities --json
+jcheck 'capabilities free-first contract' "$OUT" "w=[x for x in d['data']['warnings'] if x.startswith('free-first')]; assert len(w)==1, w; assert 'FIRECRAWL_CLI_KEYLESS=0' in w[0] and 'keyless_cooldown' in w[0] and 'scrape_id' in w[0], w; assert d['data']['budget_environment']['keyless_cooldown']=='FIRECRAWL_CLI_KEYLESS_COOLDOWN', d['data']['budget_environment']; assert any('limit 10 or less goes keyless first' in x for x in d['data']['warnings'])"
+run_cli --help
+contains "$OUT" 'FIRECRAWL_CLI_KEYLESS=0' 'root help names free-first and its opt-out'
+unset FIRECRAWL_TEST_ENV_LOG
 
 printf '%s passed, %s failed\n' "$pass" "$fail"
 [[ "$fail" -eq 0 ]]

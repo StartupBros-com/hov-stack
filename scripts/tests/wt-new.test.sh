@@ -22,7 +22,7 @@ set -uo pipefail
 
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)   # scripts
 SCRIPT="$HERE/wt-new.sh"
-TMP=$(mktemp -d)
+TMP=$(mktemp -d) || exit 1
 trap 'chmod -R u+w "$TMP" 2>/dev/null; rm -rf "$TMP"' EXIT
 
 # wt-new.sh's stamp_pr_pending() writes to $HOME/.claude/logs/session-prs.jsonl
