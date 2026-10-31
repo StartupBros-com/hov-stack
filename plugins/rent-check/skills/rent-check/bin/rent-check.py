@@ -247,7 +247,7 @@ def vcs_status(path: Path) -> dict[str, str]:
     invisible to teammates, clean checkouts, and CI -- so it freezes while
     its tracked twin keeps moving. Measured: better-ccflare's AGENTS.md sat
     gitignored at 4 commits while CLAUDE.md reached 91, and drifted into
-    naming a mode the CLI does not accept. will-os carries the same shape.
+    naming a mode the CLI does not accept. A second audited repo carried the same shape.
 
     `ignored` is reported separately from `tracked` because the pair
     distinguishes a deliberate local-only file (ignored) from one nobody ever

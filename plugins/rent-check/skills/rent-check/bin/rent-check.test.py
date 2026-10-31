@@ -168,7 +168,7 @@ class TestCheckoutFreshness(TempTree):
         origin.mkdir()
         self.git("init", "-q", "--bare", cwd=origin) if False else None
         subprocess.run(["git", "init", "-q", str(origin)], check=True, capture_output=True)
-        self.git("config", "user.email", "t@e.com", cwd=origin)
+        self.git("config", "user.email", "t@example.com", cwd=origin)
         self.git("config", "user.name", "t", cwd=origin)
         (origin / "AGENTS.md").write_text("# v1\n", encoding="utf-8")
         self.git("add", "AGENTS.md", cwd=origin)
@@ -213,7 +213,7 @@ class TestCheckoutFreshness(TempTree):
     def test_no_upstream_is_its_own_state(self) -> None:
         # Legitimate (detached HEAD, local-only branch) but unjudgeable.
         subprocess.run(["git", "init", "-q", str(self.root)], check=True, capture_output=True)
-        self.git("config", "user.email", "t@e.com")
+        self.git("config", "user.email", "t@example.com")
         self.git("config", "user.name", "t")
         self.write("AGENTS.md", "# local only\n")
         self.git("add", "AGENTS.md")
