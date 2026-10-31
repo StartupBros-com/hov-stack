@@ -39,6 +39,8 @@
 ^hooks/tests/git-guard\.test\.js$	^cursoragent@[c]ursor\.com$	the git-guard test's assistant-vendor trailer case	email
 ^hooks/tests/git-guard\.test\.js$	^devin@[c]ognition\.ai$	the git-guard test's vendor-domain trailer case	email
 ^hooks/tests/git-guard\.test\.js$	^yesreply@[h]appy\.engineering$	the git-guard test's vendor-domain trailer case	email
-^plugins/memory-dream/pyproject\.toml$	^hello@[h]ouseofvibe\.ai$	the package metadata's published contact, the product's role mailbox, already public in the standalone repo; not a person's address	email
+^plugins/(memory-dream|papercut)/pyproject\.toml$	^hello@[h]ouseofvibe\.ai$	the package metadata's published contact, the product's role mailbox, already public in the standalone repo; not a person's address	email
 ^tests/vastai\.test\.sh$	^root@ssh5\.[v]ast\.ai$	the vastai wrapper test asserts on the vendor's documented SSH proxy login form, the behaviour under test	email
 ^windows/ssh-config$	config\.[l]ocal	an ssh Include of a per-machine file, not a host	private-host
+^plugins/papercut/tests/hooks/papercut-log\.test\.js$	^s3cr3tp4ssw0rd@db\.[i]nternal$	the redaction test feeds a fake credential URI through redact() and asserts the password is gone; the user:pass@host form reads as an email	email
+^plugins/papercut/tests/hooks/papercut-log\.test\.js$	^db\.[i]nternal$	the same fake credential URI's host	private-host
