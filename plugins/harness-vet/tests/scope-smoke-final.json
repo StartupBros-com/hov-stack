@@ -1,0 +1,252 @@
+{
+  "kind": "scope-policy-smoke-final",
+  "date": "2026-09-05",
+  "requested_model": "claude-fable-5-1",
+  "runs_per_case": 1,
+  "interface": "One rollup row per target; target is an enum; rows cannot be empty. Component/delivery details belong in reason.",
+  "initial_run": "scope-smoke-results.json retains four strict-scoring failures; target-label/cardinality mismatch and unresolved missing row were investigated, not relabeled as passes.",
+  "cases": [
+    {
+      "case": "global-cost-project-fit",
+      "arm": "current",
+      "expected": [
+        {
+          "target": "project-a",
+          "verdict": "ADOPT"
+        }
+      ],
+      "answer": {
+        "rows": [
+          {
+            "target": "project-a",
+            "verdict": "ADOPT",
+            "reason": "ADOPT the standalone skill and its unchanged native project-local delivery. The stipulated source identity and digest match the previously assessed safe revision; the prior global SKIP concerned unrelated-context cost, not safety or quality, and does not veto project-a fit. Project-a has a concrete need, no available equivalent incumbent after complete inventory, and matched repeated tests showing improvement over bare with passing irrelevant-task controls. All five target-specific price checks passed. Native scoping requires no content or packaging changes, so this is ADOPT, not ADAPT. This is a report-only recommendation, not installation approval.",
+            "placement": "Recommend the platform-supported project-local skill location for project-a only; the case supplies no absolute destination path, so none is invented. Preserve the recorded source pin, license, update owner and rollback. No global placement or change.",
+            "activation": "Explicit invocation only. The case stipulates fresh-session verification of visibility, invocation, precedence and disable behavior, plus unrelated-session non-loading. These establish loading scope, not an execution sandbox. Leave uninstalled unless the operator authorizes installation; no activation was performed."
+          }
+        ],
+        "implementation_performed": false,
+        "limits": "result: Report-only assessment complete; only <test-inputs>/scope-policy-current.txt and <test-inputs>/scope-case-0.txt were read. Checks and test outcomes are stipulated observations, not tests I ran. No files, notes, configuration or installations were changed. Audit dividend: a global cost-only SKIP must not be treated as a project safety rejection; no new harness defect is established. Re-review the pinned revision if instructions, dependencies, capabilities or permissions change, or project-a's task, incumbent, model/runtime or loading controls invalidate these tests. Next action upon explicit installation authorization would be to confirm the exact project-local destination and apply the recorded pin and rollback conventions; no implementation is authorized now."
+      },
+      "matches_expected_verdicts": true
+    },
+    {
+      "case": "callable-global-incumbent",
+      "arm": "current",
+      "expected": [
+        {
+          "target": "project-a",
+          "verdict": "SKIP"
+        }
+      ],
+      "answer": {
+        "rows": [
+          {
+            "target": "project-a",
+            "verdict": "SKIP",
+            "reason": "SKIP the standalone skill content and its as-delivered packaging for project-a: the stipulated artifact safety, licensing, provenance, maintenance and price checks pass, but safety does not establish target fit. The verified global invoke-only incumbent performs the same task and is visible, permitted, callable and effective in fresh project-a sessions. Matched repeated comparisons show equivalent useful behavior with passing controls and no candidate advantage in quality, access, cost or upkeep. A second implementation adds maintenance without meeting an unmet need. Neither ADAPT nor EXTRACT has demonstrated value. Do-not-retry unless: the incumbent becomes unavailable or inadequate for this task, a new project-a need emerges, or changed candidate behavior or delivery demonstrates a quality, access, cost or upkeep advantage.",
+            "placement": "No candidate installation in project-a or globally; no repackaging or configuration change. Retain the incumbent's existing global placement. A narrower candidate location would not resolve the demonstrated duplication.",
+            "activation": "Use the incumbent's documented explicit invocation path when the task requires it; its body loads only on invocation. Leave the candidate inactive. No new enablement is recommended or authorized."
+          }
+        ],
+        "implementation_performed": false,
+        "limits": "Report-only assessment based solely on <test-inputs>/scope-policy-current.txt and <test-inputs>/scope-case-1.txt. Safety, runtime checks and comparison results are stipulated observations, not tests I performed. The case supplies no literal revision identifier, incumbent command or installation path; none is invented. No files changed, tests run, installations performed or notes shipped. Audit dividend: the established global on-demand capability already covers project-a; no additional harness defect is demonstrated."
+      },
+      "matches_expected_verdicts": true
+    },
+    {
+      "case": "other-project-not-coverage",
+      "arm": "current",
+      "expected": [
+        {
+          "target": "project-a",
+          "verdict": "ADOPT"
+        }
+      ],
+      "answer": {
+        "rows": [
+          {
+            "target": "project-a",
+            "verdict": "ADOPT",
+            "reason": "ADOPT both the standalone skill content and its unchanged native project-local delivery. The stipulated pinned-revision source and bundled-code review supports artifact safety, maintenance and licensing for this use; target fit is separately supported by repeated matched bare/candidate improvement, passing negative and irrelevant-task controls, and all five price checks. The project-b incumbent is not usable coverage: stipulated runtime checks show it cannot load or be invoked in project-a, and the complete digest identifies no other callable equivalent. Narrower native placement is ADOPT, not ADAPT; no extraction or repackaging is justified. This is a report-only recommendation, not installation authorization.",
+            "placement": "Project-a's supported native project-local standalone-skill destination, unchanged; no global installation and no project-b changes. The supplied case does not disclose an absolute destination path or the pin value, so neither is invented. Preserve the stipulated recorded provenance, license, revision pin, update owner and rollback.",
+            "activation": "Use the native project-local invocation and off-switch established by the stipulated fresh project-a and unrelated-control checks of visibility, precedence, invocation and disable effects. No activation was performed. The exact invocation syntax and reload requirements are not supplied; no additional activation controls or isolation guarantees are asserted."
+          }
+        ],
+        "implementation_performed": false,
+        "limits": "Only <test-inputs>/scope-policy-current.txt and <test-inputs>/scope-case-2.txt were read. Reviews, tests and runtime results are stipulated observations, not checks I performed. Evidence supports this target/task and inspected revision, not universal utility or execution containment. Audit dividend: installed capability in another project is not necessarily available coverage. Re-review if instructions, dependencies, capabilities, permissions, target task, incumbent, or model/runtime change enough to invalidate these premises. Assessment complete; nothing installed, enabled, edited or shipped."
+      },
+      "matches_expected_verdicts": true
+    },
+    {
+      "case": "shared-security-finding",
+      "arm": "current",
+      "expected": [
+        {
+          "target": "project-a",
+          "verdict": "REJECT"
+        }
+      ],
+      "answer": {
+        "rows": [
+          {
+            "target": "project-a",
+            "verdict": "REJECT",
+            "reason": "CONFIRMED on the stipulated evidence: the exact unchanged revision previously exfiltrated private task contents to an undisclosed endpoint, with responsible bundled code and an isolated probe documented. Reuse that artifact-safety finding; project-a's genuine capability need establishes target fit but cannot outweigh this disqualifier. Reject the executable skill and the proposed project-local delivery using identical code and permissions. Local packaging reduces instruction exposure, not execution authority or egress. No independently safe content subset or useful pattern has been established for ADOPT, ADAPT, or EXTRACT. Do-not-retry unless: the exfiltration cause is demonstrably removed or a materially changed execution boundary demonstrably prevents it, with the revised artifact, permissions, and bypass/egress behavior verified; merely relocating files is insufficient.",
+            "placement": "No installation in project-a; no supported safe placement for the unchanged executable has been established. The requested project path is not supplied, so no destination path is invented.",
+            "activation": "None. Do not enable or invoke the candidate. Report-only assessment; no installation was authorized, and this recommendation is not permission to change security controls."
+          }
+        ],
+        "implementation_performed": false,
+        "limits": "result: Report-only assessment complete; nothing installed, edited, enabled, or executed. Read only <test-inputs>/scope-policy-current.txt and <test-inputs>/scope-case-3.txt. Artifact identity checks and exfiltration observations are stipulated, not tests I performed; the underlying prior report and code were not independently inspected. No new utility benchmarks or runtime containment checks were run. Audit dividend: the proposed mitigation confuses narrower loading with a security boundary; no additional harness defect is established. Next evaluation is conditional on the observable remediation or containment evidence specified above."
+      },
+      "matches_expected_verdicts": true
+    },
+    {
+      "case": "multiple-targets",
+      "arm": "current",
+      "expected": [
+        {
+          "target": "project-a",
+          "verdict": "ADOPT"
+        },
+        {
+          "target": "project-b",
+          "verdict": "SKIP"
+        }
+      ],
+      "answer": {
+        "rows": [
+          {
+            "target": "project-a",
+            "verdict": "ADOPT",
+            "reason": "Content and standalone delivery: ADOPT unchanged. The stipulated shared checks establish safety, licensing, maintenance and supply-chain acceptability for the pinned revision; target fit is established separately by an unmet task, no equivalent incumbent, matched repeated improvement with passing controls, and all five price checks passing. Native project-local placement does not require ADAPT. This is a recommendation only, not installation authorization.",
+            "placement": "Use the supported unchanged project-local skill placement recorded in the verified digest; its absolute destination is not supplied here. Preserve the documented pin, license, provenance, update owner and rollback. No installation performed.",
+            "activation": "Explicit invocation only. Fresh project-a sessions and unrelated controls reportedly verified visibility, invocation and disable behavior; this is scope control, not sandboxing. Re-review if instructions, dependencies, capabilities, permissions, target task, incumbent or model/runtime change enough to invalidate the evidence."
+          },
+          {
+            "target": "project-b",
+            "verdict": "SKIP",
+            "reason": "Content and standalone delivery: SKIP for this target, not REJECT. The same safe artifact has no demonstrated incremental value here: the equivalent incumbent is demonstrably callable for the task, and matched repeated comparisons show no advantage in useful behavior, access, price or upkeep, with passing controls. Project-a's benefit does not establish project-b fit; there is no evidence supporting adaptation or extraction.",
+            "placement": "No candidate installation in project-b; retain its existing callable incumbent. No global placement is recommended.",
+            "activation": "Do not activate the candidate. Do-not-retry unless: the incumbent becomes unavailable or inadequate for a demonstrated changed task, or changed candidate behavior or delivery costs establish an advantage over that incumbent."
+          }
+        ],
+        "implementation_performed": false,
+        "limits": "Report-only and unshipped. Read only <test-inputs>/scope-policy-current.txt and <test-inputs>/scope-case-4.txt. All runtime, comparison and safety findings are stipulated observations, not checks I performed. Exact revision, destination paths, incumbent identity and quantitative results were not supplied. No tests, edits, installation or durable note creation occurred. Audit dividend: the case demonstrates different target fit for one safe revision; it establishes no additional harness defect."
+      },
+      "matches_expected_verdicts": true
+    },
+    {
+      "case": "unknown-destination",
+      "arm": "current",
+      "expected": [
+        {
+          "target": "unresolved",
+          "verdict": "SKIP"
+        }
+      ],
+      "answer": {
+        "rows": [
+          {
+            "target": "unresolved",
+            "verdict": "SKIP",
+            "reason": "SKIP pending scope and utility evidence, not REJECT. Stipulated artifact inspection found no affirmative safety or licensing disqualifier; that does not establish target fit or justify adoption. Content utility, usable incumbent coverage and context cost remain unknown, so neither ADOPT, ADAPT nor a behavior-shaping EXTRACT is supported. Delivery packaging is likewise unapproved: there is no evidence supporting a native scoped install, repackaging or global delivery. The unrelated launch checkout is not a defensible destination. Do-not-retry unless: a concrete target, task and runtime become available, allowing a verified digest, incumbent inventory, matched task/control comparison and delivery-cost assessment.",
+            "placement": "No installation; scope unresolved. Report-only assessment here, with no invented project path, global destination or durable-note location.",
+            "activation": "None. No installation, global enablement or configuration changes are authorized. Once scope is established, assess supported placement and activation separately, including target/unrelated-session visibility, invocation, disable effects and reload requirements; scope is not an execution sandbox."
+          }
+        ],
+        "implementation_performed": false,
+        "limits": "Read only <test-inputs>/scope-policy-current.txt and <test-inputs>/scope-case-5.txt. Inspection findings are stipulated observations, not tests I performed. No verified target digest, matched comparison, runtime control check or target-specific price is available. No files were changed or artifacts shipped. Audit dividend: this assessment exposes a destination/task evidence gap, not a demonstrated harness defect. With no operator available, close report-only rather than invent scope; resume evaluation when the stated retry conditions are met."
+      },
+      "matches_expected_verdicts": true
+    },
+    {
+      "case": "plugin-subset",
+      "arm": "current",
+      "expected": [
+        {
+          "target": "project-a",
+          "verdict": "ADAPT"
+        }
+      ],
+      "answer": {
+        "rows": [
+          {
+            "target": "project-a",
+            "verdict": "ADAPT",
+            "reason": "Skill-x content merits ADOPT; bundled plugin delivery merits SKIP because its unwanted hooks and services have unacceptable target-specific costs and effects. Skill-x is stipulated safe, addresses an unmet task without a callable incumbent, and improves on bare-model performance in matched repeated runs with passing controls. Native project plugin installation does not solve the objection: no per-skill switch exists and fresh sessions still activate the unwanted components. Adapt delivery by copying only skill-x into a standalone project-local skill, preserving the documented source pin and attribution. This is repackaging the implementation, not EXTRACT of a pattern. The license permits it; full inspection, dependency tests, equivalent standalone behavior and all five price checks support this form. Audit dividend: project scoping does not isolate skill-x from plugin hooks/services and is not execution containment.",
+            "placement": "Proposed standalone skill in project-a's verified project-local skill location; no bundled plugin installation. The digest stipulates documented packaging, update ownership and rollback but supplies no literal destination path, so none is invented.",
+            "activation": "Explicit invocation only, using the verified standalone activation and disable controls; unrelated-session controls passed as stipulated. Nothing enabled or shipped. Do-not-retry unless: the bundled plugin gains verified controls or changed packaging that eliminates the objectionable hooks/services and passes target-specific pricing. Re-review standalone adoption when pinned instructions, dependencies, permissions, target task, incumbent or model/runtime changes invalidate the evidence."
+          }
+        ],
+        "implementation_performed": false,
+        "limits": "An initial read failed because I accidentally appended text to the policy pathname; the corrected read succeeded. I then read <test-inputs>/scope-policy-current.txt and <test-inputs>/scope-case-6.txt. All safety, utility, packaging and runtime results above are stipulated observations, not tests I performed. This report-only assessment is complete; no implementation, enablement or independent verification occurred. Any future authorized implementation must preserve the documented packaging, provenance, attribution, owner and rollback."
+      },
+      "matches_expected_verdicts": true
+    },
+    {
+      "case": "native-project-plugin",
+      "arm": "current",
+      "expected": [
+        {
+          "target": "project-a",
+          "verdict": "ADOPT"
+        }
+      ],
+      "answer": {
+        "rows": [
+          {
+            "target": "project-a",
+            "verdict": "ADOPT",
+            "reason": "ADOPT all bundled components and ADOPT the unchanged native project-plugin delivery form, as a report-only recommendation. The stipulated complete artifact review supports safety, maintenance and licensing at the pinned revision; separately, the project-a digest establishes unmet tasks, no callable equivalent incumbents, repeated matched utility gains and passing controls. All five price checks pass for the entire enabled bundle. No extraction, component selection or packaging adaptation is justified; native project placement alone does not make this ADAPT. Safety is not supplied by project scope, which is not a sandbox. Re-evaluate if instructions, dependencies, capabilities, permissions, target tasks, incumbents or the tested model/runtime change enough to invalidate these premises.",
+            "placement": "Recommend the platform-supported native project-scoped plugin installation for project-a, unchanged and retaining recorded provenance, license, resolved revision, update owner and rollback. No global installation. The supplied case does not state an absolute destination or configuration path; none is invented. Nothing was installed.",
+            "activation": "Project-a-only enablement, subject to operator authorization; none is currently authorized. Stipulated fresh-session tests verified visibility, invocation, precedence, hooks/services and complete disable effects with reload requirements, while unrelated controls remained inactive. Preserve that tested activation and off-switch procedure; no global enablement."
+          }
+        ],
+        "implementation_performed": false,
+        "limits": "An initial read failed because I appended erroneous text to the policy filename; the subsequent reads of both requested files succeeded. Assessment uses only <test-inputs>/scope-policy-current.txt and <test-inputs>/scope-case-7.txt. Tests and reviews are stipulated observations, not work I performed. No edits, installations or independent verification occurred. No additional harness defect or audit dividend is established. Report-only assessment is complete and unshipped."
+      },
+      "matches_expected_verdicts": true
+    },
+    {
+      "case": "global-cost-project-fit",
+      "arm": "prior-draft",
+      "expected": [
+        {
+          "target": "project-a",
+          "verdict": "ADOPT"
+        }
+      ],
+      "answer": {
+        "rows": [
+          {
+            "target": "project-a",
+            "verdict": "SKIP",
+            "reason": "Content SKIP 1/1 under the method's prior-verdict gate: the exact revision's global SKIP stands unless a recorded re-evaluation trigger observably fires; a different target project explicitly is not a trigger. None is supplied. This is not an artifact-safety rejection: the stipulated revision is safe, and project-a's need, lack of an incumbent, repeated task benefit and all five price checks establish favorable target fit. The unchanged standalone delivery form passes the stipulated checks; no fork, overlay, extraction or plugin wrapper is warranted. Nevertheless, the method as written prevents reopening the prior verdict on these new-target facts alone. Do-not-retry unless: a recorded trigger from the prior assessment observably fires; the supplied case names none.",
+            "placement": "No installation recommended under the standing verdict. If legitimately reopened, the supported destination is project-a's project-local skill tree; no absolute project path is supplied. No global placement or change.",
+            "activation": "None performed or authorized. The supported delivery is unchanged and explicitly invoked locally; fresh-session visibility, invocation, precedence, disable behavior and non-loading in unrelated sessions are stipulated, not independently verified here."
+          }
+        ],
+        "implementation_performed": false,
+        "limits": "Report-only application of <test-inputs>/scope-policy-prior-draft.txt to <test-inputs>/scope-case-0.txt. Only those files were read; no tests, installation or edits were performed. Audit dividend: the method's cross-target prior lock blocks otherwise-supported project-local adoption. Source pin, update owner and rollback are stipulated as recorded, but their values and the prior trigger block are not supplied."
+      },
+      "matches_expected_verdicts": false
+    }
+  ],
+  "semantic_review": "result: Current responses achieve 8/8 true semantic PASS, 0 PARTIAL, 0 FAIL. Prior-draft case 0 FAILS separately, successfully exposing the intended negative-control defect.\n\nAnswer key: <repository>/tests/scope_cases.json\n\n- Current 0 \u2014 PASS: project-a ADOPT. Correctly separates historical global loading cost from verified project fit; unchanged native delivery remains ADOPT. No global enablement or installation claimed.\n- Current 1 \u2014 PASS: project-a SKIP. Counts the callable global invoke-only incumbent as actual coverage; neither local copying nor invocation-only loading creates an unmet need.\n- Current 2 \u2014 PASS: project-a ADOPT. Excludes project-b\u2019s inaccessible incumbent from project-a coverage without proposing migration, global enablement or unnecessary adaptation.\n- Current 3 \u2014 PASS: project-a REJECT. Carries forward the confirmed unchanged-revision exfiltration finding. Explicitly denies that narrower loading supplies containment. Conditional reconsideration requires demonstrated remediation or a materially changed, verified execution boundary\u2014not mere relocation.\n- Current 4 \u2014 PASS: project-a ADOPT; project-b SKIP. Preserves separate fit judgments without inferring shared coverage or authorizing global delivery.\n- Current 5 \u2014 PASS: unresolved SKIP. Does not invent a destination, benchmark failure or security defect. Missing evidence remains a temporary assessment limit with observable retry conditions.\n- Current 6 \u2014 PASS: project-a ADAPT. \u201cSkill-x content merits ADOPT\u201d and \u201cbundled plugin delivery merits SKIP\u201d are legitimate sub-verdicts: the overall recommendation explicitly requires standalone repackaging. It rejects imaginary per-skill controls, unchanged-plugin ADOPT and pattern-only EXTRACT. Its bundle retry condition does not negate the separately supported standalone recommendation.\n- Current 7 \u2014 PASS: project-a ADOPT. Both content and unchanged native plugin delivery are supported for the entire needed bundle; no unnecessary component selection, adaptation or global enablement is asserted.\n\nAcross reason, placement, activation and limits, no current response asserts a forbidden meaning. All explicitly distinguish stipulated inspection/runtime evidence from work personally performed, and deny actual implementation or enablement. Cases 6\u20137 disclose corrected read failures; those are not semantic grading failures. These conclusions assess the supplied responses, not independently observed session execution.\n\nExact negative-control counterexample, prior-draft case 0:\n\u201cthe exact revision's global SKIP stands unless a recorded re-evaluation trigger observably fires; a different target project explicitly is not a trigger.\u201d\n\nThat imposes the forbidden cross-target historical lock despite acknowledged favorable project-a evidence. Its resulting SKIP contradicts expected ADOPT; correct caveats elsewhere do not rescue the central decision.",
+  "payload_sha256": {
+    "DIGEST.md": "5d0ee757762d55a46a35648865f9494033f5de2b1efdf9df1f462995e50a7c0d",
+    "VERDICTS.md": "e10067644be6853432eaa737354c04c62f50013bffa12908dd5b6a770daaa255",
+    "EVIDENCE.md": "c8d7dbc5d5bc0ced11e0131656250c69e7825a24dec5636bb55fb6c5013fdca2",
+    "SKILL.md": "cebca2d4ce3a04a460d771772eaaaa80ae2327f0d63d7d46b0650ef868d2ebe6"
+  },
+  "limits": [
+    "Synthetic decision smoke test, not statistical performance evidence.",
+    "Scenario runtime tests are stipulated, not performed.",
+    "Not SEO/estate quality or runtime isolation evidence.",
+    "Prior draft is a rejected unpublished design, not v0.1.2.",
+    "Forbidden claims require semantic review in addition to exact verdict scoring."
+  ],
+  "sanitization": "Local scratch input and worktree paths replaced by placeholders; responses otherwise unchanged."
+}
