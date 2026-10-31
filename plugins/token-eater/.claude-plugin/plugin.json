@@ -1,0 +1,22 @@
+{
+  "name": "token-eater",
+  "version": "0.1.2",
+  "description": "Spend your about-to-expire AI credits on safe, reviewed code cleanup. Just run /token-eater: it tidies your code in an isolated copy, verifies it, reviews it, and opens a draft PR. Never merges.",
+  "author": {
+    "name": "StartupBros / House of Vibe",
+    "url": "https://houseofvibe.ai"
+  },
+  "homepage": "https://houseofvibe.ai",
+  "repository": "https://github.com/StartupBros-com/hov-stack",
+  "license": "MIT",
+  "keywords": [
+    "house-of-vibe",
+    "code-cleanup",
+    "code-review",
+    "credits",
+    "de-monolithize",
+    "simplify",
+    "dead-code",
+    "draft-pr"
+  ]
+}

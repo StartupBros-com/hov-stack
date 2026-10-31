@@ -1,0 +1,50 @@
+{
+  "name": "@startupbros/product-video",
+  "version": "0.1.0",
+  "description": "Agent-native product walkthrough videos: safe authenticated browser capture, telemetry-driven cursor and click overlays, Remotion composition, and verified H.264 render.",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "capture": "tsx src/cli/capture.ts",
+    "format": "prettier --check .",
+    "format:fix": "prettier --write .",
+    "lint": "eslint .",
+    "narrated:capture": "tsx src/cli/narrated-capture.ts",
+    "narrated:fixture": "tsx src/cli/narrated-fixture.ts",
+    "narrated:prepare": "tsx src/cli/narrated-prepare.ts",
+    "narrated:render": "tsx src/cli/narrated-render.ts",
+    "narrated:smoke": "tsx src/cli/narrated-smoke.ts",
+    "narrated:studio": "tsx src/cli/narrated-studio.ts",
+    "narrated:verify": "tsx src/cli/narrated-verify.ts",
+    "narrated:voice": "tsx src/cli/narrated-voice.ts",
+    "render": "tsx src/cli/render.ts",
+    "studio": "remotion studio src/index.ts --no-open",
+    "test": "tsx --test \"src/**/*.test.ts\"",
+    "typecheck": "tsc --noEmit",
+    "verify": "tsx src/cli/verify.ts"
+  },
+  "dependencies": {
+    "@remotion/bundler": "4.0.518",
+    "@remotion/renderer": "4.0.518",
+    "react": "19.2.3",
+    "react-dom": "19.2.3",
+    "remotion": "4.0.518",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@remotion/cli": "4.0.518",
+    "@types/node": "22.10.2",
+    "@types/react": "19.2.3",
+    "@types/react-dom": "19.2.3",
+    "eslint": "^9.39.1",
+    "playwright-capture-runtime": "npm:playwright@1.63.0-alpha-2026-08-05",
+    "prettier": "^3.6.2",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.20.0"
+  }
+}
