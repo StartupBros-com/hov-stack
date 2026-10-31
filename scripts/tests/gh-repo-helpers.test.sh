@@ -21,7 +21,7 @@ REPO_ROOT=$(CDPATH= cd -- "$HERE/../.." && pwd)
 # shellcheck source=/dev/null
 . "$REPO_ROOT/scripts/lib/gh-repo-helpers.sh"
 
-TMP=$(mktemp -d /tmp/gh-repo-helpers-test.XXXXXX)
+TMP=$(mktemp -d /tmp/gh-repo-helpers-test.XXXXXX) || exit 1
 trap 'rm -rf "$TMP"' EXIT
 
 pass=0 fail=0

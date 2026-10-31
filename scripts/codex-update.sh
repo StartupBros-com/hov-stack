@@ -24,16 +24,20 @@
 # tool-update.sh is not extended because its daily timer is enabled by sync.sh install on
 # every role, and this path must stay inert until codex-auto-update.timer is enabled.
 #
+# pnpm 11 only (it refuses any other major). pnpm 11 installs each `pnpm add -g` in its own
+# dir, global/v11/<hash>/, and replaces that dir when the package is added again, so the
+# installed package is found through `pnpm ls -g --json`, re-read after every install.
+#
 # The cooldown exception. pnpm checks minimumReleaseAge on the candidate AND on every
 # platform alias it declares (measured 2026-09-26, pnpm 10.33.2: excluding only the host
-# alias fails on 0.157.1-win32-x64). The exception is one per-run rc, passed as
-# npm_config_userconfig: a private copy of the operator's ~/.npmrc plus
-#   minimum-release-age-exclude[]=@openai/codex@V || V-<suffix> ...
+# alias fails on 0.157.1-win32-x64). The exception is one per-run environment variable
+#   pnpm_config_minimum_release_age_exclude=["@openai/codex@V || V-<suffix> ..."]
 # naming exact versions of the one official package that the version's own manifest
-# declares. Measured the same day: every CLI --config form of the exclude is silently
-# ignored, and a cwd .npmrc does not reach `add -g`; ~/.config/pnpm/rc (the 1440 cooldown,
-# the build-script allowlist, global-bin-dir) still applies under the override. Every
-# other package and every other install keeps the cooldown.
+# declares. Measured 2026-10-19 on pnpm 11.10.0: that JSON-array env form and a global
+# config.yaml list are the only exclude forms that work. Every CLI --config form, an
+# npm_config_userconfig rc line (the pnpm 10 mechanism this replaced) and a bare-string
+# env value are silently ignored. The cooldown itself stays on (pnpm 11's built-in 1440
+# minutes); every other package and every other install keeps it.
 #
 # Flow (DRY_RUN=0): lock → installed version (pnpm's own package.json) → stable `latest`
 # (strict X.Y.Z; prereleases refused; never a downgrade) → candidate + host-artifact
@@ -83,7 +87,6 @@ PNPM=${CODEX_UPDATE_PNPM:-pnpm}
 REGISTRY=${CODEX_UPDATE_REGISTRY:-https://registry.npmjs.org}
 STATE_DIR=${CODEX_UPDATE_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/codex-update}
 LIB_DIR=${CODEX_UPDATE_LIB_DIR:-$HOME/.local/lib/codex-update}
-NPMRC=${CODEX_UPDATE_NPMRC:-$HOME/.npmrc}
 PROC_ROOT=${CODEX_UPDATE_PROC_ROOT:-/proc}
 KEEP=${CODEX_UPDATE_KEEP:-2}
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -120,28 +123,45 @@ for need in "$PNPM" jq curl flock timeout; do
 done
 [ -n "$PLATFORM" ] || { echo "codex-update: unsupported platform $(uname -sm)"; exit 1; }
 
-# Scratch for the per-run rc (it may hold a copy of ~/.npmrc) and fetched manifests.
+# Scratch for fetched manifests, and the neutral cwd every pnpm call runs from: corepack
+# picks pnpm's version from the cwd's packageManager field.
 WORK=$(mktemp -d "${TMPDIR:-/tmp}/codex-update.XXXXXX") || { echo "codex-update: no scratch dir"; exit 1; }
-RC=$WORK/npmrc
 trap 'rm -rf "$WORK"' EXIT
 
-# write_rc [exclude-line]: the operator's npmrc plus, at most, one exact exception.
-write_rc() {
-  (umask 077 && { if [ -f "$NPMRC" ]; then cat "$NPMRC"; fi; [ -n "${1:-}" ] && printf '\n%s\n' "$1"; } >"$RC")
-}
+# The layout and exception form above are pnpm 11's. pnpm 10 still sits in
+# ~/.local/share/pnpm, and a PATH that puts it first would run every step wrong.
+PNPM_VERSION=$(cd "$WORK" && timeout 60 "$PNPM" --version 2>/dev/null | tail -n 1)
+case "$PNPM_VERSION" in
+  11.*) ;;
+  *) echo "codex-update: needs pnpm 11; $PNPM reports '${PNPM_VERSION:-nothing}'"; exit 1 ;;
+esac
+
+# The one exact cooldown exception a pnpm_g call carries, set per call:
+#   EXCLUDE=<exclude_for output> pnpm_g ...
+EXCLUDE=""
 
 # pnpm_g <global-dir> <bin-dir> args...: pnpm against one global prefix, from a neutral
-# cwd, with the per-run rc. Empty dirs mean pnpm's configured live prefix.
+# cwd, carrying $EXCLUDE and nothing inherited. Empty dirs mean pnpm's configured live
+# prefix. The global virtual store stays off, as config/pnpm/config.yaml sets it: with it
+# on, the package lives in the shared store/v11/links tree instead of its install dir's
+# own node_modules/.pnpm, where blockers() looks for running sessions.
 pnpm_g() {
   local gdir=$1 bdir=$2
   shift 2
-  local -a cfg=()
+  local -a cfg=(--config.enable-global-virtual-store=false) env=(-u pnpm_config_minimum_release_age_exclude)
   [ -n "$gdir" ] && cfg+=("--config.global-dir=$gdir")
   [ -n "$bdir" ] && cfg+=("--config.global-bin-dir=$bdir")
   [ -n "$STORE_DIR" ] && cfg+=("--config.store-dir=$STORE_DIR")
   [ -n "$CACHE_DIR" ] && cfg+=("--config.cache-dir=$CACHE_DIR")
-  (cd "$WORK" && PATH="${bdir:+$bdir:}$PATH" npm_config_userconfig="$RC" \
+  [ -n "$EXCLUDE" ] && env+=("pnpm_config_minimum_release_age_exclude=$(jq -cn --arg e "$EXCLUDE" '[$e]')")
+  (cd "$WORK" && env "${env[@]}" PATH="${bdir:+$bdir:}$PATH" \
     timeout 900 "$PNPM" "$@" "${cfg[@]}")
+}
+
+# pkg_dir <global-dir> <bin-dir>: the @openai/codex dir pnpm lists in that prefix.
+pkg_dir() {
+  pnpm_g "$1" "$2" ls -g --depth=0 --json 2>/dev/null |
+    jq -er --arg pkg "$PKG" '.[0].dependencies[$pkg].path // empty' 2>/dev/null
 }
 
 fetch() { curl -fsS --max-time 30 --proto '=https,file' "$1" -o "$2" 2>/dev/null; }
@@ -168,23 +188,27 @@ exclude_for() {
         | if (.key | test("^@openai/codex-[a-z0-9]+-[a-z0-9]+$")) and .value == "npm:\($pkg)@\($v)-\($s)"
           then $s else error("alias \(.key)") end]
     | sort
-    | "minimum-release-age-exclude[]=\($pkg)@\($v)" + (map(" || \($v)-\(.)") | join(""))
+    | "\($pkg)@\($v)" + (map(" || \($v)-\(.)") | join(""))
   ' "$1" 2>/dev/null
 }
 
-# smoke <bin-dir> <node_modules-root> <version>: exact version, --help, host native artifact.
+# smoke <global-dir> <bin-dir> <version>: exact version, --help, host native artifact, for
+# the prefix pnpm_g takes those two dirs as (empty = live; its launcher is in $LIVE_BIN).
 smoke() {
-  local bdir=$1 root=$2 v=$3 got real nat
-  got=$(cd "$WORK" && timeout 60 "$bdir/codex" --version 2>/dev/null | head -n 1)
+  local gdir=$1 bdir=$2 v=$3 launcher=${2:-$LIVE_BIN}/codex got pkg real nat
+  got=$(cd "$WORK" && timeout 60 "$launcher" --version 2>/dev/null | head -n 1)
   if [ "$got" != "codex-cli $v" ]; then
-    echo "  smoke: $bdir/codex reports '${got:-nothing}', expected 'codex-cli $v'"
+    echo "  smoke: $launcher reports '${got:-nothing}', expected 'codex-cli $v'"
     return 1
   fi
-  if ! (cd "$WORK" && timeout 60 "$bdir/codex" --help >/dev/null 2>&1); then
-    echo "  smoke: $bdir/codex --help failed"
+  if ! (cd "$WORK" && timeout 60 "$launcher" --help >/dev/null 2>&1); then
+    echo "  smoke: $launcher --help failed"
     return 1
   fi
-  real=$(cd "$root/$PKG" 2>/dev/null && pwd -P) || { echo "  smoke: no $PKG under $root"; return 1; }
+  if ! pkg=$(pkg_dir "$gdir" "$bdir") || ! real=$(cd "$pkg" 2>/dev/null && pwd -P); then
+    echo "  smoke: pnpm lists no $PKG in ${gdir:-the live prefix}"
+    return 1
+  fi
   if [ "$(jq -r .version "$real/package.json" 2>/dev/null)" != "$v" ]; then
     echo "  smoke: $real/package.json is not $v"
     return 1
@@ -196,23 +220,23 @@ smoke() {
   fi
 }
 
-# resolve_live: LIVE_ROOT, LIVE_BIN, INSTALLED, VSTORE (pnpm's virtual store for the live
-# package — global/5/.pnpm on this host, node_modules/.pnpm in other layouts).
+# resolve_live: LIVE_BIN, LIVE_PKG, INSTALLED, VSTORE (the live install dir's own
+# virtual store, global/v11/<hash>/node_modules/.pnpm on this host).
 resolve_live() {
-  local real
-  LIVE_ROOT=$(pnpm_g "$GLOBAL_DIR" "$BIN_DIR" root -g 2>/dev/null | tail -n 1)
+  local real root
   LIVE_BIN=$BIN_DIR
   [ -n "$LIVE_BIN" ] || LIVE_BIN=$(pnpm_g "" "" bin -g 2>/dev/null | tail -n 1)
-  if [ -z "$LIVE_ROOT" ] || [ ! -f "$LIVE_ROOT/$PKG/package.json" ]; then
-    echo "no pnpm-owned $PKG install under ${LIVE_ROOT:-<pnpm root -g failed>}; install it with pnpm first"
+  if ! LIVE_PKG=$(pkg_dir "$GLOBAL_DIR" "$BIN_DIR") || [ ! -f "$LIVE_PKG/package.json" ]; then
+    root=$(pnpm_g "$GLOBAL_DIR" "$BIN_DIR" root -g 2>/dev/null | tail -n 1)
+    echo "no pnpm-owned $PKG install under ${root:-<pnpm root -g failed>}; install it with pnpm 11 first"
     return 1
   fi
-  INSTALLED=$(jq -r .version "$LIVE_ROOT/$PKG/package.json" 2>/dev/null)
+  INSTALLED=$(jq -r .version "$LIVE_PKG/package.json" 2>/dev/null)
   if ! is_stable "$INSTALLED"; then
     echo "installed $PKG is '$INSTALLED', not a stable release; not managing it"
     return 1
   fi
-  real=$(cd "$LIVE_ROOT/$PKG" && pwd -P)
+  real=$(cd "$LIVE_PKG" && pwd -P)
   VSTORE=${real%%/@openai+codex@*}
 }
 
@@ -311,66 +335,76 @@ write_status() {
 # retain <version> [--offline]: a complete runnable copy in its own pnpm prefix, plus the
 # exact exception its reinstall needs (it may itself be under a day old). --prefer-offline
 # by default; a rollback passes --offline so it never waits on the network.
+# A copy retained under pnpm 10 (global/5 layout, 0.162.0 and 0.162.1 on this host) fails
+# the check below, so retaining that version again replaces it. Rolling back to one still
+# works, but online: pnpm 11's store does not hold its files.
 retain() {
-  local v=$1 net=${2:---prefer-offline} d="$LIB_DIR/retained/$1" excl root
-  excl=$(exclude_for "$LIVE_ROOT/$PKG/package.json" "$v") || excl=""
-  root=$(pnpm_g "$d/global" "$d/bin" root -g 2>/dev/null | tail -n 1)
-  if [ -n "$root" ] && smoke "$d/bin" "$root" "$v" >/dev/null; then
+  local v=$1 net=${2:---prefer-offline} d="$LIB_DIR/retained/$1" excl
+  excl=$(exclude_for "$LIVE_PKG/package.json" "$v") || excl=""
+  if smoke "$d/global" "$d/bin" "$v" >/dev/null; then
     [ -d "$d/metadata" ] || snapshot_meta "$d/metadata" || true
     return 0
   fi
   rm -rf "$d"
   mkdir -p "$d/global" "$d/bin" || return 1
-  write_rc "$excl"
-  if ! pnpm_g "$d/global" "$d/bin" add -g "$PKG@$v" "$net" >"$WORK/retain.log" 2>&1; then
+  if ! EXCLUDE=$excl pnpm_g "$d/global" "$d/bin" add -g "$PKG@$v" "$net" >"$WORK/retain.log" 2>&1; then
     echo "  retain: pnpm add $PKG@$v failed:"
     show_log 3 "$WORK/retain.log"
     return 1
   fi
-  root=$(pnpm_g "$d/global" "$d/bin" root -g 2>/dev/null | tail -n 1)
-  smoke "$d/bin" "$root" "$v" || return 1
+  smoke "$d/global" "$d/bin" "$v" || return 1
   printf '%s\n' "$excl" >"$d/exclude"
   # The install just refreshed pnpm's metadata, so it lists this version.
   snapshot_meta "$d/metadata" ||
     echo "WARN no pnpm metadata to snapshot for $v; an offline rollback after a store prune would need the network"
 }
 
-# stage <version> <exclude-line>: install the candidate into a scratch prefix and verify it.
+# stage <version> <exclude>: install the candidate into a scratch prefix and verify it.
 stage() {
-  local v=$1 d="$LIB_DIR/staging/$1" root
+  local v=$1 d="$LIB_DIR/staging/$1"
   rm -rf "$LIB_DIR/staging"
   mkdir -p "$d/global" "$d/bin" || return 1
-  write_rc "$2"
-  if ! pnpm_g "$d/global" "$d/bin" add -g "$PKG@$v" >"$WORK/stage.log" 2>&1; then
+  if ! EXCLUDE=$2 pnpm_g "$d/global" "$d/bin" add -g "$PKG@$v" >"$WORK/stage.log" 2>&1; then
     echo "staging failed: pnpm add $PKG@$v:"
     show_log 3 "$WORK/stage.log"
     STAGE_TRANSIENT=1
     return 1
   fi
-  root=$(pnpm_g "$d/global" "$d/bin" root -g 2>/dev/null | tail -n 1)
-  smoke "$d/bin" "$root" "$v" || { echo "staged candidate $v failed verification; not promoting"; return 1; }
+  smoke "$d/global" "$d/bin" "$v" || { echo "staged candidate $v failed verification; not promoting"; return 1; }
 }
 
-# install_live <version> <exclude-line>: pnpm add into the live prefix, offline first.
+# install_live <version> <exclude>: pnpm add into the live prefix, offline first. pnpm
+# replaces the live install dir, so it re-reads LIVE_PKG after a successful install.
 install_live() {
-  write_rc "$2"
-  if pnpm_g "$GLOBAL_DIR" "$BIN_DIR" add -g "$PKG@$1" --offline >"$WORK/live.log" 2>&1; then
+  if EXCLUDE=$2 pnpm_g "$GLOBAL_DIR" "$BIN_DIR" add -g "$PKG@$1" --offline >"$WORK/live.log" 2>&1; then
+    LIVE_PKG=$(pkg_dir "$GLOBAL_DIR" "$BIN_DIR")
     return 0
   fi
   echo "  offline install of $1 failed; retrying with --prefer-offline"
   show_log 2 "$WORK/live.log"
-  pnpm_g "$GLOBAL_DIR" "$BIN_DIR" add -g "$PKG@$1" --prefer-offline >>"$WORK/live.log" 2>&1 && return 0
+  if EXCLUDE=$2 pnpm_g "$GLOBAL_DIR" "$BIN_DIR" add -g "$PKG@$1" --prefer-offline >>"$WORK/live.log" 2>&1; then
+    LIVE_PKG=$(pkg_dir "$GLOBAL_DIR" "$BIN_DIR")
+    return 0
+  fi
   show_log 3 "$WORK/live.log"
   return 1
 }
 
 # pnpm's metadata cache is not ours to keep: `pnpm store prune` (pkg-cache-prune.timer,
-# weekly) deletes all of it — "Removed all cached metadata files", pnpm 10.33.2 — while
-# the retained prefix keeps the package files. --offline then fails
-# ERR_PNPM_NO_OFFLINE_META even for an exact version. So each retained copy carries a
-# snapshot of the @openai/codex metadata, restored before an offline reinstall.
+# weekly) deletes all of it — "Removed all cached metadata files" on pnpm 10.33.2, and on
+# 11.10.0 (measured 2026-10-19) it empties the whole cache dir — while the retained prefix
+# keeps the package files. --offline then fails ERR_PNPM_NO_OFFLINE_META even for an
+# exact version. So each retained copy carries a snapshot of the @openai/codex metadata
+# (<cache>/v11/metadata*/<registry>/@openai/codex.jsonl), restored before an offline
+# reinstall.
+# pnpm 11 prints "undefined" for a cache dir nobody configured (measured 2026-10-19 on
+# 11.10.0 in the unit's environment); its built-in default is $XDG_CACHE_HOME/pnpm, else
+# ~/.cache/pnpm. Anything but an absolute path falls back to that default.
 cache_root() {
-  if [ -n "$CACHE_DIR" ]; then echo "$CACHE_DIR"; else pnpm_g "" "" config get cache-dir 2>/dev/null | tail -n 1; fi
+  local c=$CACHE_DIR
+  [ -n "$c" ] || c=$(pnpm_g "" "" config get cache-dir 2>/dev/null | tail -n 1)
+  case "$c" in /*) ;; *) c=${XDG_CACHE_HOME:-$HOME/.cache}/pnpm ;; esac
+  echo "$c"
 }
 
 # snapshot_meta <dest-dir>: copy every cached @openai/codex metadata file, keeping paths.
@@ -381,7 +415,7 @@ snapshot_meta() {
   while IFS= read -r f; do
     rel=${f#"$root"/}
     mkdir -p "$1/${rel%/*}" && cp -p "$f" "$1/$rel" && n=$((n + 1))
-  done < <(find "$root" -path "$root/metadata*/*/@openai/codex.json" -type f 2>/dev/null)
+  done < <(find "$root" -path "$root/v11/metadata*/*/@openai/codex.jsonl" -type f 2>/dev/null)
   [ "$n" -gt 0 ]
 }
 
@@ -394,19 +428,20 @@ restore_meta() {
   while IFS= read -r f; do
     rel=${f#"$1"/}
     [ -e "$root/$rel" ] || { mkdir -p "$root/${rel%/*}" && cp -p "$f" "$root/$rel"; }
-  done < <(find "$1" -type f -name codex.json 2>/dev/null)
+  done < <(find "$1" -type f -name codex.jsonl 2>/dev/null)
 }
 
 # rollback_to <version>: reinstall a retained exact version into the live prefix, verify it.
+# An exclude file written under pnpm 10 is an rc line; its pattern follows the prefix.
 rollback_to() {
   local excl=""
   [ -f "$LIB_DIR/retained/$1/exclude" ] && excl=$(cat "$LIB_DIR/retained/$1/exclude")
+  excl=${excl#"minimum-release-age-exclude[]="}
   restore_meta "$LIB_DIR/retained/$1/metadata"
-  install_live "$1" "$excl" && smoke "$LIVE_BIN" "$LIVE_ROOT" "$1"
+  install_live "$1" "$excl" && smoke "$GLOBAL_DIR" "$BIN_DIR" "$1"
 }
 
 others_list() {
-  write_rc ""
   pnpm_g "$GLOBAL_DIR" "$BIN_DIR" ls -g --depth=0 --json 2>/dev/null |
     jq -r --arg pkg "$PKG" '[.[0].dependencies // {} | to_entries[] | select(.key != $pkg)
       | "\(.key)@\(.value.version)"] | sort | .[]' 2>/dev/null
@@ -452,7 +487,6 @@ take_lock() {
 # ── --report ─────────────────────────────────────────────────────────────────────────
 report() {
   local latest checked gap outcome age days
-  write_rc ""
   resolve_live || return 0
   if ! fetch "$REGISTRY/-/package/$PKG/dist-tags" "$WORK/tags.json" ||
     ! latest=$(jq -er .latest "$WORK/tags.json" 2>/dev/null); then
@@ -493,7 +527,6 @@ report() {
 manual_rollback() {
   local target=${1:-} why
   take_lock
-  write_rc ""
   resolve_live || exit 1
   check_launcher >/dev/null
   if [ -z "$target" ]; then
@@ -529,7 +562,6 @@ manual_rollback() {
 update() {
   local latest excl why before after drift
   [ "$DRY_RUN" = 1 ] || take_lock
-  write_rc ""
   resolve_live || exit 1
   check_launcher
 
@@ -547,7 +579,7 @@ update() {
     ver_lt "$latest" "$INSTALLED" &&
       echo "refusing downgrade: installed $INSTALLED is newer than stable $latest"
     if [ "$DRY_RUN" != 1 ]; then
-      if ! smoke "$LIVE_BIN" "$LIVE_ROOT" "$INSTALLED"; then
+      if ! smoke "$GLOBAL_DIR" "$BIN_DIR" "$INSTALLED"; then
         echo "the live codex install fails its smoke check; not publishing a record"
         write_status failed "live smoke failed" "$latest"
         say "codex-update: live codex $INSTALLED fails its smoke check" error
@@ -624,7 +656,7 @@ update() {
 
   before=$(others_list)
   local prev=$INSTALLED
-  if ! install_live "$latest" "$excl" || ! smoke "$LIVE_BIN" "$LIVE_ROOT" "$latest"; then
+  if ! install_live "$latest" "$excl" || ! smoke "$GLOBAL_DIR" "$BIN_DIR" "$latest"; then
     rm -rf "$LIB_DIR/staging"
     hold "$latest"
     if rollback_to "$prev"; then

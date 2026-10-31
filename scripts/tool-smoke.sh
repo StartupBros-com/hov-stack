@@ -173,6 +173,21 @@ err_line() {
   printf '%s' "$hit" | cut -c1-160
 }
 
+check_wacli_pin() {
+  local installer=$HOME/.claude/scripts/wacli-install.sh wacli_pin_out
+  if [ ! -x "$installer" ]; then
+    echo "WARN wacli pin/link verification unavailable: missing executable $installer"
+    FLAGGED=$((FLAGGED + 1))
+    return
+  fi
+  if wacli_pin_out=$("$installer" --check 2>&1); then
+    echo "wacli pin: ok — $wacli_pin_out"
+  else
+    echo "WARN wacli pin/link verification failed: $(err_line "$wacli_pin_out")"
+    FLAGGED=$((FLAGGED + 1))
+  fi
+}
+
 # Everything above is pure helpers; everything below probes this specific machine.
 # tests/tool-smoke.test.sh sources the file with TOOL_SMOKE_SOURCED=1 to exercise the
 # helpers against fixtures, so the suite stays hermetic and does not depend on what happens
@@ -195,6 +210,13 @@ smoke_cmd dcg 'dcg v' - - --version
 
 # Harness tooling the CLAUDE.md rules and weekly timers depend on.
 smoke_cmd cass     '^cass [0-9]+\.[0-9]+\.[0-9]+' - - --version
+# Account-authority binary: offline/version-only. Live connectivity belongs to
+# the human-attended WhatsApp runbook, never the weekly proof-of-life sweep.
+smoke_cmd wacli    '^wacli [0-9]+\.[0-9]+\.[0-9]+$' - - --version
+# Version output cannot detect a replaced binary that still prints the expected
+# string. Reuse the installer's exact archive/binary/direct-link contract; check
+# mode is offline and never reads the WhatsApp store.
+check_wacli_pin
 smoke_cmd xf       '^xf [0-9]+\.[0-9]+\.[0-9]+'   - - --version
 smoke_cmd papercut 'usage: papercut'              - - --help
 

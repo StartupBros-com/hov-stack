@@ -73,6 +73,22 @@ const ASKS = [
   'resend-cli emails receiving "$VERB"', 'resend-cli emails se*', 'resend-cli emails {send,list}', 'resend-cli "$@"',
   'resend-cli emails ${VERB}', 'resend-cli emails "${VERB:-send}"', '${R:-resend-cli} contacts delete c_1',
   'resend-cli emails $(cat verb)', 'resend-cli emails `cat verb`',
+  // The wrapper's --account selector changes no tier, wherever it sits before --.
+  'resend-cli --account second emails send --from a@b.c --to d@e.f --subject s --text t --confirm-send',
+  'resend-cli --account=second contacts delete c_1 --confirm-destructive',
+  'resend-cli --json --account second broadcasts send bc_1 --confirm-send',
+  'resend-cli --account second --json webhooks rotate-signing-secret wh_1 --confirm-destructive',
+  'resend-cli emails send --account second --from a@b.c --confirm-send',
+  'python3 bin/resend_cli.py --account second emails send --from a@b.c --confirm-send',
+  '~/.local/bin/resend-cli --account second contacts create --email x@y.z --confirm-write',
+  "resend-cli --account second 'emails send' --from a@b.c --confirm-send",
+  // Planted negatives: a guard without account handling passes these, because the
+  // account name reads as the first path word or splits the path.
+  'resend-cli emails --account second send --from a@b.c --confirm-send',
+  'resend-cli --account second $CMD', 'resend-cli --account second "$GROUP" send --confirm-send',
+  // An expanded account value may split into path words (A='second emails send').
+  'resend-cli --account $A emails list', 'resend-cli --account "$A" emails list', 'resend-cli --account ${A} emails list',
+  'resend-cli --account sb* emails list', 'resend-cli --account=$A emails list',
 ];
 const PASSES = [
   'resend-cli emails list --limit 5', 'resend-cli emails get e_1', 'resend-cli emails receiving list', 'resend-cli domains list',
@@ -95,6 +111,12 @@ const PASSES = [
   'r=$(command -v resend-cli); $r emails list --limit 5', 'r=$(command -v resend-cli); "$r" --json domains list',
   'r=$(command -v resend-cli); ls -l "$r"', "rg 'r=$(which resend-cli); $r emails list' docs/",
   'node hooks/PreToolUse/resend-write-guard.js', 'node --test hooks/tests/resend-write-guard.test.js',
+  // Account-selected reads, help and metadata.
+  'resend-cli --account second webhooks list', 'resend-cli --account=second emails list --limit 5',
+  'resend-cli webhooks list --account second', 'resend-cli --account second domains get d_1',
+  'resend-cli --account main emails get e_1', 'resend-cli --account second emails get $ID',
+  'resend-cli --account second emails send --help', 'resend-cli --account second emails send -h',
+  'resend-cli --account second --where', 'resend-cli --account second',
 ];
 // eval of a held string and python -m module mode.
 const HELD_ASKS = [
@@ -103,10 +125,15 @@ const HELD_ASKS = [
   'PYTHONPATH=bin python3 -m resend_cli emails send --from a@b.c --confirm-send',
   'python3 -mresend_cli contacts delete c_1 --confirm-destructive', 'python3 -m claude.bin.resend_cli contacts create --email x@y.z --confirm-write',
   'python3 -B -m resend_cli domains delete d_1 --confirm-destructive', 'python3 -Bm resend_cli domains delete d_1 --confirm-destructive',
+  // --account in the module and eval-held shapes.
+  'PYTHONPATH=bin python3 -m resend_cli --account second emails send --from a@b.c --confirm-send',
+  'python3 -m resend_cli emails --account second send --from a@b.c --confirm-send',
+  "CMD='resend-cli emails --account second send --from a@b.c'; eval \"$CMD\"",
 ];
 const HELD_PASSES = [
   'X=foo; eval "$X"', "CMD='resend-cli emails list'; eval \"$CMD\"", 'eval "$(ssh-agent -s)"',
   'python3 -m resend_cli emails list', 'python3 -m resend_cli --help', 'python3 -m json.tool send.json',
+  'python3 -m resend_cli --account second emails list', "CMD='resend-cli --account second webhooks list'; eval \"$CMD\"",
 ];
 
 async function ask(command, hook = HOOK) {
@@ -665,6 +692,11 @@ test('classifier exceptions ask only when a literal named write is present, neve
   assert.strictEqual(JSON.parse(run('resend-cli broadcasts rm bc_1')).hookSpecificOutput.permissionDecision, 'ask');
   assert.strictEqual(JSON.parse(run('resend-cli emails $VERB')).hookSpecificOutput.permissionDecision, 'ask');
   assert.strictEqual(run('resend-cli emails list'), 'null');
+  for (const command of ['resend-cli --account second emails send --from a@b.c --confirm-send',
+    'resend-cli --account=second contacts delete c_1 --confirm-destructive', 'resend-cli --account second $CMD']) {
+    assert.strictEqual(JSON.parse(run(command)).hookSpecificOutput.permissionDecision, 'ask', command);
+  }
+  assert.strictEqual(run('resend-cli --account second emails list'), 'null');
 });
 
 test('registered hook asks on any Resend command, never denies, when the Resend classifier cannot load', () => {
@@ -681,6 +713,10 @@ test('registered hook asks on any Resend command, never denies, when the Resend 
   assert.strictEqual(degraded('python3 -m resend_cli contacts delete c_1').permissionDecision, 'ask');
   // Without the tier map a read cannot be told from a send, so reads ask too.
   assert.strictEqual(degraded('resend-cli emails list').permissionDecision, 'ask');
+  for (const command of ['resend-cli --account second emails list', 'resend-cli --account=second webhooks list',
+    'resend-cli --json --account second emails send --from a@b.c --confirm-send']) {
+    assert.strictEqual(degraded(command).permissionDecision, 'ask', command);
+  }
   for (const command of ['resend-cli --where', 'resend-cli --version', 'resend-cli --help', 'resend-cli', 'git add bin/resend_cli.py']) {
     assert.doesNotMatch(run(command), /"deny"|"block"|"ask"/, command);
   }

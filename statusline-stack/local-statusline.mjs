@@ -366,6 +366,18 @@ function accountBadge(data, level = 0, priv = false) {
   return `${dim('last session route')} ${e(dot, '●')} ${e(NEUTRAL, name)}${parts.length ? ' ' + parts.join(' ') : ''}${age}`;
 }
 
+// Streaming adapters can report an all-zero placeholder until terminal usage
+// arrives; an interrupted turn may keep it forever. Do not label it as measured
+// zero context or a cache miss. A fresh session has no current_usage object.
+// Keep older/malformed payloads and any positive native measurement unchanged.
+function usageUnavailable(cw) {
+  const usage = cw.current_usage;
+  return cw.total_input_tokens === 0 && !(num(cw.used_percentage) && cw.used_percentage > 0)
+    && usage && typeof usage === 'object' && !Array.isArray(usage)
+    && ['input_tokens', 'output_tokens', 'cache_read_input_tokens', 'cache_creation_input_tokens']
+      .every((key) => usage[key] === 0);
+}
+
 // Prompt-cache readout from Claude Code's own prompt_cache status-line field.
 // Main conversation only: Claude Code keeps subagent requests out of it, so
 // fleet traffic cannot fake a warm or cold main cache. The field is absent
@@ -376,9 +388,15 @@ function accountBadge(data, level = 0, priv = false) {
 // expiry reads cold. Cold is a cost, not an error, so it is never red.
 // Drop levels (line 1's budget): 1 the miss flag, 3 the idle time, 4 the
 // "re-cache" word (the token count stays).
-function cacheSegment(pc, level) {
+function cacheSegment(pc, level, unavailable) {
   if (!pc || typeof pc !== 'object' || pc.caching_observed !== true || typeof pc.warm !== 'boolean')
     return null;
+  // Keep independently reported warmth/expiry; only the evidence-free cold
+  // state left by an interrupted zero-usage attempt is unknown. An old miss
+  // timestamp can survive later attempts, so it does not settle this one.
+  if (unavailable && !pc.warm && !num(pc.expires_at)
+      && !(num(pc.recache_tokens_if_cold) && pc.recache_tokens_if_cold > 0))
+    return dim('cache unknown');
   const now = Date.now() / 1000;
   const ttlSec = TTL_SEC[pc.ttl];
   const exp = num(pc.expires_at) ? pc.expires_at : null;
@@ -493,13 +511,15 @@ function main(raw) {
   // ---- Line 1: ctx bar · prompt cache · model effort (last reply) · cost ----
   {
     const cw = d.context_window || {};
+    const unavailable = usageUnavailable(cw);
     // total_input_tokens tracks current context size; total_output_tokens is a
     // noisy point-in-time value (and makes tok/s meaningless), so show only input.
     const tokens = num(cw.total_input_tokens)
       ? kfmt(cw.total_input_tokens) + (num(cw.context_window_size) && cw.context_window_size > 0 ? `/${sizefmt(cw.context_window_size)}` : '')
       : '';
     let ctx = null;
-    if (num(cw.used_percentage))
+    if (unavailable) ctx = dim('ctx usage unavailable');
+    else if (num(cw.used_percentage))
       ctx = `${dim('ctx')} ${bar(cw.used_percentage)} ${pctText(cw.used_percentage)}${tokens ? ' ' + dim(tokens) : ''}`;
     else if (tokens) ctx = dim(`ctx ${tokens}`);
 
@@ -522,7 +542,7 @@ function main(raw) {
       return out;
     };
     const cost = num(d.cost?.total_cost_usd) ? e(NEUTRAL, `$${d.cost.total_cost_usd.toFixed(2)}`) : null;
-    const line = fit((level) => row([ctx, cacheSegment(d.prompt_cache, level), model(level), level < 5 ? cost : null]), 5);
+    const line = fit((level) => row([ctx, cacheSegment(d.prompt_cache, level, unavailable), model(level), level < 5 ? cost : null]), 5);
     if (line) lines.push(line);
   }
 

@@ -102,6 +102,8 @@ def log_db_globs() -> list[str]:
 
 def codex_pkg_roots() -> list[str]:
     roots = glob.glob(f"{HOME}/.local/share/pnpm/global/*/.pnpm")
+    # pnpm 11 gives each global install its own dir: global/v11/<hash>/node_modules/.pnpm.
+    roots += glob.glob(f"{HOME}/.local/share/pnpm/global/v11/*/node_modules/.pnpm")
     roots += glob.glob(f"{HOME}/.nvm/versions/node/*/lib/node_modules/@openai")
     roots += [f"{HOME}/.local/share/pnpm/global/5/.pnpm"]
     roots += [f"{w}/AppData/Roaming/npm/node_modules/@openai" for w in windows_homes()]

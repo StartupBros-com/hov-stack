@@ -2,17 +2,18 @@
 # Tests for scripts/codex-update.sh — verified stable Codex CLI updates through pnpm
 # (dotfiles#1377).
 #
-# Hermetic: a PATH-local fake pnpm reproduces the global layout that matters here
-# (.pnpm/@openai+codex@V, its npm:-aliased native package, a bin shim, a store that
-# --offline installs can only draw from, and old-version pruning on re-add), the
-# registry is a file:// tree, and /proc is a fixture. Nothing touches the network,
-# the real pnpm store or ~/.local/bin. Real pnpm is exercised by
+# Hermetic: a PATH-local fake pnpm 11 reproduces the global layout that matters here
+# (each add in its own global/v11/<hash> dir that a re-add replaces, .pnpm/@openai+codex@V
+# inside it with its npm:-aliased native package, a bin shim, a store that --offline
+# installs can only draw from, and a cooldown exclude read only from a JSON-array env
+# value), the registry is a file:// tree, and /proc is a fixture. Nothing touches the
+# network, the real pnpm store or ~/.local/bin. Real pnpm is exercised by
 # codex-update-live.test.sh (manual-only).
 #
 # The cases that matter most: the cooldown exception names exact versions of the one
-# official package and nothing broader (3); a running Codex session defers promotion
-# instead of having its package dir pruned under it (8); a promotion that smoke-fails
-# restores the prior exact version from local material alone (10).
+# official package and nothing broader or inherited (3); a running Codex session defers
+# promotion instead of having its package dir pruned under it (8); a promotion that
+# smoke-fails restores the prior exact version from local material alone (10).
 set -uo pipefail
 
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
@@ -29,9 +30,11 @@ has() { case "$1" in *"$2"*) return 0 ;; esac; return 1; }
 mkdir -p "$TMP/stub"
 cat >"$TMP/stub/pnpm" <<'FAKE'
 #!/usr/bin/env bash
-# Fake pnpm: global add/root/bin/ls against --config.global-dir/--config.global-bin-dir.
+# Fake pnpm 11: global add/root/bin/ls against --config.global-dir/--config.global-bin-dir.
 F=${FAKE_DIR:?}
-gdir="" bdir="" offline=0 spec="" mode=none rc=""
+# FAKE_PNPM_VERSION set but empty: a pnpm that prints no version.
+[ "${1:-}" = --version ] && { echo "${FAKE_PNPM_VERSION-11.10.0}"; exit 0; }
+gdir="" bdir="" offline=0 spec=""
 for a in "$@"; do
   case "$a" in
     --config.global-dir=*) gdir=${a#*=} ;;
@@ -40,20 +43,46 @@ for a in "$@"; do
     @openai/codex@*) spec=$a ;;
   esac
 done
-if [ -n "${npm_config_userconfig:-}" ] && [ -f "$npm_config_userconfig" ]; then
-  rc=$(paste -sd'~' "$npm_config_userconfig")
-  mode=$(stat -c %a "$npm_config_userconfig")
+excl=${pnpm_config_minimum_release_age_exclude-}
+printf 'ARGS %s\tEXCL %s\tAGE %s|%s\n' "$*" "$excl" \
+  "${pnpm_config_minimum_release_age-unset}" "${npm_config_minimum_release_age-unset}" >>"$F/log"
+# pnpm 11 refuses global work when the global bin dir is not on PATH.
+if [ -n "$bdir" ]; then
+  case ":$PATH:" in *":$bdir:"*) ;; *)
+    echo "[ERROR] The configured global bin directory \"$bdir\" is not in PATH" >&2; exit 1 ;;
+  esac
 fi
-printf 'ARGS %s\tMODE %s\tRC %s\n' "$*" "$mode" "$rc" >>"$F/log"
-root="$gdir/5/node_modules"
+g="$gdir/v11"
 # pnpm's metadata cache: --offline cannot resolve a version it does not list, and
-# `pnpm store prune` deletes all of it (measured on 10.33.2).
-meta="$F/cache/metadata-ff-v1.3/registry.npmjs.org/@openai/codex.json"
+# `pnpm store prune` deletes all of it (measured on 10.33.2 and 11.10.0). With
+# cache_undefined, pnpm 11's unconfigured default: `config get` says "undefined" and the
+# cache is $XDG_CACHE_HOME/pnpm (required here, so the fake never writes a real one).
+cache="$F/cache"
+[ -f "$F/cache_undefined" ] && cache="${XDG_CACHE_HOME:?}/pnpm"
+meta="$cache/v11/metadata/registry.npmjs.org/@openai/codex.jsonl"
+# Each `add -g` gets its own install dir; cdir is the one holding @openai/codex.
+cdir=""
+for d in "$g"/h*; do [ -e "$d/node_modules/@openai/codex" ] && cdir=$d; done
 case "${1:-}" in
-  config) [ "${2:-} ${3:-}" = "get cache-dir" ] && { echo "$F/cache"; exit 0; }; exit 2 ;;
-  root) echo "$root"; exit 0 ;;
+  config)
+    [ "${2:-} ${3:-}" = "get cache-dir" ] || exit 2
+    if [ -f "$F/cache_undefined" ]; then echo undefined; else echo "$cache"; fi
+    exit 0
+    ;;
+  root) echo "$g"; exit 0 ;;
   bin) echo "$bdir"; exit 0 ;;
-  ls) jq -c '[{dependencies: (to_entries | map({key, value: {version: .value}}) | from_entries)}]' "$F/others.json"; exit 0 ;;
+  ls)
+    others='{}'
+    [ "$gdir" = "$(cat "$F/live_gdir")" ] && others=$(cat "$F/others.json")
+    cv=""
+    [ -n "$cdir" ] && cv=$(jq -r .version "$cdir/node_modules/@openai/codex/package.json")
+    jq -cn --arg g "$g" --argjson o "$others" --arg cd "$cdir" --arg cv "$cv" '
+      [{path: $g, private: true,
+        dependencies: (($o | to_entries | map({key, value: {version: .value}}) | from_entries)
+          + (if $cd == "" then {} else
+              {"@openai/codex": {version: $cv, path: "\($cd)/node_modules/@openai/codex"}} end))}]'
+    exit 0
+    ;;
   add) ;;
   *) echo "fake pnpm: unsupported ${1:-}" >&2; exit 2 ;;
 esac
@@ -71,31 +100,37 @@ if [ "$offline" = 1 ] && ! grep -qxF "$v" "$meta" 2>/dev/null; then
   echo " ERR_PNPM_NO_OFFLINE_META  fake: no cached metadata lists $v" >&2; exit 1
 fi
 if grep -qxF "$v" "$F/immature" 2>/dev/null; then
+  # pnpm 11 takes the exclude from this variable only as a JSON array of patterns
+  # (measured on 11.10.0; a bare string is ignored).
+  pat=$(jq -er --arg p "@openai/codex@$v ||" '.[] | select(type == "string" and startswith($p))' \
+    <<<"$excl" 2>/dev/null | head -n 1)
   mature=1
-  case "$rc" in *"minimum-release-age-exclude[]=@openai/codex@$v ||"*) ;; *) mature=0 ;; esac
+  [ -n "$pat" ] || mature=0
   for s in $(cat "$F/suffixes"); do
-    case "$rc" in *"|| $v-$s"*) ;; *) mature=0 ;; esac
+    case "$pat" in *"|| $v-$s"*) ;; *) mature=0 ;; esac
   done
   if [ "$mature" = 0 ]; then
     echo " ERR_PNPM_NO_MATURE_MATCHING_VERSION  fake: $v is inside the cooldown" >&2; exit 1
   fi
 fi
-mkdir -p "$root/@openai" "$bdir"
-rm -rf "$root"/.pnpm/@openai+codex@*
-pkg="$root/.pnpm/@openai+codex@$v/node_modules/@openai/codex"
-mkdir -p "$pkg"
+# A re-add replaces the package's install dir with a new one.
+n=$(($(cat "$F/seq" 2>/dev/null || echo 0) + 1))
+echo "$n" >"$F/seq"
+[ -n "$cdir" ] && rm -rf "$cdir"
+nm="$g/h$n/node_modules"
+pkg="$nm/.pnpm/@openai+codex@$v/node_modules/@openai/codex"
+mkdir -p "$pkg" "$nm/@openai" "$bdir"
 opt=""
 for s in $(cat "$F/suffixes"); do opt="$opt\"@openai/codex-$s\":\"npm:@openai/codex@$v-$s\","; done
 printf '{"name":"@openai/codex","version":"%s","optionalDependencies":{%s}}\n' "$v" "${opt%,}" >"$pkg/package.json"
 if ! grep -qxF "$v" "$F/no_native" 2>/dev/null; then
-  nat="$root/.pnpm/@openai+codex@$v-linux-x64/node_modules/@openai/codex"
+  nat="$nm/.pnpm/@openai+codex@$v-linux-x64/node_modules/@openai/codex"
   mkdir -p "$nat"
   printf '{"name":"@openai/codex","version":"%s-linux-x64"}\n' "$v" >"$nat/package.json"
   ln -sfn "../../../@openai+codex@$v-linux-x64/node_modules/@openai/codex" \
-    "$root/.pnpm/@openai+codex@$v/node_modules/@openai/codex-linux-x64"
+    "$nm/.pnpm/@openai+codex@$v/node_modules/@openai/codex-linux-x64"
 fi
-rm -f "$root/@openai/codex"
-ln -s "../.pnpm/@openai+codex@$v/node_modules/@openai/codex" "$root/@openai/codex"
+ln -s "../.pnpm/@openai+codex@$v/node_modules/@openai/codex" "$nm/@openai/codex"
 report="codex-cli $v"
 o=$(grep -F "$bdir $v " "$F/report_override" 2>/dev/null | head -1 | cut -d' ' -f3-)
 [ -n "$o" ] && report=$o
@@ -138,8 +173,7 @@ new_case() {
   echo '{"left-pad":"1.3.0","typescript":"5.9.2"}' >"$C/fake/others.json"
   echo "$SUFFIXES" >"$C/fake/suffixes"
   echo "$C/global" >"$C/fake/live_gdir"
-  printf 'registry=https://registry.npmjs.org/\n' >"$C/npmrc"
-  FAKE_DIR="$C/fake" "$TMP/stub/pnpm" add -g "@openai/codex@${2:-0.156.0}" \
+  PATH="$C/bin:$PATH" FAKE_DIR="$C/fake" "$TMP/stub/pnpm" add -g "@openai/codex@${2:-0.156.0}" \
     --config.global-dir="$C/global" --config.global-bin-dir="$C/bin" >/dev/null
   : >"$C/fake/log"
 }
@@ -164,16 +198,18 @@ reg_latest() {
 }
 
 # run [args...]: DRY=default leaves DRY_RUN unset so the script's own default applies.
+# The caller's environment carries a stray cooldown exclude; no pnpm call may inherit it.
 run() {
   local -a dr=(DRY_RUN="${DRY:-0}")
   [ "${DRY:-}" = default ] && dr=()
-  env -u DRY_RUN "${dr[@]}" \
+  env -u DRY_RUN -u pnpm_config_minimum_release_age -u npm_config_minimum_release_age "${dr[@]}" \
+    pnpm_config_minimum_release_age_exclude='["left-pad@1.3.0"]' \
     PATH="${PRE_PATH:+$PRE_PATH:}$C/bin:$TMP/stub:$PATH" FAKE_DIR="$C/fake" \
     CODEX_UPDATE_PNPM="$TMP/stub/pnpm" \
     CODEX_UPDATE_REGISTRY="file://$C/reg" \
     CODEX_UPDATE_STATE_DIR="$C/state" CODEX_UPDATE_LIB_DIR="$C/lib" \
     CODEX_UPDATE_GLOBAL_DIR="$C/global" CODEX_UPDATE_BIN_DIR="$C/bin" \
-    CODEX_UPDATE_NPMRC="$C/npmrc" CODEX_UPDATE_PROC_ROOT="$C/proc" \
+    CODEX_UPDATE_PROC_ROOT="$C/proc" \
     CODEX_UPDATE_PLATFORM="${PLAT-linux-x64}" CODEX_UPDATE_NOTIFY="$TMP/stub/notify" \
     bash "$SCRIPT" "$@" 2>&1
 }
@@ -184,6 +220,12 @@ rec_ver() { jq -r .version "$C/state/verified-version.json" 2>/dev/null; }
 outcome() { jq -r .outcome "$C/state/status.json" 2>/dev/null; }
 adds() { grep -c '^ARGS add' "$C/fake/log"; }
 live_adds() { grep '^ARGS add' "$C/fake/log" | grep -F -- "--config.global-dir=$C/global" | grep -c .; }
+# excl_of <filter>: the exclude env value each matching pnpm call ran with.
+excl_of() { awk -F'\t' -v f="$1" '$1 ~ f {print substr($2, 6)}' "$C/fake/log"; }
+# live_vstore: the live install dir's own virtual store (one hash dir per prefix here).
+live_vstore() { echo "$C"/global/v11/h*/node_modules/.pnpm; }
+want_c='["@openai/codex@0.157.1 || 0.157.1-darwin-arm64 || 0.157.1-darwin-x64 || 0.157.1-linux-arm64 || 0.157.1-linux-x64 || 0.157.1-win32-arm64 || 0.157.1-win32-x64"]'
+want_p='["@openai/codex@0.156.0 || 0.156.0-darwin-arm64 || 0.156.0-darwin-x64 || 0.156.0-linux-arm64 || 0.156.0-linux-x64 || 0.156.0-win32-arm64 || 0.156.0-win32-x64"]'
 
 # ── 1. already current: no install, and a record for the verified live version ────────
 new_case 1; reg_latest 0.156.0; reg_publish 0.156.0
@@ -219,19 +261,18 @@ has "$out" "codex promoted: 0.156.0 -> 0.157.1" && ok || bad "3: no promoted lin
 # Only two exceptions ever appear: the candidate (staging, promotion) and the version
 # being retained (it may itself be under a day old), each naming exact versions of the
 # official package and every alias its own manifest declares.
-want_c='minimum-release-age-exclude[]=@openai/codex@0.157.1 || 0.157.1-darwin-arm64 || 0.157.1-darwin-x64 || 0.157.1-linux-arm64 || 0.157.1-linux-x64 || 0.157.1-win32-arm64 || 0.157.1-win32-x64'
-want_p='minimum-release-age-exclude[]=@openai/codex@0.156.0 || 0.156.0-darwin-arm64 || 0.156.0-darwin-x64 || 0.156.0-linux-arm64 || 0.156.0-linux-x64 || 0.156.0-win32-arm64 || 0.156.0-win32-x64'
-excl=$(grep -o 'minimum-release-age-exclude[^~]*' "$C/fake/log" | sort -u)
+excl=$(excl_of '^ARGS add' | sort -u)
 [ "$excl" = "$(printf '%s\n%s\n' "$want_c" "$want_p" | sort -u)" ] && ok \
-  || bad "3: exclude lines were not exactly the declared exact versions: $excl"
-grep '^ARGS add' "$C/fake/log" | grep -F -- '@openai/codex@0.157.1 ' | grep -vqF "$want_c" \
+  || bad "3: exclude values were not exactly the declared exact versions: $excl"
+grep '^ARGS add' "$C/fake/log" | grep -F -- '@openai/codex@0.157.1 ' | grep -vqF "EXCL $want_c" \
   && bad "3: a candidate install ran without its exact exception" || ok
-grep -q -e 'minimum-release-age=' -e 'minimum-release-age-exclude=' "$C/fake/log" \
-  && bad "3: the cooldown itself was overridden or a string-form exclude was used" || ok
-[ "$(grep '^ARGS add' "$C/fake/log" | grep -vc 'MODE 600')" = 0 ] && ok || bad "3: an add ran with a non-private rc"
-[ "$(grep '^ARGS add' "$C/fake/log" | grep -vc 'RC registry=https://registry.npmjs.org/')" = 0 ] && ok \
-  || bad "3: the operator's npmrc was not carried into the per-run rc"
-[ -z "$(find "$C/state" "$C/lib" -name 'npmrc*' -print -quit)" ] && ok || bad "3: the per-run rc outlived the run"
+[ -z "$(excl_of '^ARGS ([^a]|a[^d])')" ] && ok || bad "3: a non-install pnpm call carried an exclude"
+! grep -qF 'left-pad@1.3.0' "$C/fake/log" && ok || bad "3: a pnpm call inherited the caller's exclude"
+grep -q -e '--config.minimum-release-age' -e '--minimum-release-age' "$C/fake/log" \
+  && bad "3: a CLI cooldown flag was passed" || ok
+[ "$(grep -vc $'\tAGE unset|unset$' "$C/fake/log")" = 0 ] && ok || bad "3: the cooldown age itself was overridden"
+[ "$(grep -vcF -- '--config.enable-global-virtual-store=false' "$C/fake/log")" = 0 ] && ok \
+  || bad "3: a pnpm call ran without the global virtual store off"
 grep '^ARGS add' "$C/fake/log" | grep -F -- "--config.global-dir=$C/global" | grep -F '@openai/codex@0.157.1' \
   | grep -q -- '--offline' && ok || bad "3: the live promotion was not drawn from the staged store (--offline)"
 [ "$("$C/lib/retained/0.156.0/bin/codex" --version 2>/dev/null)" = "codex-cli 0.156.0" ] && ok \
@@ -310,7 +351,7 @@ out=$(run); rc=$?
 # ── 8. a running Codex session defers promotion ───────────────────────────────────────
 new_case 8a; reg_latest 0.157.1; reg_publish 0.157.1
 mkdir -p "$C/proc/4242"
-ln -s "$C/global/5/node_modules/.pnpm/@openai+codex@0.156.0-linux-x64/node_modules/@openai/codex/vendor/x86_64-unknown-linux-musl/bin/codex" \
+ln -s "$(live_vstore)/@openai+codex@0.156.0-linux-x64/node_modules/@openai/codex/vendor/x86_64-unknown-linux-musl/bin/codex" \
   "$C/proc/4242/exe"
 printf 'codex\0exec\0' >"$C/proc/4242/cmdline"
 out=$(run); rc=$?
@@ -319,7 +360,7 @@ out=$(run); rc=$?
 [ "$(outcome)" = deferred ] && ok || bad "8a: status outcome is '$(outcome)'"
 new_case 8b; reg_latest 0.157.1; reg_publish 0.157.1
 mkdir -p "$C/proc/77"; ln -s /usr/bin/node "$C/proc/77/exe"
-printf 'node\0%s\0' "$C/global/5/node_modules/.pnpm/@openai+codex@0.156.0/node_modules/@openai/codex/bin/codex.js" \
+printf 'node\0%s\0' "$(live_vstore)/@openai+codex@0.156.0/node_modules/@openai/codex/bin/codex.js" \
   >"$C/proc/77/cmdline"
 out=$(run); rc=$?
 [ "$rc" -eq 0 ] && has "$out" "deferred" && [ "$(live_adds)" = 0 ] && ok \
@@ -448,9 +489,10 @@ out=$(run --rollback); rc=$?
   || bad "17b: a failed retention blocked or hid the rollback ($rc): $out"
 
 # ── 22. rollback stays offline after `pnpm store prune` wiped pnpm's metadata cache ───
-# Measured on pnpm 10.33.2: prune reports "Removed all cached metadata files" and keeps
-# the retained prefix's packages, and --offline then fails ERR_PNPM_NO_OFFLINE_META even
-# for an exact version. The retained copy carries its own metadata snapshot.
+# Measured on pnpm 10.33.2 ("Removed all cached metadata files") and on 11.10.0 (the whole
+# cache dir emptied): prune keeps the retained prefix's packages, and --offline then fails
+# ERR_PNPM_NO_OFFLINE_META even for an exact version. The retained copy carries its own
+# metadata snapshot.
 new_case 22; reg_latest 0.157.1; reg_publish 0.157.1
 run >/dev/null
 rm -rf "$C/fake/cache"
@@ -555,6 +597,48 @@ out=$(run); rc=$?
 ! has "$out" "s3cr3t" && ! has "$out" "tok_ABC123" && ! has "$out" "npm_XYZ789" && ok \
   || bad "28: pnpm output leaked a credential: $out"
 has "$out" "WARN notify failed" && ok || bad "28: a failed notifier left no trace: $out"
+
+# ── 29. any pnpm but 11 is refused before any pnpm work ──────────────────────────────
+# The layout and the exclude form are pnpm 11's; pnpm 10 is still installed beside it.
+new_case 29; reg_latest 0.157.1; reg_publish 0.157.1
+out=$(FAKE_PNPM_VERSION=10.33.2 run); rc=$?
+[ "$rc" -eq 1 ] && has "$out" "needs pnpm 11" && has "$out" "'10.33.2'" && [ ! -s "$C/fake/log" ] && ok \
+  || bad "29: pnpm 10 was not refused up front ($rc): $out"
+out=$(FAKE_PNPM_VERSION='' run); rc=$?
+[ "$rc" -eq 1 ] && has "$out" "reports 'nothing'" && [ ! -s "$C/fake/log" ] && ok \
+  || bad "29: a pnpm with no version was not refused ($rc): $out"
+[ "$(live_ver)" = "codex-cli 0.156.0" ] && ok || bad "29: live install changed under a refused pnpm"
+
+# ── 30. a copy retained under pnpm 10 still rolls back, online, with its exclude converted ─
+# Its exclude file is a pnpm 10 rc line and pnpm 11's store does not hold its files.
+new_case 30 0.157.1; reg_latest 0.157.1; reg_publish 0.157.1; echo 0.156.0 >"$C/fake/immature"
+d="$C/lib/retained/0.156.0"
+mkdir -p "$d/bin" "$d/global/5/node_modules"
+printf '#!/usr/bin/env bash\necho "codex-cli 0.156.0"\n' >"$d/bin/codex"
+chmod +x "$d/bin/codex"
+jq -r '"minimum-release-age-exclude[]=" + .[0]' <<<"$want_p" >"$d/exclude"
+out=$(run --rollback 0.156.0); rc=$?
+[ "$rc" -eq 0 ] && has "$out" "rolled back to 0.156.0" && [ "$(live_ver)" = "codex-cli 0.156.0" ] && ok \
+  || bad "30: a pnpm 10 retained copy did not roll back ($rc): $out"
+grep '^ARGS add' "$C/fake/log" | grep -F -- '@openai/codex@0.156.0 --prefer-offline' | grep -qF "EXCL $want_p" && ok \
+  || bad "30: the rollback install did not carry the converted exclude: $(grep '^ARGS add' "$C/fake/log")"
+[ "$(rec_ver)" = 0.156.0 ] && [ "$("$C/lib/retained/0.157.1/bin/codex" --version 2>/dev/null)" = "codex-cli 0.157.1" ] && ok \
+  || bad "30: record not restored or the replaced version not retained"
+
+# ── 31. an unconfigured cache dir ("undefined" from pnpm 11) still gets its snapshot ──
+# Measured 2026-10-19 on 11.10.0 in the unit's environment. The default is
+# $XDG_CACHE_HOME/pnpm; a relative "undefined" must never become a write target.
+new_case 31; reg_latest 0.157.1; reg_publish 0.157.1; touch "$C/fake/cache_undefined"
+out=$(cd "$C" && XDG_CACHE_HOME="$C/xdg-cache" run); rc=$?
+[ "$rc" -eq 0 ] && has "$out" "codex promoted" && ! has "$out" "no pnpm metadata to snapshot" && ok \
+  || bad "31: promotion with the default cache dir ($rc): $out"
+[ -n "$(find "$C/lib/retained/0.156.0/metadata" -name codex.jsonl 2>/dev/null)" ] && ok \
+  || bad "31: no metadata snapshot from the default cache dir"
+rm -rf "$C/xdg-cache/pnpm"; : >"$C/fake/log"
+out=$(cd "$C" && XDG_CACHE_HOME="$C/xdg-cache" run --rollback); rc=$?
+[ "$rc" -eq 0 ] && has "$out" "rolled back to 0.156.0" && [ "$(grep -c -- '--prefer-offline' "$C/fake/log")" = 0 ] && ok \
+  || bad "31: rollback after a default-cache wipe needed the network ($rc): $out"
+[ ! -e "$C/undefined" ] && ok || bad "31: metadata was written under a relative 'undefined' dir"
 
 if [ "$fail" -eq 0 ]; then
   echo "ok — codex-update: $pass/$((pass + fail)) assertions passed"

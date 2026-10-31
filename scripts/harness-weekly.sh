@@ -425,7 +425,7 @@ else:
   # headroom for a dozen more overlays before it binds; a run that hits it
   # still prints the rows it collected.
   if [ -f "$SCRIPTS/vendored-drift-check.sh" ]; then
-    _vd_out=$(mktemp); _vd_err=$(mktemp)
+    _vd_out=$(mktemp) || exit 1; _vd_err=$(mktemp) || exit 1
     if timeout 1200 bash "$SCRIPTS/vendored-drift-check.sh" >"$_vd_out" 2>"$_vd_err"; then
       cat "$_vd_out"
       _vd_moved=$(grep -c '| MOVED$' "$_vd_out" 2>/dev/null || true)
@@ -496,7 +496,7 @@ else:
   # 1 -> 3, and the only tell was a buried "disposition_unknown" line. An
   # unattended run would have read as healthy while every remote-state check in
   # it was silently unanswerable.
-  _pc_err=$(mktemp)
+  _pc_err=$(mktemp) || exit 1
   # Records first, so the rollup below counts them. Claude Code fires no
   # PostToolUseFailure for a call it rejects before running it (input
   # validation, where the Write/Edit worktree guard lives), so those failures
@@ -656,7 +656,9 @@ DOCK=$(grep -oE 'docker-flagged:[0-9]+' "$REPORT" | head -1 | cut -d: -f2)
 AWG=$(grep -oE 'agent-write-flagged:[0-9]+' "$REPORT" | head -1 | cut -d: -f2)
 # reclaim-sweep prints a trailing reclaim-flagged:N. Unlike the others this one is
 # pure disk space, never correctness — but it is the only counter that tells you the
-# box is quietly hoarding tens of GB of superseded backups.
+# box is quietly hoarding tens of GB of superseded backups. It counts agent scratch
+# too (#2002); the hourly timer applies both, so a count that stays nonzero week
+# over week means removal is failing, not waiting.
 RECLAIM=$(grep -oE 'reclaim-flagged:[0-9]+' "$REPORT" | head -1 | cut -d: -f2)
 # denial-mine --digest prints a trailing denials-flagged:N counting only
 # ACTIONABLE clusters (allow/deny-fast/sandbox fixes); behavioral guard blocks
