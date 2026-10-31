@@ -275,7 +275,7 @@ running_of() { # running_of IMAGENAME (e.g. brave.exe) -> true|false|null; memoi
   # read loop in cmd_browsers) AND the hang guard.
   out="$(win_exec tasklist.exe /FO CSV /FI "IMAGENAME eq $n" | tr -d '\r')"
   if [ -z "$out" ]; then v=null
-  elif printf '%s' "$out" | grep -qi "\"$n\""; then v=true
+  elif grep -qi "\"$n\"" <<<"$out"; then v=true
   else v=false; fi
   printf -v "$var" '%s' "$v"
   printf '%s' "$v"
