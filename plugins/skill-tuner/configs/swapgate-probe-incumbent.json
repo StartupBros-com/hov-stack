@@ -1,0 +1,5 @@
+{
+  "model": "claude-sonnet-5",
+  "doctrine_file": "/home/user/hov-stack/plugins/hov-stack/skills/writing-for-agents/SKILL.md",
+  "target_file": "/home/user/hov-stack/plugins/hov-stack/skills/browser-console-setup/SKILL.md"
+}
