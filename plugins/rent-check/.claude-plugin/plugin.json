@@ -1,0 +1,23 @@
+{
+  "name": "rent-check",
+  "version": "0.3.1",
+  "description": "Every always-loaded line pays rent or gets cut. /rent-check audits CLAUDE.md, AGENTS.md, rules dirs and the always-loaded surface around them: load-class costing, enforcement-backing analysis (which rules are just words), reality drift against the live repo, and evidence-tiered KEEP/FIX/PROMOTE/DEMOTE/MERGE/CUT/MEASURE verdicts with folklore labeled as folklore — report-first, verified draft diffs, never auto-applied.",
+  "author": {
+    "name": "StartupBros / House of Vibe",
+    "url": "https://houseofvibe.ai"
+  },
+  "homepage": "https://houseofvibe.ai",
+  "repository": "https://github.com/StartupBros-com/hov-stack",
+  "license": "MIT",
+  "keywords": [
+    "house-of-vibe",
+    "skills",
+    "claude-md",
+    "agents-md",
+    "context-engineering",
+    "audit",
+    "harness",
+    "monorepo",
+    "claude-code"
+  ]
+}
