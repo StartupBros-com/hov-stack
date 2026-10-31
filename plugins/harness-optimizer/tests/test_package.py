@@ -105,8 +105,8 @@ class PackageTests(unittest.TestCase):
     def test_discovery_package_identity(self):
         target = self.copied()
         manifest = json.loads((target / ".claude-plugin/plugin.json").read_text())
-        self.assertEqual(manifest["version"], "0.2.0")
-        self.assertEqual((target / "VERSION").read_text().strip(), "0.2.0")
+        self.assertEqual(manifest["version"], "0.2.1")
+        self.assertEqual((target / "VERSION").read_text().strip(), "0.2.1")
         validate(target)
 
     def test_readme_discovery_and_evidence_contract(self):
