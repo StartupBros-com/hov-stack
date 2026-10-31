@@ -1,0 +1,8 @@
+{
+  "name": "harness-optimizer",
+  "version": "0.2.1",
+  "description": "User-invoked, bounded coordination of evidence-backed harness repairs and optional maintenance specialists.",
+  "author": {"name": "StartupBros / House of Vibe"},
+  "license": "MIT",
+  "keywords": ["harness", "coordination", "verification"]
+}

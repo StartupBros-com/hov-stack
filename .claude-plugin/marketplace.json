@@ -256,15 +256,16 @@
     {
       "name": "harness-optimizer",
       "source": {
-        "source": "url",
-        "url": "https://github.com/StartupBros-com/harness-optimizer.git",
-        "sha": "6d1fbab5164327631c1dca38b02ff6de66bb9d9a"
+        "source": "git-subdir",
+        "url": "https://github.com/StartupBros-com/hov-stack.git",
+        "path": "plugins/harness-optimizer",
+        "sha": "5aa8c005ab131b5075f39ab9e50e5b30155d00e8"
       },
       "description": "Investigate recurring Claude Code setup problems across six evidence lanes, select up to three repair families, and independently challenge the diagnosis, changes and outcome. Explicitly invoked, with existing permissions and specialist consent preserved. Attempt limits are not spending caps.",
       "metadata": {
-        "version": "0.2.0",
-        "releaseId": 418994909,
-        "releaseTag": "v0.2.0"
+        "version": "0.2.1",
+        "releaseId": 430093815,
+        "releaseTag": "harness-optimizer--v0.2.1"
       },
       "card": {
         "tagline": "Claude Code plugin: investigate recurring setup problems before changing things",
