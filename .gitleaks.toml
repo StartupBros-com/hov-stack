@@ -24,6 +24,9 @@ paths = [
   '''hooks/tests/papercut-log\.test\.js''',
   '''tests/test_stripe_api\.py''',
   '''tests/test_memory_recall_eval\.py''',
+  # The memory-dream plugin's copy of the same test plants a fake live-key line in a note
+  # and asserts `sample` drops that note as sensitive.
+  '''plugins/memory-dream/tests/test_recall_eval\.py''',
   '''tests/test_memory_mine\.py''',
   '''tests/test_resend_cli\.py''',
   '''tests/test_supabase_api\.py''',
