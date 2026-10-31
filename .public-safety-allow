@@ -44,3 +44,4 @@
 ^windows/ssh-config$	config\.[l]ocal	an ssh Include of a per-machine file, not a host	private-host
 ^plugins/papercut/tests/hooks/papercut-log\.test\.js$	^s3cr3tp4ssw0rd@db\.[i]nternal$	the redaction test feeds a fake credential URI through redact() and asserts the password is gone; the user:pass@host form reads as an email	email
 ^plugins/papercut/tests/hooks/papercut-log\.test\.js$	^db\.[i]nternal$	the same fake credential URI's host	private-host
+^plugins/sign-it/skills/sign-it/scripts/sign-it\.mjs$	^a\.[i]nternal$	Node's os.networkInterfaces() entries carry a boolean internal flag; the matched text reads that property of an entry, it is not a hostname	private-host
