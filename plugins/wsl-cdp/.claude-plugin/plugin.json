@@ -1,0 +1,20 @@
+{
+  "name": "wsl-cdp",
+  "version": "0.3.6",
+  "description": "Drive your real, logged-in Windows browser (Chrome/Edge/Brave) from Claude Code inside WSL2 over the Chrome DevTools Protocol: read authenticated dashboards, take real screenshots, manage tabs. Fills the gap the Claude in Chrome extension cannot cover under WSL.",
+  "author": {
+    "name": "StartupBros / House of Vibe",
+    "url": "https://houseofvibe.ai"
+  },
+  "homepage": "https://houseofvibe.ai",
+  "repository": "https://github.com/StartupBros-com/hov-stack",
+  "license": "MIT",
+  "keywords": [
+    "house-of-vibe",
+    "browser",
+    "cdp",
+    "wsl2",
+    "windows",
+    "claude-code"
+  ]
+}
