@@ -42,3 +42,4 @@
 ^plugins/memory-dream/pyproject\.toml$	^hello@[h]ouseofvibe\.ai$	the package metadata's published contact, the product's role mailbox, already public in the standalone repo; not a person's address	email
 ^tests/vastai\.test\.sh$	^root@ssh5\.[v]ast\.ai$	the vastai wrapper test asserts on the vendor's documented SSH proxy login form, the behaviour under test	email
 ^windows/ssh-config$	config\.[l]ocal	an ssh Include of a per-machine file, not a host	private-host
+^plugins/sign-it/skills/sign-it/scripts/sign-it\.mjs$	^a\.[i]nternal$	Node's os.networkInterfaces() entries carry a boolean internal flag; the matched text reads that property of an entry, it is not a hostname	private-host
