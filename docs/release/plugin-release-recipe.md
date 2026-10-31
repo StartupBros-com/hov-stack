@@ -56,11 +56,16 @@ chain converges without them.
    `plugins/<name>/release/stage-assets.sh`, which stage runs with
    `RELEASE_TAG` and `RELEASE_VERSION` set and an empty output directory as
    its argument, before the gate. Every file it writes there is uploaded with
-   the draft. A hook that fails or writes nothing stops the stage, and a draft
-   that comes back without every asset is deleted (the tag stays) so a re-run
-   stages it cleanly. A tag that already has a release stages nothing and
-   says so, unless the plugin has a hook and the release lacks one of its
-   assets; that fails and names them. The manifest is read from the
+   the draft. A hook that fails or writes nothing stops the stage. A hooked
+   draft is created as a prerelease, which the reconciler and the migrate
+   never pin, and the flag is cleared only once every asset is confirmed on
+   it. A draft that is still a prerelease after a failed upload, a short
+   upload or an interrupted run is deleted (the tag stays), and a re-run that
+   finds one deletes it and stages again; nothing else is ever deleted, so
+   the delete-draft hazard below cannot arise from staging. A tag that
+   already has any other release stages nothing and says so, unless the
+   plugin has a hook and the release lacks one of its assets; that fails,
+   names them and leaves the release alone. The manifest is read from the
    checkout, never over a raw URL. The draft is a draft because publishing
    fires the announcement, and the announcement must find the card already
    current.
