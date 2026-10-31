@@ -1,0 +1,148 @@
+# Changelog
+
+## v0.4.0 — 2026-09-22
+
+- **Fix (agents)**: drafter and scribe now declare an explicit minimal tool
+  list (`Glob` only) and `omitClaudeMd: true`. An empty list grants every
+  inherited tool in Claude Code, so the previous declarations did not enforce
+  the documented restriction. All task inputs are passed inline; the parent
+  reads cluster shards and review files before dispatch. Agent regression
+  tests enforce non-empty, read-only tool lists and omitted host instructions.
+- **New (preview)**: config key `preview_opener`, overridden by
+  `MEMORY_DREAM_PREVIEW_OPENER`, runs a command without a shell, appends the
+  original preview path, waits, and returns its exit code. It bypasses all
+  built-in openers and the WSL copy into the Windows profile, which otherwise
+  duplicates full memory bodies. Command failures do not trigger a fallback.
+- **New (eval)**: `sample` and `routing-input` accept `--out-file PATH` using
+  the same JSON output helpers as `plan` and `trace`. The eval command uses
+  these flags instead of shell redirects; default stdout behavior is unchanged.
+- **Docs**: worked mirror-mode config examples explain the flat per-project
+  mirror layout, custom preview opener, and hard errors for unknown keys.
+- **Release**: plugin, Python package, and CLI versions now agree at `0.4.0`,
+  with a regression check for version agreement.
+
+## v0.3.0 — 2026-08-21
+
+The plugin's documented assumptions become runtime checks, and a pass now
+remembers what the operator decided. Everything below is advisory by
+default: no new check changes doctor's default exit code.
+
+- **New (doctor)**: five advisory checks — the installed CLI version
+  compared against `config.COMPATIBILITY_RECORD` (the measured basis for
+  the index caps), a compaction-shape canary over ambient transcripts,
+  non-default config values with their override source, patch-set and
+  preview-copy retention counts, and triage readiness — aggregated into
+  one `drift:` line. Opt-in `--strict` turns detected drift into a
+  nonzero exit; unverifiable states (no CLI on PATH) are deliberately
+  never drift.
+- **New (apply/triage)**: proposals the operator declines are durably
+  recorded in `rejections.json` (a sibling of the dated pass directories,
+  so pruning old passes never erases it), and triage suppresses those
+  paths for `--suppress-rejected-days` (default 14). Clusters deferred
+  pass after pass surface as repeat-deferral streaks backed by
+  `deferral-streaks.json`. Both files are written atomically and degrade
+  to a warning on failure — triage and doctor stay crash-free surfaces.
+- **New (`verify-findings`)**: a mechanical quote-existence gate for the
+  pass's verifier stages — substring-checks each finding's quote against
+  its cited file (path-confined; nothing outside the base root is ever
+  opened) and stamps `quote_checked` / `unverified_quote` for
+  adjudication. Advisory, always exits 0, never drops a finding.
+- **Fix (doctor)**: the version probe now honors its timeout on Windows.
+  `subprocess.run`'s timeout handling kills only the direct child and
+  then re-reads pipes a grandchild can still hold — and a real Windows
+  `claude` is a `.cmd` wrapper spawning `node.exe`, exactly that shape.
+  The probe now kills, reaps, and abandons the pipes unread.
+- **Docs**: `SUPPRESS_REJECTED_DAYS` joins the TUNING.md threshold table;
+  the fidelity-stage quote stamp is documented as expected-uninformative
+  for destination files that do not exist yet (extract/split before
+  build), so mass unverified stamps are not misread as fabrication.
+
+## v0.2.1 — 2026-08-11
+
+- **Fix (consent gate)**: a compaction summary can no longer stand in for an
+  operator approval. Claude Code writes its post-compaction continuation turn
+  as `type == "user"` / `role == "user"` with no `isMeta`, so it passed every
+  structural check in `extract_user_text`. Because the summarizer quotes prior
+  conversation verbatim and `trace` scans backward from the end of the
+  transcript, a compaction landing between "preview generated" and "operator
+  approves" could reproduce the approval token in a turn no human typed — and
+  that synthetic turn would be _preferred_ over a genuine earlier approval.
+  That is exactly the property the gate exists to guarantee. Now rejected on
+  the `isCompactSummary` / `isVisibleInTranscriptOnly` flags rather than on
+  model-written prose; measured across 400 live transcripts, 348/348 entries
+  carrying either flag were summaries and none were operator turns, so no real
+  approval is refused.
+- **New**: `plan` and `trace` accept `--out-file PATH`, writing their JSON
+  there instead of stdout. The documented pass captured them with
+  `> "$SCRATCH/..."`, and a shell redirect to a variable target cannot be
+  statically proven safe, so agent command guards refuse it — which halted the
+  documented pass at its first step. `commands/dream.md` now uses the flag.
+  Spelled `--out-file`, not `--out`, because `build`/`archive` already use
+  `--out` for an output _directory_. Stdout behavior without the flag is
+  unchanged.
+
+## v0.2.0 — 2026-08-08
+
+Suite integration, strictly additive: everything below is stdlib-only and
+inert unless a sibling plugin is installed. Standalone behavior is unchanged.
+
+- **New**: `eval export-paired` emits two flat `{question_id: score}` JSON
+  files with identical key sets from two scored runs (suite identity
+  checked, questions broken in either run excluded as suite decay,
+  unpaired ids dropped — all exclusions summarized, never silent). The
+  output is the input shape of generic paired-comparison tools.
+- **Docs**: when skill-tuner (same marketplace) is installed, the eval
+  report upgrades its "deltas under 2 points are judge noise" rule of thumb
+  to skill-tuner's statistical verdict — the noise rule becomes a stated
+  non-inferiority margin with a confidence interval. Without skill-tuner
+  the heuristic stands verbatim.
+- **Docs**: SECURITY.md now warns explicitly against pointing generic
+  repo-cleanup or PR-writing tools at a memory mirror — that route bypasses
+  every apply gate, and the failure it causes is invisible in a diff.
+- **Docs**: mirror-mode notes that a PR-review plugin (e.g. pro-gate)
+  composes well on the mirror draft PR, as a complement to the gates.
+
+## v0.1.1 — 2026-08-08
+
+Windows correctness release; no behavior change on POSIX.
+
+- **Fix**: the transcript slug derivation (`transcript.cwd_slug`) now replaces
+  Windows drive colons and backslashes, so the derived transcripts directory
+  always stays inside `<claude-config-dir>/projects/` on native Windows.
+  Previously `doctor` and the consent trace probed a wrong (repo-local) path.
+- **Fix**: all file I/O — product and test fixtures — now uses explicit UTF-8
+  with LF newlines, matching what Claude Code itself writes. Previously
+  Windows wrote locale-encoded (e.g. cp1252) CRLF files that later strict
+  UTF-8 reads rejected with `UnicodeDecodeError`.
+- **Tests**: the lock-contention test holds the lock via `compat.FileLock`
+  (flock on POSIX, msvcrt on Windows) instead of raw `fcntl`, so the whole
+  suite imports and runs on Windows; POSIX-only 0700 mode assertions are
+  skipped on Windows per `compat.restrict_permissions`'s documented no-op.
+
+## v0.1.0 — 2026-08-08
+
+Initial public release.
+
+- **Two surfaces**: a Claude Code plugin (`/memory-dream:dream`,
+  `/memory-dream:eval`) and a standalone stdlib-only Python CLI
+  (`python3 -m memory_dream`, or `pipx install .` for a `memory-dream`
+  console script). Zero dependencies.
+- **`/memory-dream:dream`** — an operator-gated consolidation pass over
+  Claude Code auto-memory: deterministic triage and clustering, drafting by a
+  drafting subagent (note bodies treated as untrusted input),
+  fidelity/repo-grounding/quality verification, per-proposal diff
+  preview with item-by-item approval, and a gated apply with single-flight
+  locking, consent-trace verification, per-project atomic writes, snapshot
+  backup, and `memory-dream restore`.
+- **`/memory-dream:eval`** — a frozen, content-anchored recall-regression
+  suite that scores index routing accuracy before and after a pass instead of
+  assuming it improved.
+- **Security model** (SECURITY.md): single-operator trust model, restricted
+  drafting (the declaration bug is fixed in v0.4.0), verified post-preview consent, and an explicit opt-in
+  reduced-consent token mode for non-Claude-Code harnesses.
+- **180-test suite** (stdlib unittest, no network, no model calls) across
+  ubuntu/macos/windows × Python 3.10/3.12, plus two CI-enforced hygiene
+  guards: stdlib-only imports and no private-harness references.
+- **Docs**: architecture (docs/ARCHITECTURE.md), full threshold and tuning
+  reference (docs/TUNING.md), and the hardening campaign that shaped the gate
+  stack (docs/PROVENANCE.md).
