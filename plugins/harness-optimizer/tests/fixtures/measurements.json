@@ -1,0 +1,102 @@
+{
+  "a": {
+    "before": {
+      "id": "scan-41",
+      "producer": {"operation": "finding-audit", "version": "1", "source": "snapshot-41"},
+      "scope": "repository inventory",
+      "population": {"code_files:shared-7": 4000, "code_files:other-8": 2000, "feedback_notes:cohort-9": 152},
+      "enabled_checks": ["feedback", "unindexed"],
+      "sampling_basis": "complete supplied inventory",
+      "outcome_definition": "unique check and target finding count",
+      "window": "seven-day fixed workload replay",
+      "exposure": {"invocations": 500},
+      "findings": 4772
+    },
+    "after": {
+      "id": "scan-42",
+      "producer": {"operation": "finding-audit", "version": "1", "source": "snapshot-42"},
+      "scope": "scratch inventory",
+      "population": {"code_files:shared-7": 4000, "code_files:other-8": 2000, "feedback_notes:cohort-9": 0},
+      "enabled_checks": ["unindexed"],
+      "sampling_basis": "complete supplied inventory",
+      "outcome_definition": "unique check and target finding count",
+      "window": "seven-day fixed workload replay",
+      "exposure": {"invocations": 500},
+      "findings": 1403
+    }
+  },
+  "b": {
+    "before": {
+      "id": "scan-41",
+      "producer": {"operation": "finding-audit", "version": "1", "source": "snapshot-41"},
+      "scope": "repository inventory",
+      "population": {"code_files:shared-7": 4000, "code_files:other-8": 2000, "feedback_notes:cohort-9": 152},
+      "enabled_checks": ["feedback", "unindexed"],
+      "sampling_basis": "complete supplied inventory",
+      "outcome_definition": "unique check and target finding count",
+      "window": "seven-day fixed workload replay",
+      "exposure": {"invocations": 500},
+      "findings": 4772
+    },
+    "after": {
+      "id": "scan-42",
+      "producer": {"operation": "finding-audit", "version": "1", "source": "snapshot-42"},
+      "scope": "repository inventory",
+      "population": {"code_files:shared-7": 4000, "code_files:other-8": 2000, "feedback_notes:cohort-9": 152},
+      "enabled_checks": ["feedback", "unindexed"],
+      "sampling_basis": "complete supplied inventory",
+      "outcome_definition": "unique check and target finding count",
+      "window": "seven-day fixed workload replay",
+      "exposure": {"invocations": 500},
+      "findings": 1403
+    }
+  },
+  "c": {
+    "before": {
+      "id": "scan-41",
+      "producer": {"operation": "finding-audit", "version": "1", "source": "snapshot-41"},
+      "scope": "repository inventory",
+      "population": {"code_files:shared-7": 4000, "code_files:other-8": 2000, "feedback_notes:cohort-9": 152},
+      "enabled_checks": ["feedback", "unindexed"],
+      "sampling_basis": "complete supplied inventory",
+      "outcome_definition": "unique check and target finding count",
+      "window": "seven-day fixed workload replay",
+      "exposure": {"invocations": 500},
+      "findings": 4772,
+      "subsets": [{
+        "name": "unindexed",
+        "scope": "shared code inventory",
+        "population": {"code_files:shared-7": 4000},
+        "enabled_checks": ["unindexed"],
+        "sampling_basis": "complete supplied inventory",
+        "outcome_definition": "unique check and target finding count",
+        "window": "seven-day fixed workload replay",
+        "exposure": {"invocations": 500},
+        "findings": 3726
+      }]
+    },
+    "after": {
+      "id": "scan-42",
+      "producer": {"operation": "finding-audit", "version": "1", "source": "snapshot-42"},
+      "scope": "scratch inventory",
+      "population": {"code_files:shared-7": 4000, "code_files:other-8": 2000, "feedback_notes:cohort-9": 0},
+      "enabled_checks": ["unindexed"],
+      "sampling_basis": "complete supplied inventory",
+      "outcome_definition": "unique check and target finding count",
+      "window": "seven-day fixed workload replay",
+      "exposure": {"invocations": 500},
+      "findings": 1403,
+      "subsets": [{
+        "name": "unindexed",
+        "scope": "shared code inventory",
+        "population": {"code_files:shared-7": 4000},
+        "enabled_checks": ["unindexed"],
+        "sampling_basis": "complete supplied inventory",
+        "outcome_definition": "unique check and target finding count",
+        "window": "seven-day fixed workload replay",
+        "exposure": {"invocations": 500},
+        "findings": 359
+      }]
+    }
+  }
+}

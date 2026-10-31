@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "id": "prbot-browser-tour",
+  "project": {
+    "schemaVersion": 1,
+    "id": "prbot-narrated-tour",
+    "compositionId": "NarratedBrowserTour",
+    "viewport": { "width": 1280, "height": 720 },
+    "fps": 30,
+    "colors": {
+      "matte": "#07111f",
+      "cursor": "#ffffff",
+      "focus": "#2dd4bf",
+      "click": "#fb7185",
+      "captionBackground": "#07111f",
+      "captionForeground": "#ffffff"
+    },
+    "camera": { "maxZoom": 1.45, "safeMargin": 0.04 }
+  },
+  "baseUrl": "https://prbot.ai/home",
+  "allowedHosts": ["prbot.ai"],
+  "routes": [
+    { "id": "home", "path": "/home" },
+    { "id": "workspace", "path": "/home/example" }
+  ],
+  "maxDurationMs": 60000,
+  "maxEvents": 2000,
+  "steps": [
+    {
+      "type": "chapter",
+      "title": "Open the workspace",
+      "description": "Start from the prepared demo account.",
+      "durationMs": 1500
+    },
+    { "type": "goto", "routeId": "workspace", "waitFor": "networkidle" },
+    { "type": "pause", "durationMs": 1200 }
+  ]
+}
