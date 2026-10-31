@@ -1,0 +1,22 @@
+{
+  "name": "harness-vet",
+  "version": "0.3.0",
+  "description": "Adoption gate for external agent tooling: shared safety checks, per-project utility and overlap, verified placement and activation, evidence-backed verdicts and re-evaluation triggers.",
+  "author": {
+    "name": "StartupBros / House of Vibe",
+    "url": "https://houseofvibe.ai"
+  },
+  "homepage": "https://houseofvibe.ai",
+  "repository": "https://github.com/StartupBros-com/hov-stack",
+  "license": "MIT",
+  "keywords": [
+    "house-of-vibe",
+    "skills",
+    "harness",
+    "vetting",
+    "adoption",
+    "context-engineering",
+    "supply-chain",
+    "claude-code"
+  ]
+}

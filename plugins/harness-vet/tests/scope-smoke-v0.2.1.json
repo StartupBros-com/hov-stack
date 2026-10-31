@@ -1,0 +1,958 @@
+{
+ "kind": "scope-policy-smoke-v0.2.1",
+ "date": "2026-09-05",
+ "requested_model": "inherited session model (workflow subagents reported claude-sonnet-5)",
+ "runs_per_case": 1,
+ "rounds_run": 3,
+ "interface": "One rollup row per target the scenario asks about; component, delivery, prior and other-scope state belong in the explanation. Round 1 ran before this sentence existed in tests/README.md and in VERDICTS.md.",
+ "method": "Each case ran in a fresh workflow subagent that read only the four skill files and one scenario file. expected, forbidden_claims, the case id and every other case were withheld. A separate reviewer then received the answer key and graded exact row match plus semantic pass.",
+ "payload_sha256": {
+  "SKILL.md": "9b480a23ed403f8bc2b73d186a2536c84692971972f5ceac5ab54eeb50da9c99",
+  "VERDICTS.md": "a1dc880d00adc059e5525c93ef30e186b7833547096b7069a2e8c75de4ed855a",
+  "DIGEST.md": "c7e184ba7460e1f32c5356a6113cbdf7d45c6edc1edfdc2031968f453aed39cd",
+  "EVIDENCE.md": "c8d7dbc5d5bc0ced11e0131656250c69e7825a24dec5636bb55fb6c5013fdca2"
+ },
+ "rounds": [
+  {
+   "round": "round-1 (interface before clarification)",
+   "cases": 13,
+   "exact_matches": 10,
+   "semantic": {
+    "pass": 10,
+    "partial": 0,
+    "fail": 3
+   },
+   "mismatches": [
+    {
+     "id": "global-cost-project-fit",
+     "expected": "project-a=ADOPT",
+     "returned": "global=SKIP,project-a=ADOPT",
+     "exact": false
+    },
+    {
+     "id": "same-skill-other-scope-reconcile",
+     "expected": "project-a=ADAPT",
+     "returned": "global=SKIP,project-a=ADAPT",
+     "exact": false
+    },
+    {
+     "id": "other-project-not-coverage",
+     "expected": "project-a=ADOPT",
+     "returned": "project-a=ADOPT,project-b=SKIP",
+     "exact": false
+    }
+   ],
+   "reviews": [
+    {
+     "id": "global-cost-project-fit",
+     "exact_match": false,
+     "semantic": "FAIL",
+     "forbidden_claims_hit": [],
+     "notes": "Expected only {project-a: ADOPT}. Answer adds an extra unrequested 'global: SKIP' rollup row (a carried-forward prior verdict), which is an extra rollup row per the exact_match rule, so rows differ from the expected set. The project-a ADOPT reasoning itself is clean and hits none of the four forbidden claims (explicitly rejects 'historical SKIP forces project-a SKIP', explicitly says no global enablement is needed, explicitly says placement alone doesn't force ADAPT, and evidence_limits explicitly disclaims installation). But because rows differ, semantic must be FAIL per the grading rule."
+    },
+    {
+     "id": "callable-global-incumbent",
+     "exact_match": true,
+     "semantic": "PASS",
+     "forbidden_claims_hit": [],
+     "notes": "Single row {project-a: SKIP} matches exactly. Explicitly negates all four forbidden claims: affirms a callable global on-demand skill counts as coverage, explicitly rejects conflating invoke-only with disabled/unavailable, frames the candidate as adding a redundant second implementation (not net-new capability), and states the paired test found no candidate advantage/no unmet need. Evidence_limits correctly disclaims that nothing was independently run or installed. Retry/review section gives observable, non-time-based triggers."
+    },
+    {
+     "id": "other-project-not-coverage",
+     "exact_match": false,
+     "semantic": "FAIL",
+     "forbidden_claims_hit": [],
+     "notes": "Expected only {project-a: ADOPT}. Answer adds an extra unrequested 'project-b: SKIP' row addressing a target the scenario explicitly placed out of scope ('authorizes no installation or changes to project-b'), so rows differ from the expected set -> FAIL by the exact_match rule despite otherwise clean reasoning (project-a row correctly avoids treating project-b's inaccessible copy as coverage, correctly avoids ADAPT-for-narrowness, and correctly avoids duplicate-skip framing)."
+    },
+    {
+     "id": "shared-security-finding",
+     "exact_match": true,
+     "semantic": "PASS",
+     "forbidden_claims_hit": [],
+     "notes": "Single row {project-a: REJECT} matches exactly. Explicitly rejects all four forbidden claims: states project scope is not a sandbox and does not block the exfiltration, states the finding attaches to the artifact not the destination (reused verbatim regardless of target), states utility never outweighs an unremediated safety REJECT, and treats this as an affirmative disqualifier (not a mere utility gap). Evidence_limits correctly disclaims no independent re-verification or installs occurred."
+    },
+    {
+     "id": "multiple-targets",
+     "exact_match": true,
+     "semantic": "PASS",
+     "forbidden_claims_hit": [],
+     "notes": "Rows {project-a: ADOPT, project-b: SKIP} match exactly. Explicitly separates shared artifact findings (reusable) from the target-specific fit conclusion (not transferable), never conflates project-b coverage with project-a's need, never argues project-a's benefit justifies project-b/global installation, and issues two distinct per-target rows rather than a single rollup."
+    },
+    {
+     "id": "unknown-destination",
+     "exact_match": true,
+     "semantic": "PASS",
+     "forbidden_claims_hit": [],
+     "notes": "Single row {target: unresolved, verdict: SKIP} matches exactly. Explicitly rejects defaulting to global installation, explicitly refuses to treat the launch directory as the destination, frames missing utility evidence as 'unverified, not refuted' (not unsafe/REJECT), never claims a benchmark ran, and gives an explicit non-time-based, two-part observable retry condition (verified target + concrete task) plus states the SKIP is not a durable/fleet-wide rejection."
+    },
+    {
+     "id": "plugin-subset",
+     "exact_match": true,
+     "semantic": "PASS",
+     "forbidden_claims_hit": [],
+     "notes": "Single row {project-a: ADAPT} matches exactly. Reason is terser than sibling answers (only a 'reason' field, no separate placement/activation/evidence_limits/retry sections) but the substance is present: names the packaging change (copy skill-x out standalone under the license grant rather than natively installing the whole plugin), explicitly states no per-skill switch exists and that scoped native install still activates the objectionable hooks, correctly labels the copy-out as ADAPT (not ADOPT, not EXTRACT since a license grant exists). No forbidden claim is asserted."
+    },
+    {
+     "id": "native-project-plugin",
+     "exact_match": true,
+     "semantic": "PASS",
+     "forbidden_claims_hit": [],
+     "notes": "Single row {project-a: ADOPT} matches exactly. Explicitly rejects narrower-than-global forcing ADAPT, explicitly says no forking/copying is needed given verified native support and need for all components, never proposes global installation, and explicitly disclaims that the report-only ADOPT verdict means the plugin was deployed/enabled (activation field states enabling would itself require separate operator authorization)."
+    },
+    {
+     "id": "unlicensed-verbatim-copy",
+     "exact_match": true,
+     "semantic": "PASS",
+     "forbidden_claims_hit": [],
+     "notes": "Single row {project-a: EXTRACT} matches exactly. Terse (single 'reason' field, no separate evidence_limits/placement sections) but substantively correct: explicitly says the missing grant blocks verbatim ADOPT/ADAPT copy-out (not merely operator-weighed), explicitly says absence of a license is not itself a REJECT, explicitly says placement/price findings don't cure the missing grant, and frames EXTRACT as pattern-in-own-words rather than an already-completed port. No forbidden claim asserted."
+    },
+    {
+     "id": "same-skill-other-scope-reconcile",
+     "exact_match": false,
+     "semantic": "FAIL",
+     "forbidden_claims_hit": [
+      "The vet should delete the global copy itself as part of this assessment."
+     ],
+     "notes": "Expected only {project-a: ADAPT}. Answer adds an extra, unrequested 'global: SKIP' row (the scenario asked for a project-a-scoped assessment only), so rows differ from the expected set -> FAIL. That extra row also recommends a disposition for the global copy ('resolved by standing it down, not by adopting or retaining it at global scope'), which reads as the vet prescribing the fate of the out-of-scope global copy -- in spirit the forbidden claim about the vet acting on/removing the global copy as part of this assessment. The project-a row itself correctly avoids treating the global copy as covering SKIP and correctly diffs/names the authoritative copy."
+    },
+    {
+     "id": "first-instruction-surface-bootstrap",
+     "exact_match": true,
+     "semantic": "PASS",
+     "forbidden_claims_hit": [],
+     "notes": "Single row {project-a: ADOPT} matches exactly. Explicitly requires the operator to create the first instruction surface at a named exact path (never landed by the agent), explicitly requires the eval note be filed at a real committed location rather than only in agent memory, explicitly grants ADOPT despite zero prior instruction surface, and activation field explicitly states nothing has been implemented in this run."
+    },
+    {
+     "id": "tool-heavy-mcp-unmeasured",
+     "exact_match": true,
+     "semantic": "PASS",
+     "forbidden_claims_hit": [],
+     "notes": "Single row {project-a: SKIP} matches exactly. Explicitly rejects narrative-only tool-count comparison as satisfying the context-cost price check, explicitly rejects treating the unrun measurement as proof of degradation warranting REJECT, explicitly blocks ADOPT/ADAPT while the price check remains PARTIAL, and frames the result as SKIP-pending-evidence rather than a security finding."
+    },
+    {
+     "id": "skill-pack-named-subset",
+     "exact_match": true,
+     "semantic": "PASS",
+     "forbidden_claims_hit": [],
+     "notes": "Single row {project-a: ADAPT} matches exactly, with full packaging_change/placement/activation/evidence_limits/retry_or_review breakdown. Explicitly confirms all six named skills (not three) were deep-vetted, explicitly rejects native whole-plugin install as sufficient (fails context-cost for the 50-skill bundle), explicitly states the 44 untriaged skills carry no verdict and must not be treated as cleared or rejected, and explicitly labels the six copies as ADAPT (extract-and-repackage), not an unchanged native ADOPT."
+    }
+   ],
+   "answers": [
+    {
+     "id": "global-cost-project-fit",
+     "rows": [
+      {
+       "target": "project-a",
+       "verdict": "ADOPT",
+       "reason": "Per the scenario's stated facts (treated as established, not independently re-run here): project-a has a concrete task the skill serves, the target digest confirms no equivalent incumbent across global/project/nested/plugin sources, matched repeated behavioral tests show the candidate beating the bare model with clean irrelevant-task controls, and all five price checks (context cost, armor test, placement/off-switch, delivery-vs-content, supply chain) passed for this target with no safety/license/maintenance/quality defect. Delivery and content sub-verdicts both clear separately: delivery is unchanged/as-is (no fork, patch or trim needed), and content utility is demonstrated by the task-matched paired tests -- so the verdict is ADOPT, not ADAPT, since a narrower-than-global placement alone does not force ADAPT (VERDICTS.md). This is the same clean-artifact revision a prior global assessment already found safe; project-a reuses that shared artifact finding and adds its own target-specific fit evidence on top.",
+       "packaging_change": "None. The unchanged skill installs as-is for this target -- no fork, patch, updater removal, or component selection is required.",
+       "placement": "Project-local skill scoped to project-a only -- the narrowest supported placement for the demonstrated task, not global and not always-on.",
+       "activation": "Explicit invocation only, matching the platform's verified support for project-local explicit-invocation skills. Per the scenario, fresh target sessions confirmed visibility, invocation, precedence and disable behavior, and a separate unrelated control session confirmed the skill does not load there -- i.e., the scoping was runtime-verified, not just configured.",
+       "evidence_limits": "This row applies the harness-vet method to the scenario's stipulated facts; no checks were run or re-verified in producing this assessment, and no installation has been performed. Landing depth is report-only per the operator's explicit request and explicit authorization of no installation and no global change, so state is proposed/reported, not shipped or applied. Provenance recorded per the scenario (source pin, update owner, rollback) should be carried verbatim into the eval note rather than re-derived.",
+       "retry_or_review": "Bounded review trigger, not a fresh vet: re-open only on changed skill instructions/dependencies/capabilities/permissions, a changed project-a task, an incumbent becoming available, or a model/runtime change that would invalidate the paired behavioral test. Turning this recommendation into an applied change still requires a separate operator go-ahead, landed via project-a's own review conventions, plus a durable eval note (source identity/revision, test results, update/rollback owner)."
+      },
+      {
+       "target": "global",
+       "verdict": "SKIP",
+       "reason": "The prior global verdict for this exact source identity and content digest is reused, not re-litigated: SKIP was recorded solely because loading the skill in unrelated global contexts added unjustified cost, with no safety, licensing, maintenance or quality defect found. Per VERDICTS.md, that clean artifact finding carries forward, but the cost/no-need conclusion is scope-bound to global and is unaffected by project-a's task-specific result. A project-level ADOPT is evidence about one target's task match, not a demonstrated cross-project or global need, so it does not reopen or reverse the global SKIP -- this is exactly the pairing SKILL.md names: 'a global SKIP for clutter is not a project-level rejection,' and the converse holds too, a project ADOPT is not a global adoption. project-b is not mentioned anywhere in this scenario and is out of scope here; no verdict is asserted for it since asserting one would go beyond the stated facts.",
+       "packaging_change": "None proposed at global scope; this run's evidence does not justify any global packaging change.",
+       "placement": "No installation at global scope -- per VERDICTS.md, a SKIP row's destination is recorded as no installation.",
+       "activation": "Not applicable; the skill is not installed or activated globally.",
+       "evidence_limits": "This SKIP is a carried-forward prior verdict per the scenario's stated facts, not freshly re-verified in this exercise. The reused portion (clean artifact/safety/license/maintenance finding) is shared evidence; the cost-based fit conclusion remains scope-bound to global and was not retested here. No global installation exists, and the operator explicitly requested no global change.",
+       "retry_or_review": "Do-not-retry unless: a demonstrated cross-project or genuinely global task need emerges (distinct from one project's fit), the global delivery cost picture changes (e.g., a lighter-weight or reference-only placement removes the unjustified-load objection), or the operator states a reason the global context cost is now justified. project-a's ADOPT is not itself such a trigger."
+      }
+     ]
+    },
+    {
+     "id": "unknown-destination",
+     "rows": [
+      {
+       "target": "unresolved",
+       "verdict": "SKIP",
+       "reason": "No destination is defensible: no project path was named or verified, no global scope was requested or justified, and the launch directory is an unrelated checkout that SKILL.md/DIGEST.md bar from being treated as a destination merely because it is where the run happens to sit (local/launch availability does not imply it is the target). No concrete task was stated either — a domain label isn't a task under Phase 1, so Phase 4's behavioral-test fixture (planted-defect run plus incumbent paired comparison) cannot be derived. Per VERDICTS.md, 'Include an unresolved target row when no destination is defensible; missing scope is not an empty assessment,' so this is the one rollup row, target=unresolved. Component sub-verdict: the artifact-level intake check is stipulated (for this exercise) as having found no affirmative safety or licensing disqualifier, which is enough to clear an artifact REJECT but is not itself grounds for ADOPT/ADAPT/EXTRACT — utility, overlap and price are judged per target, and no target exists to judge them against. Delivery sub-verdict: whatever mechanism packages the skill (plugin/installer/etc.) is likewise unpriced for the same reason — Phase 5's context-cost, armor-test and placement/off-switch checks all presuppose a resolved target and cannot run here. Per VERDICTS.md, 'Insufficient verification may mean SKIP pending evidence, never a fabricated negative benchmark or a security REJECT,' so SKIP-pending-evidence, not REJECT, is the correct verdict given a run with no operator available to resolve the ambiguity (SKILL.md Interaction: 'For an unattended run with no defensible destination, continue the assessment with scope unresolved and no installation, never default to global installation.').",
+       "placement": "No installation at any scope. No skills directory, project instructions file, plugin registration, or global config entry is created or proposed. SKILL.md Phase 7 requires naming a specific target path/config before proposing any first instruction-loading surface, and none is defensible here.",
+       "activation": "None. Nothing is enabled, registered, or toggled at global, project, or plugin scope. A recommendation is not permission to enable tooling, and the explicit instruction against defaulting to global installation applies directly to this case.",
+       "packaging_change": "None proposed. ADAPT-style packaging decisions (selecting permitted components, stripping an updater, converting a global-only installer to project-local, patch/fork packaging) are target-specific under VERDICTS.md and cannot be specified without a target and task to adapt toward.",
+       "evidence_limits": "Treat all of the following as stipulated facts of this hypothetical, not as checks this session ran: (1) no verified target project or global scope, so Phase 2's per-target digest rows (effective context, available incumbent, placement/activation options, delivery/review conventions) were never built; (2) no concrete task, so Phase 4's representative-task behavioral test and named-incumbent paired comparison could not run — utility is unverified, not refuted, and no claim is made that any check was executed; (3) Phase 5 pricing (context cost, armor test, placement/off-switch verification in a live session) did not run because it presupposes a target; (4) the scenario's own statement of 'no affirmative safety or licensing disqualifier' is accepted as given for this exercise and is one input among several, not a completed independent audit; (5) no prior-verdict/note search across shared or target-project locations is reported complete, since there is no target to search from. No installation, configuration change, or global enablement has occurred or is being recommended.",
+       "retry_or_review": "Do-not-retry unless: an operator, or a later unattended run, supplies both (a) a verified target project path or an explicit and justified request for global scope, and (b) a concrete task naming the artifact/outcome the target's sessions must produce and how a result is judged. When both are supplied, resume at Phase 2 (digest) for that target/task pair; the artifact-level no-disqualifier finding carries forward per VERDICTS.md's reuse rule ('reuse verified shared findings, not necessarily a previous fit conclusion') rather than being re-derived, but utility, overlap, and context price must be freshly assessed against the newly named target. This SKIP is scope-and-task-absence-driven, not a security finding, so it does not become a durable fleet-wide rejection of the candidate and expires the moment a defensible destination and task exist."
+      }
+     ]
+    },
+    {
+     "id": "native-project-plugin",
+     "rows": [
+      {
+       "target": "project-a",
+       "verdict": "ADOPT",
+       "reason": "Delivery-mechanism verdict: ADOPT — native project-scoped plugin installation is the supported placement, the plugin is unchanged/pinned, and instruction/manifest/executable/updater/supply-chain review found it safe, maintained and licensed for this use with no unwanted extras (a shared artifact finding, not project-a-specific). Content verdict: ADOPT — the project-a digest shows a concrete unmet task per bundled component with no callable incumbent (project-a-specific fit finding), and repeated matched target-task tests beat the bare model while irrelevant-task and negative controls passed, satisfying phase 4's REFUTED-default bar. All five phase-5 price checks (context cost, armor test, placement/off-switch, delivery-vs-content, supply chain) passed for the whole project-scoped bundle. Per VERDICTS.md, a native project install is ADOPT, not ADAPT, merely for being narrower than global; since every component is needed only in project-a and no subsetting is required, this is whole-bundle ADOPT rather than per-component ADAPT.",
+       "placement": "Native, project-a-scoped plugin installation (project-local plugin registration) — not global, not reference-only. Verified as the correct grain: unrelated fresh control sessions confirmed the project-a installation does not activate the plugin in other contexts, so scope is confirmed non-leaking.",
+       "activation": "Isolated fresh project-a sessions verified enablement, visibility, invocation, precedence, hook/service effects, and complete disable behavior including reload requirements — this satisfies the phase-5 runtime-verification requirement (not config-only proof). Because the operator authorized report-only (\"no installation or global enablement\"), activation is a proposal for the operator to apply, not a landed state: enabling a plugin is a security-posture change per the harness's Ship-phase hard edge, and this ADOPT verdict itself is not permission to enable it.",
+       "packaging_change": "None. The scenario states all components are genuinely needed only in project-a and that no packaging changes or component selection are necessary — the full pinned bundle installs as-is at project scope.",
+       "evidence_limits": "All findings above are taken as the scenario's stated established facts; no checks were executed and no installation has been implemented in producing this assessment. Provenance, license, resolved revision, update owner and rollback are recorded per the scenario, which is what an ADOPT record requires, but I have not independently inspected them. The scenario names only project-a: it supplies no digest, task, price, or runtime data for project-b, so no project-b row is defensible from these facts (a separate vet would be needed, not an inferred SKIP or ADOPT). Global scope was not requested and the method's default is to never default to global absent a defensible destination, so no global row is issued either. This assessment is a report-only application of the method to a hypothetical; it does not itself ship, commit, or enable anything.",
+       "retry_or_review": "Not a SKIP/REJECT, so no Do-not-retry trigger applies; instead this ADOPT carries VERDICTS.md's bounded review trigger: re-review if the plugin's instructions, dependencies, capabilities or permissions change, if the pinned revision is bumped, if project-a's task or an available incumbent changes, or if a model/runtime change could invalidate the behavioral-test result. Before any actual landing, the operator must explicitly authorize installation/enablement at project-a scope — the current authorization covers assessment and reporting only, not activation, and does not extend to global enablement."
+      }
+     ]
+    },
+    {
+     "id": "shared-security-finding",
+     "rows": [
+      {
+       "target": "project-a",
+       "verdict": "REJECT",
+       "reason": "This is a scope-bound reuse of an existing security finding, not a fresh vet. Source identity and current content digest were checked and match the previously rejected revision exactly; the responsible bundled code that performs the exfiltration is unchanged and carries no remediation evidence. Under VERDICTS.md, REJECT is 'an affirmative disqualifier supported by evidence' (unsafe code, here CONFIRMED by a prior isolated-sandbox probe showing observed exfiltration plus file-level code identification) and 'Security findings remain applicable across targets until their cause is demonstrably removed' — project-a's genuine need for the advertised capability is a utility/fit fact, but per SKILL.md fit and safety are judged separately, and utility never outweighs an unremediated safety REJECT. Content vs. delivery sub-verdict: the CONTENT (the bundled code that phones the undisclosed endpoint) is REJECT on its own; the DELIVERY mechanism as proposed (a local project-a skill install with unchanged permissions) is also REJECT because it carries the same executable code and the same permissions forward with no new containment — both sub-verdicts fail, so there is no partial-pass split to report.",
+       "placement": "No placement is defensible. Per SKILL.md, 'Project scope never repairs unsafe execution,' and per VERDICTS.md's REJECT entry, 'Project scope is no sandbox.' The scenario's only proposed mitigation — installing inside project-a so it loads in fewer sessions — changes discoverability/session count, not execution: identical code with identical permissions still runs, and still has the same exfiltration path, whenever project-a's own sessions invoke it. Narrowing where instructions load is a scope decision, not a permission boundary (SKILL.md line: 'Scope controls where instructions load; it is not a sandbox or a permission boundary').",
+       "activation": "None. No installation was authorized by the operator, and none should be recommended here. This is a report-only output; nothing has been installed, enabled, or otherwise activated as part of producing this assessment.",
+       "packaging_change": "No packaging change can cure this on its own. A defensible path would require the upstream author to remove or patch the exfiltrating code (a new, different content digest), combined with an independent execution sandbox and egress control at whatever scope it is later installed — none of that exists today. Reducing placement scope alone is explicitly insufficient per the doctrine above.",
+       "retry_or_review": "Do-not-retry unless: (1) a new revision exists whose content digest differs from the rejected one, with the responsible exfiltrating code demonstrably removed or fixed, AND (2) a fresh isolated-sandbox probe (fresh HOME/scratch env, monitored egress) on that new revision independently confirms no outbound transmission of task contents — an author claim of a fix is not sufficient; VERDICTS.md requires the retry trigger to be an observable predicate, not 'bare time, enthusiasm and repeated asks.' Until then this REJECT is reused verbatim for project-a, and would be reused identically if project-b or global installation of this same revision were ever proposed, since the finding attaches to the artifact, not the destination.",
+       "evidence_limits": "This verdict is built entirely from the scenario's stated facts, taken as established per the task framing, plus the general method in SKILL.md/VERDICTS.md/EVIDENCE.md — I did not independently re-run the exfiltration probe, diff the bundled code, or perform any install/uninstall in this session, and no tools or installations were used to produce this output. The prior vet's finding (bundled code plus an observed isolated-probe exfiltration) is CONFIRMED-grade evidence per phase 4's bar (file:line or run output), and the identity/digest match reported in the scenario is what licenses reusing it rather than re-deriving it; I have not personally verified that digest match, only accepted it as a stated fact of the case. The scenario names only project-a as the requested target, so no row is produced for project-b or global — their omission reflects that they were out of scope for this run, not that the finding would not apply there; per VERDICTS.md it would apply unchanged if either were later named."
+      }
+     ]
+    },
+    {
+     "id": "unlicensed-verbatim-copy",
+     "rows": [
+      {
+       "target": "project-a",
+       "verdict": "EXTRACT",
+       "reason": "No license, no repository, and no grant exist for this single-file prompt-skill paste. Per SKILL.md's licensing rule, a verbatim copy (ADOPT, or ADAPT by copy-out) cannot be recommended while permission is unobtained — even though the author is reachable, they have not been asked, so that path is SKIP-pending-grant, not REJECT (no disqualifying finding exists; the block is purely absence of a grant). EXTRACT of the demonstrated pattern, expressed in project-a's own words rather than reproducing the author's text, stays open per the same rule and is supported by the record: matched repeated bare/candidate tests show the skill's structural pattern (a fixed ordering of checks) improves the concrete project-a task, irrelevant-task controls pass (no misrouting), no safety/maintenance/quality disqualifier was found, and project-a's verified digest shows no equivalent callable incumbent — clearing VERDICTS.md's 'no demonstrated need' SKIP condition and satisfying EXTRACT's requirement of a live-task result for a behavior-shaping port. Delivery/mechanism findings (project-local skill placement; visibility, invocation and disable verified in a fresh target session and an unrelated control; all five price checks pass) are clean and would separately support ADOPT/ADAPT of the delivery mechanism if the content were licensed — the block sits on the content/license axis only, not on placement, safety, or price."
+      }
+     ]
+    },
+    {
+     "id": "same-skill-other-scope-reconcile",
+     "rows": [
+      {
+       "target": "project-a",
+       "verdict": "ADAPT",
+       "reason": "Component (the skill's content/pattern) is ADOPT-grade on the evidence stated: matched repeated tests show it beats the bare model on project-a's task with honest controls passing, and artifact review of both revisions turned up no safety, licensing or maintenance disqualifier. Delivery is where this fails as-shipped: two copies of the same skill by source identity currently load in project-a sessions — the project-local copy (precedence there, carries the more recent verified edits) and the global copy (original upstream pin). Per VERDICTS.md, a copy of the candidate at another scope is a placement question, not automatic incumbent coverage, and divergence between the copies *or* an explicit operator ask to narrow where it loads each independently force reconciliation (ADAPT) rather than 'already covered' SKIP or a bare ADOPT of either copy standing alone — here both conditions hold. Net: content verdict is effectively ADOPT, delivery verdict is ADAPT; the rollup for this target is ADAPT because the shipped state must change before the demonstrated utility can be called landed."
+      },
+      {
+       "target": "global",
+       "verdict": "SKIP",
+       "reason": "The global copy is the diverging, older revision (original upstream pin, superseded by project-a's more recent verified edits), and the operator's stated goal is explicitly that the skill serve project-a only and stop loading in unrelated sessions — an explicit narrowing request. Per VERDICTS.md that copy cannot be recorded as passive global 'coverage'; it is a placement question resolved by standing it down, not by adopting or retaining it at global scope. Shared artifact findings (no safety/licensing/maintenance disqualifier, same source identity) were checked across both revisions and carry over here, so the disposition is SKIP-as-narrowed rather than REJECT — there is no affirmative disqualifier, only a scope decision the operator already made. Component vs. delivery: the underlying artifact is the same one credited under project-a; the delivery verdict specific to global is 'stand down', since global is the copy being retired out of, not a destination being adopted into."
+      }
+     ]
+    },
+    {
+     "id": "other-project-not-coverage",
+     "rows": [
+      {
+       "target": "project-a",
+       "verdict": "ADOPT",
+       "reason": "This is the vet's sole demonstrated-need target: the capability's only existing instance lives in project-b, and runtime checks confirmed that project-b's copy cannot load or be invoked from project-a and no other equivalent capability is callable there. Per VERDICTS.md, an other-project-only copy does not automatically count as coverage, so project-a's need is genuinely unmet absent the candidate. Verified utility (matched repeated bare/candidate paired tests on project-a's concrete task showed useful improvement, with irrelevant-task and negative controls passing) plus all five price checks (context cost, armor test, placement/off-switch, delivery-vs-content, supply chain) passing, on a pinned revision already found safe/maintained/licensed at intake, clears the ADOPT bar. Delivery and content sub-verdicts coincide here: this is an unchanged standalone skill (no installer/updater to verdict separately from its instructions), so a single ADOPT covers both the install mechanism and the material it delivers. Native project-local installation is ADOPT, not ADAPT, merely for being narrower than global (VERDICTS.md). Audit dividend: this case is a clean positive confirmation that the harness's 'other-project-only copy is not coverage' rule steered the correct outcome instead of a false SKIP-as-covered.",
+       "placement": "Native project-local install of the unchanged standalone skill at the narrowest supported scope (project/subtree) that serves the stated task — no global or nested placement is justified by anything in the scenario.",
+       "activation": "Verified working as configured in a fresh project-a session and confirmed non-interfering in an unrelated control session: visibility, precedence over any other project-a sources, invocation, and disable effects all checked live, not inferred from config.",
+       "packaging_change": "None. The candidate is installed unchanged at its pinned revision with its original license preserved; only the installation location (project-local rather than global) is a scope decision, not a content or packaging change.",
+       "evidence_limits": "All findings above are the scenario's stated observations, taken as established facts per instructions; this session did not itself run any install, price, or verification check, and no claim is made that adoption has been implemented. The scenario does not specify sample size/task diversity for the 'matched repeated' bare/candidate comparison, so the statistical strength of the improvement claim beyond 'demonstrated' is unknown. Global scope was neither requested nor justified by any cross-project usage evidence in the scenario (only one target task and one unrelated other-project incumbent are shown), so this assessment makes no claim, positive or negative, about global suitability.",
+       "retry_or_review": "Review trigger (not a retry gate, since this is ADOPT): re-open review on changed candidate instructions, dependencies, capabilities or permissions; on a changed project-a task; on emergence of a callable incumbent in project-a (including project-b's copy becoming loadable/invocable there, which would reopen the coverage question); or on a model/runtime change that could invalidate the paired-comparison result. Record the inspected revision/content digest, source provenance, and license in the eval note; name a concrete update owner and a rollback path (e.g., revert to the pre-install state / remove the project-local skill file) as the scenario states these were recorded but does not give their specific values — a live vet would carry those exact names, not restate them generically."
+      },
+      {
+       "target": "project-b",
+       "verdict": "SKIP",
+       "reason": "Project-b already has its own callable incumbent providing this capability, and the scenario explicitly authorizes no installation or changes there. This is genuine incumbent coverage for project-b's own task (equivalent capability already usable), distinct from the trap this case is built to test — that project-b's incumbent does not count as coverage for project-a. Nothing in the scenario shows a demonstrated new need, cost change, or gap in project-b that the candidate would address.",
+       "placement": "No installation — no destination is proposed or authorized for project-b in this assessment.",
+       "activation": "Not applicable; no activation change is proposed for project-b.",
+       "packaging_change": "None proposed.",
+       "evidence_limits": "The scenario's price/verify work (context cost, armor, placement, delivery, supply chain, paired bare/candidate tests) targeted project-a's task, not project-b's; project-b's continued coverage rests on the existing incumbent's asserted availability, which this run did not re-audit. Treat 'already covered' here as inherited from the scenario's framing, not independently re-verified this session.",
+       "retry_or_review": "Do-not-retry unless: project-b's own incumbent becomes unavailable, removed, or diverges from what serves its task; project-b's task need changes in a way the candidate's demonstrated project-a improvement would address; or the operator explicitly asks to evaluate the candidate for project-b, which would require its own fresh digest, price and verify pass rather than inheriting the project-a result."
+      }
+     ]
+    },
+    {
+     "id": "callable-global-incumbent",
+     "rows": [
+      {
+       "target": "project-a",
+       "verdict": "SKIP",
+       "reason": "Shared artifact findings (phase 1 license/provenance, phase 4 verify, phase 5 price) are stated as satisfactory — safe, licensed, no red flags — so this is not a REJECT; there is no affirmative disqualifier. Target fit is what fails: the complete, verified project-a digest names an existing global, invoke-only skill as incumbent, its covering mechanism and explicit invocation path are documented, and fresh project-a sessions independently confirmed it is visible when needed, callable with the available permissions, and effective for the task — satisfying both the phase-5 placement/off-switch bar (visibility and invocation verified in a clean target session, not merely configured) and the phase-4 'your own coverage is a claim too' bar (covering mechanism AND control surface verified, not just asserted). The phase-4 paired-comparison instrument (matched, repeated candidate vs bare vs incumbent) is the formal verdict-render here per SKILL.md, and it returned equivalent useful behavior, controls passing, and no candidate advantage in quality, access, cost, or upkeep — the candidate did not beat what project-a already owns. Per VERDICTS.md, a callable global on-demand skill counts as coverage; the scenario explicitly forecloses the trap of treating 'global' as unavailable or 'invoke-only' as disabled. Landing the candidate would only add a second maintained implementation with no unmet need — VERDICTS.md's SKIP definition verbatim. Delivery and content verdicts both land on SKIP here (no packaging defect for ADAPT to fix, no demonstrated gap for EXTRACT to port) since the incumbent's own delivery already reaches project-a. Audit dividend: this vet is a positive-confirmation case rather than a gap-finding one — it validates that the harness's global/invoke-only design genuinely reaches project-a in practice (not just on paper) and that 'global' and 'invoke-only' were correctly not conflated with unavailable/disabled.",
+       "placement": "No placement for the candidate at any scope — nothing is installed. Existing coverage remains exactly where verified: global, invoke-only, unchanged.",
+       "activation": "No activation change. The incumbent's invoke-only activation was independently confirmed (visible, callable, effective) in fresh project-a sessions, not merely configured; the candidate's own activation is moot since it is not landed and no installation or global configuration change is authorized.",
+       "packaging_change": "None proposed. No unmet capability, permission gap, or cost delta was found that a repackage (e.g., a project-local ADAPT copy or a trimmed EXTRACT) would remedy — those paths apply only where a real need or delivery defect exists, and none is stated for this case.",
+       "evidence_limits": "This response treats the scenario's stated observations (license/provenance/maintenance satisfactory, digest completeness, live-session visibility/callability/effectiveness, matched repeated candidate/bare/incumbent comparisons) as established facts per the task instructions; none were independently run, re-verified, or reproduced here, and no tools or installations were used. Scope is bounded to project-a only, matching the operator's report-only request — project-b and global were not part of this vet's request or digest, so they receive no rollup row (not because no destination is defensible, but because they were out of scope). Per SKILL.md's numbers-decay gate, the stated equivalence and price findings should be re-run before being cited again in any future note, since recorded verification numbers decay; this response is not that re-run. Provenance, update owner, and rollback are not applicable: VERDICTS.md directs SKIP/REJECT rows to record 'no installation' as the destination, so there is nothing to pin, own, or roll back.",
+       "retry_or_review": "Do-not-retry unless (VERDICTS.md): the candidate's behavior or version changes materially, project-a develops a task need the incumbent does not cover, the incumbent becomes unavailable, deprecated, or loses required permissions/access, the candidate's delivery cost changes relative to the incumbent (quality, access, cost, or upkeep), or a supported placement emerges that resolves the stated 'no unmet need' objection. This is a coverage/no-need SKIP, not a license-gated one, so the retry trigger is changed behavior/need/availability rather than a license grant. Standard bounded-review trigger also applies: re-open if the target task, model/runtime, or either implementation's instructions/dependencies/permissions change enough to invalidate the paired comparison."
+      }
+     ]
+    },
+    {
+     "id": "multiple-targets",
+     "rows": [
+      {
+       "target": "project-a",
+       "verdict": "ADOPT",
+       "reason": "Per VERDICTS.md, ADOPT fits because verified utility exceeds target-specific cost at the recorded supported placement, and a native project install is ADOPT even though narrower than global — not ADAPT merely for being scoped. The scenario states: a concrete unmet task with no equivalent incumbent for project-a; matched repeated bare/candidate runs showing a useful improvement with passing honest controls (correct instrument per phase 4 — with no incumbent named for project-a, bare/candidate is the applicable comparison, not a paired incumbent test); and all five phase-5 price checks (context cost, armor test, placement/off-switch, delivery-vs-content, supply chain) passed specifically for project-a. Shared artifact/supply-chain findings (safe, licensed, maintained, pinned revision, no prior global rejection) are candidate-level and reusable across both targets per VERDICTS.md's scope-bound reuse rule; the ADOPT conclusion itself is a target-fit finding specific to project-a and does not transfer to project-b. For this standalone skill the mechanism and the content are not reported as diverging: the shared safety/pin findings clear delivery, and the project-a-specific behavioral test clears content/utility, so no split delivery-vs-content sub-verdict is needed beyond noting both cleared.",
+       "placement": "Narrowest supported placement per phase 5: unchanged project-local install, project-a scope only (not global) — matching what the scenario reports as verified in a fresh project-a session and an unrelated control session.",
+       "activation": "Explicit invocation, as reported verified; disable behavior was also confirmed in the same clean-session/control-session check, satisfying phase 5's runtime-verification requirement rather than resting on configuration alone.",
+       "packaging_change": "None. ADOPT means use as-is, and the scenario reports the unchanged project-local placement was the one verified — no ADAPT-style repackaging, updater removal, or component-selection change is indicated by the stated facts.",
+       "evidence_limits": "This is a report-only recommendation: no installation has been performed, and none should be inferred from this assessment. The scenario asserts 'matched repeated' runs and 'passing controls' without itemizing run count, fixture composition (planted-defect vs. honest-control split), or a distinct irrelevant-task/misrouting check, so rigor beyond the stated summary cannot be independently confirmed from this text. Global-scope fit was not assessed and this verdict does not extend there. The scenario confirms provenance, license, update ownership and rollback are 'documented' for a proposed project-a installation but does not supply their content in the case text.",
+       "retry_or_review": "Bounded review trigger per VERDICTS.md (not a Do-not-retry case, since this is ADOPT): reassess if the candidate's instructions, dependencies, capabilities or permissions change; if project-a's task changes in a way that invalidates the tested use case; or if a model/runtime change invalidates the comparison. Provenance/update/rollback: carry the existing pinned revision forward unchanged; before landing, name an explicit update owner and a concrete rollback path (e.g., revert the project-local install commit) since the scenario asserts these are documented but their specifics are not given here."
+      },
+      {
+       "target": "project-b",
+       "verdict": "SKIP",
+       "reason": "Per VERDICTS.md, SKIP applies where equivalent capability is already usable for the target task. The scenario states project-b already has an equivalent incumbent demonstrably callable for its target task (digest-verified actual callable capability, not a name/topic match), and matched repeated candidate/incumbent comparisons show no candidate advantage in useful behavior, access, price, or upkeep, with the incumbent's own controls also passing. This satisfies phase 4's bar that a SKIP-as-covered verdict name and verify both the covering mechanism and its control surface rather than assert coverage. The shared safety/supply-chain findings (safe, licensed, maintained, pinned) still apply to project-b as candidate-level facts, but per VERDICTS.md they do not change the fit conclusion in either direction — this SKIP is a target-fit finding, independent of the passing safety finding.",
+       "placement": "No installation — SKIP rows record 'no installation' as the destination, per the eval-note table convention.",
+       "activation": "Not applicable; nothing is enabled for project-b.",
+       "packaging_change": "None proposed.",
+       "evidence_limits": "The comparison is reported as covering useful behavior, access, price and upkeep with passing controls; the case text does not itemize whether a distinct irrelevant-task/misrouting check was run, so that sub-part is taken on the scenario's word rather than independently confirmed here. Per VERDICTS.md, the correct basis is an incumbent genuinely distinct from the candidate (not a copy of the candidate itself at another scope, which would instead trigger diverged-copy reconciliation) — the scenario describes a separate 'equivalent incumbent,' so that reconciliation clause does not apply.",
+       "retry_or_review": "Do-not-retry unless: the incumbent becomes unavailable or is disabled for project-b, project-b's task changes to something the incumbent doesn't cover, the candidate's behavior or delivery cost changes materially from this pinned revision, or a different placement resolves an objection this SKIP doesn't rest on (none apparent, since the finding is redundancy, not placement). Bare time, enthusiasm, or repeated requests are explicitly insufficient per VERDICTS.md."
+      }
+     ]
+    },
+    {
+     "id": "first-instruction-surface-bootstrap",
+     "rows": [
+      {
+       "target": "project-a",
+       "verdict": "ADOPT",
+       "reason": "Full ADOPT evidence bar is met on the stated facts, taken as given for this hypothetical (not independently run here): the operator named a concrete task (a recurring report artifact judged against a stated checklist), the verified digest shows no callable incumbent for it so need is demonstrated, phase-4's bare/candidate behavioral test (the correct instrument absent an incumbent) shows useful, repeated improvement with passing irrelevant-task controls, artifact/supply-chain review of the pinned, licensed, maintained candidate found no disqualifier, and all five phase-5 price checks pass, including a placement/off-switch check runtime-verified (not merely configured) in a disposable copy of project-a plus an unrelated control showing no leakage. Content and delivery verdicts converge: this is one standalone skill installed natively at project scope, so ADOPT applies rather than ADAPT (VERDICTS.md: a native project install is ADOPT even though narrower than global; no updater-stripping, component selection or repackaging is indicated). Shared-artifact clearance (license, maintenance, supply chain) is candidate-level and would carry to any other target; the task-fit findings (no incumbent, positive behavioral test, verified isolation) are project-a-specific and do not transfer automatically. No project-b or global target appears anywhere in the scenario, so no row is produced for either — global is simply unproposed for lack of demonstrated cross-project use, not skipped for clutter, and project-b is not addressed at all.",
+       "placement": "Narrowest supported placement: a project-local skill scoped to project-a only (global is unsupported by the evidence given — no cross-project use is shown). Project-a currently has zero instruction-loading surface of any kind, so this would be that project's *first* skills directory/rules file/plugin registration. Per SKILL.md's Ship hard edge, that must be proposed with the exact path for the operator to create, never landed by the agent — a constraint independent of, and additional to, the report-only instruction already in force. The scenario confirms project-local placement is supported and was runtime-verified in a disposable copy, but supplies no literal path string, so the eval note must name that exact path once project-a's own platform convention is confirmed, not a fabricated placeholder.",
+       "activation": "None in this run — no recommendation has been implemented. Visibility, invocation and disable behavior were already runtime-verified in a disposable copy of project-a plus an unrelated control session showing no leakage, satisfying the closing-checklist requirement for target-and-control verification before ADOPT/ADAPT. If and when the operator authorizes the change, activation would be project-scoped only (loads for project-a sessions, not global), consistent with that verified isolation; nothing is enabled today.",
+       "packaging_change": "None indicated by the given facts. The candidate is a standalone, pinned, licensed, maintained skill to be installed as-is at project-local scope — no updater removal, component selection, activation rewrite, or global-to-project conversion is called for. Should the actual candidate later prove to bundle an updater or additional components not described here, that would reopen an ADAPT question, but nothing in this scenario supports one now.",
+       "evidence_limits": "This is a tool-free application of the method to the scenario's stated facts, treated as established for this case; no check was independently run or reproduced, and no recommendation has been implemented. The scenario asserts a positive, repeated bare/candidate result with passing controls but gives no numbers to cite (EVIDENCE.md: reproduce/cite numbers, don't assume them). It also asserts provenance, update owner and rollback are 'recorded' and that project-local placement is 'supported' without giving their literal content — those must be transcribed into the eval note from the actual record, not invented. No project-b or global scope appears anywhere in the input; treating either as evaluated would be fabrication, so only project-a is rowed.",
+       "retry_or_review": "As an ADOPT, this carries a bounded review trigger rather than a do-not-retry: re-check if project-a's task/checklist changes, if a callable incumbent later becomes available (removing the demonstrated-need basis), if the candidate's pinned revision/instructions/permissions change, or if the model/runtime behind the behavioral test changes. More immediately, nothing lands until the operator (a) authorizes the change at all — explicitly withheld here — and (b) approves creating project-a's first instruction-loading surface at a named exact path, since that is a security-posture action left for the operator to apply, not the agent, and this run is report-only besides. The eval note must be filed at a stated committed report location (e.g., docs/vets/<candidate>.md in project-a) since the repo has no notes/reports convention; the agent's private per-project memory may hold a pointer to that note but is not itself the note, since the digest never verified project-a's memory as a location future vets search."
+      }
+     ]
+    },
+    {
+     "id": "plugin-subset",
+     "rows": [
+      {
+       "target": "project-a",
+       "verdict": "ADAPT",
+       "reason": "Two sub-verdicts collapse into this one rollup row per VERDICTS.md's 'separate delivery and content verdicts' rule. Content sub-verdict (skill-x itself): ADAPT. Delivery/mechanism sub-verdict (the pinned plugin as a whole, native install): REJECT. The stated target digest shows a concrete unmet task for project-a, no equivalent callable incumbent, and skill-x beating the bare model in matched repeated runs with passing controls — clearing the phase-4 behavioral-test bar for skill-x's content. But the vehicle that ships it — native install of the whole pinned plugin — enables hooks and services whose costs/effects are stated as unacceptable for project-a; this was confirmed by isolated fresh-session runtime tests (not just config inspection), no per-skill switch exists to suppress it, and project-scoped native install was separately confirmed to still activate those hooks/services. Per doctrine, project scope never repairs unsafe execution, so the plugin-as-delivered is REJECTed for project-a regardless of skill-x's own merit; delivery and content are verdicted separately because either can pass while the other fails. Because the license explicitly grants standalone copying of skill-x with attribution preserved, and full source/manifest/dependency/runtime inspection found no dependencies or hidden manifest and equivalent standalone behavior, the licensing bar for a verbatim copy-out is met (an ADAPT copy-out, not a fallback to EXTRACT, since EXTRACT-of-pattern is only required absent a grant). The copied-out form was reportedly verified standalone in a sandbox-equivalent check (placement, explicit invocation, disable behavior, unrelated-control isolation), and all five phase-5 price checks reportedly pass for that standalone form. No project-b or global row is returned: the scenario names only project-a as the requested target and supplies no digest, cost, or need basis for any other scope, so fabricating rows for them would exceed what the case establishes."
+      }
+     ]
+    },
+    {
+     "id": "skill-pack-named-subset",
+     "rows": [
+      {
+       "target": "project-a",
+       "verdict": "ADAPT",
+       "reason": "Two sub-verdicts collapse into one ADAPT for project-a. Content: the six operator-named skills (matching project-a's concrete unmet tasks) were each read in full, are self-contained, and matched repeated behavioral tests show useful improvement over the bare model with passing controls — the Phase-4 bar is met — and once copied out standalone, all five Phase-5 price checks pass. That is ADOPT-quality utility. Delivery: the pack's only native path is a single plugin manifest with no per-skill enable switch, so a native install force-loads all 50 skills' discovery metadata into project-a (which currently has zero), and the context-cost check fails for that whole bundle — native plugin install does not suffice and would be SKIP as delivered. Per VERDICTS.md's ADAPT definition ('select permitted components ... prefer a native scoped plugin install when it suffices; if it does not, name the exact packaging change'), the resolving action is to copy out only the six named skills under the license's copy-with-attribution grant rather than install the plugin. Manifest, scripts and bundled code found no safety disqualifier, so no REJECT applies to the pack. The remaining 44 skills were triaged against the digest only, not deep-vetted, and carry no verdict this run — a coverage gap against the digest's component inventory, not a SKIP, and they must not be treated as cleared or as rejected.",
+       "packaging_change": "Extract and repackage: copy each of the six named skills out of the 50-skill bundle under the permissive license's copy-with-attribution clause, and drop the plugin-manifest wrapper entirely since it cannot be scoped to a subset (no per-skill enable switch exists). Land each as its own attributed, source-pinned, standalone skill directory in project-a instead of registering the plugin.",
+       "placement": "Project-local scope, project-a only — the narrowest placement that serves the stated task. No cross-project or global use was demonstrated in this scenario, so global placement is not supported by this evidence; do not register the plugin manifest, only the six copied skill directories.",
+       "activation": "Each of the six copies runs as an independent, self-contained skill invoked normally within project-a sessions. Standalone operation, disable behavior, and an unrelated-session control were verified per the scenario's stated facts, satisfying Phase 5's placement/off-switch check. As individual copies rather than the native plugin, per-skill enable/disable is now available where the source pack itself offered none.",
+       "evidence_limits": "This is a hypothetical assessment treating the scenario's stated observations as established facts; no checks were run and nothing was installed or applied in producing this rollup. Only 6 of 50 skills were deep-vetted — the other 44 are unverified and outside this verdict's scope. The stated behavioral-test improvement and price-check passes are taken as given, not reproduced here; per EVIDENCE.md's 'numbers decay' gate, any future citation of that result should be re-run rather than quoted indefinitely, especially after a candidate revision, task change, or model/runtime change. Landing mode is report-only: no installation is authorized, and nothing here should be read as shipped.",
+       "retry_or_review": "Do-not-retry unless, for the 44 untriaged skills: a future concrete unmet task in project-a (or elsewhere) maps to one of them, at which point it receives its own Phase 3-6 deep vet rather than inheriting the six's clearance. Review trigger for this ADAPT verdict: changed candidate instructions/revision, a changed target task or incumbent, a model/runtime change that could invalidate the behavioral-test result, a license change affecting the copy-with-attribution grant, or the platform later shipping a per-skill enable switch (which would reopen whether a native scoped plugin install now suffices and could upgrade the verdict toward ADOPT). Required provenance/update/rollback for the ADAPT: source repo identity, revision/content digest, license text and attribution string, and a named update owner must be recorded for the six copied standalone skills, since copies no longer track the upstream plugin automatically; rollback is deleting the copied skill directories, which fully reverts project-a to its pre-change (zero-skill) state because the copies carry no shared install-time state with the source pack. The scenario states these items were recorded but does not give their literal values — they must be captured in the landed eval note, not only asserted in this report."
+      }
+     ]
+    },
+    {
+     "id": "tool-heavy-mcp-unmeasured",
+     "rows": [
+      {
+       "target": "project-a",
+       "verdict": "SKIP",
+       "reason": "Rollup for project-a is SKIP, pending evidence — not REJECT (no disqualifying finding surfaced) and not yet ADOPT/ADAPT (the phase-5 price-check gate is unmet for the costliest component, and per VERDICTS.md 'insufficient verification may mean SKIP pending evidence, never a fabricated negative benchmark or a security REJECT'). Component/delivery sub-verdicts: (1) Skill — utility CONFIRMED via matched repeated runs of the skill alone with honest controls passing (meets the phase-4 behavioral-test bar); combined with passing artifact/license/maintenance/placement/armor/supply-chain checks, this component alone would support ADOPT at project-a via the verified native project-scoped plugin install — IF it can be enabled independently of the MCP server. (2) MCP-server delivery mechanism (the plugin, which auto-starts the server) — placement, armor and supply-chain checks all passed, and native project-scoped install/uninstall was verified in fresh sessions; the mechanism itself is not the blocker. (3) MCP-server content (70+ tools) — genuine task-need is established (a subset addresses project-a's concrete unmet task; the verified digest shows no callable incumbent for that subset), but the context-cost price check is PARTIAL: it was answered only by narrative comparison of tool count to published guidance, not by the required paired measurement (project-a's representative tasks run with vs. without the added tools, scoring selection accuracy/misrouting), which the sandbox could not execute for lack of model access. Because the plugin ships as one manifest that auto-starts the MCP server together with the skill, and no independent enable/disable of the skill from the server is confirmed one way or the other, phase 5's 'whole enabled bundle' pricing rule applies: the skill cannot be cleanly separated from the unpriced 70-tool surface, so the unresolved price gap on component (3) blocks a verdict of ADOPT or ADAPT for the bundle as currently delivered. Shared vs. target-specific: artifact-level findings (pinned-revision code safety, permissive license, active maintenance) are shared and reusable across any future target per VERDICTS.md; the skill's matched-run confirmation and the price PARTIAL are both task- and target-specific to project-a and do not transfer to project-b or global without their own representative-task run. project-b and global were not part of the operator's request and were not assessed here, so no rows are given for them — that omission reflects scope, not a rejection at those scopes.",
+       "evidence_limits": "Treated as established per the scenario, not independently re-run here: artifact review (safe code at pinned revision, permissive license, active maintenance), demonstrated task-need with no incumbent, matched repeated runs of the skill alone (improvement, controls passing), and verified placement/armor/supply-chain/delivery checks. The one incomplete check is load-bearing: the context-cost price for the 70+-tool MCP server is narrative-only (a comparison to published tool-count guidance), not the phase-5-required measured paired run of selection accuracy/misrouting on project-a's own representative tasks; that run could not execute because the sandbox lacked the model access needed for matched runs. Unavailable tooling means incomplete evidence, not that the candidate lost — this is explicitly not grounds for REJECT. Separately unverified: whether the plugin/manifest supports enabling the skill, or a restricted tool subset, without auto-starting the full 70+-tool server — the scenario states only that the manifest auto-starts it, so per method guidance this capability is recorded as unknown, not assumed present or absent. This assessment did not itself run any checks, install anything, or enable any tooling; it applies the method to the scenario's stated facts only.",
+       "packaging_change": "None applied — report-only, nothing shipped. If pursued later: first verify (do not assume) whether the plugin's manifest/config supports (a) enabling the skill without auto-starting the MCP server, or (b) restricting the server to project-a's verified-needed tool subset — either is an ADAPT-shaped 'select permitted components' or 'patch/fork packaging' change per VERDICTS.md. Absent confirmed per-component controls, the only currently-supported delivery is the native project-scoped plugin install as-is, which brings the full unpriced 70+-tool surface with it.",
+       "placement": "Project-a only, and only as a proposal. Native project-scoped plugin installation is the supported and verified mechanism (functional and revocable in a fresh project session per the scenario). No case was made, tested, or should be inferred for project-b or global scope on this evidence.",
+       "activation": "Not activated and not authorized by this assessment — the scenario states no installation or MCP enablement has been authorized, and this report does not change that. Enabling a plugin/MCP server is a security-posture action under the skill's Ship-phase hard edge: it must be proposed with evidence and left for the operator to apply, naming the exact target path/config and scope. Even a future ADOPT/ADAPT verdict would still require explicit operator authorization to enable the plugin (and, if repackaged, the trimmed server) at project-a specifically, with a pinned revision, a named update owner, and a stated rollback path — none of that has been established or performed here.",
+       "retry_or_review": "Do-not-retry unless one of: (a) the paired tool-selection-accuracy/misrouting measurement is actually run to completion on project-a's real representative tasks with working model access, and reported (not estimated); (b) the plugin/server is confirmed to support restricting exposed tools to the verified-needed subset, that reduced bundle is separately priced, and the same paired measurement is run against the reduced surface; or (c) an equivalent, already-measured comparison at a comparable tool count and task profile is identified and shown to transfer to project-a's task. Additional re-audit triggers per VERDICTS.md: any change to the pinned revision/manifest, a change in project-a's task, or a new callable incumbent appearing for the tool subset. A licensing/artifact re-check is not required unless the revision changes, since those findings are reusable across targets. This SKIP does not extend to project-b or global, which were not evaluated in this run; a request to assess either would open fresh target rows, reusing the shared artifact findings but requiring their own task-need and price evidence."
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "round": "round-2 (interface clarified)",
+   "cases": 13,
+   "exact_matches": 12,
+   "semantic": {
+    "pass": 10,
+    "partial": 2,
+    "fail": 1
+   },
+   "mismatches": [
+    {
+     "id": "tool-heavy-mcp-unmeasured",
+     "expected": "project-a=SKIP",
+     "returned": "project-a=ADAPT",
+     "exact": false
+    }
+   ],
+   "reviews": [
+    {
+     "id": "global-cost-project-fit",
+     "exact_match": true,
+     "semantic": "PASS",
+     "forbidden_claims_hit": [],
+     "notes": "Single row project-a/ADOPT matches. Explicitly denies all four forbidden claims: cites VERDICTS.md that a global cost-only SKIP doesn't veto a new project, states global scope is unaffected/unrequested, states native project install is ADOPT not ADAPT merely for being narrower, and evidence_limits explicitly disclaims installation ('nothing has been installed or shipped'). Includes full placement/activation/packaging_change/evidence_limits/retry sections."
+    },
+    {
+     "id": "callable-global-incumbent",
+     "exact_match": true,
+     "semantic": "PARTIAL",
+     "forbidden_claims_hit": [],
+     "notes": "Row matches (project-a/SKIP) and no forbidden claim is asserted — it correctly credits the callable global invoke-only incumbent as coverage and denies candidate superiority. But the answer is only a 'reason' field with no placement/activation/retry content at all, and omits VERDICTS.md's mandatory 'Do-not-retry unless:' observable-predicate trigger for any SKIP (e.g., incumbent withdrawn, candidate later shown superior) — a required element this run's own doctrine mandates, left completely unaddressed rather than merely thin."
+    },
+    {
+     "id": "other-project-not-coverage",
+     "exact_match": true,
+     "semantic": "PASS",
+     "forbidden_claims_hit": [],
+     "notes": "Row matches (project-a/ADOPT). Explicitly invokes VERDICTS.md's 'other-project-only copy is not automatic coverage' rule, denies packaging adaptation is needed, and never proposes touching project-b. Full placement/activation/packaging_change/evidence_limits/retry sections present and consistent with a report-only, unshipped recommendation."
+    },
+    {
+     "id": "shared-security-finding",
+     "exact_match": true,
+     "semantic": "PASS",
+     "forbidden_claims_hit": [],
+     "notes": "Row matches (project-a/REJECT). Correctly treats project-local scope as not a sandbox, states the finding 'remains applicable across targets until their cause is demonstrably removed' (satisfies the retry-predicate requirement inline), and explicitly separates genuine task need (a fit finding) from the safety disqualifier, denying that need overrides REJECT. No forbidden claim asserted."
+    },
+    {
+     "id": "multiple-targets",
+     "exact_match": true,
+     "semantic": "PASS",
+     "forbidden_claims_hit": [],
+     "notes": "Both rows match (project-a/ADOPT, project-b/SKIP). Correctly gives different fit verdicts per target from shared artifact findings, denies project-b coverage extending to project-a and vice versa, and never proposes duplicate installation or a single global rollup. Both rows carry full placement/activation/packaging_change/evidence_limits/retry content, including an explicit Do-not-retry clause for the project-b SKIP."
+    },
+    {
+     "id": "unknown-destination",
+     "exact_match": true,
+     "semantic": "PASS",
+     "forbidden_claims_hit": [],
+     "notes": "Row matches (unresolved/SKIP). Explicitly refuses to default to global or infer the launch directory as target, frames the content sub-verdict as 'SKIP-pending-evidence' (never REJECT) per VERDICTS.md's own quoted language, doesn't claim a benchmark was lost, and states an observable, concrete Do-not-retry/reopen condition (operator names a destination+task, or affirms the launch directory as intended)."
+    },
+    {
+     "id": "plugin-subset",
+     "exact_match": true,
+     "semantic": "PASS",
+     "forbidden_claims_hit": [],
+     "notes": "Row matches (project-a/ADAPT). Correctly splits content (skill-x ADAPT copy-out, license-permitted) from delivery (whole plugin SKIP, hooks/services still activate even via verified native install, no per-skill switch found), denies the copy-out is an unchanged native ADOPT, denies it's a pattern-only EXTRACT, and evidence_limits explicitly disclaims implementation. Packaging_change names the exact extraction (drop manifest/hooks/services, keep skill-x, preserve attribution)."
+    },
+    {
+     "id": "native-project-plugin",
+     "exact_match": true,
+     "semantic": "PASS",
+     "forbidden_claims_hit": [],
+     "notes": "Row matches (project-a/ADOPT). Explicitly denies native narrower-than-global placement demotes to ADAPT, denies forking/copying is needed given verified native support and full-bundle need, never proposes global installation, and evidence_limits/retry sections deny that the report-only ADOPT means deployment occurred."
+    },
+    {
+     "id": "unlicensed-verbatim-copy",
+     "exact_match": true,
+     "semantic": "PASS",
+     "forbidden_claims_hit": [],
+     "notes": "Row matches (project-a/EXTRACT). Correctly blocks the verbatim ADOPT/ADAPT copy-out path on the missing license grant, frames the as-delivered text as 'SKIP, pending grant' (not REJECT), and grounds EXTRACT in a live-task result (matched repeated tests) ported into project-a's own words rather than the author's text — satisfying VERDICTS.md's behavior-shaping-port requirement. No forbidden claim asserted."
+    },
+    {
+     "id": "same-skill-other-scope-reconcile",
+     "exact_match": true,
+     "semantic": "PASS",
+     "forbidden_claims_hit": [],
+     "notes": "Row matches (project-a/ADAPT). Correctly treats diverging copies as a reconcile-ADAPT case (not SKIP-as-covered), diffs both copies and names the project-a copy as authoritative, proposes (does not perform) retiring/narrowing the global copy per the operator's stated goal, and explicitly frames this as a proposal awaiting operator authorization. No forbidden claim asserted."
+    },
+    {
+     "id": "first-instruction-surface-bootstrap",
+     "exact_match": true,
+     "semantic": "PARTIAL",
+     "forbidden_claims_hit": [],
+     "notes": "Row matches (project-a/ADOPT). Handles the security-posture 'first instruction surface' hazard well — explicitly proposes the exact path rather than landing it, and denies a no-surface target is ineligible for ADOPT or that report-only means installed. But the scenario also deliberately states project-a has no notes/reports convention and only private per-project memory, directly setting up SKILL.md/VERDICTS.md's rule that private memory holds a pointer, not the note itself, absent a verified search convention (the same topic as forbidden claim 2). The answer never addresses eval-note placement at all — a required Ship-phase element for this specific scenario — leaving that half of the case's design unresolved rather than asserting the wrong claim outright."
+    },
+    {
+     "id": "tool-heavy-mcp-unmeasured",
+     "exact_match": false,
+     "semantic": "FAIL",
+     "forbidden_claims_hit": [
+      "ADOPT or ADAPT may be rendered while a required price check is PARTIAL."
+     ],
+     "notes": "Expected row is project-a/SKIP; answer returns project-a/ADAPT — exact_match fails. The answer's own text acknowledges 'the phase-5 context-cost price check (required before any ADOPT/ADAPT) could not run its paired measurement' and rates the MCP-server sub-verdict 'evidence-limited (PARTIAL), not passed,' then still concludes 'the defensible target-level call is ADAPT' — directly asserting the forbidden claim that ADOPT/ADAPT may be rendered while a required price check is PARTIAL, rather than the doctrine-consistent SKIP for the whole bundle since no per-component control was verified to isolate the passing skill from the unmeasured server."
+    },
+    {
+     "id": "skill-pack-named-subset",
+     "exact_match": true,
+     "semantic": "PASS",
+     "forbidden_claims_hit": [],
+     "notes": "Row matches (project-a/ADAPT). Correctly treats the pack as a multi-component candidate (not a list capped at 3), reads and assesses all six named skills, marks the other forty-four as triaged-only with no verdict, denies the whole-plugin install suffices, and denies the copy-out is an unchanged native ADOPT. Includes full placement/activation/packaging_change/evidence_limits and Do-not-retry clauses for both the SKIP (whole bundle) and ADAPT (six skills) sub-verdicts."
+    }
+   ],
+   "answers": [
+    {
+     "id": "global-cost-project-fit",
+     "rows": [
+      {
+       "target": "project-a",
+       "verdict": "ADOPT",
+       "reason": "Content sub-verdict ADOPT: source identity and content digest match a previously-assessed revision that a prior global vet found free of safety, licensing, maintenance or quality problems (that prior vet's only objection was global-scope cost, not artifact quality) — this shared artifact finding is reused, not re-derived. project-a now states a concrete task the skill serves; the verified target digest (global/project/nested/plugin sources, precedence, invocation paths) found no equivalent incumbent for that task, so a global SKIP for cost does not veto this project per VERDICTS.md ('a new target or task reopens fit'). Matched repeated-task behavioral tests show the candidate beating the bare model with irrelevant-task controls passing (no misrouting signal). Delivery sub-verdict ADOPT: all five price checks passed for project-a (context exposure, armor test, placement/off-switch, delivery-vs-content, supply chain), and the platform natively supports the unchanged skill as a project-local, explicitly-invoked install — the narrowest placement the task needs. Per VERDICTS.md, a native project install is ADOPT, not ADAPT, merely for being narrower than global. Licensing permits this installation. Global scope is unaffected and stays under its own prior SKIP (cost-only, not a safety/license finding) since this run was not asked to reassess it.",
+       "placement": "Project-local skill scoped to project-a only, unchanged from the assessed revision — no global, nested, or plugin registration. This is the narrowest placement the platform's verified controls support for the stated task.",
+       "activation": "Explicit invocation within project-a (not always-on/auto-loaded). Fresh project-a sessions confirmed visibility, invocation, precedence and disable behavior; a separate unrelated-project control session confirmed the skill does not load there — satisfying the target-plus-control verification the method requires before crediting isolation.",
+       "packaging_change": "None. Same source identity/content digest as the prior safe revision, installed as-delivered via the platform's native project-scoped mechanism — no component selection, updater removal, activation patch, or fork/repackage was needed.",
+       "evidence_limits": "This assessment treats the scenario's stated observations as given facts; no command was run and no check was executed in this session to produce them — nothing here should be read as this session having verified the digest match, behavioral tests, or control sessions itself. The scenario does not itemize the behavioral-test run count, model/settings matching, or the specific content digest/hash, so reproducibility of those specific numbers cannot be independently confirmed from the text alone. This is a report-only run: the operator authorized no installation and requested no global change, so nothing has been installed or shipped — the ADOPT verdict is a recommendation pending operator action, not a completed adoption.",
+       "retry_or_review": "Bounded review triggers (per VERDICTS.md) apply going forward: re-open this verdict if the candidate's instructions, dependencies, capabilities or permissions change, if project-a's target task changes, if an incumbent becomes available, or if a model/runtime change invalidates the behavioral-test comparison. Provenance/update/rollback: the scenario records a source pin, an update owner, and a rollback path for this project-a install — carry these into the eval note verbatim rather than re-deriving them; the update owner should re-run the behavioral test and re-check the artifact findings if the upstream revision moves. Separately (context, not a retry condition on this row): global scope remains under its own prior SKIP with its own do-not-retry-unless (a demonstrated new global task need, a changed delivery cost, or a placement/packaging change that resolves the original unjustified-cost objection) — that scope was not asked about here and is not reopened by this project-a ADOPT."
+      }
+     ]
+    },
+    {
+     "id": "callable-global-incumbent",
+     "rows": [
+      {
+       "target": "project-a",
+       "verdict": "SKIP",
+       "reason": "Component verdict (candidate skill, project-a task): SKIP as already covered. The digest's SKIP-as-covered standard (VERDICTS.md) requires equivalent capability demonstrably available for THIS target's task, including callable global on-demand tools — met here: the incumbent is a global, invoke-only skill whose covering mechanism and explicit invocation path are documented, and fresh project-a sessions confirmed it visible when needed, callable with available permissions, and effective for the task. Global scope and invoke-only activation do not by themselves disqualify an incumbent from counting (SKILL.md: 'Callable global on-demand tools count'; VERDICTS.md: being invoke-only does not mean disabled). Phase-4 matched repeated comparisons (candidate vs bare vs incumbent) found equivalent useful behavior with controls passing and no candidate advantage in quality, access, cost, or upkeep, so the candidate fails the 'must beat what you already own' bar even though its own artifact checks were clean. Delivery/mechanism sub-verdict: the candidate's inspected revision, provenance, maintenance, behavior, and price checks are all reported satisfactory — this is not a REJECT or safety finding, and nothing here should be read as an artifact defect. SKIP is driven entirely by no demonstrated unmet need plus duplication cost (a second maintained implementation of the same task), per VERDICTS.md's SKIP definition ('equivalent capability already usable ... no demonstrated need exists'). Prior verdicts: none supplied by the scenario; record as not searched/unknown rather than asserting 'never vetted' (VERDICTS.md). State of other scope: global scope already hosts the incumbent unaffected by this run; project-b is not addressed by this scenario and carries no rollup here — that is scope state for the record, not a competing verdict."
+      }
+     ]
+    },
+    {
+     "id": "shared-security-finding",
+     "rows": [
+      {
+       "target": "project-a",
+       "verdict": "REJECT",
+       "reason": "The scenario's confirmed finding is a security artifact finding (unsafe code — undisclosed exfiltration of private task contents), which per VERDICTS.md is an affirmative disqualifier that 'remains applicable across targets until their cause is demonstrably removed,' and per SKILL.md is not reset by changing destination. Source identity and current content digest were checked this run and are identical to the previously rejected revision; the responsible bundled code is unchanged and no remediation evidence exists — so the prior REJECT is reused, not re-derived, for project-a. project-a's real, stated need for the advertised capability is a fit finding, not a safety finding, and per the verdict vocabulary a genuine task need does not override an affirmative REJECT. Delivery and content are not separable here into different sub-verdicts: the same executable code and permissions are what would run under the project-local proposal, so both the packaging/delivery mechanism and the content it delivers carry the same disqualifier — there is no passing half. This is a single-target request (project-a only); no other target's state was asked about, so no other rollup rows are produced (project-b and global are out of scope for this run and are not evaluated or rolled up here)."
+      }
+     ]
+    },
+    {
+     "id": "other-project-not-coverage",
+     "rows": [
+      {
+       "target": "project-a",
+       "verdict": "ADOPT",
+       "reason": "Per the scenario's stated facts: the standalone skill's pinned revision is safe, maintained, and licensed for the proposed unchanged native installation, with no disqualifier found in source/bundled-code review; matched repeated bare-vs-candidate tests on project-a's own task show useful improvement, and irrelevant-task plus negative controls pass; the only incumbent with this capability lives in project-b and is confirmed by runtime checks unable to load or be invoked in project-a, so per VERDICTS.md's rule that an other-project-only copy is not automatic coverage, no SKIP-as-covered applies; all five phase-5 price checks (context cost, armor, placement/off-switch, delivery, supply chain) passed for project-a; and native project-local installation is unchanged from the delivered form, so this is ADOPT rather than ADAPT.",
+       "target_fit": "unspecified",
+       "placement": "Project-a's native project-local skill-install location, matching the complete verified project-a digest (global/project/nested/plugin sources and actual invocation paths) already inventoried for this run.",
+       "activation": "Scenario states fresh target-session and unrelated-control-session checks confirmed visibility, precedence, invocation, and disable effects for project-a without bleeding into the unrelated control — i.e., activation and the off-switch behave as expected and stay scoped to project-a. The scenario does not name the specific activation mode (auto-invoke vs. on-demand); that detail is unstated.",
+       "packaging_change": "None. Installation is the candidate's native, unchanged, standalone form as delivered — no component selection, updater removal, fork/patch, or global-to-project conversion was needed per the passed price checks.",
+       "evidence_limits": "This response reasons over the scenario's stated facts as given; no checks were executed and no installation was performed or implemented here. The scenario does not state whether a prior-verdict/shared-note search was run for this candidate in project-a or any shared index — record that as a search gap per VERDICTS.md, not as proof the candidate was 'never vetted.' The scenario also does not specify the exact target task beyond 'concrete unmet task,' the number of repeated test runs, or the license's actual terms beyond 'licensed for the proposed unchanged installation' — these are unstated, not failed, checks.",
+       "retry_or_review": "Per VERDICTS.md, this ADOPT carries a bounded review trigger: re-evaluate if the candidate's instructions, dependencies, capabilities, or permissions change; if project-a's target task or runtime changes; if an equivalent incumbent becomes actually callable in project-a (which would reopen the SKIP-as-covered question, since project-b's copy currently does not count); or if a platform/model change invalidates the behavioral test. Landing depth is report-only, so this ADOPT is a recommendation, not a shipped state — no installation is authorized by this assessment alone. Provenance, license preservation, the pinned revision, an update owner, and rollback (reverting/removing the project-local copy) are recorded per the scenario and should be carried into the eval note if the operator proceeds. project-b is not a requested target here: it is named only as the incumbent's current (non-portable) location, and the scenario explicitly authorizes no installation or change there — that is the full extent of project-b's involvement in this run, not a verdict on it."
+      }
+     ]
+    },
+    {
+     "id": "native-project-plugin",
+     "rows": [
+      {
+       "target": "project-a",
+       "verdict": "ADOPT",
+       "reason": "Native, project-scoped plugin install for project-a; per VERDICTS.md a native project install stands as ADOPT and is not downgraded to ADAPT merely for being narrower than global. Delivery (mechanism) and content (components) sub-verdicts are both ADOPT as stated in the scenario: full instruction/manifest/executable/updater/supply-chain review found the unchanged, pinned plugin safe, maintained and licensed for this use with no unwanted extras (delivery), and every bundled component maps to a concrete unmet project-a task with no equivalent callable incumbent, with matched repeated target-task tests plus irrelevant-task and negative controls showing real improvement over the bare model (content). All five phase-5 price checks (context cost, armor test, placement/off-switch, delivery-vs-content, supply chain) passed for the whole project-scoped bundle. Since every component is genuinely needed only in project-a, no component selection or repackaging is warranted. No prior verdict for this candidate is stated in the scenario; per VERDICTS.md that is a search gap, not confirmation of 'never vetted,' and any prior note surfaced before actual landing should be reconciled rather than overwritten. The scenario makes no claim about project-b or global scope, and none is implied here: a project-level ADOPT does not establish global or other-project fit, symmetric to the rule that a global SKIP would not veto this project.",
+       "placement": "Narrowest supported placement: native project-a-scoped plugin installation/registration, not global.",
+       "activation": "Per-project enablement only. As stated, isolated fresh project-a sessions verified enablement, visibility, invocation, precedence, hook/service effects and full disable behavior including reload requirements, and a separate unrelated-project control session verified the plugin does not activate outside project-a. Enabling a plugin is itself a security-posture action, so activation stays a proposal for the operator to apply, not something landed in this run.",
+       "packaging_change": "None required — the scenario states all components are needed only in project-a and that no packaging changes or component selection are necessary; the bundle installs as-is.",
+       "evidence_limits": "This assessment treats the scenario's stated observations as established facts for the exercise only; no checks were actually executed and no installation or enablement was performed or implemented in this session — this is a report-only, unshipped recommendation. The scenario does not describe a prior-verdict/note search, so the absence of a cited prior note is an evidence gap, not proof this candidate is unvetted elsewhere.",
+       "retry_or_review": "Not a SKIP/REJECT, so no Do-not-retry trigger applies; instead this ADOPT carries a bounded review trigger per VERDICTS.md: re-evaluate if the plugin's instructions, dependencies, capabilities or permissions change from the pinned/resolved revision, if project-a's task changes, if a usable incumbent appears, or if a model/runtime change invalidates the paired target-task comparison. Before any real install: confirm provenance (source + resolved revision/pin) and license, and name an update owner and rollback path — the scenario states these were recorded but does not reproduce their values here. Because the operator authorized report-only work and explicitly did not authorize installation or global enablement, landing this ADOPT requires a separate operator go-ahead; no PR, issue, or install should be treated as done from this output."
+      }
+     ]
+    },
+    {
+     "id": "same-skill-other-scope-reconcile",
+     "rows": [
+      {
+       "target": "project-a",
+       "verdict": "ADAPT",
+       "reason": "This is a reconcile case, not a coverage case: per VERDICTS.md's SKIP entry, a copy of the candidate at another scope is a placement question, and reconcile-as-ADAPT is triggered when copies diverge OR the operator asked to narrow where it loads — here both are true (the project-a copy's reference sections differ from the global copy, and the operator's stated goal is that the skill serve project-a only and stop loading in unrelated sessions). So the undiverged-copy-equals-covered exception does not apply, and no SKIP-as-already-covered verdict is defensible for project-a. Splitting delivery from content per SKILL.md's 'Delivery vs content' check: content/utility is demonstrated — matched repeated tests with honest controls show the skill beats the bare model on the project-a task, and artifact review of both revisions found no safety, licensing or maintenance disqualifier, so REJECT and SKIP-for-need are both ruled out. Delivery is what's broken: two diverged copies both load in project-a sessions (project copy wins precedence there, but the global copy is confirmed — by fresh target and unrelated-control sessions — to be what loads in unrelated sessions, which is exactly what the operator wants stopped). That is a placement/packaging defect, which VERDICTS.md's ADAPT definition names directly ('select permitted components... alter activation... convert a global-only installer to project-local'). The diff already names an authoritative source: the project-a copy carries the more recent verified edits, the global copy only the original upstream pin, so the project-a copy is the correct basis for the single consolidated copy, not the reverse. No prior verdict or note lookup is described in the scenario's stated facts, so this assessment cannot say whether this reconciliation was previously flagged; treat that as an open lookup, not as 'never assessed.' No other-scope rollup row is included here because the run only asked about project-a; the global copy's fate is a packaging detail of this same ADAPT, not a separate verdict.",
+       "evidence_limits": "All facts taken as given per the scenario (diff of both revisions with no disqualifier found; matched repeated behavioral tests with passing controls; runtime visibility/invocation/disable checks confirmed in a fresh target session and an unrelated control session) — this response did not independently re-run any of those checks. The scenario is explicit that no change has been authorized: nothing has been consolidated, narrowed, deleted or otherwise landed, and this rollup does not claim otherwise. Not stated in the scenario, and therefore unresolved: whether any other project or unrelated session currently depends on the global copy for its own task — that gap matters because narrowing/removing the global copy affects sessions outside project-a, and whether prior-notes locations were searched for an earlier verdict on this same candidate.",
+       "packaging_change": "Consolidate to a single project-local copy inside project-a's own skills directory, using the existing project-a copy's content as authoritative (it holds the more recent verified edits; the global copy holds only the stale upstream pin) — this is already the higher-precedence copy in project-a sessions, so no new project-local install is needed, only removal of the duplicate. Retire or narrow the global copy so it stops loading in unrelated sessions, per the operator's stated goal; per SKILL.md's Ship section this is a consolidation the operator asked for, so it may be proposed with its evidence but must not be performed as an incidental cleanup, and it must not silently delete provenance — the global copy's upstream pin history should be preserved in the eval note even after it is narrowed out of unrelated sessions. Update/rollback ownership for the resulting single copy is already recorded per the scenario; carry that record into the eval note rather than re-deriving it.",
+       "placement": "Project-a's own skills directory — the narrowest placement that already serves the task and already wins precedence there; global placement is not warranted since the operator explicitly wants project-only scope, and no cross-project need for this skill is stated in the scenario.",
+       "activation": "Whatever project-local activation the fresh target-session check already verified (visibility, invocation, and disable behavior confirmed in project-a plus an unrelated control) is sufficient once the global copy stops loading; no new activation mechanism is implied by this ADAPT, only removing/narrowing the second loading path.",
+       "retry_or_review": "This is a proposal, not a landed change — per SKILL.md's Ship section, a placement/scope change that alters where a copy loads is left for the operator to apply, naming the exact target path/config and activation scope; the next step is that explicit operator authorization to execute the consolidation, not further vetting. Once authorized and landed, the standing ADOPT/ADAPT review trigger applies: re-open review on changed instructions, dependencies, capabilities or permissions in either copy, a changed project-a task, a newly available incumbent, or a changed model/runtime that would invalidate the behavioral comparison already run."
+      }
+     ]
+    },
+    {
+     "id": "unlicensed-verbatim-copy",
+     "rows": [
+      {
+       "target": "project-a",
+       "verdict": "EXTRACT",
+       "reason": "Content vs. delivery split per VERDICTS.md's licensing rule: the candidate is an unlicensed public paste with no repo, no grant, and an author who is reachable but has not been asked. That blocks the verbatim-copy delivery path (ADOPT as-is, or ADAPT by copy-out) — component-level sub-verdict for the as-delivered text is SKIP, pending grant, not REJECT (no safety/maintenance/quality disqualifier was found, so this is a permission gap, not an affirmative disqualifier). What stays open under the same rule is EXTRACT of the demonstrated pattern (the fixed ordering of checks) ported into project-a's own words. The Phase-4 bar for that is met on the stated facts: matched repeated bare/candidate runs (not a single fixture) show the pattern improves the concrete target task, irrelevant-task controls pass (so it isn't misrouting), and project-a's digest shows no equivalent callable incumbent, so this isn't SKIP-as-covered. No prior verdict for this candidate/source was surfaced in the scenario's stated facts — that is recorded as unknown/not searched-and-found, not as 'never vetted.' No other target (project-b or global) was asked about or is addressed by this scenario, and nothing here should be read as a rollup for either."
+      }
+     ]
+    },
+    {
+     "id": "plugin-subset",
+     "rows": [
+      {
+       "target": "project-a",
+       "verdict": "ADAPT",
+       "reason": "Rollup for project-a combines two distinct sub-verdicts per the delivery-vs-content split (kept separate per VERDICTS.md, not as extra rows). CONTENT — skill-x alone: ADAPT (licensed copy-out). Stated facts satisfy the utility bar: a concrete unmet task for project-a, no equivalent callable incumbent, and demonstrated skill-x improvement over the bare model in matched repeated runs with passing controls. The license explicitly grants a standalone copy of skill-x with attribution, so this is a licensed ADAPT copy-out rather than a pattern-only EXTRACT or a SKIP-pending-grant. Full source/manifest/dependency inspection and runtime tests show skill-x has no dependencies or hidden manifest and behaves equivalently packaged alone, satisfying the pre-ADAPT requirement that a copied-out component run standalone with every outside-directory reference resolved. All five phase-5 price checks (context cost, armor test, placement/off-switch, delivery-vs-content, supply chain) are stated to pass for that standalone form, and placement, activation, disable behavior, and an unrelated control were verified. DELIVERY — the whole pinned plugin: SKIP for project-a, not REJECT. The plugin as a native install enables hooks and services whose costs/effects are stated unacceptable for project-a; observed platform behavior confirms no per-skill switch exists; and isolated fresh-session testing confirms those hooks/services still activate inside project-a even through the supported native plugin-install path. That is a cost-exceeds-benefit finding on the mechanism (SKIP), not an unsafe-code or license finding on skill-x itself, which is stated safe — REJECT is not supported by anything in the scenario. Net project-a rollup: ADAPT the extracted skill-x, SKIP the plugin's native install as a delivery vehicle. No project-b or global row is returned because the scenario names only project-a; nothing here should be read as a verdict for any other scope, and no prior-verdict evidence was supplied to reuse or reconcile.",
+       "placement": "Standalone, project-local placement of skill-x only, within project-a — not the plugin's own native project-install path, which was rejected as a delivery mechanism because it still enables the objectionable hooks/services even in isolated project-a sessions. Nothing in the scenario supports a global or cross-project placement for either skill-x or the plugin.",
+       "activation": "Explicit invocation for the standalone skill-x artifact, matching what was verified in project-a and an unrelated control session (visibility, invocation, and disable behavior all checked). The plugin's own activation surface (its hooks and services) stays off for project-a; the scenario found no per-skill switch that would let it activate only skill-x from inside the plugin.",
+       "packaging_change": "Extract skill-x out of the pinned plugin into a standalone skill artifact for project-a: drop the plugin manifest, hooks, and services entirely; retain skill-x's own files/instructions, which carry no dependencies; preserve attribution as the license requires. Provenance: record the exact plugin revision/pin skill-x was extracted from and the license clause relied on, in the eval note. Update owner: whoever owns project-a's skill surface is responsible for watching future pinned-plugin revisions for changes to skill-x and re-applying the same extraction/equivalence check. Rollback: delete the standalone skill-x file/directory from project-a — full reversion, since nothing else (no plugin registration, hooks, or services) was installed alongside it.",
+       "evidence_limits": "This is a hypothetical scenario evaluated on its stated facts per instructions; this session ran no commands, installed nothing, and inspected no actual files or plugin. The source/dependency/runtime verifications, the five price-check passes, and the placement/activation/control tests described in the scenario are treated as established facts for this exercise, not independently reproduced here. No implementation or enablement is claimed or authorized by this assessment — it is report-only, consistent with both the operator's request and the scenario's own closing statement that no implementation or enablement is authorized.",
+       "retry_or_review": "Delivery SKIP (whole plugin, project-a): Do-not-retry unless the plugin ships a working per-skill switch, removes or makes optional the objectionable hooks/services, or project-a's requirements change to accept that cost — elapsed time or repeated requests alone do not reopen it. Content ADAPT (skill-x standalone, project-a): re-review if a later pinned plugin revision changes skill-x's instructions, dependencies, capabilities, or permissions; if project-a's task or incumbent changes; if a model/runtime shift could invalidate the demonstrated improvement; or if the license terms relied on for the copy-out change — re-verify the grant and re-run the standalone equivalence check before any re-adoption or update."
+      }
+     ]
+    },
+    {
+     "id": "multiple-targets",
+     "rows": [
+      {
+       "target": "project-a",
+       "verdict": "ADOPT",
+       "reason": "project-a has a concrete unmet task with no equivalent incumbent, so bare/candidate is the correct phase-4 instrument (no incumbent means bare/candidate only) — matched repeated runs show a useful improvement with passing honest controls. All five phase-5 price checks (context cost, armor test, placement/off-switch, delivery-vs-content, supply chain) passed for this target. As a standalone skill (not a multi-component pack or separate installer/plugin wrapper), the component verdict and the delivery verdict collapse to one: ADOPT as-delivered at the verified project-local placement — narrower-than-global scope alone does not demote a native project install to ADAPT. Shared artifact findings (safety, license, maintenance, pinned/unchanged revision, supply chain) were judged once for this revision and are reused verbatim for project-b's row below, per the rule that artifact safety is judged per-revision while utility/overlap/price are judged per target. No prior global verdict exists for this candidate; none is asserted or rolled up here because global scope was not requested, and this project-a ADOPT does not itself extend to global or to project-b.",
+       "placement": "Project-local (narrowest supported placement serving the stated task), unchanged packaging as delivered by the candidate — no fork, subset, or repackaging required.",
+       "activation": "Explicit invocation. Verified correctly enabled in a fresh project-a session and correctly inert when disabled, checked in an unrelated control session with no cross-project bleed.",
+       "packaging_change": "None. The candidate installs and runs as a standalone skill; ADOPT here is as-delivered, not ADAPT — no components to strip, no updater to remove, and no activation-mode conversion is called for.",
+       "evidence_limits": "Per the task instructions, all facts here are the scenario's stated observations taken as established for this exercise; no check, comparison, price test, or installation was actually run, reproduced, or implemented in this session — this is an application of the method to a hypothetical, not a live vet. The scenario reports 'matched repeated' bare/candidate runs and 'passing controls' without stating run counts, model/runtime identity, or raw output; that is sufficient under the method to render ADOPT (no-incumbent case), but a real vet would still cite the literal commands/output before shipping, since recorded numbers are known to decay and are re-verified at ship time rather than trusted from a prior report.",
+       "retry_or_review": "Bounded review triggers (ADOPT/ADAPT clause): re-review if the candidate's instructions, dependencies, capabilities, or permissions change (safety is rejudged per revision even when the utility finding stands); if project-a's task changes; if an equivalent incumbent later becomes available for project-a (reopens the SKIP-as-covered question); or if a model/runtime change could invalidate the paired bare/candidate result. Before any actual install lands: this run is report-only and authorizes no installation — the operator must apply or defer it. The scenario states provenance (pinned source revision/content digest), license, an update owner, and a rollback path are already documented for a proposed project-a install; those records, plus a durable eval note, are the prerequisites the method requires before this ADOPT is landed as an actual change."
+      },
+      {
+       "target": "project-b",
+       "verdict": "SKIP",
+       "reason": "project-b already has an equivalent incumbent demonstrably callable for its target task, so the correct phase-4 instrument is candidate-vs-incumbent, not bare/candidate — the candidate must beat what the target already owns. Matched repeated candidate/incumbent comparisons show no candidate advantage in useful behavior, access, price, or upkeep, and the incumbent's own controls also passed. This satisfies the method's standing SKIP-as-covered bar: the covering mechanism and its control surface are named and verified for project-b's specific task, not merely asserted as 'already covered.' The same unchanged-revision shared artifact findings (safety, license, maintenance, supply chain) from project-a's row apply here too — this SKIP is a target-fit/cost finding, not a safety verdict, and does not alter or reuse any prior global disposition (none exists, and none is being asserted here since global scope was not requested).",
+       "placement": "No installation — the method's designated destination for a SKIP row.",
+       "activation": "Not applicable; nothing is installed. project-b continues to use its existing incumbent mechanism for this task.",
+       "packaging_change": "None — no adoption or adaptation is proposed for project-b.",
+       "evidence_limits": "As with project-a, every fact here is a stated scenario observation taken as given for this exercise; no comparison, price check, or control was actually run, reproduced, or implemented in this session, and no recommendation has been implemented. The scenario reports 'matched repeated' candidate/incumbent comparisons and passing controls without run counts or raw output, so the parity finding is accepted at face value for this exercise rather than independently re-run.",
+       "retry_or_review": "Do-not-retry unless one of: project-b's incumbent becomes unavailable or is withdrawn; project-b's task changes to something the incumbent no longer covers; the candidate's behavior, price, or upkeep changes materially on a new revision (which also reopens the shared safety/supply-chain judgment for that revision); or a different supported placement changes the cost side of this comparison. Elapsed time, operator enthusiasm, or a repeated ask without one of these predicates does not reopen this SKIP."
+      }
+     ]
+    },
+    {
+     "id": "first-instruction-surface-bootstrap",
+     "rows": [
+      {
+       "target": "project-a",
+       "verdict": "ADOPT",
+       "reason": "Component-level verdict: ADOPT as-is. The scenario states an operator-named concrete task (a recurring report artifact judged against a stated checklist), a complete digest showing no callable incumbent for that task, matched repeated bare/candidate behavioral tests showing useful improvement with passing irrelevant-task controls, a clean artifact/supply-chain review, and all five phase-5 price checks passing (context cost, armor test, placement/off-switch, delivery-vs-content, supply chain) — every phase-4/5 gate this method requires for a target-scoped ADOPT is reported satisfied. Delivery-mechanism verdict is also ADOPT: a native project-local skill install is ADOPT, not ADAPT, merely for being narrower than global (VERDICTS.md); no packaging change to the candidate's content is indicated. However, ship/landing state does not follow automatically from that verdict. Two independent holds apply: (1) the operator explicitly authorized a report-only run with no change authorized, so per SKILL.md phase 7 this closes as a report with explicit unshipped state, not an installation; (2) project-a has no agent instruction files, skills directory, rules file, or plugin registration of any kind — this is the target's first instruction-loading surface of any kind, which SKILL.md's phase-7 hard edge treats like a security-posture change: 'gets its first skills directory, rules file or plugin registration proposed with the exact path for the operator to create, not landed.' Both premises independently forbid autonomous installation here even though the component clears every merit gate. Prior verdicts: the scenario gives no prior-verdict search result for this candidate/target, so none is asserted or assumed absent. Other scope: the scenario asks only about project-a; no project-b or global claim is made or implied by this row."
+      }
+     ]
+    },
+    {
+     "id": "unknown-destination",
+     "rows": [
+      {
+       "target": "unresolved",
+       "verdict": "SKIP",
+       "reason": "This is an unattended run naming a candidate but no project, no stated task, and no live operator to ask; the launch directory is an unrelated checkout, and per SKILL.md's interaction rule an unattended run with no defensible destination is assessed with scope left unresolved and no installation — never defaulted to global, never inferred from cwd. VERDICTS.md requires recording an unresolved row rather than treating this as an empty assessment, so this is the one rollup row this run supports. Content/artifact sub-verdict: intake found no affirmative safety or licensing disqualifier, so nothing here supports REJECT — but with no stated task there is no demonstrated need and no target-task fit to weigh, so the content sub-verdict is SKIP-pending-evidence, per VERDICTS.md's 'insufficient verification may mean SKIP pending evidence, never a fabricated negative benchmark or a security REJECT.' Delivery/mechanism sub-verdict: phase 5's context-cost pricing, armor/placement check and delivery-vs-content split all require a target digest and task that don't exist yet, so delivery is likewise unpriced and cannot be ADOPT or ADAPT — those verdicts need the placement check to have actually run. Prior verdicts: the scenario does not report whether shared/target note locations were searched for this candidate's identity; treat that as an unrecorded gap rather than asserting 'never vetted' (VERDICTS.md: absence of evidence is not evidence of absence). State of other scope: no project-a, project-b, or global row is asked about or defensible here, and this SKIP is scope-neutral — VERDICTS.md is explicit that a SKIP for no-demonstrated-need does not veto a later, concretely-scoped ask against project-a, project-b, or global; each would reopen fit independently once a target and task are named.",
+       "placement": "No installation at any scope. Per VERDICTS.md, a skipped row's destination is recorded as no installation — neither project-local nor global placement is proposed or implied by this assessment.",
+       "activation": "Not applicable. Nothing was enabled, configured, or activated at any scope; no activation surface was identified because no target session exists to check visibility/invocation/disable effects against.",
+       "packaging_change": "None proposed. ADAPT-style packaging changes (selecting components, altering activation, converting installer scope) are only meaningful once a target and task exist to evaluate delivery fit against; specifying one now would be inventing a destination the scenario states does not exist.",
+       "evidence_limits": "Only the artifact-level intake check (no safety/licensing disqualifier found) is confirmed complete. Not established: a verified target digest for any project or global scope; a stated concrete task (artifact/outcome plus judging criterion) needed to run phase 4's behavioral or paired-comparison test; incumbent/overlap coverage for any target; phase 5 context-cost, armor, or placement/activation pricing; and whether prior-note locations were searched. This is incomplete evidence supporting a pending SKIP, not a negative finding, and no check described here was actually run in this session — this is an assessment of the scenario's stated facts only, not a live vet.",
+       "retry_or_review": "Do-not-retry unless: an operator (or a subsequent request) names a concrete destination — project-a, project-b, or global — together with a concrete task (the artifact/outcome the target's sessions must produce and how a result is judged) and its runtime, so the digest, target-task test, and pricing phases have something to run against; or the launch-directory checkout is affirmatively confirmed by the operator as the intended target rather than inferred from cwd. Any resulting target-specific verdict is independent of this unresolved row and does not require re-litigating the artifact-safety finding, which carries forward unchanged."
+      }
+     ]
+    },
+    {
+     "id": "tool-heavy-mcp-unmeasured",
+     "rows": [
+      {
+       "target": "project-a",
+       "verdict": "ADAPT",
+       "reason": "The candidate is one plugin manifest bundling two components with diverging evidence: a skill and an auto-starting MCP server exposing 70+ tools. Per VERDICTS.md the mechanism (plugin/MCP-server delivery) and the content (skill, tool surface) get separate sub-verdicts, and per EVIDENCE.md's base rate no multi-component candidate is adopted wholesale as delivered — this case fits that pattern rather than breaking it. Skill sub-verdict: ADOPT-grade evidence per the scenario's own statement — matched repeated runs of the skill alone showed improvement with controls passing, artifact review found the pinned revision safe, license permissive, maintenance active, and placement/delivery/armor/supply-chain checks all passed, including a verified native project-scoped plugin install in a fresh session. MCP-server/tool-surface sub-verdict: evidence-limited (PARTIAL), not passed. project-a has a concrete unmet task and the verified digest shows no callable incumbent for the subset of tools that addresses it, which supports genuine need — but the phase-5 context-cost price check (required before any ADOPT/ADAPT) could not run its paired measurement: the report only narrates a comparison of the >70 tool count against published guidance rather than measuring tool-selection accuracy/misrouting on project-a's own representative tasks with vs. without the server, because the sandbox lacked the model access matched runs need. EVIDENCE.md's tool-count receipts (13.6%->43.1% selection-accuracy gain from narrowing; up to 85% loss at oversized toolsets) make that specific measurement gap material, not a formality. Because skill and server ship as one manifest, and 'no per-skill switch may be invented' where per-component controls are unverified (VERDICTS.md ADAPT clause), the defensible target-level call is ADAPT: proceed via the verified native project-scoped plugin path, but the delivery must change to either scope the MCP server's tool grant down to the task-relevant subset (if the manifest supports selecting permitted components — unstated in this scenario, itself a gap) or hold the server disabled/unauthorized until the missing selection-accuracy/misrouting measurement is completed, while the skill component's evidence already clears the bar for its own narrow adoption within that same install. No other scope (global, project-b) or prior verdict is mentioned in the scenario, so nothing is carried over or reopened here; this is a fresh read of the stated facts, not a search of any note system."
+      }
+     ]
+    },
+    {
+     "id": "skill-pack-named-subset",
+     "rows": [
+      {
+       "target": "project-a",
+       "verdict": "ADAPT",
+       "reason": "Delivery and content verdict separately, per SKILL.md's 'delivery vs content' price check, then rolled into one composite recommendation for this target: (1) Content — the six operator-named skills are self-contained, were read in full, and beat the bare model on matched repeated tests with passing controls (phase-4 behavioral bar met); each was copied to scratch and verified running standalone in isolated sessions, with disable behavior and unrelated-control checks also verified (phase-5 placement/off-switch check), and all five price checks pass for these six standalone copies. The license affirmatively permits copying skills out as standalone with attribution, which satisfies VERDICTS.md's requirement that a verbatim/ADAPT copy needs a license that grants it — so copy-out is not blocked pending a grant. This clears the bar for ADAPT: 'select permitted components' and 'patch/fork packaging' are exactly the named ADAPT actions here, since delivery must change from the native mechanism. (2) Delivery mechanism — native project-scoped plugin install is supported and would be the narrower, preferred path per VERDICTS.md ('prefer a native scoped plugin install when it suffices'), but observed platform behavior confirms it has no per-skill switch and always loads all fifty skills' discovery metadata into project-a, which currently carries none. The whole-bundle context-cost check fails on this target specifically because of that forced 44-skill surplus. That mechanism, as packaged, is therefore SKIP for project-a — not REJECT, since the full manifest/script/bundled-code review found no safety disqualifier; this is a cost/placement failure, not an affirmative disqualifier. (3) The other forty-four skills were only sweep-triaged against the digest, never deep-vetted; per VERDICTS.md 'triaged-only entries are not deep-vet approvals,' so they carry no verdict at all here — not ADOPT, not SKIP — and stay open for a future run if the operator names more of them or project-a's task set grows to need them. (4) No prior verdict for this candidate is stated in the scenario one way or the other, so this is treated as this run's first recorded assessment for project-a; no other target (project-b/global) was asked about or is implied, so no other-scope state is reported. Net recommendation for project-a: ADAPT via copy-out of the six named skills as standalone project-local skills; do not install the plugin as delivered. Audit dividend: this case reproduces the mined base rate in EVIDENCE.md that no multi-component candidate has been adopted wholesale as delivered here — a fifty-skill pack again resolves to a handful of ADAPTed components plus an un-vetted remainder, corroborating rather than contradicting that prior, and reconfirms that this host's plugin mechanism still lacks a per-skill toggle, which will recur as the same cost failure for any future all-in-one skill-pack candidate until the platform adds one.",
+       "placement": "Project-local: copy each of the six named skills directly into project-a's own skills directory (project-a currently has none, so this is a first-surface addition there, not an addition to an existing surface) — not the plugin's native manifest-based install path, and not global.",
+       "activation": "Each of the six copied skills would activate individually via project-a's normal per-skill discovery/invocation, independent of the other forty-four, which stay uninstalled and unregistered. The plugin's own registration/manifest mechanism is not activated for project-a under this recommendation. Per the explicit report-only instruction, none of this has been installed or enabled by this assessment — it is a proposal for the operator to apply, and a target with no existing instruction-loading surface (as project-a is here) requires the operator's proposed-path sign-off before landing, per SKILL.md's security-posture handling of a first skills surface.",
+       "packaging_change": "Fork/patch packaging: extract the six named skills out of the fifty-skill plugin bundle into standalone skill files (bypassing the shared plugin manifest, which cannot scope to a subset), preserving the license-required attribution and a pin to the source repo's recorded revision. No updater is implied or proposed for the six standalone copies; treat any future upstream sync as a manual, reviewed re-copy rather than an automatic pull.",
+       "retry_or_review": "Do-not-retry-unless for the whole-bundle native install (SKIP): the platform ships a per-skill enable/disable control that removes the all-fifty discovery-metadata cost, or project-a's task set expands enough to justify vetting and using more of the un-vetted forty-four, or the pack is repackaged/forked upstream into a scoped-subset install. Bounded review trigger for the six ADAPTed copies: re-review on changed upstream instructions/dependencies/capabilities/permissions in those six skills, a changed or expanded project-a task that the original paired-comparison fixture no longer represents, or an incumbent/model/runtime change that could invalidate the recorded test result. The forty-four triaged-only skills are not on a retry clock at all — they simply have no verdict until named and deep-vetted.",
+       "evidence_limits": "This is a hypothetical scenario; its stated observations are taken as established facts for this analysis, not independently re-run — no tools were invoked and no checks were executed by this session, and no installation should be read as having occurred or been implemented. Within the scenario's own facts: the forty-four non-named skills remain triage-only with no deep-vet evidence, so no verdict beyond 'not evaluated' can be given for them; the scenario states provenance, source pin, update owner and rollback were 'recorded' but does not give their actual content (repo revision, named owner, rollback procedure), so this analysis cannot cite those specifics, only that they are asserted to exist; no prior-verdict search result for this candidate is stated, so whether this is a first vet or a re-evaluation of an earlier note is unresolved; and the composition/run-count of the 'matched repeated tests' behavioral comparison is not detailed beyond 'passing controls,' so the strength of that result cannot be graded finer than the scenario's own claim."
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "round": "round-3 (final files)",
+   "cases": 13,
+   "exact_matches": 13,
+   "semantic": {
+    "pass": 11,
+    "partial": 2,
+    "fail": 0
+   },
+   "mismatches": [],
+   "reviews": [
+    {
+     "id": "global-cost-project-fit",
+     "exact_match": true,
+     "semantic": "PASS",
+     "forbidden_claims_hit": [],
+     "notes": "Rows match (project-a/ADOPT). Explicitly refutes the historical-SKIP-vetoes-fit claim, the global-enablement claim, and the placement-alone-forces-ADAPT claim; evidence_limits correctly disclaims that checks were run or anything installed."
+    },
+    {
+     "id": "callable-global-incumbent",
+     "exact_match": true,
+     "semantic": "PASS",
+     "forbidden_claims_hit": [],
+     "notes": "Rows match (project-a/SKIP). Correctly treats the global invoke-only incumbent as coverage, refutes invoke-only=disabled, and does not claim candidate superiority or unmet need. No over-claim of self-run checks."
+    },
+    {
+     "id": "other-project-not-coverage",
+     "exact_match": true,
+     "semantic": "PASS",
+     "forbidden_claims_hit": [],
+     "notes": "Rows match (project-a/ADOPT). Explicitly states an other-project-only copy does not count as coverage, does not call for migrating/deleting project-b, and does not require packaging adaptation for the unchanged native install."
+    },
+    {
+     "id": "shared-security-finding",
+     "exact_match": true,
+     "semantic": "PASS",
+     "forbidden_claims_hit": [],
+     "notes": "Rows match (project-a/REJECT). Explicitly states project scope is not a sandbox, the finding carries forward unremediated, need does not offset the finding, and the defect is confirmed not merely unproven utility. Answer is terser than others (reason field only) but contains no forbidden assertion and no over-claim of self-performed checks or installation."
+    },
+    {
+     "id": "multiple-targets",
+     "exact_match": true,
+     "semantic": "PASS",
+     "forbidden_claims_hit": [],
+     "notes": "Rows match (project-a/ADOPT, project-b/SKIP). Verdicts are differentiated per-target on their own fit facts, project-b SKIP explicitly recommends no installation/duplication, and two distinct rows are returned rather than a rollup."
+    },
+    {
+     "id": "unknown-destination",
+     "exact_match": true,
+     "semantic": "PARTIAL",
+     "forbidden_claims_hit": [],
+     "notes": "Row matches (unresolved/SKIP) and no forbidden claim is asserted (explicitly frames this as 'SKIP pending evidence' per VERDICTS.md, excludes the launch directory as destination, and does not treat missing utility evidence as unsafe). However, the answer supplies no retry_or_review field or any observable condition under which the assessment should be redone (e.g., a project/task/operator becoming available) — this is exactly the 'unresolved case without an observable retry condition' example the task calls out for PARTIAL."
+    },
+    {
+     "id": "plugin-subset",
+     "exact_match": true,
+     "semantic": "PASS",
+     "forbidden_claims_hit": [],
+     "notes": "Row matches (project-a/ADAPT). Correctly holds that no per-skill override exists, that whole-plugin install does not remove the objectionable bundle effects, labels the copy-out as ADAPT (not ADOPT and not a clean-room EXTRACT), and evidence_limits confirms nothing was implemented. Includes a concrete packaging_change (extract skill-x, strip plugin manifest/hooks)."
+    },
+    {
+     "id": "native-project-plugin",
+     "exact_match": true,
+     "semantic": "PASS",
+     "forbidden_claims_hit": [],
+     "notes": "Row matches (project-a/ADOPT). Explicitly refutes narrower-than-global-forces-ADAPT, does not call for forking/copying or global enablement, and activation/evidence_limits text disclaims that this run performed or authorized any install."
+    },
+    {
+     "id": "unlicensed-verbatim-copy",
+     "exact_match": true,
+     "semantic": "PASS",
+     "forbidden_claims_hit": [],
+     "notes": "Row matches (project-a/EXTRACT). Explicitly withholds ADOPT/ADAPT-by-copy pending a license grant (not treated as a permitted operator-weighed input for copying now), explicitly says the license gap is not a REJECT-grade finding, does not claim placement cures the missing grant, and evidence_limits confirms no port/copy has occurred."
+    },
+    {
+     "id": "same-skill-other-scope-reconcile",
+     "exact_match": true,
+     "semantic": "PASS",
+     "forbidden_claims_hit": [],
+     "notes": "Row matches (project-a/ADAPT). Explicitly rejects treating the global copy as covering incumbent (SKIP), performs and cites the diff naming the authoritative copy, frames global-copy narrowing as a proposal requiring separate operator authorization rather than something this assessment does, and treats the operator's stop-global-loading goal as in-scope. Includes a substantive packaging_change."
+    },
+    {
+     "id": "first-instruction-surface-bootstrap",
+     "exact_match": true,
+     "semantic": "PARTIAL",
+     "forbidden_claims_hit": [],
+     "notes": "Row matches (project-a/ADOPT) and no forbidden claim is explicitly asserted. But the answer is reason-only (no placement/activation/packaging_change/evidence_limits/retry fields, unlike every other case) and never engages the scenario's central premise — that project-a has zero existing instruction/skills surface. It says 'no packaging change needed, used as-is' without addressing whether creating the first skills directory is proposed to the operator versus silently landed, and never addresses where the eval note should be filed given no notes convention and only private memory available. This is an incomplete treatment of a required element specific to this scenario, not a flat pass."
+    },
+    {
+     "id": "tool-heavy-mcp-unmeasured",
+     "exact_match": true,
+     "semantic": "PASS",
+     "forbidden_claims_hit": [],
+     "notes": "Row matches (project-a/SKIP). Explicitly says the narrative tool-count comparison does not satisfy the context-cost check, does not treat the unrun measurement as proof of degradation/REJECT-worthy, states a PARTIAL required check bars ADOPT/ADAPT, and does not claim project scope removes the in-session tool exposure."
+    },
+    {
+     "id": "skill-pack-named-subset",
+     "exact_match": true,
+     "semantic": "PASS",
+     "forbidden_claims_hit": [],
+     "notes": "Row matches (project-a/ADAPT). Confirms all six named skills (not three) were read in full and given a full assessment, native whole-plugin install is SKIP (does not 'suffice'), the 44 triaged skills explicitly carry no verdict/approval, and the six are labeled ADAPT (copy-out), not an unchanged native ADOPT."
+    }
+   ],
+   "answers": [
+    {
+     "id": "shared-security-finding",
+     "rows": [
+      {
+       "target": "project-a",
+       "verdict": "REJECT",
+       "reason": "Shared artifact finding carries forward unchanged: a prior vet CONFIRMED (file:line in the bundled code, plus an isolated-probe observation) that this exact revision exfiltrates private task contents to an undisclosed external endpoint. This run's stated facts show the source identity and content digest for the proposed project-a install are identical to that rejected revision, the responsible code is unchanged, and no remediation evidence exists. Component/content sub-verdict: REJECT (unsafe bundled code, materially confirmed, not merely alleged). Delivery sub-verdict: also REJECT — the local proposal uses the same executable code and the same permissions as the rejected install; the only offered mitigation is narrower placement (project-a only, to load in fewer sessions), which changes exposure count, not the execution or network-egress surface that actually caused the finding. Per doctrine, security findings remain applicable across targets until their cause is demonstrably removed, and project scope is explicitly not a sandbox or permission boundary — a real, demonstrated capability need at project-a does not offset an unremediated exfiltration finding. Other scope: only project-a was asked about in this scenario; no claim is made here about project-b or global, and none is rolled up for them. No installation has been authorized, consistent with the scenario's own framing."
+      }
+     ]
+    },
+    {
+     "id": "other-project-not-coverage",
+     "rows": [
+      {
+       "target": "project-a",
+       "verdict": "ADOPT",
+       "reason": "Single standalone-skill candidate, unchanged/verbatim delivery. Content sub-verdict: ADOPT — matched bare/candidate testing on project-a's own task shows demonstrated improvement, with irrelevant-task and negative controls passing, satisfying phase-4's REFUTED-by-default bar. Delivery sub-verdict: ADOPT — native project-local installation of the unchanged skill is a supported placement in project-a (per VERDICTS.md, a native project install is ADOPT, not ADAPT, merely for being narrower than global), and all five phase-5 price checks (context cost, armor test, placement/off-switch, delivery, supply chain) passed. Coverage/incumbent finding: project-b holds the only existing copy of this capability, but runtime checks confirm it cannot load or be invoked from project-a and no other equivalent capability is callable there — per VERDICTS.md an other-project-only copy 'does not automatically count' as coverage, so no incumbent exists for project-a and the candidate is judged on its own merits rather than SKIPped as duplicative (this is the scenario's central point). Prior-verdict search: the scenario does not state a prior-verdict search outcome for project-a or this source identity; that intake lookup is unaddressed by the given facts and should not be read as 'never vetted' — it is an open item, not a settled absence. State of the other scope: project-b was not a target of this run; the assessment explicitly authorizes no installation or changes there, so project-b's existing incumbent copy is left untouched and gets no rollup row of its own — its state belongs only in this explanation, per VERDICTS.md's rule against extra rollup rows for scopes nobody asked about.",
+       "placement": "Project-a native, project-local skill installation — the narrowest placement that serves the stated single-project task — as an unchanged/verbatim copy, matching the digest's supported placement option for project-a.",
+       "activation": "As installed and verified: visibility, precedence, invocation and disable effects were confirmed in both a fresh project-a session and an unrelated control session per the scenario's stated facts. The scenario does not specify whether loading is auto-activating or explicit-invocation-only; that detail is not given here and should be captured in the eval note rather than assumed.",
+       "packaging_change": "None — the candidate installs unchanged/verbatim at project-a; no ADAPT-style repackaging (component selection, updater removal, activation change, fork) is indicated by the stated facts.",
+       "evidence_limits": "This is a report-only recommendation: per SKILL.md phase 7, report-only landing completes with a report and explicit unshipped state, not an installation — no install, commit, PR or config change has actually been made to project-a, and none of the scenario's stated tests/checks were independently re-run in this pass. The scenario does not state the outcome of the phase-1 prior-verdict search, so applicability against any earlier vet of this source (project-a, project-b, or global) is unconfirmed. Provenance, license preservation, revision pin, update owner and rollback are reported by the scenario as recorded, but their specific content (which pin, which owner) is not given here.",
+       "retry_or_review": "Do-not-retry is inapplicable (ADOPT, not SKIP/REJECT). Per VERDICTS.md's ADOPT/ADAPT bounded review trigger, re-open this verdict on: changed candidate instructions, dependencies, capabilities or permissions; a changed project-a task the matched test no longer represents; a changed model/runtime that could invalidate the bare/candidate comparison; or a change that makes project-b's copy loadable/invokable from project-a (which would turn the coverage finding into a reconciliation/placement question rather than remaining 'no incumbent'). Before landing: file the eval note at project-a's discoverable note location (or a stated committed report path if none exists) per VERDICTS.md's template, with provenance, revision pin, license, update owner and rollback recorded there in full, and obtain operator sign-off to move from report-only to an actual install."
+      }
+     ]
+    },
+    {
+     "id": "plugin-subset",
+     "rows": [
+      {
+       "target": "project-a",
+       "verdict": "ADAPT",
+       "reason": "Delivery and content verdicts diverge, per VERDICTS.md's delivery-vs-content split, and the rollup below reflects the actionable outcome (getting skill-x) while the plugin-as-delivered sub-verdict is folded in here rather than added as its own row. Whole-plugin delivery for project-a is SKIP/not viable: the digest confirms no per-skill switch exists, and even native project-scoped plugin installation, tested in isolated fresh sessions, still enables hooks/services whose costs and effects are stated unacceptable for this target — a cost/placement failure per the SKIP criterion ('costs exceed benefit'), not an affirmative REJECT-grade safety finding, since skill-x itself is stated safe and nothing here alleges unsafe code, refuted claims, or bad licensing at the plugin level. Skill-x's content clears the phase-4 bar: a concrete unmet task, no equivalent callable incumbent, and demonstrated improvement over the bare model in matched repeated runs with passing controls satisfies the behavioral-test/paired-comparison requirement (SKILL.md phase 4). Because the operator named skill-x specifically rather than the plugin, and delivery must change to obtain it without the unwanted bundle, the rollup verdict is ADAPT (copy-out): the license explicitly grants standalone copying of skill-x with attribution preserved, satisfying VERDICTS.md's rule that a verbatim/ADAPT copy needs a license grant (absent that grant the fallback would be EXTRACT-of-pattern or SKIP-pending-grant). The copied-out form was verified to run standalone with no dependencies or hidden manifest and equivalent behavior outside the plugin, matching ADAPT's requirement that a copied-out component run standalone in the phase-4 sandbox with outside-directory references resolved before ADAPT is rendered. All five phase-5 price checks are reported passing for that standalone form (context cost, armor test, placement/off-switch, delivery-vs-content, supply chain), and none is left PARTIAL, so this does not fall to the 'PARTIAL is not a pass' rule. The scenario names no prior verdict, no project-b, and no global scope, so none of those is carried forward or invented; only project-a was asked about, so only one rollup row is returned per the task instructions, and an unresolved row is not used since project-a is a defensible destination here.",
+       "placement": "Narrowest placement serving the task per phase 5: a standalone project-local skill copy of skill-x only, installed in project-a's own skill/instruction surface — not the plugin's — with the plugin itself not installed so its hooks/services never load in project-a. This is a security-posture-adjacent packaging decision (it changes what auto-runs in the target) and per SKILL.md/VERDICTS.md is proposed with evidence, not applied by this assessment.",
+       "activation": "Explicit invocation of the standalone skill-x copy, verified in a clean target session and an unrelated control per the scenario's stated checks, including disable behavior. The plugin's own activation path is deliberately not used, since exercising it (even at project scope) re-enables the objectionable hooks/services with no per-skill disable confirmed available.",
+       "packaging_change": "Extract skill-x out of the pinned plugin into a standalone skill package (copy-out) rather than installing the plugin and attempting to suppress parts of it; strip the plugin manifest, hook and service registrations entirely. The license explicitly permits this standalone copy with attribution preserved. The scenario states the source pin, attribution, exact packaging change, update owner and rollback are documented, but this assessment does not reproduce, verify, or take credit for having run that documentation — it treats the stated fact as given, per instructions.",
+       "evidence_limits": "This is a hypothetical scenario; its stated observations are treated as established facts for this case per the task instructions, not independently run, installed, or reproduced by this assessment — no commands were executed and no packaging, hooks, or services were enabled or disabled here. Facts not stated in the scenario are not assumed: the plugin's and skill-x's concrete identities/revisions beyond 'a pinned plugin' and 'skill-x', the content of any prior-verdict search, the audit dividend, and any project-b or global-scope state. No implementation or enablement is authorized by this response.",
+       "retry_or_review": "Do-not-retry-unless for the whole-plugin delivery: a per-skill or per-hook disable control becomes available for this plugin, or the objectionable hooks/services are removed or changed upstream — elapsed time or a repeated ask alone is not sufficient per VERDICTS.md. Bounded review triggers for the standalone skill-x ADAPT: changed skill-x instructions, dependencies, capabilities or permissions; a changed target task or incumbent that would invalidate the behavioral-test comparison; a model/runtime change; or a change to the license grant covering the copy-out. Because this run is report-only, nothing ships from it: landing still requires an eval note filed at project-a's discoverable note location (or a stated committed report path) recording source identity/revision, the measured evidence, a component|target|verdict|placement|activation|evidence|state table, and these triggers, plus explicit operator authorization before any actual packaging, installation, or enablement occurs."
+      }
+     ]
+    },
+    {
+     "id": "multiple-targets",
+     "rows": [
+      {
+       "target": "project-a",
+       "verdict": "ADOPT",
+       "reason": "Verified utility exceeds cost at project-a's concrete, unmet task: no equivalent incumbent exists, matched repeated bare/candidate behavioral runs show a useful improvement with passing honest controls, and all five phase-5 price checks (context cost, armor test, placement/off-switch, delivery-vs-content, supply chain) passed. Shared artifact/supply-chain findings (safe, licensed, maintained, pinned, unchanged revision, no prior global rejection) carry across targets per VERDICTS.md scope-bound reuse and need not be re-run per target. Placement is the already-supported, unchanged project-local install with explicit invocation — a native project-local install is ADOPT, not ADAPT, merely for being narrower than global (VERDICTS.md's ADOPT definition). Because this is a standalone single-component skill with no separate installer/plugin/MCP layer, the delivery-mechanism sub-verdict and the content sub-verdict are effectively the same judgment here, and both clear for project-a specifically (not by virtue of the shared artifact pass alone, which only clears safety/license/maintenance, not fit).",
+       "packaging_change": "None. The scenario states the supported, unchanged project-local placement was itself verified — no component selection, updater removal, activation change, or repackaging is indicated for project-a.",
+       "placement": "Project-local to project-a only (narrowest placement serving the task) — not global, and no other target's ADOPT is implied.",
+       "activation": "Explicit invocation, verified in a fresh project-a session; disable behavior was also verified in that fresh session and in an unrelated control session, satisfying the visibility/collision/invocation checklist item.",
+       "evidence_limits": "This row treats the scenario's stated facts (the digest verification, the five price checks, the matched behavioral comparison, and the placement/activation/disable checks) as given for this exercise; no check was independently run or observed in this session, and no installation was performed or is implied by this recommendation — the run is report-only per the operator's instruction. The scenario gives no concrete inspected-revision/content digest identifier; a real eval note should record whatever digest intake actually captured, not one invented here. No global scope was requested or assessed in this run, and this ADOPT makes no claim about a global install.",
+       "retry_or_review": "Not a SKIP/REJECT, so no Do-not-retry trigger applies. Bounded review trigger per VERDICTS.md: re-review on changed candidate instructions/dependencies/capabilities/permissions, a changed project-a task, an incumbent later becoming available, or a model/runtime change invalidating the behavioral comparison. Because landing depth is report-only, the concrete next step is the operator authorizing actual installation (with the documented provenance, license, update owner and rollback carried into that install) plus filing the VERDICTS.md-template eval note at project-a's discoverable note location — neither occurred in this run."
+      },
+      {
+       "target": "project-b",
+       "verdict": "SKIP",
+       "reason": "project-b already has an equivalent incumbent demonstrably callable for its target task, and matched repeated candidate/incumbent comparisons (with passing controls) show no candidate advantage in useful behavior, access, price, or upkeep — the VERDICTS.md SKIP condition ('equivalent capability is already usable for the target task ... no demonstrated need exists'). This is a target-fit/cost outcome, not a safety finding: the same shared artifact/supply-chain checks that passed for project-a (safe, licensed, maintained, pinned, unchanged revision) apply equally here, so the SKIP rests on redundancy at project-b, not on any defect in the candidate.",
+       "packaging_change": "None proposed — no installation is recommended for project-b, so there is no packaging or delivery change to specify.",
+       "placement": "No installation (VERDICTS.md: skipped rows record 'no installation' as the destination).",
+       "activation": "Not applicable — nothing is activated for project-b under this verdict.",
+       "evidence_limits": "As with project-a, the incumbent-coverage finding and the candidate/incumbent comparison are taken as the scenario's stated facts, not independently run or observed in this session. This SKIP is scoped to project-b's current task and current incumbent only: it does not extend to or veto project-a's ADOPT (a per-target SKIP does not migrate across targets per VERDICTS.md), and it says nothing about a global installation, which was neither requested nor assessed here. The shared safety/license/maintenance clearance is retained, not reset, by this SKIP.",
+       "retry_or_review": "Do-not-retry unless: project-b's incumbent becomes unavailable or is retired, a new project-b task need emerges that the incumbent does not cover, the candidate's own behavior or delivery cost changes such that an advantage now appears, or project-b's placement/cost picture otherwise changes to resolve the recorded objection (VERDICTS.md Do-not-retry predicates). A later, different project-b task would reopen fit rather than being blocked by this note."
+      }
+     ]
+    },
+    {
+     "id": "global-cost-project-fit",
+     "rows": [
+      {
+       "target": "project-a",
+       "verdict": "ADOPT",
+       "reason": "Native project-local install, not ADAPT merely for being narrower than global (VERDICTS.md). The prior verdict for this exact source identity/content digest was a global SKIP, but solely for unjustified context cost of loading in unrelated global sessions — it found no safety, licensing, maintenance, or quality defect. Per VERDICTS.md, 'a global SKIP for clutter is not a project-level rejection' and a new target reopens fit when it changes the cost/need premises, so that cost finding does not veto project-a and is reused only where it actually applies (nowhere, here). That global SKIP itself stands unchanged and is not reopened by this run; it is recorded here only as context on another scope, not as a rollup row. Project-a's fit was independently established on this run's stated facts: a concrete task exists, the complete target digest (global/project/nested/plugin sources, precedence, invocation paths) found no equivalent incumbent, and matched repeated-task tests with irrelevant-task controls show the candidate beating the bare model. All five phase-5 price checks (context cost, armor test, placement/off-switch, delivery-vs-content, supply chain) passed specifically for project-a — cost is priced per target per SKILL.md phase 5, so the global cost finding does not transfer wholesale. Delivery and content verdicts coincide here: one unchanged, single-component skill with no repackaging, so both the component and the delivery mechanism verdict are ADOPT.",
+       "placement": "Project-local, explicitly invoked skill — the narrowest placement that serves the stated task, and the platform-verified supported placement for this candidate on this host. Not global, not always-on/auto-invoked.",
+       "activation": "Explicit invocation only. Fresh project-a sessions confirmed visibility, invocation, precedence, and disable behavior; an unrelated control session confirmed the skill does not load or become visible there — satisfying VERDICTS.md's requirement that visibility/collision/invocation checks run in target and unrelated controls, not just be configured.",
+       "packaging_change": "None. The candidate installs unchanged/verbatim at project scope (a copy at a narrower scope, not a diverged fork, so no reconciliation is triggered). Licensing was confirmed to permit this installation; source pin/content digest, update owner, and rollback owner are recorded, satisfying the ADOPT provenance/update/rollback requirement.",
+       "evidence_limits": "Per task instructions, the scenario's stated observations (digest completeness, matched paired tests, all five price checks, runtime visibility/disable checks, licensing) are treated as established facts for this exercise; none of those checks were independently run or reproduced in this session, and no installation was performed or is claimed here. Landing depth is report-only: the operator requested no global change and authorized no installation, so this is a recommendation only — proposed, not tested/landed/runtime-verified in the sense of actually being installed by this session (VERDICTS.md treats those as distinct states). The scenario supplied no audit-dividend content to report.",
+       "retry_or_review": "This is ADOPT, not SKIP/REJECT, so no Do-not-retry trigger applies to project-a. Per VERDICTS.md's bounded ADOPT review trigger, re-open the assessment if the candidate's instructions, dependencies, capabilities or permissions change, if project-a's task or incumbent availability changes, or if a model/runtime change would invalidate the paired-comparison test. The separate, unresolved global-scope SKIP (cost-only, no defect) keeps its own predicate — a demonstrated cross-project need or a changed delivery cost — and is not reopened by this project-a-only run."
+      }
+     ]
+    },
+    {
+     "id": "callable-global-incumbent",
+     "rows": [
+      {
+       "target": "project-a",
+       "verdict": "SKIP",
+       "reason": "SKIP-as-covered under VERDICTS.md: 'equivalent capability is already usable for the target task' — the digest identifies a global, invoke-only incumbent skill performing the same concrete task, and DIGEST.md's standing rule states callable global on-demand tools count toward coverage (an off, inaccessible, or other-project-only copy would not, but that is not this case). Component (task-performing content) sub-verdict: SKIP — redundant capability, no unmet need. Delivery (packaging mechanism: standalone, safe, licensed skill) sub-verdict: satisfactory in isolation per the stated intake/phase-4/phase-5 checks, but that clean bill does not override the content-level redundancy finding (SKILL.md's delivery-vs-content split: either can pass while the other fails, and here delivery passing does not manufacture a need). This is treated as a genuine incumbent-coverage case, not the 'copy of the candidate at another scope' placement/reconciliation path in VERDICTS.md — the scenario frames the global skill as a distinct implementation that performs the same task, not the candidate itself already installed elsewhere; no diff/reconciliation is owed. No prior verdict of this specific candidate for project-a is stated in the scenario; the operative prior fact is the incumbent's own established, documented coverage (mechanism and invocation path already on record), which this run relies on rather than re-litigates. Other scope: the scenario asks only about project-a. Project-b is not mentioned and carries no claim here. The incumbent's global scope is not itself being re-vetted, narrowed, or modified by this SKIP — it continues serving as the covering mechanism; 'global' is not a rollup target of this run since global installation/reconfiguration was neither requested nor authorized.",
+       "evidence_limits": "This assessment applies the harness-vet method to the scenario's stated observations, taken as established facts per instructions; no checks, comparisons, or installs were run by this session, and no recommendation has been implemented. Within the scenario's own facts: candidate provenance/license/maintenance/behavior/price checks are reported satisfactory; incumbent visibility, callability, and effectiveness were confirmed in fresh project-a sessions; and a matched candidate/bare/incumbent comparison (the phase-4 paired instrument) reported equivalent useful behavior with no candidate edge in quality, access, cost, or upkeep — repeated per the method's matched-runs requirement. Not stated in the scenario and therefore not assumed: an unrelated-project control session for the incumbent's visibility/collision check (phase 5 calls for target-plus-unrelated-control testing), the incumbent's own inspected revision/digest, and whether project-b or any other target exists at all. Treat any generalization beyond project-a as unresolved.",
+       "retry_or_review": "Do-not-retry unless: the global incumbent becomes unavailable, disabled, or inaccessible under project-a's permissions; the target task changes in a way the incumbent no longer covers; a future matched candidate/bare/incumbent comparison demonstrates a candidate advantage in quality, access, cost, or upkeep; or the incumbent's maintenance lapses. Bare time, enthusiasm, or repeated requests are not sufficient triggers per VERDICTS.md. Re-audit if the incumbent's own instructions, dependencies, capabilities, or permissions change, or if the model/runtime changes in a way that could invalidate the equivalence comparison.",
+       "packaging_change": "None proposed or authorized. The scenario explicitly forbids installation or global configuration change, and the report-only landing depth (SKILL.md phase 7) independently precludes any install regardless. Were this ever reopened by a retry trigger above, the correct packaging path would still route through the existing global incumbent (patch/extend it) rather than adding a second maintained implementation of the same task — VERDICTS.md's ADAPT guidance to prefer consolidating capability over duplicating it.",
+       "placement": "No placement is granted to the candidate; it is not installed at any scope. The incumbent's existing global, invoke-only placement is the operative placement for this task and is left undisturbed. Phase 5's placement/off-switch check is required only for components still alive after ADOPT/ADAPT consideration; the SKIP-as-covered outcome here makes a placement decision for the candidate moot.",
+       "activation": "No activation change for the candidate (none is being installed). The incumbent's activation is unchanged: global scope, invoke-only, and per the scenario's stated runtime checks it is visible when needed and callable with project-a's available permissions — being global does not make it unavailable, and being invoke-only does not mean it is disabled, per the scenario's own framing and DIGEST.md's coverage standard."
+      }
+     ]
+    },
+    {
+     "id": "unknown-destination",
+     "rows": [
+      {
+       "target": "unresolved",
+       "verdict": "SKIP",
+       "reason": "Only the artifact-safety half of the vet cleared: intake/phase-4 read found no affirmative safety or licensing disqualifier for the candidate skill. But phase 4 (verify) and phase 5 (price) both require a concrete target task to test against — SKILL.md Phase 1: 'an unstated task is an unresolved choice to ask about or record, not a gap to fill by inference' — and none exists here: no project is named, no task is stated, and no operator is available to supply either. The launch directory (an unrelated checkout) is explicitly excluded as a stand-in destination per SKILL.md's interaction clause: 'For an unattended run with no defensible destination, continue the assessment with scope unresolved and no installation, never default to global installation.' With no target/task pairing, utility, incumbent-overlap and context-cost cannot be established, so no ADOPT/ADAPT/EXTRACT can be rendered for either the delivery mechanism or the content it carries. VERDICTS.md's SKIP covers exactly this: 'Insufficient verification may mean SKIP pending evidence, never a fabricated negative benchmark or a security REJECT.' This is a single-row rollup because the scenario names no project-a/project-b/global target and states no prior verdict or other scope for this candidate to reconcile against — there is nothing else to fold into the explanation beyond the cleared artifact finding above."
+      }
+     ]
+    },
+    {
+     "id": "native-project-plugin",
+     "rows": [
+      {
+       "target": "project-a",
+       "verdict": "ADOPT",
+       "reason": "Per the scenario's stated facts, both shared artifact-level findings and project-a-specific fit findings pass. Shared (once-per-revision) findings: full instruction/manifest/executable/updater/supply-chain review found the unchanged, pinned plugin safe, maintained, licensed for this use, with no unwanted extras — this is the delivery-mechanism sub-verdict (native project-plugin install) and it is ADOPT. Target-fit findings, specific to project-a: every bundled component maps to a concrete unmet task with no equivalent callable incumbent, and matched repeated target-task tests show useful improvement over the bare model with passing irrelevant-task and negative controls — this is the content/component sub-verdict, also ADOPT per component. All five phase-5 price checks (context cost, armor test, placement/off-switch, delivery-vs-content, supply chain) passed for the whole project-scoped bundle. Per VERDICTS.md, a native project install is ADOPT rather than ADAPT solely for being narrower than global, and since all components are genuinely needed only in project-a with no excess, no packaging change or component selection is indicated. No prior verdict for this candidate is stated in the scenario, so none is being overridden; project-b was not mentioned and global was not requested, so neither is assessed or rolled up here.",
+       "placement": "Native project-scoped plugin install, project-a only, no global or other-project registration — the narrowest placement that serves the stated project-a task and matches the natively supported install mechanism.",
+       "activation": "Per the stated facts, isolated fresh project-a sessions verified enablement, visibility, invocation, precedence, and hook/service effects, plus complete disable behavior including reload requirements; an unrelated fresh control session confirmed the project-scoped install does not activate outside project-a. The recommended activation mirrors that same project-scoped enable, but enabling a plugin is a security-posture change: this assessment proposes it with the recorded evidence for the operator to apply — it does not perform, and does not imply authorization for, any installation or global enablement, consistent with the operator's stated authorization of none.",
+       "packaging_change": "None required. The plugin is recommended unchanged at its pinned/resolved revision, with the full bundle retained — each component is reported as needed only in project-a, so no updater removal, component stripping, activation alteration, or repackaging is called for. Provenance, license grant, resolved revision, update owner, and rollback owner are stated as recorded in the scenario, which any eval note should cite directly rather than re-derive.",
+       "evidence_limits": "This rollup restates the scenario's stated observations as established facts per the task instructions; no checks, tests, installs, or verifications were run or reproduced in this session, and this report does not claim the scenario's checks were executed here. The scenario describes the behavioral tests as matched and repeated with passing controls but does not give raw counts or percentages, so no specific figure is being cited or reproduced — treat any such number as the scenario's own unverified claim if one is later supplied. Project-b and global scope were not part of this request and are not assessed by this row.",
+       "retry_or_review": "This is an ADOPT, not a SKIP/REJECT, so no Do-not-retry trigger applies; instead carry VERDICTS.md's ADOPT review trigger forward — re-open review on a changed plugin revision (instructions, dependencies, capabilities, or permissions), a changed project-a task or a newly available incumbent, or a model/runtime change that would invalidate the matched-task comparison. Because this is a report-only landing and the operator authorized no installation or global enablement, the concrete next step is for the operator to apply (or explicitly authorize) the native project-scoped install in project-a; this assessment neither performs that install nor extends any authorization beyond project-a."
+      }
+     ]
+    },
+    {
+     "id": "same-skill-other-scope-reconcile",
+     "rows": [
+      {
+       "target": "project-a",
+       "verdict": "ADAPT",
+       "reason": "Content utility for project-a's task is demonstrated to ADOPT-grade evidence: matched repeated behavioral tests show the skill beating the bare model with controls passing, and artifact review of both revisions (global and project copies) surfaced no safety, licensing, or maintenance disqualifier — so on content alone the candidate clears the bar. But per VERDICTS.md's placement rule, a same-source copy at another scope is not automatically 'covered' or a plain ADOPT of the existing project install: it routes to reconciliation (ADAPT) whenever the copies diverge OR the operator asked to narrow where it loads. Both conditions hold here — the global (user-directory) and project-a copies diverge in their reference sections, with the project copy carrying the more recent verified edits and the global copy only the original upstream pin, and the operator explicitly wants the skill to serve project-a only and stop loading in unrelated sessions. Delivery sub-verdict: fails as-is (two diverged copies, one leaking into unrelated-session scope). Content sub-verdict: passes. Combined target verdict: ADAPT, not ADOPT or SKIP-as-covered. No prior eval note is referenced in the scenario as having been found, so this is treated as a fresh reconciliation rather than a reassessment of a recorded prior verdict; the project-a copy's more-recent-edit status is the diff-based authority call, per the digest's 'name which content is authoritative' requirement, not an assumption.",
+       "packaging_change": "Consolidate to a single project-a-scoped copy carrying the authoritative content (the project copy's more recent verified edits) and remove or narrow the global user-directory copy so it no longer loads in unrelated sessions, while preserving the global copy's upstream pin/provenance in the eval note rather than discarding it outright. This is a proposal only — SKILL.md's ship-phase edge bars deleting a shadowed copy or narrowing a global-scope surface as an incidental cleanup; it must be named with its exact file/path and evidence and left for the operator to apply.",
+       "placement": "project-a's own skills directory — already the narrower, higher-precedence placement and already an existing instruction-loading surface for project-a, so no new surface needs to be created, only consolidated.",
+       "activation": "Scenario states fresh target and unrelated-control sessions already confirmed today's state: the project copy activates and takes precedence inside project-a, and the global copy is what fires in unrelated sessions. That is the pre-change baseline. Post-consolidation activation would be project-a-only, achieved by retiring/narrowing the global copy — but that activation change has not been made; 'no change has been authorized' per the scenario.",
+       "retry_or_review": "Narrowing the global copy's reach affects sessions outside project-a, so this is a scope/activation change of the kind SKILL.md's Ship-phase hard edge reserves for operator authorization — approval scoped to project-a does not itself authorize touching the global copy. Review/re-open triggers per VERDICTS.md's bounded-review clause: the two copies re-diverge after consolidation, the candidate's instructions/dependencies/capabilities/permissions change, the target task or incumbent changes, or a model/runtime change invalidates the cited paired behavioral-test result. This is a proposed ADAPT, not a SKIP/REJECT, so no 'Do-not-retry unless' trigger applies.",
+       "evidence_limits": "This session ran no tools, read no files beyond the four method documents and the scenario text, and performed no installation — the diffing, artifact review, matched behavioral tests, and target/unrelated-session visibility checks described are the scenario's own stated facts, taken as established per instructions, not independently reproduced here. Per EVIDENCE.md's numbers-decay gate, any cited test results would need re-running before appearing in a real eval note rather than being carried forward as-is. The scenario does not state whether prior eval-note locations were searched for an existing verdict on this candidate/source identity, so absence of a prior note is recorded as unknown, not as 'never vetted.' No recommendation here has been implemented; the scenario is explicit that no change is authorized."
+      }
+     ]
+    },
+    {
+     "id": "skill-pack-named-subset",
+     "rows": [
+      {
+       "target": "project-a",
+       "verdict": "ADAPT",
+       "reason": "Two sub-verdicts roll up into this one ADAPT for project-a. (1) Delivery — the native project-scoped plugin install is SKIP: fresh sessions confirm it loads all 50 skills' discovery metadata into project-a (which currently has zero), there is no per-skill enable switch, and the whole-bundle context-cost price check fails outright — a failed price check bars ADOPT/ADAPT of that delivery form (VERDICTS.md: 'costs exceed benefit'). (2) Content — the six operator-named skills earn ADAPT by copy-out: each was read in full, is self-contained, the permissive license explicitly grants standalone copying with attribution, each copy was verified running standalone in an isolated session with disable behavior and unrelated-project controls checked, matched repeated behavioral tests with honest controls showed improvement over the bare model, and all five phase-5 price checks (context cost, armor test, placement/off-switch, delivery-vs-content, supply chain) pass for the six standalone copies. Full manifest/script/bundled-code review found no safety disqualifier, so REJECT does not apply to the pack itself. The remaining 44 skills were only triage-swept against the digest under the multi-component reader-cap rule (operator-named components read in full first, the rest triaged) — they carry no verdict, are not implicitly covered or safe, and are not an implicit SKIP; more of them could only be deep-vetted in a future run if the operator names them and reader capacity allows. No prior verdict for this candidate, and no project-b/global state, was given in this scenario, so none is carried forward — only project-a was asked about here.",
+       "packaging_change": "Do not register the native plugin manifest for project-a — it has no per-skill switch and pulls in all 50 skills' discovery metadata. Required change: copy only the six named skills out of the pack into standalone skill files/directories, preserving the license's attribution requirement, with the recorded source repo/commit pin, named update owner, and rollback plan (delete the copied files / revert project-a to its current zero-skill state).",
+       "placement": "Narrowest supported placement: project-a-local skill directory (not global, not the plugin's own namespace), one directory per copied skill, ordinary project-scoped invocation — no plugin-wide activation and no exposure of the other 44 skills' metadata into project-a.",
+       "activation": "This is a report-only run: no installation is authorized and nothing here is enabled. If later approved, the six copied skills would activate the same way any other project-a skill does (their own discovery metadata plus per-skill invocation); the plugin/bundle itself is never activated for project-a.",
+       "evidence_limits": "All findings above are the scenario's stated facts, not checks performed or verified in this session, and no recommendation here has been implemented. Coverage gap: the remaining 44 skills were triaged only, not deep-vetted, so their utility/safety/overlap for project-a is unresolved, not cleared. Not stated: whether a digest-named incumbent existed for the six skills' behavioral test; if one did, an unreported paired comparison against it would be an additional gap. 'No safety disqualifier' from the manifest/script/code review is an artifact-level supply-chain finding, not a runtime-sandboxing guarantee.",
+       "retry_or_review": "Do-not-retry the native bundle install unless: the platform adds a per-skill enable/disable switch (removing the pack-wide cost), project-a's task need expands to justify the other 44 skills, or the discovery-metadata cost model changes. Re-vet the 44 triaged-only skills only if the operator names specific ones and reader-cap capacity allows, operator-named first. Re-review the ADAPT copy-out of the six skills on a changed upstream revision/instructions/dependencies/permissions, a changed project-a task the skills no longer fit, or a changed incumbent/model-runtime that would invalidate the behavioral-test result."
+      }
+     ]
+    },
+    {
+     "id": "first-instruction-surface-bootstrap",
+     "rows": [
+      {
+       "target": "project-a",
+       "verdict": "ADOPT",
+       "reason": "Every phase-6 precondition for ADOPT is satisfied on the stated facts: the digest is complete and shows no callable incumbent for the operator-named concrete task (a recurring, checklist-judged report artifact); phase-4 behavioral evidence is matched, repeated bare-vs-candidate runs showing useful improvement with passing irrelevant-task controls (bare/candidate-only is the correct instrument here since no incumbent exists to pair against); artifact and supply-chain review found no disqualifier; and all five phase-5 price checks pass, including placement/off-switch verified with fresh sessions in a disposable copy of project-a plus unrelated-control sessions confirming no leakage. Provenance, update owner and rollback are recorded. This is a single-component 'standalone skill' candidate, so the delivery-mechanism sub-verdict and the content sub-verdict are not split findings here: both clear ADOPT together (no packaging change needed, used as-is) rather than one passing while the other fails. No other target (project-b, global) was named or tested in this run; this ADOPT is project-a-specific and carries no implication for fit or cost elsewhere, though the shared artifact/license/supply-chain findings would carry over unchanged if another target were later evaluated. The scenario does not report a phase-1 prior-verdict search result for this candidate — that absence is a search gap, not evidence of 'never vetted,' and should be re-checked before landing rather than assumed clear."
+      }
+     ]
+    },
+    {
+     "id": "unlicensed-verbatim-copy",
+     "rows": [
+      {
+       "target": "project-a",
+       "verdict": "EXTRACT",
+       "reason": "Content/pattern sub-verdict: EXTRACT. The skill's structural pattern (a fixed ordering of checks) is evidenced by matched, repeated bare-vs-candidate tests — correct instrument since project-a's verified digest shows no callable incumbent, so 'no incumbent means bare/candidate only' applies — with irrelevant-task controls passing (misrouting checked). The scenario states the pattern can be re-expressed in project-a's own words without reproducing the author's text, which is exactly EXTRACT's bar: 'port a useful pattern, not the candidate's implementation.' Delivery/verbatim-copy sub-verdict: blocked, not rejected. No license file, statement, or repository exists, and no grant has been sought or obtained from the (reachable) author, so per the no-license rule both ADOPT (native copy) and ADAPT-by-copy-out are withheld pending that grant. This is a licensing gap, not a safety/maintenance/quality finding — review explicitly found no executable content and no disqualifier on those axes — so REJECT is not warranted; the correct disposition for the verbatim-copy path is SKIP-pending-grant. All five Phase-5 price checks (context cost, armor test, placement/off-switch, delivery-vs-content, supply chain) are reported passing for a standalone project-local copy, and visibility/invocation/disable behavior was verified in fresh target and unrelated control sessions for that placement — this shows the mechanism itself is narrow and safe, and the same mechanism is the expected home for the EXTRACT artifact once it is rewritten, though the rewritten text has not itself been re-verified (see evidence limits). Prior verdicts: the scenario reports no prior-verdict or install-state search result for this candidate in project-a; that absence is a gap in what was told to us, not evidence of 'never vetted,' and should be searched before landing. Other scope: no project-b or global target was requested or implied; nothing about those scopes is rolled up here, and either would reopen fit, cost, and license status on its own premises rather than inheriting this project-a EXTRACT. Landing depth: the operator asked for report-only with no installation authorized, so this is a recommendation only.",
+       "placement": "Project-local skill/reference file within project-a's own instruction-loading surface (the same placement class already verified: visibility, invocation, and disable behavior confirmed in a fresh target session and an unrelated control session) — populated with project-a's own rewritten wording of the structural pattern (the fixed check ordering), not a copy of the candidate's file or prose.",
+       "activation": "Same project-local activation path exercised in Phase 5 (scoped to project-a, no bleed into the unrelated control session) is the intended activation for the EXTRACT artifact, but that verification covered the literal candidate copy, not the not-yet-written rewritten text — activation for the actual ported artifact is inferred from the mechanism check, not independently reconfirmed.",
+       "packaging_change": "Replace the candidate's verbatim single-file prompt text with an EXTRACT artifact: reimplement only the demonstrated structural pattern (fixed ordering of checks) in project-a's own idiom/wording, dropping all of the author's copied prose. No updater or external fetch was present in the candidate, so none needs removing; package as a plain project-local skill/doc rather than an installer or copy-out.",
+       "evidence_limits": "This assessment did not itself run or re-verify the described behavioral tests (matched repeated bare/candidate runs, irrelevant-task controls), the Phase-5 price checks, or the visibility/invocation/disable checks — those are taken as stated facts of the scenario, not observations made here. No adversarial review of ported text has occurred (SKILL.md's Ship-phase requirement before an extraction lands); that review, plus re-verification of visibility/invocation/disable for the actual rewritten artifact, is still outstanding. The scenario does not state whether a prior-verdict/install-state search was performed for this candidate in project-a, so that lookup's outcome is unknown, not confirmed clean. Nothing in this response constitutes running the scenario's checks or implementing any recommendation; no installation, commit, or draft has been made.",
+       "retry_or_review": "Do-not-retry unless: a license/grant is obtained from the author (not yet requested) — that reopens ADOPT (native copy) or ADAPT-by-copy-out of the verbatim file; until then the verbatim path stays SKIP-pending-grant, never REJECT, since no safety/quality/maintenance disqualifier exists. Before any landing of the EXTRACT artifact: run the adversarial port review (harness inward-review convention or 2-3 subagent skeptics per the Ship phase) and re-verify visibility/invocation/disable for the actual rewritten text now that packaging changed. Ongoing re-eval triggers: a project-a incumbent later becoming available, changed candidate content/behavior, or a changed task need in project-a. Record source identity and the pinned revision/content digest already captured at intake as provenance for the new project-a-authored file even though its text is not copied; name an update owner for that file and treat rollback as a straightforward revert/delete of the single new artifact."
+      }
+     ]
+    },
+    {
+     "id": "tool-heavy-mcp-unmeasured",
+     "rows": [
+      {
+       "target": "project-a",
+       "verdict": "SKIP",
+       "reason": "Rollup for project-a is SKIP-pending-measurement, not a defect finding — a required Phase-5 price check was left PARTIAL, and per VERDICTS.md/SKILL.md a required check left PARTIAL is never a pass, only ADOPT/ADAPT-blocking SKIP, regardless of an otherwise clean bill. Two sub-verdicts drive this, both to be read as the actual per-component findings (this row is the compressed rollup, not a substitute for them): (1) Delivery/mechanism — the plugin's auto-start MCP server (70+ tools) cleared artifact safety (safe code at the pinned revision), license (permissive), maintenance (active), the Placement-and-off-switch check (native project-scoped install verified in fresh and control sessions), the Armor test, and Supply-chain — and task fit is real: project-a has a concrete unmet task a subset of the tools addresses, with the verified digest showing no callable incumbent for that subset. But the Context-cost check — mandatory whenever a component adds tools to a session — was answered by narrative comparison to published tool-count guidance instead of the required paired measurement (tool-selection accuracy / misrouting on project-a's representative tasks, with vs without the server), because the sandbox lacked the model access needed for matched runs. EVIDENCE.md is explicit that this threshold moves with model/harness and must be measured as a test, never cited as a fixed N from published guidance, so the mechanism stays SKIP until that specific run happens. (2) Content — the bundled skill independently cleared its own Phase-4 behavioral bar (matched repeated runs vs a no-incumbent baseline, honest controls passing) and does not itself add session tools, so it is not gated by the same PARTIAL check. Its evidence supports EXTRACT of the demonstrated pattern into project-a's own idiom today, or ADOPT/ADAPT of the skill alone if a verified per-component toggle is later confirmed to enable it without auto-starting the server — the scenario does not establish whether such a toggle exists, and per ADAPT's rule against inventing a per-skill switch, none is assumed either way. No prior-verdict search results or project-b/global state were supplied by this scenario, so none is asserted or rolled up here; this run addresses only project-a, report-only, with no installation or MCP enablement authorized, consistent with the requested landing depth.",
+       "placement": "Native project-scoped plugin installation is confirmed supported and was verified in fresh and control sessions (the Placement-and-off-switch check passed) — that clears placement but does not substitute for the missing Context-cost measurement, so it does not by itself unlock ADOPT/ADAPT of the bundle. If the skill is pursued via EXTRACT instead, the landing target is a project-a-local skill/instruction file under project-a's own skills or instructions surface, not the plugin — no MCP server, no new tool grants, narrowest supported placement per Phase 5.",
+       "activation": "None this run: report-only, no install or MCP enablement authorized, matching the operator's stated landing depth. If the missing measurement is later run and clears, activation would be the already-verified native project-scoped plugin install (auto-start server). If EXTRACT is pursued now, activation is simply project-a's normal instruction-loading path for a manually authored file — no plugin registration, no server start.",
+       "packaging_change": "Plugin/MCP path: no packaging change substitutes for the missing measurement. First confirm (do not assume) whether the manifest exposes a per-component control that enables the skill without auto-starting the server; absent one, price the whole bundle via the paired tool-selection-accuracy/misrouting run before any ADOPT/ADAPT verdict. A fork that changes the server from auto-start to opt-in/on-demand would change what is being priced and needs its own re-measurement, not an assumption of safety by inspection. Skill-alone path (EXTRACT): port the demonstrated instructions into project-a's own skill/instruction file in project-a's idiom — not a verbatim copy of the plugin's skill body — and record the plugin's pinned revision as provenance for traceability even though EXTRACT does not require the license grant a verbatim copy would.",
+       "evidence_limits": "The Context-cost price check is PARTIAL, not passed: the report substitutes a narrative comparison to published tool-count guidance for the required paired measurement (tool-selection accuracy / misrouting on project-a's representative tasks, with vs without the server), because the sandbox lacked model access for matched runs. Per EVIDENCE.md's tool-count section, a fixed-N threshold from published guidance is directional and moves with model generation — it is not a substitute for the target/model-specific test. This assessment treats the scenario's other stated observations (artifact safety, license, maintenance, placement/activation, armor, supply chain, and the skill's own passing behavioral test) as established facts per instructions; none of them were independently re-run or re-verified here, and no scenario-supplied prior-verdict or cross-scope data exists to reconcile against VERDICTS.md's reuse rules.",
+       "retry_or_review": "Do-not-retry the bundle as delivered unless: the paired tool-selection-accuracy/misrouting measurement is run to completion on project-a's representative tasks (with vs without the server) in a sandbox with model access, and clears on that measurement rather than a narrative tool-count comparison. That gap does not block the skill's own path: it may proceed toward EXTRACT (or ADOPT/ADAPT if a per-component toggle is later verified) independent of the MCP measurement, since it does not add session tools. Re-open review if the candidate's pinned revision, its license, or the manifest's auto-start behavior changes, or if project-a's task or incumbent picture changes — per VERDICTS.md, changed premises reopen fit without re-running the whole vet. Security/safety findings (code, license, maintenance) remain applicable and reusable if this candidate is later evaluated for project-b or global scope, but no such evaluation was requested or performed here."
+      }
+     ]
+    }
+   ]
+  }
+ ],
+ "limits": [
+  "Synthetic decision smoke on stipulated facts, not a measurement of vet quality.",
+  "Scenario observations are inputs to each hypothetical case; no run performed those checks.",
+  "One run per case per round; three rounds do not establish statistical robustness or cross-model behavior.",
+  "Rounds 1 and 2 ran against earlier revisions of the four files; only the final round matches the shipped payload hashes above.",
+  "No SEO, estate or other real candidate was vetted, installed or measured by this test."
+ ]
+}

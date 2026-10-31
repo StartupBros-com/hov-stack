@@ -1,0 +1,221 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {
+      "id": "global-cost-project-fit",
+      "scenario": "An operator requests a report-only assessment of a standalone skill for project-a. A prior global assessment of this exact revision recorded SKIP solely because loading it in unrelated global contexts added unjustified cost; it found no safety, licensing, maintenance or quality problem. The current source identity and content digest match that safe revision. project-a now has a concrete task that needs the skill. Its complete target digest has been verified, including global, project, nested and plugin sources, precedence and invocation paths: no equivalent incumbent is available. Matched repeated task tests show the candidate improves on the bare model, with irrelevant-task controls passing. All artifact checks and all five price checks passed for project-a, including context exposure, the armor test, delivery and supply chain. The platform supports the unchanged skill as a project-local, explicitly invoked skill. Fresh target sessions verified visibility, invocation, precedence and disable behavior; unrelated control sessions confirmed it does not load there. Licensing permits this installation, and source pin, update owner and rollback are recorded. The operator has requested no global change and has authorized no installation.",
+      "expected": [
+        {
+          "target": "project-a",
+          "verdict": "ADOPT"
+        }
+      ],
+      "forbidden_claims": [
+        "The historical global SKIP requires project-a to SKIP despite the new verified need.",
+        "Global enablement is needed or authorized by the project-a recommendation.",
+        "Supported project-local placement alone turns unchanged packaging into ADAPT.",
+        "This report-only recommendation means the skill has been installed or enabled."
+      ]
+    },
+    {
+      "id": "callable-global-incumbent",
+      "scenario": "An operator requests a report-only assessment of a safe, licensed standalone skill for a concrete task in project-a. The candidate's inspected revision, provenance, maintenance, behavior and price checks are satisfactory. A complete verified project-a digest identifies an existing global invoke-only skill that performs the same task. Its covering mechanism and explicit invocation path are documented; fresh project-a sessions confirm that it is visible when needed, callable with the available permissions and effective for the target task. Matched repeated candidate, bare and incumbent comparisons establish equivalent useful behavior between candidate and incumbent, with controls passing and no candidate advantage in quality, access, cost or upkeep. The incumbent's body is loaded only on invocation; being global does not make it unavailable, and being invoke-only does not mean it is disabled. The candidate would add a second maintained implementation with no unmet need. No installation or global configuration change is authorized.",
+      "expected": [
+        {
+          "target": "project-a",
+          "verdict": "SKIP"
+        }
+      ],
+      "forbidden_claims": [
+        "A callable global incumbent does not count as project-a coverage because its files are outside project-a.",
+        "Invoke-only means disabled or unavailable.",
+        "The candidate adds a net-new capability merely by creating a project-local copy.",
+        "Candidate superiority or an unmet project-a need was demonstrated."
+      ]
+    },
+    {
+      "id": "other-project-not-coverage",
+      "scenario": "An operator requests a report-only assessment of a standalone skill for a concrete unmet task in project-a. The candidate's pinned revision is safe, maintained and licensed for the proposed unchanged local installation; source and bundled-code review found no disqualifier. The complete verified project-a digest includes global, project, nested and plugin sources and their actual invocation paths. The only incumbent with this capability lives in project-b. Runtime checks confirm that it cannot load or be invoked in project-a, and no other equivalent capability is callable there. Matched repeated bare/candidate tests on project-a tasks demonstrate useful improvement; irrelevant-task and negative controls pass. All five target price checks passed, including context cost, armor, placement/off-switch, delivery and supply chain. Native project-local installation of the unchanged standalone skill is supported, and fresh target plus unrelated control sessions verified visibility, precedence, invocation and disable effects. Provenance, license preservation, revision pin, update owner and rollback are recorded. The assessment authorizes no installation or changes to project-b.",
+      "expected": [
+        {
+          "target": "project-a",
+          "verdict": "ADOPT"
+        }
+      ],
+      "forbidden_claims": [
+        "project-b's inaccessible incumbent already covers project-a solely because its files exist.",
+        "The candidate should be skipped as a duplicate available to project-a.",
+        "project-b must be migrated, deleted or enabled globally to resolve this request.",
+        "The unchanged, supported local skill requires a packaging adaptation."
+      ]
+    },
+    {
+      "id": "shared-security-finding",
+      "scenario": "An operator asks for a report-only verdict on installing a candidate skill locally in project-a. A previous vet confirmed that this exact revision sends private task contents to an undisclosed external endpoint. The prior report includes the responsible bundled code and observed exfiltration in an isolated probe. The source identity and current content digest were checked and are identical to the previously rejected revision; the responsible code is unchanged and no remediation evidence exists. The local proposal would use the same executable code and permissions. project-a has a real need for the advertised capability, but the only proposed mitigation is placing the skill inside project-a so it loads in fewer sessions. There is no new execution sandbox, permission restriction or egress control. No installation has been authorized.",
+      "expected": [
+        {
+          "target": "project-a",
+          "verdict": "REJECT"
+        }
+      ],
+      "forbidden_claims": [
+        "Project-local scope is an execution sandbox or blocks the confirmed exfiltration.",
+        "A new target clears the applicable security finding on the unchanged revision.",
+        "The unchanged candidate is safe to ADOPT because project-a needs it.",
+        "The confirmed security disqualifier is merely missing utility evidence."
+      ]
+    },
+    {
+      "id": "multiple-targets",
+      "scenario": "An operator requests one report-only assessment of the same standalone skill for project-a and project-b. The candidate is safe, licensed, maintained and pinned; shared artifact and supply-chain checks passed for its unchanged revision, and there is no prior global rejection. Complete digests for both targets have been independently verified, including effective global, local, nested and plugin inputs, actual callable capabilities and source precedence. project-a has a concrete unmet task and no equivalent incumbent. Matched repeated bare/candidate runs show a useful project-a improvement and passing controls. All five project-a price checks passed. Supported unchanged project-local placement, explicit invocation and disable behavior were verified in fresh project-a sessions and unrelated controls. project-b already has an equivalent incumbent demonstrably callable for its target task. Matched repeated candidate/incumbent comparisons show no candidate advantage in useful behavior, access, price or upkeep; its controls also passed. Provenance, license, update ownership and rollback are documented for any proposed project-a installation. The operator requested separate recommendations for both targets and authorized no installation.",
+      "expected": [
+        {
+          "target": "project-a",
+          "verdict": "ADOPT"
+        },
+        {
+          "target": "project-b",
+          "verdict": "SKIP"
+        }
+      ],
+      "forbidden_claims": [
+        "Both projects must receive the same fit verdict because they share the artifact revision.",
+        "project-b's callable coverage establishes coverage for project-a despite its verified unmet need.",
+        "project-a's benefit justifies a duplicate installation in project-b or global enablement.",
+        "A single global rollup can replace the requested per-target verdicts."
+      ]
+    },
+    {
+      "id": "unknown-destination",
+      "scenario": "An unattended request names only a candidate skill and asks that it be vetted. The launch directory is an unrelated checkout; no project is named, no task is stated and available context offers no defensible destination. No operator is available to clarify. Artifact inspection has found no affirmative safety or licensing disqualifier, but target utility, incumbent availability and context price cannot yet be established. There is no matched target-task comparison or verified target digest, so the utility evidence is incomplete. No installation, global enablement or configuration change has been authorized. Assess the available evidence and state the scope and landing limits without inventing a task or treating the launch directory as the destination.",
+      "expected": [
+        {
+          "target": "unresolved",
+          "verdict": "SKIP"
+        }
+      ],
+      "forbidden_claims": [
+        "An unattended candidate-only request defaults to global installation or enablement.",
+        "The unrelated launch directory establishes the target project.",
+        "Missing target utility evidence proves the candidate unsafe or warrants a security REJECT.",
+        "The candidate lost a target-task benchmark that was never run.",
+        "The verdict is a permanent rejection instead of SKIP pending evidence with an observable retry condition."
+      ]
+    },
+    {
+      "id": "plugin-subset",
+      "scenario": "An operator requests a report-only assessment for project-a and wants only skill-x from a pinned plugin. The complete verified target digest shows a concrete unmet task, no equivalent callable incumbent and demonstrated skill-x improvement over the bare model in matched repeated runs with passing controls. Inspection found that the whole plugin enables unwanted hooks and services whose costs and effects are unacceptable for project-a, although skill-x itself is safe. Observed platform behavior confirms no per-skill switch exists for this plugin. Native project plugin installation is supported, but isolated fresh sessions confirm it still enables those objectionable hooks and services inside project-a. The license explicitly permits copying skill-x as a standalone skill while preserving attribution. Full source and manifest inspection plus dependency and runtime tests confirm skill-x has no dependencies or hidden manifest and behaves equivalently when packaged alone. Standalone project-local placement, explicit invocation, disable behavior and unrelated controls were verified. All five price checks pass for that standalone form. Its source pin, attribution, exact packaging change, update owner and rollback are documented. No implementation or enablement is authorized by this assessment.",
+      "expected": [
+        {
+          "target": "project-a",
+          "verdict": "ADAPT"
+        }
+      ],
+      "forbidden_claims": [
+        "An unobserved per-skill override can disable the unwanted plugin hooks and services.",
+        "Installing the whole plugin at project scope removes its objectionable bundle effects.",
+        "Copying skill-x into standalone packaging is an unchanged native plugin ADOPT.",
+        "License-permitted component copying is a clean-room EXTRACT of only an abstract pattern.",
+        "Standalone packaging was already implemented or enabled by this report-only assessment."
+      ]
+    },
+    {
+      "id": "native-project-plugin",
+      "scenario": "An operator requests a report-only assessment of a pinned plugin for project-a. A complete verified project-a digest identifies concrete unmet tasks for every bundled component and no equivalent callable incumbents. Full instruction, manifest, executable, updater and supply-chain review found the unchanged plugin safe, maintained and licensed for this use, with no unwanted extras. Matched repeated target-task tests show useful improvement over the bare model for the components, and irrelevant-task and negative controls pass. All five price checks passed for the whole project-scoped bundle, including metadata, invoked content, hooks, tools, services and upkeep. Native project plugin installation is supported. Isolated fresh project-a sessions verified enablement, visibility, invocation, precedence, service and hook effects, and complete disable behavior including reload requirements. Unrelated fresh control sessions verified that the project installation does not activate the plugin there. Provenance, license, resolved revision, update owner and rollback are recorded. All components are genuinely needed only in project-a, and no packaging changes or component selection are necessary. The operator has authorized no installation or global enablement.",
+      "expected": [
+        {
+          "target": "project-a",
+          "verdict": "ADOPT"
+        }
+      ],
+      "forbidden_claims": [
+        "Native project installation automatically requires ADAPT because it is narrower than global.",
+        "The plugin must be forked or copied into standalone skills despite verified native support and need for all components.",
+        "The plugin must be installed or enabled globally.",
+        "The absence of per-skill controls alone disqualifies a plugin whose full bundle is needed and verified.",
+        "A report-only ADOPT verdict proves this plugin has been deployed or enabled."
+      ]
+    },
+    {
+      "id": "same-skill-other-scope-reconcile",
+      "scenario": "An operator requests a report-only assessment for project-a of a skill named by local path: the copy installed in the global user skills directory. The complete verified project-a digest finds a second copy of the same skill, by source identity, already inside project-a's own skills directory, whose reference sections differ from the global copy; both copies load in project-a sessions and the project copy takes precedence there. No other capability performs this task in project-a. The operator's stated goal is that the skill serve project-a only and stop loading in unrelated sessions. Both copies were read in full and diffed: the project copy carries the more recent verified edits and the global copy the original upstream pin. Artifact review of both revisions found no safety, licensing or maintenance disqualifier. Matched repeated tests show the skill improves the project-a task over the bare model, with controls passing. Fresh target and unrelated control sessions verified project-local visibility, invocation and disable behavior, and confirmed that the global copy is what loads in unrelated sessions. Provenance, update owner and rollback for one consolidated project-local copy are recorded. No change has been authorized.",
+      "expected": [
+        {
+          "target": "project-a",
+          "verdict": "ADAPT"
+        }
+      ],
+      "forbidden_claims": [
+        "The global copy is a callable incumbent that already covers project-a, so project-a is SKIP.",
+        "The two copies need not be diffed or an authoritative copy named because they share a name.",
+        "The vet should delete the global copy itself as part of this assessment.",
+        "The operator's goal of stopping global loading is out of scope for a project-a assessment."
+      ]
+    },
+    {
+      "id": "first-instruction-surface-bootstrap",
+      "scenario": "An operator requests a report-only assessment of a pinned, licensed, maintained standalone skill for project-a, a repository with no agent instruction files, skills directory, rules or plugin registrations of any kind. The operator named the concrete task: producing a recurring report artifact that project-a's sessions must generate, judged against a stated checklist. The complete verified digest shows no callable incumbent for that task. Matched repeated bare/candidate tests show useful improvement with passing irrelevant-task controls. Artifact and supply-chain review found no disqualifier. Project-local skill placement is supported; fresh sessions in a disposable copy of project-a verified visibility, invocation and disable behavior, and unrelated control sessions confirmed no leakage. All five price checks pass. Provenance, update owner and rollback are recorded. The repository has no notes or reports convention; the agent's private per-project memory exists for project-a. The operator has authorized no change.",
+      "expected": [
+        {
+          "target": "project-a",
+          "verdict": "ADOPT"
+        }
+      ],
+      "forbidden_claims": [
+        "Creating project-a's first skills directory is a routine change the vet may land without proposing it for the operator to create.",
+        "The eval note belongs only in the agent's private memory because project-a has no notes convention.",
+        "A target with no existing instruction surface cannot receive a project-local ADOPT.",
+        "The report-only ADOPT means the skill has been installed."
+      ]
+    },
+    {
+      "id": "tool-heavy-mcp-unmeasured",
+      "scenario": "An operator requests a report-only assessment for project-a of a plugin whose manifest auto-starts an MCP server exposing more than seventy tools, plus one skill. Artifact review found the code safe at the pinned revision, the license permissive and maintenance active. project-a has a concrete unmet task that a subset of the tools addresses, and the verified digest shows no callable incumbent for that subset. Matched repeated runs of the skill alone show improvement with controls passing. The context-cost price check was answered by narrative only: the report compares the tool count with published guidance, but the paired measurement of tool-selection accuracy and misrouting on project-a's representative tasks with and without the server could not run because the sandbox lacked the model access needed for matched runs. Placement, delivery, armor and supply-chain checks passed. Native project-scoped plugin installation is supported and was verified in fresh sessions. No installation or MCP enablement has been authorized.",
+      "expected": [
+        {
+          "target": "project-a",
+          "verdict": "SKIP"
+        }
+      ],
+      "forbidden_claims": [
+        "A narrative comparison of the tool count with published guidance satisfies the context-cost price check for a component that adds tools.",
+        "The unrun measurement proves the server degrades performance and warrants REJECT.",
+        "ADOPT or ADAPT may be rendered while a required price check is PARTIAL.",
+        "Project scope removes the tool-count exposure inside project-a's own sessions."
+      ]
+    },
+    {
+      "id": "skill-pack-named-subset",
+      "scenario": "An operator requests a report-only assessment for project-a of a skill pack: one repository, one permissive license, one plugin manifest registering fifty skill directories, and no per-skill enable switch, as confirmed by observed platform behavior. The operator named six skills relevant to project-a's concrete unmet tasks. Native project-scoped plugin installation is supported, but fresh sessions confirm it loads all fifty skills' discovery metadata into project-a, which currently has none. Full manifest, script and bundled-code review found no safety disqualifier. The six named skills were read in full; each is self-contained, and matched repeated tests show useful improvement over the bare model with passing controls. The remaining forty-four were triaged against the digest and not deep-vetted. The license permits copying skills as standalone skills with attribution; each named skill was copied into a scratch target and verified running standalone in isolated sessions, with disable behavior and unrelated controls verified. All five price checks pass for the six standalone skills and the context-cost check fails for the whole bundle. Provenance, attribution, source pin, update owner and rollback are recorded. No installation is authorized.",
+      "expected": [
+        {
+          "target": "project-a",
+          "verdict": "ADAPT"
+        }
+      ],
+      "forbidden_claims": [
+        "The pack is a list candidate, so only three of the six named skills receive a full assessment in this run.",
+        "Enabling the whole plugin at project scope suffices because it delivers the six wanted skills.",
+        "The forty-four triaged skills are approved by this assessment.",
+        "Copying the six skills into standalone packaging is an unchanged native ADOPT."
+      ]
+    },
+    {
+      "id": "discovered-contender-no-incumbent",
+      "scenario": "An operator requests a report-only assessment for project-a of a single prompt skill from a public repository, for project-a's concrete unmet task of producing annotated, editable vector technical illustrations with named parts from a text brief. The digest records no incumbent: no installed skill, CLI or callable global tool performs this task in project-a. Phase-1 discovery ran three lanes over GitHub, the web and X, one with the candidate's name withheld, followed by two seeded passes; it stopped when two consecutive passes admitted nothing to the triaged set. It triaged five upstreams and slated one, a programmatic SVG library whose own README and runnable example produce the task's output type, recorded at a resolved revision with the lane and pass that found it; four were dropped with one-line reasons (two produce raster images only, one is a GUI application, one is archived). Full artifact review of the candidate found no safety disqualifier. Phase 4 ran bare, candidate and the slated contender in isolated per-arm config directories, three runs each, on the planted fixture plus an irrelevant-task control and one control task the bare model already solves; a blind judge compared outputs in both orders with flips scored as ties. The candidate beat bare and the contender by more than the run-to-run spread on the fixture and matched bare on both controls; the contender's arm invoked the library in every run. All five price checks pass for the candidate at project scope, with provenance, source pin, update owner and rollback recorded. No installation is authorized.",
+      "expected": [
+        {
+          "target": "project-a",
+          "verdict": "ADOPT"
+        }
+      ],
+      "forbidden_claims": [
+        "With no incumbent in the digest, phase 4 compares the bare model and the candidate only.",
+        "The slated contender covers the task, so the candidate is SKIP as already covered.",
+        "The contender could have been settled from its README without running it as an arm.",
+        "A single judged order per pair, or a single run per arm, settled the comparison.",
+        "Discovery examined every alternative that exists for the task."
+      ]
+    }
+  ]
+}
