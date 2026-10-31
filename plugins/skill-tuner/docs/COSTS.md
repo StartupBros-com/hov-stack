@@ -1,0 +1,145 @@
+# What a run costs, and what actually reduces it
+
+Measured on `claude-sonnet-5` through `claude -p`, CLI 2.1.224, 2026-08-08.
+Numbers are from real gate runs and controlled probes, not estimates.
+
+## Where the money goes
+
+A 16-document probe at `verify_trials: 3` (`swapgate4-probe-ablated`, 192
+calls, **$8.07**):
+
+| | calls | mean | total | share |
+| --- | --- | --- | --- | --- |
+| probe (doctrine + target inline) | 16 | $0.2755 | $4.41 | 55% |
+| verify (target + one finding) | 176 | $0.0208 | $3.66 | 45% |
+
+## Caching already pays for the skeptic panel
+
+`verify_trials: 3` sends the *same* prompt three times, and the repeats hit
+prompt cache:
+
+| verify trial | mean cost |
+| --- | --- |
+| 1 (cold) | $0.03401 |
+| 2 (identical prompt) | $0.01386 |
+| 3 (identical prompt) | $0.01422 |
+
+**59% cheaper after the first.** A three-skeptic panel costs about 1.8× a
+single skeptic, not 3×. Raising `verify_trials` is far cheaper than its call
+count suggests, and that is the one lever here with no methodological cost.
+
+## What does *not* work: partial-prefix caching
+
+Claude Code's cache breakpoint sits after the whole user message, so two
+calls sharing a long prefix but differing at the end get no reuse. Measured
+with a fixed ~10 KB prefix and a varying one-line suffix:
+
+| call | cache_create | cache_read | cost |
+| --- | --- | --- | --- |
+| 1 | 11536 | 0 | $0.06216 |
+| 2 (same prefix, new suffix) | 3173 | 8362 | $0.01447 |
+| 3 (same prefix, new suffix) | 3174 | 8362 | $0.01449 |
+
+The 8362 read tokens are Claude Code's own system prompt. Our content is
+cache-*written* every call and never read. So the doctrine, constant across
+all 16 probe calls, buys nothing where it currently sits.
+
+## The system-prompt envelope, adopted opt-in — and humbler than projected
+
+Shipped v0.6.0 as `--doctrine-system` on `probe` and `gate` (adapter_shape
+`claude-p-doctrine-system-prompt`; `compare` refuses cross-shape pairs).
+The re-baseline legs measured the real saving at **~6–11% per leg**, not
+the ~25–30% the microbenchmark below projected: the prompt-cache TTL
+(~5 min) expires between probe calls because each target's verify batch
+takes minutes, so most probe calls re-write the doctrine prefix anyway.
+The microbenchmark ran back-to-back calls; real legs do not. Kept opt-in.
+
+## What would work: the doctrine as a system prompt (microbenchmark)
+
+Moving the constant doctrine into `--append-system-prompt` makes it part of
+the cached prefix. Same three calls, varying targets:
+
+| shape | call 1 | calls 2–3 |
+| --- | --- | --- |
+| doctrine inline (today) | $0.01795 | $0.01795 |
+| doctrine in `--append-system-prompt` | $0.07281 | **$0.00672** |
+
+Break-even is about **6 calls**; past that the system-prompt shape wins, and
+it read 11,595 cached tokens per call instead of 0.
+
+## Why neither optimization is switched on
+
+Both of these — and the Batch API's flat 50%, which needs a direct-API
+adapter and drops Claude Code's system prompt entirely — **change the prompt
+envelope**. The model reads a doctrine in a system prompt differently from
+one in a user message. A run made under a new envelope is not comparable to a
+baseline made under the old one, so adopting either invalidates every banked
+baseline and costs a re-measure (~$7.50 a leg) to regain a valid comparison.
+
+That is a fine price to pay once, at a deliberate boundary. It is not a fine
+price to pay in the middle of a gate, where it would confound the exact
+difference being measured.
+
+**Rule: adopt envelope-changing optimizations at a re-baseline boundary,
+never mid-experiment.** `compare` already refuses runs with different model
+pins for this reason, and since 2026-08-08 the same check covers the
+envelope: every manifest records its `adapter_shape`, runs from before the
+field are read as the inline envelope they all used, and `compare` refuses
+to pair two different shapes.
+
+## Sequential gating: pay for the answer, not the leg
+
+`tune.py gate --config X --baseline RUN --delta D` probes targets one at a
+time and stops the moment two mixture SPRTs establish not_worse / worse /
+better at your margin (anytime-valid under the pre-registered sd bound
+`SEQUENTIAL_SIGMA0 = 2.0`; every banked gate's observed sd sat below it).
+Replayed over the five banked gates ($0, `scripts/replay_sequential.py`):
+the decisive one (v3) stops at n=7/15 and saves **$4.10 of $8.30 (49%)**;
+the four non-decisive gates never stop and cost exactly what fixed-n cost.
+A live gate run (`swapgate8-gate-combined`, 2026-10-29) was non-decisive
+too: undecided after 15/15, full price ($2.75 on `claude-sonnet-5-5`,
+against $3.07 for its baseline leg), fixed-n not_worse of record.
+The mode saves money when the answer is clear and never conjures an answer
+when it is not — and it never disagreed with a full leg on pass/fail.
+
+The trade it does make: an early stop can land a weaker verdict (v3
+sequential says not_worse at n=7 where the full leg earned **better**).
+When the headline claim matters, run the full leg; the gate's fixed-n
+verdict on collected pairs is always printed beside the sequential one and
+remains the verdict of record.
+
+## Arms no longer carry the caller's CLAUDE.md and memory (v0.8.2 re-baseline boundary)
+
+Measured 2026-09-20 (Claude Code 2.1.278, Sonnet, three calls per condition,
+cwd with a CLAUDE.md and an auto-memory index): with the adapter's flags as
+they were, the agent under test reported the host's memory index loaded every
+time and calls cost $0.0593, $0.0598 and $0.0283; the same calls with
+`CLAUDE_CODE_DISABLE_CLAUDE_MDS=1` reported nothing loaded and cost $0.0045,
+$0.0041, $0.0005 (bare) and $0.0062 (env switch alone). `--setting-sources ""`
+selects settings files only; it never governed CLAUDE.md, project instructions
+or auto memory, so every probe, routing and endtask call before v0.8.2 judged
+its target with the caller's doctrine in context. That is a confound (the
+host's rules are not the document under test) and roughly an order of
+magnitude of per-call cost.
+
+From v0.8.2 every adapter call runs with `CLAUDE_CODE_DISABLE_CLAUDE_MDS=1`.
+`--bare` was rejected: it strips the same files, but the CLI reads no OAuth
+credentials or keychain in bare mode, so it would break subscription-auth
+adopters. Per the rule above this is an envelope change: new manifests record
+`claude-p-user-message-isolated` / `claude-p-doctrine-system-prompt-isolated`,
+and `compare` refuses to pair them with earlier shapes. Every figure in the
+sections above was measured with the caller's files loaded and is stale as a
+per-call cost until a re-baseline leg is run under the new shape; the
+direction of each finding (caching, the envelope trade, sequential gating)
+does not depend on it.
+
+## What to do meanwhile
+
+- Keep `verify_trials: 3`. Caching makes the panel nearly free and it is the
+  difference between a verdict and a coin flip.
+- Re-use banked baselines instead of re-measuring: `tune.py verify` tells you
+  whether one is still valid, and one leg costs half of two.
+- When a single input drifts, `tune.py compare --exclude <substring>` drops it
+  from both sides rather than forcing a full re-baseline.
+- Size the target set from `n_to_resolve`, not from habit. More documents than
+  the question needs is the most common way to overspend here.

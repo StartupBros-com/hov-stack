@@ -1,0 +1,22 @@
+{
+  "model": "claude-sonnet-5",
+  "max_findings": 5,
+  "verify_trials": 3,
+  "target_files": [
+    "/home/user/hov-stack/plugins/hov-stack/skills/papercut/SKILL.md",
+    "/home/user/hov-stack/plugins/hov-stack/skills/repo-junk-triage/SKILL.md",
+    "/home/user/hov-stack/plugins/hov-stack/skills/stash-mining/SKILL.md",
+    "/home/user/hov-stack/plugins/hov-stack/skills/verify/SKILL.md",
+    "/home/user/hov-stack/plugins/hov-stack/skills/verify-review/SKILL.md",
+    "/home/user/hov-stack/plugins/hov-stack/skills/ssh-local/SKILL.md",
+    "/home/user/hov-stack/plugins/hov-stack/skills/kill-ai-slop/SKILL.md",
+    "/home/user/hov-stack/plugins/hov-stack/skills/improve-animations/SKILL.md",
+    "/home/user/hov-stack/plugins/hov-stack/skills/review-animations/SKILL.md",
+    "/home/user/hov-stack/plugins/hov-stack/skills/pick-ui-library/SKILL.md",
+    "/home/user/hov-stack/plugins/hov-stack/skills/prototype/SKILL.md",
+    "/home/user/hov-stack/plugins/hov-stack/skills/scaffold-agents-md/SKILL.md",
+    "/home/user/hov-stack/plugins/hov-stack/skills/memory-mine/SKILL.md",
+    "/home/user/hov-stack/plugins/hov-stack/skills/hov-brand-voice/SKILL.md",
+    "/home/user/hov-stack/plugins/hov-stack/skills/system-performance-remediation-local/SKILL.md"
+  ]
+}
