@@ -3,10 +3,11 @@
 #
 # Runs what the standalone repo's ci.yml and release.yml ran against the plugin's own code:
 # source validation, a syntax pass over every shell file, then every tests/*.test.* suite.
-# The suites took over 100 minutes back to back (the engine suite alone about 65, measured
-# unsharded), past the 45-minute job limit, so they run as concurrent legs inside this one
-# job on one runner: the engine suite as its three PG_TEST_SHARD shards plus balanced legs
-# for the rest. The old repo spread the same legs over separate parallel runners.
+# On the standalone repo's ubuntu-24.04 runners the suites took about 33 minutes back to back
+# (each engine shard about 6, the rest about 9), too close to the 45-minute job limit to run in
+# series, so they run as concurrent legs inside this one job on one runner: the engine suite
+# as its three PG_TEST_SHARD shards plus balanced legs for the rest. The old repo spread the
+# same legs over separate parallel runners.
 #
 # Dropped because they served the old repo's release train and workflow files, not this code:
 # the customer-notes gate (plugin-ci.sh gates a VERSION bump on release notes), the
