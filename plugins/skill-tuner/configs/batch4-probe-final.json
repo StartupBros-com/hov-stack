@@ -1,0 +1,14 @@
+{
+  "model": "claude-sonnet-5",
+  "max_findings": 5,
+  "verify_trials": 3,
+  "target_files": [
+    "/home/user/hov-stack/plugins/hov-stack/skills/goal-brief/SKILL.md",
+    "/home/user/hov-stack/plugins/hov-stack/skills/google-safe-browsing/SKILL.md",
+    "/home/user/hov-stack/plugins/hov-stack/skills/harness-vet/SKILL.md",
+    "/home/user/hov-stack/plugins/hov-stack/skills/measure/SKILL.md",
+    "/home/user/hov-stack/plugins/hov-stack/skills/youtube-transcript/SKILL.md",
+    "/home/user/hov-stack/plugins/hov-stack/skills/simplify-and-refactor-code-isomorphically-local/SKILL.md",
+    "/home/user/hov-stack/plugins/hov-stack/skills/design-drift/SKILL.md"
+  ]
+}

@@ -1308,7 +1308,7 @@ if [ -f "$SWEEP_SCRIPT" ]; then
   else
     crit=$(printf '%s' "$_sweep" | jq -r '.critical_count')
     wc_=$(printf '%s' "$_sweep" | jq -r '.warn_count')
-    [ "$crit" -gt 0 ] && warn "skills-beads-sweep-check: $crit CRITICAL beads/br/bv worked-example(s) live in scoped skills (python3 $SWEEP_SCRIPT for detail; run skills-localize.sh apply if patches are unapplied)"
+    [ "$crit" -gt 0 ] && warn "skills-beads-sweep-check: $crit CRITICAL beads/br/bv worked-example(s) live in scoped skills without the local-tooling note (python3 $SWEEP_SCRIPT for detail; skills-localize.sh apply adds the note)"
     [ "$wc_" -gt 0 ] && warn "skills-beads-sweep-check: $wc_ WARN-level dangling beads reference(s) (non-blocking; same script for detail)"
   fi
 else

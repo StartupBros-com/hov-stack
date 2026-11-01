@@ -1,0 +1,23 @@
+{
+  "model": "claude-sonnet-5",
+  "doctrine_file": "../skills/skill-tuner/SKILL.md",
+  "max_findings": 5,
+  "verify_trials": 3,
+  "target_files": [
+    "/home/user/hov-stack/plugins/hov-stack/skills/agent-swarm/SKILL.md",
+    "/home/user/hov-stack/plugins/hov-stack/skills/animate/SKILL.md",
+    "/home/user/hov-stack/plugins/hov-stack/skills/apple-design/SKILL.md",
+    "/home/user/hov-stack/plugins/hov-stack/skills/automating-your-automations-local/SKILL.md",
+    "/home/user/hov-stack/plugins/hov-stack/skills/branch-harmonization/SKILL.md",
+    "/home/user/hov-stack/plugins/hov-stack/skills/brand-voice-builder/SKILL.md",
+    "/home/user/hov-stack/plugins/hov-stack/skills/browser-console-setup/SKILL.md",
+    "/home/user/hov-stack/plugins/hov-stack/skills/cass-rerank-local/SKILL.md",
+    "/home/user/hov-stack/plugins/hov-stack/skills/cli-agent-ergonomics/SKILL.md",
+    "/home/user/hov-stack/plugins/hov-stack/skills/cli-doctor-mode/SKILL.md",
+    "/home/user/hov-stack/plugins/hov-stack/skills/codex-consult/SKILL.md",
+    "/home/user/hov-stack/plugins/hov-stack/skills/curl-bash-installer/SKILL.md",
+    "/home/user/hov-stack/plugins/hov-stack/skills/de-monolithize-your-codebase-isomorphically-local/SKILL.md",
+    "/home/user/hov-stack/plugins/hov-stack/skills/emil-design-eng/SKILL.md",
+    "/home/user/hov-stack/plugins/hov-stack/skills/find-animation-opportunities/SKILL.md"
+  ]
+}

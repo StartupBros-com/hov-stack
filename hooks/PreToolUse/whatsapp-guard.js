@@ -1285,7 +1285,7 @@ const DISCORD_WRITE_RE = new RegExp(String.raw`\b(?:discord-cli|discord_cli\.py)
 // the fallback for an unloadable resend-write-guard.js asks on reads too,
 // since the tier map that tells a read from a send lives in that classifier.
 // --where, --version, --help and a bare call stay quiet.
-const RESEND_COMMAND_RE = /\b(?:resend-cli|resend_cli(?:\.py)?)['"]?(?:\s+(?:--confirm-\S+|--json|-q|--quiet))*\s+["']?[^\s"'-]/;
+const RESEND_COMMAND_RE = /\b(?:resend-cli|resend_cli(?:\.py)?)['"]?(?:\s+(?:--confirm-\S+|--json|-q|--quiet|--account(?:=\S*|\s+\S+)))*\s+["']?[^\s"'-]/;
 
 function run(rawInput) {
   try {

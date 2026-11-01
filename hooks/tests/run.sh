@@ -9,7 +9,7 @@ cd "$(dirname "$0")"
 # ~/.claude/run/hook-seam/, one file per throwaway temp-repo slug — test state
 # leaking into the live harness, and unbounded since every run mints new slugs.
 # Point the whole suite at a scratch dir. (No `exec`, so the trap can fire.)
-CLAUDE_SEAM_DIR="$(mktemp -d)"
+CLAUDE_SEAM_DIR="$(mktemp -d)" || exit 1
 export CLAUDE_SEAM_DIR
 # Trap installed before the second mktemp so a failure there (set -e exits
 # immediately) can't strand the seam dir; the alternate expansion drops the
@@ -22,7 +22,7 @@ trap 'rm -rf "$CLAUDE_SEAM_DIR" ${SANDBOX_HOME:+"$SANDBOX_HOME"}' EXIT
 # harness sandboxes its own users at require time; this catches anything that
 # bypasses it. Tests that need a specific home still win — they set env.HOME
 # explicitly.
-SANDBOX_HOME="$(mktemp -d)"
+SANDBOX_HOME="$(mktemp -d)" || exit 1
 export HOME="$SANDBOX_HOME"
 export USERPROFILE="$SANDBOX_HOME"
 # And the filesystem root the SessionStart stray-.git heal scans and renames

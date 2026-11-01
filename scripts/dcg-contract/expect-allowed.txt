@@ -97,3 +97,17 @@ mkdir -p /tmp/d; S=/tmp/d; echo hi > "$S/out"
 S=/tmp/d; cd /home/user/dotfiles && echo hi > "$S/out"
 S=/tmp/d; for f in a b; do echo hi >> "$S/$f.out"; done
 
+# --- GitHub security reads and disables ------------------------------------
+# Reading the state and turning it off must never be refused.
+gh repo edit o/r --enable-secret-scanning=false
+gh api repos/o/r --jq '.security_and_analysis'
+gh api -X PATCH repos/o/r -f 'security_and_analysis[secret_scanning][status]=disabled'
+gh api -X PATCH repos/o/r -f 'security_and_analysis[dependabot_security_updates][status]=enabled'
+gh api orgs/o/code-security/configurations
+gh api -X PATCH orgs/o/code-security/configurations/1325 -f secret_protection=disabled -f code_security=disabled
+gh api -X PUT orgs/o/code-security/configurations/17/defaults -f default_for_new_repos=none
+gh api -X POST orgs/o/secret_scanning/disable_all
+gh api /orgs/o --jq 'select(.secret_scanning_enabled_for_new_repositories==true)'
+gh api -X PATCH /repos/o/r/code-scanning/default-setup -f state=not-configured
+gh api /organizations/o/settings/billing/budgets
+gh api -X POST /organizations/o/settings/billing/budgets --input body.json

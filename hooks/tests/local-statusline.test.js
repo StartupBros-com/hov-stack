@@ -565,6 +565,80 @@ const cache = (extra) => ({ caching_observed: true, ttl: '1h', requests: 40, mis
 const lineOf = (output, n) => output.split('\n')[n] ?? '';
 const withFixture = (fn) => { const f = fixture(); try { fn(f); } finally { fs.rmSync(f.dir, { recursive: true, force: true }); } };
 
+const zeroUsage = { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 };
+
+// Native snapshots across a cached turn, an interrupted placeholder, and the
+// following completion. These fixtures test presentation, not a live provider.
+test('incomplete zero usage cannot turn a cached conversation into zero context and cold cache', () => withFixture((f) => {
+  const measured = { ...zeroUsage, input_tokens: 129, cache_read_input_tokens: 125056, output_tokens: 930 };
+  const render = (usage, total, pc) => lineOf(runStatusline(f, 'unavailable', { payload: {
+    context_window: { used_percentage: total ? 12.5 : 0, total_input_tokens: total, context_window_size: 1000000, current_usage: usage },
+    prompt_cache: pc,
+  } }), 0);
+  const warm = cache({ warm: true, expires_at: nowS() + 2880 });
+  assert.match(render(measured, 125185, warm), /125k\/1M │ cache 48m→/);
+  const incomplete = render(zeroUsage, 0, cache({ warm: false, expires_at: null, recache_tokens_if_cold: 0, last_miss_at: nowS() - 6000 }));
+  assert.match(incomplete, /^ctx usage unavailable │ cache unknown │/);
+  assert.doesNotMatch(incomplete, /0%|0\/1M|cold|warm|re-cache|→/);
+  assert.match(render(measured, 125185, warm), /125k\/1M │ cache 48m→/);
+}));
+
+test('unmeasured current usage preserves independently reported cache warmth and expiry', () => withFixture((f) => {
+  const cases = [
+    [cache({ warm: true, expires_at: nowS() + 2880 }), /cache 48m→/],
+    [cache({ warm: true, expires_at: null }), /cache warm │/],
+    [cache({ warm: true, expires_at: nowS() - 60 }), /cache cold · idle 1h01m/],
+    [cache({ warm: false, expires_at: nowS() - 60 }), /cache cold · idle 1h01m/],
+    [cache({ warm: false, expires_at: null, recache_tokens_if_cold: 125185 }), /cache cold · re-cache ~125k/],
+  ];
+  for (const [prompt_cache, expected] of cases) {
+    const output = lineOf(runStatusline(f, 'unavailable', { payload: {
+      context_window: { used_percentage: 0, total_input_tokens: 0, current_usage: zeroUsage },
+      prompt_cache,
+    } }), 0);
+    assert.match(output, /^ctx usage unavailable │/);
+    assert.match(output, expected);
+    assert.doesNotMatch(output, /cache unknown/);
+  }
+}));
+
+test('unmeasured usage does not invent cache metadata for an unobserved provider', () => withFixture((f) => {
+  for (const prompt_cache of [undefined, null, 'cold', { caching_observed: false, warm: false }]) {
+    const output = lineOf(runStatusline(f, 'unavailable', { payload: {
+      context_window: { used_percentage: 0, total_input_tokens: 0, current_usage: zeroUsage },
+      prompt_cache,
+    } }), 0);
+    assert.match(output, /^ctx usage unavailable │ Opus 5/);
+    assert.doesNotMatch(output, /cache/);
+  }
+}));
+
+test('missing or malformed current usage preserves legacy and fresh-session rendering', () => withFixture((f) => {
+  for (const current_usage of [undefined, null, {}, [], 'zero', { ...zeroUsage, input_tokens: '0' }, { ...zeroUsage, output_tokens: null }, { ...zeroUsage, cache_read_input_tokens: -1 }]) {
+    const output = lineOf(runStatusline(f, 'unavailable', { payload: {
+      context_window: { used_percentage: 0, total_input_tokens: 0, context_window_size: 1000000, current_usage },
+    } }), 0);
+    assert.match(output, /0% 0\/1M │ Opus 5/);
+    assert.doesNotMatch(output, /unavailable|unknown|cache/);
+  }
+}));
+
+test('positive usage and positive context are not hidden by the unmeasured-usage guard', () => withFixture((f) => {
+  const cases = [
+    ...Object.keys(zeroUsage).map((key) => ({ usage: { ...zeroUsage, [key]: 128 }, total: 0, pct: 0 })),
+    { usage: zeroUsage, total: 128, pct: 0 },
+    { usage: zeroUsage, total: 0, pct: 12 },
+  ];
+  for (const { usage, total, pct } of cases) {
+    const output = lineOf(runStatusline(f, 'unavailable', { payload: {
+      context_window: { used_percentage: pct, total_input_tokens: total, current_usage: usage },
+      prompt_cache: cache({ warm: false, expires_at: null, recache_tokens_if_cold: 128 }),
+    } }), 0);
+    assert.match(output, /cache cold · re-cache ~128/);
+    assert.doesNotMatch(output, /unavailable|unknown/);
+  }
+}));
+
 test('no prompt_cache field, or no caching observed, renders no cache segment', () => withFixture((f) => {
   assert.doesNotMatch(runStatusline(f, 'unavailable'), /cache/);
   const off = runStatusline(f, 'unavailable', { payload: { prompt_cache: { caching_observed: false, warm: false, ttl: '5m', recache_tokens_if_cold: 9000 } } });
