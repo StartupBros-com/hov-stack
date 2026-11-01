@@ -813,7 +813,7 @@ main() {
   # Scratch area + cleanup trap. Every worktree this run creates, plus the
   # scratch dir itself, is removed on EXIT regardless of exit path. (scratch
   # is deliberately not `local`; see the comment on `repo` above.)
-  scratch=$(mktemp -d /tmp/red-first-run.XXXXXX)
+  scratch=$(mktemp -d /tmp/red-first-run.XXXXXX) || return 1
   cleanup() {
     local d
     for d in "$scratch"/wt-*; do
@@ -1220,7 +1220,7 @@ print(json.dumps({"path": sys.argv[1], "pre_fix": sys.argv[2], "status": "unveri
 
     local pf_dir=${revision_dir[$full]}
     local pf_work
-    pf_work=$(mktemp -d "$scratch/run-prefix.XXXXXX")
+    pf_work=$(mktemp -d "$scratch/run-prefix.XXXXXX") || return 1
     local pf_lines
     pf_lines=$(run_family "$family" "$pf_dir/$p" "$pf_dir" "$pf_work" "$timeout_s")
     local pf_cmd pf_rc
@@ -1228,7 +1228,7 @@ print(json.dumps({"path": sys.argv[1], "pre_fix": sys.argv[2], "status": "unveri
     pf_rc=$(printf '%s\n' "$pf_lines" | awk -F'\t' '$1=="EXITCODE"{print $2}')
 
     local hd_work
-    hd_work=$(mktemp -d "$scratch/run-head.XXXXXX")
+    hd_work=$(mktemp -d "$scratch/run-head.XXXXXX") || return 1
     local hd_lines
     hd_lines=$(run_family "$family" "$head_dir/$p" "$head_dir" "$hd_work" "$timeout_s")
     local hd_rc

@@ -1,0 +1,43 @@
+{
+  "id": "prbot-product-tour",
+  "compositionId": "ProductTour",
+  "width": 1280,
+  "height": 720,
+  "fps": 30,
+  "background": "#07111f",
+  "accent": "#2dd4bf",
+  "surface": "#0d1d2f",
+  "foreground": "#ffffff",
+  "muted": "#cbd5e1",
+  "brand": {
+    "name": "PRBot.ai",
+    "tagline": "Fast, relevant PR opportunities",
+    "logo": "generated/prbot/prbot-stacked-padded.png"
+  },
+  "scenes": [
+    {
+      "id": "workspace",
+      "eyebrow": "One workspace",
+      "title": "Open the right brand",
+      "body": "Switch to the site you manage without sharing a login.",
+      "image": "generated/prbot/dashboard.webp",
+      "durationInFrames": 120
+    },
+    {
+      "id": "profile",
+      "eyebrow": "One live profile",
+      "title": "Review the expert",
+      "body": "Keep the source profile accurate before pitching starts.",
+      "image": "generated/prbot/dashboard-header.webp",
+      "durationInFrames": 120
+    },
+    {
+      "id": "billing",
+      "eyebrow": "Add sites when ready",
+      "title": "Scale without changing the workflow",
+      "body": "Each additional site gets its own profile and controls.",
+      "image": "generated/prbot/billing.webp",
+      "durationInFrames": 120
+    }
+  ]
+}

@@ -12,6 +12,13 @@ umask 022, process groups and a per-suite timeout (default: 1800 seconds).
 Interrupts kill children too. Logs live in a unique /tmp directory, removed
 after every executed suite passes unless --keep-scratch was given.
 
+Before any suite starts the run refuses (exit 2, no record) when /tmp, $TMPDIR,
+$HOME or the repository has less free space than --min-free-mb (default 2048,
+or $AFFECTED_SUITES_MIN_FREE_MB; 0 turns it off). Parallel suites that fill the
+disk make every later mktemp fail, and a suite that missed the failure once ran
+`rm -rf /home`. The floor is checked once, at the start; it is not a watchdog
+for a run that fills the disk later.
+
 This screen is not a sandbox: the workflow is trusted, reviewed code. Suites
 use the real $HOME and host tools, in parallel. Suites writing shared host
 state (~/.claude, user units, docker, fixed /tmp paths) can collide; run those
@@ -21,8 +28,8 @@ A clean committed head with an origin can record its result for --read;
 --no-lint and CLAUDE_LOOP_GUARD=1 refuse records. --applies checks for a draft
 aggregate in the tree's or base ref's workflow. Records retain unrun steps as
 partial evidence. Exit codes: 0 every executed suite passed or --dry-run;
-1 a suite failed; 2 bad arguments, workflow, file or git state;
-3 nothing runnable; 4 --read found no record; 130 interrupted.
+1 a suite failed; 2 bad arguments, workflow, file or git state, or free disk
+under the floor; 3 nothing runnable; 4 --read found no record; 130 interrupted.
 """
 
 from __future__ import annotations
@@ -482,6 +489,10 @@ def gate_applies(repo: Path, base_ref: str = "origin/main") -> bool:
     )
 
 
+MIN_FREE_MB_ENV = "AFFECTED_SUITES_MIN_FREE_MB"
+DEFAULT_MIN_FREE_MB = 2048
+
+
 def parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -519,6 +530,14 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--no-lint", action="store_true", help="skip bash -n and shellcheck"
+    )
+    # A string default goes through type=int, so a bad env value is exit 2.
+    parser.add_argument(
+        "--min-free-mb",
+        type=int,
+        default=os.environ.get(MIN_FREE_MB_ENV, str(DEFAULT_MIN_FREE_MB)),
+        help=f"refuse to start when /tmp, $TMPDIR, $HOME or the repo has less free space, in MB "
+        f"(default {DEFAULT_MIN_FREE_MB}, or ${MIN_FREE_MB_ENV}; 0 turns the check off)",
     )
     parser.add_argument(
         "--dry-run", action="store_true", help="print the plan, run nothing"
@@ -696,6 +715,30 @@ def execute(
     return results, log_names, interrupted
 
 
+def short_on_disk(repo: Path, min_free_mb: int) -> str | None:
+    """Why the run must not start, or None: the first filesystem the suites
+    write to (/tmp, $TMPDIR, $HOME, the repository) with less than
+    min_free_mb free. A path that cannot be measured is skipped."""
+    if min_free_mb <= 0:
+        return None
+    seen: set[int] = set()
+    for name, path in (("/tmp", "/tmp"), ("$TMPDIR", os.environ.get("TMPDIR")),
+                       ("$HOME", os.environ.get("HOME")), ("the repository", str(repo))):
+        if not path:
+            continue
+        try:
+            dev = os.stat(path).st_dev
+            if dev in seen:
+                continue
+            seen.add(dev)
+            free_mb = shutil.disk_usage(path).free // (1024 * 1024)
+        except OSError:
+            continue
+        if free_mb < min_free_mb:
+            return f"{name} ({path}) has {free_mb} MB free, under the {min_free_mb} MB floor"
+    return None
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     repo = Path(args.repo).resolve()
@@ -746,6 +789,16 @@ def main(argv: list[str] | None = None) -> int:
             print(f"not run locally: {key} ({why})")
         return 0
 
+    # No record: a refusal is not a result, and a partial record reads as a pass.
+    low = short_on_disk(repo, args.min_free_mb)
+    if low:
+        print(
+            f"affected-suites: refusing to start: {low}. Parallel suites can fill it, and every "
+            f"mktemp after that fails. Free space, or lower the floor with "
+            f"--min-free-mb N or {MIN_FREE_MB_ENV}=N (0 turns it off).",
+            file=sys.stderr,
+        )
+        return 2
     scratch = Path(tempfile.mkdtemp(prefix="run-affected-suites.", dir="/tmp"))
     created = scratch.stat()
     print(

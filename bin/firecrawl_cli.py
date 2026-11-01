@@ -55,6 +55,11 @@ RAW_VALUE_FLAGS = frozenset({
     "--scrape-options", "--scrape-options-file", "--webhook",
     "--categories", "--sources", "--tbs", "--scrape-formats", "--max-age",
     "--location", "--country",
+    # Vendor 1.26.x gov filters; a host on that version passes them through raw.
+    "--jurisdiction", "--court", "--court-type", "--cites", "--domain",
+    # Wrapper developer filters (vendor 1.26.24's `firecrawl developer` dropped them).
+    "--types", "--repos", "--passages", "--language", "--topic", "--license",
+    "--min-stars", "--max-stars", "--archived", "--fork",
 })
 # The wrapper's watchdog must outlive the vendor's own interact timeout so the
 # vendor can report its outcome before the wrapper gives up.
@@ -87,6 +92,81 @@ SEARCH_CATEGORIES = ("github", "research", "pdf", "developer")
 API_ONLY_CATEGORIES = frozenset({"developer"})
 SEARCH_SOURCES = ("web", "images", "news")
 TBS_VALUES = ("qdr:h", "qdr:d", "qdr:w", "qdr:m", "qdr:y")
+# API-direct verbs: the wrapper POSTs to these paths itself, so they need neither
+# the vendor binary nor its version (the vendor's own gov and developer commands
+# exist only from 1.26.x) and work without a key. FIRECRAWL_API_KEY, when the
+# environment holds one, rides along as a Bearer for higher rate limits.
+API_DIRECT_VERBS = {"gov": "/v2/search/gov", "developer": "/v2/search/developer"}
+GOV_COURT_TYPES = (
+    "federal-supreme", "federal-appellate", "federal-district", "federal-bankruptcy",
+    "federal-special", "military", "state-supreme", "state-appellate", "state-trial",
+    "state-special", "state-attorney-general",
+)
+# Wrapper flag to API body field; the API's own names, not the vendor's.
+GOV_FILTERS = {
+    "--limit": "k", "--jurisdiction": "jurisdiction", "--court": "court",
+    "--court-type": "courtType", "--cites": "cites", "--domain": "domain",
+}
+DEVELOPER_TYPES = ("doc", "issue", "pull_request", "readme")
+DEVELOPER_SOURCES_MAX = 20
+DEVELOPER_SOURCE_CHARS = 512
+DEVELOPER_PASSAGES_MAX = 5
+DEVELOPER_FILTERS = {
+    "--limit": "k", "--types": "types", "--repos": "repos", "--sources": "sources",
+    "--skills-only": "skills", "--passages": "passages", "--language": "language",
+    "--topic": "topic", "--license": "license", "--min-stars": "min_stars",
+    "--max-stars": "max_stars", "--archived": "archived", "--fork": "fork",
+}
+KEYLESS_DEVELOPER_NOTE = (
+    "keyless developer search: account floor unchecked; "
+    "Firecrawl's keyless allowance applies"
+)
+# Free-first (#2118): a call whose keyed and keyless outputs were probed
+# equivalent runs keyless first, since keyless calls never bill the account.
+KEYLESS_NOTE = (
+    "keyless: answered by Firecrawl's free keyless tier; no account credits spent, "
+    "account floor unchecked"
+)
+# Routing notes start "keyless: " and never switch plain output to the envelope;
+# KEYLESS_DEVELOPER_NOTE keeps doing so, as it always has.
+KEYLESS_PREFIX = "keyless: "
+KEYLESS_SCRAPE_ID_NOTE = (
+    "keyless: scrape_id comes from a keyless fetch; interact runs keyed and may not "
+    "find it, so refetch with FIRECRAWL_CLI_KEYLESS=0 before interact"
+)
+# The vendor goes keyless when it finds no key and the API URL is its default.
+KEYLESS_STRIPPED = ("FIRECRAWL_API_KEY", "FIRECRAWL_API_URL")
+KEYLESS_OFF = {"0", "false", "no", "off"}
+# Failures that mean "this call needs the key", so the keyed leg runs once.
+# Only the rate-limit refusal arms the cooldown; a 401 or 402 may be one
+# combination's limit rather than the whole allowance. Anything else raises.
+KEYLESS_FALLBACK_SHAPES = frozenset({
+    "keyless_rate_limited", "auth_failure", "quota_exhausted", "credentials_missing",
+    "rate_limited",
+})
+# A planted or skewed marker can hold eligible calls keyed for this long at most.
+KEYLESS_COOLDOWN_CAP = 6 * 3600
+# Probed equivalent (issue #2118 verdicts); anything else stays keyed.
+KEYLESS_SCRAPE_FORMATS = frozenset({"summary", "markdown", "links", "html"})
+KEYLESS_PARSE_FORMATS = frozenset({"summary", "markdown"})
+KEYLESS_SEARCH_SOURCES = frozenset({"web", "images"})
+KEYLESS_SEARCH_CATEGORIES = frozenset({"github", "research"})
+KEYLESS_RESEARCH_COMMANDS = frozenset({"search-papers", "search-github"})
+KEYLESS_LIMIT = 10
+# Set by the first keyless refusal with no key to fall back on, so later targets
+# of the same call fail without sending another refused request.
+KEYLESS_REFUSED = None
+# This process's own copy of the cooldown, for when the marker cannot be written.
+KEYLESS_UNTIL = None
+# Vendor 1.19.26 prints these successes as text whatever --json says (#2123):
+# a --query answer (scrape.js:191-194, parse.js:212-215), and for a search whose
+# web, images and news buckets are all empty, "No results found." or nothing
+# (search.js:207-213).
+VENDOR_NO_RESULTS = "No results found."
+RESEARCH_BUCKET_NOTE = (
+    "vendor counts only web, images and news results, so research-bucket "
+    "results may be missing from an empty search (#2108)"
+)
 SEARCH_OPERATORS = (
     "quoted phrases, -term, site:host, inurl:term, intitle:term, related:host"
 )
@@ -124,6 +204,9 @@ BUDGET_DEFAULTS = {
     "bounded_crawl": 100, "scrape": 1, "json_extraction": 5,
     "screenshot": 1, "search_per_ten": 2, "map": 1,
     "interact_per_minute": 7, "interact_code_per_minute": 2, "agent": 100,
+    # Seconds a keyless refusal sends eligible calls straight to keyed when the
+    # refusal names no Retry-After of its own (the vendor's never does).
+    "keyless_cooldown": 3600,
 }
 
 
@@ -407,14 +490,30 @@ class Budget:
                     target.setdefault("scrapes", {})[scrape_id] = now
                     target.setdefault("interacted", {})[scrape_id] = interact
 
-    def reserve(self, amount):
+    def reserve(self, amount, keyless_rerun=None):
         with self.transaction() as data:
             remaining = self.available(data)
             host, _, _ = self.buckets(data)
             pending = sum(e["amount"] for e in host["reservations"].values())
-            if remaining < amount or (
-                self.remaining is not None and self.remaining - pending - amount < self.constants["floor"]
-            ):
+            floor = self.constants["floor"]
+            if self.remaining is not None and self.remaining - pending - amount < floor:
+                # The account, not the session bucket, is short; --raise-budget
+                # cannot lift it, so name the account remedy instead (#2105).
+                next_action = (
+                    "operator action: top up Firecrawl credits in the Firecrawl dashboard "
+                    "or wait for the billing cycle reset; then check: firecrawl credit-usage --json"
+                )
+                if keyless_rerun:
+                    next_action = (
+                        f"rerun keyless, which spends no account credits: {keyless_rerun}; or {next_action}"
+                    )
+                raise CliError(
+                    f"vendor balance refused: Firecrawl account has {self.remaining:g} credits; "
+                    f"pending reservations {pending:g}; reservation {amount:g}; floor {floor:g}; "
+                    "a session --raise-budget cannot lift the account balance",
+                    next_action, 3,
+                )
+            if remaining < amount:
                 raise CliError(
                     f"session budget refused: {remaining:g} credits remaining; reservation {amount:g}; "
                     f"vendor credits remaining {self.remaining}; floor {self.constants['floor']:g}; use --raise-budget <n> --reason <text>",
@@ -474,6 +573,31 @@ def reported_cost(payload):
     return reported_cost(payload.get("data"))
 
 
+TERMINAL_JOB_STATES = frozenset({"completed", "failed", "cancelled"})
+
+
+def cost_final(payload, running=False):
+    """Whether reported_cost(payload) is the whole charge (#2117). It is when the
+    work behind it has finished: the job states a terminal status, or there is no
+    job status at all (a synchronous scrape or search). A running job's
+    creditsUsed is a running total, and a status this cannot read is not
+    terminal. Walks the same path as reported_cost."""
+    if not isinstance(payload, dict):
+        return False
+    if "status" in payload:
+        status = payload["status"]
+        running = running or not (isinstance(status, str) and status in TERMINAL_JOB_STATES)
+    if any(credit_number(payload.get(key)) for key in ("creditsUsed", "credits_spent")):
+        return not running
+    metadata = payload.get("metadata")
+    if isinstance(metadata, dict) and credit_number(metadata.get("creditsUsed")):
+        return not running
+    if isinstance(payload.get("items"), list):
+        items = [item for item in payload["items"] if item_succeeded(item)]
+        return bool(items) and all(cost_final(item, running) for item in items)
+    return cost_final(payload.get("data"), running)
+
+
 def read_credits(budget, timeout):
     for attempt in range(3):
         try:
@@ -482,7 +606,9 @@ def read_credits(budget, timeout):
             # never the available balance used by the pre-call floor.
             data = payload.get("data")
             value = data.get("remainingCredits")
-            if not credit_number(value):
+            # An overdrawn account reports a negative balance: a real reading for
+            # reserve() to refuse against the floor, not a malformed one to retry (#2105).
+            if type(value) not in (int, float) or not math.isfinite(value):
                 raise ValueError("credit-usage response needs numeric data.remainingCredits")
             budget.remaining = value
             return value
@@ -516,7 +642,8 @@ def reservation_cost(args, surface):
         return getattr(args, "max_credits", None) or c["agent"], True
     if args.verb == "interact" and args.target == "stop":
         return 0, False  # ending a session accrues nothing new
-    if args.verb == "search":
+    if args.verb in {"search", "developer"}:
+        # Developer reaches here only with a key; keyless never reserves.
         return c["search_per_ten"] * math.ceil((args.limit or 10) / 10), False
     if args.verb == "interact":
         rate = (
@@ -541,8 +668,125 @@ def vendor_binary():
     return shutil.which("firecrawl")
 
 
+def keyless_shape(args, surface, command):
+    """Whether this argv is one the #2118 probe found keyless-equivalent. Reads the
+    produced command, never args.target: a multi-URL call passes its list here."""
+    verb = args.verb
+    if verb == "raw":
+        return (
+            len(command) >= 2 and command[0] == "research"
+            and command[1] in KEYLESS_RESEARCH_COMMANDS
+            and not {"--help", "-h"} & set(command)
+        )
+    if verb == "developer":
+        return args.limit is None or args.limit <= KEYLESS_LIMIT
+    if verb == "search":
+        filters = search_filters(args)
+        return (
+            surface == "search" and (args.limit is None or args.limit <= KEYLESS_LIMIT)
+            and set(filters["sources"]) <= KEYLESS_SEARCH_SOURCES
+            and set(filters["categories"]) <= KEYLESS_SEARCH_CATEGORIES
+        )
+    if verb == "shot":
+        return surface == "scrape"
+    if verb not in {"fetch", "extract"} or surface not in {"scrape", "parse"}:
+        return False  # act, interact, map, agent: probed unequal or never keyless
+    options = command[2:]
+    formats = options[options.index("--format") + 1].split(",") if "--format" in options else []
+    query = getattr(args, "query", None)
+    if surface == "parse":
+        # Only PDFs were probed, and a parse question was not.
+        return (
+            Path(command[1]).suffix.lower() == ".pdf" and not query
+            and bool(formats) and set(formats) <= KEYLESS_PARSE_FORMATS
+        )
+    if args.schema or args.schema_file:
+        return formats == ["json"] and not query
+    if query:
+        return not formats
+    return bool(formats) and set(formats) <= KEYLESS_SCRAPE_FORMATS
+
+
+def vendor_login():
+    """The vendor's stored login (credentials.js:50-67). Stripping the environment
+    cannot hide it, and any file there may hold a key or another API URL."""
+    home = Path.home()
+    base = {
+        "darwin": home / "Library/Application Support",
+        "win32": home / "AppData/Roaming",
+    }.get(sys.platform, home / ".config")
+    return (base / "firecrawl-cli/credentials.json").exists()
+
+
+def keyless_ready(args, surface, command, api):
+    if os.environ.get("FIRECRAWL_CLI_KEYLESS", "").strip().lower() in KEYLESS_OFF:
+        return False
+    if not keyless_shape(args, surface, command):
+        return False
+    if api:
+        return True  # The wrapper itself omits the Bearer.
+    url = os.environ.get("FIRECRAWL_API_URL")
+    return vendor_binary() is not None and url in {None, "", DEFAULT_API_BASE} and not vendor_login()
+
+
+def keyless_cooldown_path():
+    return BUDGET.root / "keyless-cooldown.json"
+
+
+def keyless_cooldown():
+    """When eligible keyed calls may try keyless again, or None. Read without the
+    ledger lock; anything unreadable is no cooldown, and a planted or skewed
+    marker holds calls keyed for KEYLESS_COOLDOWN_CAP at most."""
+    try:
+        until = json.loads(keyless_cooldown_path().read_text())["until"]
+    except (OSError, ValueError, TypeError, KeyError):
+        until = None
+    now = time.time()
+    if type(until) not in (int, float) or not math.isfinite(until):
+        until = None
+    until = max(until or 0, KEYLESS_UNTIL or 0)
+    return min(until, now + KEYLESS_COOLDOWN_CAP) if until > now else None
+
+
+def arm_keyless_cooldown(stated):
+    """Best effort: a marker that cannot be written costs a refused attempt later,
+    never this call. Returns the cooldown's end and any note to surface."""
+    global KEYLESS_UNTIL
+    seconds = min(stated or BUDGET.constants["keyless_cooldown"], KEYLESS_COOLDOWN_CAP)
+    until = KEYLESS_UNTIL = max(time.time() + seconds, keyless_cooldown() or 0)
+    try:
+        if BUDGET.root.is_symlink():
+            raise OSError(f"{BUDGET.root} is a symlink")
+        BUDGET.root.mkdir(mode=0o700, parents=True, exist_ok=True)
+        fd, temporary = tempfile.mkstemp(prefix=".keyless-", dir=BUDGET.root)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as stream:
+                json.dump({"until": until, "set_at": time.time()}, stream)
+            os.replace(temporary, keyless_cooldown_path())
+        finally:
+            if os.path.exists(temporary):
+                os.unlink(temporary)
+    except OSError as exc:
+        return until, f"{KEYLESS_PREFIX}cooldown not recorded: {exc.strerror or exc}"
+    return until, None
+
+
+def local_time(epoch):
+    return datetime.fromtimestamp(epoch).astimezone().isoformat(timespec="minutes")
+
+
 def budgeted_invoke(args, surface, command):
+    global KEYLESS_REFUSED
     api = uses_api(args)
+    if api and not api_billed(args):
+        # Free class: gov always, developer without a key. Nothing to read,
+        # reserve, or settle; the envelope reports credits_spent 0.
+        payload, notes = invoke_api(
+            api_path(args), api_body(args), command, args.timeout, args.retry_command
+        )
+        if args.verb == "developer":
+            notes.append(KEYLESS_DEVELOPER_NOTE)
+        return payload, notes
     vendor_present = vendor_binary() is not None
     if not vendor_present and not api:
         return invoke_vendor(command, args.timeout, args.verb == "raw")
@@ -551,11 +795,90 @@ def budgeted_invoke(args, surface, command):
     # This exact validated argv prints local help without spending account credits.
     if args.verb == "raw" and command == ["research", "--help"]:
         return invoke_vendor(command, args.timeout, True, args.retry_command)
+    # Free-first (#2118): an eligible call tries keyless, then runs keyed once when
+    # keyless refuses it. Without a key keyless is the only leg, cooldown or not.
+    fallback = []
+    if keyless_ready(args, surface, command, api):
+        keyed = bool(os.environ.get("FIRECRAWL_API_KEY"))
+        cooling = keyless_cooldown() if keyed else None
+        if cooling:
+            fallback.append(
+                f"{KEYLESS_PREFIX}skipped, ran keyed: the free tier refused a call "
+                f"recently; it is tried again after {local_time(cooling)}"
+            )
+        elif KEYLESS_REFUSED is not None and not keyed:
+            error = CliError(
+                f"error: not sent: the keyless free tier refused an earlier target of "
+                f"this call at {shlex.join(command[:2])}",
+                KEYLESS_REFUSED.next_action, KEYLESS_REFUSED.code,
+            )
+            error.error_code = KEYLESS_REFUSED.error_code
+            error.metadata = KEYLESS_REFUSED.metadata
+            raise error
+        else:
+            try:
+                if api:
+                    payload, notes = invoke_api(
+                        api_path(args), api_body(args), command, args.timeout,
+                        args.retry_command, keyless=True,
+                    )
+                else:
+                    payload, notes = invoke_vendor(
+                        command, args.timeout, args.verb == "raw", args.retry_command,
+                        keyless=True,
+                    )
+            except CliError as exc:
+                tag = getattr(exc, "error_code", None)
+                if tag not in KEYLESS_FALLBACK_SHAPES:
+                    raise
+                # Arm before the keyed leg, so its own refusal still leaves the cooldown.
+                until, note = (
+                    arm_keyless_cooldown(getattr(exc, "retry_after", None))
+                    if tag == "keyless_rate_limited" else (None, None)
+                )
+                if not keyed:
+                    if until:
+                        exc.next_action = exc.next_action.replace(
+                            "later:", f"after about {local_time(until)}:", 1
+                        )
+                    exc.degraded = [*(exc.degraded or []), *filter(None, [note])] or None
+                    if until:
+                        KEYLESS_REFUSED = exc
+                    raise
+                why = str(exc).splitlines()[0].removeprefix("error: ")
+                fallback.append(f"{KEYLESS_PREFIX}{tag}: {why}; ran keyed instead")
+                if until:
+                    fallback.append(
+                        f"{KEYLESS_PREFIX}eligible calls run keyed until {local_time(until)}"
+                    )
+                if note:
+                    fallback.append(note)
+            else:
+                notes.append(KEYLESS_DEVELOPER_NOTE if args.verb == "developer" else KEYLESS_NOTE)
+                if args.verb == "fetch" and returned_scrape_id(payload):
+                    notes.append(KEYLESS_SCRAPE_ID_NOTE)
+                return payload, notes
+    try:
+        return keyed_invoke(args, surface, command, api, vendor_present, fallback)
+    except CliError as exc:
+        if fallback:
+            exc.degraded = [*fallback, *(exc.degraded or [])]
+            if exc.code == 3:
+                exc.args = (f"keyless leg unavailable, and the keyed fallback was refused: {exc}",)
+        raise
+
+
+def keyed_invoke(args, surface, command, api, vendor_present, fallback):
     # The API transport needs no vendor binary. Without one the local ledger still
     # caps the session and the day, but the account floor cannot be read.
     before = read_credits(BUDGET, args.timeout) if vendor_present else None
     estimate, lag = reservation_cost(args, surface)
-    key = BUDGET.reserve(estimate)
+    # After a keyless refusal, or during its cooldown, a keyless rerun would fail too.
+    keyless_rerun = (
+        f"env -u FIRECRAWL_API_KEY {args.retry_command}"
+        if args.verb == "developer" and not fallback else None
+    )
+    key = BUDGET.reserve(estimate, keyless_rerun)
     try:
         if getattr(args, "scrape_id", None):
             BUDGET.touch_scrape(args.scrape_id, interact=True)
@@ -563,7 +886,10 @@ def budgeted_invoke(args, surface, command):
             INTERACT_TIMEOUT_MARGIN if args.verb == "interact" else 0
         )
         if api:
-            payload, notes = invoke_api_search(args, command, wrapper_timeout)
+            payload, notes = invoke_api(
+                api_path(args), api_body(args), command, wrapper_timeout,
+                args.retry_command,
+            )
         else:
             payload, notes = invoke_vendor(
                 command, wrapper_timeout, args.verb == "raw", args.retry_command
@@ -575,6 +901,7 @@ def budgeted_invoke(args, surface, command):
     except BaseException:
         BUDGET.finish(key)
         raise
+    notes[:0] = fallback
     if isinstance(payload, dict) and isinstance(payload.get("items"), list) and not any(
         item_succeeded(item) for item in payload["items"]
     ):
@@ -583,9 +910,12 @@ def budgeted_invoke(args, surface, command):
     reported = reported_cost(payload)
     free_read = args.verb == "agent" and getattr(args, "status", False)
     cost = 0 if free_read else (reported if reported is not None else estimate)
+    # Raw holds the bounded-crawl reservation unless the vendor reported a final
+    # cost; a finished job's creditsUsed is the charge (#2117).
+    raw_unsettled = args.verb == "raw" and not (reported is not None and cost_final(payload))
     # Commit the known outcome before optional accounting I/O, so interruption
     # during a post-call read can never release a successful paid invocation.
-    held_cost = max(estimate, cost) if args.verb == "raw" else cost
+    held_cost = max(estimate, cost) if raw_unsettled else cost
     try:
         entry = BUDGET.finish(key, held_cost if lag else cost, lag)
     except OSError as exc:
@@ -593,7 +923,7 @@ def budgeted_invoke(args, surface, command):
         entry = None
         notes.append(f"charge not durably recorded: {exc.strerror or exc}")
     BUDGET.spent += cost
-    if not free_read and (reported is None or args.verb == "raw"):
+    if not free_read and (reported is None or raw_unsettled):
         notes.append(ESTIMATED)
     if not vendor_present:
         notes.append("credit floor unchecked: vendor firecrawl absent; local ledger only")
@@ -640,6 +970,8 @@ def redact(value):
         value = value.replace(shlex.quote(secret), "[REDACTED]")
         value = value.replace(secret, "[REDACTED]")
     value = re.sub(r"(?i)(\bbearer\s+)[a-z0-9._~+/-]+=*", r"\1[REDACTED]", value)
+    # The keyless refusal's per-install signup link (#2118).
+    value = re.sub(r"(?i)\bhttps?://(?:www\.)?firecrawl\.dev/k/[^\s\"'<>)]+", "[REDACTED]", value)
     value = re.sub(
         r"\b(?:fc-[A-Za-z0-9_-]{8,}|eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)\b",
         "[REDACTED]", value,
@@ -674,6 +1006,14 @@ class CliError(Exception):
 # A substring on an HTTP row refines that status (403 requires the injection
 # tag; 429 distinguishes concurrency). The final 429 row is its default.
 FAILURE_SHAPES = (
+    # The keyless free tier's refusal: HTTP 429 from the API, and from the vendor
+    # only this text on stderr with exit 1 (measured 2026-10-30, #2118).
+    # Exit 1, not 2: the window runs for hours, so backing off and retrying is wrong.
+    ({429}, ("keyless free tier",), 1, "keyless_rate_limited",
+     "Firecrawl's keyless free tier refused the call: its small allowance (about "
+     "15 calls, then a window measured at over 40 minutes) is used up for now.",
+     "set FIRECRAWL_API_KEY in this process's environment to run it keyed, or "
+     "retry keyless later: {retry}", True),
     ({402}, ("insufficient credits", "payment required"), 1, "quota_exhausted",
      "Insufficient credits; Firecrawl quota exhausted.",
      "operator action: top up Firecrawl credits in the Firecrawl dashboard; "
@@ -698,6 +1038,13 @@ FAILURE_SHAPES = (
      2, "provider_failure", "Firecrawl provider failure. {backoff}", "{retry}", True),
     (set(), ("we do not support this site",), 1, "unsupported_site",
      "Firecrawl does not support this site.", "{contents}", True),
+    # With no key and no stored login the vendor prints its interactive login
+    # menu and exits 0; neither a retry nor the drift check can fix that.
+    (set(), ("authenticate with your firecrawl account",), 1, "credentials_missing",
+     "The vendor CLI found no Firecrawl credential (FIRECRAWL_API_KEY unset, no "
+     "stored login) and printed its interactive login menu instead of JSON.",
+     "set FIRECRAWL_API_KEY in this process's environment, or run firecrawl login "
+     "once on this host; then check: firecrawl --status", False),
     (set(), (), 2, "vendor_output_changed",
      "Vendor returned no valid JSON; vendor output changed; run the drift check "
      "(harness-doctor check 32). {backoff}", "harness-doctor check 32", False),
@@ -732,7 +1079,8 @@ def error_metadata(payload, detail):
             if name in {"status", "statuscode", "httpstatus", "httpstatuscode"}:
                 if status is None and re.fullmatch(r"[45]\d\d", str(value)):
                     status = int(value)
-            if name == "retryafter":
+            # The keyless refusal's body says retry_after_seconds (#2118).
+            if name in {"retryafter", "retryafterseconds"}:
                 retry_after = value
     if status is None:
         match = re.search(
@@ -746,6 +1094,7 @@ def error_metadata(payload, detail):
         if match:
             retry_after = match[1].strip()
     delay = 5
+    stated = None  # the server's own Retry-After in seconds, when it gave one
     if retry_after is not None:
         try:
             value = float(retry_after)
@@ -755,8 +1104,9 @@ def error_metadata(payload, detail):
             except (ValueError, TypeError, OverflowError):
                 value = 0
         if math.isfinite(value) and value > 0:
-            delay = max(delay, math.ceil(value))
-    return status, delay
+            stated = math.ceil(value)
+            delay = max(delay, stated)
+    return status, delay, stated
 
 
 def exa_fallback(query):
@@ -781,7 +1131,7 @@ def exa_fallback(query):
 
 def vendor_failure(command, payload, detail, timing="", retry=None, malformed=False):
     """One renderer for shaped, raw, and per-item provider failures (KTD9)."""
-    status, delay = error_metadata(payload, detail)
+    status, delay, stated = error_metadata(payload, detail)
     vendor_error = payload.get("error", payload.get("text", "")) if isinstance(payload, dict) else ""
     evidence = redact("; ".join(filter(None, (detail, str(vendor_error)))))
     # The injection tag can also be supplied in details rather than error text.
@@ -793,7 +1143,7 @@ def vendor_failure(command, payload, detail, timing="", retry=None, malformed=Fa
         statuses, substrings, _, tag, *_ = row
         if status not in statuses:
             continue
-        if tag in {"injection_blocked", "concurrency_limited"} and not any(
+        if tag in {"keyless_rate_limited", "injection_blocked", "concurrency_limited"} and not any(
             text in lowered for text in substrings
         ):
             continue
@@ -810,7 +1160,11 @@ def vendor_failure(command, payload, detail, timing="", retry=None, malformed=Fa
     if shape is None and malformed:
         shape = next(row for row in FAILURE_SHAPES if row[3] == "vendor_output_changed")
     target = next((arg for arg in command[1:] if is_url(arg)), None)
-    query = command[1] if command[0] == "search" and len(command) > 1 else target
+    query = (
+        command[1]
+        if command[0] in {"search", *API_DIRECT_VERBS} and len(command) > 1
+        else target
+    )
     retry = retry or shlex.join(["firecrawl-cli", "raw", "--json", "--", *command])
     values = {
         "source": (
@@ -835,7 +1189,11 @@ def vendor_failure(command, payload, detail, timing="", retry=None, malformed=Fa
             "firecrawl --status", False,
         )
     location = shlex.join(command[:2])
-    what = "could not decode vendor output" if tag == "vendor_output_changed" else "vendor rejected the call"
+    what = {
+        "vendor_output_changed": "could not decode vendor output",
+        "credentials_missing": "vendor has no Firecrawl credential",
+        "keyless_rate_limited": "keyless free tier refused the call",
+    }.get(tag, "vendor rejected the call")
     message = f"error: {what} at {location}"
     if timing:
         message += f" ({timing})"
@@ -849,6 +1207,7 @@ def vendor_failure(command, payload, detail, timing="", retry=None, malformed=Fa
     error = CliError(redact(message), redact(action), code, payload)
     error.error_code = tag
     error.metadata = {"http_status": status}
+    error.retry_after = stated
     return error
 
 
@@ -869,8 +1228,18 @@ def build_parser():
             "A bare URL or local path infers fetch. "
             "Put --json after the verb (canonical); before the verb also works. "
             "Use capabilities --json for flags, costs, limits, and exits. "
-            "raw -- <vendor args> passes arguments unchanged; request vendor --json. "
-            "monitor and crawl are raw-only; credits scale with work. "
+            "raw -- <vendor args> passes arguments unchanged; add vendor --json for "
+            "research and search, never for crawl or monitor, which print JSON by "
+            "default and reject it. "
+            "monitor and crawl are raw-only; credits scale with work. A raw call whose "
+            "output reports creditsUsed for finished work (job status completed, failed "
+            "or cancelled, or no job status) is charged that; any other raw call holds "
+            "the bounded-crawl reservation (100 credits by default) and counts it as "
+            "spent once the settle window passes. "
+            "Free-first: a call whose keyless answer was probed equivalent tries "
+            "Firecrawl's free keyless tier before spending credits, key or not, and "
+            "runs keyed once if refused (capabilities warnings list them); "
+            "FIRECRAWL_CLI_KEYLESS=0 turns that off. "
             "Exit codes: "
             + "; ".join(f"{k}={v['meaning']}" for k, v in EXIT_CODES.items())
             + ". Exit 3 refuses the session budget; cron callers must alert on it themselves."
@@ -956,10 +1325,13 @@ def build_parser():
         p.epilog = (
             "Injection check " + INJECTION_CHECK + ". Firecrawl may serve recently "
             "indexed content instead of refetching; --max-age 0 forces a live fetch "
-            "and a small --max-age bounds staleness."
+            "and a small --max-age bounds staleness. URLs with summary, markdown, "
+            "links, or html formats, a schema alone, or a question alone, and PDFs to "
+            "summary or markdown, go keyless first and spend no credits; interact "
+            "runs keyed, so refetch with FIRECRAWL_CLI_KEYLESS=0 before interact."
         )
         schema(p)
-        p.add_argument("-Q", "--query", help="question about the content")
+        p.add_argument("-Q", "--query", help="question about the content; answer in data.answer")
     p = verb("shot", "Capture a URL screenshot", "screenshot")
     p.add_argument("target", metavar="url", nargs="+")
     p = verb("act", "Scrape a URL after running browser actions", "scrape")
@@ -1010,7 +1382,8 @@ def build_parser():
     p.add_argument(
         "--categories", metavar="LIST",
         help="comma-separated: " + ", ".join(SEARCH_CATEGORIES)
-        + " (developer is answered by the API directly and needs FIRECRAWL_API_KEY)",
+        + " (developer is answered by the API directly and needs FIRECRAWL_API_KEY; "
+        "the developer verb is the keyless, filtered path)",
     )
     p.add_argument(
         "--sources", metavar="LIST",
@@ -1028,21 +1401,109 @@ def build_parser():
     p.epilog = (
         "Operators: " + SEARCH_OPERATORS + ". Results are titles, URLs, and "
         "descriptions; fetch a chosen URL for its content. The envelope's search_id "
-        "feeds raw -- search-feedback <id> when a result is wrong."
+        "feeds raw -- search-feedback <id> when a result is wrong. Web or images "
+        "sources, github or research categories, and --limit 10 or less go keyless "
+        "first and spend no credits."
+    )
+    p = verb(
+        "gov",
+        "Search US federal, state, and local law: statutes, regulations, codes, "
+        "court opinions, and agency publications (free, keyless)",
+        "free",
+    )
+    p.add_argument("target", metavar="query")
+    p.add_argument("--limit", type=int, help="maximum results (1-100; API default 10)")
+    p.add_argument(
+        "--jurisdiction", metavar="CODE",
+        help="us for federal, or us- plus a two-letter state or territory code, "
+        "for example us-ca or us-dc",
+    )
+    p.add_argument(
+        "--court", metavar="ID",
+        help="one CourtListener court id, for example scotus, ca9, or nysd",
+    )
+    p.add_argument(
+        "--court-type", metavar="TYPE", help="one of: " + ", ".join(GOV_COURT_TYPES)
+    )
+    p.add_argument(
+        "--cites", metavar="CITATION",
+        help='pages citing a printed citation ("42 U.S.C. § 1983", "5 U.S. 137") '
+        "or a citation id (us:usc:42:1983)",
+    )
+    p.add_argument("--domain", metavar="HOST", help="one site, for example irs.gov")
+    p.epilog = (
+        "Answered by POST /v2/search/gov directly: no vendor binary, no key, no "
+        "credits, no ledger reservation. Filters combine with AND and keep only "
+        "pages the index has labeled, so no results does not mean none exist. US "
+        "material only; results can be historical versions, bill text, or "
+        "third-party copies: verify issuer, jurisdiction, and effective status, and "
+        "fetch the source URL before citing. Not legal advice."
+    )
+    p = verb(
+        "developer",
+        "Search the Developer Index: GitHub issues, merged PRs, READMEs, and "
+        "curated docs, with matched passages (keyless first; 2 credits per 10 "
+        "results when it runs keyed)",
+        "search",
+    )
+    p.add_argument("target", metavar="query")
+    p.add_argument("--limit", type=int, help="maximum results (1-100; API default 10)")
+    p.add_argument(
+        "--types", metavar="LIST",
+        help="comma-separated subset of " + ", ".join(DEVELOPER_TYPES)
+        + " (default: all four)",
+    )
+    p.add_argument(
+        "--repos", metavar="LIST",
+        help="comma-separated owner/name slugs; scopes issue, pull_request, and readme results",
+    )
+    p.add_argument(
+        "--sources", metavar="LIST",
+        help=f"comma-separated documentation source ids (at most {DEVELOPER_SOURCES_MAX}); "
+        "scopes doc results",
+    )
+    p.add_argument(
+        "--skills-only", action="store_true",
+        help="search only indexed agent-skill files",
+    )
+    p.add_argument(
+        "--passages", type=int, metavar="N",
+        help=f"matched passages per result (1-{DEVELOPER_PASSAGES_MAX}; API default 1)",
+    )
+    p.add_argument("--language", metavar="NAME", help="repository language, for example Rust")
+    p.add_argument("--topic", metavar="NAME", help="repository topic, for example async")
+    p.add_argument("--license", metavar="NAME", help="repository license, for example MIT")
+    p.add_argument("--min-stars", type=int, metavar="N", help="minimum repository stars")
+    p.add_argument("--max-stars", type=int, metavar="N", help="maximum repository stars")
+    p.add_argument("--archived", metavar="true|false", help="include archived repositories")
+    p.add_argument("--fork", metavar="true|false", help="include forks")
+    p.epilog = (
+        "Answered by POST /v2/search/developer directly: no vendor binary needed. "
+        "Without FIRECRAWL_API_KEY the call is free and outside the ledger at any "
+        "--limit; with the key, --limit 10 or less still tries keyless first, and a "
+        "keyed run costs 2 credits per 10 results, rounded up, reserved and read like "
+        "search. Repository filters (--language, --topic, --license, stars, "
+        "--archived, --fork) without --sources return no doc results by design. "
+        "Results carry doc:, issue:, pull_request:, and readme: ids with markdown "
+        "passages; with no --types they can also carry web: pages (forum threads, "
+        "blogs, docs mirrors). coverage, when the API sends it, says why a type is missing."
     )
     p = verb("map", "Discover URLs on a site", "map")
     p.add_argument("target", metavar="url")
     p.add_argument("--limit", type=int, help="maximum URLs")
     p = verb(
         "raw",
-        "True vendor passthrough; cost unknown; include vendor --json",
+        "True vendor passthrough; charged the reported creditsUsed of finished work, "
+        "else holds the bounded-crawl reservation until it settles; vendor --json for "
+        "research and search, not crawl or monitor",
         "raw-unknown",
     )
     p.add_argument("--allow-code-exec", action="store_true", help="per-call interact code consent; also needs --reason")
     p.add_argument("vendor_args", nargs=argparse.REMAINDER, metavar="-- vendor-args")
     p.epilog = (
         "Writes are reported using a best-effort, non-exclusive "
-        "working-directory snapshot."
+        "working-directory snapshot. raw -- research search-papers and "
+        "search-github go keyless first, outside the ledger."
     )
     verb(
         "capabilities",
@@ -1095,9 +1556,17 @@ def normalize(argv, parser, registry):
                 result[i] = token = "fetch"
             if token not in registry:
                 if token in {"crawl", "monitor"}:
+                    # Vendor crawl and monitor print JSON by default and reject
+                    # --json, so it stays on the wrapper side of the separator.
+                    wrapper_flags = [arg for arg in result[:i] if arg != "--json"]
+                    if "--json" in result:
+                        wrapper_flags.append("--json")
                     raise CliError(
                         f"{token} is raw-only; credits scale with work",
-                        shlex.join(["firecrawl-cli", "raw", "--", *result[i:]]),
+                        shlex.join([
+                            "firecrawl-cli", "raw", *wrapper_flags, "--",
+                            *(arg for arg in result[i:] if arg != "--json"),
+                        ]),
                     )
                 if Path(token).exists() or is_url(token):
                     result.insert(i, "fetch")
@@ -1308,6 +1777,13 @@ def vendor_arguments(args, parser, registry):
     if verb == "raw":
         return "raw", raw_arguments(args, parser, registry)
     target = args.target
+    if verb in API_DIRECT_VERBS:
+        if not target.strip():
+            raise CliError("query must not be empty", f"firecrawl-cli {verb} --help")
+        # Validate every filter and the API base before any ledger or network contact.
+        api_body(args)
+        api_base()
+        return verb, [verb, target]
     if verb in {"fetch", "extract"}:
         if verb == "extract" and not (args.schema or args.schema_file or args.query):
             raise CliError(
@@ -1517,10 +1993,184 @@ def search_filters(args):
 
 
 def uses_api(args):
-    """Only a search naming an API-only category leaves the vendor CLI."""
+    """API-direct verbs and a search naming an API-only category leave the vendor CLI."""
+    if args.verb in API_DIRECT_VERBS:
+        return True
     return args.verb == "search" and bool(
         API_ONLY_CATEGORIES & set(search_filters(args)["categories"])
     )
+
+
+def api_billed(args):
+    """Which API-direct calls touch the ledger: search (always keyed) and
+    developer with a key. gov is free, and keyless developer runs on Firecrawl's
+    keyless allowance with nothing to reserve or read."""
+    if args.verb == "gov":
+        return False
+    if args.verb == "developer":
+        return bool(os.environ.get("FIRECRAWL_API_KEY"))
+    return True
+
+
+def api_path(args):
+    return API_DIRECT_VERBS.get(args.verb, "/v2/search")
+
+
+def api_body(args):
+    if args.verb == "gov":
+        return gov_body(args)
+    if args.verb == "developer":
+        return developer_body(args)
+    return search_body(args)
+
+
+def text_filter(args, flag, verb):
+    """A free-text filter: forwarded as given, but never blank."""
+    value = getattr(args, flag.lstrip("-").replace("-", "_"), None)
+    if value is None:
+        return None
+    if not value.strip():
+        raise CliError(f"{flag} must not be empty", f"firecrawl-cli {verb} --help")
+    return value.strip()
+
+
+def bounded_int(args, flag, verb, low, high):
+    value = getattr(args, flag.lstrip("-").replace("-", "_"), None)
+    if value is not None and not low <= value <= high:
+        raise CliError(
+            f"invalid {flag}: {value} (must be {low}-{high})",
+            f"firecrawl-cli {verb} --help",
+        )
+    return value
+
+
+def comma_list(args, flag, verb):
+    raw = getattr(args, flag.lstrip("-"), None)
+    if raw is None:
+        return None
+    values = [item.strip() for item in raw.split(",")]
+    if any(not item for item in values) or len(set(values)) != len(values):
+        raise CliError(
+            f"invalid {flag} {raw!r}; comma-separated, no blanks, no repeats",
+            f"firecrawl-cli {verb} --help",
+        )
+    return values
+
+
+def gov_body(args):
+    """Validate the shaped Government Index filters client-side and name them as
+    the API does. Court ids and citations are free text the API validates; its
+    400 text surfaces in error.message."""
+    body = {"query": args.target}
+    limit = bounded_int(args, "--limit", "gov", 1, 100)
+    if limit is not None:
+        body["k"] = limit  # /v2/search/gov rejects limit: "Unrecognized key".
+    jurisdiction = text_filter(args, "--jurisdiction", "gov")
+    if jurisdiction is not None:
+        code = jurisdiction.lower()
+        if not re.fullmatch(r"us(-[a-z]{2})?", code):
+            raise CliError(
+                f"invalid --jurisdiction {jurisdiction!r}; use us for federal, or us- "
+                "plus a two-letter state or territory code such as us-ca",
+                "firecrawl-cli gov --help",
+            )
+        body["jurisdiction"] = code
+    court_type = text_filter(args, "--court-type", "gov")
+    if court_type is not None:
+        if court_type not in GOV_COURT_TYPES:
+            raise CliError(
+                f"invalid --court-type {court_type!r}; valid court types: "
+                + ", ".join(GOV_COURT_TYPES),
+                "firecrawl-cli gov --help",
+            )
+        body["courtType"] = court_type
+    for flag in ("--court", "--cites", "--domain"):
+        value = text_filter(args, flag, "gov")
+        if value is not None:
+            body[GOV_FILTERS[flag]] = value
+    return body
+
+
+def developer_body(args):
+    """Validate the shaped Developer Index filters client-side and name them as
+    the API does. Repo slugs and source ids are free text the API validates."""
+    body = {"query": args.target}
+    limit = bounded_int(args, "--limit", "developer", 1, 100)
+    if limit is not None:
+        body["k"] = limit
+    types = comma_list(args, "--types", "developer")
+    if types is not None:
+        unknown = [item for item in types if item not in DEVELOPER_TYPES]
+        if unknown:
+            raise CliError(
+                f"invalid --types {args.types!r}; valid types: " + ", ".join(DEVELOPER_TYPES),
+                "firecrawl-cli developer --help",
+            )
+        body["types"] = types
+    repos = comma_list(args, "--repos", "developer")
+    if repos is not None:
+        body["repos"] = repos
+    sources = comma_list(args, "--sources", "developer")
+    if sources is not None:
+        if len(sources) > DEVELOPER_SOURCES_MAX or any(
+            len(item) > DEVELOPER_SOURCE_CHARS for item in sources
+        ):
+            raise CliError(
+                f"--sources takes at most {DEVELOPER_SOURCES_MAX} ids of up to "
+                f"{DEVELOPER_SOURCE_CHARS} characters each",
+                "firecrawl-cli developer --help",
+            )
+        body["sources"] = sources
+    if args.skills_only:
+        body["skills"] = "only"
+    passages = bounded_int(args, "--passages", "developer", 1, DEVELOPER_PASSAGES_MAX)
+    if passages is not None:
+        body["passages"] = passages
+    for flag in ("--language", "--topic", "--license"):
+        value = text_filter(args, flag, "developer")
+        if value is not None:
+            body[DEVELOPER_FILTERS[flag]] = value
+    for flag in ("--min-stars", "--max-stars"):
+        value = getattr(args, flag.lstrip("-").replace("-", "_"))
+        if value is not None:
+            if value < 0:
+                raise CliError(
+                    f"invalid {flag}: {value} (must be 0 or more)",
+                    "firecrawl-cli developer --help",
+                )
+            body[DEVELOPER_FILTERS[flag]] = value
+    if (
+        body.get("min_stars") is not None and body.get("max_stars") is not None
+        and body["min_stars"] > body["max_stars"]
+    ):
+        raise CliError("--min-stars exceeds --max-stars", "firecrawl-cli developer --help")
+    for flag in ("--archived", "--fork"):
+        value = getattr(args, flag.lstrip("-"))
+        if value is not None:
+            lowered = value.strip().lower()
+            if lowered not in {"true", "false"}:
+                raise CliError(
+                    f"invalid {flag} {value!r}; use true or false",
+                    "firecrawl-cli developer --help",
+                )
+            body[DEVELOPER_FILTERS[flag]] = lowered == "true"
+    return body
+
+
+def search_body(args):
+    filters = search_filters(args)
+    body = {"query": args.target}
+    if args.limit is not None:
+        body["limit"] = args.limit
+    if filters["categories"]:
+        body["categories"] = filters["categories"]
+    if filters["sources"]:
+        body["sources"] = [{"type": source} for source in filters["sources"]]
+    if filters["tbs"]:
+        body["tbs"] = filters["tbs"][0]
+    if args.location:
+        body["location"] = args.location
+    return body
 
 
 def api_base():
@@ -1544,41 +2194,31 @@ def api_preflight(args):
         raise CliError(
             "search --categories developer is answered by the API directly (vendor CLI "
             "1.19.26 rejects the category; firecrawl/cli#222) and needs "
-            "FIRECRAWL_API_KEY in the environment",
-            shlex.join([
-                "firecrawl-cli", "raw", "--json", "--", "research", "search-github",
-                args.target, "--json",
-            ]),
+            "FIRECRAWL_API_KEY in the environment; the developer verb is the keyless, "
+            "filtered path",
+            shlex.join(["firecrawl-cli", "developer", args.target, "--json"]),
         )
     api_base()
 
 
-def invoke_api_search(args, command, timeout):
-    """POST /v2/search for categories the vendor CLI refuses; same envelope,
-    budget, failure shapes, and redaction as the subprocess path."""
-    key = os.environ["FIRECRAWL_API_KEY"]
-    SECRETS.add(key)
-    filters = search_filters(args)
-    body = {"query": args.target}
-    if args.limit is not None:
-        body["limit"] = args.limit
-    if filters["categories"]:
-        body["categories"] = filters["categories"]
-    if filters["sources"]:
-        body["sources"] = [{"type": source} for source in filters["sources"]]
-    if filters["tbs"]:
-        body["tbs"] = filters["tbs"][0]
-    if args.location:
-        body["location"] = args.location
+def invoke_api(path, body, command, timeout, retry, keyless=False):
+    """POST one API path the vendor CLI cannot answer here; same envelope,
+    failure shapes, and redaction as the subprocess path. The key is sent only
+    when the environment holds one and the call is not keyless; the API-direct
+    verbs work without it."""
+    key = None if keyless else os.environ.get("FIRECRAWL_API_KEY")
+    headers = {
+        "Content-Type": "application/json",
+        "User-Agent": "firecrawl-cli/" + VERSION,
+    }
+    if key:
+        SECRETS.add(key)
+        headers["Authorization"] = "Bearer " + key
     timing = f"wrapper --timeout={timeout:g} s; transport=api"
     request = urllib.request.Request(
-        api_base() + "/v2/search",
-        data=json.dumps(body).encode("utf-8"),
-        headers={
-            "Authorization": "Bearer " + key,
-            "Content-Type": "application/json",
-            "User-Agent": "firecrawl-cli/" + VERSION,
-        },
+        api_base() + path,
+        data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
+        headers=headers,
         method="POST",
     )
     try:
@@ -1600,13 +2240,13 @@ def invoke_api_search(args, command, timeout):
             ) from None
         raise CliError(
             f"could not reach the Firecrawl API ({timing}): {redact(str(reason))}",
-            "check network access, then retry: " + args.retry_command, 2,
+            "check network access, then retry: " + retry, 2,
         ) from None
     if 300 <= status < 400:
         location = headers.get("Location") if headers else None
         raise CliError(
             f"the Firecrawl API answered with a redirect (HTTP {status}); the wrapper "
-            "never follows one with the key"
+            "never follows one, so the key cannot travel to another host"
             + (f": {redact(location)}" if location else ""),
             "point FIRECRAWL_API_URL at the API's final address, or unset it for "
             + DEFAULT_API_BASE, 1,
@@ -1623,10 +2263,16 @@ def invoke_api_search(args, command, timeout):
         payload = None
     if payload is None or status >= 400 or not item_succeeded(payload):
         record = payload if isinstance(payload, dict) else {"error": text.strip()[:500]}
-        raise vendor_failure(
-            command, record, detail, timing, args.retry_command,
+        error = vendor_failure(
+            command, record, detail, timing, retry,
             malformed=payload is None and status < 400,
         )
+        if status == 400 and command[0] in API_DIRECT_VERBS:
+            # The API named the bad filter value; the fix is a flag, not account state.
+            error.next_action = (
+                f"fix the filter the API named; flags: firecrawl-cli {command[0]} --help"
+            )
+        raise error
     return redact(payload), []
 
 
@@ -1648,6 +2294,12 @@ def capabilities(registry):
         "parse_extensions": sorted(PARSE_EXTENSIONS),
         "search_categories": list(SEARCH_CATEGORIES),
         "api_only_categories": sorted(API_ONLY_CATEGORIES),
+        "api_direct_verbs": list(API_DIRECT_VERBS),
+        "api_direct_paths": dict(API_DIRECT_VERBS),
+        "gov_filters": dict(GOV_FILTERS),
+        "gov_court_types": list(GOV_COURT_TYPES),
+        "developer_filters": dict(DEVELOPER_FILTERS),
+        "developer_types": list(DEVELOPER_TYPES),
         "search_sources": list(SEARCH_SOURCES),
         "search_tbs": list(TBS_VALUES),
         "search_operators": SEARCH_OPERATORS,
@@ -1665,16 +2317,19 @@ def capabilities(registry):
             "code_mode_available": True,
         },
         "warnings": [
-            "raw is true passthrough; request vendor --json; cost is unknown",
+            "raw is true passthrough; add vendor --json for research and search; vendor crawl and monitor print JSON by default and reject --json; cost is unknown",
             "monitor and crawl are raw-only; credits scale with work",
-            "raw reserves at least the bounded crawl cost; lag-billed holds settle into spent credits",
+            "raw reserves at least the bounded crawl cost; a reported creditsUsed for finished work (job status completed, failed or cancelled, or no job status) replaces the hold and settles as reported; every other raw hold settles into spent credits in full after settle_window",
             "raises increase the session (or unattended day) bucket within a cumulative daily bound",
             "error.code is the wrapper exit code as an integer unless a vendor failure shape matched, then its snake_case tag",
-            "search --categories developer is answered by the API directly and needs FIRECRAWL_API_KEY in the environment; every other category goes through the vendor CLI",
+            "search --categories developer is answered by the API directly and needs FIRECRAWL_API_KEY in the environment; every other category goes through the vendor CLI; the developer verb is the keyless, filtered path with passages",
             "search envelopes carry search_id; raw -- search-feedback <id> reports a wrong result",
             "fetch --max-age 0 forces a live fetch; Firecrawl may otherwise serve recently indexed content",
-            "search --country and the MCP developer search's skills-only filter have no shaped equivalent; --country is raw -- search <q> --country DE --json",
-            "without the vendor firecrawl binary the developer category still runs under the local session and day caps, but the account floor is unchecked",
+            "search --country has no shaped equivalent; it is raw -- search <q> --country DE --json",
+            "gov and developer are API-direct (POST /v2/search/gov and /v2/search/developer): no vendor binary, no key needed; gov is free with no credit read or reservation; developer without FIRECRAWL_API_KEY is keyless at any limit and runs outside the ledger with a degraded note; with the key, limit 10 or less goes keyless first, and a keyed run costs 2 credits per 10 results",
+            "free-first (#2118): with or without FIRECRAWL_API_KEY, an eligible call tries Firecrawl's free keyless tier first, spends no credits, and carries a degraded note starting 'keyless: ' that never wraps plain output (developer keeps its 'keyless developer search:' note, which wraps plain output as it always has). Eligible: fetch or extract of a URL to summary, markdown, links, or html, a schema alone, or a question alone; shot; a PDF to summary or markdown; search over web or images sources and github or research categories with limit 10 or less; developer with limit 10 or less; raw -- research search-papers or search-github. A keyless refusal runs the call keyed once and keeps eligible keyed calls off the keyless tier for its stated window (keyless_cooldown seconds when none is stated, 6 hours at most); without a key the refusal exits 1 as keyless_rate_limited. FIRECRAWL_CLI_KEYLESS=0, a stored vendor login, or a non-default FIRECRAWL_API_URL keeps vendor calls keyed. A keyless fetch's scrape_id may not resolve in keyed interact",
+            "without the vendor firecrawl binary, keyed API-direct calls (search --categories developer, developer with a key) still run under the local session and day caps, but the account floor is unchecked",
+            "gov filters combine with AND over labeled pages only; no results does not mean no law; US material only; verify issuer, jurisdiction, and effective status before citing",
         ],
     }
 
@@ -1787,12 +2442,44 @@ def directory_snapshot():
     return snapshot
 
 
-def invoke_vendor(command, timeout=120, raw=False, retry=None):
+def plain_text_payload(command, stdout, payload, decoded):
+    """Map the vendor's text-only successes (#2123) to payloads; None for anything else.
+
+    A --query answer is text, and may itself be JSON. With an empty answer the
+    vendor prints its document (metadata), envelope (success) or serializer
+    failure (error) instead, so only an object without those keys is an answer.
+    Search reads only undecodable output, so a JSON envelope keeps its own buckets.
+    """
+    text = stdout.strip()
+    options = command[2:]  # command[1] is the target, which may look like a flag
+    if command[0] in {"scrape", "parse"} and "--query" in options:
+        vendor_shape = isinstance(payload, dict) and not {
+            "metadata", "success", "error"
+        }.isdisjoint(payload)
+        if text and not (decoded and vendor_shape):
+            return {"answer": text}, []
+        return None
+    if command[0] == "search" and not decoded and text in {"", VENDOR_NO_RESULTS}:
+        def listed(flag):
+            return options[options.index(flag) + 1].split(",") if flag in options else []
+        sources = listed("--sources") or ["web"]
+        notes = [RESEARCH_BUCKET_NOTE] if "research" in listed("--categories") else []
+        return {"success": True, "data": {source: [] for source in sources}}, notes
+    return None
+
+
+def invoke_vendor(command, timeout=120, raw=False, retry=None, keyless=False):
+    """keyless runs the vendor without the wrapper's credential variables, so it
+    answers from Firecrawl's free keyless tier (#2118); the caller has already
+    checked that no stored vendor login would stand in for them."""
+    env = {k: v for k, v in os.environ.items() if k not in KEYLESS_STRIPPED} if keyless else None
     binary = vendor_binary()
     if binary is None:
         raise CliError(
             "vendor firecrawl is missing from PATH",
-            "Add the mise install to PATH: ~/.local/share/mise/installs/node/<version>/bin/firecrawl",
+            # Nothing in this repo installs the vendor; this is the pinned reinstall (#2105).
+            "reinstall the pinned vendor: pnpm add -g firecrawl-cli@1.19.26; "
+            "pnpm's global bin directory (pnpm bin -g) must be on PATH",
         )
     binary = str(Path(binary).absolute())
     vendor_timeout = "vendor default"
@@ -1811,7 +2498,7 @@ def invoke_vendor(command, timeout=120, raw=False, retry=None):
         if raw:
             response = subprocess.run(
                 [binary, *command], capture_output=True, text=True,
-                errors="replace", timeout=timeout,
+                errors="replace", timeout=timeout, env=env,
             )
         else:
             # KTD3/R9: isolate vendor caches/artifacts; local inputs are absolute.
@@ -1820,7 +2507,7 @@ def invoke_vendor(command, timeout=120, raw=False, retry=None):
             ) as cwd:
                 response = subprocess.run(
                     [binary, *command], capture_output=True, text=True,
-                    errors="replace", timeout=timeout, cwd=cwd,
+                    errors="replace", timeout=timeout, cwd=cwd, env=env,
                 )
     except subprocess.TimeoutExpired as exc:
         detail = exc.stderr or ""
@@ -1846,15 +2533,22 @@ def invoke_vendor(command, timeout=120, raw=False, retry=None):
         raise failure
     detail = redact(response.stderr.strip())
     try:
-        payload = json.loads(response.stdout)
+        payload, decoded = json.loads(response.stdout), True
     except ValueError:
+        payload, decoded = None, False
+    if not raw and not response.returncode:
+        recovered = plain_text_payload(command, response.stdout, payload, decoded)
+        if recovered:
+            (payload, notes), decoded = recovered, True
+            degraded.extend(notes)
+    if not decoded:
         if raw:
             payload = {"text": response.stdout}
         else:
             raise vendor_failure(
                 command, None, detail or response.stdout.strip(), timing, retry,
                 malformed=not response.returncode,
-            ) from None
+            )
     if raw:
         if isinstance(payload, dict):
             payload = {**payload, "exitCode": response.returncode}
@@ -1969,13 +2663,17 @@ def execute(args, parser, registry):
     return surface, payload, degraded
 
 
+RESULT_BUCKETS = ("items", "data", "web", "news", "images", "research", "links", "results")
+
+
 def empty_payload(payload):
+    # Empty only when every bucket present is empty: search with --sources web,news,
+    # or --categories research from 2026-11-16, fills one bucket and leaves web=[] (#2108).
     if payload == []:
         return True
     if isinstance(payload, dict):
-        for key in ("items", "data", "web", "links"):
-            if key in payload and empty_payload(payload[key]):
-                return True
+        buckets = [payload[key] for key in RESULT_BUCKETS if key in payload]
+        return bool(buckets) and all(empty_payload(bucket) for bucket in buckets)
     return False
 
 
@@ -1984,8 +2682,9 @@ def emit(value, stream=sys.stdout):
 
 
 def main(argv=None):
-    global BUDGET
+    global BUDGET, KEYLESS_REFUSED, KEYLESS_UNTIL
     BUDGET = None
+    KEYLESS_REFUSED = KEYLESS_UNTIL = None
     argv = list(sys.argv[1:] if argv is None else argv)
     json_requested = "--json" in argv
     remember_secrets(argv)
@@ -2037,7 +2736,10 @@ def main(argv=None):
                 "hint: empty result; try a broader query or another target",
                 file=sys.stderr,
             )
-        wrapped = args.json or verb == "raw" or code in {1, 2} or result["degraded"]
+        # Keyless routing notes describe where the answer came from, not a gap in it.
+        wrapped = args.json or verb == "raw" or code in {1, 2} or any(
+            not note.startswith(KEYLESS_PREFIX) for note in result["degraded"] or []
+        )
         emit(
             result if wrapped else result["data"],
             sys.stderr if code in {1, 2} and not args.json else sys.stdout,

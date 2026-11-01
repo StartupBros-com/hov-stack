@@ -51,8 +51,21 @@ chain converges without them.
    concluded failure or timed out unless its file is a listed plumbing
    workflow. Then it creates a **draft** release titled `<name> v<version>`
    from the notes file, with the workflow's own `GITHUB_TOKEN`: a draft
-   fires no event, so no App identity is needed here. A tag that already has
-   a release stages nothing and says so. The manifest is read from the
+   fires no event, so no App identity is needed here. A plugin that ships
+   built files (pro-gate's runtime tarball) keeps an executable
+   `plugins/<name>/release/stage-assets.sh`, which stage runs with
+   `RELEASE_TAG` and `RELEASE_VERSION` set and an empty output directory as
+   its argument, before the gate. Every file it writes there is uploaded with
+   the draft. A hook that fails or writes nothing stops the stage. A hooked
+   draft is created as a prerelease, which the reconciler and the migrate
+   never pin, and the flag is cleared only once every asset is confirmed on
+   it. A draft that is still a prerelease after a failed upload, a short
+   upload or an interrupted run is deleted (the tag stays), and a re-run that
+   finds one deletes it and stages again; nothing else is ever deleted, so
+   the delete-draft hazard below cannot arise from staging. A tag that
+   already has any other release stages nothing and says so, unless the
+   plugin has a hook and the release lacks one of its assets; that fails,
+   names them and leaves the release alone. The manifest is read from the
    checkout, never over a raw URL. The draft is a draft because publishing
    fires the announcement, and the announcement must find the card already
    current.

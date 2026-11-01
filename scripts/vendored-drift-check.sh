@@ -22,7 +22,10 @@
 #     name | pinned | upstream-head | status
 #   status is one of: ok (upstream head starts with the pin), MOVED (it does not),
 #   no-pin (no commit found in the file), unreachable (no source parsed, or the gh
-#   call itself failed — network, auth, renamed/deleted repo). MOVED and no-pin are
+#   call itself failed — network, auth, renamed/deleted repo), jsm-nightly (a
+#   `source: jsm <base>` fork, pinned by `base-version:`; jsm-auto-update-wrapper.sh
+#   checks it against `jsm versions` every night, with credentials this script
+#   lacks, so no gh call and no WARN here). MOVED and no-pin are
 #   WARN lines on stderr, same shape as harness-doctor.sh's `warn()`; ok and
 #   unreachable are not, since neither is actionable here (ok needs nothing, and
 #   unreachable is as likely a transient gh/network hiccup as a real problem).
@@ -67,6 +70,14 @@ process_one() {
     "$LOCAL_DIR"/*)   name="plugins/hov-stack/skills/${name#"$LOCAL_DIR"/}" ;;
     "$PATCHES_DIR"/*) name="skills-patches/${name#"$PATCHES_DIR"/}" ;;
   esac
+
+  local jsm_base base_version
+  jsm_base=$(sed -nE '/^source:/{s/^source:[[:space:]]*jsm[[:space:]]+([a-z0-9][a-z0-9-]{0,63})[[:space:]]*$/\1/p;q}' "$upstream_md")
+  if [ -n "$jsm_base" ]; then
+    base_version=$(sed -nE '/^base-version:/{s/^base-version:[[:space:]]*v?([0-9]+)[[:space:]]*$/\1/p;q}' "$upstream_md")
+    printf '%s | %s | - | jsm-nightly\n' "$name" "${base_version:+v$base_version}"
+    return 0
+  fi
 
   local repo_line
   repo_line=$(grep -oE 'github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+' "$upstream_md" | head -1)

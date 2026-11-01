@@ -29,8 +29,12 @@ REAL_HOME = os.path.expanduser("~")
 PROJECT = "11111111-2222-4333-8444-555555555555"
 RECORD_ID = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
 KEY = "re_fixtureKey_0123456789abcdefghij"
+SECOND = "RESEND_API_KEY_SECOND"
+SECOND_RECORD_ID = "bbbbbbbb-cccc-4ddd-8eee-ffffffffffff"
+SECOND_KEY = "re_fixtureSecondKey_9876543210zyx"
+ACCOUNTS = {"alpha": cli.RECORD_NAME, "second": SECOND}
 TOKEN = "0.fixture-bws-machine-token.fixture"
-SECRETS = (KEY, TOKEN)
+SECRETS = (KEY, SECOND_KEY, TOKEN)
 
 FAKE_BWS = """#!/usr/bin/env bash
 D=%s
@@ -542,6 +546,170 @@ class CredentialTests(Base):
         self.assertEqual(self.execs, [])
 
 
+class AccountTests(Base):
+    """--account selects the record; it reaches the vendor in no form. The
+    account names come from the bindings file, never from the tree."""
+
+    def setUp(self):
+        super().setUp()
+        self.bind({cli.RECORD_NAME: {"id": RECORD_ID, "key": cli.RECORD_NAME},
+                   SECOND: {"id": SECOND_RECORD_ID, "key": SECOND}},
+                  extra={"accounts": ACCOUNTS, "default_account": "alpha"})
+
+    def second_reply(self):
+        self.bws_reply({"id": SECOND_RECORD_ID, "key": SECOND, "projectId": PROJECT, "value": SECOND_KEY})
+
+    def test_no_account_resolves_the_default_exactly_as_before(self):
+        for args in (("webhooks", "list"), ("--account", "alpha", "webhooks", "list"), ("--account=alpha", "webhooks", "list")):
+            self.execs.clear()
+            code, _ = self.main(*args)
+            self.assertEqual(code, 0, args)
+            self.assertEqual(self.bws_argv(), ["--color", "no", "secret", "get", RECORD_ID, "-o", "json"], args)
+            argv, env = self.exec_once()
+            self.assertEqual(argv[1:], ["webhooks", "list", "--json"], args)
+            self.assertEqual(env["RESEND_API_KEY"], KEY, args)
+
+    def test_builtin_account_is_main_without_an_accounts_object(self):
+        self.bind({cli.RECORD_NAME: {"id": RECORD_ID, "key": cli.RECORD_NAME}})
+        code, _ = self.main("--account", "main", "webhooks", "list")
+        self.assertEqual(code, 0)
+        self.assertEqual(self.exec_once()[1]["RESEND_API_KEY"], KEY)
+        self.execs.clear()
+        self.assert_error(self.main("--account", "alpha", "webhooks", "list"), "usage", 2)
+        self.assertEqual(self.execs, [])
+
+    def test_second_resolves_only_its_own_record(self):
+        self.second_reply()
+        for args in (
+            ("--account", "second", "webhooks", "list"),
+            ("--account=second", "webhooks", "list"),
+            ("webhooks", "list", "--account", "second"),
+            ("webhooks", "--account", "second", "list"),
+            ("--json", "--account", "second", "webhooks", "list"),
+        ):
+            self.execs.clear()
+            code, _ = self.main(*args)
+            self.assertEqual(code, 0, args)
+            self.assertEqual(self.bws_argv(), ["--color", "no", "secret", "get", SECOND_RECORD_ID, "-o", "json"], args)
+            argv, env = self.exec_once()
+            # Identical to the vendor argv of the same call without --account.
+            self.assertEqual(argv[1:], ["webhooks", "list", "--json"], args)
+            self.assertNotIn("--account", " ".join(argv), args)
+            self.assertNotIn("second", " ".join(argv), args)
+            self.assertEqual(env["RESEND_API_KEY"], SECOND_KEY, args)
+
+    def test_account_after_the_separator_is_a_vendor_operand(self):
+        code, _ = self.main("emails", "get", "em_1", "--", "--account", "second")
+        self.assertEqual(code, 0)
+        self.assertEqual(self.bws_argv()[4], RECORD_ID)
+        argv, env = self.exec_once()
+        self.assertEqual(argv[1:], ["emails", "get", "--json", "em_1", "--", "--account", "second"])
+        self.assertEqual(env["RESEND_API_KEY"], KEY)
+
+    def test_planted_negative_unbound_slot_never_falls_back_to_the_default(self):
+        self.bind({cli.RECORD_NAME: {"id": RECORD_ID, "key": cli.RECORD_NAME}},
+                  extra={"accounts": ACCOUNTS, "default_account": "alpha"})
+        error = self.assert_error(self.main("--account", "second", "webhooks", "list"), "credential_unbound", 3)
+        self.assertEqual((error["account"], error["record"], error["project_id"]), ("second", SECOND, PROJECT))
+        self.assertIn("no fallback to RESEND_API_KEY or another account", error["message"])
+        self.assert_untouched()
+        # The default slot unbound is the same distinct exit, named for its own record.
+        self.bind({SECOND: {"id": SECOND_RECORD_ID, "key": SECOND}},
+                  extra={"accounts": ACCOUNTS, "default_account": "alpha"})
+        error = self.assert_error(self.main("webhooks", "list"), "credential_unbound", 3)
+        self.assertEqual((error["account"], error["record"]), ("alpha", cli.RECORD_NAME))
+        self.assert_untouched()
+
+    def test_planted_negative_swapped_records_are_identity_mismatches(self):
+        self.bws_reply({"id": SECOND_RECORD_ID, "key": cli.RECORD_NAME, "projectId": PROJECT, "value": SECOND_KEY})
+        self.assert_error(self.main("--account", "second", "webhooks", "list"), "bws_identity_mismatch", 1)
+        self.bws_reply({"id": RECORD_ID, "key": SECOND, "projectId": PROJECT, "value": KEY})
+        self.assert_error(self.main("webhooks", "list"), "bws_identity_mismatch", 1)
+        # The default account's record returned for the second binding.
+        self.bws_reply({"id": RECORD_ID, "key": cli.RECORD_NAME, "projectId": PROJECT, "value": KEY})
+        self.assert_error(self.main("--account", "second", "webhooks", "list"), "bws_identity_mismatch", 1)
+        self.assertEqual(self.execs, [])
+
+    def test_planted_negative_unknown_missing_or_repeated_account_is_usage(self):
+        (self.fake_bin / "bws").unlink()
+        for args in (
+            ("--account", "acme", "webhooks", "list"), ("--account=acme", "webhooks", "list"),
+            ("--account=", "webhooks", "list"), ("webhooks", "list", "--account"),
+            ("--account", "--", "webhooks", "list"), ("--account", "ALPHA", "webhooks", "list"),
+            ("--account", "alpha", "--account", "second", "webhooks", "list"),
+            ("--account", "second", "--account=second", "webhooks", "list"),
+            ("--account", KEY, "webhooks", "list"),
+        ):
+            error = self.assert_error(self.main(*args), "usage", 2)
+            self.assertNotIn("acme", error["message"], args)
+        self.assert_untouched()
+
+    def test_bad_accounts_declarations_are_bindings_invalid(self):
+        records = {cli.RECORD_NAME: {"id": RECORD_ID, "key": cli.RECORD_NAME}}
+        for label, extra in {
+            "not an object": {"accounts": ["alpha"]},
+            "empty": {"accounts": {}},
+            "bad name": {"accounts": {"Alpha": cli.RECORD_NAME}, "default_account": "Alpha"},
+            "bad record": {"accounts": {"alpha": "RESEND_API_KEY"}, "default_account": "alpha"},
+            "default not an account": {"accounts": ACCOUNTS, "default_account": "gamma"},
+            "no default": {"accounts": {"alpha": cli.RECORD_NAME}},
+        }.items():
+            self.bind(records, extra=extra)
+            self.assert_error(self.main("webhooks", "list"), "bindings_invalid", 2)
+        self.assert_untouched()
+
+    def test_planted_negative_account_changes_no_tier(self):
+        (self.fake_bin / "bws").unlink()
+        for args, flag in (
+            (("--account", "second", "emails", "send", "--from", "a@b.c", "--confirm-write"), "--confirm-send"),
+            (("--account", "second", "emails", "send", "--from", "a@b.c"), "--confirm-send"),
+            (("--account", "second", "broadcasts", "create", "--name", "n", "--send", "--confirm-write"), "--confirm-send"),
+            (("--account", "second", "contacts", "delete", "c_1", "--confirm-write"), "--confirm-destructive"),
+            (("--account", "second", "webhooks", "update", "w_1"), "--confirm-write"),
+        ):
+            error = self.assert_error(self.main(*args), "confirmation_required", 2)
+            self.assertEqual(error["required_flag"], flag, args)
+        self.assert_error(self.main("--account", "second", "auth", "login"), "unsupported_command", 2)
+        self.assert_error(self.main("--account", "second", "emails", "list", "--profile", "x"), "forbidden_flag", 2)
+        self.assert_untouched()
+
+    def test_confirmed_send_runs_on_the_selected_account(self):
+        self.second_reply()
+        code, _ = self.main("--account", "second", "emails", "send", "--confirm-send", "--from", "a@b.c")
+        self.assertEqual(code, 0)
+        argv, env = self.exec_once()
+        self.assertEqual(argv[1:], ["emails", "send", "--json", "--from", "a@b.c"])
+        self.assertEqual(env["RESEND_API_KEY"], SECOND_KEY)
+
+    def test_help_with_an_account_reads_no_credential(self):
+        code, text = self.main("--account", "second", "--help")
+        self.assertEqual(code, 0)
+        self.assertIn("--account NAME", text)
+        code, _ = self.main("--account", "second", "emails", "list", "--help")
+        self.assertEqual(code, 0)
+        argv, env = self.exec_once()
+        self.assertEqual(argv[1:], ["emails", "list", "--help"])
+        self.assertNotIn("RESEND_API_KEY", env)
+        self.assertFalse(self.bws_called())
+
+    def test_where_reports_every_account_and_takes_no_account(self):
+        self.bind({SECOND: {"id": SECOND_RECORD_ID, "key": SECOND}},
+                  extra={"accounts": ACCOUNTS, "default_account": "alpha"})
+        code, payload = self.main("--where")
+        self.assertEqual(code, 0)
+        where = payload["where"]
+        self.assertEqual(where["default_account"], "alpha")
+        self.assertEqual(sorted(where["accounts"]), ["alpha", "second"])
+        alpha, second = where["accounts"]["alpha"], where["accounts"]["second"]
+        self.assertEqual((alpha["record"], alpha["bound"], alpha["valid"], alpha["error"]), (cli.RECORD_NAME, False, True, "credential_unbound"))
+        self.assertEqual((second["record"], second["bound"], second["record_id"], second["error"]),
+                         (SECOND, True, SECOND_RECORD_ID, None))
+        self.assertEqual(where["binding"], alpha)
+        for args in (("--where", "--account", "second"), ("--account=alpha", "--where"), ("--version", "--account", "alpha")):
+            self.assert_error(self.main(*args), "usage", 2)
+        self.assert_untouched()
+
+
 class VendorTests(Base):
     def test_missing_vendor_is_reported_before_any_credential(self):
         self.install_vendor(cli.VENDOR_PIN, binary=False)
@@ -748,10 +916,13 @@ class SettingsTests(unittest.TestCase):
             "~/.venv/bin/python3 /home/user/hov-stack/bin/resend_cli.py contacts delete c_1 --confirm-destructive",
             "uv run python bin/resend_cli.py domains delete d_1 --confirm-destructive",
             "python3.12 ./bin/resend_cli.py contacts create --confirm-write --email x@y.z",
+            # The account selector changes no rule.
+            "resend-cli --account second emails send --confirm-send --from a@b.c",
+            "resend-cli --account=second contacts delete c_1 --confirm-destructive",
         ):
             self.assertEqual(decide(command, permissions), "ask", command)
         for command in ("resend-cli emails list --limit 5", "resend-cli --where", "resend-cli domains get d_1",
-                        "~/.local/bin/resend-cli emails list"):
+                        "~/.local/bin/resend-cli emails list", "resend-cli --account second webhooks list"):
             self.assertEqual(decide(command, permissions), "prompt", command)
         self.assertFalse([rule for rule in permissions.get("allow", []) if "resend" in rule])
         self.assertFalse([rule for rule in permissions.get("deny", []) if "resend" in rule])

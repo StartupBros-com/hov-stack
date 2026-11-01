@@ -1,0 +1,21 @@
+{
+  "baseUrl": "https://prbot.ai/home",
+  "allowedHosts": ["prbot.ai"],
+  "steps": [
+    {
+      "type": "chapter",
+      "title": "Open the workspace",
+      "description": "Start from the authenticated PRBot dashboard",
+      "durationMs": 1800
+    },
+    {
+      "type": "goto",
+      "path": "/home/example",
+      "waitFor": "networkidle"
+    },
+    {
+      "type": "pause",
+      "durationMs": 1200
+    }
+  ]
+}

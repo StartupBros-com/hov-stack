@@ -1,0 +1,721 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ideation refresh: token-eater's next chapter (surplus-credit harvester → shipped meta-skill)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+  :root{
+    --bg:#0f1115; --surface:#171a21; --surface-2:#1d212b; --line:#2a2f3a;
+    --ink:#e7e9ee; --ink-2:#aab1c0; --ink-3:#7d8597;
+    --accent:#7aa2ff; --accent-soft:#1a2440; --accent-line:#34457a;
+    --good:#5fd0a0; --good-soft:#13302a; --good-line:#205a48;
+    --warn:#e8b765; --warn-soft:#322713; --warn-line:#5e4a1f;
+    --bad:#f08a8a; --bad-soft:#3a1d1f; --bad-line:#6a3236;
+    --radius:10px;
+    --fz:15px;
+    --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+    --sans:"Inter",system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+  }
+  @media (prefers-color-scheme: light){
+    :root{
+      --bg:#f6f7f9; --surface:#ffffff; --surface-2:#f0f2f6; --line:#e0e3ea;
+      --ink:#1a1d24; --ink-2:#4a515f; --ink-3:#727a8a;
+      --accent:#2f5bd6; --accent-soft:#e8eefc; --accent-line:#bcccf4;
+      --good:#1f8a5f; --good-soft:#e1f4ec; --good-line:#a9ddc6;
+      --warn:#9a6b14; --warn-soft:#fbf0d8; --warn-line:#ecd49a;
+      --bad:#bc3a3a; --bad-soft:#fbe6e6; --bad-line:#f0c0c0;
+    }
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    margin:0; background:var(--bg); color:var(--ink);
+    font-family:var(--sans); font-size:var(--fz); line-height:1.62;
+    font-feature-settings:"cv05","ss01";
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:940px; margin-inline:auto; padding:48px 24px 96px}
+  p,li{max-width:72ch}
+  a{color:var(--accent); text-decoration:none}
+  a:hover{text-decoration:underline}
+  code{font-family:var(--mono); font-size:.86em; background:var(--surface-2);
+    border:1px solid var(--line); border-radius:5px; padding:.06em .36em}
+  h1,h2,h3{line-height:1.25; margin:0}
+  .eyebrow{font-size:.72rem; letter-spacing:.13em; text-transform:uppercase;
+    color:var(--accent); font-weight:600; margin-bottom:10px}
+  header.doc h1{font-size:2.05rem; font-weight:700; letter-spacing:-.02em}
+  .meta{display:flex; flex-wrap:wrap; gap:8px; margin-top:18px}
+  .meta .pill{font-size:.78rem}
+  .pill{display:inline-flex; align-items:center; gap:.4em;
+    border:1px solid var(--line); background:var(--surface-2); color:var(--ink-2);
+    border-radius:999px; padding:.22em .7em; font-weight:500; white-space:nowrap}
+  .pill.axis{background:var(--accent-soft); border-color:var(--accent-line); color:var(--accent)}
+  .pill.good{background:var(--good-soft); border-color:var(--good-line); color:var(--good)}
+  .pill.warn{background:var(--warn-soft); border-color:var(--warn-line); color:var(--warn)}
+  .pill.bad{background:var(--bad-soft); border-color:var(--bad-line); color:var(--bad)}
+  .lede{font-size:1.08rem; color:var(--ink-2); margin-top:22px}
+  section{margin-top:52px}
+  h2.sec{font-size:1.32rem; font-weight:700; letter-spacing:-.01em;
+    padding-bottom:10px; border-bottom:1px solid var(--line)}
+  h2.sec .num{color:var(--ink-3); font-weight:600; margin-right:.5em}
+  .note{margin-top:14px; background:var(--surface-2); border:1px solid var(--line);
+    border-left:3px solid var(--accent-line); border-radius:8px; padding:12px 16px;
+    font-size:.9rem; color:var(--ink-2)}
+  .grounding{display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-top:22px}
+  @media (max-width:720px){.grounding{grid-template-columns:1fr}}
+  .gcard{background:var(--surface); border:1px solid var(--line); border-radius:var(--radius); padding:16px 18px}
+  .gcard h3{font-size:.95rem; font-weight:600; margin-bottom:8px}
+  .gcard p, .gcard ul{font-size:.9rem; color:var(--ink-2); margin:.3em 0}
+  .gcard ul{padding-left:18px}
+  .axes{margin-top:20px; display:flex; flex-direction:column; gap:10px}
+  .axis-row{display:flex; gap:12px; align-items:baseline; background:var(--surface);
+    border:1px solid var(--line); border-radius:var(--radius); padding:12px 16px}
+  .axis-row .tag{font-family:var(--mono); font-size:.8rem; color:var(--accent); font-weight:600; min-width:30px}
+  .axis-row .desc{color:var(--ink-2); font-size:.92rem}
+  .axis-row .desc b{color:var(--ink); font-weight:600}
+  .jump{margin-top:22px; background:var(--surface); border:1px solid var(--line);
+    border-radius:var(--radius); padding:14px 18px}
+  .jump .jl{font-size:.72rem; letter-spacing:.1em; text-transform:uppercase; color:var(--ink-3); font-weight:600; margin-bottom:8px}
+  .jump ol{margin:0; padding-left:20px; columns:2; column-gap:28px}
+  @media (max-width:640px){.jump ol{columns:1}}
+  .jump li{margin:.2em 0; font-size:.9rem; break-inside:avoid}
+  article.idea{background:var(--surface); border:1px solid var(--line);
+    border-radius:14px; padding:24px 26px; margin-top:22px; scroll-margin-top:18px}
+  article.idea .top{display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-bottom:6px}
+  .idnum{font-family:var(--mono); font-weight:600; color:var(--accent);
+    background:var(--accent-soft); border:1px solid var(--accent-line);
+    border-radius:7px; padding:.1em .5em; font-size:.86rem}
+  article.idea h3{font-size:1.24rem; font-weight:700; letter-spacing:-.01em; flex:1 1 auto; min-width:60%}
+  .chips{display:flex; flex-wrap:wrap; gap:7px; margin:8px 0 16px}
+  .field{margin:13px 0}
+  .field .lab{font-size:.7rem; letter-spacing:.1em; text-transform:uppercase;
+    color:var(--ink-3); font-weight:600; margin-bottom:3px}
+  .field p{margin:0}
+  .basis{border-left:3px solid var(--accent-line); padding-left:14px}
+  .basis .tagk{font-family:var(--mono); font-size:.8rem; font-weight:600; color:var(--accent)}
+  .downsides{background:var(--warn-soft); border:1px solid var(--warn-line);
+    border-radius:8px; padding:12px 15px}
+  .downsides .lab{color:var(--warn)}
+  .downsides p{color:var(--ink); font-size:.94rem}
+  figure{margin:18px 0 6px; background:var(--surface-2); border:1px solid var(--line);
+    border-radius:10px; padding:18px}
+  figure svg{display:block; width:100%; height:auto}
+  figcaption{font-size:.82rem; color:var(--ink-3); margin-top:10px; text-align:center}
+  .toppick{background:var(--accent-soft); border:1px solid var(--accent-line);
+    border-radius:12px; padding:18px 22px; margin-top:22px}
+  .toppick .lab{font-size:.72rem; letter-spacing:.12em; text-transform:uppercase; color:var(--accent); font-weight:700}
+  .toppick p{margin:.5em 0 0; color:var(--ink)}
+  table{width:100%; border-collapse:collapse; margin-top:20px; font-size:.9rem}
+  th,td{text-align:left; padding:10px 12px; border-bottom:1px solid var(--line); vertical-align:top}
+  th{font-size:.72rem; letter-spacing:.08em; text-transform:uppercase; color:var(--ink-3); font-weight:600}
+  td.r{font-family:var(--mono); color:var(--ink-3); white-space:nowrap}
+  td.idea-name{font-weight:600; color:var(--ink)}
+  tr.fold td.idea-name{color:var(--ink-2); font-weight:500}
+  .st{font-family:var(--mono); font-size:.74rem; font-weight:600; white-space:nowrap; border-radius:6px; padding:.12em .5em; border:1px solid}
+  .st.ship{color:var(--good); background:var(--good-soft); border-color:var(--good-line)}
+  .st.soft{color:var(--warn); background:var(--warn-soft); border-color:var(--warn-line)}
+  .st.drop{color:var(--bad); background:var(--bad-soft); border-color:var(--bad-line)}
+  .st.defer{color:var(--ink-2); background:var(--surface-2); border-color:var(--line)}
+  footer.composition-signal{margin-top:64px; padding-top:18px; border-top:1px solid var(--line);
+    font-size:.8rem; color:var(--ink-3)}
+  .svg-label{font-family:var(--sans); font-size:13px; fill:var(--ink)}
+  .svg-sub{font-family:var(--sans); font-size:11px; fill:var(--ink-2)}
+  .svg-mono{font-family:var(--mono); font-size:11px; fill:var(--ink-2)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="doc">
+  <div class="eyebrow">Compound Engineering · Ideation · Refresh</div>
+  <h1>token-eater's next chapter — the harvester that shipped</h1>
+  <div class="meta">
+    <span class="pill">Refreshed <time datetime="2026-07-11">2026-07-11</time></span>
+    <span class="pill">Originally <time datetime="2026-06-26">2026-06-26</time></span>
+    <span class="pill">Topic <code>token-eater</code> (was <code>surplus-credit-harvester</code>)</span>
+    <span class="pill">Mode repo-grounded · <code>~/SITES/token-eater</code> @ v0.1.1</span>
+  </div>
+  <p class="lede">The original run (below, preserved as history) imagined a piece of standing personal
+  infrastructure: one idempotent loop harvesting about-to-expire credits across every model CLI. That
+  ideation <b>inspired a real project — and the project has since shipped and diverged from it three
+  times over.</b> token-eater is now a distributable House of Vibe skill (v0.1.1): a member types
+  <code>/token-eater</code>, picks a service, and that service runs a whole cleanup skill on
+  <em>its own</em> credits, in an isolated worktree, landing a draft PR token-eater never merges. This
+  refresh re-grounds against what it <em>became</em>, records what happened to the original six ideas,
+  and ranks the <b>strongest next moves given where the product actually is</b> — with its flagship
+  promise (spend visibility) currently broken and its biggest safety and distribution work still open.</p>
+</header>
+
+<div class="note">
+  <b>This is a resume of the 2026-06-26 doc, not a fresh sheet.</b> The original grounding, the six ideas
+  it produced, and its rejection table are carried forward — §02 is an honest ledger of what became of
+  each. The new grounding (§01), refreshed axes (§03), ranked ideas (§04), and cuts (§05) reflect the
+  built reality: a triple pivot from <em>fleet scheduler</em> → <em>meta-skill</em>, from
+  <em>mechanical-chore delegation</em> → <em>recipe-driven whole-skill delegation</em>, and from
+  <em>personal infra</em> → <em>shippable member product</em>.
+</div>
+
+<!-- ===================== GROUNDING ===================== -->
+<section id="grounding">
+  <h2 class="sec"><span class="num">01</span>Grounding Context — what token-eater became</h2>
+  <div class="grounding">
+    <div class="gcard">
+      <h3>The meta-skill, in one breath</h3>
+      <p>You point token-eater at <b>one</b> service (<code>grok</code>/<code>codex</code>/<code>claude</code>)
+      and a token-heavy maintenance skill. <b>That service runs the whole job on its own credits</b> — it
+      loads your installed skills (<code>de-monolithize</code>, <code>de-slopify</code>, <code>ce-*</code>),
+      runs the skill, keeps the gate green, reviews-and-fixes its own work, opens a draft PR. token-eater
+      is the launcher + guardrail: clean worktree off <code>origin/main</code>, hand over one recipe, then
+      <em>independently</em> re-run the gate and make sure nothing merges.</p>
+      <p>Registry-driven: <code>adapters.yaml</code> says it plainly — <i>"There is no posture, tier, or
+      cost-routing engine: you choose the service, and the run loop spends it on any chore the project's
+      own checks can verify."</i></p>
+    </div>
+    <div class="gcard">
+      <h3>The triple pivot from the original doc</h3>
+      <ul>
+        <li><b>Fleet scheduler → meta-skill.</b> PR #12 deliberately collapsed the cross-provider drain
+        loop. Posture / reserve floor / cost-routing were <em>removed</em>, not deferred lightly.</li>
+        <li><b>Chore delegation → recipe delegation.</b> The crown-jewel insight: the service is a full
+        agent that already runs your skills — token-eater doesn't re-implement work, it hands over a recipe.</li>
+        <li><b>Personal infra → HoV member product.</b> A plugin (<code>plugin.json</code>, v0.1.1). A
+        non-technical member types <code>/token-eater</code>, answers a plain-language preflight once, and
+        never sees a flag, gate, or skill name again.</li>
+      </ul>
+    </div>
+    <div class="gcard">
+      <h3>Verification, softened but honest</h3>
+      <p>The original strict rule ("deterministic gate or keep on Claude") became a <b>3-tier confidence
+      ladder</b>: <b>A</b> "tests pass" (<code>test&&typecheck</code>), <b>B</b> "structural checks pass"
+      (<code>typecheck</code>/<code>build</code>/<code>lint</code>), <b>C</b> soft — no gate, so it still
+      runs but the draft PR is loudly labeled "AI-reviewed only — please read before merging."</p>
+      <p>token-eater re-runs the gate <em>itself</em> after the service finishes (self-report never
+      trusted). Review is service-aware: <code>claude</code>→ real <code>/ce-code-review</code>;
+      <code>grok</code>→ persona-file fleet. Layered review (<code>ce-code-review</code> → <code>pro-gate</code>)
+      was proven on token-eater's own code — each tier caught bugs the others missed.</p>
+    </div>
+    <div class="gcard">
+      <h3>The new open problems the original never saw</h3>
+      <ul>
+        <li><b>Spend is invisible on grok</b> (issue&nbsp;#9). The whole pitch is "burn your credits," but
+        grok's headless log emits <em>one</em> usage record (the orchestrator turn); the subagents doing the
+        real work log nothing. The flagship promise is unverifiable for the flagship service.</li>
+        <li><b>Distribution doesn't exist yet.</b> The HoV app has no skill-install mechanism — bundle
+        format, versioning, the <code>ce-*</code> plugin dependency all unresolved.</li>
+        <li><b>The service runs unsandboxed</b> (issue&nbsp;#29). <code>pro-gate</code> twice flagged an OS
+        sandbox as <em>required</em> before untrusted-repo distribution.</li>
+        <li><b>Still in beta</b> (issue&nbsp;#3): <code>disable-model-invocation:true</code> — a human must type it.</li>
+      </ul>
+    </div>
+  </div>
+  <div class="note">
+    <b>Grounding sources.</b> <code>skills/token-eater/SKILL.md</code>, <code>adapters.yaml</code>,
+    <code>skills-catalog.yaml</code>, <code>references/{result-handling,worktree-lifecycle}.md</code>,
+    <code>DISTRIBUTION-READINESS.md</code>, <code>PLAN-adaptive-gate-and-review.md</code>, the merged PR
+    history (#12 simplify, #14 macOS bash-3.2, #16 safety, #17 member-UX, #21 service-authored PRs, #26
+    checkout-safety, #28 runaway backstop), and open issues #3–#11, #29. Load-bearing bases were verified
+    against these files. One drift found in passing: <code>worktree-lifecycle.md</code> still documents
+    copying <code>.env*</code> while <code>DISTRIBUTION-READINESS</code> says <code>.env</code> copying was
+    removed — evidence for idea&nbsp;#7.
+  </div>
+</section>
+
+<!-- ===================== RETROSPECTIVE ===================== -->
+<section id="retro">
+  <h2 class="sec"><span class="num">02</span>What became of the original six</h2>
+  <p style="color:var(--ink-2)">The 2026-06-26 ideas were the Grok adapter's spec. Two weeks and ~16 merged
+  PRs later, most shipped, one was deliberately dropped, and the grand one was simplified away. This is the
+  honest ledger — it is <em>why</em> the new ideas below start where they do.</p>
+  <table>
+    <thead><tr><th>#</th><th>Original idea</th><th></th><th>What actually happened</th></tr></thead>
+    <tbody>
+      <tr>
+        <td class="r">1</td>
+        <td class="idea-name">Surplus-credit harvester — one scheduler, every provider</td>
+        <td><span class="st drop">simplified away</span></td>
+        <td>PR #12 collapsed the fleet scheduler to a meta-skill: one service per run, no posture/reserve/cost-routing. The adapter <em>seam</em> survived (<code>adapters.yaml</code>). The scheduler is now a deferred "power-user phase 2" — cross-repo sweep (#5) and reserve-floor oracle (#4) are its open remnants.</td>
+      </tr>
+      <tr>
+        <td class="r">2</td>
+        <td class="idea-name">Deterministic-gate eligibility + Grok-safe taxonomy</td>
+        <td><span class="st soft">shipped, softened</span></td>
+        <td>Became the 3-tier gate — Tier C now <em>allows</em> gateless runs (labeled) for accessibility, an explicit reversal of "gate or nothing." The taxonomy became <code>skills-catalog.yaml</code> and the plain-language member menu.</td>
+      </tr>
+      <tr>
+        <td class="r">3</td>
+        <td class="idea-name">Clone the Codex harness — worktree, structured, PR-not-merge</td>
+        <td><span class="st ship">shipped +</span></td>
+        <td>Built (<code>run-session.sh</code>, <code>wt.sh</code>, <code>delegate-*.sh</code>). Plus safety the original never listed: never touch the member's checkout (#26), trust gate, repo-string validation, <code>.env</code> not copied (#16), wall-clock runaway backstop (#28).</td>
+      </tr>
+      <tr>
+        <td class="r">4</td>
+        <td class="idea-name">Headless-contract preflight + scope-fenced prompt</td>
+        <td><span class="st ship">shipped +</span></td>
+        <td>Built (<code>check-auth.sh</code>, <code>detect-adapters.sh</code>). Plus a whole dimension it missed: macOS stock <b>bash 3.2</b> + BSD-tools portability (#14) is now a standing pre-distribution checklist item.</td>
+      </tr>
+      <tr>
+        <td class="r">5</td>
+        <td class="idea-name">Per-codebase eval harness + Grok trust ledger</td>
+        <td><span class="st soft">half-built</span></td>
+        <td>The run ledger exists (<code>.token-eater/runs/ledger.jsonl</code>) and independent re-verify + layered review shipped — but the <b>ledger is write-only</b>. The auto-demoting trust ledger / eval calibration was never built. This is the seed of new idea&nbsp;#3.</td>
+      </tr>
+      <tr>
+        <td class="r">6</td>
+        <td class="idea-name">Grok-chores backlog queue (beads-backed)</td>
+        <td><span class="st drop">dropped</span></td>
+        <td>Replaced by auto-discovery: the skill finds its own target on the service's credits (SKILL.md step 4). The curated queue was judged unnecessary for the member flow.</td>
+      </tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ===================== AXES ===================== -->
+<section id="axes">
+  <h2 class="sec"><span class="num">03</span>Topic Axes (refreshed)</h2>
+  <div class="axes">
+    <div class="axis-row"><span class="tag">A1</span><span class="desc"><b>Meta-skill core</b> — the recipe handoff, skill catalog, target selection, review-and-fix rounds, the session boundary itself.</span></div>
+    <div class="axis-row"><span class="tag">A2</span><span class="desc"><b>Trust &amp; safety boundary</b> — the unsandboxed service, OS containment, resource fences, trust gate, prompt-injection surface.</span></div>
+    <div class="axis-row"><span class="tag">A3</span><span class="desc"><b>Verification &amp; confidence</b> — the 3-tier gate, independent re-verify, service-aware review, the member-facing review UX.</span></div>
+    <div class="axis-row"><span class="tag">A4</span><span class="desc"><b>Credit economics &amp; observability</b> — the broken "what did it cost / save" promise, the deferred scheduler remnants.</span></div>
+    <div class="axis-row"><span class="tag">A5</span><span class="desc"><b>Distribution &amp; member experience</b> — HoV packaging, install, the plugin dependency, escaping beta, teaching surface.</span></div>
+    <div class="axis-row"><span class="tag">A6</span><span class="desc"><b>Compounding / learning loop</b> — the write-only ledger, per-repo calibration, recipe learnings capture, cross-run memory.</span></div>
+  </div>
+</section>
+
+<!-- ===================== RANKED IDEAS ===================== -->
+<section id="ideas">
+  <h2 class="sec"><span class="num">04</span>Ranked Ideas — the next chapter</h2>
+
+  <div class="toppick">
+    <div class="lab">Top pick</div>
+    <p><b>#1 — answer "what did this cost me," honestly.</b> token-eater's headline is "burn your credits,"
+    yet for grok, its flagship drain target, the spend line is <em>empty</em>. Fixing this is not a metrics
+    nicety — it is closing the one gap between the product's promise and what a member can actually see.
+    Five independent ideation frames converged here, and the fix is grounded: the ledger already has a
+    <code>spend_estimate</code> slot waiting to be filled. Its natural partners are <b>#2</b> (the sandbox
+    that unblocks distribution) and <b>#3</b> (reading the ledger back so the tool finally compounds).</p>
+  </div>
+
+  <div class="jump">
+    <div class="jl">Jump to</div>
+    <ol>
+      <li><a href="#i1">Answer "what did this cost me," honestly</a></li>
+      <li><a href="#i2">Graduated OS containment, shipped <em>with</em> distribution</a></li>
+      <li><a href="#i3">Close the compounding loop — let merges set the tier</a></li>
+      <li><a href="#i4">Recipe chains — a whole spring-cleaning pass, not six invocations</a></li>
+      <li><a href="#i5">Finish the review step you already tell the human to finish</a></li>
+      <li><a href="#i6">Escape beta by nudging idle credits, not flipping the injection surface</a></li>
+      <li><a href="#i7">Extract the shared delegation core — before three more things fork it</a></li>
+    </ol>
+  </div>
+
+  <!-- IDEA 1 -->
+  <article class="idea" id="i1">
+    <div class="top"><span class="idnum">1</span><h3>Answer "what did this cost me," honestly</h3></div>
+    <div class="chips">
+      <span class="pill axis">A4 · Economics &amp; observability</span>
+      <span class="pill good">Confidence 85%</span>
+      <span class="pill">Complexity Medium</span>
+      <span class="pill good">Top pick · 5-frame convergence</span>
+    </div>
+
+    <div class="field"><div class="lab">Description</div>
+    <p>Stop trying to <em>log</em> a number grok will never emit, and give the member a truthful answer
+    three ways, best-available-first. <b>(a) Weigh the wallet, don't read the receipt:</b> snapshot the
+    account balance immediately before and after the run and report <code>spend = before − after</code>
+    (issue&nbsp;#9's <code>GetGrokCredits</code> reader, made self-contained — no <code>onwatch</code>
+    dependency, since members won't run that daemon). <b>(b) When no balance exists, estimate and label it</b>
+    — a FinOps-style same-run estimate calibrated against <code>claude</code>/<code>codex</code>'s real
+    <code>cost_usd</code> on the same archetype, shown as "≈ comparable to $X," never a blank line, trued-up
+    later if a reader lands. <b>(c) Lead with the number the member actually acts on:</b> a "review receipt"
+    (files × diff size × confidence tier → "5-minute skim / 20-minute read / get a second opinion first"),
+    which every service can compute today. The dollar figure is secondary; the review-time is primary.</p></div>
+
+    <figure>
+      <svg viewBox="0 0 880 214" role="img" aria-label="Three fallbacks for reporting spend: balance delta if a reader exists, else a labeled estimate from cost-per-archetype, and always a review-attention receipt.">
+        <defs>
+          <marker id="ah1" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto" markerUnits="strokeWidth">
+            <path d="M0,0 L7,3 L0,6 Z" fill="#7d8597"/>
+          </marker>
+        </defs>
+        <rect x="14" y="26" width="150" height="52" rx="8" fill="var(--surface)" stroke="var(--line)"/>
+        <text class="svg-label" x="89" y="48" text-anchor="middle">Run finishes</text>
+        <text class="svg-sub" x="89" y="65" text-anchor="middle">need a spend answer</text>
+
+        <polygon points="300,52 380,20 460,52 380,84" fill="var(--accent-soft)" stroke="var(--accent-line)"/>
+        <text class="svg-label" x="380" y="49" text-anchor="middle">balance</text>
+        <text class="svg-label" x="380" y="64" text-anchor="middle">reader?</text>
+        <line x1="164" y1="52" x2="298" y2="52" stroke="#7d8597" marker-end="url(#ah1)"/>
+
+        <rect x="560" y="24" width="304" height="52" rx="8" fill="var(--good-soft)" stroke="var(--good-line)"/>
+        <text class="svg-label" x="575" y="46" fill="var(--good)">(a) before − after = real spend</text>
+        <text class="svg-sub" x="575" y="64">weigh the wallet, not the receipt</text>
+        <line x1="460" y1="52" x2="556" y2="52" stroke="#5fd0a0" marker-end="url(#ah1)"/>
+        <text class="svg-mono" x="508" y="43" text-anchor="middle" fill="var(--good)">yes</text>
+
+        <rect x="560" y="96" width="304" height="46" rx="8" fill="var(--surface)" stroke="var(--warn-line)"/>
+        <text class="svg-label" x="575" y="116" fill="var(--warn)">(b) labeled estimate ≈ $X</text>
+        <text class="svg-sub" x="575" y="132">calibrated on claude and codex cost_usd</text>
+        <path d="M380,84 L380,119 L556,119" fill="none" stroke="#7d8597" marker-end="url(#ah1)"/>
+        <text class="svg-mono" x="396" y="106" fill="var(--ink-3)">no</text>
+
+        <rect x="240" y="158" width="440" height="44" rx="8" fill="var(--accent-soft)" stroke="var(--accent-line)"/>
+        <text class="svg-label" x="460" y="184" text-anchor="middle">(c) always: review receipt — "≈ 5-minute skim"</text>
+        <path d="M380,142 L380,158" fill="none" stroke="#7aa2ff" marker-end="url(#ah1)"/>
+      </svg>
+      <figcaption>Never a blank line. The dollar amount degrades gracefully across three tiers; the review-attention estimate — the thing a member standing in front of a draft PR actually needs — is computed for every run regardless.</figcaption>
+    </figure>
+
+    <div class="field basis"><div class="lab">Basis</div>
+    <p><span class="tagk">direct:</span> <code>DISTRIBUTION-READINESS.md</code> — <i>"Per-run spend is
+    unobservable on grok … the parallel native subagents that do the real work log no token usage … the
+    DONE-block spend line is empty for grok"</i> while <i>"claude and codex delegates DO report
+    <code>cost_usd</code>."</i> <code>result-handling.md</code> already carries a <code>spend_estimate</code>
+    field (currently <code>"unknown"</code>) and an <code>event:"update"</code> enrichment path for a later
+    true-up. <span class="tagk">external:</span> FinOps committed-use burndown reconciles a labeled same-day
+    estimate against the true invoice later; balance-delta metering is how prepaid systems measure
+    consumption when itemized receipts are unavailable.</p></div>
+
+    <div class="field"><div class="lab">Rationale</div>
+    <p>This is the smallest change that makes the product's core claim true. Issue #9's current framing bets
+    everything on one brittle gRPC integration; the three-tier answer ships value now (the estimate and the
+    review receipt need no new API) and folds the reader in as an upgrade, not a blocker. And reframing the
+    "cost" as <em>review attention</em> answers the question the member is actually asking.</p></div>
+
+    <div class="field downsides"><div class="lab">Downsides &amp; the hard part</div>
+    <p>The balance-delta is only clean if no other grok activity overlaps the run window — concurrent use
+    poisons the subtraction, so it needs a "measured during exclusive window" caveat. The estimate's
+    calibration drifts as model pricing changes and must be re-fit. And a wrong-but-confident dollar figure
+    is worse than an honest "estimated" label — the labeling discipline is load-bearing.</p></div>
+  </article>
+
+  <!-- IDEA 2 -->
+  <article class="idea" id="i2">
+    <div class="top"><span class="idnum">2</span><h3>Graduated OS containment, shipped <em>with</em> distribution</h3></div>
+    <div class="chips">
+      <span class="pill axis">A2 · Trust &amp; safety</span>
+      <span class="pill good">Confidence 88%</span>
+      <span class="pill">Complexity High</span>
+      <span class="pill good">Named distribution blocker</span>
+    </div>
+
+    <div class="field"><div class="lab">Description</div>
+    <p><code>--trust-repo</code> is a consent checkbox, not a technical control: once granted, the service
+    (grok <code>--always-approve</code>, claude <code>--allowedTools Bash</code>) and the gate run an
+    <em>unsandboxed</em> shell under the member's OS account — a booby-trapped repo or a model mistake can
+    reach <code>$HOME</code>, credentials, and the network. Do two things. <b>Make the sandbox the default,
+    not a later bolt-on:</b> run every session inside <code>sandbox-exec</code> (macOS) / <code>bwrap</code>
+    (Linux), mirroring codex's <code>workspace-write</code> posture that <em>already</em> models the target,
+    with an explicit named opt-out for the rare gate that needs broad access. <b>Grade containment by
+    repo-risk, biosafety-style:</b> derive a tier from concrete signals (first-run vs Nth-clean-run,
+    <code>--install-deps</code> requested, the member's own repo vs a fresh clone) and let the ledger
+    <em>earn</em> relaxation over clean history — trust becomes evidence-based and reversible, not a
+    permanent yes. Tie the whole thing to a hard rule: <b>the sandbox ships in the same release as the
+    install mechanism</b> — distribution multiplies the blast radius, so they cannot ship apart.</p></div>
+
+    <div class="field basis"><div class="lab">Basis</div>
+    <p><span class="tagk">direct:</span> <code>DISTRIBUTION-READINESS.md</code> — <i>"an OS sandbox around
+    the service + gate is the <b>required hardening before distribution beyond trusted-repo use</b>, and
+    codex (<code>workspace-write</code>) already shows the target posture"</i>; the <code>pro-gate</code>
+    verify-round re-flagged it 2026-07-03; issue #29 pushes even to an OS-level resource fence.
+    <span class="tagk">external:</span> BSL 1–4 biosafety containment assigns level by agent risk and
+    enforces it with engineering controls, not a signed form — the direct analogue to "consent click" vs
+    "kernel boundary."</p></div>
+
+    <div class="field"><div class="lab">Rationale</div>
+    <p>This is the single named item standing between "internal-ready" and "safe for a non-technical member
+    on a repo they cloned from a tutorial." Every other safety item in the readiness doc is done. Shipping
+    the install mechanism first — as currently sequenced — is shipping issue #29 at 10,000× the reach; the
+    biosafety grading is what keeps the safe path fast for repeat users instead of taxing every run forever.</p></div>
+
+    <div class="field downsides"><div class="lab">Downsides</div>
+    <p>A default sandbox breaks legitimate gates that need filesystem or network (the exact reason the trust
+    gate shipped first) — the opt-out and per-ecosystem allowances have to be right or Tier A/B silently
+    degrade. Cross-platform sandboxing (<code>sandbox-exec</code> vs <code>bwrap</code> vs Windows/WSL) is
+    real, bash-3.2-constrained work. And "earned relaxation" needs the ledger read-back from #3 to exist.</p></div>
+  </article>
+
+  <!-- IDEA 3 -->
+  <article class="idea" id="i3">
+    <div class="top"><span class="idnum">3</span><h3>Close the compounding loop — let merges set the tier</h3></div>
+    <div class="chips">
+      <span class="pill axis">A6 · Compounding</span>
+      <span class="pill axis">A3 · Verification</span>
+      <span class="pill good">Confidence 82%</span>
+      <span class="pill">Complexity Medium</span>
+    </div>
+
+    <div class="field"><div class="lab">Description</div>
+    <p>token-eater writes a rich <code>ledger.jsonl</code> after every run — <code>provider</code>,
+    <code>gate_outcome</code>, <code>result_ref</code> (the PR URL), <code>files_modified</code> — and then
+    <b>never reads it back.</b> A tool built by a "compound engineering" practice that doesn't compound its
+    own delegation history is the most on-the-nose gap in the project. Close it: mine the ledger (plus each
+    PR's actual disposition via <code>gh pr view</code> — merged untouched? heavily edited? closed?) to
+    <b>bin every <code>(service, skill, repo)</code> triple by real track record</b>, semiconductor-style,
+    and route three things off that bin — (1) the preflight's <em>"(Recommended)"</em> badge; (2)
+    <em>review depth</em>: a combo with a clean five-run history can fast-track, one that keeps getting
+    rewritten auto-escalates to <code>pro-gate</code> before the PR even opens; (3) <em>discovery</em>: skip
+    a chore already PR'd or gate-failed within N days. The same read-back subsumes issue #10's duplicate-PR
+    problem — the ledger becomes a cross-session claim record ("archetype X on repo Y in flight, run Z"),
+    reusing the <code>flock</code> that already exists, without resurrecting the scheduler PR #12 removed.</p></div>
+
+    <figure>
+      <svg viewBox="0 0 780 180" role="img" aria-label="The write-only ledger becomes a closed loop: run, record outcome and PR disposition, bin the service-skill-repo triple, and route the recommended badge, review depth, and discovery of the next run.">
+        <defs>
+          <marker id="ah3" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto" markerUnits="strokeWidth">
+            <path d="M0,0 L7,3 L0,6 Z" fill="#7aa2ff"/>
+          </marker>
+        </defs>
+        <rect x="34" y="64" width="120" height="48" rx="8" fill="var(--surface)" stroke="var(--line)"/>
+        <text class="svg-label" x="94" y="92" text-anchor="middle">Run + PR</text>
+        <rect x="214" y="64" width="150" height="48" rx="8" fill="var(--surface)" stroke="var(--line)"/>
+        <text class="svg-label" x="289" y="86" text-anchor="middle">Ledger + merge</text>
+        <text class="svg-sub" x="289" y="102" text-anchor="middle">disposition (gh pr view)</text>
+        <rect x="424" y="64" width="120" height="48" rx="8" fill="var(--accent-soft)" stroke="var(--accent-line)"/>
+        <text class="svg-label" x="484" y="86" text-anchor="middle">Bin triple</text>
+        <text class="svg-sub" x="484" y="102" text-anchor="middle">svc×skill×repo</text>
+        <rect x="604" y="64" width="140" height="48" rx="8" fill="var(--good-soft)" stroke="var(--good-line)"/>
+        <text class="svg-label" x="674" y="84" text-anchor="middle">Route next run</text>
+        <text class="svg-sub" x="674" y="99" text-anchor="middle">badge·depth·skip</text>
+
+        <line x1="154" y1="88" x2="210" y2="88" stroke="#7aa2ff" marker-end="url(#ah3)"/>
+        <line x1="364" y1="88" x2="420" y2="88" stroke="#7aa2ff" marker-end="url(#ah3)"/>
+        <line x1="544" y1="88" x2="600" y2="88" stroke="#7aa2ff" marker-end="url(#ah3)"/>
+        <path d="M674,112 L674,150 L94,150 L94,114" fill="none" stroke="#7aa2ff" stroke-dasharray="5 4" marker-end="url(#ah3)"/>
+        <text class="svg-mono" x="384" y="142" text-anchor="middle" fill="var(--accent)">what merged clean earns lighter review · what got rewritten earns more</text>
+      </svg>
+      <figcaption>The ledger already exists and is written every run. The only missing arc is the dashed one — reading it back. That single read-path is the unbuilt half of the original idea #5, and it makes run N+1 measurably smarter than run N.</figcaption>
+    </figure>
+
+    <div class="field basis"><div class="lab">Basis</div>
+    <p><span class="tagk">direct:</span> <code>result-handling.md</code> defines the append-only
+    <code>ledger.jsonl</code> with exactly these fields and an <code>event:"update"</code> path, yet no
+    reference reads it; grounding confirms <i>"the auto-demoting trust ledger / per-codebase eval harness
+    NOT built."</i> <code>worktree-lifecycle.md</code> — <i>"two sessions could independently pick the same
+    chore and open duplicate PRs … a chore-claim file is the planned fix"</i> — and the per-repo
+    <code>flock</code> already exists one hop away. <span class="tagk">external:</span> semiconductor
+    post-fab binning grades rather than scraps, and scales inspection sampling to recent defect history.</p></div>
+
+    <div class="field"><div class="lab">Rationale</div>
+    <p>Every other axis leans on this. #1's true-up wants ledger enrichment; #2's earned sandbox relaxation
+    wants clean-run history; #5's escalation wants a defect signal. Building the read-back once turns the
+    data token-eater already throws away into the engine that makes confidence, safety, and cost all
+    compound — the exact promise the "eater" name has been writing IOUs against since the ledger shipped.</p></div>
+
+    <div class="field downsides"><div class="lab">Downsides</div>
+    <p>Auto-demotion on a tiny sample thrashes — needs a minimum-N floor before a bin influences routing.
+    "Merged untouched" is a noisy proxy for "correct" (a member may merge blind), so PR disposition informs
+    but cannot be the sole signal. And the ledger is per-repo local (<code>.token-eater/</code>, uncommitted),
+    so history evaporates on a fresh clone until #6/distribution gives it somewhere durable to live.</p></div>
+  </article>
+
+  <!-- IDEA 4 -->
+  <article class="idea" id="i4">
+    <div class="top"><span class="idnum">4</span><h3>Recipe chains — a whole spring-cleaning pass, not six invocations</h3></div>
+    <div class="chips">
+      <span class="pill axis">A1 · Meta-skill core</span>
+      <span class="pill warn">Confidence 75%</span>
+      <span class="pill">Complexity Medium</span>
+    </div>
+
+    <div class="field"><div class="lab">Description</div>
+    <p>The session boundary is drawn at "one service, one skill, one PR" — but <code>skills-catalog.yaml</code>
+    holds six independently-gated archetypes that are naturally complementary (de-monolithize a fat module,
+    <em>then</em> remove the dead code the split exposed, <em>then</em> tidy formatting). Redraw the boundary
+    at the <em>worktree</em>, not the archetype: let one session run a short ordered <b>chain</b> of 2–3
+    archetypes in the same worktree, each gated independently before the next begins, closing with <b>one</b>
+    combined draft PR and <b>one</b> combined confidence label — the lowest tier in the chain wins, so honesty
+    is preserved. This turns "spend my grok credits on de-monolithize" into "give my repo a spring-cleaning
+    pass" — which is what a non-technical member actually wants, and it re-uses the expensive worktree +
+    dependency-install setup across all three steps instead of paying it three times.</p></div>
+
+    <div class="field basis"><div class="lab">Basis</div>
+    <p><span class="tagk">direct:</span> <code>SKILL.md</code> — <i>"A token-eater run is one session: one
+    service, one skill, one polished draft PR"</i> — set against <code>skills-catalog.yaml</code>, whose six
+    model-exec archetypes each carry their own gate and are sequentially compatible (dead-code's gate is
+    "removed symbols have no references"; de-monolithize's is "full suite passes unchanged" — composable in
+    that order). <span class="tagk">reasoned:</span> the per-session cost (worktree, dep install, preflight,
+    review dispatch) is fixed overhead amortized better across a chain; the only new logic is sequencing +
+    a lowest-tier-wins combiner.</p></div>
+
+    <div class="field"><div class="lab">Rationale</div>
+    <p>It reframes token-eater from "a chore runner" to "a cleanup crew" — the difference a member feels. It
+    also spends surplus credits more completely in one drain (the original doc's whole point), and it stays
+    inside the shipped safety model: each step still gates independently, still lands as a draft PR, still
+    never merges.</p></div>
+
+    <div class="field downsides"><div class="lab">Downsides</div>
+    <p>A mid-chain gate failure needs a clean policy — ship the steps that passed, or roll the whole chain?
+    A combined PR is harder to review than three focused ones (partly why the current boundary exists), so
+    the PR body must clearly segment "what each step did." And chains multiply run time and blast radius,
+    which raises the stakes on #2's sandbox.</p></div>
+  </article>
+
+  <!-- IDEA 5 -->
+  <article class="idea" id="i5">
+    <div class="top"><span class="idnum">5</span><h3>Finish the review step you already tell the human to finish</h3></div>
+    <div class="chips">
+      <span class="pill axis">A3 · Verification</span>
+      <span class="pill good">Confidence 78%</span>
+      <span class="pill">Complexity Medium</span>
+    </div>
+
+    <div class="field"><div class="lab">Description</div>
+    <p>Two gaps sit at the review step, both aimed at the exact non-technical member the rest of the design
+    protects. First: <code>SKILL.md</code>'s final instruction tells the <em>human</em> to go do more work —
+    <i>"for your own peace of mind, run a fresh <code>/ce-code-review</code> … before merging"</i> — a manual
+    step that only happens if they remember the sentence. Fold it in: run that independent cross-model pass
+    (<code>pro-gate</code> or a second-model review) as the actual last step of <code>run-session.sh</code>
+    for Tier A/B, before the PR is shown, so "the service reviewed its own work" is never the final state.
+    Second: the moment the PR opens, that same member is handed a <em>raw unified diff</em> and a slash
+    command — the single highest-jargon moment in the whole flow. Replace it with the primitive the onboarding
+    already uses: walk them through the top N hunks conversationally (<code>AskUserQuestion</code>:
+    keep / revert / explain), and the PR takes its final shape only after that dialogue.</p></div>
+
+    <div class="field basis"><div class="lab">Basis</div>
+    <p><span class="tagk">direct:</span> <code>SKILL.md</code> step 6 hands the member an independent-review
+    homework assignment and a raw diff — directly contradicting its own Audience-first framing that the
+    member <i>"does NOT know what a gate, a flag, a parameter … is."</i> <code>DISTRIBUTION-READINESS.md</code>
+    proves the extra pass earns its keep: <i>"layered review … each tier caught complementary bugs the others
+    missed."</i> <span class="tagk">reasoned:</span> a 3-tier gate and independent re-verify are worthless as
+    <em>member-facing</em> safety if the member's actual last check is "read a diff" the product says they
+    can't read.</p></div>
+
+    <div class="field"><div class="lab">Rationale</div>
+    <p>token-eater's whole trust story is "we prove it, honestly." Right now the proof has a hole where the
+    strongest check is optional-if-remembered and the member-facing check regresses to jargon. Closing both
+    makes the safety real for the audience it's built for — and the conversational review doubles as the
+    plainest possible answer to #1's "how carefully do I need to read this?"</p></div>
+
+    <div class="field downsides"><div class="lab">Downsides</div>
+    <p>An always-on <code>pro-gate</code> pass adds latency and (on paid tiers) cost to every run — it may
+    belong behind a "high-stakes only" trigger keyed to #3's bin. Conversational hunk review is a real UX
+    build, and for a large diff "top N hunks" risks lulling the member past the ones that matter — hunk
+    selection has to be risk-ranked, not size-ranked.</p></div>
+  </article>
+
+  <!-- IDEA 6 -->
+  <article class="idea" id="i6">
+    <div class="top"><span class="idnum">6</span><h3>Escape beta by nudging idle credits, not flipping the injection surface</h3></div>
+    <div class="chips">
+      <span class="pill axis">A5 · Distribution &amp; UX</span>
+      <span class="pill warn">Confidence 72%</span>
+      <span class="pill">Complexity Medium</span>
+    </div>
+
+    <div class="field"><div class="lab">Description</div>
+    <p>Issue #3 ("promote out of <code>disable-model-invocation</code> beta") reads like a binary switch —
+    but flipping it globally lets <em>any</em> installed skill hand off to token-eater's unsandboxed,
+    credit-burning, PR-opening shell, reopening the exact injection surface issue #29 is trying to close. The
+    real gap is narrower: a member with idle, about-to-expire credits who simply doesn't remember to type
+    <code>/token-eater</code>. Solve <em>that</em> instead. Surface the already-shipped
+    <code>schedule-install.md</code> path as an <b>opt-in idle-credit nudge</b> — a cron/Stop-hook trigger
+    that <em>still asks</em> ("your grok credits reset in 2 days and you've got a backlog — run a cleanup?"),
+    never silently executing — and gate any true autonomy on <em>per-repo earned trust</em> (a repo already
+    <code>--trust-repo</code>'d with a clean ledger history from #3), not a global flag flip.</p></div>
+
+    <div class="field basis"><div class="lab">Basis</div>
+    <p><span class="tagk">direct:</span> issue #3 and <code>references/schedule-install.md</code> (the
+    recurring-schedule capability already exists, cited in SKILL.md's reference map); issue #29 and the
+    unsandboxed-shell admission are why a naive flag flip is unsafe. <span class="tagk">reasoned:</span> the
+    obvious fix ("<code>disable-model-invocation:false</code>") maximizes new attack surface to solve a
+    "member forgot" problem; a nudge gets ~90% of the value (token-eater runs without the member remembering)
+    with none of the arbitrary-skill-handoff exposure.</p></div>
+
+    <div class="field"><div class="lab">Rationale</div>
+    <p>Adoption, not features, decides whether this product matters — and adoption dies on "the member forgot
+    the tool exists." The nudge is the honest bridge out of beta: it makes idle credits get spent without
+    handing the keys to every skill on the machine, and it composes with #1 (the nudge can quote "you left
+    ≈$X of grok on the table last week").</p></div>
+
+    <div class="field downsides"><div class="lab">Downsides</div>
+    <p>A credit nudge is an outbound interruption — get the frequency wrong and it's spam a member disables.
+    It needs a real "credits about to expire" signal, which circles back to #1's observability gap (grok's is
+    the weakest). And a background trigger on an unsandboxed tool still wants #2 shipped first before it runs
+    anything without a human present.</p></div>
+  </article>
+
+  <!-- IDEA 7 -->
+  <article class="idea" id="i7">
+    <div class="top"><span class="idnum">7</span><h3>Extract the shared delegation core — before three more things fork it</h3></div>
+    <div class="chips">
+      <span class="pill axis">A1 · Meta-skill core</span>
+      <span class="pill axis">A2 · Safety</span>
+      <span class="pill good">Confidence 85%</span>
+      <span class="pill">Complexity Low–Medium</span>
+    </div>
+
+    <div class="field"><div class="lab">Description</div>
+    <p>Safety-critical behavior — trust-gate enforcement, <code>.env</code> scrubbing, repo-string
+    validation, the wall-clock runaway backstop, ledger writes — currently lives duplicated across
+    <code>delegate-grok.sh</code>, <code>delegate-codex.sh</code>, and <code>delegate-claude.sh</code>. Do
+    the issue #7 extraction into one audited delegation library <em>now</em>, because three big pending
+    items each carry an implicit "× N delegate scripts" tax: the sandbox fence (#29/#2), the balance reader
+    (#9/#1), and the cursor/gemini adapters (#6). Land the shared core first and each becomes a 1× change
+    instead of a 3× hand-threaded patch that can silently miss one adapter.</p></div>
+
+    <div class="field basis"><div class="lab">Basis</div>
+    <p><span class="tagk">direct:</span> open issue #7 ("extract shared delegation library from
+    <code>delegate-*.sh</code>"); commit <code>c3432f4</code> ("working claude delegate, bash-3.2 grok
+    delegate") shows safety fixes landing per-adapter, one at a time, in practice. The live proof:
+    <code>worktree-lifecycle.md</code> still documents copying <code>.env*</code> while
+    <code>DISTRIBUTION-READINESS</code> says <code>.env</code> copying was <em>removed</em> — an invariant
+    that already drifted between two places. <span class="tagk">reasoned:</span> a safety property is only as
+    strong as its weakest re-implementation; three copies is three chances to regress one while "fixing"
+    another.</p></div>
+
+    <div class="field"><div class="lab">Rationale</div>
+    <p>The least glamorous idea here and the highest-leverage sequencing move. It's not a feature — it's the
+    thing that makes the next three features cheap and the safety story trustworthy. A strong team looks at
+    "when the sandbox lands, does it touch one file or three?" and does this first.</p></div>
+
+    <div class="field downsides"><div class="lab">Downsides</div>
+    <p>Pure refactor with no member-visible payoff, so it's easy to skip under feature pressure — exactly
+    when the drift bites. The three adapters have genuinely different exec shapes (grok's soft schema, codex's
+    <code>workspace-write</code>, claude's permission modes), so the shared core must abstract without
+    flattening those real differences. And it must stay bash-3.2-clean.</p></div>
+  </article>
+</section>
+
+<!-- ===================== REJECTION ===================== -->
+<section id="rejected">
+  <h2 class="sec"><span class="num">05</span>Rejection Summary</h2>
+  <p style="color:var(--ink-2)">Thirty-nine raw candidates across five frames (pain, inversion, leverage,
+  cross-domain analogy, assumption/constraint-flipping); load-bearing bases were verified against the
+  repo files before this cut. Most rejects were <em>folded</em> into a survivor as a sub-mechanism rather
+  than being wrong. All six axes retained at least one survivor — no coverage gaps. The original 2026-06-26
+  rejection table is preserved in this file's history and superseded by §02 (its ideas have since resolved).</p>
+  <table>
+    <thead><tr><th>Candidate</th><th>Disposition &amp; reason</th></tr></thead>
+    <tbody>
+      <tr class="fold"><td class="idea-name">Structural chore-claim lock (issue #10)</td><td><b>Folded into #3.</b> The ledger read-back naturally skips in-flight chores; the existing per-repo <code>flock</code> becomes the claim primitive. Not a standalone direction.</td></tr>
+      <tr class="fold"><td class="idea-name">The recipe learns — per-(service,skill) failure-modes preamble</td><td><b>Folded into #3.</b> Same compounding substrate (ledger + learnings); injecting caught-mistake lines into the next recipe is one expression of the loop, sharing the read-back mechanism.</td></tr>
+      <tr class="fold"><td class="idea-name">Adaptive review rounds (convergence-based, not fixed <code>--rounds 2</code>)</td><td><b>Folded into #5.</b> A mechanism inside the review step — iterate while findings shrink, lean on the PR #28 backstop. Tactical, not a direction on its own.</td></tr>
+      <tr class="fold"><td class="idea-name">Bundle the <code>ce-*</code> review fleet in the box (appliance model)</td><td><b>Folded into distribution.</b> Real (the plugin dep silently degrades review), but a packaging decision inside the already-tracked DELIVERY workstream, and a premise of #5. Ship review at full strength by construction when the bundle lands.</td></tr>
+      <tr><td class="idea-name">Ship-then-ask — zero-question first run, correct on the PR</td><td><b>Rejected (downgraded).</b> Contradicts the deliberate member-first "ask once, persist" design; running the wrong task on the wrong service unprompted is the worst place to be wrong — a member's first impression. Its good part (per-repo autonomy) lives in #6.</td></tr>
+      <tr><td class="idea-name">Adapter "mystery-shopper" canary — periodic contract re-verification</td><td><b>Deferred → #7.</b> Guards against <code>adapters.yaml</code> drift (grok's schema is already flagged SOFT), but it belongs in the shared delegation core and earns its keep once a 4th adapter (#6) lands.</td></tr>
+      <tr><td class="idea-name">Expiry-calendar cross-repo sweep (no balance feed)</td><td><b>Deferred to power-user phase 2.</b> Cleverly recovers the deferred cross-repo sweep (#5) without reviving the scheduler, ordering repos by a member-entered reset date. Scope-creep before single-repo maturity; noted as #5's safe re-entry path.</td></tr>
+      <tr><td class="idea-name">The draft PR is the lesson — PR body links the HoV course/vault</td><td><b>Deferred.</b> Charming, and merges two backlog items (PR descriptions + course content), but presupposes HoV course/vault content that doesn't exist yet. Revisit once distribution + teaching surface land; a strong enhancement to #6's work.</td></tr>
+      <tr><td class="idea-name">Fix the cold-run experience first (issue #11)</td><td><b>Acknowledged, not ranked.</b> Dry-run defaults, <code>gh pr</code> robustness, detector false-positives — real prerequisite hygiene gating first impressions, but a bug-fix backlog item below the meeting-test as an ideation direction.</td></tr>
+      <tr><td class="idea-name">Cross-member fleet-scale recipe telemetry</td><td><b>Rejected (premature).</b> <code>reasoned:</code>-only basis, privacy-heavy, presupposes a member fleet that doesn't exist yet. Interesting once distribution is real — better as a brainstorm variant then, not a build now.</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<footer class="composition-signal">
+  Refreshed 2026-07-11 by ce-ideate (compound-engineering) as a resume of the 2026-06-26 surplus-credit-harvester
+  ideation. Repo-grounded over <code>~/SITES/token-eater</code> @ v0.1.1 (16 merged PRs, open issues #3–#29).
+  5-frame divergent fleet · 7 survivors of 39 raw candidates · load-bearing bases verified against
+  <code>SKILL.md</code>, <code>adapters.yaml</code>, <code>skills-catalog.yaml</code>,
+  <code>result-handling.md</code>, <code>worktree-lifecycle.md</code>, <code>DISTRIBUTION-READINESS.md</code> ·
+  run <code>a3f9c1d7</code>. The original doc's six ideas, grounding, and rejection table are carried forward
+  in §01–§02.
+</footer>
+
+</div>
+</body>
+</html>

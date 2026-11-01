@@ -13,6 +13,12 @@ Scope is deliberately an allowlist, not an estate-wide scan: 15+ unrelated
 skills cite beads_rust as an example/corpus codebase (EXEMPLARS, session
 evidence), which is fine and must not be flagged.
 
+These skills keep upstream's text and skills-localize.sh adds a
+local-tooling note after the frontmatter that maps every beads command to
+gh. A scoped skill whose SKILL.md carries that note is listed under "noted"
+and not scanned; one without it is scanned as before, so a CRITICAL now means
+the note is missing (the layer is off).
+
 Usage: skills-beads-sweep-check.py [--skills-dir PATH] [--json] [--gate]
   --gate  exit 1 if critical_count > 0 (PR completion proof); default exit 0
           so harness-doctor (which parses the JSON) never sees a hard failure.
@@ -43,6 +49,7 @@ CMD_RE = re.compile(
     r"|bd (onboard|ready|show|update|close|sync))"
     r"(?:[^A-Za-z0-9_-]|$)"
 )
+NOTE_MARKER = "> **Local tooling on this machine.**"  # skills-localize.sh MARKER
 ARRAY_OPEN_RE = re.compile(r"(REFERENCED_SKILLS|REFERENCED)\s*=\s*\(")
 LINK_RE = re.compile(r"\]\(([^)]*beads[^)]*)\)", re.IGNORECASE)
 SUPPRESS_RE = re.compile(r"retired|superseded", re.IGNORECASE)
@@ -111,6 +118,16 @@ def scan_file(path):
     return findings
 
 
+def has_note(skill_dir):
+    try:
+        with open(
+            os.path.join(skill_dir, "SKILL.md"), encoding="utf-8", errors="replace"
+        ) as f:
+            return any(line.startswith(NOTE_MARKER) for line in f)
+    except OSError:
+        return False
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument(
@@ -124,10 +141,14 @@ def main():
     args = ap.parse_args()
 
     files = []
+    noted = []
     critical = warn = 0
     for skill in SCOPE:
         skill_dir = os.path.join(args.skills_dir, skill)
         if not os.path.isdir(skill_dir):
+            continue
+        if has_note(skill_dir):
+            noted.append(skill)
             continue
         for root, _dirs, names in os.walk(skill_dir):
             if os.sep + ".trash" + os.sep in root + os.sep:
@@ -147,6 +168,7 @@ def main():
 
     report = {
         "scope": SCOPE,
+        "noted": noted,
         "files": files,
         "critical_count": critical,
         "warn_count": warn,
@@ -156,7 +178,7 @@ def main():
     else:
         print(
             f"skills-beads-sweep-check: {critical} CRITICAL, {warn} WARN "
-            f"across {len(SCOPE)} scoped skills"
+            f"across {len(SCOPE)} scoped skills ({len(noted)} noted, not scanned)"
         )
         for entry in files:
             print(f"  {entry['path']}")

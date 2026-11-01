@@ -386,6 +386,45 @@ class RunAffectedSuitesTests(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
         self.assertNotIn("UMASK_MARKER", proc.stdout)
 
+    def test_free_disk_under_the_floor_refuses_before_any_suite_runs(self) -> None:
+        # Parallel suites filled the disk, a mktemp failed, and a suite that
+        # missed it deleted /home. No filesystem has an exabyte free.
+        self.repo.keep_steps("alpha", "gamma")
+        proc = self.repo.run("--min-free-mb", str(10**12))
+        self.assertEqual(proc.returncode, 2, proc.stdout + proc.stderr)
+        self.assertIn("affected-suites: refusing to start: /tmp (/tmp) has ", proc.stderr)
+        self.assertIn(f"under the {10**12} MB floor", proc.stderr)
+        self.assertIsNone(self.repo.track_scratch(proc.stdout), proc.stdout)
+        self.assertEqual(self.repo.calls_text(), "")
+
+    def test_the_env_floor_applies_and_the_flag_overrides_it(self) -> None:
+        self.repo.keep_steps("alpha", "gamma")
+        env = {**self.repo.env(), "AFFECTED_SUITES_MIN_FREE_MB": str(10**12)}
+        for extra, rc in (((), 2), (("--min-free-mb", "0"), 0)):
+            proc = subprocess.run(
+                self.repo.args(*extra),
+                cwd=self.repo.root,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.repo.track_scratch(proc.stdout)
+            self.assertEqual(proc.returncode, rc, proc.stdout + proc.stderr)
+        self.assertEqual(self.repo.calls_text().count("alpha ran"), 1)
+        # A value that is not a number is a usage error, not a skipped check.
+        proc = subprocess.run(
+            self.repo.args(),
+            cwd=self.repo.root,
+            env={**self.repo.env(), "AFFECTED_SUITES_MIN_FREE_MB": "lots"},
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(proc.returncode, 2, proc.stdout + proc.stderr)
+        self.assertIn("--min-free-mb: invalid int value: 'lots'", proc.stderr)
+        self.assertEqual(self.repo.calls_text().count("alpha ran"), 1)
+
     def test_a_suite_reading_ci_exported_env_is_reported_not_run(self) -> None:
         # dotfiles#1598: a step appending to $GITHUB_ENV is CI's own; a suite
         # reading what it exports would run here without it and read red.

@@ -32,6 +32,18 @@ for target in args[1:]:
     if target in control.get("targets", {}):
         rule = control["targets"][target]
         break
+# A rule's "keyless" sub-rule answers the wrapper's keyless leg, which strips
+# the key from this process's environment (#2118). The optional env log records
+# which credentials each call saw, never their values.
+if os.environ.get("FIRECRAWL_TEST_ENV_LOG"):
+    with open(os.environ["FIRECRAWL_TEST_ENV_LOG"], "a", encoding="utf-8") as log:
+        log.write(json.dumps({
+            "argv": args,
+            "key": "FIRECRAWL_API_KEY" in os.environ,
+            "url": "FIRECRAWL_API_URL" in os.environ,
+        }) + "\n")
+if "FIRECRAWL_API_KEY" not in os.environ and isinstance(rule.get("keyless"), dict):
+    rule = rule["keyless"]
 # Inputs must still resolve when the wrapper changes the vendor's cwd.
 if args[0] == "parse":
     assert Path(args[1]).is_file()

@@ -1,0 +1,569 @@
+#!/usr/bin/env python3
+"""Paired comparison of two probe runs (Unit 9.6). Python 3 stdlib only.
+
+The swap gate used to be one line: `confirmed(candidate) >= confirmed(
+incumbent)` on raw totals. That rule cannot express "we could not tell", so
+it always answers, and on a noisy measurement roughly half those answers are
+luck. It demonstrably was: the same two doctrines failed that rule at n=1 on
+a margin of 2 and passed it at n=6 on a margin of 2.
+
+This module pairs the two runs by document -- the only comparison that
+controls for documents simply differing in how many defects they contain --
+and reports the difference with an interval around it. The verdict is one of:
+
+- ``better``        the 95% interval excludes zero on the high side
+- ``worse``         the interval sits entirely past the margin: even its
+                    optimistic bound is a regression larger than delta
+- ``not_worse``     the interval's lower bound sits above -delta, i.e. any
+                    regression is smaller than the margin you declared
+                    tolerable (a non-inferiority claim, not an equality one)
+- ``inconclusive``  none of the above: the run does not license a claim
+
+A regression can be confirmed (the interval excludes zero) while still
+smaller than the declared margin; that case is ``not_worse`` with
+``regression_confirmed`` set, because the margin is the claim the caller
+asked to test. The first version anchored ``worse`` at zero instead of
+-delta, which failed the gate on regressions the caller had declared
+tolerable; a 2026-08-08 statistics review caught it, and the fix
+reclassifies one banked verdict (swapgate3: worse -> inconclusive with
+regression confirmed -- the data did not move, the label did).
+
+``delta`` is the non-inferiority margin, in confirmed findings per document,
+and it is an argument rather than a constant because it is a judgment about
+what regression would matter, not a fact about the data.
+
+When a run is inconclusive, ``n_for_delta`` estimates the document count that
+would have resolved it at the observed variance -- so "collect more" is a
+number, not a shrug.
+"""
+
+from __future__ import annotations
+
+import json
+import math
+import random
+import statistics
+from pathlib import Path
+from typing import Any, Mapping, Sequence
+
+import provenance
+
+# Two-tailed 95% critical values. A t-table beats pulling in scipy for one
+# number, and beats pretending n=6 is normal: at 5 degrees of freedom the
+# correct multiplier is 2.571, not 1.96, and using the latter would narrow
+# every small-sample interval by a quarter.
+_T95 = {
+    1: 12.706, 2: 4.303, 3: 3.182, 4: 2.776, 5: 2.571, 6: 2.447, 7: 2.365,
+    8: 2.306, 9: 2.262, 10: 2.228, 11: 2.201, 12: 2.179, 13: 2.160, 14: 2.145,
+    15: 2.131, 16: 2.120, 17: 2.110, 18: 2.101, 19: 2.093, 20: 2.086,
+    21: 2.080, 22: 2.074, 23: 2.069, 24: 2.064, 25: 2.060, 26: 2.056,
+    27: 2.052, 28: 2.048, 29: 2.045, 30: 2.042,
+}
+_T95_LARGE = 1.96
+
+MIN_DOCUMENTS = 3
+
+
+class ComparisonError(ValueError):
+    """Raised when two runs cannot be honestly compared: different documents,
+    too few of them, or a different model behind each side."""
+
+
+def t_critical_95(df: int) -> float:
+    if df < 1:
+        raise ComparisonError("need at least two documents to form an interval")
+    return _T95.get(df, _T95_LARGE)
+
+
+def n_to_resolve(
+    mean: float, sd: float, delta: float, *, max_n: int = 500
+) -> int | None:
+    """Smallest document count at which a non-inferiority claim would clear,
+    holding the observed mean and spread.
+
+    The bound is ``mean - t*sd/sqrt(n) > -delta``, so how much data it takes
+    depends on where the point estimate already sits, not on the spread
+    alone. Sizing from spread alone can return a number *below* the n already
+    collected -- which reads as "gather fewer documents" and is nonsense.
+    That is what the first version of this did: n=16, verdict inconclusive,
+    and it advised 12.
+
+    Returns None when ``mean`` is already at or past ``-delta``: no sample
+    size rescues a point estimate that is itself worse than the margin, and
+    printing a number would promise otherwise.
+    """
+    if mean <= -delta:
+        return None
+    if sd <= 0:
+        return 3
+    for candidate in range(3, max_n + 1):
+        if mean - t_critical_95(candidate - 1) * sd / math.sqrt(candidate) > -delta:
+            return candidate
+    return None
+
+
+def exact_sign_test_p(won: int, lost: int) -> float | None:
+    """Two-sided exact binomial p-value on the win/loss record, ties dropped.
+
+    A distribution-free companion to the t-interval: it reads only the signs
+    of the diffs, so a single outlier document stretching the variance cannot
+    move it. Reported beside the interval, never instead of it -- when the
+    two disagree, the t-interval's normality assumption is doing the work,
+    and that is worth seeing. None when every document tied: signs carry no
+    information there."""
+    trials = won + lost
+    if trials == 0:
+        return None
+    tail = min(won, lost)
+    cumulative = sum(math.comb(trials, k) for k in range(tail + 1)) / 2**trials
+    return min(1.0, 2 * cumulative)
+
+
+# Percentile bootstrap on the paired diffs. The resample count is plenty for
+# a 95% interval; the seed is fixed because `compare` recomputes on every
+# invocation and a verdict that shifts between two reads of the same banked
+# runs would be indistinguishable from drift.
+_BOOTSTRAP_RESAMPLES = 2000
+_BOOTSTRAP_SEED = 20260808
+
+
+def bootstrap_ci_95(diffs: Sequence[float]) -> tuple[float, float]:
+    """Percentile bootstrap 95% interval for the mean paired diff. The
+    t-interval assumes the diffs are roughly normal; integer finding counts
+    at n<=16 often are not, and the bootstrap makes no such assumption."""
+    rng = random.Random(_BOOTSTRAP_SEED)
+    n = len(diffs)
+    means = sorted(
+        statistics.mean(rng.choices(diffs, k=n)) for _ in range(_BOOTSTRAP_RESAMPLES)
+    )
+    low = means[round(0.025 * (_BOOTSTRAP_RESAMPLES - 1))]
+    high = means[round(0.975 * (_BOOTSTRAP_RESAMPLES - 1))]
+    return low, high
+
+
+# --------------------------------------------------------------------------
+# Sequential gating (opt-in): mixture SPRT over the paired diffs
+# --------------------------------------------------------------------------
+
+# Pre-registered standard-deviation bound for the mSPRT's normal likelihood.
+# The five banked doctrine gates observed paired-diff sds between 0.95 and
+# 1.82; 2.0 is deliberately above all of them, and OVERSTATING sigma makes
+# the test stop later, never earlier -- the safe direction for a gate. The
+# value is a registered constant, not estimated from the data mid-run,
+# because a variance estimated from the same stream it monitors forfeits the
+# anytime guarantee.
+SEQUENTIAL_SIGMA0 = 2.0
+
+
+def msprt_lambda(
+    diffs: Sequence[float], mu0: float, *, sigma0: float = SEQUENTIAL_SIGMA0,
+    tau: float | None = None,
+) -> float:
+    """Mixture SPRT statistic for H0: mu = mu0 against a N(mu0, tau^2)
+    mixture of alternatives, observations modelled N(mu, sigma0^2).
+
+    Lambda_n = sqrt(sigma0^2 / (sigma0^2 + n tau^2))
+               * exp( n^2 tau^2 (mean - mu0)^2
+                      / (2 sigma0^2 (sigma0^2 + n tau^2)) )
+
+    Under H0 this is a nonnegative martingale with expectation 1, so by
+    Ville's inequality P(sup_n Lambda_n >= 1/alpha) <= alpha: the test may
+    be consulted after every observation with no peeking penalty. The
+    guarantee is exact for normal data with sd <= sigma0 and degrades
+    gracefully for the near-normal integer diffs this gate sees; the fixed-n
+    verdict on whatever was collected is still computed and reported as the
+    verdict of record."""
+    n = len(diffs)
+    if n == 0:
+        return 1.0
+    tau_sq = (sigma0 if tau is None else tau) ** 2
+    sigma_sq = sigma0 ** 2
+    mean = statistics.mean(diffs)
+    denom = sigma_sq + n * tau_sq
+    return math.sqrt(sigma_sq / denom) * math.exp(
+        (n ** 2) * tau_sq * (mean - mu0) ** 2 / (2 * sigma_sq * denom)
+    )
+
+
+def sequential_decision(
+    diffs: Sequence[float], *, delta: float, alpha: float = 0.05,
+    sigma0: float = SEQUENTIAL_SIGMA0,
+) -> dict[str, Any]:
+    """Consult the two mixture SPRTs the gate cares about and say whether
+    the run may stop now.
+
+    - ``lambda_margin`` tests H0: mu = -delta. Crossing 1/alpha with the
+      observed mean above -delta establishes non-inferiority (stop:
+      ``not_worse``); crossing with the mean below -delta establishes a
+      regression past the margin (stop: ``worse``).
+    - ``lambda_zero`` tests H0: mu = 0. Crossing with a positive mean
+      establishes superiority (upgrades a stop to ``better``).
+
+    Returns the statistics and a ``stop`` field of ``better`` /
+    ``not_worse`` / ``worse`` / None (keep probing). Direction is read from
+    the observed mean; the caller reports the final fixed-n interval beside
+    whatever this decides."""
+    threshold = 1.0 / alpha
+    lam_margin = msprt_lambda(diffs, -delta, sigma0=sigma0)
+    lam_zero = msprt_lambda(diffs, 0.0, sigma0=sigma0)
+    mean = statistics.mean(diffs) if diffs else 0.0
+    sd = statistics.stdev(diffs) if len(diffs) >= 2 else None
+
+    stop: str | None = None
+    if lam_margin >= threshold:
+        stop = "not_worse" if mean > -delta else "worse"
+    if stop == "not_worse" and lam_zero >= threshold and mean > 0:
+        stop = "better"
+    return {
+        "n": len(diffs),
+        "mean": mean,
+        "sd": sd,
+        # The anytime guarantee assumes the true sd sits under the
+        # pre-registered sigma0; when the RUNNING sd breaches it, a stop
+        # decided under the violated assumption must be visibly flagged.
+        "sigma0_exceeded": bool(sd is not None and sd > sigma0),
+        "lambda_margin": lam_margin,
+        "lambda_zero": lam_zero,
+        "threshold": threshold,
+        "sigma0": sigma0,
+        "alpha": alpha,
+        "stop": stop,
+    }
+
+
+def per_target_counts(report: Mapping[str, Any]) -> dict[str, int]:
+    """Public accessor for a probe report's per-document confirmed counts,
+    keyed by target path -- what the sequential gate pairs against."""
+    return _per_target(report)
+
+
+def _per_target(report: Mapping[str, Any]) -> dict[str, int]:
+    probe = report.get("probe")
+    if not isinstance(probe, Mapping):
+        raise ComparisonError("report has no probe block")
+    rows = probe.get("per_target") or []
+    if not rows:
+        raise ComparisonError("report has no per_target breakdown to pair on")
+    return {str(row["target_file"]): int(row["findings_confirmed"]) for row in rows}
+
+
+def _manifest_field(report: Mapping[str, Any], key: str) -> Any:
+    manifest = report.get("manifest")
+    return manifest.get(key) if isinstance(manifest, Mapping) else None
+
+
+def compare_probe_reports(
+    baseline: Mapping[str, Any],
+    candidate: Mapping[str, Any],
+    *,
+    delta: float = 1.0,
+    exclude: Sequence[str] = (),
+) -> dict[str, Any]:
+    """Pair two probe reports by document and judge the difference.
+
+    ``exclude`` drops documents from **both** sides, matched on path suffix.
+    Its purpose is a banked baseline whose input has since drifted: excluding
+    the one document that moved keeps every other pair honest for the price of
+    one document, where re-measuring the baseline costs a whole leg. It
+    applies symmetrically by construction, because an exclusion that could hit
+    one side would be a way to delete losing documents.
+    """
+    base_counts = _per_target(baseline)
+    cand_counts = _per_target(candidate)
+
+    warnings: list[str] = []
+    base_model = _manifest_field(baseline, "model_pin")
+    cand_model = _manifest_field(candidate, "model_pin")
+    if base_model and cand_model and base_model != cand_model:
+        raise ComparisonError(
+            f"runs used different model pins ({base_model} vs {cand_model}); "
+            "the difference would measure the models, not the doctrines"
+        )
+
+    # Runs from before the field existed all used the inline user-message
+    # envelope -- it was the only shape the runner had -- so a missing value
+    # reads as that, and the check fires exactly when a future envelope-
+    # changing optimization meets a banked baseline (docs/COSTS.md's rule).
+    base_shape = _manifest_field(baseline, "adapter_shape") or provenance.ADAPTER_SHAPE_USER_MESSAGE
+    cand_shape = _manifest_field(candidate, "adapter_shape") or provenance.ADAPTER_SHAPE_USER_MESSAGE
+    if base_shape != cand_shape:
+        raise ComparisonError(
+            f"runs used different adapter shapes ({base_shape} vs {cand_shape}); "
+            "the model reads the same doctrine differently across prompt "
+            "envelopes, so the difference would measure the envelope, not the doctrines "
+            "(runs from before v0.8.2 carried the caller's CLAUDE.md and memory in the "
+            "envelope; re-run the older side under the current runner)"
+        )
+
+    base_cli = _manifest_field(baseline, "cli_version")
+    cand_cli = _manifest_field(candidate, "cli_version")
+    if base_cli and cand_cli and base_cli != cand_cli:
+        warnings.append(
+            f"runs used different claude CLI versions ({base_cli} vs {cand_cli}); "
+            "the doctrine's own time-relative rule says these are not directly comparable"
+        )
+    if not _manifest_field(baseline, "run_id") or not _manifest_field(candidate, "run_id"):
+        warnings.append(
+            "at least one run predates provenance recording; its inputs and model cannot be verified"
+        )
+
+    return compare_paired(
+        base_counts, cand_counts, delta=delta, exclude=exclude, warnings=warnings
+    )
+
+
+def matches_exclusion(name: str, patterns: Sequence[str]) -> bool:
+    """Match the same non-empty substring policy at ingestion and pairing."""
+    return any(pattern and pattern in name for pattern in patterns)
+
+
+def compare_paired(
+    baseline: Mapping[str, float],
+    candidate: Mapping[str, float],
+    *,
+    delta: float,
+    exclude: Sequence[str] = (),
+    warnings: Sequence[str] | None = None,
+    extra: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """The statistical core: two paired series keyed by the same case names.
+
+    Separated from the probe-report loader on purpose. The verdict -- an
+    interval, a stated non-inferiority margin, and the four-way outcome -- is
+    the part worth having, and it does not care whether the numbers are
+    confirmed findings from this repo's probe or pass rates lifted out of a
+    skill-creator benchmark. Loaders extract; this decides.
+    """
+    base_counts = dict(baseline)
+    cand_counts = dict(candidate)
+    collected: list[str] = list(warnings or [])
+
+    excluded: list[str] = []
+    if exclude:
+        def dropped(name: str) -> bool:
+            return matches_exclusion(name, exclude)
+
+        excluded = sorted({n for n in {**base_counts, **cand_counts} if dropped(n)})
+        base_counts = {k: v for k, v in base_counts.items() if not dropped(k)}
+        cand_counts = {k: v for k, v in cand_counts.items() if not dropped(k)}
+        if excluded:
+            collected.append(f"excluded from both sides: {', '.join(excluded)}")
+
+    if set(base_counts) != set(cand_counts):
+        only_base = sorted(set(base_counts) - set(cand_counts))
+        only_cand = sorted(set(cand_counts) - set(base_counts))
+        raise ComparisonError(
+            "runs measured different cases; pairing by position would "
+            f"compare unrelated things. baseline-only={only_base} "
+            f"candidate-only={only_cand}"
+        )
+
+    documents = sorted(base_counts)
+    if len(documents) < MIN_DOCUMENTS:
+        raise ComparisonError(
+            f"need at least {MIN_DOCUMENTS} cases to say anything; got {len(documents)}"
+        )
+
+    diffs = [cand_counts[name] - base_counts[name] for name in documents]
+    n = len(diffs)
+    mean_diff = statistics.mean(diffs)
+    sd = statistics.stdev(diffs) if n > 1 else 0.0
+    se = sd / math.sqrt(n) if sd else 0.0
+    half = t_critical_95(n - 1) * se
+    ci_low, ci_high = mean_diff - half, mean_diff + half
+
+    if ci_low > 0:
+        verdict = "better"
+    elif ci_high < -delta:
+        verdict = "worse"
+    elif ci_low > -delta:
+        verdict = "not_worse"
+    else:
+        verdict = "inconclusive"
+
+    n_for_delta = n_to_resolve(mean_diff, sd, delta) if verdict == "inconclusive" else n
+
+    documents_won = sum(1 for d in diffs if d > 0)
+    documents_lost = sum(1 for d in diffs if d < 0)
+    documents_tied = sum(1 for d in diffs if d == 0)
+    boot_low, boot_high = bootstrap_ci_95(diffs)
+
+    return {
+        "verdict": verdict,
+        "delta": delta,
+        "documents": documents,
+        "excluded": excluded,
+        "n": n,
+        "baseline_total": sum(base_counts.values()),
+        "candidate_total": sum(cand_counts.values()),
+        "per_document": [
+            {
+                "target_file": name,
+                "baseline": base_counts[name],
+                "candidate": cand_counts[name],
+                "diff": cand_counts[name] - base_counts[name],
+            }
+            for name in documents
+        ],
+        "mean_diff": mean_diff,
+        "sd": sd,
+        "se": se,
+        "ci_low": ci_low,
+        "ci_high": ci_high,
+        # The interval excludes zero on the low side: some regression is
+        # real even when it is smaller than the margin. Kept as its own
+        # field so a not_worse verdict cannot silently absorb it.
+        "regression_confirmed": ci_high < 0,
+        # Robustness companions to the t-interval, reported beside it and
+        # never consulted by the verdict: when they disagree with the
+        # interval, the normality assumption is doing the work.
+        "bootstrap_ci_low": boot_low,
+        "bootstrap_ci_high": boot_high,
+        "sign_test_p": exact_sign_test_p(documents_won, documents_lost),
+        "effect_size_dz": (mean_diff / sd) if sd else None,
+        "documents_won": documents_won,
+        "documents_lost": documents_lost,
+        "documents_tied": documents_tied,
+        # What the pre-U9 gate would have concluded, kept so a reader can see
+        # exactly which claim the old rule was making.
+        "passes_legacy_count_rule": sum(cand_counts.values()) >= sum(base_counts.values()),
+        "n_for_delta": n_for_delta,
+        **(dict(extra) if extra else {}),
+        "warnings": collected,
+    }
+
+
+def load_report(path: Path) -> dict[str, Any]:
+    report_path = path / "report.json" if path.is_dir() else path
+    return json.loads(report_path.read_text(encoding="utf-8"))
+
+
+def load_paired_scores(path: Path) -> dict[str, float]:
+    """Loader for an external paired-score series: a flat JSON object mapping
+    case name -> number, produced by any tool with per-case scores (e.g.
+    memory-dream's `eval export-paired`). Validation stops at shape; key
+    pairing and the minimum-n floor stay compare_paired's job, so every
+    source hits the same wall."""
+    path = Path(path)
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise ComparisonError(f"{path}: cannot read paired scores: {error}") from error
+    if not isinstance(data, dict) or not data:
+        raise ComparisonError(
+            f"{path}: expected a non-empty JSON object of case name -> number"
+        )
+    scores: dict[str, float] = {}
+    for name, value in data.items():
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ComparisonError(f"{path}: score for {name!r} is not a number")
+        scores[str(name)] = float(value)
+    return scores
+
+
+def _num(value: float, integral: bool = True) -> str:
+    """Render a paired value without assuming it is a count. Findings are
+    integers; a pass rate is not, and formatting one with an integer code
+    raises rather than rounding."""
+    return f"{value:g}" if integral else f"{value:.3f}"
+
+
+def _signed(value: float, integral: bool = True) -> str:
+    return f"{value:+g}" if integral else f"{value:+.3f}"
+
+
+def _robustness_lines(result: Mapping[str, Any]) -> list[str]:
+    """Render the distribution-free companions when the result carries them.
+    Older result dicts (pre-2026-08-08) do not, and render unchanged."""
+    lines: list[str] = []
+    if "bootstrap_ci_low" in result:
+        piece = (
+            f"- robustness: bootstrap 95% CI "
+            f"[{result['bootstrap_ci_low']:+.2f}, {result['bootstrap_ci_high']:+.2f}]"
+        )
+        sign_p = result.get("sign_test_p")
+        if sign_p is not None:
+            piece += f", exact sign test p={sign_p:.3f}"
+        dz = result.get("effect_size_dz")
+        if dz is not None:
+            piece += f", effect size dz {dz:+.2f}"
+        lines.append(piece)
+    if result.get("regression_confirmed") and result["verdict"] == "not_worse":
+        lines.append(
+            "- the interval excludes zero: a regression is confirmed, but it "
+            "is smaller than the declared margin"
+        )
+    if result.get("regression_confirmed") and result["verdict"] == "inconclusive":
+        lines.append(
+            "- the interval excludes zero: a regression is confirmed; whether "
+            "it clears the margin is unresolved"
+        )
+    return lines
+
+
+def render(result: Mapping[str, Any]) -> str:
+    source = result.get("source")
+    label = "case" if source else "document"
+    heading = (
+        f"# Paired comparison — {source}" if source else "# Paired probe comparison"
+    )
+    lines = [
+        heading,
+        "",
+        f"**Verdict: {result['verdict']}**  (non-inferiority margin delta = "
+        f"{result['delta']:g} {result.get('metric', 'findings')} per {label})",
+        "",
+        (
+            f"- {result.get('metric', 'score')} paired across {result['n']} {label}s "
+            f"({result.get('candidate_config', result.get('candidate_path', 'candidate'))} "
+            f"vs {result.get('baseline_config', result.get('baseline_path', 'baseline'))})"
+            if source else
+            f"- totals: candidate {result['candidate_total']} vs baseline "
+            f"{result['baseline_total']} across {result['n']} documents"
+        ),
+        f"- mean difference: {result['mean_diff']:+.3f} per " + label + " "
+        f"(sd {result['sd']:.3f}, se {result['se']:.3f})",
+        f"- 95% CI: [{result['ci_low']:+.2f}, {result['ci_high']:+.2f}]",
+        f"- {label} record: {result['documents_won']} won, "
+        f"{result['documents_lost']} lost, {result['documents_tied']} tied",
+        *_robustness_lines(result),
+        (
+            "- a bare total comparison would say: " if source
+            else "- the pre-U9 raw-count rule would say: "
+        ) + ("PASS" if result["passes_legacy_count_rule"] else "FAIL"),
+    ]
+    if result["verdict"] == "inconclusive":
+        needed = result["n_for_delta"]
+        if needed is None:
+            lines.append(
+                "- no sample size resolves this: the point estimate itself is "
+                "at or past the margin, so more documents would confirm a "
+                "regression rather than clear one"
+            )
+        else:
+            lines.append(
+                f"- to clear the margin at this mean and spread you would need "
+                f"about {needed} {label}s ({needed - result['n']:+d} on this run)"
+            )
+    lines.append("")
+    lines.append(f"| {label.title()} | baseline | candidate | diff |")
+    lines.append("| --- | --- | --- | --- |")
+    integral = all(
+        float(v).is_integer()
+        for row in result["per_document"]
+        for v in (row["baseline"], row["candidate"], row["diff"])
+    )
+    for row in result["per_document"]:
+        name = Path(row["target_file"]).parent.name or row["target_file"]
+        lines.append(
+            f"| {name} | {_num(row['baseline'], integral)} "
+            f"| {_num(row['candidate'], integral)} | {_signed(row['diff'], integral)} |"
+        )
+    if result["warnings"]:
+        lines.append("")
+        lines.append("### Warnings")
+        lines.append("")
+        for warning in result["warnings"]:
+            lines.append(f"- {warning}")
+    lines.append("")
+    return "\n".join(lines)

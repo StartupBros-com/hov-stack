@@ -7,12 +7,16 @@ reaches the vendor. Everything else -- argument parsing, JSON output,
 pagination, exit codes -- is the official CLI's, executed unchanged through
 os.execve of the pinned vendor binary.
 
-Credential: only RESEND_API_KEY_MAIN, read from one exact Bitwarden Secrets
-Manager record named in the host overlay resend-bws-bindings.json
+Credentials: one per account. The default account reads RESEND_API_KEY_MAIN;
+the bindings file may name more accounts (an "accounts" object of account name
+to record name, plus "default_account"), chosen by the wrapper's own --account
+flag, which never reaches the vendor. Each is read from one exact Bitwarden
+Secrets Manager record named in the host overlay resend-bws-bindings.json
 (RESEND_CLI_BINDINGS_FILE, then $HOV_STACK_OVERLAY, then
 ${XDG_CONFIG_HOME:-$HOME/.config}/hov-stack). The record id,
 the record key and the project id are all checked against that file before
-the value is accepted. There is no fallback to RESEND_API_KEY in the
+the value is accepted. There is no fallback to another account, to
+RESEND_API_KEY in the
 environment, to `resend login` caches, or to any secret-list search. An
 empty binding slot is reported as credential_unbound, which is distinct from
 a bws outage (bws_unavailable, bws_timeout, bws_failed) and from the
@@ -54,10 +58,18 @@ import stat
 import subprocess
 import sys
 
-WRAPPER_VERSION = "1.0.0"
+WRAPPER_VERSION = "1.1.0"
 VENDOR_PACKAGE = "resend-cli"
 VENDOR_PIN = "2.23.0"
 RECORD_NAME = "RESEND_API_KEY_MAIN"
+# One Resend team per account, each read through its own exact BWS record. With no
+# "accounts" object in the bindings file the only account is "main"; a host overlay
+# names its own accounts there, so no account name lives in the tree.
+BUILTIN_ACCOUNTS = {"main": RECORD_NAME}
+BUILTIN_DEFAULT = "main"
+ACCOUNT_FLAG = "--account"
+ACCOUNT_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,31}$")
+RECORD_NAME_RE = re.compile(r"^RESEND_API_KEY_[A-Z0-9_]{1,64}$")
 INSTALL_HINT = "scripts/resend-cli-install.sh install"
 
 UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
@@ -172,11 +184,12 @@ class CliError(Exception):
 
 def usage_text():
     return (
-        "usage: resend-cli <vendor command> [vendor options]\n"
+        "usage: resend-cli [--account NAME] <vendor command> [vendor options]\n"
         "       resend-cli --where | --version | --help\n"
         "\n"
-        "Operator wrapper over the official resend-cli " + VENDOR_PIN + " using the exact BWS\n"
-        "record " + RECORD_NAME + ". Named reads run as-is; sends need --confirm-send; other\n"
+        "Operator wrapper over the official resend-cli " + VENDOR_PIN + ". --account picks the Resend\n"
+        "team and its exact BWS record (the names are in the bindings file; --where lists them).\n"
+        "Named reads run as-is; sends need --confirm-send; other\n"
         "writes need --confirm-write; deletes, API-key and signing-secret operations need\n"
         "--confirm-destructive. login/logout/auth, doctor, open, docs, update, completion,\n"
         "careers and the listen commands are refused. --api-key, --profile and\n"
@@ -238,6 +251,7 @@ class Invocation:
         self.where = False
         self.version = False
         self.help = False
+        self.account = None
         self.confirms = set()
         self.path = []
         self.rest = []
@@ -256,7 +270,21 @@ def classify(argv):
         if tok == "--":
             passthrough.extend(tokens[i:])
             break
-        if tok in WRAPPER_FLAGS:
+        if tok == ACCOUNT_FLAG or tok.startswith(ACCOUNT_FLAG + "="):
+            # The value is never echoed: a mistyped argv could hold anything.
+            if tok == ACCOUNT_FLAG:
+                if i + 1 == len(tokens):
+                    raise CliError("--account needs an account name", "usage")
+                i += 1
+                name = tokens[i]
+            else:
+                name = tok.split("=", 1)[1]
+            if inv.account is not None:
+                raise CliError("--account is given more than once", "usage")
+            if not ACCOUNT_RE.match(name):
+                raise CliError("--account needs a configured account name (see --where)", "usage")
+            inv.account = name
+        elif tok in WRAPPER_FLAGS:
             if tok == "--where":
                 inv.where = True
             elif tok == "--version":
@@ -279,8 +307,8 @@ def classify(argv):
         if name in FORBIDDEN_FLAGS:
             raise CliError("%s is refused: the credential and its storage are the wrapper's, never argv" % name, "forbidden_flag")
     if inv.where or inv.version:
-        if passthrough or inv.confirms:
-            raise CliError("--where and --version take no other arguments", "usage")
+        if passthrough or inv.confirms or inv.account:
+            raise CliError("--where and --version take no other arguments (--where reports every account)", "usage")
         return inv
     if passthrough and passthrough[0] == "help":
         inv.help = True
@@ -434,8 +462,45 @@ def exec_vendor(argv, env):
 # ── credential ────────────────────────────────────────────────────────────────
 
 
-def load_binding(path):
-    """The exact-record binding for RECORD_NAME, or credential_unbound."""
+def parse_accounts(data, path):
+    """(accounts, default) from a parsed bindings object. Without an "accounts"
+    object the only account is BUILTIN_ACCOUNTS; with one it is exactly that."""
+    def bad(why):
+        return CliError("bindings file %s: %s" % (path, why), "bindings_invalid", path=str(path))
+
+    extra = data.get("accounts")
+    if extra is None:
+        accounts = dict(BUILTIN_ACCOUNTS)
+    else:
+        if not isinstance(extra, dict) or not extra:
+            raise bad("accounts must be a non-empty object of account name -> record name")
+        for name, record in extra.items():
+            if not ACCOUNT_RE.match(name) or not isinstance(record, str) or not RECORD_NAME_RE.match(record):
+                raise bad("accounts entries must map a lowercase account name to a RESEND_API_KEY_* record name")
+        accounts = dict(extra)
+    default = data.get("default_account")
+    if default is None:
+        default = BUILTIN_DEFAULT if BUILTIN_DEFAULT in accounts else None
+    if default is None or default not in accounts:
+        raise bad("default_account must name one of the accounts")
+    return accounts, default
+
+
+def known_accounts(path):
+    """Accounts and default for classification, help and --where. Lenient: an
+    absent or malformed file yields the built-in account, and load_binding
+    reports the file's fault when a credential is actually needed."""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(data, dict):
+            return parse_accounts(data, path)
+    except (OSError, ValueError, CliError):
+        pass
+    return dict(BUILTIN_ACCOUNTS), BUILTIN_DEFAULT
+
+
+def load_binding(path, account=None):
+    """The exact-record binding for the account's record, or credential_unbound."""
     try:
         raw = path.read_text(encoding="utf-8")
     except FileNotFoundError:
@@ -461,7 +526,7 @@ def load_binding(path):
         raise CliError("bindings file %s is not valid JSON" % path, "bindings_invalid", path=str(path))
     if not isinstance(data, dict):
         raise CliError("bindings file %s must hold an object" % path, "bindings_invalid", path=str(path))
-    unknown = sorted(k for k in data if k not in {"project_id", "records"} and not k.startswith("_"))
+    unknown = sorted(k for k in data if k not in {"project_id", "records", "accounts", "default_account"} and not k.startswith("_"))
     if unknown:
         raise CliError("bindings file %s has unknown keys: %s" % (path, ", ".join(unknown)), "bindings_invalid", path=str(path))
     project = data.get("project_id")
@@ -498,16 +563,23 @@ def load_binding(path):
                 path=str(path),
             )
         seen.add(record["id"])
-    record = records.get(RECORD_NAME)
+    accounts, default = parse_accounts(data, path)
+    account = account or default
+    if account not in accounts:
+        raise CliError("unknown --account value; use one of: %s" % ", ".join(accounts), "usage")
+    name = accounts[account]
+    record = records.get(name)
     if record is None:
         raise CliError(
-            "%s is not bound: add its exact BWS record id to %s (set RESEND_CLI_BINDINGS_FILE; no enumeration, no fallback to RESEND_API_KEY)"
-            % (RECORD_NAME, path),
+            "%s (account %s) is not bound: add its exact BWS record id to %s (set RESEND_CLI_BINDINGS_FILE; no enumeration, no fallback to RESEND_API_KEY or another account)"
+            % (name, account, path),
             "credential_unbound",
             path=str(path),
             project_id=project,
+            account=account,
+            record=name,
         )
-    return {"project_id": project, "id": record["id"], "key": RECORD_NAME}
+    return {"project_id": project, "id": record["id"], "key": name}
 
 
 def token_presence():
@@ -567,20 +639,26 @@ def resolve_credential(binding):
 # ── reporting ─────────────────────────────────────────────────────────────────
 
 
+def binding_report(bpath, account, record):
+    binding = {"file": str(bpath), "record": record, "bound": False, "valid": False, "project_id": None, "record_id": None, "error": None}
+    try:
+        info = load_binding(bpath, account)
+        binding.update(bound=True, valid=True, project_id=info["project_id"], record_id=info["id"])
+    except CliError as exc:
+        binding["error"] = exc.code
+        binding["valid"] = exc.code == "credential_unbound"
+        binding["project_id"] = exc.extra.get("project_id")
+    return binding
+
+
 def where_report():
     """Metadata only: no credential value, token value or network."""
     prefix = vendor_prefix()
     binary = vendor_binary(prefix)
     version = vendor_package_version(prefix)
     bpath = bindings_path()
-    binding = {"file": str(bpath), "record": RECORD_NAME, "bound": False, "valid": False, "project_id": None, "record_id": None, "error": None}
-    try:
-        info = load_binding(bpath)
-        binding.update(bound=True, valid=True, project_id=info["project_id"], record_id=info["id"])
-    except CliError as exc:
-        binding["error"] = exc.code
-        binding["valid"] = exc.code == "credential_unbound"
-        binding["project_id"] = exc.extra.get("project_id")
+    names, default = known_accounts(bpath)
+    accounts = {name: binding_report(bpath, name, record) for name, record in names.items()}
     source = token_presence()
     xdg = state_dir() / "xdg"
     stray = []
@@ -592,7 +670,10 @@ def where_report():
                    "binary_present": binary.is_file() and os.access(binary, os.X_OK),
                    "installed": version, "converged": version == VENDOR_PIN and binary.is_file(),
                    "node_on_path": shutil.which("node") is not None, "install": INSTALL_HINT},
-        "binding": binding,
+        # binding is the default account's, in the shape it had before --account.
+        "binding": accounts[default],
+        "default_account": default,
+        "accounts": accounts,
         "bws": {"binary_on_path": shutil.which("bws") is not None, "token_source": source, "token_file": str(token_file())},
         "config_home": {"path": str(xdg), "vendor_entries": stray},
         "ignored_parent_env": [name for name in IGNORED_PARENT_VARS if name in os.environ],
@@ -624,7 +705,7 @@ def main(argv=None):
         binary = check_vendor(vendor_prefix())
         credential = None
         if inv.kind != METADATA:
-            credential = resolve_credential(load_binding(bindings_path()))
+            credential = resolve_credential(load_binding(bindings_path(), inv.account))
         env = child_env(credential)
         del credential
         exec_vendor(vendor_argv(binary, inv), env)

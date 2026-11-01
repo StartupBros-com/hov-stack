@@ -22,10 +22,23 @@ paths = [
   # as a generic secret.
   '''skills-patches/saas-billing-patterns-for-stripe-and-paypal/SKILL\.md''',
   '''hooks/tests/papercut-log\.test\.js''',
+  # The papercut plugin keeps the same redaction test under tests/hooks/: it feeds a fake
+  # live key, a bearer token and generic secrets through redact() and asserts none survive.
+  '''tests/hooks/papercut-log\.test\.js''',
   '''tests/test_stripe_api\.py''',
   '''tests/test_memory_recall_eval\.py''',
+  # The memory-dream plugin's copy of the same test plants a fake live-key line in a note
+  # and asserts `sample` drops that note as sensitive.
+  '''plugins/memory-dream/tests/test_recall_eval\.py''',
   '''tests/test_memory_mine\.py''',
   '''tests/test_resend_cli\.py''',
   '''tests/test_supabase_api\.py''',
   '''tests/vastai\.test\.sh''',
+]
+# Matched against the secret, not the file. pro-gate's engine test keys its scratch review
+# homes by fake round keys like acme-exhausted-96 in *_KEY= variables, which the
+# generic-api-key rule reads as a credential. Anchored to that exact shape so the rest of
+# the file stays scanned; a whole-file path entry would hide a real secret there too.
+regexes = [
+  '''^acme-[a-z]+-[0-9]+$''',
 ]

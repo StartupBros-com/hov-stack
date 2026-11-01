@@ -56,6 +56,9 @@ import sys
 from typing import NamedTuple, Optional
 
 
+NAME_MAX = 255  # longest single path component Linux allows
+
+
 class Holder(NamedTuple):
     signal: str  # "fd" | "cwd" | "environ" | "cmdline"
     pid: int
@@ -156,6 +159,50 @@ class ProcSnapshot:
                 if real in blob or (raw is not None and raw in blob):
                     return Holder(signal, pid)
         return None
+
+    def held_children(self, root: str) -> dict[str, Holder]:
+        """Every direct child of `root` that holder() would call held, in one pass.
+
+        holder() is linear in the snapshot, so asking it once per entry of a
+        283,000-entry /tmp never finishes (#2002). This inverts the query:
+        each fd/cwd target under root names the one child it sits in, and
+        each environ/cmdline occurrence of "root/" names every child that
+        holder()'s substring match would accept there — including its false
+        alives ("root/foo-other" holds "fo" and "foo"), because this must
+        never be stricter than holder(). Children that are themselves
+        symlinks are out of scope: their realpath leaves root, and the sweep
+        never removes a symlink. Keys are child names; values the first
+        holder seen, fd and cwd before environ and cmdline.
+        """
+        real = os.path.realpath(root)
+        pref = real + os.sep
+        spellings = [pref]
+        if os.path.isabs(root) and root.rstrip(os.sep) != real:
+            spellings.append(root.rstrip(os.sep) + os.sep)
+        held: dict[str, Holder] = {}
+        for signal, targets in (("fd", self._fd_targets), ("cwd", self._cwds)):
+            for tgt, pid in targets:
+                if tgt.startswith(pref):
+                    name = tgt[len(pref):].split(os.sep, 1)[0]
+                    if name:
+                        held.setdefault(name, Holder(signal, pid))
+        for signal, blobs in (("environ", self._environs), ("cmdline", self._cmdlines)):
+            for blob, pid in blobs:
+                for sp in spellings:
+                    i = blob.find(sp)
+                    while i != -1:
+                        start = i + len(sp)
+                        end = start
+                        # A child name cannot contain the separator or NUL, nor
+                        # exceed NAME_MAX, so these bound every name holder()
+                        # could match here.
+                        stop = min(len(blob), start + NAME_MAX)
+                        while end < stop and blob[end] not in (os.sep, "\0"):
+                            end += 1
+                        for k in range(start + 1, end + 1):
+                            held.setdefault(blob[start:k], Holder(signal, pid))
+                        i = blob.find(sp, i + 1)
+        return held
 
 
 def main(argv=None) -> int:

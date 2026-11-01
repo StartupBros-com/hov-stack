@@ -1,0 +1,21 @@
+{
+  "name": "product-video",
+  "version": "0.1.0",
+  "description": "Agent-native product walkthrough videos. Capture a real authenticated browser tour over CDP at a forced 16:9 geometry, overlay a real cursor from safe telemetry that carries no URLs, DOM text, or account data, compose in Remotion, and render a digest-bound H.264 you can verify frame by frame.",
+  "author": {
+    "name": "StartupBros / House of Vibe",
+    "url": "https://houseofvibe.ai"
+  },
+  "homepage": "https://houseofvibe.ai",
+  "repository": "https://github.com/StartupBros-com/hov-stack",
+  "license": "MIT",
+  "keywords": [
+    "house-of-vibe",
+    "video",
+    "remotion",
+    "screencast",
+    "cdp",
+    "product-demo",
+    "claude-code"
+  ]
+}

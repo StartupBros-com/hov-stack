@@ -9,7 +9,7 @@
 #
 # Each step is reported ok, skipped with the command to run later, or failed:
 #   1. Symlinks the harness into $CLAUDE_CONFIG_DIR (default ~/.claude):
-#        CLAUDE.md agents/ bin/ commands/ hooks/ mods/ scripts/ workflows/ claude-env.sh
+#        CLAUDE.md agents/ bin/ commands/ hooks/ mods/ scripts/ workflows/ claude-env.sh memory-dream.json
 #      plus one link per skill in plugins/hov-stack/skills/ and skills-stack/ into
 #      skills/, skipping the skills a default plugin provides
 #      (lib/default-plugin-skills.txt names them).
@@ -142,7 +142,7 @@ find_dcg() {  # the dcg the seeded hook will run: the one on PATH, else dcg/inst
 # of the pack does not have (restructure plan R21's exception), so only setup links them.
 srcs=()
 dsts=()
-for name in CLAUDE.md agents bin commands hooks mods scripts workflows claude-env.sh; do
+for name in CLAUDE.md agents bin commands hooks mods scripts workflows claude-env.sh memory-dream.json; do
   srcs+=("$HOV_STACK/$name")
   dsts+=("$CFG/$name")
 done

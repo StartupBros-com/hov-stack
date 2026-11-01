@@ -114,10 +114,11 @@ ok "credentials untouched"
 backup=$(ls -d "$HOME"/.hov-stack-backups/*/ | head -1)
 grep -q "their rules" "$backup/.claude/CLAUDE.md" || fail "previous CLAUDE.md not in backup"
 ok "previous CLAUDE.md backed up under $backup"
-for name in agents bin commands hooks mods scripts workflows claude-env.sh; do
+for name in agents bin commands hooks mods scripts workflows claude-env.sh memory-dream.json; do
   [ -L "$HOME/.claude/$name" ] || fail "$name not linked"
 done
-ok "9 harness links"
+[ "$(readlink -f "$HOME/.claude/memory-dream.json")" = "$ROOT/memory-dream.json" ] || fail "memory-dream.json points elsewhere"
+ok "10 harness links, memory-dream.json among them (the memory-dream plugin reads its config there)"
 # Skills (#37, restructure plan KTD12): one link per skill in the pack and in skills-stack/
 # (R21's exception), except the ones lib/default-plugin-skills.txt says a default plugin
 # provides, and each skip is reported.
@@ -221,7 +222,7 @@ HOST_PLACEHOLDERS=$(sed -n "s/^PH='\(.*\)'\$/\1/p" "$ROOT/scripts/public-safety-
 [ -n "$HOST_PLACEHOLDERS" ] || fail "could not read the placeholder list (PH=) from scripts/public-safety-scan.sh"
 scan_host_literals() {  # $1 = a config dir laid out like ~/.claude; prints offenders, returns 1 on any
   local root=$1 bad=0 entry f want n hits name roots=()
-  for name in CLAUDE.md agents bin commands hooks mods scripts workflows claude-env.sh skills; do
+  for name in CLAUDE.md agents bin commands hooks mods scripts workflows claude-env.sh memory-dream.json skills; do
     [ -e "$root/$name" ] && roots+=("$root/$name")
   done
   hits=$(find -L "${roots[@]}" -type f \

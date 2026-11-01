@@ -146,6 +146,75 @@ class FakeProcfsSignalTests(unittest.TestCase):
         self.assertFalse(snap.ok)
 
 
+class HeldChildrenTests(unittest.TestCase):
+    """held_children(root) is holder() inverted for a 283k-entry /tmp (#2002).
+
+    Its whole safety argument is that it says "held" for every child holder()
+    would, so the core test is that property over a fake procfs built to hit
+    each signal and each matching edge, not a handful of hand-picked answers.
+    """
+
+    NAMES = ["foo", "foobar", "fo", "bar", "deep", "job", "baz qux", "cold", "x (deleted)"]
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        base = self._tmp.name
+        self.proc = os.path.join(base, "proc")
+        self.root = os.path.join(base, "scratch")
+        self.link = os.path.join(base, "scratch-link")
+        os.makedirs(self.proc)
+        for n in self.NAMES:
+            os.makedirs(os.path.join(self.root, n))
+        os.symlink(self.root, self.link)
+        r = self.root
+        _fake_proc(self.proc, 301, cwd="/", fd_targets=[f"{r}/foobar/held.db"])
+        _fake_proc(self.proc, 302, cwd=f"{r}/deep/er")
+        # environ names the job dir itself — the CLAUDE_JOB_DIR shape
+        _fake_proc(self.proc, 303, cwd="/", env=[f"CLAUDE_JOB_DIR={r}/job", "TERM=x"])
+        # argv substring: "{r}/fo" is inside "{r}/foo-other", so holder() calls
+        # "fo" held too; the batch form must not be stricter than that
+        _fake_proc(self.proc, 304, cwd="/", argv=["tool", f"--out={r}/foo-other/x"])
+        # raw (unresolved) spelling through a symlinked root, environ only
+        _fake_proc(self.proc, 305, cwd="/", env=[f"D={self.link}/baz qux"])
+        # a deleted-file fd target and a holder of the root itself, not a child
+        _fake_proc(self.proc, 306, cwd=r, fd_targets=[f"{r}/x (deleted)"])
+        # /var<root>/bar contains "<root>/bar" as a substring
+        _fake_proc(self.proc, 307, cwd="/", argv=["cat", f"/var{r}/bar/f"])
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def _snap(self):
+        return PL.ProcSnapshot(procfs=self.proc, exclude_pids=NO_EXCLUDES)
+
+    def test_agrees_with_holder_for_every_child(self):
+        snap = self._snap()
+        for root in (self.root, self.link):
+            batch = snap.held_children(root)
+            for name in self.NAMES:
+                single = snap.holder(os.path.join(root, name))
+                self.assertEqual(name in batch, single is not None,
+                                 f"{root}/{name}: batch={batch.get(name)} holder={single}")
+
+    def test_the_fixture_exercises_both_answers(self):
+        """The property above is vacuous if every child were held or none were."""
+        batch = self._snap().held_children(self.root)
+        self.assertIn("job", batch)
+        self.assertNotIn("cold", batch)
+
+    def test_reports_the_signal_that_held_it(self):
+        batch = self._snap().held_children(self.root)
+        self.assertEqual(batch["foobar"], PL.Holder("fd", 301))
+        self.assertEqual(batch["deep"], PL.Holder("cwd", 302))
+        self.assertEqual(batch["job"], PL.Holder("environ", 303))
+
+    def test_holding_the_root_holds_no_child(self):
+        """cwd AT the root (every shell in /tmp) must not pin all of /tmp."""
+        batch = self._snap().held_children(self.root)
+        self.assertNotIn("", batch)
+        self.assertNotIn("cold", batch)
+
+
 class CliContractTests(unittest.TestCase):
     """Exit codes are the bash callers' entire interface: 0 held, 1 not, 2 error."""
 

@@ -302,7 +302,7 @@ if [ -n "$ISSUE" ]; then
   ISSUE_URL=$(printf '%s' "$STATE_JSON" | jq -r .url)
 elif [ -n "$NEW_TITLE" ]; then
   if [ -z "$BODY_FILE" ]; then
-    BODY_FILE=$(mktemp)
+    BODY_FILE=$(mktemp) || exit 1
     cat >"$BODY_FILE" <<'EOF'
 ## Context & Motivation
 

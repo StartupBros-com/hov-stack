@@ -1,0 +1,41 @@
+{
+  "name": "design-rails",
+  "version": "0.13.0",
+  "description": "Guardrails that keep AI agents on YOUR design — derive your real design system from your code, decide it, wire it, and enforce it in CI.",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "design-rails": "bin/design-rails"
+  },
+  "files": [
+    "bin",
+    "src",
+    "skills",
+    "README.md",
+    "LICENSE",
+    "NOTICE",
+    "PROVENANCE.md"
+  ],
+  "scripts": {
+    "test": "cd test && node --test"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/StartupBros-com/hov-stack.git",
+    "directory": "plugins/design-rails"
+  },
+  "keywords": [
+    "design-system",
+    "design-tokens",
+    "DESIGN.md",
+    "drift",
+    "ai-agents",
+    "lint",
+    "ci",
+    "guardrails",
+    "claude-code"
+  ]
+}

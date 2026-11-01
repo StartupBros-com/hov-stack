@@ -1,0 +1,77 @@
+{
+  "schemaVersion": 1,
+  "compositionId": "NarratedBrowserTour",
+  "runId": "synthetic-narrated-demo",
+  "project": {
+    "schemaVersion": 1,
+    "id": "synthetic-demo",
+    "compositionId": "NarratedBrowserTour",
+    "viewport": { "width": 1280, "height": 720 },
+    "fps": 30,
+    "colors": {
+      "matte": "#07111f",
+      "cursor": "#ffffff",
+      "focus": "#2dd4bf",
+      "click": "#fb7185",
+      "captionBackground": "#07111f",
+      "captionForeground": "#ffffff"
+    },
+    "camera": { "maxZoom": 1.45, "safeMargin": 0.04 }
+  },
+  "durationMs": 6000,
+  "source": {
+    "video": "generated/narrated/synthetic-narrated-demo/capture.webm",
+    "videoSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+    "telemetry": "generated/narrated/synthetic-narrated-demo/telemetry.v1.json",
+    "telemetrySha256": "2222222222222222222222222222222222222222222222222222222222222222",
+    "sourceStartMs": 0,
+    "sourceEndMs": 6000,
+    "marker": { "type": "clapperboard", "tMs": 500 }
+  },
+  "telemetry": {
+    "schemaVersion": 1,
+    "runId": "synthetic-narrated-demo",
+    "durationMs": 6000,
+    "channels": ["cursor", "click", "element", "scroll", "route"],
+    "events": [
+      { "channel": "cursor", "seq": 0, "tMs": 300, "x": 0.2, "y": 0.3 },
+      { "channel": "click", "seq": 1, "tMs": 1200, "x": 0.7, "y": 0.35 },
+      {
+        "channel": "element",
+        "seq": 2,
+        "tMs": 1200,
+        "rect": { "x": 0.6, "y": 0.25, "width": 0.2, "height": 0.2 }
+      },
+      { "channel": "scroll", "seq": 3, "tMs": 2400, "x": 0, "y": 0.5 },
+      { "channel": "route", "seq": 4, "tMs": 3600, "routeId": "reports" }
+    ]
+  },
+  "narration": {
+    "audio": "generated/narrated/synthetic-narrated-demo/narration.v1.wav",
+    "audioSha256": "3333333333333333333333333333333333333333333333333333333333333333",
+    "offsetMs": 0
+  },
+  "captions": [
+    {
+      "id": "cue-one",
+      "startMs": 500,
+      "endMs": 2000,
+      "text": "Open reports."
+    },
+    {
+      "id": "cue-two",
+      "startMs": 2200,
+      "endMs": 4000,
+      "text": "Review progress."
+    }
+  ],
+  "cameraOverrides": [
+    {
+      "id": "reports-focus",
+      "startMs": 2000,
+      "endMs": 3000,
+      "target": { "x": 0.7, "y": 0.3 },
+      "zoom": 1.3
+    }
+  ]
+}

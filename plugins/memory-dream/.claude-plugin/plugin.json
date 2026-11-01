@@ -1,0 +1,20 @@
+{
+  "name": "memory-dream",
+  "version": "0.4.0",
+  "description": "The sleep cycle for Claude Code auto-memory. /memory-dream:dream runs an operator-gated consolidation pass — deterministic triage, a drafting subagent with an explicit minimal tool list, item-by-item diff approval, and an apply step that refuses rather than guesses. /memory-dream:eval measures whether recall actually improved, instead of assuming it.",
+  "author": {
+    "name": "StartupBros / House of Vibe",
+    "url": "https://houseofvibe.ai"
+  },
+  "homepage": "https://houseofvibe.ai",
+  "repository": "https://github.com/StartupBros-com/hov-stack",
+  "license": "MIT",
+  "keywords": [
+    "house-of-vibe",
+    "memory",
+    "consolidation",
+    "claude-code",
+    "evals",
+    "agents"
+  ]
+}

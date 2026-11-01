@@ -23,7 +23,7 @@ cd "$REPO" || { log "no dotfiles repo at $REPO" >&2; exit 1; }
 mkdir -p "$TMP_ROOT"
 exec 9>"$TMP_ROOT/backup.lock"
 flock -n 9 || { log "another backup is already running" >&2; exit 1; }
-WORKTREE=$(mktemp -d "$TMP_ROOT/run.XXXXXX")
+WORKTREE=$(mktemp -d "$TMP_ROOT/run.XXXXXX") || exit 1
 rmdir "$WORKTREE"
 cleanup() {
   rc=$?
@@ -48,7 +48,7 @@ git worktree add --detach "$WORKTREE" origin/main >/dev/null
 # and the reason six consecutive nightly failures logged a refusal with no indication of what was
 # refused. Capture it, stay quiet while the push succeeds, and replay it when it does not. stderr is
 # left unredirected so a refusal or a quarantine warning reaches the journal as it happens.
-PUSH_LOG=$(mktemp "$TMP_ROOT/memory-push.XXXXXX.log")
+PUSH_LOG=$(mktemp "$TMP_ROOT/memory-push.XXXXXX.log") || exit 1
 push_rc=0
 CLAUDE_HOME="${CLAUDE_HOME:-$HOME/.claude}" bash "$WORKTREE/sync.sh" memory-push \
   >"$PUSH_LOG" || push_rc=$?

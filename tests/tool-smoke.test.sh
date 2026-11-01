@@ -17,7 +17,7 @@
 set -euo pipefail
 
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-TMP=$(mktemp -d)
+TMP=$(mktemp -d) || exit 1
 trap 'rm -rf "$TMP"' EXIT
 
 pass=0 fail=0
@@ -130,12 +130,24 @@ check '[ "$FLAGGED" -eq 1 ]'                       "anchored expect-regex still 
 
 # ── 11. production probe registration + trailing counter ────────────────────────────────
 # A generic smoke helper test cannot prove a new production row was actually wired.
+check 'grep -qE "^smoke_cmd wacli[[:space:]]" "$REPO/scripts/tool-smoke.sh"' \
+                                                   "wacli has no production proof-of-life probe"
 check 'grep -qE "^smoke_cmd gsc[[:space:]]" "$REPO/scripts/tool-smoke.sh"' \
                                                    "gsc has no production proof-of-life probe"
 check 'grep -qE "^smoke_cmd dfs[[:space:]]" "$REPO/scripts/tool-smoke.sh"' \
                                                    "dfs has no production proof-of-life probe"
 check 'grep -qE "^smoke_cmd firecrawl-cli[[:space:]]" "$REPO/scripts/tool-smoke.sh"' \
                                                    "firecrawl-cli has no production proof-of-life probe"
+check 'grep -qF "\"\$installer\" --check" "$REPO/scripts/tool-smoke.sh"' \
+                                                   "wacli proof-of-life omits exact hash/link verification"
+saved_home=$HOME
+HOME=$TMP/no-wacli-installer
+FLAGGED=0
+check_wacli_pin >"$TMP/missing-pin-out"
+HOME=$saved_home
+check '[ "$FLAGGED" -eq 1 ]'                    "missing wacli installer was not flagged"
+check 'grep -q "pin/link verification unavailable" "$TMP/missing-pin-out"' \
+                                                   "missing installer warning was not actionable"
 real_out=$(bash "$REPO/scripts/tool-smoke.sh" 2>&1 || true)
 check 'grep -qE "^toolsmoke-flagged:[0-9]+$" <<<"$real_out"' \
                                                    "script did not emit the toolsmoke-flagged counter"

@@ -96,6 +96,8 @@ const GROUPS = new Set(Object.keys(TIERS).flatMap((key) => {
 // -- turns the call into vendor help; --where/--version with any other
 // argument is a usage error; neither runs a command.
 const NO_EFFECT = new Set(['-h', '--help', '--where', '--version']);
+// The wrapper's account selector, `--account NAME` or `--account=NAME`.
+const ACCOUNT_FLAG = '--account';
 const LEADING_FLAG_RE = /^(?:--confirm-\S+|--json|-q|--quiet)$/;
 
 const DATA = new Set(['echo', 'printf', 'rg', 'grep', 'egrep', 'fgrep', 'cat']);
@@ -116,7 +118,7 @@ const spell = (token) => {
   return spellings.length > 1 ? '(?:' + spellings.join('|') + ')' : token;
 };
 const joinPath = (key) => key.split(' ').map(spell).join(String.raw`\s+["']?`);
-const WRITE_TAIL = String.raw`(?:\s+(?:--confirm-\S+|--json|-q|--quiet))*\s+["']?(?:`
+const WRITE_TAIL = String.raw`(?:\s+(?:--confirm-\S+|--json|-q|--quiet|--account(?:=\S*|\s+\S+)))*\s+["']?(?:`
   + [
     ...Object.keys(TIERS).filter((key) => ASK_TIERS.has(TIERS[key])).map((key) => joinPath(key) + String.raw`\b`),
     '[$`]',
@@ -455,9 +457,18 @@ function writePath(args) {
   }
   if (tokens.some((value) => NO_EFFECT.has(value))) return false;
   let key = '';
-  for (const value of tokens) {
+  for (let index = 0; index < tokens.length; index += 1) {
+    const value = tokens[index];
     if (/[$`]/.test(value)) {
       if (!Object.hasOwn(TIERS, key)) return true; // an expansion may complete the path
+      continue;
+    }
+    if (value === ACCOUNT_FLAG) {
+      // The wrapper takes the next word as the account name wherever this
+      // flag sits before --, so it is never a path word; an expansion or a
+      // glob there may split into one (`--account $A` with A='x emails send').
+      index += 1;
+      if (index < tokens.length && /[$`*?{[]/.test(tokens[index]) && !Object.hasOwn(TIERS, key)) return true;
       continue;
     }
     if (value.startsWith('-')) continue;

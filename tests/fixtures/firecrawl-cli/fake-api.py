@@ -2,7 +2,8 @@
 """Offline Firecrawl API: a loopback listener for the wrapper's direct transport.
 
 FIRECRAWL_API_TEST_CONTROL is JSON: {"status": 200, "body": {...}} or
-{"status": 200, "text": "..."} plus optional "headers" and "sleep" seconds.
+{"status": 200, "text": "..."} plus optional "headers" and "sleep" seconds, and
+an optional "keyless" control of the same shape for requests with no Bearer.
 Every request is appended to FIRECRAWL_API_TEST_LOG as one JSON line with the
 method, path, Authorization, Content-Type, User-Agent, and decoded body.
 The bound port is printed on stdout; the server runs until killed.
@@ -33,6 +34,9 @@ class Handler(BaseHTTPRequestHandler):
                 "body": body,
             }) + "\n")
         control = json.loads(Path(os.environ["FIRECRAWL_API_TEST_CONTROL"]).read_text())
+        # A "keyless" control answers requests without a Bearer (#2118).
+        if self.headers.get("Authorization") is None and isinstance(control.get("keyless"), dict):
+            control = control["keyless"]
         if control.get("sleep"):
             time.sleep(control["sleep"])
         if "text" in control:
