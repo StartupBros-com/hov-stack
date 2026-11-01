@@ -1,0 +1,381 @@
+#!/usr/bin/env bash
+# Tests for the daemon self-reload: pick up a redeploy at the idle top of the poll loop by
+# re-execing in place, instead of a control-group-killing `systemctl restart`. The trigger is an
+# atomic deploy stamp ($PRO_GATE_HOME/.deploy-stamp) that install.sh writes LAST, after every
+# runtime file has landed (so the daemon never re-execs onto a half-deployed file set).
+#   - pg_file_sig: stable + change-sensitive content signature (the stamp content)
+#   - install.sh writes .deploy-stamp last, = sig of the deployed daemon code
+#   - integration: a running daemon re-execs itself when the stamp changes, keeps its PID (proving
+#     exec, not a fresh spawn), reloads exactly once, and stays put when self-reload is disabled
+# No ChatGPT/gh/network: gh is stubbed, sudo is a no-op, browser mode is forced native.
+# Run: bash tests/daemon-reload.test.sh
+set -uo pipefail
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LIB="$HERE/../lib/pro-gate-lib.sh"
+TEST_FAILURES=0
+check() { if [ "$2" = 0 ]; then echo "ok - $1"; else echo "FAIL - $1: ${3:-}"; TEST_FAILURES=$((TEST_FAILURES + 1)); fi; }
+
+TDIR="$(mktemp -d "${TMPDIR:-/tmp}/pg-daemon-test.XXXXXX")"
+DPID=""
+cleanup() {
+  [ -n "$DPID" ] && { kill "$DPID" 2>/dev/null; pkill -P "$DPID" 2>/dev/null; }
+  pkill -f "$TDIR/daemon.sh" 2>/dev/null
+  rm -rf "$TDIR"
+}
+trap cleanup EXIT
+
+echo '# pg_file_sig: stable + change-sensitive'
+mkdir -p "$TDIR/sig"
+printf 'alpha\n' > "$TDIR/sig/a"; printf 'beta\n' > "$TDIR/sig/b"
+S1="$(bash -c ". '$LIB'; pg_file_sig '$TDIR/sig/a' '$TDIR/sig/b'")"
+S2="$(bash -c ". '$LIB'; pg_file_sig '$TDIR/sig/a' '$TDIR/sig/b'")"
+check 'sig is non-empty' "$([ -n "$S1" ]; echo $?)" "s1=$S1"
+check 'sig is stable across calls' "$([ "$S1" = "$S2" ]; echo $?)" "s1=$S1 s2=$S2"
+printf 'beta-CHANGED\n' > "$TDIR/sig/b"
+S3="$(bash -c ". '$LIB'; pg_file_sig '$TDIR/sig/a' '$TDIR/sig/b'")"
+check 'sig changes when a file changes' "$([ "$S1" != "$S3" ]; echo $?)" "s1=$S1 s3=$S3"
+rm -f "$TDIR/sig/b"
+S4="$(bash -c ". '$LIB'; pg_file_sig '$TDIR/sig/a' '$TDIR/sig/b'")"
+check 'sig changes when a file disappears' "$([ "$S3" != "$S4" ]; echo $?)" "s3=$S3 s4=$S4"
+
+echo '# install.sh writes an atomic deploy stamp (= sig of the deployed daemon code) as its last deploy step'
+SBI="$TDIR/inst"; mkdir -p "$SBI/shim" "$SBI/cdir" "$SBI/home" "$SBI/oracle"
+printf '#!/bin/sh\n[ "$1" = tee ] && cat >/dev/null\nexit 0\n' > "$SBI/shim/sudo"; chmod +x "$SBI/shim/sudo"   # neutralize systemd steps
+INSTALL_DAEMON=0 CLAUDE_DIR="$SBI/cdir" PRO_GATE_HOME="$SBI/home" ORACLE_DIR="$SBI/oracle" \
+  PATH="$SBI/shim:$PATH" bash "$HERE/../install.sh" --local-source > "$SBI/install.log" 2>&1 || true
+check 'install wrote .deploy-stamp' "$([ -s "$SBI/home/.deploy-stamp" ]; echo $?)" "$(ls -1 "$SBI/home" 2>/dev/null | tr '\n' ' ')"
+EXP="$(bash -c ". '$LIB'; pg_file_sig '$SBI/home/daemon.sh' '$SBI/home/lib.sh' '$SBI/home/run-daemon.sh'")"
+GOT="$(cat "$SBI/home/.deploy-stamp" 2>/dev/null || true)"
+check 'stamp == sig of deployed daemon code' "$([ -n "$GOT" ] && [ "$GOT" = "$EXP" ]; echo $?)" "got=$GOT exp=$EXP"
+check 'no leftover .deploy-stamp.tmp (atomic rename)' "$([ ! -e "$SBI/home/.deploy-stamp.tmp" ]; echo $?)" 'tmp left behind'
+check 'installer does not copy plugin-owned skill' "$([ ! -e "$SBI/cdir/skills/pro-gate/SKILL.md" ]; echo $?)" 'duplicate skill installed'
+check 'installer does not copy plugin-owned agent' "$([ ! -e "$SBI/cdir/agents/oracle-reviewer.md" ]; echo $?)" 'duplicate agent installed'
+
+echo '# U4: daemon consumes all typed actions without legacy policy inference'
+TYPED_HOME="$TDIR/typed-runtime"; mkdir -p "$TYPED_HOME"
+unset PRO_REVIEW_INPUT
+export PRO_GATE_HOME="$TYPED_HOME" PRO_GATE_DAEMON_LIB_ONLY=1
+. "$HERE/../daemon/daemon.sh"
+unset PRO_GATE_DAEMON_LIB_ONLY
+check 'daemon defaults PRO_REVIEW_INPUT to empty/inherit-engine' "$([ -z "$DD_INPUT" ] && [ "${#DD_INPUT_ARGS[@]}" -eq 0 ]; echo $?)" "input=$DD_INPUT args=${DD_INPUT_ARGS[*]}"
+PRO_GATE_HOME="$TYPED_HOME" PRO_REVIEW_INPUT=invalid bash "$HERE/../daemon/daemon.sh" >"$TYPED_HOME/invalid-input.log" 2>&1; input_rc=$?
+check 'invalid PRO_REVIEW_INPUT fails closed at startup' "$([ "$input_rc" -ne 0 ] && grep -Fq 'must be one of: empty, both, bundle, connector' "$TYPED_HOME/invalid-input.log"; echo $?)" "rc=$input_rc"
+# TYPED_STATE tracks daemon.sh's real $STATE ledger (processed-v2.tsv), not $STATE_LEGACY's
+# processed.tsv -- #184 finding 1 (round 5): before that fix, allow-existing-merge-workflow never
+# reached mark_processed_heads, so pointing this at the wrong file was silently inert; now that a
+# FIRST SHIP correctly marks the head done, a case below (line ~224) legitimately writes here, and
+# a later case reusing the same PROCESS_SHA needs this truncated first or it inherits that mark.
+TYPED_STATE="$TYPED_HOME/processed-v2.tsv"; TYPED_FAILS="$TYPED_HOME/failcount.tsv"; : > "$TYPED_STATE"; : > "$TYPED_FAILS"
+TYPED_LOG="$TYPED_HOME/typed.log"; : > "$TYPED_LOG"
+log(){ printf '%s\n' "$*" >> "$TYPED_LOG"; }
+TYPED_ENGINE="$TYPED_HOME/oracle-review.sh"; TYPED_ENGINE_CALLS="$TYPED_HOME/engine-calls.log"; : > "$TYPED_ENGINE_CALLS"; export MOCK_ENGINE_CALLS="$TYPED_ENGINE_CALLS"
+printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> "$MOCK_ENGINE_CALLS"\ncase " $* " in\n  *" --review-decision-effect "*|*" --review-decision "*) cat "$MOCK_FRESH";;\n  *" --recover "*) printf "recover\\n" >> "$MOCK_RECOVERED";;\nesac\n' > "$TYPED_ENGINE"
+chmod +x "$TYPED_ENGINE"
+typed_decision(){ # corpus-case index output
+  local index="$1" out="$2" facts patch
+  patch="$(jq -c ".cases[$index].patch" "$HERE/fixtures/review-decision/v1/corpus.json")"
+  facts="$(jq -cS --arg cd "$(pg_review_decision_contract_digest)" --arg xd "$(pg_review_decision_corpus_digest)" --argjson patch "$patch" '.base_facts * $patch | .contract={contract_digest:$cd,contract_id:"review-decision/v1",contract_version:1,corpus_digest:$xd}' "$HERE/fixtures/review-decision/v1/corpus.json")"
+  pg_review_decision_reduce "$facts" > "$out"
+}
+
+# Prompt contracts carry only validated handles; they do not interpolate decision JSON or bypass the
+# full fixer lifecycle after the first exact guarded runtime effect.
+TYPED_BIN="$TYPED_HOME/bin"; mkdir -p "$TYPED_BIN"
+printf '#!/usr/bin/env bash\n[ "${MOCK_CLAUDE_RC:-0}" = 0 ] || exit "$MOCK_CLAUDE_RC"\nprintf "%%s" "$2" > "$MOCK_PROMPT"\n' > "$TYPED_BIN/claude"; chmod +x "$TYPED_BIN/claude"
+PATH="$TYPED_BIN:$PATH"; CLAUDE_MODEL=test FALLBACK_MODEL=test MAX_BUDGET=1
+RUN_DECISION="$TYPED_HOME/run-decision.json"; typed_decision 2 "$RUN_DECISION"
+RUN_PROMPT="$TYPED_HOME/run.prompt"
+# #151: with PRO_REVIEW_ENGINE_TIMEOUT unset the worker argv carries NO --timeout, so the engine's
+# own sized fresh-review default (and a machine-wide PRO_GATE_TIMEOUT) reaches a daemon-launched
+# review. Same rule as the r1 P2 recovery path below.
+printf -v EXPECTED_EFFECT '%q ' "$TYPED_ENGINE" --review-decision --review-decision-effect "$RUN_DECISION" --pr 1983 --repo "$TYPED_HOME" --out "$TYPED_LOG.review"
+MOCK_PROMPT="$RUN_PROMPT" DD_ENGINE="$TYPED_ENGINE" DD_NWO=acme/widgets DD_NUM=1983 DD_SHA=1111111111111111111111111111111111111111 DD_WORKTREE="$TYPED_HOME" DD_LOG="$TYPED_LOG" daemon_run_review_worker "$RUN_DECISION"; worker_rc=$?
+check 'empty daemon input omits --input from the guarded effect worker argv' "$(grep -Fqx 'First action: execute this exact argv-quoted guarded runtime effect; it rechecks the saved review-decision/v1 before any charge or submission:' "$RUN_PROMPT" && grep -Fq "$EXPECTED_EFFECT" "$RUN_PROMPT" && ! grep -Fq -- '--input ' "$RUN_PROMPT"; echo $?)" "rc=$worker_rc"
+check 'run worker prompt restores fix/test/commit/push/comment lifecycle and no-merge guard' "$(grep -Fq '/pro-gate skill' "$RUN_PROMPT" && grep -Fq 'sanity-check every P0/P1' "$RUN_PROMPT" && grep -Fq 'tests and lint' "$RUN_PROMPT" && grep -Fq 'commit the fixes' "$RUN_PROMPT" && grep -Fq 'push this branch to origin' "$RUN_PROMPT" && grep -Fq 'exactly one audit PR comment' "$RUN_PROMPT" && grep -Fq 'Never merge' "$RUN_PROMPT"; echo $?)"
+AGENT_DECISION="$TYPED_HOME/agent-decision.json"; typed_decision 3 "$AGENT_DECISION"
+AGENT_PROMPT="$TYPED_HOME/agent.prompt"; raw_marker="$(jq -r '.facts.prior_review.marker' "$AGENT_DECISION")"
+MOCK_PROMPT="$AGENT_PROMPT" DD_ENGINE="$TYPED_ENGINE" DD_NWO=acme/widgets DD_NUM=1983 DD_SHA=1111111111111111111111111111111111111111 DD_WORKTREE="$TYPED_HOME" DD_LOG="$TYPED_LOG" daemon_run_agent_task "$AGENT_DECISION" fix-review-findings; agent_rc=$?
+check 'successful typed agent task returns completion' "$([ "$agent_rc" -eq 0 ]; echo $?)" "rc=$agent_rc"
+check 'empty daemon input omits --input from query-only agent re-entry' "$(grep -Fq 'Control-safe typed action: fix-review-findings.' "$AGENT_PROMPT" && grep -Fq "PR #1983 (acme/widgets), local repository $TYPED_HOME." "$AGENT_PROMPT" && grep -Fq "$AGENT_DECISION" "$AGENT_PROMPT" && grep -Fq -- '--review-decision --json --pr 1983' "$AGENT_PROMPT" && ! grep -Fq -- '--input ' "$AGENT_PROMPT" && ! grep -F -- '--review-decision --json' "$AGENT_PROMPT" | grep -Fq -- '--out'; echo $?)"
+check 'agent-task prompt excludes raw decision-envelope content' "$(! grep -Fq "$raw_marker" "$AGENT_PROMPT"; echo $?)" "marker=$raw_marker"
+daemon_agent_task_available(){ return 1; }
+MOCK_PROMPT="$AGENT_PROMPT" DD_ENGINE="$TYPED_ENGINE" DD_NWO=acme/widgets DD_NUM=1983 DD_SHA=1111111111111111111111111111111111111111 DD_WORKTREE="$TYPED_HOME" DD_LOG="$TYPED_LOG" daemon_run_agent_task "$AGENT_DECISION" fix-review-findings; agent_rc=$?
+check 'unavailable typed agent task is deferred, not completed' "$([ "$agent_rc" -eq 2 ]; echo $?)" "rc=$agent_rc"
+daemon_agent_task_available(){ return 0; }
+MOCK_CLAUDE_RC=1 MOCK_PROMPT="$AGENT_PROMPT" DD_ENGINE="$TYPED_ENGINE" DD_NWO=acme/widgets DD_NUM=1983 DD_SHA=1111111111111111111111111111111111111111 DD_WORKTREE="$TYPED_HOME" DD_LOG="$TYPED_LOG" daemon_run_agent_task "$AGENT_DECISION" fix-review-findings; agent_rc=$?
+check 'failed typed agent task is deferred, not completed' "$([ "$agent_rc" -eq 1 ]; echo $?)" "rc=$agent_rc"
+: > "$TYPED_ENGINE_CALLS"
+MOCK_ENGINE_CALLS="$TYPED_ENGINE_CALLS" MOCK_FRESH="$RUN_DECISION" DD_ENGINE="$TYPED_ENGINE" DD_NWO=acme/widgets DD_NUM=1983 DD_SHA=1111111111111111111111111111111111111111 DD_WORKTREE="$TYPED_HOME" DD_LOG="$TYPED_LOG" daemon_handle_review_worker_failure 124; default_query_rc=$?
+check 'empty daemon input omits --input from replacement query argv' "$([ "$default_query_rc" -eq 1 ] && grep -Fq -- '--review-decision --json --pr 1983' "$TYPED_ENGINE_CALLS" && ! grep -Fq -- '--input ' "$TYPED_ENGINE_CALLS"; echo $?)" "rc=$default_query_rc calls=$(cat "$TYPED_ENGINE_CALLS")"
+
+# An explicit daemon value stays byte-identical across every subsequent command.
+DD_INPUT=connector; DD_INPUT_ARGS=(--input "$DD_INPUT")
+EXPLICIT_RUN_PROMPT="$TYPED_HOME/run-explicit.prompt"
+printf -v EXPLICIT_EFFECT '%q ' "$TYPED_ENGINE" --review-decision --review-decision-effect "$RUN_DECISION" --pr 1983 --repo "$TYPED_HOME" --input connector --out "$TYPED_LOG.review"
+MOCK_PROMPT="$EXPLICIT_RUN_PROMPT" DD_ENGINE="$TYPED_ENGINE" DD_NWO=acme/widgets DD_NUM=1983 DD_SHA=1111111111111111111111111111111111111111 DD_WORKTREE="$TYPED_HOME" DD_LOG="$TYPED_LOG" daemon_run_review_worker "$RUN_DECISION"; explicit_worker_rc=$?
+check 'explicit connector input is preserved byte-identically in worker argv' "$([ "$explicit_worker_rc" -eq 0 ] && grep -Fq "$EXPLICIT_EFFECT" "$EXPLICIT_RUN_PROMPT"; echo $?)" "rc=$explicit_worker_rc"
+
+# #151: the FRESH-review worker obeys the same rule as the r1 P2 recovery path. It used to send a
+# fixed 60m whenever PRO_REVIEW_ENGINE_TIMEOUT was unset, and because the engine treats any
+# --timeout it receives as final, a machine-wide PRO_GATE_TIMEOUT could never reach a
+# daemon-launched review at all. These must run BEFORE the stub that replaces
+# daemon_run_review_worker further down, or they assert nothing.
+FRESH_TIMEOUT_PROMPT="$TYPED_HOME/run-timeout.prompt"
+( unset PRO_REVIEW_ENGINE_TIMEOUT
+  MOCK_PROMPT="$FRESH_TIMEOUT_PROMPT" DD_ENGINE="$TYPED_ENGINE" DD_NWO=acme/widgets DD_NUM=1983 DD_SHA=1111111111111111111111111111111111111111 DD_WORKTREE="$TYPED_HOME" DD_LOG="$TYPED_LOG" daemon_run_review_worker "$RUN_DECISION" )
+check '#151: daemon fresh review sends no --timeout when PRO_REVIEW_ENGINE_TIMEOUT is unset, so the engine fresh default applies' \
+  "$([ -s "$FRESH_TIMEOUT_PROMPT" ] && ! grep -Fq -- '--timeout' "$FRESH_TIMEOUT_PROMPT"; echo $?)" "prompt=$(head -c 200 "$FRESH_TIMEOUT_PROMPT" 2>/dev/null | tr '\n' ' ')"
+FRESH_TIMEOUT_SET_PROMPT="$TYPED_HOME/run-timeout-set.prompt"
+( export PRO_REVIEW_ENGINE_TIMEOUT=9m
+  MOCK_PROMPT="$FRESH_TIMEOUT_SET_PROMPT" DD_ENGINE="$TYPED_ENGINE" DD_NWO=acme/widgets DD_NUM=1983 DD_SHA=1111111111111111111111111111111111111111 DD_WORKTREE="$TYPED_HOME" DD_LOG="$TYPED_LOG" daemon_run_review_worker "$RUN_DECISION" )
+check '#151: daemon fresh review passes an explicit PRO_REVIEW_ENGINE_TIMEOUT through as --timeout' \
+  "$([ -s "$FRESH_TIMEOUT_SET_PROMPT" ] && grep -Fq -- '--timeout 9m' "$FRESH_TIMEOUT_SET_PROMPT"; echo $?)" "prompt=$(head -c 200 "$FRESH_TIMEOUT_SET_PROMPT" 2>/dev/null | tr '\n' ' ')"
+
+# A nonzero run worker must re-query with the same input before it can consume the wrapper budget.
+FAIL_NOTES=0
+note_fail(){ FAIL_NOTES=$((FAIL_NOTES + 1)); }
+for fresh_index in 0 1; do
+  FRESH_DECISION="$TYPED_HOME/fresh-$fresh_index.json"; typed_decision "$fresh_index" "$FRESH_DECISION"
+  FAIL_NOTES=0
+  MOCK_ENGINE_CALLS="$TYPED_ENGINE_CALLS" MOCK_FRESH="$FRESH_DECISION" DD_ENGINE="$TYPED_ENGINE" DD_INPUT=both DD_NWO=acme/widgets DD_NUM=1983 DD_SHA=1111111111111111111111111111111111111111 DD_WORKTREE="$TYPED_HOME" DD_LOG="$TYPED_LOG" daemon_handle_review_worker_failure 124; failure_rc=$?
+  fresh_action="$(jq -r .action "$FRESH_DECISION")"
+  check "nonzero run worker + fresh typed $fresh_action leaves wrapper failure budget untouched" "$([ "$failure_rc" -eq 2 ] && [ "$FAIL_NOTES" -eq 0 ]; echo $?)" "rc=$failure_rc notes=$FAIL_NOTES"
+done
+NONRECOVERABLE_DECISION="$TYPED_HOME/fresh-run.json"; typed_decision 2 "$NONRECOVERABLE_DECISION"; FAIL_NOTES=0
+MOCK_ENGINE_CALLS="$TYPED_ENGINE_CALLS" MOCK_FRESH="$NONRECOVERABLE_DECISION" DD_ENGINE="$TYPED_ENGINE" DD_INPUT=both DD_NWO=acme/widgets DD_NUM=1983 DD_SHA=1111111111111111111111111111111111111111 DD_WORKTREE="$TYPED_HOME" DD_LOG="$TYPED_LOG" daemon_handle_review_worker_failure 124; failure_rc=$?
+check 'nonrecoverable fresh typed replacement retains note_fail behavior' "$([ "$failure_rc" -eq 1 ] && [ "$FAIL_NOTES" -eq 1 ]; echo $?)" "rc=$failure_rc notes=$FAIL_NOTES"
+check 'explicit connector input is reused by fresh query' "$(grep -F -- '--review-decision --json' "$TYPED_ENGINE_CALLS" | grep -Fq -- '--input connector'; echo $?)"
+
+REVIEW_WORKERS=0; AGENT_TASKS=0
+daemon_run_review_worker(){ REVIEW_WORKERS=$((REVIEW_WORKERS + 1)); return 0; }
+daemon_agent_task_available(){ return 0; }
+daemon_run_agent_task(){ AGENT_TASKS=$((AGENT_TASKS + 1)); return 0; }
+for index in $(seq 0 "$(jq '.cases | length - 1' "$HERE/fixtures/review-decision/v1/corpus.json")"); do
+  decision="$TYPED_HOME/decision-$index.json"; typed_decision "$index" "$decision"
+  action="$(jq -r .action "$decision")"; expected="$(jq -r ".cases[$index].expected.action" "$HERE/fixtures/review-decision/v1/corpus.json")"
+  before_review="$REVIEW_WORKERS"; before_agent="$AGENT_TASKS"; before_state="$(wc -c < "$TYPED_STATE")"; before_fails="$(wc -c < "$TYPED_FAILS")"
+  MOCK_FRESH="$decision" MOCK_RECOVERED="$TYPED_HOME/recovered-$index" DD_ENGINE="$TYPED_ENGINE" DD_NWO=acme/widgets DD_NUM=1983 DD_SHA=1111111111111111111111111111111111111111 DD_WORKTREE="$TYPED_HOME" DD_LOG="$TYPED_LOG" daemon_dispatch_decision "$decision"; rc=$?
+  check "typed daemon accepts corpus action $expected" "$([ "$rc" -eq 0 ] && [ "$action" = "$expected" ]; echo $?)" "rc=$rc action=$action"
+  case "$action" in
+    run-granted-review) expected_review=$((before_review + 1)); expected_agent="$before_agent";;
+    fix-review-findings|prepare-matching-review-evidence) expected_review="$before_review"; expected_agent=$((before_agent + 1));;
+    *) expected_review="$before_review"; expected_agent="$before_agent";;
+  esac
+  check "$action dispatches only its runtime-provided execution class without a routine prompt" "$([ "$REVIEW_WORKERS" -eq "$expected_review" ] && [ "$AGENT_TASKS" -eq "$expected_agent" ]; echo $?)" "review=$REVIEW_WORKERS agent=$AGENT_TASKS"
+  check "$action has zero SHA/failure-budget effects unless it runs a granted review" "$([ "$action" = run-granted-review ] || { [ "$(wc -c < "$TYPED_STATE")" = "$before_state" ] && [ "$(wc -c < "$TYPED_FAILS")" = "$before_fails" ]; }; echo $?)" "processed=$(wc -c < "$TYPED_STATE") failures=$(wc -c < "$TYPED_FAILS")"
+done
+# gate #148 r1 P2: an unattended recovery passes --timeout only when PRO_REVIEW_ENGINE_TIMEOUT is
+# configured. The engine treats any --timeout it receives as final, so the fixed 60m the daemon used
+# to send bypassed the 45m collection default and PRO_GATE_HARVEST_TIMEOUT on every recovery.
+RECOVER_INDEX="$(jq -r 'first(.cases | to_entries[] | select(.value.expected.action == "recover-existing-review")) | .key' "$HERE/fixtures/review-decision/v1/corpus.json")"
+RECOVER_DECISION="$TYPED_HOME/recover-timeout.json"; typed_decision "$RECOVER_INDEX" "$RECOVER_DECISION"
+: > "$TYPED_ENGINE_CALLS"
+( unset PRO_REVIEW_ENGINE_TIMEOUT; export PRO_GATE_HARVEST_TIMEOUT=5m
+  MOCK_FRESH="$RECOVER_DECISION" MOCK_RECOVERED="$TYPED_HOME/recover-timeout-unset" DD_ENGINE="$TYPED_ENGINE" DD_NWO=acme/widgets DD_NUM=1983 DD_SHA=1111111111111111111111111111111111111111 DD_WORKTREE="$TYPED_HOME" DD_LOG="$TYPED_LOG" daemon_dispatch_decision "$RECOVER_DECISION" )
+RECOVER_CALL="$(grep -F -- '--recover ' "$TYPED_ENGINE_CALLS" | tail -1)"
+check 'gate #148 r1 P2: daemon recovery sends no --timeout when PRO_REVIEW_ENGINE_TIMEOUT is unset, so the engine collection default applies' \
+  "$([ -n "$RECOVER_CALL" ] && ! grep -Fq -- '--timeout' <<<"$RECOVER_CALL"; echo $?)" "call=$RECOVER_CALL"
+: > "$TYPED_ENGINE_CALLS"
+( export PRO_REVIEW_ENGINE_TIMEOUT=7m
+  MOCK_FRESH="$RECOVER_DECISION" MOCK_RECOVERED="$TYPED_HOME/recover-timeout-set" DD_ENGINE="$TYPED_ENGINE" DD_NWO=acme/widgets DD_NUM=1983 DD_SHA=1111111111111111111111111111111111111111 DD_WORKTREE="$TYPED_HOME" DD_LOG="$TYPED_LOG" daemon_dispatch_decision "$RECOVER_DECISION" )
+RECOVER_CALL="$(grep -F -- '--recover ' "$TYPED_ENGINE_CALLS" | tail -1)"
+check 'gate #148 r1 P2: daemon recovery passes an explicit PRO_REVIEW_ENGINE_TIMEOUT through as --timeout' \
+  "$(grep -Fq -- '--timeout 7m' <<<"$RECOVER_CALL"; echo $?)" "call=$RECOVER_CALL"
+check 'explicit connector input is reused by guarded effect rechecks' "$(grep -F -- '--review-decision-effect' "$TYPED_ENGINE_CALLS" | grep -Fq -- '--input connector'; echo $?)"
+
+# #184/#184c: completion requires a typed current-head outcome, not a subprocess exit code. A
+# successful agent task is progress -- it never marks the SHA. A completed run-granted-review
+# worker completes it; a report-only stop-without-new-review decision completes it ONLY when its
+# facts positively attest a completed, applicable, current-head review (daemon_stop_is_completion_
+# proof) -- most stop reasons (round-governor-denied included) mean no applicable review ran at
+# all. Every other action, and agent-task failure/unavailable outcomes, remain retryable and
+# budget-neutral.
+# CI is reported settled throughout this block; #184's own CI-gate/deferral-cap and
+# agent-task-attempt-cap coverage lives in tests/daemon-current-head-completion.test.sh.
+PROCESS_REPO="$TYPED_HOME/process-repo"; mkdir -p "$PROCESS_REPO/.git"
+PROCESS_SHA=1111111111111111111111111111111111111111
+find_repo(){ printf '%s\n' "$PROCESS_REPO"; }
+git(){
+  if [ "${1:-}" = -C ] && [ "${3:-}" = worktree ] && [ "${4:-}" = add ]; then mkdir -p "$6"; fi
+  return 0
+}
+# #184 finding 3 (round 8): an EMPTY rollup no longer means "settled" (see ci_ready in daemon.sh) --
+# an unconfigured repo now blocks once the empty-rollup grace is exhausted instead of proceeding, so
+# reusing an empty rollup here would trip that new (correct) block and fail every process_pr call in
+# this block, none of which intends to exercise the empty-rollup/no-CI-config mechanic (that has its
+# own dedicated red/green coverage in tests/daemon-current-head-completion.test.sh). Report a
+# positively SETTLED check instead, matching this block's actual, stated intent.
+gh(){
+  [ "${1:-}" = pr ] && [ "${2:-}" = view ] && { printf '{"statusCheckRollup":[{"status":"COMPLETED","conclusion":"SUCCESS"}]}\n'; return 0; }
+  return 1
+}
+runtime_gate(){ return 0; }
+CI_EMPTY_GRACE=1
+PROCESS_AGENT_RC=0
+daemon_run_agent_task(){ AGENT_TASKS=$((AGENT_TASKS + 1)); return "$PROCESS_AGENT_RC"; }
+PROCESS_DECISION="$TYPED_HOME/process-agent.json"; typed_decision 3 "$PROCESS_DECISION"
+: > "$TYPED_STATE"; : > "$TYPED_FAILS"; : > "$TYPED_HOME/agent-task-attempts.tsv"
+MOCK_FRESH="$PROCESS_DECISION" process_pr acme/widgets 1983 "$PROCESS_SHA" branch https://example.test/pr/1983; process_rc=$?
+check 'successful fix agent task does not mark its SHA and is retried next poll' "$([ "$process_rc" -eq 0 ] && ! already_done acme/widgets 1983 "$PROCESS_SHA" && [ ! -s "$TYPED_STATE" ]; echo $?)" "rc=$process_rc state=$(wc -l < "$TYPED_STATE")"
+check 'successful agent task counts toward its bounded no-progress attempt cap' "$([ "$(wc -l < "$TYPED_HOME/agent-task-attempts.tsv")" -eq 1 ]; echo $?)" "attempts=$(cat "$TYPED_HOME/agent-task-attempts.tsv")"
+PROCESS_PREPARE_DECISION="$TYPED_HOME/process-prepare.json"; typed_decision 4 "$PROCESS_PREPARE_DECISION"
+: > "$TYPED_STATE"; : > "$TYPED_FAILS"; : > "$TYPED_HOME/agent-task-attempts.tsv"
+MOCK_FRESH="$PROCESS_PREPARE_DECISION" process_pr acme/widgets 1983 "$PROCESS_SHA" branch https://example.test/pr/1983; process_rc=$?
+check 'successful evidence-prep agent task does not mark its SHA and is retried next poll' "$([ "$process_rc" -eq 0 ] && ! already_done acme/widgets 1983 "$PROCESS_SHA" && [ ! -s "$TYPED_STATE" ]; echo $?)" "rc=$process_rc state=$(wc -l < "$TYPED_STATE")"
+for PROCESS_AGENT_RC in 1 2; do
+  : > "$TYPED_STATE"; : > "$TYPED_FAILS"; : > "$TYPED_HOME/agent-task-attempts.tsv"
+  MOCK_FRESH="$PROCESS_DECISION" process_pr acme/widgets 1983 "$PROCESS_SHA" branch https://example.test/pr/1983; process_rc=$?
+  check "agent task rc=$PROCESS_AGENT_RC stays retryable without a failure-budget row" "$([ "$process_rc" -eq "$PROCESS_AGENT_RC" ] && [ ! -s "$TYPED_STATE" ] && [ ! -s "$TYPED_FAILS" ]; echo $?)" "rc=$process_rc processed=$(wc -c < "$TYPED_STATE") failures=$(wc -c < "$TYPED_FAILS")"
+done
+PROCESS_AGENT_RC=0
+for action in collect-existing-result recover-existing-review ask-named-product-choice; do
+  index="$(jq -r --arg action "$action" 'first(.cases | to_entries[] | select(.value.expected.action == $action)) | .key' "$HERE/fixtures/review-decision/v1/corpus.json")"
+  decision="$TYPED_HOME/process-$action.json"; typed_decision "$index" "$decision"
+  : > "$TYPED_STATE"; : > "$TYPED_FAILS"
+  MOCK_FRESH="$decision" MOCK_RECOVERED="$TYPED_HOME/process-recovered" process_pr acme/widgets 1983 "$PROCESS_SHA" branch https://example.test/pr/1983; process_rc=$?
+  check "$action does not mark a processed SHA or failure budget" "$([ "$process_rc" -eq 0 ] && [ ! -s "$TYPED_STATE" ] && [ ! -s "$TYPED_FAILS" ]; echo $?)" "rc=$process_rc processed=$(wc -c < "$TYPED_STATE") failures=$(wc -c < "$TYPED_FAILS")"
+done
+# #162: account-cooldown-active is the OTHER non-completing stop-without-new-review shape. It is
+# deliberately not in the loop above -- #184 narrowed that list to the three report/collection
+# actions -- so assert it directly, the same way allow-existing-merge-workflow was split out below.
+# A cooldown defers a spend: the head must stay unprocessed and nothing may be charged.
+cooldown_index="$(jq -r 'first(.cases | to_entries[] | select(.value.expected.action == "stop-without-new-review" and .value.expected.reason == "account-cooldown-active")) | .key' "$HERE/fixtures/review-decision/v1/corpus.json")"
+decision="$TYPED_HOME/process-cooldown.json"; typed_decision "$cooldown_index" "$decision"
+: > "$TYPED_STATE"; : > "$TYPED_FAILS"
+MOCK_FRESH="$decision" MOCK_RECOVERED="$TYPED_HOME/process-recovered" process_pr acme/widgets 1983 "$PROCESS_SHA" branch https://example.test/pr/1983; process_rc=$?
+check "account-cooldown-active does not mark a processed SHA or failure budget" "$([ "$process_rc" -eq 0 ] && [ ! -s "$TYPED_STATE" ] && [ ! -s "$TYPED_FAILS" ]; echo $?)" "rc=$process_rc processed=$(wc -c < "$TYPED_STATE") failures=$(wc -c < "$TYPED_FAILS")"
+# #184 finding 1 (round 5): allow-existing-merge-workflow/current-ship-is-merge-eligible is one of
+# the positive shapes daemon_decision_completes_current_head recognizes (the producer's FIRST
+# SHIP result lives in .facts.completed_results, never .facts.prior_review) -- unlike the three
+# report/collection actions above, it correctly DOES mark the head done, or the unchanged head
+# re-clones and re-queries forever. Split out of the "does not mark" loop above on purpose.
+MERGE_INDEX="$(jq -r '.cases | to_entries[] | select(.value.expected.reason == "current-ship-is-merge-eligible") | .key' "$HERE/fixtures/review-decision/v1/corpus.json")"
+MERGE_DECISION="$TYPED_HOME/process-allow-existing-merge-workflow.json"; typed_decision "$MERGE_INDEX" "$MERGE_DECISION"
+check 'sanity: the allow-existing-merge-workflow corpus fixture is the FIRST-SHIP completion reason (current-ship-is-merge-eligible)' "$([ "$(jq -r .reason "$MERGE_DECISION")" = current-ship-is-merge-eligible ]; echo $?)" "$(jq -r .reason "$MERGE_DECISION")"
+: > "$TYPED_STATE"; : > "$TYPED_FAILS"
+MOCK_FRESH="$MERGE_DECISION" MOCK_RECOVERED="$TYPED_HOME/process-recovered" process_pr acme/widgets 1983 "$PROCESS_SHA" branch https://example.test/pr/1983; process_rc=$?
+check 'allow-existing-merge-workflow (current-ship-is-merge-eligible) completes the current head without a failure-budget charge' "$([ "$process_rc" -eq 0 ] && already_done acme/widgets 1983 "$PROCESS_SHA" && [ ! -s "$TYPED_FAILS" ]; echo $?)" "rc=$process_rc processed=$(wc -c < "$TYPED_STATE") failures=$(wc -c < "$TYPED_FAILS")"
+DEFER_INDEX="$(jq -r '.cases | to_entries[] | select(.value.expected.reason == "fix-first-deferred-p2-only") | .key' "$HERE/fixtures/review-decision/v1/corpus.json")"
+DEFER_DECISION="$TYPED_HOME/process-deferral.json"; typed_decision "$DEFER_INDEX" "$DEFER_DECISION"
+: > "$TYPED_STATE"; : > "$TYPED_FAILS"
+MOCK_FRESH="$DEFER_DECISION" process_pr acme/widgets 1983 "$PROCESS_SHA" branch https://example.test/pr/1983; process_rc=$?
+check 'P2-5 deferral allow completes the current head without a failure-budget charge' "$([ "$process_rc" -eq 0 ] && already_done acme/widgets 1983 "$PROCESS_SHA" && [ ! -s "$TYPED_FAILS" ]; echo $?)" "rc=$process_rc processed=$(wc -c < "$TYPED_STATE") failures=$(wc -c < "$TYPED_FAILS")"
+: > "$TYPED_STATE"; : > "$TYPED_FAILS"
+# #184c finding 1: a round-governor-denied stop means no applicable review ran, so it must NOT
+# complete the head. Positive current-head review proof ("identical-code-and-evidence") is covered
+# by tests/daemon-current-head-completion.test.sh, which is not in the shared corpus so it does not
+# perturb this file's case count.
+# #162: select on the REASON, not the action alone. This case used to be the corpus's only
+# stop-without-new-review entry, and selecting by action returned exactly one key; the cooldown case
+# added for #162 makes that selector return two, which silently feeds a malformed index to
+# typed_decision and fails this sanity check with an empty reason. The cooldown case has its own
+# non-completion assertion above.
+STOP_INDEX="$(jq -r 'first(.cases | to_entries[] | select(.value.expected.action == "stop-without-new-review" and .value.expected.reason == "round-governor-denied")) | .key' "$HERE/fixtures/review-decision/v1/corpus.json")"
+STOP_DECISION="$TYPED_HOME/process-stop.json"; typed_decision "$STOP_INDEX" "$STOP_DECISION"
+check 'sanity: the stop-without-new-review corpus fixture is a NON-completion reason (round-governor-denied)' "$([ "$(jq -r .reason "$STOP_DECISION")" = round-governor-denied ]; echo $?)" "$(jq -r .reason "$STOP_DECISION")"
+: > "$TYPED_STATE"; : > "$TYPED_FAILS"
+MOCK_FRESH="$STOP_DECISION" process_pr acme/widgets 1983 "$PROCESS_SHA" branch https://example.test/pr/1983; process_rc=$?
+check 'report-only stop-without-new-review WITHOUT current-head review proof does not complete the head' "$([ "$process_rc" -eq 0 ] && ! already_done acme/widgets 1983 "$PROCESS_SHA" && [ ! -s "$TYPED_STATE" ]; echo $?)" "rc=$process_rc state=$(wc -l < "$TYPED_STATE")"
+# Observation is progress only: it reports, but never changes action selection or prompts.
+typed_decision 2 "$TYPED_HOME/observed-base.json"
+observed_facts="$(jq -cS '.facts | .observation.kind="waiting"' "$TYPED_HOME/observed-base.json")"
+pg_review_decision_reduce "$observed_facts" > "$TYPED_HOME/observed-run.json"
+before_review="$REVIEW_WORKERS"
+MOCK_FRESH="$TYPED_HOME/observed-run.json" DD_ENGINE="$TYPED_ENGINE" DD_NWO=acme/widgets DD_NUM=1983 DD_SHA=1111111111111111111111111111111111111111 DD_WORKTREE="$TYPED_HOME" DD_LOG="$TYPED_LOG" daemon_dispatch_decision "$TYPED_HOME/observed-run.json"
+check 'observation reports progress without changing granted runtime dispatch' "$([ "$REVIEW_WORKERS" -eq $((before_review + 1)) ] && grep -Fq 'review observation: waiting' "$TYPED_LOG"; echo $?)"
+# A rechecked stale effect must return and dispatch the replacement, not a guessed retry.
+typed_decision 0 "$TYPED_HOME/stale-original.json"; typed_decision 2 "$TYPED_HOME/stale-replacement.json"
+before_review="$REVIEW_WORKERS"
+MOCK_FRESH="$TYPED_HOME/stale-replacement.json" DD_ENGINE="$TYPED_ENGINE" DD_NWO=acme/widgets DD_NUM=1983 DD_SHA=1111111111111111111111111111111111111111 DD_WORKTREE="$TYPED_HOME" DD_LOG="$TYPED_LOG" daemon_dispatch_decision "$TYPED_HOME/stale-original.json"
+check 'stale runtime effect re-dispatches the fresh replacement action' "$([ "$REVIEW_WORKERS" -eq $((before_review + 1)) ]; echo $?)" "review=$REVIEW_WORKERS"
+# Every rejected envelope fails closed; only a complete incompatible identity defers globally.
+for invalid in malformed corpus unknown stale; do
+  typed_decision 2 "$TYPED_HOME/invalid-$invalid.json"
+  case "$invalid" in
+    malformed) printf '{not-json}\n' > "$TYPED_HOME/invalid-$invalid.json" ;;
+    corpus) jq '.contract.corpus_digest="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"' "$TYPED_HOME/invalid-$invalid.json" > "$TYPED_HOME/invalid-$invalid.tmp" && mv "$TYPED_HOME/invalid-$invalid.tmp" "$TYPED_HOME/invalid-$invalid.json" ;;
+    unknown) jq '.action="unknown-action" | .effect_request.action="unknown-action" | .effect_request.effect="unknown-action"' "$TYPED_HOME/invalid-$invalid.json" > "$TYPED_HOME/invalid-$invalid.tmp" && mv "$TYPED_HOME/invalid-$invalid.tmp" "$TYPED_HOME/invalid-$invalid.json" ;;
+    stale) facts="$(jq -c '.facts | .target.head_oid="2222222222222222222222222222222222222222"' "$TYPED_HOME/invalid-$invalid.json")"; pg_review_decision_reduce "$facts" > "$TYPED_HOME/invalid-$invalid.json" ;;
+  esac
+  DECISION_DEFERRED=0; RUNTIME_DEFERRED=0; before_review="$REVIEW_WORKERS"; before_agent="$AGENT_TASKS"; before_state="$(wc -c < "$TYPED_STATE")"; before_fails="$(wc -c < "$TYPED_FAILS")"
+  MOCK_FRESH="$TYPED_HOME/invalid-$invalid.json" DD_ENGINE="$TYPED_ENGINE" DD_NWO=acme/widgets DD_NUM=1983 DD_SHA=1111111111111111111111111111111111111111 DD_WORKTREE="$TYPED_HOME" DD_LOG="$TYPED_LOG" daemon_dispatch_decision "$TYPED_HOME/invalid-$invalid.json"; rc=$?
+  expected_deferred=0; [ "$invalid" != corpus ] || expected_deferred=1
+  check "$invalid decision defers at the correct scope with zero worker/SHA/failure-budget effects" "$([ "$rc" -eq 2 ] && [ "$DECISION_DEFERRED" = "$expected_deferred" ] && [ "$REVIEW_WORKERS" -eq "$before_review" ] && [ "$AGENT_TASKS" -eq "$before_agent" ] && [ "$(wc -c < "$TYPED_STATE")" = "$before_state" ] && [ "$(wc -c < "$TYPED_FAILS")" = "$before_fails" ]; echo $?)" "rc=$rc deferred=$DECISION_DEFERRED"
+done
+unset PRO_GATE_HOME
+
+echo '# integration: daemon re-execs itself in place when the deploy stamp changes'
+cp "$HERE/../daemon/daemon.sh"      "$TDIR/daemon.sh"
+cp "$HERE/../lib/pro-gate-lib.sh"   "$TDIR/lib.sh"
+cp "$HERE/../daemon/run-daemon.sh"  "$TDIR/run-daemon.sh"
+chmod +x "$TDIR/daemon.sh" "$TDIR/run-daemon.sh"
+mkdir -p "$TDIR/.local/bin" "$TDIR/logs" "$TDIR/.config/pro-gate"
+RUNTIME_VERSION="$(tr -d '[:space:]' < "$HERE/../VERSION")"
+printf '%s\n' "$RUNTIME_VERSION" > "$TDIR/VERSION"
+printf '%s\n' "$RUNTIME_VERSION" > "$TDIR/EXPECTED_VERSION"
+cp "$HERE/../skills/pro-gate/review-decision-v1.json" "$TDIR/review-decision-v1.json"
+printf '1\n' > "$TDIR/.config/pro-gate/dangerous-mode-consent"
+# Stub gh so the daemon finds no PRs and just idles through its poll loop (wins in PATH because
+# pg_augment_path prepends $HOME/.local/bin first, and HOME is pinned to $TDIR below).
+printf '#!/bin/sh\nexit 0\n' > "$TDIR/.local/bin/gh"; chmod +x "$TDIR/.local/bin/gh"
+
+DLOG="$TDIR/daemon.log"
+HOME="$TDIR" PRO_GATE_HOME="$TDIR" PRO_GATE_CONSENT_HOME="$TDIR/.config/pro-gate" PRO_REVIEW_OWNERS=fakeowner PRO_REVIEW_POLL_SECONDS=1 \
+  PRO_GATE_BROWSER_MODE=native PRO_GATE_DAEMON_SELF_RELOAD=1 PATH="/usr/bin:/bin" \
+  bash "$TDIR/run-daemon.sh" > "$DLOG" 2>&1 &
+DPID=$!
+
+for _ in $(seq 1 50); do grep -q 'pro-review-daemon starting' "$DLOG" 2>/dev/null && break; sleep 0.2; done
+check 'daemon started' "$(grep -q 'pro-review-daemon starting' "$DLOG"; echo $?)" "$(tail -3 "$DLOG" 2>/dev/null)"
+check 'daemon process alive before reload' "$(kill -0 "$DPID" 2>/dev/null; echo $?)" "pid=$DPID"
+
+# Simulate install.sh finishing a deploy: write the stamp atomically (this is the ONLY trigger now,
+# so merely editing daemon.sh on disk would NOT reload -- the stamp is the deploy-complete signal).
+printf 'deploy-v2-%s\n' "$(date +%s)" > "$TDIR/.deploy-stamp.tmp" && mv -f "$TDIR/.deploy-stamp.tmp" "$TDIR/.deploy-stamp"
+
+for _ in $(seq 1 60); do grep -q 'detected a new daemon deploy' "$DLOG" 2>/dev/null && break; sleep 0.2; done
+check 'daemon detected the new deploy stamp' "$(grep -q 'detected a new daemon deploy' "$DLOG"; echo $?)" "$(tail -5 "$DLOG" 2>/dev/null)"
+for _ in $(seq 1 40); do [ "$(grep -c 'pro-review-daemon starting' "$DLOG" 2>/dev/null)" -ge 2 ] && break; sleep 0.2; done
+check 'daemon re-started after reload (2 startup lines)' "$([ "$(grep -c 'pro-review-daemon starting' "$DLOG")" -ge 2 ]; echo $?)" "starts=$(grep -c 'pro-review-daemon starting' "$DLOG")"
+check 'PID unchanged across reload (exec, not a fresh spawn)' "$(kill -0 "$DPID" 2>/dev/null; echo $?)" "pid=$DPID"
+
+# No reload-loop: several more polls, and re-writing the SAME stamp content, must not reload again.
+sleep 2
+cp "$TDIR/.deploy-stamp" "$TDIR/.deploy-stamp.tmp" && mv -f "$TDIR/.deploy-stamp.tmp" "$TDIR/.deploy-stamp"
+sleep 2
+check 'reloaded exactly once (no reload-loop; identical stamp is inert)' "$([ "$(grep -c 'detected a new daemon deploy' "$DLOG")" -eq 1 ]; echo $?)" "reloads=$(grep -c 'detected a new daemon deploy' "$DLOG")"
+check 'started exactly twice (no reload-loop)' "$([ "$(grep -c 'pro-review-daemon starting' "$DLOG")" -eq 2 ]; echo $?)" "starts=$(grep -c 'pro-review-daemon starting' "$DLOG")"
+
+echo '# integration: self-reload disabled -> no re-exec on a new stamp'
+kill "$DPID" 2>/dev/null; pkill -P "$DPID" 2>/dev/null; DPID=""
+sleep 0.5
+rm -f "$TDIR/.deploy-stamp"
+DLOG2="$TDIR/daemon2.log"
+HOME="$TDIR" PRO_GATE_HOME="$TDIR" PRO_GATE_CONSENT_HOME="$TDIR/.config/pro-gate" PRO_REVIEW_OWNERS=fakeowner PRO_REVIEW_POLL_SECONDS=1 \
+  PRO_GATE_BROWSER_MODE=native PRO_GATE_DAEMON_SELF_RELOAD=0 PATH="/usr/bin:/bin" \
+  bash "$TDIR/run-daemon.sh" > "$DLOG2" 2>&1 &
+DPID=$!
+for _ in $(seq 1 50); do grep -q 'pro-review-daemon starting' "$DLOG2" 2>/dev/null && break; sleep 0.2; done
+printf 'deploy-v3-%s\n' "$(date +%s)" > "$TDIR/.deploy-stamp.tmp" && mv -f "$TDIR/.deploy-stamp.tmp" "$TDIR/.deploy-stamp"
+sleep 3
+check 'self-reload=0 does not detect/reload' "$([ "$(grep -c 'detected a new daemon deploy' "$DLOG2")" -eq 0 ]; echo $?)" "reloads=$(grep -c 'detected a new daemon deploy' "$DLOG2")"
+check 'self-reload=0 keeps a single startup line' "$([ "$(grep -c 'pro-review-daemon starting' "$DLOG2")" -eq 1 ]; echo $?)" "starts=$(grep -c 'pro-review-daemon starting' "$DLOG2")"
+
+# U5: metadata/library skew is a machine-global zero-effect defer. A later complete deploy stamp
+# re-execs only after the compatible record is present, restoring normal runtime readiness.
+echo '# integration: identity mismatch globally defers, compatible reload recovers'
+kill "$DPID" 2>/dev/null; pkill -P "$DPID" 2>/dev/null; DPID=""
+rm -f "$TDIR/review-decision-v1.json" "$TDIR/.deploy-stamp"
+DLOG3="$TDIR/daemon-identity.log"
+HOME="$TDIR" PRO_GATE_HOME="$TDIR" PRO_GATE_CONSENT_HOME="$TDIR/.config/pro-gate" PRO_REVIEW_OWNERS=fakeowner PRO_REVIEW_POLL_SECONDS=1 \
+  PRO_GATE_BROWSER_MODE=native PRO_GATE_DAEMON_SELF_RELOAD=1 PATH="/usr/bin:/bin" \
+  bash "$TDIR/run-daemon.sh" > "$DLOG3" 2>&1 &
+DPID=$!
+for _ in $(seq 1 50); do grep -q 'review-decision identity is missing' "$DLOG3" 2>/dev/null && break; sleep 0.2; done
+check 'missing identity globally defers before browser or worker work' "$(grep -q 'review-decision identity is missing' "$DLOG3" && grep -q 'globally deferring PR processing' "$DLOG3" && ! grep -q 'reviewing ' "$DLOG3"; echo $?)" "$(tail -5 "$DLOG3" 2>/dev/null)"
+cp "$HERE/../skills/pro-gate/review-decision-v1.json" "$TDIR/review-decision-v1.json"
+printf 'identity-converged-%s\n' "$(date +%s)" > "$TDIR/.deploy-stamp.tmp" && mv -f "$TDIR/.deploy-stamp.tmp" "$TDIR/.deploy-stamp"
+for _ in $(seq 1 60); do [ "$(grep -c 'pro-review-daemon starting' "$DLOG3" 2>/dev/null)" -ge 2 ] && break; sleep 0.2; done
+check 'compatible identity deploy reloads and recovers daemon readiness' "$( [ "$(grep -c 'pro-review-daemon starting' "$DLOG3" 2>/dev/null)" -ge 2 ] && [ "$(grep -c 'review-decision identity is missing' "$DLOG3" 2>/dev/null)" -eq 1 ] && grep -q 'no PRs pending' "$DLOG3"; echo $?)" "$(tail -8 "$DLOG3" 2>/dev/null)"
+
+[ "$TEST_FAILURES" -eq 0 ] && { echo "ALL PASS"; exit 0; } || { echo "$TEST_FAILURES FAILURES"; exit 1; }

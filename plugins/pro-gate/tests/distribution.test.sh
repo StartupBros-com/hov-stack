@@ -1,0 +1,723 @@
+#!/usr/bin/env bash
+set -uo pipefail
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+FAILS=0
+check() { local name="$1"; shift; if "$@"; then echo "ok - $name"; else echo "FAIL - $name"; FAILS=$((FAILS + 1)); fi; }
+TDIR="$(mktemp -d "${TMPDIR:-/tmp}/pro-gate-distribution.XXXXXX")"
+trap 'rm -rf "$TDIR"' EXIT
+VERSION="$(tr -d '[:space:]' < "$ROOT/VERSION")"
+export PRO_GATE_SERVICE_MANAGER=none
+
+check "plugin owns one skill" test "$(find "$ROOT/skills" -name SKILL.md -type f | wc -l)" -eq 1
+check "plugin owns one agent" test "$(find "$ROOT/agents" -name oracle-reviewer.md -type f | wc -l)" -eq 1
+
+# #176 (remaining sites): every possibly-empty array expansion in install.sh is guarded against the
+# bash <4.4 (stock macOS /bin/bash 3.2) "unbound variable" crash on a bare "${arr[@]}" expansion of
+# a zero-element array under set -u -- PROXY_ARGS is empty unless HTTPS_PROXY/HTTP_PROXY is set.
+# Same sweep as tests/daemon-current-head-completion.test.sh (daemon.sh) and the ENGINE sweep in
+# tests/engine.test.sh (oracle-review.sh); install.sh has no never-empty-by-name allowlist entries.
+# What this does NOT verify: an actual bash 3.2 reproduction -- none is available in this
+# environment; see daemon-current-head-completion.test.sh for the guard-idiom probe that
+# non-regression-tests the idiom itself on this host bash.
+INSTALL_UNGUARDED="$(sed -E 's/\$\{[A-Za-z_][A-Za-z0-9_]*\[@\]\+"\$\{[A-Za-z_][A-Za-z0-9_]*\[@\]\}"\}//g' "$ROOT/install.sh" \
+  | grep -noE '\$\{[A-Za-z_][A-Za-z0-9_]*\[@\]\}' || true)"
+[ -n "$INSTALL_UNGUARDED" ] && echo "install.sh unguarded [@] sites: $INSTALL_UNGUARDED"
+check "every \"[@]\" array expansion in install.sh is wrapped in the guard idiom" test -z "$INSTALL_UNGUARDED"
+INSTALL_DASH_DEFAULT="$(grep -c '\[@\]:-' "$ROOT/install.sh")"
+check "no \${arr[@]:-} single-spurious-empty-arg anti-idiom remains in install.sh" test "$INSTALL_DASH_DEFAULT" -eq 0
+
+OUT="$TDIR/dist"
+RELEASE_TAG="v$VERSION" bash "$ROOT/scripts/package-runtime.sh" "$OUT" >/dev/null
+ARCHIVE="$OUT/pro-gate-runtime-$VERSION.tar.gz"
+CHECKSUM="$ARCHIVE.sha256"
+check "package creates archive" test -s "$ARCHIVE"
+check "package creates checksum" test -s "$CHECKSUM"
+
+# #172: install.sh's standalone sha256() must hash through stdin, like pg_sha256 (#168),
+# so an archive path containing a backslash does not get its digest corrupted by
+# sha256sum/shasum framing-and-escaping the printed filename.
+ESC_DIR="$TDIR/esc-src"; mkdir -p "$ESC_DIR"
+ESC="$ESC_DIR/pro-gate-runtime-$VERSION"'\'"-esc.tar.gz"
+cp "$ARCHIVE" "$ESC"
+{ sha256sum < "$ESC" | cut -d' ' -f1; } 2>/dev/null > "$ESC.sha256"
+ESC_HOME="$TDIR/esc-home"; ESC_RUNTIME="$TDIR/esc-runtime"
+mkdir -p "$ESC_HOME"
+HOME="$ESC_HOME" PRO_GATE_HOME="$ESC_RUNTIME" \
+  bash "$ROOT/install.sh" --version "$VERSION" --archive "$ESC" --checksum "$ESC.sha256" >"$TDIR/esc.log" 2>&1
+check "install succeeds for archive path containing a backslash" test "$(cat "$ESC_RUNTIME/VERSION" 2>/dev/null)" = "$VERSION"
+
+ESC_BAD_RUNTIME="$TDIR/esc-bad-runtime"
+printf '%s\n' "0000000000000000000000000000000000000000000000000000000000000000" > "$ESC.wrong.sha256"
+if HOME="$ESC_HOME" PRO_GATE_HOME="$ESC_BAD_RUNTIME" \
+  bash "$ROOT/install.sh" --version "$VERSION" --archive "$ESC" --checksum "$ESC.wrong.sha256" >"$TDIR/esc-wrong.log" 2>&1; then
+  echo "FAIL - install rejects wrong checksum for backslash-path archive"; FAILS=$((FAILS + 1))
+else echo "ok - install rejects wrong checksum for backslash-path archive"; fi
+check "no VERSION installed after checksum mismatch on backslash-path archive" test ! -e "$ESC_BAD_RUNTIME/VERSION"
+
+LIST="$TDIR/archive.list"; tar -tzf "$ARCHIVE" > "$LIST"
+check "runtime package excludes skill" sh -c "! grep -q '/skills/' '$LIST'"
+check "runtime package excludes agent" sh -c "! grep -q '/agents/' '$LIST'"
+check "runtime package excludes plugin manifest" sh -c "! grep -q '/.claude-plugin/' '$LIST'"
+check "runtime package includes organizer UI expressions" grep -q '/bin/cdp-organizer-expressions.mjs$' "$LIST"
+check "runtime package includes one identity record" sh -c "test \"\$(grep -Fc 'pro-gate-runtime-$VERSION/review-decision-v1.json' '$LIST')\" -eq 1"
+check "runtime identity is byte-identical to plugin identity" sh -c "tar -xOf '$ARCHIVE' 'pro-gate-runtime-$VERSION/review-decision-v1.json' | cmp -s - '$ROOT/skills/pro-gate/review-decision-v1.json'"
+
+HOME1="$TDIR/default-home"; RUNTIME1="$TDIR/default-runtime"; CLAUDE1="$HOME1/.claude"
+mkdir -p "$HOME1" "$CLAUDE1"
+HOME="$HOME1" CLAUDE_DIR="$CLAUDE1" PRO_GATE_HOME="$RUNTIME1" \
+  bash "$ROOT/install.sh" --version "$VERSION" --archive "$ARCHIVE" --checksum "$CHECKSUM" >"$TDIR/default.log" 2>&1
+check "runtime records installed version" test "$(cat "$RUNTIME1/VERSION")" = "$VERSION"
+check "runtime records expected version" test "$(cat "$RUNTIME1/EXPECTED_VERSION")" = "$VERSION"
+check "runtime installs organizer UI expressions" test -s "$RUNTIME1/cdp-organizer-expressions.mjs"
+check "runtime installs exact identity metadata beside its library" cmp -s "$RUNTIME1/review-decision-v1.json" "$ROOT/skills/pro-gate/review-decision-v1.json"
+check "runtime daemon omits Codex doghouse admission" sh -c "! grep -qF '.codex/.doghouse' '$RUNTIME1/daemon.sh'"
+check "runtime daemon omits Codex usage endpoint" sh -c "! grep -qF 'backend-api/wham/usage' '$RUNTIME1/daemon.sh'"
+check "runtime daemon omits Codex quota probe" sh -c "! grep -qF 'usage_saturated' '$RUNTIME1/daemon.sh'"
+check "runtime daemon omits Codex quota gate" sh -c "! grep -qF 'usage_gate' '$RUNTIME1/daemon.sh'"
+check "runtime install does not duplicate skill" test ! -e "$CLAUDE1/skills/pro-gate/SKILL.md"
+check "runtime install does not duplicate agent" test ! -e "$CLAUDE1/agents/oracle-reviewer.md"
+check "daemon defaults off" grep -q 'daemon: 0' "$TDIR/default.log"
+
+# #286: the archive shipped bin/cdp-test-timing.mjs but install.sh never copied it, so a fresh
+# install's cdp-salvage.mjs died with ERR_MODULE_NOT_FOUND. Hosts kept working only on a leftover
+# copy from an older deploy, so these checks run on homes that have no copy, or a stale one.
+BIN_NOT_INSTALLED=""
+while IFS= read -r archived; do
+  case "$archived" in */bin/?*) ;; *) continue ;; esac
+  cmp -s "$RUNTIME1/${archived##*/}" "$ROOT/bin/${archived##*/}" || BIN_NOT_INSTALLED="$BIN_NOT_INSTALLED ${archived##*/}"
+done < "$LIST"
+[ -z "$BIN_NOT_INSTALLED" ] || echo "archived bin/ files not installed:$BIN_NOT_INSTALLED"
+check "fresh install deploys every archived bin/ file byte-for-byte" test -z "$BIN_NOT_INSTALLED"
+salvage_loads() { # runtime label: the installed salvage resolves its imports and reaches usage (exit 2)
+  local rc=0
+  node "$1/cdp-salvage.mjs" --help >"$TDIR/salvage-$2.out" 2>"$TDIR/salvage-$2.err" || rc=$?
+  [ "$rc" -eq 2 ] && grep -q '^usage: cdp-salvage.mjs ' "$TDIR/salvage-$2.err"
+}
+check "fresh install's cdp-salvage.mjs loads its imports and prints usage" salvage_loads "$RUNTIME1" fresh
+
+STALE_HOME="$TDIR/stale-timing-home"; STALE_RUNTIME="$TDIR/stale-timing-runtime"
+mkdir -p "$STALE_HOME" "$STALE_RUNTIME"
+printf '%s\n' 'export const STALE_LEFTOVER = true;' > "$STALE_RUNTIME/cdp-test-timing.mjs"
+HOME="$STALE_HOME" PRO_GATE_HOME="$STALE_RUNTIME" \
+  bash "$ROOT/install.sh" --version "$VERSION" --archive "$ARCHIVE" --checksum "$CHECKSUM" >"$TDIR/stale-timing.log" 2>&1
+check "upgrade over a stale timing module installs the archived bytes" \
+  cmp -s "$STALE_RUNTIME/cdp-test-timing.mjs" "$ROOT/bin/cdp-test-timing.mjs"
+check "upgraded cdp-salvage.mjs loads its imports and prints usage" salvage_loads "$STALE_RUNTIME" stale
+
+# A review can start salvage mid-upgrade, and Node resolves its imports at startup, so salvage
+# must load at the moment it is moved into place. The mv shim runs it right then.
+SWAP_HOME="$TDIR/swap-order-home"; SWAP_RUNTIME="$TDIR/swap-order-runtime"; SWAP_BIN="$TDIR/swap-order-bin"
+mkdir -p "$SWAP_HOME" "$SWAP_BIN"
+REAL_MV_SWAP="$(command -v mv)"
+cat > "$SWAP_BIN/mv" <<'EOF'
+#!/usr/bin/env bash
+"${REAL_MV_SWAP:?}" "$@" || exit
+for dst; do :; done
+if [ "$dst" = "${SWAP_SALVAGE:?}" ]; then
+  rc=0; node "$dst" --help >/dev/null 2>"${SWAP_SALVAGE_ERR:?}" || rc=$?
+  printf '%s\n' "$rc" > "${SWAP_SALVAGE_RC:?}"
+fi
+EOF
+chmod +x "$SWAP_BIN/mv"
+SWAP_SALVAGE="$SWAP_RUNTIME/cdp-salvage.mjs" SWAP_SALVAGE_ERR="$TDIR/salvage-swap.err" SWAP_SALVAGE_RC="$TDIR/salvage-swap.rc" \
+  REAL_MV_SWAP="$REAL_MV_SWAP" HOME="$SWAP_HOME" PRO_GATE_HOME="$SWAP_RUNTIME" PATH="$SWAP_BIN:$PATH" \
+  bash "$ROOT/install.sh" --version "$VERSION" --archive "$ARCHIVE" --checksum "$CHECKSUM" >"$TDIR/swap-order.log" 2>&1
+check "cdp-salvage.mjs loads at the moment the installer swaps it in" \
+  sh -c "test \"\$(cat '$TDIR/salvage-swap.rc' 2>/dev/null)\" = 2 && grep -q '^usage: cdp-salvage.mjs ' '$TDIR/salvage-swap.err'"
+
+LOCK_HOME="$TDIR/lock-home"; LOCK_RUNTIME="$TDIR/lock-runtime"
+mkdir -p "$LOCK_HOME" "$LOCK_RUNTIME/.install.lock.d"
+if HOME="$LOCK_HOME" PRO_GATE_HOME="$LOCK_RUNTIME" PRO_GATE_BROWSER_MODE=native PRO_GATE_FORCE_PORTABLE_LOCK=1 \
+  bash "$ROOT/install.sh" --local-source --version "$VERSION" >"$TDIR/lock-loser.log" 2>&1; then
+  echo "FAIL - concurrent installer loses the portable lock"; FAILS=$((FAILS + 1))
+else echo "ok - concurrent installer loses the portable lock"; fi
+check "losing installer preserves winning lock" test -d "$LOCK_RUNTIME/.install.lock.d"
+
+LIVE_LOCK_RUNTIME="$TDIR/live-lock-runtime"; mkdir -p "$LIVE_LOCK_RUNTIME/.install.lock.d"
+LIVE_START="$(ps -o lstart= -p "$$" | tr -s '[:space:]' ' ' | sed 's/^ //;s/ $//')"
+printf '%s %s\n' "$$" "$LIVE_START" > "$LIVE_LOCK_RUNTIME/.install.lock.d/owner"
+if HOME="$LOCK_HOME" PRO_GATE_HOME="$LIVE_LOCK_RUNTIME" PRO_GATE_BROWSER_MODE=native PRO_GATE_FORCE_PORTABLE_LOCK=1 \
+  bash "$ROOT/install.sh" --local-source --version "$VERSION" >"$TDIR/live-lock.log" 2>&1; then
+  echo "FAIL - live portable lock blocks concurrent installer"; FAILS=$((FAILS + 1))
+else echo "ok - live portable lock blocks concurrent installer"; fi
+check "loser preserves live lock owner" grep -q "^$$ " "$LIVE_LOCK_RUNTIME/.install.lock.d/owner"
+
+STALE_LOCK_RUNTIME="$TDIR/stale-lock-runtime"; mkdir -p "$STALE_LOCK_RUNTIME/.install.lock.d"
+printf '999999 Mon Jan 1 00:00:00 2001\n' > "$STALE_LOCK_RUNTIME/.install.lock.d/owner"
+HOME="$LOCK_HOME" PRO_GATE_HOME="$STALE_LOCK_RUNTIME" PRO_GATE_BROWSER_MODE=native PRO_GATE_FORCE_PORTABLE_LOCK=1 \
+  bash "$ROOT/install.sh" --local-source --version "$VERSION" >"$TDIR/stale-lock.log" 2>&1
+check "stale portable lock is reclaimed" test "$(cat "$STALE_LOCK_RUNTIME/VERSION")" = "$VERSION"
+check "successful install releases reclaimed lock" test ! -e "$STALE_LOCK_RUNTIME/.install.lock.d"
+
+RACE_RUNTIME="$TDIR/race-lock-runtime"; RACE_BIN="$TDIR/race-bin"
+mkdir -p "$RACE_RUNTIME/.install.lock.d" "$RACE_BIN"
+printf '999999 Mon Jan 1 00:00:00 2001\n' > "$RACE_RUNTIME/.install.lock.d/owner"
+REAL_MV="$(command -v mv)"
+cat > "$RACE_BIN/mv" <<'EOF'
+#!/usr/bin/env bash
+if [ "$1" = "$RACE_LOCKDIR" ] && [ ! -e "$RACE_RELEASE" ]; then
+  : > "$RACE_READY"
+  while [ ! -e "$RACE_RELEASE" ]; do sleep 0.01; done
+fi
+exec "$REAL_MV" "$@"
+EOF
+chmod +x "$RACE_BIN/mv"
+RACE_LOCKDIR="$RACE_RUNTIME/.install.lock.d" RACE_READY="$TDIR/race.ready" RACE_RELEASE="$TDIR/race.release" REAL_MV="$REAL_MV" \
+  HOME="$LOCK_HOME" PRO_GATE_HOME="$RACE_RUNTIME" PRO_GATE_BROWSER_MODE=native PRO_GATE_FORCE_PORTABLE_LOCK=1 PATH="$RACE_BIN:$PATH" \
+  bash "$ROOT/install.sh" --local-source --version "$VERSION" >"$TDIR/race-winner.log" 2>&1 & RACE_WINNER_PID=$!
+for _ in $(seq 1 500); do [ -e "$TDIR/race.ready" ] && break; sleep 0.01; done
+check "first stale-lock reclaimer reaches serialized section" test -e "$TDIR/race.ready"
+if RACE_LOCKDIR="$RACE_RUNTIME/.install.lock.d" RACE_READY="$TDIR/race-loser.ready" RACE_RELEASE="$TDIR/race.release" REAL_MV="$REAL_MV" \
+  HOME="$LOCK_HOME" PRO_GATE_HOME="$RACE_RUNTIME" PRO_GATE_BROWSER_MODE=native PRO_GATE_FORCE_PORTABLE_LOCK=1 PATH="$RACE_BIN:$PATH" \
+  bash "$ROOT/install.sh" --local-source --version "$VERSION" >"$TDIR/race-loser.log" 2>&1; then
+  echo "FAIL - concurrent stale-lock reclaimer is rejected"; FAILS=$((FAILS + 1))
+else echo "ok - concurrent stale-lock reclaimer is rejected"; fi
+: > "$TDIR/race.release"
+RACE_WINNER_STATUS=0
+wait "$RACE_WINNER_PID" || RACE_WINNER_STATUS=$?
+check "exactly one stale-lock reclaimer installs" test "$RACE_WINNER_STATUS" -eq 0
+check "stale-lock race leaves no portable lock" test ! -e "$RACE_RUNTIME/.install.lock.d"
+check "stale-lock race leaves no reaper lock" test ! -e "$RACE_RUNTIME/.install.lock.reaper"
+
+KILL_RUNTIME="$TDIR/killed-reaper-runtime"; KILL_BIN="$TDIR/killed-reaper-bin"
+mkdir -p "$KILL_RUNTIME/.install.lock.d" "$KILL_BIN"
+printf '999999 Mon Jan 1 00:00:00 2001\n' > "$KILL_RUNTIME/.install.lock.d/owner"
+cat > "$KILL_BIN/mv" <<'EOF'
+#!/usr/bin/env bash
+if [ "$1" = "$KILL_LOCKDIR" ]; then
+  parent="$PPID"
+  : > "$KILL_READY"
+  while kill -0 "$parent" 2>/dev/null; do sleep 0.1; done
+  exit 137
+fi
+exec "$REAL_MV" "$@"
+EOF
+chmod +x "$KILL_BIN/mv"
+KILL_LOCKDIR="$KILL_RUNTIME/.install.lock.d" KILL_READY="$TDIR/killed-reaper.ready" REAL_MV="$REAL_MV" \
+  HOME="$LOCK_HOME" PRO_GATE_HOME="$KILL_RUNTIME" PRO_GATE_BROWSER_MODE=native PRO_GATE_FORCE_PORTABLE_LOCK=1 PATH="$KILL_BIN:$PATH" \
+  bash "$ROOT/install.sh" --local-source --version "$VERSION" >"$TDIR/killed-reaper.log" 2>&1 & KILL_PID=$!
+for _ in $(seq 1 500); do [ -e "$TDIR/killed-reaper.ready" ] && break; sleep 0.01; done
+check "reclaimer reaches crash window" test -e "$TDIR/killed-reaper.ready"
+kill -KILL "$KILL_PID"
+wait "$KILL_PID" 2>/dev/null || true
+HOME="$LOCK_HOME" PRO_GATE_HOME="$KILL_RUNTIME" PRO_GATE_BROWSER_MODE=native PRO_GATE_FORCE_PORTABLE_LOCK=1 \
+  bash "$ROOT/install.sh" --local-source --version "$VERSION" >"$TDIR/killed-reaper-recovery.log" 2>&1
+check "dead reaper owner is recovered" test "$(cat "$KILL_RUNTIME/VERSION")" = "$VERSION"
+check "dead reaper recovery leaves no locks" sh -c "! find '$KILL_RUNTIME' -maxdepth 1 -name '.install.lock.*' -type d | grep -q ."
+
+OWNERLESS_RUNTIME="$TDIR/ownerless-reaper-runtime"; mkdir -p "$OWNERLESS_RUNTIME/.install.lock.d" "$OWNERLESS_RUNTIME/.install.lock.reaper"
+printf '999999 Mon Jan 1 00:00:00 2001\n' > "$OWNERLESS_RUNTIME/.install.lock.d/owner"
+HOME="$LOCK_HOME" PRO_GATE_HOME="$OWNERLESS_RUNTIME" PRO_GATE_BROWSER_MODE=native PRO_GATE_FORCE_PORTABLE_LOCK=1 \
+  PRO_GATE_PORTABLE_LOCK_GRACE_SECONDS=0 bash "$ROOT/install.sh" --local-source --version "$VERSION" >"$TDIR/ownerless-reaper.log" 2>&1
+check "aged ownerless reaper is recovered" test "$(cat "$OWNERLESS_RUNTIME/VERSION")" = "$VERSION"
+
+check "reviewer agent enforces exact runtime" grep -q 'PRO_GATE_EXPECTED_VERSION=' "$ROOT/agents/oracle-reviewer.md"
+check "reviewer agent rejects invalid plugin versions" grep -q 'could not resolve a valid plugin version' "$ROOT/agents/oracle-reviewer.md"
+check "reviewer commands resolve runtime independently" test "$(grep -c '\${PRO_GATE_HOME:-\$HOME/.pro-review-daemon}/oracle-review.sh' "$ROOT/agents/oracle-reviewer.md")" -ge 2
+check "reviewer agent has no cross-shell runtime dependency" sh -c "! grep -q '\$RUNTIME_HOME/oracle-review.sh' '$ROOT/agents/oracle-reviewer.md'"
+check "reviewer agent has no hardcoded engine home" sh -c "! grep -q '~/.pro-review-daemon/oracle-review.sh' '$ROOT/agents/oracle-reviewer.md'"
+
+# Input policy is engine-owned: both plugin callers omit the flag unless INPUT was explicit, and
+# use the same array for advisory query and guarded effect.
+for caller in "$ROOT/skills/pro-gate/SKILL.md" "$ROOT/agents/oracle-reviewer.md"; do
+  caller_name="$(basename "$(dirname "$caller")")"
+  check "$caller_name initializes optional input args" grep -Fq 'INPUT_ARGS=()' "$caller"
+  check "$caller_name appends explicit input unchanged" grep -Fq '[ -n "${INPUT:-}" ] && INPUT_ARGS=(--input "$INPUT")' "$caller"
+  check "$caller_name reuses optional input args for query" grep -Fq 'QUERY_ARGS=(--review-decision --json --pr "$PR" --repo "$REPO" "${INPUT_ARGS[@]}")' "$caller"
+  check "$caller_name reuses optional input args for effect" grep -Fq 'EFFECT_ARGS=(--review-decision-effect "$DECISION" --pr "$PR" --repo "$REPO" "${INPUT_ARGS[@]}")' "$caller"
+  check "$caller_name does not hard-code both input" sh -c "! grep -Fq -- '--input \"\${INPUT:-both}\"' '$caller'"
+done
+check "README names both engine input policy values" sh -c "grep -Fq 'bundle-only' '$ROOT/README.md' && grep -Fq 'connector-enabled' '$ROOT/README.md'"
+check "env example names both engine input policy values" sh -c "grep -Fq 'bundle-only' '$ROOT/.env.example' && grep -Fq 'connector-enabled' '$ROOT/.env.example'"
+check "README states browser connector trust boundary" grep -Fq 'operator trust boundary' "$ROOT/README.md"
+
+# U4: novice recovery is a thin, no-spend relay over the engine's exclusive --recover mode.
+# Keep the skill and agent in lockstep while preserving the older diagnostic/harvest expert paths.
+RECOVERY_GRAMMAR='recover <PR|URL|marker>'
+RECOVERY_CALL='oracle-review.sh" --recover <PR|URL|marker>'
+for caller in "$ROOT/skills/pro-gate/SKILL.md" "$ROOT/agents/oracle-reviewer.md"; do
+  caller_name="$(basename "$(dirname "$caller")")"
+  check "$caller_name documents recover grammar" grep -Fq "$RECOVERY_GRAMMAR" "$caller"
+  check "$caller_name routes recover through engine recovery mode" grep -Fq "$RECOVERY_CALL" "$caller"
+  check "$caller_name recover route has no fresh --pr dispatch" sh -c "! grep -F -- '--recover <PR|URL|marker> --pr' '$caller' | grep -q ."
+  check "$caller_name guarantees recovery launches no fresh review" grep -Fq 'never launches a fresh review' "$caller"
+  check "$caller_name recovery does not prescribe manual refresh" sh -c "! grep -Eqi 'manual (browser )?(refresh|reload)' '$caller'"
+  check "$caller_name documents all plain recovery states" sh -c "for state in 'Review ready' 'Checking for completed review' 'Still working' 'Review superseded' 'No review remains' 'Browser needs attention'; do grep -Fq \"\$state\" '$caller' || exit 1; done"
+done
+check "skill rejects open-tab ground-truth guidance" sh -c "! grep -Fq 'Ground truth is the BROWSER' '$ROOT/skills/pro-gate/SKILL.md'"
+check "skill preserves expert status JSON diagnostics" grep -Fq 'oracle-review.sh" --status <pr-number|pr-url|marker> --json' "$ROOT/skills/pro-gate/SKILL.md"
+check "skill preserves direct expert harvest" grep -Fq 'oracle-review.sh" --harvest' "$ROOT/skills/pro-gate/SKILL.md"
+check "README documents engine recover command" grep -Fq 'oracle-review.sh --recover <PR|URL|marker>' "$ROOT/README.md"
+check "README preserves expert status JSON command" grep -Fq 'oracle-review.sh --status [<pr|url|marker>] [--json]' "$ROOT/README.md"
+check "README preserves direct expert harvest command" grep -Fq 'oracle-review.sh --harvest <run-marker>' "$ROOT/README.md"
+check "engine usage documents recover as no-fresh-run mode" grep -Fq 'oracle-review.sh --recover <pr-number|pr-url|pg-run-marker>' "$ROOT/bin/oracle-review.sh"
+
+REVIEW_RUNTIME="$TDIR/reviewer-runtime"; mkdir -p "$REVIEW_RUNTIME"
+printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> "$REVIEW_LOG"\n' > "$REVIEW_RUNTIME/oracle-review.sh"
+chmod +x "$REVIEW_RUNTIME/oracle-review.sh"
+PRO_GATE_HOME="$REVIEW_RUNTIME" REVIEW_LOG="$TDIR/reviewer.log" bash -c '"${PRO_GATE_HOME:-$HOME/.pro-review-daemon}/oracle-review.sh" --pr 22'
+REVIEW_OUT="$TDIR/oracle-reviewer-pr-22.md"
+printf '{"marker":"pg-run-22-1700000000-1"}\n' > "$REVIEW_OUT.status"
+PRO_GATE_HOME="$REVIEW_RUNTIME" REVIEW_LOG="$TDIR/reviewer.log" OUT="$REVIEW_OUT" bash -c '
+  OUT="${OUT}"
+  MARKER="$(jq -r '\''.marker // empty'\'' "$OUT.status" 2>/dev/null || sed -nE '\''s/.*"marker":"([^"]+)".*/\1/p'\'' "$OUT.status")"
+  case "$MARKER" in pg-run-[A-Za-z0-9.-]*) ;; *) exit 1;; esac
+  "${PRO_GATE_HOME:-$HOME/.pro-review-daemon}/oracle-review.sh" --harvest "$MARKER" --out "$OUT" --timeout 45m
+'
+check "separate reviewer shells use configured runtime" test "$(wc -l < "$TDIR/reviewer.log")" -eq 2
+check "harvest shell reconstructs marker and output" grep -q -- '--harvest pg-run-22-1700000000-1.*--out .*oracle-reviewer-pr-22.md' "$TDIR/reviewer.log"
+
+HOSTILE="$TDIR/hostile-cwd"; mkdir -p "$HOSTILE/lib"
+printf 'hostile\n' > "$HOSTILE/VERSION"
+printf 'exit 99\n' > "$HOSTILE/lib/pro-gate-lib.sh"
+# A permanently unpublished version keeps this hermetic: the piped installer
+# must resolve only the published runtime release, so once "$VERSION" is
+# actually released the download would succeed and invert the assertion.
+if (cd "$HOSTILE" && PRO_GATE_HOME="$TDIR/piped-runtime" bash -s -- --version 0.0.0 < "$ROOT/install.sh") >"$TDIR/piped.log" 2>&1; then
+  echo "FAIL - piped installer does not infer hostile cwd source"; FAILS=$((FAILS + 1))
+else echo "ok - piped installer does not infer hostile cwd source"; fi
+check "piped installer did not execute hostile source" test ! -e "$TDIR/piped-runtime/VERSION"
+
+HOME_LOCAL="$TDIR/local-home"; RUNTIME_LOCAL="$TDIR/local-runtime"; mkdir -p "$HOME_LOCAL"
+HOME="$HOME_LOCAL" PRO_GATE_HOME="$RUNTIME_LOCAL" PRO_GATE_BROWSER_MODE=native \
+  bash "$ROOT/install.sh" --local-source --version "$VERSION" >"$TDIR/local.log" 2>&1
+check "explicit local source installs source tree" test "$(cat "$RUNTIME_LOCAL/VERSION")" = "$VERSION"
+if bash -s -- --local-source --version "$VERSION" < "$ROOT/install.sh" >"$TDIR/piped-local.log" 2>&1; then
+  echo "FAIL - piped local source is rejected"; FAILS=$((FAILS + 1))
+else echo "ok - piped local source is rejected"; fi
+check "piped local source names real file requirement" grep -q 'real regular on-disk file' "$TDIR/piped-local.log"
+
+# gate #148 r1 P2 legacy-lock-wait-env-migration: v0.40 generated this exact assignment.
+# Upgrade only that byte-exact line; an operator's values, syntax, comments, and other config are data.
+LEGACY_LOCK_WAIT_LINE='PRO_GATE_LOCK_WAIT=2400                # seconds a queued review waits before giving up'
+MIGRATED_LOCK_WAIT_LINE='PRO_GATE_LOCK_WAIT=3900                # seconds to wait for account capacity (was 2400 before v0.41)'
+MIGRATION_HOME="$TDIR/migration-home"; MIGRATION_RUNTIME="$TDIR/migration-runtime"
+mkdir -p "$MIGRATION_HOME" "$MIGRATION_RUNTIME"
+cat > "$MIGRATION_RUNTIME/.env" <<'EOF'
+PRO_GATE_PLUGIN_KEY=keep-this-test-value
+PRO_GATE_LOCK_WAIT=2400                # seconds a queued review waits before giving up
+PRO_GATE_CUSTOM_SETTING=preserved
+EOF
+cat > "$TDIR/migration-expected.env" <<'EOF'
+PRO_GATE_PLUGIN_KEY=keep-this-test-value
+PRO_GATE_LOCK_WAIT=3900                # seconds to wait for account capacity (was 2400 before v0.41)
+PRO_GATE_CUSTOM_SETTING=preserved
+EOF
+chmod 644 "$MIGRATION_RUNTIME/.env"
+HOME="$MIGRATION_HOME" PRO_GATE_HOME="$MIGRATION_RUNTIME" PRO_GATE_BROWSER_MODE=native \
+  bash "$ROOT/install.sh" --local-source --version "$VERSION" >"$TDIR/migration.log" 2>&1
+check "gate #148 r1 P2 legacy-lock-wait-env-migration upgrades the exact v0.40 generated env and preserves other config" \
+  cmp -s "$MIGRATION_RUNTIME/.env" "$TDIR/migration-expected.env"
+MIGRATION_ENV_MODE="$(stat -c %a "$MIGRATION_RUNTIME/.env" 2>/dev/null || stat -f %Lp "$MIGRATION_RUNTIME/.env")"
+check "gate #148 r1 P2 legacy-lock-wait-env-migration publishes the migrated env owner-only" \
+  test "$MIGRATION_ENV_MODE" = 600
+cp "$MIGRATION_RUNTIME/.env" "$TDIR/migration-first.env"
+HOME="$MIGRATION_HOME" PRO_GATE_HOME="$MIGRATION_RUNTIME" PRO_GATE_BROWSER_MODE=native \
+  bash "$ROOT/install.sh" --local-source --version "$VERSION" >"$TDIR/migration-second.log" 2>&1
+check "gate #148 r1 P2 legacy-lock-wait-env-migration is idempotent" \
+  cmp -s "$MIGRATION_RUNTIME/.env" "$TDIR/migration-first.env"
+
+CUSTOM_BARE_RUNTIME="$TDIR/custom-bare-runtime"; mkdir -p "$CUSTOM_BARE_RUNTIME"
+printf '%s\n' 'PRO_GATE_LOCK_WAIT=2400' 'PRO_GATE_CUSTOM_SETTING=bare-preserved' > "$CUSTOM_BARE_RUNTIME/.env"
+cp "$CUSTOM_BARE_RUNTIME/.env" "$TDIR/custom-bare.before"
+HOME="$MIGRATION_HOME" PRO_GATE_HOME="$CUSTOM_BARE_RUNTIME" PRO_GATE_BROWSER_MODE=native \
+  bash "$ROOT/install.sh" --local-source --version "$VERSION" >"$TDIR/custom-bare.log" 2>&1
+check "gate #148 r1 P2 legacy-lock-wait-env-migration preserves a deliberately bare operator 2400" \
+  cmp -s "$CUSTOM_BARE_RUNTIME/.env" "$TDIR/custom-bare.before"
+
+CUSTOM_QUOTED_RUNTIME="$TDIR/custom-quoted-runtime"; mkdir -p "$CUSTOM_QUOTED_RUNTIME"
+printf '%s\n' 'PRO_GATE_LOCK_WAIT="2400" # operator intentionally quoted this legacy-sized value' > "$CUSTOM_QUOTED_RUNTIME/.env"
+cp "$CUSTOM_QUOTED_RUNTIME/.env" "$TDIR/custom-quoted.before"
+HOME="$MIGRATION_HOME" PRO_GATE_HOME="$CUSTOM_QUOTED_RUNTIME" PRO_GATE_BROWSER_MODE=native \
+  bash "$ROOT/install.sh" --local-source --version "$VERSION" >"$TDIR/custom-quoted.log" 2>&1
+check "gate #148 r1 P2 legacy-lock-wait-env-migration preserves a deliberately quoted operator 2400" \
+  cmp -s "$CUSTOM_QUOTED_RUNTIME/.env" "$TDIR/custom-quoted.before"
+
+CUSTOM_VALUE_RUNTIME="$TDIR/custom-value-runtime"; mkdir -p "$CUSTOM_VALUE_RUNTIME"
+printf '%s\n' 'PRO_GATE_LOCK_WAIT=7200 # operator custom wait' > "$CUSTOM_VALUE_RUNTIME/.env"
+cp "$CUSTOM_VALUE_RUNTIME/.env" "$TDIR/custom-value.before"
+HOME="$MIGRATION_HOME" PRO_GATE_HOME="$CUSTOM_VALUE_RUNTIME" PRO_GATE_BROWSER_MODE=native \
+  bash "$ROOT/install.sh" --local-source --version "$VERSION" >"$TDIR/custom-value.log" 2>&1
+check "gate #148 r1 P2 legacy-lock-wait-env-migration preserves a custom operator lock wait" \
+  cmp -s "$CUSTOM_VALUE_RUNTIME/.env" "$TDIR/custom-value.before"
+
+MIGRATION_ROLLBACK_RUNTIME="$TDIR/migration-rollback-runtime"; MIGRATION_ROLLBACK_BIN="$TDIR/migration-rollback-bin"
+mkdir -p "$MIGRATION_ROLLBACK_RUNTIME" "$MIGRATION_ROLLBACK_BIN"
+printf '%s\n' "$LEGACY_LOCK_WAIT_LINE" 'PRO_GATE_CUSTOM_SETTING=rollback-preserved' > "$MIGRATION_ROLLBACK_RUNTIME/.env"
+chmod 600 "$MIGRATION_ROLLBACK_RUNTIME/.env"
+cp -p "$MIGRATION_ROLLBACK_RUNTIME/.env" "$TDIR/migration-rollback.before"
+REAL_CHMOD_MIGRATION="$(command -v chmod)"
+cat > "$MIGRATION_ROLLBACK_BIN/chmod" <<'EOF'
+#!/usr/bin/env bash
+if [ "${2:-}" = "${MIGRATION_ROLLBACK_ENV:?}" ]; then
+  if grep -Fxq "${MIGRATED_LOCK_WAIT_LINE:?}" "$2"; then : > "${MIGRATION_OBSERVED:?}"; fi
+  exit 1
+fi
+exec "${REAL_CHMOD_MIGRATION:?}" "$@"
+EOF
+chmod +x "$MIGRATION_ROLLBACK_BIN/chmod"
+if HOME="$MIGRATION_HOME" PRO_GATE_HOME="$MIGRATION_ROLLBACK_RUNTIME" PRO_GATE_BROWSER_MODE=native \
+  MIGRATION_ROLLBACK_ENV="$MIGRATION_ROLLBACK_RUNTIME/.env" MIGRATED_LOCK_WAIT_LINE="$MIGRATED_LOCK_WAIT_LINE" \
+  MIGRATION_OBSERVED="$TDIR/migration-observed" REAL_CHMOD_MIGRATION="$REAL_CHMOD_MIGRATION" \
+  PATH="$MIGRATION_ROLLBACK_BIN:$PATH" bash "$ROOT/install.sh" --local-source --version "$VERSION" \
+  >"$TDIR/migration-rollback.log" 2>&1; then
+  echo "FAIL - gate #148 r1 P2 legacy-lock-wait-env-migration failure after migration triggers rollback"; FAILS=$((FAILS + 1))
+else echo "ok - gate #148 r1 P2 legacy-lock-wait-env-migration failure after migration triggers rollback"; fi
+check "gate #148 r1 P2 legacy-lock-wait-env-migration reaches the secured env after atomic migration" \
+  test -e "$TDIR/migration-observed"
+check "gate #148 r1 P2 legacy-lock-wait-env-migration rollback restores the exact prior env" \
+  cmp -s "$MIGRATION_ROLLBACK_RUNTIME/.env" "$TDIR/migration-rollback.before"
+
+SVC_BIN="$TDIR/service-bin"; SVC_LOG="$TDIR/service.log"; mkdir -p "$SVC_BIN"
+printf '#!/usr/bin/env bash\nprintf "sudo %%s\\n" "$*" >> "$SVC_LOG"\nif [ "$1" = tee ]; then cat >/dev/null; fi\n' > "$SVC_BIN/sudo"
+printf '#!/usr/bin/env bash\nexit 0\n' > "$SVC_BIN/systemctl"
+chmod +x "$SVC_BIN/sudo" "$SVC_BIN/systemctl"
+HOME="$TDIR/service-home" PRO_GATE_HOME="$TDIR/service-runtime" PRO_GATE_SERVICE_MANAGER=systemd \
+  SVC_LOG="$SVC_LOG" PATH="$SVC_BIN:$PATH" \
+  bash "$ROOT/install.sh" --local-source --version "$VERSION" >"$TDIR/service-install.log" 2>&1
+check "normal systemd install enables Chrome" grep -q 'systemctl enable --now oracle-chrome.service' "$SVC_LOG"
+check "normal systemd install disables daemon" grep -q 'systemctl disable --now pro-review-daemon.service' "$SVC_LOG"
+: > "$SVC_LOG"
+HOME="$TDIR/service-home" PRO_GATE_HOME="$TDIR/service-runtime" PRO_GATE_CONSENT_HOME="$TDIR/service-consent" \
+  PRO_GATE_SERVICE_MANAGER=systemd SVC_LOG="$SVC_LOG" PATH="$SVC_BIN:$PATH" \
+  bash "$ROOT/install.sh" --local-source --version "$VERSION" \
+  --daemon --accept-dangerous-mode >"$TDIR/service-daemon.log" 2>&1
+check "daemon install independently enables Chrome" grep -q 'systemctl enable --now oracle-chrome.service' "$SVC_LOG"
+check "daemon install enables daemon service" grep -q 'systemctl enable --now pro-review-daemon.service' "$SVC_LOG"
+
+# #212 step 3: oracle-chrome.service.tmpl ships MemoryMax=70% + OOMPolicy=continue and
+# deliberately omits MemoryHigh (upstream's own recommended primary control) because #212's
+# gate-round measurements show MemoryHigh's throttle wedges Chrome (renderer VmHWM 7.63 GiB,
+# main process parked in state D). Same render-then-assert idiom as
+# tests/autoupdate.test.sh:190-194 (three-token sed pass-through -- these lines have no
+# @PLACEHOLDER@ of their own).
+CHROME_TMPL="$ROOT/daemon/oracle-chrome.service.tmpl"
+CHROME_RENDERED="$(sed -e "s#@PRO_GATE_HOME@#/custom/rt-home#g" -e "s#@HOME@#/h#g" -e "s#@USER@#u#g" "$CHROME_TMPL")"
+check "oracle-chrome.service renders MemoryMax=70%" \
+  bash -c 'grep -qF "MemoryMax=70%" <<<"$1"' _ "$CHROME_RENDERED"
+check "oracle-chrome.service renders OOMPolicy=continue" \
+  bash -c 'grep -qF "OOMPolicy=continue" <<<"$1"' _ "$CHROME_RENDERED"
+check "oracle-chrome.service renders with NO MemoryHigh" \
+  bash -c '! grep -qF "MemoryHigh" <<<"$1"' _ "$CHROME_RENDERED"
+
+# Planted negative: prove the "no MemoryHigh" assertion above can actually fail. Render a
+# scratch copy of the SAME template with a MemoryHigh line appended and re-run the identical
+# assertion against it -- it must flip red, or the check above is a tautology.
+CHROME_PLANT_DIR="$TDIR/oracle-chrome-plant"; mkdir -p "$CHROME_PLANT_DIR"
+cp "$CHROME_TMPL" "$CHROME_PLANT_DIR/oracle-chrome.service.tmpl"
+printf 'MemoryHigh=4G\n' >> "$CHROME_PLANT_DIR/oracle-chrome.service.tmpl"
+CHROME_PLANTED_RENDERED="$(sed -e "s#@PRO_GATE_HOME@#/custom/rt-home#g" -e "s#@HOME@#/h#g" -e "s#@USER@#u#g" "$CHROME_PLANT_DIR/oracle-chrome.service.tmpl")"
+if bash -c '! grep -qF "MemoryHigh" <<<"$1"' _ "$CHROME_PLANTED_RENDERED"; then
+  echo "FAIL - oracle-chrome.service planted-negative: no-MemoryHigh check should fail on a template with MemoryHigh but it passed"
+  FAILS=$((FAILS + 1))
+else
+  echo "ok - oracle-chrome.service planted-negative: no-MemoryHigh check correctly fails when MemoryHigh is present"
+fi
+
+MAC_BIN="$TDIR/mac-bin"; MAC_LOG="$TDIR/mac.log"; mkdir -p "$MAC_BIN"
+printf '#!/usr/bin/env bash\nprintf "Darwin\\n"\n' > "$MAC_BIN/uname"
+printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> "$MAC_LOG"\n' > "$MAC_BIN/launchctl"
+chmod +x "$MAC_BIN/uname" "$MAC_BIN/launchctl"
+HOME="$TDIR/mac-home" PRO_GATE_HOME="$TDIR/mac-runtime" PRO_GATE_SERVICE_MANAGER=launchd \
+  MAC_LOG="$MAC_LOG" PATH="$MAC_BIN:$PATH" \
+  bash "$ROOT/install.sh" --local-source --version "$VERSION" >"$TDIR/mac-install.log" 2>&1
+check "macOS normal install unloads daemon" grep -q '^unload ' "$MAC_LOG"
+check "macOS has no separate Chrome service" sh -c "! grep -q oracle-chrome '$MAC_LOG'"
+
+printf 'sentinel\n' > "$RUNTIME1/oracle-review.sh"
+cp "$ARCHIVE" "$TDIR/tampered.tar.gz"; printf 'tampered\n' >> "$TDIR/tampered.tar.gz"
+if HOME="$HOME1" PRO_GATE_HOME="$RUNTIME1" bash "$ROOT/install.sh" --version "$VERSION" \
+  --archive "$TDIR/tampered.tar.gz" --checksum "$CHECKSUM" >"$TDIR/tampered.log" 2>&1; then
+  echo "FAIL - tampered checksum rejected"; FAILS=$((FAILS + 1))
+else echo "ok - tampered checksum rejected"; fi
+check "tampered archive leaves install untouched" grep -q '^sentinel$' "$RUNTIME1/oracle-review.sh"
+
+# Every archive-level failure occurs before DEPLOYING, preserving the old runtime byte-for-byte.
+# Build validly checksummed bad candidates so checksum success cannot mask extraction/identity gates.
+printf 'not a gzip archive\n' > "$TDIR/bad-extraction.tar.gz"
+sha256sum "$TDIR/bad-extraction.tar.gz" > "$TDIR/bad-extraction.tar.gz.sha256"
+if HOME="$HOME1" PRO_GATE_HOME="$RUNTIME1" bash "$ROOT/install.sh" --version "$VERSION" \
+  --archive "$TDIR/bad-extraction.tar.gz" --checksum "$TDIR/bad-extraction.tar.gz.sha256" >"$TDIR/bad-extraction.log" 2>&1; then
+  echo "FAIL - extraction failure rejected"; FAILS=$((FAILS + 1))
+else echo "ok - extraction failure rejected"; fi
+check "extraction failure leaves install untouched" grep -q '^sentinel$' "$RUNTIME1/oracle-review.sh"
+
+MIXED_STAGE="$TDIR/mixed-stage"; mkdir -p "$MIXED_STAGE"
+tar -xzf "$ARCHIVE" -C "$MIXED_STAGE"
+jq -cS '.contract_digest="0000000000000000000000000000000000000000000000000000000000000000"' \
+  "$MIXED_STAGE/pro-gate-runtime-$VERSION/review-decision-v1.json" | tr -d '\n' > "$MIXED_STAGE/identity.tmp"
+mv "$MIXED_STAGE/identity.tmp" "$MIXED_STAGE/pro-gate-runtime-$VERSION/review-decision-v1.json"
+tar -C "$MIXED_STAGE" -czf "$TDIR/mixed-identity.tar.gz" "pro-gate-runtime-$VERSION"
+sha256sum "$TDIR/mixed-identity.tar.gz" > "$TDIR/mixed-identity.tar.gz.sha256"
+if HOME="$HOME1" PRO_GATE_HOME="$RUNTIME1" bash "$ROOT/install.sh" --version "$VERSION" \
+  --archive "$TDIR/mixed-identity.tar.gz" --checksum "$TDIR/mixed-identity.tar.gz.sha256" >"$TDIR/mixed-identity.log" 2>&1; then
+  echo "FAIL - mixed archive/library identity rejected"; FAILS=$((FAILS + 1))
+else echo "ok - mixed archive/library identity rejected"; fi
+check "mixed archive/library identity leaves install untouched" grep -q '^sentinel$' "$RUNTIME1/oracle-review.sh"
+
+MALFORMED_STAGE="$TDIR/malformed-stage"; cp -a "$MIXED_STAGE" "$MALFORMED_STAGE"
+printf '{}' > "$MALFORMED_STAGE/pro-gate-runtime-$VERSION/review-decision-v1.json"
+tar -C "$MALFORMED_STAGE" -czf "$TDIR/malformed-identity.tar.gz" "pro-gate-runtime-$VERSION"
+sha256sum "$TDIR/malformed-identity.tar.gz" > "$TDIR/malformed-identity.tar.gz.sha256"
+if HOME="$HOME1" PRO_GATE_HOME="$RUNTIME1" bash "$ROOT/install.sh" --version "$VERSION" \
+  --archive "$TDIR/malformed-identity.tar.gz" --checksum "$TDIR/malformed-identity.tar.gz.sha256" >"$TDIR/malformed-identity.log" 2>&1; then
+  echo "FAIL - malformed identity rejected"; FAILS=$((FAILS + 1))
+else echo "ok - malformed identity rejected"; fi
+check "malformed identity leaves install untouched" grep -q '^sentinel$' "$RUNTIME1/oracle-review.sh"
+
+# A failure after live files and identity metadata start changing must exercise cleanup rollback,
+# not merely the pre-deploy validation path above.
+ROLLBACK_BIN="$TDIR/rollback-bin"; mkdir -p "$ROLLBACK_BIN"
+REAL_CHMOD="$(command -v chmod)"
+cat > "$ROLLBACK_BIN/chmod" <<'ROLLBACK_CHMOD'
+#!/usr/bin/env bash
+if [ "${2:-}" = "${ROLLBACK_FAIL_TARGET:?}" ]; then exit 1; fi
+exec "${REAL_CHMOD:?}" "$@"
+ROLLBACK_CHMOD
+chmod +x "$ROLLBACK_BIN/chmod"
+cp "$RUNTIME1/review-decision-v1.json" "$TDIR/rollback-identity.before"
+cp "$RUNTIME1/VERSION" "$TDIR/rollback-version.before"
+cp "$RUNTIME1/.deploy-stamp" "$TDIR/rollback-stamp.before"
+printf '%s\n' 'export const ROLLBACK_SENTINEL = true;' > "$RUNTIME1/cdp-test-timing.mjs"
+cp "$RUNTIME1/cdp-test-timing.mjs" "$TDIR/rollback-timing.before"
+if HOME="$HOME1" PRO_GATE_HOME="$RUNTIME1" REAL_CHMOD="$REAL_CHMOD" ROLLBACK_FAIL_TARGET="$RUNTIME1/.env" \
+  PATH="$ROLLBACK_BIN:$PATH" bash "$ROOT/install.sh" --version "$VERSION" \
+  --archive "$ARCHIVE" --checksum "$CHECKSUM" >"$TDIR/rollback-live.log" 2>&1; then
+  echo "FAIL - live deploy permission failure triggers rollback"; FAILS=$((FAILS + 1))
+else echo "ok - live deploy permission failure triggers rollback"; fi
+check "live rollback restores prior engine bytes" grep -q '^sentinel$' "$RUNTIME1/oracle-review.sh"
+check "live rollback restores prior identity bytes" cmp -s "$RUNTIME1/review-decision-v1.json" "$TDIR/rollback-identity.before"
+check "live rollback restores prior version bytes" cmp -s "$RUNTIME1/VERSION" "$TDIR/rollback-version.before"
+check "live rollback restores prior deploy stamp" cmp -s "$RUNTIME1/.deploy-stamp" "$TDIR/rollback-stamp.before"
+check "live rollback restores the prior salvage timing module" cmp -s "$RUNTIME1/cdp-test-timing.mjs" "$TDIR/rollback-timing.before"
+
+HOME2="$TDIR/consent-home"; RUNTIME2="$TDIR/consent-runtime"; mkdir -p "$HOME2"
+if HOME="$HOME2" PRO_GATE_HOME="$RUNTIME2" PRO_GATE_BROWSER_MODE=native \
+  bash "$ROOT/install.sh" --version "$VERSION" --archive "$ARCHIVE" --checksum "$CHECKSUM" --daemon >"$TDIR/no-consent.log" 2>&1; then
+  echo "FAIL - daemon refuses without consent"; FAILS=$((FAILS + 1))
+else echo "ok - daemon refuses without consent"; fi
+check "failed daemon enable leaves no runtime" test ! -e "$RUNTIME2/VERSION"
+
+HOME3="$TDIR/guard-home"; RUNTIME3="$TDIR/guard-runtime"; CONSENT3="$TDIR/operator-state"; mkdir -p "$HOME3"
+HOME="$HOME3" PRO_GATE_HOME="$RUNTIME3" PRO_GATE_CONSENT_HOME="$CONSENT3" \
+  bash "$ROOT/install.sh" --version "$VERSION" --archive "$ARCHIVE" --checksum "$CHECKSUM" --accept-dangerous-mode >"$TDIR/consent.log" 2>&1
+check "operator-global consent recorded" test "$(cat "$CONSENT3/dangerous-mode-consent")" = 1
+PRO_GATE_HOME="$RUNTIME3" PRO_GATE_EXPECTED_VERSION="$VERSION" PRO_GATE_CONSENT_HOME="$CONSENT3" \
+  PRO_GATE_BROWSER_MODE=native bash "$ROOT/bin/pro-gate-doctor.sh" >"$TDIR/doctor-consent.log" 2>&1 || true
+check "doctor reports matching exact release" grep -q "runtime version $VERSION matches plugin" "$TDIR/doctor-consent.log"
+check "doctor reports accepted disclosure" grep -q 'dangerous automatic-fixer disclosure accepted (consent v1)' "$TDIR/doctor-consent.log"
+# issue #37: the version-mismatch message is DIRECTION-AWARE (runtime VERSION is $VERSION)
+PRO_GATE_HOME="$RUNTIME3" PRO_GATE_EXPECTED_VERSION="99.99.99" PRO_GATE_CONSENT_HOME="$CONSENT3" \
+  PRO_GATE_BROWSER_MODE=native bash "$ROOT/bin/pro-gate-doctor.sh" >"$TDIR/doctor-behind.log" 2>&1 || true
+check "doctor names a BEHIND runtime (upgrade path)" grep -q "is BEHIND plugin 99.99.99" "$TDIR/doctor-behind.log"
+PRO_GATE_HOME="$RUNTIME3" PRO_GATE_EXPECTED_VERSION="0.0.1" PRO_GATE_CONSENT_HOME="$CONSENT3" \
+  PRO_GATE_BROWSER_MODE=native bash "$ROOT/bin/pro-gate-doctor.sh" >"$TDIR/doctor-ahead.log" 2>&1 || true
+check "doctor flags an AHEAD runtime as a DOWNGRADE" grep -q "AHEAD of plugin 0.0.1" "$TDIR/doctor-ahead.log"
+check "doctor AHEAD message warns DOWNGRADE" grep -q "DOWNGRADE the runtime" "$TDIR/doctor-ahead.log"
+
+# Contract skew is directional and blocks before consumers can resolve or dispatch. Package semver
+# messaging above remains independent; these test the typed adapter/runtime compatibility record.
+read -r CONTRACT_ID CONTRACT_VERSION CONTRACT_DIGEST CORPUS_DIGEST < <(jq -r '[.contract_id, (.contract_version|tostring), .contract_digest, .corpus_digest] | @tsv' "$ROOT/skills/pro-gate/review-decision-v1.json")
+run_contract_doctor() { # expected-id expected-version expected-contract-digest expected-corpus-digest output
+  PRO_GATE_HOME="$RUNTIME3" PRO_GATE_EXPECTED_VERSION="$VERSION" PRO_GATE_CONSENT_HOME="$CONSENT3" \
+    PRO_GATE_BROWSER_MODE=native PRO_GATE_EXPECTED_CONTRACT_ID="$1" PRO_GATE_EXPECTED_CONTRACT_VERSION="$2" \
+    PRO_GATE_EXPECTED_CONTRACT_DIGEST="$3" PRO_GATE_EXPECTED_CORPUS_DIGEST="$4" \
+    bash "$ROOT/bin/pro-gate-doctor.sh" > "$5" 2>&1 || true
+}
+run_contract_doctor "$CONTRACT_ID" "$CONTRACT_VERSION" "$CONTRACT_DIGEST" "$CORPUS_DIGEST" "$TDIR/doctor-contract-ok.log"
+check "doctor accepts matching runtime/plugin contract identity" grep -q 'runtime and adapter review-decision identities match' "$TDIR/doctor-contract-ok.log"
+run_contract_doctor "$CONTRACT_ID" 0 "$CONTRACT_DIGEST" "$CORPUS_DIGEST" "$TDIR/doctor-runtime-newer.log"
+check "doctor blocks runtime-newer contract before dispatch" grep -q 'runtime-newer contract' "$TDIR/doctor-runtime-newer.log"
+run_contract_doctor "$CONTRACT_ID" 2 "$CONTRACT_DIGEST" "$CORPUS_DIGEST" "$TDIR/doctor-adapter-newer.log"
+check "doctor blocks adapter-newer contract before dispatch" grep -q 'adapter-newer contract' "$TDIR/doctor-adapter-newer.log"
+run_contract_doctor review-decision/v999 "$CONTRACT_VERSION" "$CONTRACT_DIGEST" "$CORPUS_DIGEST" "$TDIR/doctor-unknown-contract.log"
+check "doctor blocks unknown contract before dispatch" grep -q 'unknown contract' "$TDIR/doctor-unknown-contract.log"
+run_contract_doctor "$CONTRACT_ID" "$CONTRACT_VERSION" "0000000000000000000000000000000000000000000000000000000000000000" "$CORPUS_DIGEST" "$TDIR/doctor-contract-digest.log"
+check "doctor blocks contract-digest mismatch before dispatch" grep -q 'contract-digest mismatch' "$TDIR/doctor-contract-digest.log"
+run_contract_doctor "$CONTRACT_ID" "$CONTRACT_VERSION" "$CONTRACT_DIGEST" "0000000000000000000000000000000000000000000000000000000000000000" "$TDIR/doctor-corpus.log"
+check "doctor blocks corpus mismatch before dispatch" grep -q 'corpus mismatch' "$TDIR/doctor-corpus.log"
+cp "$RUNTIME3/review-decision-v1.json" "$TDIR/runtime-identity.backup"
+rm "$RUNTIME3/review-decision-v1.json"
+run_contract_doctor "$CONTRACT_ID" "$CONTRACT_VERSION" "$CONTRACT_DIGEST" "$CORPUS_DIGEST" "$TDIR/doctor-missing-identity.log"
+check "doctor blocks missing runtime identity metadata" grep -q 'metadata missing or malformed' "$TDIR/doctor-missing-identity.log"
+cp "$TDIR/runtime-identity.backup" "$RUNTIME3/review-decision-v1.json"
+printf '%s\n' "$(<"$TDIR/runtime-identity.backup")" > "$RUNTIME3/review-decision-v1.json"
+run_contract_doctor "$CONTRACT_ID" "$CONTRACT_VERSION" "$CONTRACT_DIGEST" "$CORPUS_DIGEST" "$TDIR/doctor-malformed-identity.log"
+check "doctor blocks malformed runtime identity metadata" grep -q 'metadata missing or malformed' "$TDIR/doctor-malformed-identity.log"
+cp "$TDIR/runtime-identity.backup" "$RUNTIME3/review-decision-v1.json"
+run_contract_doctor "$CONTRACT_ID" "$CONTRACT_VERSION" "$CONTRACT_DIGEST" "$CORPUS_DIGEST" "$TDIR/doctor-recovered-identity.log"
+check "doctor recovers after a compatible runtime identity converges" grep -q 'runtime and adapter review-decision identities match' "$TDIR/doctor-recovered-identity.log"
+printf '#!/usr/bin/env bash\nprintf "oracle-custom 7.8.9\\n"\n' > "$TDIR/oracle-custom"
+printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >> "$TIMEOUT_LOG"\nshift\n"$@"\n' > "$TDIR/timeout-custom"
+chmod +x "$TDIR/oracle-custom" "$TDIR/timeout-custom"
+TIMEOUT_LOG="$TDIR/timeout.log" PRO_GATE_ORACLE_BIN="$TDIR/oracle-custom" PRO_GATE_TIMEOUT_BIN="$TDIR/timeout-custom" \
+  PRO_GATE_HOME="$RUNTIME3" PRO_GATE_EXPECTED_VERSION="$VERSION" PRO_GATE_CONSENT_HOME="$CONSENT3" \
+  PRO_GATE_BROWSER_MODE=native bash "$ROOT/bin/pro-gate-doctor.sh" >"$TDIR/doctor-custom.log" 2>&1 || true
+check "doctor uses configured oracle for version" grep -q 'oracle installed (oracle-custom 7.8.9)' "$TDIR/doctor-custom.log"
+check "doctor uses configured timeout" grep -q "$TDIR/oracle-custom --version" "$TDIR/timeout.log"
+PRO_GATE_ORACLE_BIN="$TDIR/missing-oracle" PRO_GATE_TIMEOUT_BIN="$TDIR/missing-timeout" \
+  PRO_GATE_HOME="$RUNTIME3" PRO_GATE_BROWSER_MODE=native bash "$ROOT/bin/pro-gate-doctor.sh" >"$TDIR/doctor-missing-bin.log" 2>&1 || true
+check "doctor reports configured oracle missing" grep -q "configured oracle command missing: $TDIR/missing-oracle" "$TDIR/doctor-missing-bin.log"
+check "doctor reports configured timeout missing" grep -q "configured timeout command missing: $TDIR/missing-timeout" "$TDIR/doctor-missing-bin.log"
+
+# The distribution lookup is advisory, but it must be exact and bounded: a
+# broken network/CLI can never hold the doctor open or invent a skew warning.
+DOCTOR_GH_HOME="$TDIR/doctor-gh-home"; DOCTOR_GH_BIN="$DOCTOR_GH_HOME/.local/bin/gh"
+NETWORK_TIMEOUT="$TDIR/doctor-network-timeout"; NETWORK_TIMEOUT_LOG="$TDIR/doctor-network-timeout.log"
+mkdir -p "$(dirname "$DOCTOR_GH_BIN")"
+cat > "$DOCTOR_GH_BIN" <<'EOF'
+#!/usr/bin/env bash
+set -u
+printf '%s\n' "$*" >> "$GH_LOG"
+if [[ "${1:-}" == auth && "${2:-}" == status && "$#" -eq 2 ]]; then
+  exit 0
+fi
+if [[ "${1:-}" != api || "${2:-}" != --paginate || "${3:-}" != 'repos/StartupBros-com/hov-stack/releases?per_page=100' || "${4:-}" != --jq || "$#" -ne 5 ]]; then
+  exit 64
+fi
+# Two pages of a hov-stack release list. $GH_TAG is the pro-gate release that must win: it is the
+# newest stable pro-gate publication, and the decoys are what a wrong selector would pick instead.
+pages="$(jq -nc --arg tag "$GH_TAG" '[
+  [ {id:1,  tag_name:"pro-gate--v0.0.1",   published_at:"2026-01-01T00:00:00Z", draft:false, prerelease:false},
+    {id:2,  tag_name:"papercut--v999.0.0", published_at:"2026-12-01T00:00:00Z", draft:false, prerelease:false},
+    {id:3,  tag_name:"pro-gate--v998.0.0", published_at:"2026-12-02T00:00:00Z", draft:true,  prerelease:false},
+    {id:4,  tag_name:"pro-gate--v997.0.0", published_at:"2026-12-03T00:00:00Z", draft:false, prerelease:true},
+    {id:5,  tag_name:"v996.0.0",           published_at:"2026-12-04T00:00:00Z", draft:false, prerelease:false} ],
+  [ {id:900, tag_name:"pro-gate--v995.0.0", published_at:"2026-02-01T00:00:00Z", draft:false, prerelease:false},
+    {id:49,  tag_name:"pro-gate--v994.0.0", published_at:"2026-06-01T00:00:00Z", draft:false, prerelease:false},
+    {id:50,  tag_name:$tag,                 published_at:"2026-06-01T00:00:00Z", draft:false, prerelease:false},
+    {id:51,  tag_name:"pro-gate--v993.0.0", published_at:null,                   draft:false, prerelease:false} ] ]')"
+case "${GH_MODE:-newer}" in
+  fail) exit 1 ;;
+  malformed) printf '2026-06-01T00:00:00Z\t1\tpro-gate--vnot-a-semver\n' ;;
+  hung) trap '' TERM; while :; do :; done ;;
+  *) jq -c '.[]' <<<"$pages" | while IFS= read -r page; do jq -r "$5" <<<"$page"; done ;;
+esac
+EOF
+cat > "$NETWORK_TIMEOUT" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$NETWORK_TIMEOUT_LOG"
+exec /usr/bin/timeout "$@"
+EOF
+chmod +x "$DOCTOR_GH_BIN" "$NETWORK_TIMEOUT"
+run_doctor_release_skew() {
+  local mode="$1" tag="$2" output="$3"
+  GH_MODE="$mode" GH_TAG="$tag" GH_LOG="$TDIR/doctor-gh.log" NETWORK_TIMEOUT_LOG="$NETWORK_TIMEOUT_LOG" \
+    HOME="$DOCTOR_GH_HOME" PRO_GATE_HOME="$RUNTIME3" PRO_GATE_EXPECTED_VERSION="$VERSION" \
+    PRO_GATE_CONSENT_HOME="$CONSENT3" PRO_GATE_BROWSER_MODE=native PRO_GATE_ORACLE_BIN="$TDIR/oracle-custom" \
+    PRO_GATE_GH_BIN="$DOCTOR_GH_BIN" PRO_GATE_TIMEOUT_BIN="$NETWORK_TIMEOUT" \
+    bash "$ROOT/bin/pro-gate-doctor.sh" >"$output" 2>&1 || true
+}
+
+: > "$TDIR/doctor-gh.log"; : > "$NETWORK_TIMEOUT_LOG"
+run_doctor_release_skew newer pro-gate--v99.99.99 "$TDIR/doctor-newer.log"
+check "doctor warns once when published release is newer" test "$(grep -c 'pro-gate 99.99.99 has been published' "$TDIR/doctor-newer.log")" -eq 1
+check "doctor warns for the newest pro-gate release, not a decoy: other plugin, draft, prerelease, bare tag, older publication with a higher id, equal publication with a lower id, unpublished" \
+  test "$(grep -c 'has been published' "$TDIR/doctor-newer.log")" -eq 1
+check "doctor skew lookup reads the hov-stack release list, not releases/latest" grep -Fq 'api --paginate repos/StartupBros-com/hov-stack/releases?per_page=100 --jq ' "$TDIR/doctor-gh.log"
+check "doctor skew lookup never uses releases/latest" sh -c "! grep -q 'releases/latest' '$TDIR/doctor-gh.log'"
+check "doctor uses configured timeout with TERM and KILL deadlines" grep -Fq -- "-k 1s 5s $DOCTOR_GH_BIN api --paginate repos/StartupBros-com/hov-stack/releases?per_page=100 --jq " "$NETWORK_TIMEOUT_LOG"
+
+: > "$TDIR/doctor-gh.log"
+run_doctor_release_skew equal "pro-gate--v$VERSION" "$TDIR/doctor-equal.log"
+check "doctor stays quiet when local version equals latest release" sh -c "! grep -q 'has been published' '$TDIR/doctor-equal.log'"
+
+: > "$TDIR/doctor-gh.log"
+run_doctor_release_skew ahead pro-gate--v0.0.1 "$TDIR/doctor-ahead-release.log"
+check "doctor stays quiet when local version is ahead of latest release" sh -c "! grep -q 'has been published' '$TDIR/doctor-ahead-release.log'"
+
+: > "$TDIR/doctor-gh.log"
+run_doctor_release_skew malformed ignored "$TDIR/doctor-malformed-release.log"
+check "doctor stays quiet for malformed latest release output" sh -c "! grep -q 'has been published' '$TDIR/doctor-malformed-release.log'"
+
+: > "$TDIR/doctor-gh.log"
+run_doctor_release_skew fail ignored "$TDIR/doctor-api-failure.log"
+check "doctor stays quiet for latest release API failure" sh -c "! grep -q 'has been published' '$TDIR/doctor-api-failure.log'"
+
+MISSING_GH_OUTPUT="$TDIR/doctor-missing-gh.log"
+HOME="$DOCTOR_GH_HOME" PRO_GATE_HOME="$RUNTIME3" PRO_GATE_EXPECTED_VERSION="$VERSION" PRO_GATE_CONSENT_HOME="$CONSENT3" \
+  PRO_GATE_BROWSER_MODE=native PRO_GATE_ORACLE_BIN="$TDIR/oracle-custom" PRO_GATE_GH_BIN="$TDIR/no-such-gh" \
+  PRO_GATE_TIMEOUT_BIN="$NETWORK_TIMEOUT" bash "$ROOT/bin/pro-gate-doctor.sh" >"$MISSING_GH_OUTPUT" 2>&1 || true
+check "doctor reports a configured gh binary missing" grep -q 'gh (GitHub CLI) missing' "$MISSING_GH_OUTPUT"
+check "doctor stays quiet when gh is missing" sh -c "! grep -q 'has been published' '$MISSING_GH_OUTPUT'"
+
+: > "$TDIR/doctor-gh.log"; : > "$NETWORK_TIMEOUT_LOG"
+SECONDS=0
+run_doctor_release_skew hung ignored "$TDIR/doctor-hung-gh.log"
+HUNG_ELAPSED=$SECONDS
+check "TERM-ignoring gh is hard-killed within the bounded window" test "$HUNG_ELAPSED" -lt 8
+check "doctor stays quiet after hard-killing a hung gh" sh -c "! grep -q 'has been published' '$TDIR/doctor-hung-gh.log'"
+check "hung gh received configured hard timeout" grep -Fq -- "-k 1s 5s $DOCTOR_GH_BIN api --paginate repos/StartupBros-com/hov-stack/releases?per_page=100 --jq " "$NETWORK_TIMEOUT_LOG"
+
+HOME="$HOME3" PRO_GATE_HOME="$RUNTIME3" PRO_GATE_CONSENT_HOME="$CONSENT3" PRO_GATE_BROWSER_MODE=native \
+  bash "$ROOT/daemon/daemon.sh" >"$TDIR/daemon-ok.log" 2>&1 & DPID=$!
+sleep 0.3
+check "valid consent passes daemon guard" kill -0 "$DPID"
+kill "$DPID" 2>/dev/null || true
+HOME="$HOME3" PRO_GATE_HOME="$RUNTIME3" PRO_GATE_CONSENT_HOME="$CONSENT3" PRO_GATE_CONSENT_VERSION=2 \
+  PRO_REVIEW_OWNERS=fake PRO_REVIEW_POLL_SECONDS=1 PRO_GATE_BROWSER_MODE=native \
+  bash "$ROOT/daemon/daemon.sh" >"$TDIR/stale.log" 2>&1 & DPID=$!
+sleep 0.3
+check "stale consent globally defers without exiting" kill -0 "$DPID"
+check "stale consent does not charge per-PR failure" test ! -s "$RUNTIME3/failcount.tsv"
+kill "$DPID" 2>/dev/null || true
+printf '0.0.0\n' > "$RUNTIME3/EXPECTED_VERSION"
+HOME="$HOME3" PRO_GATE_HOME="$RUNTIME3" PRO_GATE_CONSENT_HOME="$CONSENT3" PRO_REVIEW_OWNERS=fake \
+  PRO_REVIEW_POLL_SECONDS=1 PRO_GATE_BROWSER_MODE=native bash "$ROOT/daemon/daemon.sh" >"$TDIR/mismatch.log" 2>&1 & DPID=$!
+sleep 0.3
+check "runtime mismatch globally defers without exiting" kill -0 "$DPID"
+kill "$DPID" 2>/dev/null || true
+check "mismatch route names exact release" grep -q 'exact plugin release' "$TDIR/mismatch.log"
+check "runtime mismatch is global deferred state" grep -q 'globally deferring PR processing' "$TDIR/mismatch.log"
+
+MISSING="$TDIR/missing-runtime"; mkdir -p "$MISSING"
+if PRO_GATE_HOME="$MISSING" PRO_GATE_EXPECTED_VERSION="$VERSION" bash "$ROOT/bin/pro-gate-doctor.sh" >"$TDIR/missing.log" 2>&1; then
+  echo "FAIL - doctor blocks missing runtime"; FAILS=$((FAILS + 1))
+else echo "ok - doctor blocks missing runtime"; fi
+check "missing route names exact release setup" grep -q 'exact plugin release' "$TDIR/missing.log"
+
+# hov-stack tags releases pro-gate--v<version>; the standalone v<version> form keeps working.
+HOV_OUT="$TDIR/dist-hov-tag"
+RELEASE_TAG="pro-gate--v$VERSION" bash "$ROOT/scripts/package-runtime.sh" "$HOV_OUT" >"$TDIR/package-hov-tag.log" 2>&1
+check "packaging accepts the pro-gate--v<version> tag" test -s "$HOV_OUT/pro-gate-runtime-$VERSION.tar.gz"
+check "pro-gate--v tag packaging writes a checksum that verifies" sh -c "cd '$HOV_OUT' && sha256sum -c 'pro-gate-runtime-$VERSION.tar.gz.sha256' >/dev/null"
+check "both tag forms package the identical archive" cmp -s "$HOV_OUT/pro-gate-runtime-$VERSION.tar.gz" "$ARCHIVE"
+
+for mismatch in tag hovtag manifest runtime; do
+  COPY="$TDIR/mismatch-$mismatch"; cp -a "$ROOT" "$COPY"
+  TAG="v$VERSION"
+  case "$mismatch" in
+    tag) TAG=v9.9.9 ;;
+    hovtag) TAG=pro-gate--v9.9.9 ;;
+    manifest) python3 -c 'import json,sys; p=sys.argv[1]; d=json.load(open(p)); d["version"]="9.9.9"; open(p,"w").write(json.dumps(d))' "$COPY/.claude-plugin/plugin.json" ;;
+    runtime) printf '9.9.9\n' > "$COPY/VERSION" ;;
+  esac
+  if RELEASE_TAG="$TAG" bash "$COPY/scripts/package-runtime.sh" "$TDIR/bad-$mismatch" >"$TDIR/package-$mismatch.log" 2>&1; then
+    echo "FAIL - packaging rejects $mismatch mismatch"; FAILS=$((FAILS + 1))
+  else echo "ok - packaging rejects $mismatch mismatch"; fi
+  check "packaging reports $mismatch mismatch" grep -q 'release version mismatch' "$TDIR/package-$mismatch.log"
+done
+
+# install.sh's default download base is the hov-stack release for the pro-gate--v<version> tag;
+# PRO_GATE_RELEASE_BASE_URL still overrides it. A curl that records its arguments and fails stops
+# the install at the first download, before anything is deployed.
+INSTALL_BASE_HOME="$TDIR/install-base-home"; mkdir -p "$INSTALL_BASE_HOME/bin"
+cat > "$INSTALL_BASE_HOME/bin/curl" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$CURL_LOG"
+exit 22
+EOF
+chmod +x "$INSTALL_BASE_HOME/bin/curl"
+: > "$TDIR/install-base-curl.log"
+PATH="$INSTALL_BASE_HOME/bin:$PATH" CURL_LOG="$TDIR/install-base-curl.log" HOME="$INSTALL_BASE_HOME" PRO_GATE_HOME="$INSTALL_BASE_HOME/runtime" \
+  bash "$ROOT/install.sh" --version "$VERSION" --skip-services >"$TDIR/install-base.out" 2>&1 || true
+check "install.sh downloads the archive from the hov-stack pro-gate--v release" \
+  grep -Fq -- "-fsSL https://github.com/StartupBros-com/hov-stack/releases/download/pro-gate--v$VERSION/pro-gate-runtime-$VERSION.tar.gz -o " "$TDIR/install-base-curl.log"
+: > "$TDIR/install-base-curl.log"
+PATH="$INSTALL_BASE_HOME/bin:$PATH" CURL_LOG="$TDIR/install-base-curl.log" HOME="$INSTALL_BASE_HOME" PRO_GATE_HOME="$INSTALL_BASE_HOME/runtime" \
+  PRO_GATE_RELEASE_BASE_URL=https://example.test/mirror bash "$ROOT/install.sh" --version "$VERSION" --skip-services >"$TDIR/install-base-override.out" 2>&1 || true
+check "PRO_GATE_RELEASE_BASE_URL still overrides the download base" \
+  grep -Fq -- "-fsSL https://example.test/mirror/pro-gate-runtime-$VERSION.tar.gz -o " "$TDIR/install-base-curl.log"
+
+[ "$FAILS" -eq 0 ] && { echo "ALL PASS"; exit 0; }
+echo "$FAILS FAILURES"; exit 1

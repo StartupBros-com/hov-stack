@@ -1,0 +1,21 @@
+[Unit]
+Description=pro-gate Oracle ChatGPT browser session (Xvfb + Chrome, CDP 127.0.0.1)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=@USER@
+Group=@USER@
+WorkingDirectory=@HOME@/.pro-review-daemon
+ExecStart=@HOME@/.pro-review-daemon/run-oracle-chrome.sh
+Restart=always
+RestartSec=5
+KillMode=control-group
+TimeoutStopSec=20
+LimitNOFILE=65535
+MemoryMax=70%
+OOMPolicy=continue
+
+[Install]
+WantedBy=multi-user.target
