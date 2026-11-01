@@ -2,5 +2,8 @@ __pycache__/
 *.pyc
 .venv/
 reports/*/tmp/
+# tune.py's --reports-dir defaults to ./reports, and tests/ci.sh runs the unit tests from
+# skills/skill-tuner/scripts, so the CLI tests' compare log lands here on every run.
+skills/skill-tuner/scripts/reports/
 evals/results/
 .DS_Store
