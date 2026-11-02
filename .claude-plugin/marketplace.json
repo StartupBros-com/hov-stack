@@ -235,15 +235,16 @@
     {
       "name": "sign-it",
       "source": {
-        "source": "url",
-        "url": "https://github.com/StartupBros-com/sign-it.git",
-        "sha": "3a66772de0ee8e0fc5f2812356040ea9fa5b8bb4"
+        "source": "git-subdir",
+        "url": "https://github.com/StartupBros-com/hov-stack.git",
+        "path": "plugins/sign-it",
+        "sha": "227412a0802aaab1d349fa8fa8e30e256b8576f4"
       },
       "description": "Agent-native PDF signing: type /sign-it with a document and get <file>-signed.pdf back; Claude never starts it on its own. Finds the signature line in form fields, the text layer (typed or drawn rules, captions under the rule), or scanned pages, stamps your stored signature and today's date, previews the result, and never stamps over an existing signature. Converts Word documents, opens owner-password forms, fails closed when the line is missing or ambiguous, and can add a PAdES seal. Your own signature only, never a counterparty's.",
       "metadata": {
-        "version": "0.6.0",
-        "releaseId": 395112853,
-        "releaseTag": "v0.6.0"
+        "version": "0.6.1",
+        "releaseId": 430468222,
+        "releaseTag": "sign-it--v0.6.1"
       },
       "card": {
         "rows": [
