@@ -10,6 +10,13 @@
 # SCOPE: memory only. settings.json, hooks, and managed settings stay on the manually reviewed
 # flow. Each run uses a temporary detached worktree and advances a dedicated remote backup branch.
 # It never commits to main, carries unrelated commits, or needs a PR merged before the next backup.
+#
+# PRIVACY: memory is private, and the backup branch is readable by anyone who can read origin.
+# A run from a public checkout (hov-stack itself, or a fork of it) would publish every note, so
+# nothing is pushed until origin is confirmed private (see the guard below). To back up from a
+# public checkout, point DOTFILES at a checkout of a private repository (for the timer, a drop-in
+# on backup-harness.service with Environment=DOTFILES=...), and CLAUDE_MEMORY_BACKUP_REPO at the
+# same checkout so memory-audit.py reads the branch this pushes.
 set -euo pipefail
 
 # The checkout this script lives in; DOTFILES overrides it.
@@ -19,6 +26,38 @@ TMP_ROOT="${BACKUP_TMP_ROOT:-${XDG_CACHE_HOME:-$HOME/.cache}/claude-harness-back
 log() { echo "backup-harness: $*"; }
 cd "$REPO" || { log "no dotfiles repo at $REPO" >&2; exit 1; }
 [ -f sync.sh ] || { log "sync.sh missing" >&2; exit 1; }
+
+# Refuse before anything is fetched, locked or copied unless origin is confirmed private.
+#   - github.com: an unauthenticated repository lookup answers 200 only for a public
+#     repository and 404 for a private (or missing) one. 404 passes; 200 refuses, and so does
+#     every other answer, a network failure or a rate limit included.
+#   - any other host cannot be checked, so it refuses unless HARNESS_BACKUP_REMOTE_PRIVATE=1
+#     says you have confirmed it yourself.
+# The URL checked is the one git pushes to (pushInsteadOf applied). It is never logged, since
+# an https remote can carry a token; the GitHub owner/name is.
+push_url=$(git remote get-url --push origin 2>/dev/null) || { log "no origin remote in $REPO" >&2; exit 1; }
+github_slug=""
+if [[ $push_url =~ ^(git@github\.com:|ssh://git@github\.com/|https://([^/@]+@)?github\.com/)([^/]+/[^/]+)/?$ ]]; then
+  github_slug=${BASH_REMATCH[3]%.git}
+fi
+if [ "${HARNESS_BACKUP_REMOTE_PRIVATE:-0}" = 1 ]; then
+  log "origin's privacy is vouched for by HARNESS_BACKUP_REMOTE_PRIVATE=1, not checked"
+elif [[ $github_slug =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]]; then
+  code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 "https://api.github.com/repos/$github_slug") || true
+  [ -n "$code" ] || code=000
+  case $code in
+    404) log "origin ($github_slug) is not publicly readable on GitHub; backing up there" ;;
+    200)
+      log "REFUSED: origin ($github_slug) is a public GitHub repository, so pushing memory there would publish it. Point DOTFILES at a checkout of a private repository." >&2
+      exit 1 ;;
+    *)
+      log "REFUSED: could not confirm origin ($github_slug) is private (GitHub lookup answered HTTP $code); memory is not pushed" >&2
+      exit 1 ;;
+  esac
+else
+  log "REFUSED: origin is not a github.com owner/name, so its privacy cannot be checked; memory is not pushed. Set HARNESS_BACKUP_REMOTE_PRIVATE=1 once you have confirmed it is private." >&2
+  exit 1
+fi
 
 mkdir -p "$TMP_ROOT"
 exec 9>"$TMP_ROOT/backup.lock"
