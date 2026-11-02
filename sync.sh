@@ -1937,7 +1937,11 @@ reconcile_role_timers() {
   fi
 
   enable_set="$base_enable$admitted"
-  all_role_units="backup-harness.timer dcg-auto-update.timer tools-auto-update.timer $CRITICAL_SILENCE_TIMERS"
+  all_role_units="dcg-auto-update.timer tools-auto-update.timer $CRITICAL_SILENCE_TIMERS"
+  # backup-harness.timer is opt-in on a workstation, so install leaves its state alone there.
+  # A satellite still turns it off: a second machine pushing the shared backup branch
+  # duplicates or clobbers the workstation's copy.
+  case $role in satellite) all_role_units="backup-harness.timer $all_role_units" ;; esac
   for timer in $all_role_units; do
     case " $enable_set " in *" $timer "*) continue ;; esac
     case " $UNITS " in *" $timer "*) ;; *) continue ;; esac
@@ -2202,6 +2206,13 @@ install() {
   # ACTIVATION CHECKLIST in dotfiles PR "wsl-hygiene-timers" — this is a loud,
   # documented omission, not the silent-gap failure mode described above.
   #
+  # OPT-IN — backup-harness.timer is not in the workstation set either. It pushes
+  # live memory to a branch of the checkout's origin, and scripts/backup-harness.sh
+  # refuses to push to a public repository, so on a clone of this public repo an
+  # enabled timer fails every night. Enable it by hand once origin is private or
+  # DOTFILES points at a private checkout (systemd/README.md); install then leaves
+  # it enabled on a workstation and still disables it on a satellite.
+  #
   # ROLE-KEYED, replacing a hardcoded literal that was itself a workstation
   # profile written by hand. hosts.tsv is the declaration; lib/profile.sh reads it.
   #
@@ -2215,7 +2226,7 @@ install() {
   case "$(profile_role 2>/dev/null || echo unknown)" in
     workstation)
       _role=workstation
-      _enable="backup-harness.timer dcg-auto-update.timer tools-auto-update.timer" ;;
+      _enable="dcg-auto-update.timer tools-auto-update.timer" ;;
     satellite)
       _role=satellite
       _enable="dcg-auto-update.timer tools-auto-update.timer" ;;
