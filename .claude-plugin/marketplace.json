@@ -12,15 +12,16 @@
     {
       "name": "token-eater",
       "source": {
-        "source": "url",
-        "url": "https://github.com/StartupBros-com/token-eater.git",
-        "sha": "80ebac8f554eb836423430a7796322de431c1ff0"
+        "source": "git-subdir",
+        "url": "https://github.com/StartupBros-com/hov-stack.git",
+        "path": "plugins/token-eater",
+        "sha": "c81c35f3d37b754637ed8ce9b4fbc21ae61cad43"
       },
       "description": "Spend expiring AI credits on isolated, verified code cleanup that opens a draft pull request and never merges.",
       "metadata": {
-        "version": "0.1.2",
-        "releaseId": 397449033,
-        "releaseTag": "v0.1.2"
+        "version": "0.1.3",
+        "releaseId": 431257926,
+        "releaseTag": "token-eater--v0.1.3"
       },
       "card": {
         "rows": [
