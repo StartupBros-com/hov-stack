@@ -339,8 +339,8 @@ rm -f "$CCFLARE_DB"   # the later cases keep U4e's no-gateway-DB state
 [ "$RC" = 0 ] && ok || bad "U4e2 loop exit $RC"
 grep -A1 -- '^--cost$' "$LEDGER_CALLS" | grep -qx '1.25' && ok || bad "U4e2 ledger --cost should be the in-window row's 1.25, not the timestamp-1 row outside the window: $(cat "$LEDGER_CALLS")"
 grep -A1 -- '^--tokens$' "$LEDGER_CALLS" | grep -qx '4200' && ok || bad "U4e2 ledger --tokens should be the in-window row's 4200: $(cat "$LEDGER_CALLS")"
-[ "$(printf '%s' "$OUT4E2" | jq -r '.window_cost_usd')" = "101.25" ] && [ "$(printf '%s' "$OUT4E2" | jq -r '.cost_usd')" = "101.25" ] \
-  && ok || bad "U4e2 the cost script must print the window's cost under window_cost_usd and its cost_usd alias, which a loop started before the rename reads at exit: $OUT4E2"
+[ "$(printf '%s' "$OUT4E2" | jq -r '.window_cost_usd')" = "101.25" ] && printf '%s' "$OUT4E2" | jq -e 'has("cost_usd") | not' >/dev/null \
+  && ok || bad "U4e2 the cost script must print the window's cost under window_cost_usd only; the pre-rename cost_usd alias was retired on 2026-10-19 (dotfiles#1429): $OUT4E2"
 
 echo "== U4e3: claude-loop still reads a cost helper that prints only the pre-rename cost_usd key (a rollback) =="
 cat >"$TMP/bin/cost-old-key.py" <<'STUB'
