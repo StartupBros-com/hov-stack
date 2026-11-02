@@ -17,7 +17,8 @@ copies of the plugin coexist, and where the plugin documents the rest.
   `~/.claude/memory-dream.json` (a `STABLE_FILES` entry in sync.sh). It sets no
   `mirror_root`, so the pass runs in the plugin's default snapshot mode (#1918): apply
   copies every file it touches into the patch set first, `restore` reverses it, and
-  the nightly `backup-harness.timer` pushes the result offsite. Mirror mode was
+  the host's own backup of its home directory, or the opt-in `backup-harness.timer`,
+  keeps the result. Mirror mode was
   dropped because 0.4.0's freshness check has no exclusion list (it refused 14 of 143
   live projects on 2026-10-18) and its record step needs a git checkout of the
   mirror. memory-push never deletes, so a note the pass consolidates away stays in
@@ -69,9 +70,13 @@ copies of the plugin coexist, and where the plugin documents the rest.
    tier (rehook's `memory-archive-index.md`, the dream pass's `MEMORY-archive.md`)
    counts as indexed, for the audit and for fix. Dry-run by default. `--apply`
    restores each repaired file's pre-fix mtime, so maintenance never resets the age
-   signal. It, and rehook's below, refuses unless live memory matches
-   `refs/remotes/origin/backup/claude-memory` (#1918), so run
-   `systemctl --user start backup-harness.service` first.
+   signal. It, and rehook's below, first copies every file it is about to change
+   into `~/.claude/logs/memory-audit/write-backups/<stamp>/` with a `manifest.json`
+   (a file the write creates is recorded with a null hash), prints that directory,
+   and refuses to write when the copy fails. With `--mirror-root DIR` it instead
+   refuses unless live memory matches that directory; with `--pushed-mirror`,
+   unless it matches `refs/remotes/origin/backup/claude-memory` (#1918), which the
+   opt-in `backup-harness.service` pushes.
 
    **Rehook** (`memory-audit.py rehook`, `--apply` to write, #1450) is the index's
    load-cap maintenance: a bare `[-](slug.md)` fragment cannot route recall, and
@@ -102,10 +107,10 @@ copies of the plugin coexist, and where the plugin documents the rest.
 ```bash
 python3 ~/.claude/scripts/memory-audit.py triage                 # score, read-only (harness-weekly)
 python3 ~/.claude/scripts/memory-audit.py fix                    # mechanical repairs, dry-run
-systemctl --user start backup-harness.service                    # push live memory to backup/claude-memory (what --apply checks)
-python3 ~/.claude/scripts/memory-audit.py fix --apply            # apply repairs (gated on the pushed backup branch)
+python3 ~/.claude/scripts/memory-audit.py fix --apply            # apply repairs (copies each file it changes first)
 python3 ~/.claude/scripts/memory-audit.py rehook                 # hook bare index fragments, rank-split under the load cap (dry-run)
-python3 ~/.claude/scripts/memory-audit.py rehook --apply         # write MEMORY.md + the archive tier (gated on the pushed backup branch)
+python3 ~/.claude/scripts/memory-audit.py rehook --apply         # write MEMORY.md + the archive tier (copies both first)
+python3 ~/.claude/scripts/memory-audit.py fix --apply --pushed-mirror  # gate on the pushed backup branch instead (opt-in backup-harness)
 bash sync.sh memory-push                       # the only permitted mirror write (from the hov-stack checkout root)
 # inside a session:
 #   /memory-dream:dream                                            operator-gated pass

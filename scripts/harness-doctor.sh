@@ -344,10 +344,19 @@ DOCTOR_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 . "$DOCTOR_DIR/lib/floor-assert.sh" || { warn "floor assertion helper missing"; exit 1; }
 MEMORY_AUDIT=$DOCTOR_DIR/memory-audit.py
 MEMORY_MIRROR=${CLAUDE_MEMORY_MIRROR_ROOT:-$HD_ROOT/memory}
+# The mirror is opt-in (memory-audit.py): compare against it only when it is named
+# or a `sync.sh memory-push` has created the default one. With neither, the audit
+# runs without mirror findings instead of reporting every live project missing.
+_memory_mirror_args=()
+if [ -n "${CLAUDE_MEMORY_MIRROR_ROOT:-}" ] || [ -d "$MEMORY_MIRROR" ]; then
+  _memory_mirror_args=(--mirror-root "$MEMORY_MIRROR")
+else
+  echo "  note: no memory mirror at $MEMORY_MIRROR, so the memory audit skips its mirror checks"
+fi
 if [ -f "$MEMORY_AUDIT" ]; then
   _memory_json=$(python3 "$MEMORY_AUDIT" \
     --live-root "${CLAUDE_MEMORY_LIVE_ROOT:-$HOME/.claude/projects}" \
-    --mirror-root "$MEMORY_MIRROR" --format json --as-of "$(date +%F)" 2>/dev/null)
+    "${_memory_mirror_args[@]}" --format json --as-of "$(date +%F)" 2>/dev/null)
   _memory_status=$?
   if [ "$_memory_status" -eq 2 ] || [ -z "$_memory_json" ]; then
     warn "memory audit could not complete"
