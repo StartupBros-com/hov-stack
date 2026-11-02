@@ -26,6 +26,7 @@ lives at grading.summary.pass_rate.
 from __future__ import annotations
 
 import json
+import shutil
 import sys
 import unittest
 import tempfile
@@ -216,9 +217,12 @@ class CliTest(unittest.TestCase):
 
         import tune
 
+        # Keep compare's log out of the source tree.
+        reports = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, reports, True)
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
-            code = tune.main(argv)
+            code = tune.main([*argv, "--reports-dir", reports])
         return code, buf.getvalue()
 
     def test_compare_reads_a_benchmark_tree(self):
