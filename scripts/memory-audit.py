@@ -11,6 +11,7 @@ import io
 import json
 import os
 import re
+import shutil
 import stat
 import subprocess
 import sys
@@ -160,11 +161,19 @@ def filename_allowlist_path() -> Path:
     candidate = overlay / "memory-filename-allowlist.txt"
     return candidate if candidate.is_file() else DEFAULT_FILENAME_ALLOWLIST
 
-# With no --mirror-root and no CLAUDE_MEMORY_MIRROR_ROOT, the mirror is the
-# memory tree of the branch backup-harness.sh pushes, read from this
-# checkout's remote-tracking ref (dotfiles#1918). A directory can be filled by a
-# scratch memory-push with nothing durable behind it; this ref moves only on a
-# fetch or a push. CLAUDE_MEMORY_BACKUP_REPO names another checkout to read it from.
+# The mirror is opt-in. With no --mirror-root, no CLAUDE_MEMORY_MIRROR_ROOT and
+# no --pushed-mirror there is none: the audit reports no mirror_* findings, and
+# fix --apply and rehook --apply copy every file they are about to touch into
+# WRITE_BACKUP_ROOT instead of checking freshness. Live memory then has whatever
+# backup the host gives its home directory, and the copy covers edits made since
+# that backup last ran.
+#
+# --pushed-mirror reads the memory tree of the branch backup-harness.sh pushes,
+# from this checkout's remote-tracking ref (dotfiles#1918). A directory can be
+# filled by a scratch memory-push with nothing durable behind it; this ref moves
+# only on a fetch or a push. CLAUDE_MEMORY_BACKUP_REPO names another checkout to
+# read it from. It is a flag and not a CLAUDE_MEMORY_MIRROR_ROOT value because
+# sync.sh reads that variable as a directory.
 PUSHED_MIRROR_REF = "refs/remotes/origin/backup/claude-memory"
 PUSHED_MIRROR_HINT = (
     f"checked against {PUSHED_MIRROR_REF}; run `systemctl --user start backup-harness.service` "
@@ -199,12 +208,66 @@ def pushed_mirror_root() -> Path:
     return Path(_pushed_mirror.name)
 
 
-def mirror_root_path(value: str | None) -> Path:
-    return pushed_mirror_root() if value is None else Path(value).expanduser()
+def mirror_root_path(args: argparse.Namespace) -> Path | None:
+    """The configured mirror: the pushed ref, a directory, or None for no mirror."""
+    if getattr(args, "pushed_mirror", False):
+        return pushed_mirror_root()
+    value = getattr(args, "mirror_root", None)
+    return Path(value).expanduser() if value else None
 
 
-def mirror_root_label(value: str | None) -> str:
-    return PUSHED_MIRROR_REF if value is None else str(Path(value).expanduser())
+def mirror_root_label(args: argparse.Namespace) -> str | None:
+    if getattr(args, "pushed_mirror", False):
+        return PUSHED_MIRROR_REF
+    value = getattr(args, "mirror_root", None)
+    return str(Path(value).expanduser()) if value else None
+
+
+def mirror_hint(args: argparse.Namespace) -> str:
+    return PUSHED_MIRROR_HINT if getattr(args, "pushed_mirror", False) else ""
+
+
+# Where a no-mirror write copies the files it is about to change. Outside
+# ~/.claude/projects, so a copy can never be read as a live project.
+WRITE_BACKUP_ROOT = Path(
+    os.environ.get("CLAUDE_MEMORY_WRITE_BACKUP_ROOT")
+    or Path(os.environ.get("CLAUDE_CONFIG_DIR") or "~/.claude") / "logs" / "memory-audit" / "write-backups"
+).expanduser()
+
+
+def snapshot_before_write(live_root: Path, touched: set[tuple[str, str]], command: str) -> Path | None:
+    """Copy every live file a no-mirror write is about to change into a fresh
+    directory under WRITE_BACKUP_ROOT, before any write.
+
+    Writes <dir>/<project>/<path> byte-identical copies (mtimes kept) and
+    <dir>/manifest.json recording {project, path, sha256} per file. A file the
+    write will create is recorded with sha256 null, so a restore deletes it
+    rather than restoring bytes. Prints the directory to stderr. Returns None,
+    after printing why, when the copy cannot be made: the caller then refuses
+    the write, since this copy is the only undo a no-mirror write has."""
+    live = project_dirs(live_root, live=True)
+    stamp = dt.datetime.now(dt.UTC).strftime("%Y%m%dT%H%M%SZ")
+    manifest: list[dict[str, Any]] = []
+    try:
+        WRITE_BACKUP_ROOT.mkdir(parents=True, exist_ok=True)
+        target = Path(tempfile.mkdtemp(prefix=f"{stamp}-{command}-", dir=WRITE_BACKUP_ROOT))
+        for project, rel in sorted(touched):
+            source = live[project] / rel
+            if source.is_symlink():
+                raise OSError(f"{project}/{rel} is a symlink; refusing to write through it")
+            if not source.exists():
+                manifest.append({"project": project, "path": rel, "sha256": None})
+                continue
+            destination = target / project / rel
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, destination)
+            manifest.append({"project": project, "path": rel, "sha256": digest(destination)})
+        (target / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    except (OSError, KeyError) as error:
+        print(f"memory-{command}: refusing to write: cannot copy files before the write: {error}", file=sys.stderr)
+        return None
+    print(f"memory-{command}: copied {len(manifest)} file(s) before writing to {target}", file=sys.stderr)
+    return target
 
 
 def load_filename_allowlist(path: Path) -> set[str]:
@@ -613,14 +676,14 @@ def missing_enforcer_citations(
 
 def audit(args: argparse.Namespace) -> dict[str, Any]:
     live_root = Path(args.live_root).expanduser()
-    mirror_root = mirror_root_path(args.mirror_root)
+    mirror_root = mirror_root_path(args)
     filename_allowlist = load_filename_allowlist(
         Path(getattr(args, "filename_allowlist", None) or filename_allowlist_path()).expanduser()
     )
     if not live_root.is_dir():
         raise OSError(f"live root is not a directory: {live_root}")
     live = project_dirs(live_root, live=True)
-    mirror = project_dirs(mirror_root, live=False)
+    mirror = project_dirs(mirror_root, live=False) if mirror_root is not None else {}
     findings: list[dict[str, Any]] = []
     # The cited-enforcer check is advisory. sync.sh's --copy-gate decides
     # confinement and sensitive data only, so in that mode none of it runs: at
@@ -655,7 +718,7 @@ def audit(args: argparse.Namespace) -> dict[str, Any]:
         if project not in live:
             findings.append(finding("mirror_only_project", project))
             continue
-        if project not in mirror:
+        if mirror_root is not None and project not in mirror:
             findings.append(finding("mirror_missing_project", project))
         memory_dir = live[project]
         if memory_dir.is_symlink() or memory_dir.parent.is_symlink():
@@ -912,7 +975,7 @@ def audit(args: argparse.Namespace) -> dict[str, Any]:
             enforcer_warnings.append(f"cited-enforcer discovery degraded ({len(discovery_errors)} error(s))")
     result: dict[str, Any] = {
         "schema_version": 1,
-        "roots": {"live": str(live_root), "mirror": mirror_root_label(args.mirror_root)},
+        "roots": {"live": str(live_root), "mirror": mirror_root_label(args)},
         "summary": {
             "live_projects": len(live),
             "mirror_projects": len(mirror),
@@ -1361,7 +1424,7 @@ def run_triage(args: argparse.Namespace) -> int:
     result = {
         "schema_version": 1,
         "command": "triage",
-        "roots": {"live": str(live_root), "mirror": mirror_root_label(args.mirror_root)},
+        "roots": {"live": str(live_root), "mirror": mirror_root_label(args)},
         "now": now.isoformat(),
         "summary": {
             "live_projects": len(live),
@@ -1976,9 +2039,17 @@ def apply_index_refresh(index_path: Path, refresh: dict[str, dict[str, Any]]) ->
         os.utime(index_path, ns=(stat.st_atime_ns, stat.st_mtime_ns))
 
 
-def apply_fix(live_root: Path, mirror_root: Path, repairs: list[dict[str, Any]], hint: str = "") -> int:
+def apply_fix(live_root: Path, mirror_root: Path | None, repairs: list[dict[str, Any]], hint: str = "") -> int:
     affected = sorted({repair["project"] for repair in repairs})
-    stale = mirror_freshness(live_root, mirror_root, affected)
+    if mirror_root is None:
+        touched = {
+            (repair["project"], repair["path"] if repair["kind"] == "wikilink_rewrite" else "MEMORY.md")
+            for repair in repairs
+            if repair["kind"] in ("wikilink_rewrite", "index_reconcile")
+        }
+        if snapshot_before_write(live_root, touched, "fix") is None:
+            return 1
+    stale = mirror_freshness(live_root, mirror_root, affected) if mirror_root is not None else {}
     if stale:
         for project, kinds in sorted(stale.items()):
             print(
@@ -2016,13 +2087,12 @@ def run_fix(args: argparse.Namespace) -> int:
     repairs = compute_fix(live_root)
     exit_code = 0
     if args.apply and repairs:
-        hint = PUSHED_MIRROR_HINT if args.mirror_root is None else ""
-        exit_code = apply_fix(live_root, mirror_root_path(args.mirror_root), repairs, hint)
+        exit_code = apply_fix(live_root, mirror_root_path(args), repairs, mirror_hint(args))
     result = {
         "schema_version": 1,
         "command": "fix",
         "applied": bool(args.apply and repairs and exit_code == 0),
-        "roots": {"live": str(live_root), "mirror": mirror_root_label(args.mirror_root)},
+        "roots": {"live": str(live_root), "mirror": mirror_root_label(args)},
         "repairs": repairs,
     }
     if args.format == "json":
@@ -2508,9 +2578,14 @@ def write_preserving_mtime(path: Path, text: str) -> bool:
     return True
 
 
-def apply_rehook(live_root: Path, mirror_root: Path, plans: list[dict[str, Any]], hint: str = "") -> int:
+def apply_rehook(live_root: Path, mirror_root: Path | None, plans: list[dict[str, Any]], hint: str = "") -> int:
     affected = sorted({plan["project"] for plan in plans})
-    stale = mirror_freshness(live_root, mirror_root, affected)
+    if mirror_root is None:
+        touched = {(plan["project"], "MEMORY.md") for plan in plans}
+        touched |= {(plan["project"], ARCHIVE_INDEX_NAME) for plan in plans if plan["archive_changed"]}
+        if snapshot_before_write(live_root, touched, "rehook") is None:
+            return 1
+    stale = mirror_freshness(live_root, mirror_root, affected) if mirror_root is not None else {}
     if stale:
         for project, kinds in sorted(stale.items()):
             print(
@@ -2577,13 +2652,12 @@ def run_rehook(args: argparse.Namespace) -> int:
         return 2
     exit_code = 0
     if args.apply and plans:
-        hint = PUSHED_MIRROR_HINT if args.mirror_root is None else ""
-        exit_code = apply_rehook(live_root, mirror_root_path(args.mirror_root), plans, hint)
+        exit_code = apply_rehook(live_root, mirror_root_path(args), plans, mirror_hint(args))
     result = {
         "schema_version": 1,
         "command": "rehook",
         "applied": bool(args.apply and plans and exit_code == 0),
-        "roots": {"live": str(live_root), "mirror": mirror_root_label(args.mirror_root)},
+        "roots": {"live": str(live_root), "mirror": mirror_root_label(args)},
         "now": now.isoformat(),
         "budget": {"lines": REHOOK_MAIN_MAX_LINES, "bytes": REHOOK_MAIN_MAX_BYTES},
         "summary": {
@@ -2655,13 +2729,23 @@ def common_parser(subcommand: bool = False) -> argparse.ArgumentParser:
     # A subparser copies its own defaults over the parent namespace, so a flag given
     # before the subcommand (`--live-root X rehook --apply`) would silently fall back
     # to the real store. Subcommand copies set a value only when the flag is written.
-    # An unset mirror root stays None and means PUSHED_MIRROR_REF (mirror_root_path).
-    def default(value: str) -> str:
+    # An unset mirror root stays None and means no mirror (mirror_root_path).
+    def default(value: Any) -> Any:
         return argparse.SUPPRESS if subcommand else value
 
     result = argparse.ArgumentParser(add_help=False)
     result.add_argument("--live-root", default=default(os.environ.get("CLAUDE_MEMORY_LIVE_ROOT", "~/.claude/projects")))
-    result.add_argument("--mirror-root", default=default(os.environ.get("CLAUDE_MEMORY_MIRROR_ROOT")))
+    result.add_argument(
+        "--mirror-root",
+        default=default(os.environ.get("CLAUDE_MEMORY_MIRROR_ROOT")),
+        help="directory mirror of live memory to compare against (default: none; CLAUDE_MEMORY_MIRROR_ROOT)",
+    )
+    result.add_argument(
+        "--pushed-mirror",
+        action="store_true",
+        default=default(False),
+        help=f"compare against {PUSHED_MIRROR_REF}, the branch backup-harness.sh pushes; overrides --mirror-root",
+    )
     result.add_argument("--format", choices=("human", "json"), default=default("human"))
     return result
 
@@ -2732,13 +2816,13 @@ def parser() -> argparse.ArgumentParser:
     triage.add_argument("--now", type=date_value, default=None, help="inject YYYY-MM-DD for deterministic age scoring")
     triage.add_argument("--suppress-applied-days", type=int, default=14, help="drop flags on notes an applied dream pass touched within N days (0 disables)")
     fix = sub.add_parser("fix", parents=[sub_common], help="mechanical repairs (dry-run unless --apply)")
-    fix.add_argument("--apply", action="store_true", help="write repairs to live memory (gated on mirror freshness)")
+    fix.add_argument("--apply", action="store_true", help="write repairs to live memory (gated on mirror freshness when a mirror is set, else after copying the files it changes)")
     rehook = sub.add_parser(
         "rehook",
         parents=[sub_common],
         help="hook bare MEMORY.md fragments and split the index by rank under the load cap (dry-run unless --apply)",
     )
-    rehook.add_argument("--apply", action="store_true", help="write MEMORY.md and the archive tier in live memory (gated on mirror freshness)")
+    rehook.add_argument("--apply", action="store_true", help="write MEMORY.md and the archive tier in live memory (gated on mirror freshness when a mirror is set, else after copying the files it changes)")
     rehook.add_argument("--project", default=None, help="one project only; also lets a run that merely adds unindexed notes proceed")
     rehook.add_argument("--now", type=date_value, default=None, help="inject YYYY-MM-DD for the archive section heading")
     rehook.add_argument("--all", action="store_true", help="with --apply: write every live project whose index needs work (default: --apply needs --project)")

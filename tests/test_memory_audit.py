@@ -2,6 +2,7 @@
 
 import contextlib
 import datetime as dt
+import hashlib
 import importlib.util
 import json
 import os
@@ -596,6 +597,26 @@ class MemoryAuditTests(unittest.TestCase):
                     ]
                     self.assertEqual(unindexed, expected)
 
+    def test_no_mirror_configured_reports_no_mirror_findings(self):
+        """PLANTED NEGATIVE: with no mirror named, the audit read the pushed backup ref,
+        so a host without one got mirror_missing_project for every live project."""
+        with tempfile.TemporaryDirectory() as temp:
+            fixture = Fixture(Path(temp))
+            live, _ = fixture.project(mirror=False)
+            (live / "MEMORY.md").write_text("- [A](a.md)\n")
+            (live / "a.md").write_text(note("a"))
+            env = {key: value for key, value in os.environ.items() if key != "CLAUDE_MEMORY_MIRROR_ROOT"}
+            bare = subprocess.run(
+                ["python3", str(AUDITOR), "--live-root", str(fixture.live), "--format", "json"],
+                text=True, capture_output=True, check=False, env=env,
+            )
+            payload = json.loads(bare.stdout)
+            self.assertIsNone(payload["roots"]["mirror"])
+            self.assertEqual([item for item in payload["findings"] if item["kind"].startswith("mirror_")], [])
+            # Control: the same tree against an empty mirror directory still reports it.
+            kinds = {item["kind"] for item in json.loads(self.run_audit(fixture).stdout)["findings"]}
+            self.assertIn("mirror_missing_project", kinds)
+
 
 class MemoryTriageTests(unittest.TestCase):
     def run_triage(self, fixture, *args):
@@ -925,8 +946,8 @@ class MemoryFixTests(unittest.TestCase):
             self.assertIn("[[project_alpha_note]]", beta.read_text())
             self.assertEqual(beta.stat().st_mtime_ns, pre)
 
-    def test_apply_with_no_mirror_named_checks_the_pushed_backup_ref(self):
-        """PLANTED NEGATIVE (#1918): with no --mirror-root, a matching copy committed
+    def test_apply_with_pushed_mirror_checks_the_pushed_backup_ref(self):
+        """PLANTED NEGATIVE (#1918): with --pushed-mirror, a matching copy committed
         but never pushed refuses; only the backup ref's tree lets the apply through."""
         with tempfile.TemporaryDirectory() as temp:
             fixture = Fixture(Path(temp))
@@ -936,7 +957,10 @@ class MemoryFixTests(unittest.TestCase):
             beta = live / "beta.md"
             beta.write_text(note("beta", body="See [[alpha-note]]."))
             repo = BackupRepo(Path(temp))
-            command = ["python3", str(AUDITOR), "fix", "--live-root", str(fixture.live), "--apply", "--format", "json"]
+            command = [
+                "python3", str(AUDITOR), "fix", "--live-root", str(fixture.live),
+                "--pushed-mirror", "--apply", "--format", "json",
+            ]
             stale = {**snapshot(live), "project_alpha_note.md": note("alpha", body="older").encode()}
             repo.commit("project", stale, push=True)
             repo.commit("project", snapshot(live), push=False)
@@ -953,6 +977,51 @@ class MemoryFixTests(unittest.TestCase):
             self.assertEqual(applied.returncode, 0, applied.stderr)
             self.assertEqual(json.loads(applied.stdout)["roots"]["mirror"], MA.PUSHED_MIRROR_REF)
             self.assertIn("[[project_alpha_note]]", beta.read_text())
+
+    def test_apply_with_no_mirror_copies_every_touched_file_before_writing(self):
+        """PLANTED NEGATIVE: with no mirror named, fix --apply refused unless live memory
+        matched the pushed backup ref. Now it copies each file it changes first, and a
+        copy it cannot make refuses the write."""
+        with tempfile.TemporaryDirectory() as temp:
+            fixture = Fixture(Path(temp))
+            live, _ = fixture.project(mirror=False)
+            (live / "MEMORY.md").write_text("- [A](project_alpha_note.md)\n- [B](beta.md)\n")
+            (live / "project_alpha_note.md").write_text(note("alpha"))
+            beta = live / "beta.md"
+            beta.write_text(note("beta", body="See [[alpha-note]]."))
+            before = snapshot(live)
+            env = {key: value for key, value in os.environ.items() if key != "CLAUDE_MEMORY_MIRROR_ROOT"}
+            command = ["python3", str(AUDITOR), "fix", "--live-root", str(fixture.live), "--apply", "--format", "json"]
+            blocker = Path(temp) / "not-a-directory"
+            blocker.write_text("")
+            refused = subprocess.run(
+                command, text=True, capture_output=True, check=False,
+                env={**env, "CLAUDE_MEMORY_WRITE_BACKUP_ROOT": str(blocker / "backups")},
+            )
+            self.assertEqual(refused.returncode, 1, refused.stdout)
+            self.assertIn("memory-fix: refusing to write: cannot copy files before the write", refused.stderr)
+            self.assertEqual(snapshot(live), before)
+            backups = Path(temp) / "backups"
+            applied = subprocess.run(
+                command, text=True, capture_output=True, check=False,
+                env={**env, "CLAUDE_MEMORY_WRITE_BACKUP_ROOT": str(backups)},
+            )
+            self.assertEqual(applied.returncode, 0, applied.stderr)
+            payload = json.loads(applied.stdout)
+            self.assertTrue(payload["applied"])
+            self.assertIsNone(payload["roots"]["mirror"])
+            self.assertIn("[[project_alpha_note]]", beta.read_text())
+            (copy_dir,) = list(backups.iterdir())
+            self.assertIn(f"before writing to {copy_dir}", applied.stderr)
+            manifest = json.loads((copy_dir / "manifest.json").read_text())
+            changed = {name for name, data in snapshot(live).items() if before.get(name) != data}
+            self.assertEqual(changed, {"beta.md"})
+            self.assertTrue(changed <= {item["path"] for item in manifest})
+            for item in manifest:
+                self.assertEqual(item["project"], "project")
+                copied = (copy_dir / "project" / item["path"]).read_bytes()
+                self.assertEqual(copied, before[item["path"]])
+                self.assertEqual(item["sha256"], hashlib.sha256(copied).hexdigest())
 
 
 class MemorySyncTests(unittest.TestCase):
@@ -1833,8 +1902,8 @@ class RehookTests(unittest.TestCase):
             self.assertIn("0 of 1 live index(es) need work", again.stdout)
             self.assertTrue(again.stdout.rstrip().endswith("changes:0"))
 
-    def test_rehook_apply_with_no_mirror_named_checks_the_pushed_backup_ref(self):
-        """PLANTED NEGATIVE (#1918): with no --mirror-root, an absent ref, a ref whose
+    def test_rehook_apply_with_pushed_mirror_checks_the_pushed_backup_ref(self):
+        """PLANTED NEGATIVE (#1918): with --pushed-mirror, an absent ref, a ref whose
         MEMORY.md differs or lacks a note, and a matching copy committed but never
         pushed all refuse and leave live byte-identical; a matching ref applies."""
         with tempfile.TemporaryDirectory() as temp:
@@ -1843,7 +1912,7 @@ class RehookTests(unittest.TestCase):
             fixture, live, _mirror = self.make_project(temp, index, notes, mirror=False)
             repo = BackupRepo(Path(temp))
             command = [
-                "python3", str(AUDITOR), "rehook", "--live-root", str(fixture.live),
+                "python3", str(AUDITOR), "rehook", "--live-root", str(fixture.live), "--pushed-mirror",
                 "--apply", "--project=project", "--now", "2026-09-28", "--format", "json",
             ]
             before = snapshot(live)
@@ -1983,6 +2052,41 @@ class RehookTests(unittest.TestCase):
             (live / "MEMORY.md").write_bytes(b"- [-](a.md);[-](b.md)\r\n- [C](c.md): hooked\r\n")
             plan = self.plan(live)
             self.assertEqual(plan["main_text"], self.entry("a.md") + self.entry("b.md") + "- [C](c.md): hooked\r\n")
+
+    def test_rehook_apply_with_no_mirror_copies_the_index_and_records_a_new_archive(self):
+        """With no mirror named, rehook --apply copies MEMORY.md before writing it and
+        records the archive tier it creates as absent (sha256 null), so a restore
+        deletes that file instead of restoring bytes."""
+        with tempfile.TemporaryDirectory() as temp:
+            count = 160  # more one-line entries than the 140-line budget holds
+            rels = [f"n{i:03d}.md" for i in range(count)]
+            notes = {rel: ("project", f"2026-09-{28 - i // 24:02d}T{23 - i % 24:02d}:00:00Z") for i, rel in enumerate(rels)}
+            packed = "".join("- " + ";".join(f"[-]({rel})" for rel in rels[i:i + 10]) + "\n" for i in range(0, count, 10))
+            fixture, live, _ = self.make_project(temp, "# idx\n" + packed, notes, mirror=False)
+            before = (live / "MEMORY.md").read_bytes()
+            backups = Path(temp) / "backups"
+            env = {key: value for key, value in os.environ.items() if key != "CLAUDE_MEMORY_MIRROR_ROOT"}
+            applied = subprocess.run(
+                [
+                    "python3", str(AUDITOR), "rehook", "--live-root", str(fixture.live),
+                    "--apply", "--project=project", "--now", "2026-09-28", "--format", "json",
+                ],
+                text=True, capture_output=True, check=False,
+                env={**env, "CLAUDE_MEMORY_WRITE_BACKUP_ROOT": str(backups)},
+            )
+            self.assertEqual(applied.returncode, 0, applied.stderr)
+            payload = json.loads(applied.stdout)
+            self.assertTrue(payload["applied"])
+            self.assertIsNone(payload["roots"]["mirror"])
+            self.assertTrue((live / MA.ARCHIVE_INDEX_NAME).is_file())
+            self.assertNotEqual((live / "MEMORY.md").read_bytes(), before)
+            (copy_dir,) = list(backups.iterdir())
+            manifest = {item["path"]: item for item in json.loads((copy_dir / "manifest.json").read_text())}
+            self.assertEqual(set(manifest), {"MEMORY.md", MA.ARCHIVE_INDEX_NAME})
+            self.assertIsNone(manifest[MA.ARCHIVE_INDEX_NAME]["sha256"])
+            self.assertFalse((copy_dir / "project" / MA.ARCHIVE_INDEX_NAME).exists())
+            self.assertEqual((copy_dir / "project" / "MEMORY.md").read_bytes(), before)
+            self.assertEqual(manifest["MEMORY.md"]["sha256"], hashlib.sha256(before).hexdigest())
 
     def test_rehook_apply_with_a_move_writes_the_archive_hooks_its_fragments_and_needs_a_scope(self):
         with tempfile.TemporaryDirectory() as temp:

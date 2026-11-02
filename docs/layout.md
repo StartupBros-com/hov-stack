@@ -182,9 +182,9 @@ layers, all reusing the auditor's helpers (run from the hov-stack checkout root)
 ```bash
 python3 scripts/memory-audit.py triage        # score notes, read-only
 python3 scripts/memory-audit.py fix            # mechanical repairs, dry-run
-python3 scripts/memory-audit.py fix --apply    # apply repairs (gated on the pushed backup branch)
+python3 scripts/memory-audit.py fix --apply    # apply repairs (copies each file it changes first)
 python3 scripts/memory-audit.py rehook         # hook bare index fragments, rank-split under the load cap (dry-run)
-python3 scripts/memory-audit.py rehook --apply # write MEMORY.md + archive tier (gated on the pushed backup branch)
+python3 scripts/memory-audit.py rehook --apply # write MEMORY.md + archive tier (copies both first)
 ```
 
 `triage` scores every live note on structure only (supersession markers, body size,
@@ -192,8 +192,10 @@ mtime age, inbound wikilinks) and prints a project-level summary ending in a
 `flagged:N` line; it never shows filenames or bodies. `fix` performs the mechanical,
 one-answer repairs (single-candidate wikilink rewrites, `MEMORY.md` index
 reconciliation), dry-run by default; `--apply` preserves each repaired file's mtime and,
-like `rehook --apply`, refuses unless live memory matches the pushed backup branch, so
-run `systemctl --user start backup-harness.service` first.
+like `rehook --apply`, first copies every file it changes into
+`~/.claude/logs/memory-audit/write-backups/`, refusing to write when it cannot. A mirror
+is opt-in: `--mirror-root DIR` or `--pushed-mirror` (the branch the opt-in
+`backup-harness.service` pushes) makes `--apply` refuse unless live memory matches it.
 
 The full consolidation runs through the `memory-dream@hov` plugin's operator-invocable
 `/memory-dream:dream` command: triage, then a Glob-only drafter subagent proposes
