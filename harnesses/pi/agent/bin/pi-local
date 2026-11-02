@@ -15,14 +15,14 @@
 #   - pi-local-champion-tunnel.service enabled (systemd --user)
 #
 # The verify and oracle extensions are symlinked from
-# ~/hov-stack/pi/agent/extensions/ so edits are tracked in git.
+# <hov-stack checkout>/pi/agent/extensions/ so edits are tracked in git.
 # The local-champion extension is machine-specific.
 #
 # On a new machine:
 #   1. mkdir -p ~/.pi-local/agent ~/.pi-local/extensions
-#   2. ln -s ~/hov-stack/pi/agent/extensions/verify.ts ~/.pi-local/extensions/verify.ts
-#   3. ln -s ~/hov-stack/pi/agent/extensions/oracle.ts ~/.pi-local/extensions/oracle.ts
-#   4. ln -s ~/hov-stack/pi/agent/bin/pi-local ~/.local/bin/pi-local
+#   2. ln -s <hov-stack checkout>/pi/agent/extensions/verify.ts ~/.pi-local/extensions/verify.ts
+#   3. ln -s <hov-stack checkout>/pi/agent/extensions/oracle.ts ~/.pi-local/extensions/oracle.ts
+#   4. ln -s <hov-stack checkout>/pi/agent/bin/pi-local ~/.local/bin/pi-local
 #   5. Create ~/.pi-local/agent/settings.json (copy from another machine, adjust provider)
 #   6. Create ~/.pi-local/extensions/local-champion.ts (machine-specific provider)
 #   7. echo 'your-litellm-key' > ~/.pi-local/.litellm-key

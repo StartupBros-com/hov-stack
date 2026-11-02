@@ -129,15 +129,15 @@ The live source is `~/.claude/projects/<project-key>/memory/`. The tracked mirro
 `memory/<project-key>/`, absent from this copy until a push creates it. Project keys stay flat and are discovered from direct
 `*/memory` directories. The mirror is a reviewed backup, not a second live store.
 
-Run the dependency-free, read-only auditor before syncing:
+Run the dependency-free, read-only auditor before syncing (commands in this section run from the hov-stack checkout root, the directory `./setup` ran from):
 
 ```bash
-python3 ~/hov-stack/scripts/memory-audit.py
-python3 ~/hov-stack/scripts/memory-audit.py --format json --as-of 2026-07-15
-bash ~/hov-stack/sync.sh memory-preview
-bash ~/hov-stack/sync.sh memory-push
+python3 scripts/memory-audit.py
+python3 scripts/memory-audit.py --format json --as-of 2026-07-15
+bash sync.sh memory-preview
+bash sync.sh memory-push
 
-git -C ~/hov-stack diff -- memory
+git diff -- memory
 # Inspect every change, then commit and push manually.
 ```
 
@@ -177,14 +177,14 @@ not fail the audit, which keeps the weekly doctor concise.
 ## Memory dream pass (consolidation)
 
 The auditor detects rot; the dream pass remediates it, operator-gated. It has three
-layers, all reusing the auditor's helpers:
+layers, all reusing the auditor's helpers (run from the hov-stack checkout root):
 
 ```bash
-python3 ~/hov-stack/scripts/memory-audit.py triage        # score notes, read-only
-python3 ~/hov-stack/scripts/memory-audit.py fix            # mechanical repairs, dry-run
-python3 ~/hov-stack/scripts/memory-audit.py fix --apply    # apply repairs (gated on the pushed backup branch)
-python3 ~/hov-stack/scripts/memory-audit.py rehook         # hook bare index fragments, rank-split under the load cap (dry-run)
-python3 ~/hov-stack/scripts/memory-audit.py rehook --apply # write MEMORY.md + archive tier (gated on the pushed backup branch)
+python3 scripts/memory-audit.py triage        # score notes, read-only
+python3 scripts/memory-audit.py fix            # mechanical repairs, dry-run
+python3 scripts/memory-audit.py fix --apply    # apply repairs (gated on the pushed backup branch)
+python3 scripts/memory-audit.py rehook         # hook bare index fragments, rank-split under the load cap (dry-run)
+python3 scripts/memory-audit.py rehook --apply # write MEMORY.md + archive tier (gated on the pushed backup branch)
 ```
 
 `triage` scores every live note on structure only (supersession markers, body size,
