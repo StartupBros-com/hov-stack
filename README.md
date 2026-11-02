@@ -15,7 +15,7 @@ In the 60 days to 2026-10-19: 4,302 pull requests merged across 17 repos. Everyt
 
 <!-- ![GitHub contributions, 2026](docs/images/github-2026.png) -->
 
-**What nobody else ships:** the permission lists. 291 allow, 75 ask and 70 deny entries, grown from refusals through `/denial-triage`, plus 12 hooks that run before a tool call lands. The other published stacks ship skills; this one ships the part that decides what an agent may run.
+**What nobody else ships:** the permission lists. 291 allow, 75 ask and 70 deny entries, grown from refusals through `/denial-triage`, plus 10 hooks that run before a tool call lands. The other published stacks ship skills; this one ships the part that decides what an agent may run.
 
 ## Who this is for
 
@@ -51,7 +51,7 @@ Then start a new Claude Code session and type `/hov-setup`, setup's second stage
 ## What's here
 
 - `CLAUDE.md`, the global rules file every session and subagent loads (15 KB), and `HARNESS.md` with 34 detail docs in `harness/` explaining the decisions behind it
-- `hooks/`: 19 hook scripts that `settings.json` registers across 6 hook events; 12 of them run before a tool call (`git-guard`, `settings-guard`, `loop-guard`, `read-ceiling-chunk` and the rest), and `dcg` runs beside them when it is installed. The hook suite is the 46 test files in `hooks/tests/`.
+- `hooks/`: 17 hook scripts that `settings.json` registers across 6 hook events; 10 of them run before a tool call (`git-guard`, `settings-guard`, `loop-guard`, `runner-guard` and the rest), and `dcg` runs beside them when it is installed. The papercut plugin registers its own on top: failure capture, the Read ceiling guard and the StructuredOutput unwrap. The hook suite is the 46 test files in `hooks/tests/`.
 - `settings.json`: the allow / ask / deny lists I run under bypass-permissions mode (291 / 75 / 70 entries)
 - `plugins/hov-stack/skills/` (also reachable as `skills/`): 45 skills, 31 of them slash-command only so they never cost tokens until called, plus patches to 2 third-party skills in `skills-patches/` (papers, and de-slopify's fact-check scripts), each with a note of its upstream
 - `skills-stack/`: 2 more slash-command skills (memory-mine, review-adversarial-first) that run this repo's scripts, so `./setup` links them and the plugin does not ship them

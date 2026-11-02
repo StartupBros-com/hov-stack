@@ -638,26 +638,6 @@
         ]
       },
       {
-        "matcher": "Read",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node \"$HOME/.claude/hooks/PreToolUse/read-ceiling-chunk.js\"",
-            "timeout": 5
-          }
-        ]
-      },
-      {
-        "matcher": "StructuredOutput",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node \"$HOME/.claude/hooks/PreToolUse/structured-output-unwrap.js\"",
-            "timeout": 5
-          }
-        ]
-      },
-      {
         "matcher": "Bash|PowerShell|Monitor",
         "hooks": [
           {
