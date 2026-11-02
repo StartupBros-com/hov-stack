@@ -344,15 +344,15 @@ LITERALS: list[tuple[str, str]] = [
     ("gh-ready.sh", "an external readiness check"),
     ("gh-ready", "an external readiness check"),
     ("sync.sh", "your config sync"),
+    # codex-quota-guard, canonical-worktree-route-guard and git-guard are not
+    # translated: they ship publicly in hov-stack's hooks/PreToolUse/, and the
+    # packaged signature and fixture code must name the labels they really write.
     ("codex-doghouse-guard", "another-guard"),
-    ("codex-quota-guard", "another-guard"),
-    ("canonical-worktree-route-guard", "a-route-guard"),
     ("heavy-job-admission", "an-admission-guard"),
     ("grep-cost-guard", "a-cost-guard"),
     ("whatsapp-guard", "a-messaging-guard"),
     ("runner-guard", "a-worker-guard"),
     ("loop-guard", "a-repetition-guard"),
-    ("git-guard", "a-vcs-guard"),
     ("loop-ok", "the dispatch-ready label"),
     ("dispatcher", "an autonomous queue"),
     ("smaug", "example-project"),

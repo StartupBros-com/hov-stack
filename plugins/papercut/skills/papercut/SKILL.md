@@ -350,8 +350,8 @@ replaces the whole boundary.
 and verification read member records, so a member signature that fires when
 the mechanism works *as intended* can never validate a fix — it reads
 `regressed` forever no matter how good the fix was. Live example
-(2026-08-28): the a-vcs-guard doc-gap family's one member was
-`guard_blocked:a-vcs-guard`, which fires every time the guard correctly blocks
+(2026-08-28): the git-guard doc-gap family's one member was
+`guard_blocked:git-guard`, which fires every time the guard correctly blocks
 something; the fix was a documentation change whose real regression test
 lives in CI. For a family like that, close the loop with `family dispose`
 (verdict `intended-policy`) once the fix ships and its planted negative is

@@ -54,10 +54,11 @@ LITERALS: list[tuple[str, str, bool]] = [
     ("private-harness-doc", "HARNESS.md", False),
     ("private-queue-label", "loop-ok", True),
     ("private-queue-term", "dispatcher", True),
-    ("private-guard", "git-guard", True),
+    # git-guard and codex-quota-guard are not listed: both ship publicly in
+    # hov-stack's hooks/PreToolUse/, and papercut's signature and fixture code must
+    # name the labels those guards really write, or the rules never match.
     ("private-guard", "runner-guard", True),
     ("private-guard", "loop-guard", True),
-    ("private-guard", "codex-quota-guard", True),
     ("private-tool", "gsc ", False),
     ("private-env", "CLAUDE_JOB_DIR", False),
 ]

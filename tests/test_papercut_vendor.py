@@ -358,5 +358,38 @@ class TestDoctrineCodesResolve(unittest.TestCase):
         )
 
 
+class TestPackagedGuardLabels(unittest.TestCase):
+    """The packaged copy must name the labels hov-stack's own guards really write.
+
+    The vendor once translated every guard name, so the plugin's route-guard
+    fixture rule keyed on `guard_blocked:a-route-guard`, a label no guard writes,
+    and never fired for anyone running hov-stack's guards.
+    """
+
+    PLUGIN = REPO_ROOT / "plugins" / "papercut"
+    HOOKS = REPO_ROOT / "hooks" / "PreToolUse"
+    # Retired guard whose records stay queryable; it no longer ships as a hook.
+    HISTORICAL = {"codex-doghouse"}
+
+    def test_fixture_guard_sig_names_the_real_route_guard(self):
+        sig_re = re.compile(r'^_FIXTURE_GUARD_SIG = "([^"]+)"', re.M)
+        packaged = sig_re.search(
+            (self.PLUGIN / "papercut" / "cli.py").read_text(encoding="utf-8")).group(1)
+        source = sig_re.search(
+            (REPO_ROOT / "bin" / "papercut.py").read_text(encoding="utf-8")).group(1)
+        hook = (self.HOOKS / "canonical-worktree-route-guard.js").read_text(encoding="utf-8")
+        written = re.search(r"guard: '([^']+)'", hook).group(1)
+        self.assertEqual(packaged, source)
+        self.assertEqual(packaged, f"guard_blocked:{written}")
+
+    def test_signature_guard_labels_name_public_hooks(self):
+        text = (self.PLUGIN / "hooks" / "papercut-log.js").read_text(encoding="utf-8")
+        names = re.findall(r"return 'guard_blocked:([a-z][a-z-]*)'", text)
+        self.assertTrue(names, "no hard-coded guard_blocked labels found; the pattern drifted")
+        unknown = [n for n in names
+                   if n not in self.HISTORICAL and not (self.HOOKS / f"{n}.js").is_file()]
+        self.assertEqual(unknown, [], "papercut-log.js labels a guard hov-stack does not ship")
+
+
 if __name__ == "__main__":
     unittest.main()

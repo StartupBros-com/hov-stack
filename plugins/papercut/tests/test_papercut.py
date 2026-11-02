@@ -315,7 +315,7 @@ class TestSynthesizedIdentityFixtureLane(PapercutBase):
     """Hook-test denial writes are dropped from ranking; genuine ones are not.
 
     Measured 2026-08-29 on the live store: of the last 7 days' guard records,
-    a-vcs-guard was 2,280 test writes against 100 genuine, a-worker-guard 1,938
+    git-guard was 2,280 test writes against 100 genuine, a-worker-guard 1,938
     against 3, and a-messaging-guard 991 against 5 -- so three of the weekly's
     top signatures were ranked almost entirely by test artifacts. The rule is
     CONJUNCTIVE (hook-test cwd AND synthesized identity) because either signal
@@ -326,7 +326,7 @@ class TestSynthesizedIdentityFixtureLane(PapercutBase):
     REAL_CWD = "/home/user/SITES/sample-app"
 
     def rec_for(self, **kw):
-        base = {"sig": "guard_blocked:a-vcs-guard", "cwd": self.HOOK_CWD,
+        base = {"sig": "guard_blocked:git-guard", "cwd": self.HOOK_CWD,
                 "session": "d-318283"}
         base.update(kw)
         return base
@@ -342,7 +342,7 @@ class TestSynthesizedIdentityFixtureLane(PapercutBase):
 
     def test_a_literal_test_session_is_synthesized_too(self):
         # Measured 2026-09-02: a harness-vet suite handed the hook the literal
-        # session id `test` from a /tmp scratch repo -- 796 a-vcs-guard records in
+        # session id `test` from a /tmp scratch repo -- 796 git-guard records in
         # one day, 43% of everything the hyphen-only rule let through. A real
         # session is the last 8 hex characters of a UUID; anything else was
         # invented by whoever called the hook.
@@ -370,7 +370,7 @@ class TestSynthesizedIdentityFixtureLane(PapercutBase):
             self.rec(sig="guard_blocked:a-messaging-guard", session="cda2bb6d",
                      cwd="/home/user/SITES/sample-app", days_ago=1),
             # dropped by the fixture rule -> must not be counted as ranking
-            self.rec(sig="guard_blocked:a-vcs-guard", session="ppid-99",
+            self.rec(sig="guard_blocked:git-guard", session="ppid-99",
                      cwd="/tmp/gg-branch-zzz", days_ago=1),
         ])
         buf = io.StringIO()
@@ -387,7 +387,7 @@ class TestSynthesizedIdentityFixtureLane(PapercutBase):
 
     def test_a_mkdtemp_sandbox_write_is_dropped_too(self):
         # Guard suites write from mkdtemp sandboxes as well as the hooks tree:
-        # route-guard uses /tmp/route-guard-*, a-vcs-guard /tmp/gg-branch-* and
+        # route-guard uses /tmp/route-guard-*, git-guard /tmp/gg-branch-* and
         # /tmp/gg-varpath-*. Matching the SHAPE avoids enumerating a prefix per
         # suite, which silently under-filters until someone notices -- it did,
         # for 2,406 records, until 2026-08-29.
@@ -437,23 +437,23 @@ class TestSynthesizedIdentityFixtureLane(PapercutBase):
 
     def test_a_demo_subdirectory_is_covered_but_a_prefix_sibling_is_not(self):
         self.assertEqual(
-            PC.fixture_rule({"sig": "guard_blocked:a-vcs-guard",
+            PC.fixture_rule({"sig": "guard_blocked:git-guard",
                              "cwd": "/home/user/SITES/demo/sub",
                              "session": "cda2bb6d"}),
             "guard-suite-demo-cwd")
         # Planted negative: a real project whose name merely starts with
         # "demo" must keep counting.
         self.assertIsNone(PC.fixture_rule(
-            {"sig": "guard_blocked:a-vcs-guard",
+            {"sig": "guard_blocked:git-guard",
              "cwd": "/home/user/SITES/demo-app", "session": "cda2bb6d"}))
 
     def test_a_guard_denial_whose_command_works_in_a_tmp_scratch_repo_is_dropped(self):
         # Measured 2026-09-02: one harness-vet fixture ran `cd /tmp/hv-848-vet-2/
         # scratch-repo && git add -A && git commit ...` 1,000 times in a day --
         # real session, real worktree cwd, so neither conjunctive rule fires --
-        # and it was 53% of every a-vcs-guard denial in the window.
+        # and it was 53% of every git-guard denial in the window.
         self.assertEqual(
-            PC.fixture_rule({"sig": "guard_blocked:a-vcs-guard", "cwd": self.REAL_CWD,
+            PC.fixture_rule({"sig": "guard_blocked:git-guard", "cwd": self.REAL_CWD,
                              "session": "cda2bb6d",
                              "cmd": "cd /tmp/hv-848-vet-2/scratch-repo && git add -A && git commit -q -F -"}),
             "guard-scratch-sandbox-cmd")
@@ -463,7 +463,7 @@ class TestSynthesizedIdentityFixtureLane(PapercutBase):
             {"sig": "bash:exit code <n>", "cwd": self.REAL_CWD, "session": "cda2bb6d",
              "cmd": "cd /tmp/hv-848-vet-2/scratch-repo && git add -A"}))
         self.assertIsNone(PC.fixture_rule(
-            {"sig": "guard_blocked:a-vcs-guard", "cwd": self.REAL_CWD, "session": "cda2bb6d",
+            {"sig": "guard_blocked:git-guard", "cwd": self.REAL_CWD, "session": "cda2bb6d",
              "cmd": "cd /home/user/SITES/example-project && git add -A"}))
 
     def test_non_guard_telemetry_at_the_demo_cwd_keeps_counting(self):
@@ -483,20 +483,20 @@ class TestSynthesizedIdentityFixtureLane(PapercutBase):
     def test_a_record_with_no_cwd_keeps_counting(self):
         # The python suite's own fixtures carry no cwd key at all.
         self.assertIsNone(PC.fixture_rule(
-            {"sig": "guard_blocked:a-vcs-guard", "session": "d-318283"}))
+            {"sig": "guard_blocked:git-guard", "session": "d-318283"}))
 
     def test_the_route_guard_rules_still_fire(self):
         # Regression: an earlier change's original lane must not be narrowed by this change.
         self.assertEqual(
-            PC.fixture_rule({"sig": "guard_blocked:a-route-guard",
+            PC.fixture_rule({"sig": "guard_blocked:canonical-worktree-route-guard",
                              "cwd": "/parent/workspace", "session": "cda2bb6d"}),
             "route-guard-fixture-cwd")
 
     def test_dropped_records_are_counted_not_silent(self):
         self.write("-p", [
-            self.rec(sig="guard_blocked:a-vcs-guard", session="d-318283",
+            self.rec(sig="guard_blocked:git-guard", session="d-318283",
                      cwd=self.HOOK_CWD, days_ago=1),
-            self.rec(sig="guard_blocked:a-vcs-guard", session="cda2bb6d",
+            self.rec(sig="guard_blocked:git-guard", session="cda2bb6d",
                      cwd=self.REAL_CWD, days_ago=1),
         ])
         kept = [r["session"] for r in PC.read_records(7)]
@@ -3102,7 +3102,7 @@ class TestVerificationLifecycle(PapercutBase):
 class TestClaimScopedVerification(PapercutBase):
     """`family scope` narrows recurrence/verification to the dossier's claim.
 
-    Born of the third live occurrence of one wall (a-vcs-guard, route-guard,
+    Born of the third live occurrence of one wall (git-guard, route-guard,
     whole-transcript-reads): a member signature counting a superset of the
     remedy reads `regressed` forever over records the No-Claim Boundary never
     covered — measured 2026-09-01, 131 post-closure records, zero in scope.
@@ -5252,13 +5252,13 @@ class TestFixtureRule(unittest.TestCase):
     (an earlier change). Planted negatives pin the dossier's no-claim boundary:
     genuine denials under the same signature keep counting."""
 
-    SIG = "guard_blocked:a-route-guard"
+    SIG = "guard_blocked:canonical-worktree-route-guard"
 
     def fx(self, cwd="/tmp/route-guard-B9VGxg", sig=None, err=None):
         return {
             "sig": sig or self.SIG,
             "cwd": cwd,
-            "err": err or ("[a-route-guard] r is an independent "
+            "err": err or ("[canonical-worktree-route-guard] r is an independent "
                            "noncanonical clone. Enter or create worktrees from "
                            "/canonical; use an external worktree tool --issue for planned work."),
         }
@@ -5282,7 +5282,7 @@ class TestFixtureRule(unittest.TestCase):
                        "Hook input is not an object; refusing EnterWorktree "
                        "because its target cannot be verified."):
             rec = self.fx(cwd="/home/user/SITES/real-repo",
-                          err=f"[a-route-guard] {reason}")
+                          err=f"[canonical-worktree-route-guard] {reason}")
             self.assertEqual(PC.fixture_rule(rec), "route-guard-synthetic-input")
 
     def test_genuine_denial_from_a_real_cwd_is_kept(self):
@@ -5295,7 +5295,7 @@ class TestFixtureRule(unittest.TestCase):
         # measurable — quarantining it would hide the bug class the dossier
         # explicitly keeps in scope.
         rec = self.fx(cwd="/home/user/SITES/example-project",
-                      err="[a-route-guard] Cannot verify "
+                      err="[canonical-worktree-route-guard] Cannot verify "
                           "repository route (bad state); refusing EnterWorktree "
                           "before it creates or enters worktree state.")
         self.assertIsNone(PC.fixture_rule(rec))
@@ -5304,7 +5304,7 @@ class TestFixtureRule(unittest.TestCase):
         # Scope-limited on purpose: another guard's record from a /tmp fixture
         # dir is a DIFFERENT leak that must surface as its own papercut, not be
         # absorbed by this family's cleanup.
-        self.assertIsNone(PC.fixture_rule(self.fx(sig="guard_blocked:a-vcs-guard")))
+        self.assertIsNone(PC.fixture_rule(self.fx(sig="guard_blocked:git-guard")))
 
     def test_record_with_no_cwd_is_kept(self):
         self.assertIsNone(PC.fixture_rule({"sig": self.SIG, "err": "x"}))
@@ -5314,7 +5314,7 @@ class TestFixtureReadRecords(PapercutBase):
     def fixture_rec(self, **kw):
         kw.setdefault("sig", TestFixtureRule.SIG)
         kw.setdefault("cwd", "/tmp/route-guard-abc123")
-        kw.setdefault("err", "[a-route-guard] r is an "
+        kw.setdefault("err", "[canonical-worktree-route-guard] r is an "
                              "independent noncanonical clone.")
         return self.rec(**kw)
 
@@ -5347,7 +5347,7 @@ class TestFixtureRollup(PapercutBase):
         # they counted; they must instead surface ONLY as the dropped counter.
         self.write("-tmp-route-guard-abc123", [
             self.rec(sig=TestFixtureRule.SIG, cwd="/tmp/route-guard-abc123",
-                     err="[a-route-guard] r is an independent "
+                     err="[canonical-worktree-route-guard] r is an independent "
                          "noncanonical clone.", session=f"s{i}")
             for i in range(5)
         ])
