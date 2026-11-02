@@ -285,6 +285,21 @@
         ],
         "run": "Run `/harness-optimizer:harness-optimizer` in the project you want to investigate"
       }
+    },
+    {
+      "name": "hov-stack",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/StartupBros-com/hov-stack.git",
+        "path": "plugins/hov-stack",
+        "sha": "33d465c54b0d2af3687e482761415f2b1b9dbb74"
+      },
+      "description": "The skill pack from the hov-stack Claude Code harness, installable on its own as one plugin.",
+      "metadata": {
+        "version": "0.1.1",
+        "releaseId": 431327539,
+        "releaseTag": "hov-stack--v0.1.1"
+      }
     }
   ]
 }
