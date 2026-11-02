@@ -369,7 +369,13 @@ guard_no_credentials() {
   # own source (grep would otherwise flag sync.sh itself). At runtime the
   # shell concatenates each fragment back into the full signature.
   re="BEGIN [A-Z ]*PRIV""ATE KEY|\"type\":[[:space:]]*\"service""_account\"|\"priv""ate_key_id\""
-  hits=$(grep -rIlE "$re" "$HERE" --exclude-dir=.git 2>/dev/null) || true
+  # Pruned: .git anywhere; every node_modules, whose package READMEs carry example
+  # keys (dotenv's does) and which this tree never tracks; and .claude/worktrees,
+  # other agents' separate checkouts, which a run from the main checkout would
+  # otherwise sweep and refuse on. Everything else is scanned as before, symlinks
+  # still not followed.
+  hits=$(find "$HERE" \( -name .git -o -type d -name node_modules -o -path "$HERE/.claude/worktrees" \) -prune \
+      -o -type f -print0 2>/dev/null | xargs -0 -r grep -IlE "$re" -- 2>/dev/null) || true
   if [ -n "$hits" ]; then
     echo "SECRET GUARD: credential material found in the dotfiles tree — refusing to proceed:" >&2
     echo "$hits" | sed 's/^/  /' >&2
