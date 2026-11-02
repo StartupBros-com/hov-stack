@@ -981,8 +981,40 @@ reconcile_memory_hook() {
   retire_hook_commands "memory-access" "$MEMORY_HOOK_COMMAND"
 }
 
+# The papercut plugin (papercut@hov) registers papercut-log, structured-output-unwrap
+# and read-ceiling-chunk from its own hooks.json, so it owns those three
+# registrations and the seed settings.json carries none of them. Claude Code runs a
+# plugin's copy of a hook separately from a settings.json copy, so a host with both
+# logs every failure twice (inflating papercut's repeat counts) and read-ceiling-chunk
+# records two denials per refusal, reaching its rewrite threshold early. These three
+# reconciles therefore only retire the settings.json copy, and only once the plugin
+# is installed at user scope and enabled: on a host without it they leave live
+# settings alone, because a settings copy is then the only capture there is.
+# harness-doctor section 19 reports a host with neither and a host with both.
+PAPERCUT_PLUGIN_ID=papercut@hov
+papercut_plugin_active() {
+  local registry=${CLAUDE_INSTALLED_PLUGINS:-$H/plugins/installed_plugins.json}
+  command -v jq >/dev/null 2>&1 && [ -f "$registry" ] && [ -f "$H/settings.json" ] || return 1
+  # A project-scope install runs only in that project, so it does not count.
+  jq -e --arg id "$PAPERCUT_PLUGIN_ID" '(.plugins[$id] // []) | any(.scope == "user")' \
+    "$registry" >/dev/null 2>&1 || return 1
+  # Only an explicit true: `claude plugin install` writes it, and treating an absent
+  # key as enabled could retire the only working registration.
+  jq -e --arg id "$PAPERCUT_PLUGIN_ID" '.enabledPlugins[$id] == true' \
+    "$H/settings.json" >/dev/null 2>&1
+}
+
+# retire_papercut_settings_hook <label> <command>
+retire_papercut_settings_hook() {
+  if papercut_plugin_active; then
+    retire_hook_commands "$1" "$2"
+  else
+    echo "  $1 hook: live settings left as they are; $PAPERCUT_PLUGIN_ID is not installed and enabled (it registers this hook itself: claude plugin install $PAPERCUT_PLUGIN_ID)"
+  fi
+}
+
 reconcile_papercut_hook() {
-  reconcile_hook_group "papercut" PostToolUseFailure "$PAPERCUT_HOOK_COMMAND"
+  retire_papercut_settings_hook "papercut" "$PAPERCUT_HOOK_COMMAND"
 }
 
 reconcile_pr_record_hook() {
@@ -1008,19 +1040,19 @@ reconcile_worktree_claim_advisory_hook() {
 # StructuredOutput unwrap (PreToolUse, issue #844): subagents handed their
 # schema result back wrapped under a top-level `input` key and regenerated the
 # same wrapper up to 16 times per session; the hook rewrites the retry once
-# the wrapper has demonstrably failed. settings.json is volatile, so the
-# canonical matcher block alone never reaches the live harness; this installs it.
+# the wrapper has demonstrably failed. The papercut plugin registers it; see
+# papercut_plugin_active above.
 reconcile_structured_output_unwrap_hook() {
-  reconcile_hook_group "structured-output-unwrap" PreToolUse "$STRUCTURED_OUTPUT_UNWRAP_HOOK_COMMAND"
+  retire_papercut_settings_hook "structured-output-unwrap" "$STRUCTURED_OUTPUT_UNWRAP_HOOK_COMMAND"
 }
 
 # Read ceiling guard (PreToolUse on Read): a Read of a file that already
 # failed the token ceiling for this caller is denied when its window would
 # fail again, and the denial names the window that fits (442 of 535 ceiling
 # failures in one day were such repeats, one agent 104 deep; every one of
-# them carried an explicit limit). Same volatile-settings reason as above.
+# them carried an explicit limit). The papercut plugin registers it too.
 reconcile_read_ceiling_chunk_hook() {
-  reconcile_hook_group "read-ceiling-chunk" PreToolUse "$READ_CEILING_CHUNK_HOOK_COMMAND"
+  retire_papercut_settings_hook "read-ceiling-chunk" "$READ_CEILING_CHUNK_HOOK_COMMAND"
 }
 
 # Shape rewrite (PreToolUse on Bash): a verifier-refused Bash shape (a

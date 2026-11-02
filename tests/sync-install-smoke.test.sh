@@ -1118,24 +1118,22 @@ else
   bad "standalone hook reconcile entered the full install() function"
 fi
 
-# -- StructuredOutput unwrap hook reaches a fresh live settings.json ---------
-# dotfiles#844: the canonical matcher block alone never reaches the volatile
-# live file; the reconcile must seed it, and the deployed command must quietly
-# pass a non-StructuredOutput call through (empty stdout, exit 0 -- issue
-# #1339; no longer a byte-for-byte echo of the probe input).
+# -- StructuredOutput unwrap: the papercut plugin registers it, sync.sh does not
+# The papercut plugin (papercut@hov) registers structured-output-unwrap and
+# read-ceiling-chunk itself, so on a fresh host without it the reconcile exits 0
+# and writes nothing (tests/papercut-plugin-reconcile.test.sh covers retiring a
+# settings copy once the plugin is enabled). The hook must still quietly pass a
+# non-StructuredOutput call through (empty stdout, exit 0 -- issue #1339).
 fresh_unwrap_root=$TMP/unwrap-hook-fresh
 fresh_unwrap_home=$fresh_unwrap_root/.claude
 mkdir -p "$fresh_unwrap_home"
 ln -s "$REPO/hooks" "$fresh_unwrap_home/hooks"
-fresh_unwrap_out=$(HOME="$fresh_unwrap_root" CLAUDE_HOME="$fresh_unwrap_home" "$SYNC" reconcile-structured-output-unwrap 2>&1); fresh_unwrap_status=$?
+fresh_unwrap_out=$(env -u CLAUDE_INSTALLED_PLUGINS HOME="$fresh_unwrap_root" CLAUDE_HOME="$fresh_unwrap_home" "$SYNC" reconcile-structured-output-unwrap 2>&1); fresh_unwrap_status=$?
 if [ "$fresh_unwrap_status" -eq 0 ]; then ok; else bad "fresh reconcile-structured-output-unwrap exited $fresh_unwrap_status:"$'\n'"$fresh_unwrap_out"; fi
-if jq -e '
-    [.hooks.PreToolUse[]? | select(.matcher == "StructuredOutput") | .hooks[]? | .command]
-    | index("node \"$HOME/.claude/hooks/PreToolUse/structured-output-unwrap.js\"") != null
-  ' "$fresh_unwrap_home/settings.json" >/dev/null; then
+if [ ! -e "$fresh_unwrap_home/settings.json" ]; then
   ok
 else
-  bad "fresh reconcile-structured-output-unwrap did not seed the StructuredOutput matcher group"
+  bad "fresh reconcile-structured-output-unwrap wrote a settings.json; the papercut plugin registers that hook"
 fi
 fresh_unwrap_probe='{"tool_name":"Bash","tool_input":{"command":"printf no-unwrap"}}'
 fresh_unwrap_probe_out=$(printf '%s' "$fresh_unwrap_probe" | node "$REPO/hooks/PreToolUse/structured-output-unwrap.js"); fresh_unwrap_probe_status=$?
@@ -1145,20 +1143,17 @@ else
   bad "structured-output-unwrap did not quietly pass a non-StructuredOutput call through (status $fresh_unwrap_probe_status):"$'\n'"$fresh_unwrap_probe_out"
 fi
 
-# -- Read ceiling chunk hook reaches a fresh live settings.json ------------
+# -- Read ceiling chunk: the papercut plugin registers it, sync.sh does not -----
 fresh_chunk_root=$TMP/chunk-hook-fresh
 fresh_chunk_home=$fresh_chunk_root/.claude
 mkdir -p "$fresh_chunk_home"
 ln -s "$REPO/hooks" "$fresh_chunk_home/hooks"
-fresh_chunk_out=$(HOME="$fresh_chunk_root" CLAUDE_HOME="$fresh_chunk_home" "$SYNC" reconcile-read-ceiling-chunk 2>&1); fresh_chunk_status=$?
+fresh_chunk_out=$(env -u CLAUDE_INSTALLED_PLUGINS HOME="$fresh_chunk_root" CLAUDE_HOME="$fresh_chunk_home" "$SYNC" reconcile-read-ceiling-chunk 2>&1); fresh_chunk_status=$?
 if [ "$fresh_chunk_status" -eq 0 ]; then ok; else bad "fresh reconcile-read-ceiling-chunk exited $fresh_chunk_status:"$'\n'"$fresh_chunk_out"; fi
-if jq -e '
-    [.hooks.PreToolUse[]? | select(.matcher == "Read") | .hooks[]? | .command]
-    | index("node \"$HOME/.claude/hooks/PreToolUse/read-ceiling-chunk.js\"") != null
-  ' "$fresh_chunk_home/settings.json" >/dev/null; then
+if [ ! -e "$fresh_chunk_home/settings.json" ]; then
   ok
 else
-  bad "fresh reconcile-read-ceiling-chunk did not seed the Read matcher group"
+  bad "fresh reconcile-read-ceiling-chunk wrote a settings.json; the papercut plugin registers that hook"
 fi
 fresh_chunk_probe='{"tool_name":"Read","tool_input":{"file_path":"/nonexistent/first-attempt.txt"},"session_id":"s-fresh0000","cwd":"/tmp"}'
 fresh_chunk_probe_out=$(printf '%s' "$fresh_chunk_probe" | PAPERCUT_STORE="$TMP/chunk-empty-store" node "$REPO/hooks/PreToolUse/read-ceiling-chunk.js"); fresh_chunk_probe_status=$?
