@@ -106,7 +106,7 @@ systemctl --user start backup-harness.service                    # push live mem
 python3 ~/.claude/scripts/memory-audit.py fix --apply            # apply repairs (gated on the pushed backup branch)
 python3 ~/.claude/scripts/memory-audit.py rehook                 # hook bare index fragments, rank-split under the load cap (dry-run)
 python3 ~/.claude/scripts/memory-audit.py rehook --apply         # write MEMORY.md + the archive tier (gated on the pushed backup branch)
-bash ~/hov-stack/sync.sh memory-push                       # the only permitted mirror write
+bash sync.sh memory-push                       # the only permitted mirror write (from the hov-stack checkout root)
 # inside a session:
 #   /memory-dream:dream                                            operator-gated pass
 #   /memory-dream:eval                                             recall-regression suite
