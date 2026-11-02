@@ -307,8 +307,8 @@ function signature(err, toolName, target, cmd) {
   // Our own guards. Which guard fired is the actionable part: a rule rediscovered
   // N times is either under-documented or a candidate for an allowlist change.
   if ((m = e.match(/BLOCKED by (\w[\w-]*)/i))) return `guard_blocked:${SUBJ(m[1].toLowerCase())}`;
-  if (/a-vcs-guard|ALLOW_DESTRUCTIVE_GIT|ALLOW_MAIN_COMMIT/.test(e)) return 'guard_blocked:a-vcs-guard';
-  if (/Codex quota is explicitly unavailable/i.test(e)) return 'guard_blocked:another-guard';
+  if (/git-guard|ALLOW_DESTRUCTIVE_GIT|ALLOW_MAIN_COMMIT/.test(e)) return 'guard_blocked:git-guard';
+  if (/Codex quota is explicitly unavailable/i.test(e)) return 'guard_blocked:codex-quota-guard';
   if (/circuit breaker TRIPPED|doghouse/i.test(e)) return 'guard_blocked:codex-doghouse';
   // Placed after every hard-coded guard_blocked:* branch above, never before,
   // so this can only ever pick up what none of those already claimed — it
@@ -594,7 +594,7 @@ function storeDir() {
  *
  * Factored out so the PreToolUse guards can log their OWN denials through the
  * identical write path. A permission denial reaches no post-hook at all — probed
- * live: a-vcs-guard and a-command-guard both deny, and neither PostToolUse, PostToolUseFailure
+ * live: git-guard and a-command-guard both deny, and neither PostToolUse, PostToolUseFailure
  * nor PermissionRequest dispatches — so a guard that wants to be counted has to
  * write the record itself. Guard blocks were the 4th most common friction class
  * in the 30-day sweep (66 sessions, 53 projects), so this is the single largest
@@ -670,7 +670,7 @@ function logDenial({ guard, cwd, sessionId, agentId, tool, command, reason }) {
     const rec = {
       ts: new Date().toISOString(),
       // Attribute to the guard that actually fired, rather than pattern-matching
-      // its prose. Text matching put a-vcs-guard's un-prefixed `git add .` message
+      // its prose. Text matching put git-guard's un-prefixed `git add .` message
       // and a-worker-guard's `Blocked: ...` messages into the generic per-tool
       // bucket, and split ONE a-worker-guard rule across 13 signatures that
       // differed only by systemctl verb and trailing punctuation. The guard knows

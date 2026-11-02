@@ -1321,7 +1321,7 @@ def quarantine_rule(sig: str) -> str | None:
     return None
 
 
-# Test-fixture pollution (an earlier change). The a-route-guard test
+# Test-fixture pollution (an earlier change). The canonical-worktree-route-guard test
 # matrix calls the guard's run() in-process; every expected denial appends a
 # real record under os.homedir(). an earlier change sandboxed HOME for every entrypoint in
 # THIS tree, but pre-an earlier change worktrees keep their own unsandboxed copies and live
@@ -1332,7 +1332,7 @@ def quarantine_rule(sig: str) -> str | None:
 # and rollup reports the dropped volume as a count so a fresh leak stays
 # visible without ever ranking as work. Same posture as quarantine: defer at
 # read time, never delete from disk.
-_FIXTURE_GUARD_SIG = "guard_blocked:a-route-guard"
+_FIXTURE_GUARD_SIG = "guard_blocked:canonical-worktree-route-guard"
 # The test's own fixture cwds, nothing else: its mkdtemp prefixes (current and
 # historical) and the literal laundering-workspace payload. A record from any
 # real project keeps counting — the guard blocking noncanonical clones is
@@ -1356,7 +1356,7 @@ _FIXTURE_ONLY_REASONS = ("Hook input is malformed", "Hook input is not an object
 #   2. the identity was synthesized -- the hook's `ppid-<pid>` fallback, used
 #      only when the payload carried no session_id at all.
 # Measured 2026-08-29 over the whole live store (47,168 records): the signals
-# agree on 6,700 of 6,722 a-vcs-guard records, and every guard with genuine
+# agree on 6,700 of 6,722 git-guard records, and every guard with genuine
 # production denials is 0% synthesized (a-cost-guard 2,365, heavy-job-
 # admission 480, a-repetition-guard 37) -- so a real denial with no session_id is rare
 # now, and the 2026-08-06 "95% carry neither" measurement no longer holds.
@@ -1366,7 +1366,7 @@ _FIXTURE_ONLY_REASONS = ("Hook input is malformed", "Hook input is not an object
 # this census line had counted fixtures as its genuine examples.)
 # Conjunctive on purpose: either signal on its own KEEPS the record.
 # Two shapes, not an enumerated prefix list. Guard suites write either from a
-# mkdtemp sandbox under /tmp (route-guard uses /tmp/route-guard-*, a-vcs-guard
+# mkdtemp sandbox under /tmp (route-guard uses /tmp/route-guard-*, git-guard
 # /tmp/gg-branch-* and /tmp/gg-varpath-*, and the next suite will invent its
 # own) or from the repo's own hooks tree. Enumerating prefixes per guard is
 # whack-a-mole that silently under-filters until someone notices; the shape
@@ -1394,7 +1394,7 @@ _FIXTURE_DEMO_CWD = re.compile(r"^/home/user/SITES/demo(?:/|$)")
 # cwd are real, so neither conjunctive rule above fires, yet the work is a
 # throwaway sandbox -- a harness-vet fixture ran `cd /tmp/hv-848-vet-2/
 # scratch-repo && git add -A && git commit ...` 1,000 times in one day, which
-# was 53% of every a-vcs-guard denial in the window and would have ranked as
+# was 53% of every git-guard denial in the window and would have ranked as
 # the fleet's top friction. The guard's doctrine still applied to each one;
 # what makes them fixtures is where the command works, which only the
 # command itself says.
@@ -1409,7 +1409,7 @@ def synthesized_identity(rec: dict) -> bool:
     its last 8 characters (`ppid-318283` -> `d-318283`). A real session is the
     last 8 hex characters of a UUID, so anything else -- a hyphen-bearing
     fallback, or a literal like `test` that a harness suite hands the hook
-    (measured 2026-09-02: 796 a-vcs-guard records in one day, 43% of everything
+    (measured 2026-09-02: 796 git-guard records in one day, 43% of everything
     the earlier hyphen rule let through) -- was invented, not supplied.
     """
     session = str(rec.get("session") or "")
@@ -2034,7 +2034,7 @@ def cmd_show(args: argparse.Namespace) -> None:
     print(f"{args.sig} — {len(hits)} occurrence(s), last {args.days}d\n")
 
     # Guard signatures deliberately collapse to the guard name, so the rule
-    # breakdown lives here. Without it, `guard_blocked:a-vcs-guard 82x` would say
+    # breakdown lives here. Without it, `guard_blocked:git-guard 82x` would say
     # which guard is being tripped but never which RULE — and the rule is what
     # gets fixed.
     if len(hits) > 3:
