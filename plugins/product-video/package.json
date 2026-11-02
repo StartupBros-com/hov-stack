@@ -1,6 +1,6 @@
 {
   "name": "@startupbros/product-video",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Agent-native product walkthrough videos: safe authenticated browser capture, telemetry-driven cursor and click overlays, Remotion composition, and verified H.264 render.",
   "license": "MIT",
   "type": "module",
