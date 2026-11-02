@@ -19,20 +19,23 @@ set -uo pipefail
 # __pycache__ in its scripts directory.
 #
 # Now: list the pending updates once, clear bytecode caches from those skills,
-# upgrade each plain skill by name, and decide each overlay skill from jsm's
-# own file diff (update_overlay_skill). `sync` is gone: it installs only skills
+# take our local layer off each one and upgrade it by name (upgrade_skill);
+# ExecStopPost applies the layer again. This replaced holding every overlay
+# skill whose update touched an overlaid file, which held 10 of the 12 on
+# 2026-10-17 and took a rebase PR plus a forced install to release
+# (dotfiles#2091). `sync` is gone: it installs only skills
 # saved to the cloud list and not yet on this machine, and the only one was
 # ubs, retired here, which it reinstalled every night for skills-localize.sh
 # to remove again. Run `jsm sync` by hand after saving a new skill elsewhere.
 
 JSM_BIN=${JSM_BIN:-$HOME/.local/bin/jsm}
-# The tracked overlay set. Resolve through the ~/.claude/scripts symlink the
-# unit runs, as skills-localize.sh does; tests point it at a fixture.
+# skills-localize.sh takes our layer off a skill before jsm sees it, and its
+# state lists the files where an overlay kept our side of a conflict. Resolve
+# through the ~/.claude/scripts symlink the unit runs; tests point both at
+# fixtures.
 SELF=$(readlink -f "${BASH_SOURCE[0]}")
-PATCHES=${JSM_SKILLS_PATCHES:-$(cd -P "$(dirname "$SELF")/.." && pwd)/skills-patches}
-# Without the overlay set every pending skill upgrades plainly, over any local
-# patch, so a missing directory is reported rather than taken quietly (#42).
-[ -d "$PATCHES" ] || echo "jsm-auto-update: warning: no overlay directory at $PATCHES; every pending skill upgrades plainly and loses any local patch (set JSM_SKILLS_PATCHES to the overlay set)" >&2
+LOCALIZE=${JSM_LOCALIZE:-$(dirname "$SELF")/skills-localize.sh}
+LOCALIZE_STATE=${SKILLS_LOCALIZE_STATE:-${XDG_STATE_HOME:-$HOME/.local/state}/skills-localize}
 work=$(mktemp -d "${TMPDIR:-/tmp}/jsm-auto-update.XXXXXX") || exit 1
 trap 'rm -rf "$work"' EXIT
 # Every streamed jsm call is appended here for the failure summary's scan.
@@ -70,10 +73,12 @@ failure_summary() {
 # skills are still attempted, and one journal summary covers the invocation.
 status=0
 fail_cause=""
+fail_stage=upgrade
 note_failure() {
   [ "$status" -eq 0 ] || return 0
   status=$1
   fail_cause=$2
+  fail_stage=${3:-upgrade}
 }
 
 run_jsm() {
@@ -133,40 +138,64 @@ clear_bytecode() {
   done
 }
 
-# An overlay skill carries our copies of some of its files, so jsm refuses to
-# update it. Reinstall it over them only when the update leaves every overlaid
-# file alone; skills-localize.sh (ExecStopPost) then puts the overlay back.
-# When the update changes a file we overlay, putting our copy back would throw
-# that change away, so the skill is held, not failed. Rebasing the overlay
-# does not release it: jsm still lists the same changed files, so once the
-# rebase lands the version it was rebased onto is installed by hand, as the
-# held line says. On 2026-10-17 that was 10 of the 12 overlay skills with a
-# pending update.
-update_overlay_skill() {
-  local name=$1 rc=0 touched versions to
-  "$JSM_BIN" diff "$name" --json >"$work/diff.json" || rc=$?
-  if [ "$rc" -ne 0 ]; then
-    note_failure "$rc" stage-failed
+# jsm refuses to update a skill whose files differ from what it installed, and
+# our layer (skills-patches overlays, the local-tooling note) makes them
+# differ on purpose. `skills-localize.sh unapply` puts back the pristine files
+# it saved, wherever the live file is still what it wrote, so jsm upgrades a
+# plain skill; ExecStopPost then merges the layer onto the new version. The
+# skills-localize lock is held from the unapply until jsm has written: a dotup
+# apply that starts meanwhile waits and merges onto the new version instead of
+# recording state for the old one. The unapply reuses the held lock through
+# SKILLS_LOCALIZE_LOCK_FD; jsm runs without the descriptor.
+#   0  pristine again: upgrade it
+#   3  an overlay but no saved pristine copy (state lost), or text the
+#      pre-#2091 layer wrote: only a forced install restores pristine; apply
+#      merges the overlay back afterwards
+#   4  a file was edited by hand after apply (unapply names it): a person
+#      decides, so jsm is not run and the night fails
+upgrade_skill() {
+  local name=$1 rc=0
+  if ! { mkdir -p "$LOCALIZE_STATE" && exec 8>>"$LOCALIZE_STATE/.lock" && flock -x -w 120 8; }; then
+    echo "jsm-auto-update: $name was not updated: could not take the skills-localize lock $LOCALIZE_STATE/.lock"
+    note_failure 1 stage-failed
+    exec 8>&-
     return
   fi
-  # Anything but three arrays of path strings could hide an overlaid file and
-  # force-install over it, so an unexpected shape fails instead.
-  if ! jq -r '[.added, .removed, .modified]
-      | if all(type == "array") and (map(.[]) | all(type == "string"))
-        then .[][] else error("unexpected jsm diff shape") end' "$work/diff.json" \
-      | LC_ALL=C sort -u >"$work/changed"; then
-    note_failure 1 output-unavailable
-    return
-  fi
-  (cd "$PATCHES/$name" && find . -type f -printf '%P\n') | LC_ALL=C sort -u >"$work/ours"
-  touched=$(LC_ALL=C comm -12 "$work/changed" "$work/ours" | paste -sd' ' -)
-  if [ -z "$touched" ]; then
-    run_jsm install "$name" --force
-    return
-  fi
-  versions=$(jq -r '"v\(.from_version) to v\(.to_version)"' "$work/diff.json")
-  to=$(jq -r '.to_version' "$work/diff.json")
-  echo "jsm-auto-update: held $name ($versions): the update changes $touched, which skills-patches/$name replaces; rebase the overlay onto v$to, merge it, then run jsm install $name --version $to --force and skills-localize.sh apply (the rebase alone never releases the hold), or retire the skill"
+  SKILLS_LOCALIZE_LOCK_FD=8 "$LOCALIZE" unapply "$name" || rc=$?
+  case $rc in
+    0) run_jsm upgrade "$name" 8>&- ;;
+    3)
+      echo "jsm-auto-update: $name has no pristine copy to put back; reinstalling it with --force"
+      run_jsm install "$name" --force 8>&-
+      ;;
+    4)
+      echo "jsm-auto-update: $name was not updated: a file above was edited by hand after skills-localize wrote it; to discard the edit run skills-localize.sh forget $name, jsm install $name --force, then skills-localize.sh apply"
+      note_failure 1 reported-failure
+      ;;
+    *)
+      echo "jsm-auto-update: $name was not updated: skills-localize.sh unapply exited $rc"
+      note_failure "$rc" stage-failed
+      ;;
+  esac
+  flock -u 8
+  exec 8>&-
+}
+
+# Files where an overlay kept our side because upstream changed the same
+# lines, as of the last skills-localize apply. They go to the journal every
+# night; `skills-localize.sh rebase` (recipe in
+# harness/cc-jsm-skill-manager.md) clears them.
+conflict_lines=()
+read_conflicts() {
+  local line extra=0
+  [ -f "$LOCALIZE_STATE/conflicts" ] || return 0
+  while IFS= read -r line; do
+    [[ $line =~ ^(claude|codex|agents)\ [a-z0-9][a-z0-9._-]{0,63}/[A-Za-z0-9._/-]{1,200}$ ]] || continue
+    if [ "${#conflict_lines[@]}" -lt 20 ]; then conflict_lines+=("$line"); else extra=$((extra + 1)); fi
+  done <"$LOCALIZE_STATE/conflicts"
+  [ "$extra" -eq 0 ] || conflict_lines+=("and $extra more")
+  [ "${#conflict_lines[@]}" -eq 0 ] ||
+    echo "jsm-auto-update: overlay conflicts, our side kept: $(printf '%s; ' "${conflict_lines[@]}" | sed 's/; $//')"
 }
 
 rc=0
@@ -212,13 +241,10 @@ else
       | jq -r '.values.skills // {} | to_entries[] | select(.key | endswith("_dir")) | .value | strings | select(startswith("/"))')
   for name in "${pending[@]}"; do
     clear_bytecode "$name"
-    if [ -d "$PATCHES/$name" ]; then
-      update_overlay_skill "$name"
-    else
-      run_jsm upgrade "$name"
-    fi
+    upgrade_skill "$name"
   done
 fi
 
-[ "$status" -eq 0 ] || failure_summary upgrade "$fail_cause"
+read_conflicts
+[ "$status" -eq 0 ] || failure_summary "$fail_stage" "$fail_cause"
 exit "$status"

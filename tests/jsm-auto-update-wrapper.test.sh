@@ -6,14 +6,14 @@ CLAUDE_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 WRAPPER=$CLAUDE_DIR/scripts/jsm-auto-update-wrapper.sh
 [ -x "$WRAPPER" ] || { echo "FAIL: executable wrapper not found at $WRAPPER" >&2; exit 1; }
 
-TMP=$(mktemp -d /tmp/jsm-wrapper-test.XXXXXX)
+TMP=$(mktemp -d /tmp/jsm-wrapper-test.XXXXXX) || exit 1
 trap 'rm -rf "$TMP"' EXIT
 export TMPDIR=$TMP
 FIXTURE=$TMP/fixture
 CALLS=$TMP/calls.log
 MARKER=$TMP/marker
 FAKE_JSM=$TMP/fake-jsm
-PATCHES=$TMP/patches
+LOC_CALLS=$TMP/localize-calls.log
 TREES=$TMP/trees
 mkdir -p "$FIXTURE" "$TMP/bin"
 
@@ -39,10 +39,46 @@ chmod +x "$TMP/bin/tee"
 export PATH="$TMP/bin:$PATH" FAKE_MARKER="$MARKER"
 export INVOCATION_ID=282b9a9bf6eb486aaa4dc81424feb4db
 
+# skills-localize.sh stand-in: logs each call, replays unapply-<skill>.stdout
+# and .rc from the fixture (empty and 0 when absent), and on 0 takes the
+# skill's LAYERED file away, which the fake jsm below refuses to upgrade over.
+# Exported with the state path, so no run reaches the real script or its state.
+cat >"$TMP/bin/localize" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"${FAKE_LOC_CALLS:?}"
+[ "$#" -eq 2 ] && [ "$1" = unapply ] || exit 64
+if [ -n "${FAKE_LOCK_LOG:-}" ]; then
+  fd=${SKILLS_LOCALIZE_LOCK_FD:-none} on=fd-not-on-lock held=unlocked
+  [ "$fd" = none ] || [ ! /proc/self/fd/"$fd" -ef "$SKILLS_LOCALIZE_STATE/.lock" ] || on=fd-on-lock
+  flock -n -x "$SKILLS_LOCALIZE_STATE/.lock" true 2>/dev/null || held=locked
+  printf 'unapply %s %s %s\n' "$2" "$on" "$held" >>"$FAKE_LOCK_LOG"
+fi
+F=${FAKE_FIXTURE:?}
+[ ! -f "$F/unapply-$2.stdout" ] || cat "$F/unapply-$2.stdout"
+rc=0
+[ ! -f "$F/unapply-$2.rc" ] || rc=$(cat "$F/unapply-$2.rc")
+[ "$rc" -ne 0 ] || rm -f "${FAKE_TREES:-/nonexistent}"/*/"$2"/LAYERED
+exit "$rc"
+STUB
+chmod +x "$TMP/bin/localize"
+export FAKE_LOC_CALLS="$LOC_CALLS" JSM_LOCALIZE="$TMP/bin/localize" \
+  SKILLS_LOCALIZE_STATE="$TMP/localize-state"
+
+# The real localizer state must come out of this suite untouched.
+real_state_sum() {
+  local dir=${XDG_STATE_HOME:-$HOME/.local/state}/skills-localize
+  if [ -e "$dir" ]; then
+    find "$dir" -printf '%P %s %T@\n' 2>/dev/null | LC_ALL=C sort | sha256sum
+  else
+    echo absent
+  fi
+}
+REAL_STATE_BEFORE=$(real_state_sum)
+
 # Answers only the calls the wrapper makes, logs each one, and replays
 # <key>.stdout/.stderr/.rc from the fixture (empty and 0 when absent). Like jsm
 # 0.3.36 it refuses an upgrade, with rc 0 and a Failed: block, when the skill
-# carries __pycache__ in any tree.
+# carries __pycache__ or a LAYERED file (our layer still on) in any tree.
 cat >"$FAKE_JSM" <<'STUB'
 #!/usr/bin/env bash
 set -u
@@ -52,12 +88,17 @@ case "$#:$*" in
   '3:config show --json') key=config ;;
   2:upgrade\ *) key=upgrade-$2 ;;
   3:install\ *\ --force) key=install-$2 ;;
-  3:diff\ *\ --json) key=diff-$2 ;;
   *) exit 64 ;;
 esac
 F=${FAKE_FIXTURE:?}
+if [ -n "${FAKE_LOCK_LOG:-}" ] && { [ "$key" = "upgrade-$2" ] || [ "$key" = "install-$2" ]; }; then
+  fd8=fd8-closed held=unlocked
+  [ ! -e /proc/self/fd/8 ] || fd8=fd8-open
+  flock -n -x "${SKILLS_LOCALIZE_STATE:?}/.lock" true 2>/dev/null || held=locked
+  printf 'jsm %s %s %s\n' "$key" "$fd8" "$held" >>"$FAKE_LOCK_LOG"
+fi
 if [ "$key" = "upgrade-$2" ] && [ -n "${FAKE_TREES:-}" ] &&
-  find "$FAKE_TREES"/*/"$2" -name __pycache__ 2>/dev/null | grep -q .; then
+  find "$FAKE_TREES"/*/"$2" \( -name __pycache__ -o -name LAYERED \) 2>/dev/null | grep -q .; then
   printf 'Failed:\n  • %s - Local edits or untracked data detected in managed skill directory. Nothing was changed.\n' "$2"
   exit 0
 fi
@@ -78,11 +119,6 @@ chmod +x "$FAKE_JSM"
 mkdir -p "$TMP/home/.local/bin"
 cp "$FAKE_JSM" "$TMP/home/.local/bin/jsm"
 
-# One overlay skill: our copies of SKILL.md and references/GUIDE.md.
-mkdir -p "$PATCHES/ov-skill/references"
-printf 'ours\n' >"$PATCHES/ov-skill/SKILL.md"
-printf 'ours\n' >"$PATCHES/ov-skill/references/GUIDE.md"
-
 pass=0
 fail=0
 ok() { pass=$((pass + 1)); }
@@ -91,7 +127,8 @@ bad() { fail=$((fail + 1)); echo "FAIL: $*" >&2; }
 reset_fixture() {
   : >"$CALLS"
   : >"$MARKER"
-  rm -rf "$FIXTURE" "$TREES"
+  : >"$LOC_CALLS"
+  rm -rf "$FIXTURE" "$TREES" "$TMP/localize-state"
   mkdir -p "$FIXTURE" "$TREES/claude" "$TREES/codex"
   printf '{"status":"ok","count":0,"updates":[]}\n' >"$FIXTURE/list.stdout"
   # Only absolute *_dir values are trees; the other two keys must be ignored.
@@ -117,17 +154,11 @@ set_updates() {
     "$(($# + 1))" "$json" >"$FIXTURE/list.stdout"
 }
 
-# set_diff NAME ADDED REMOVED MODIFIED (JSON arrays), as `jsm diff --json` prints.
-set_diff() {
-  printf '{"skill":"%s","from_version":6,"to_version":12,"added":%s,"removed":%s,"modified":%s}\n' \
-    "$1" "$2" "$3" "$4" >"$FIXTURE/diff-$1.stdout"
-}
-
 run_wrapper() {
   local name=$1
   LAST_OUTPUT=$TMP/$name.output
   FAKE_CALLS="$CALLS" FAKE_FIXTURE="$FIXTURE" FAKE_TREES="$TREES" JSM_BIN="$FAKE_JSM" \
-    JSM_SKILLS_PATCHES="$PATCHES" "$WRAPPER" >"$LAST_OUTPUT" 2>&1
+    "$WRAPPER" >"$LAST_OUTPUT" 2>&1
   LAST_RC=$?
 }
 
@@ -135,7 +166,7 @@ run_wrapper_default() {
   local name=$1
   LAST_OUTPUT=$TMP/$name.output
   FAKE_CALLS="$CALLS" FAKE_FIXTURE="$FIXTURE" FAKE_TREES="$TREES" HOME="$TMP/home" \
-    JSM_SKILLS_PATCHES="$PATCHES" env -u JSM_BIN "$WRAPPER" >"$LAST_OUTPUT" 2>&1
+    env -u JSM_BIN "$WRAPPER" >"$LAST_OUTPUT" 2>&1
   LAST_RC=$?
 }
 
@@ -163,6 +194,10 @@ assert_marker() {
 
 assert_no_marker() {
   if [ ! -s "$MARKER" ]; then ok; else bad "$1 wrote a failure marker"; fi
+}
+
+assert_line() {
+  if grep -qxF -- "$1" "$LAST_OUTPUT"; then ok; else bad "$2: missing line: $1"; fi
 }
 
 LIST='upgrade --list --json'
@@ -365,55 +400,99 @@ run_wrapper unrelated-prompt
 assert_marker 'JSM_CAUSE=reported-failure' "prompt text outside failure section"
 assert_marker 'JSM_SKILLS=' "unrelated prompt has no affected skills"
 
-# An overlay skill whose update leaves every overlaid file alone is reinstalled
-# over our copies (skills-localize.sh puts them back), never plain-upgraded.
+# Our local layer comes off every pending skill before jsm sees it, so a
+# localized skill upgrades by name like any other (dotfiles#2091). The fake jsm
+# refuses a skill that still carries LAYERED, so an upgrade run before the
+# unapply fails this case.
+reset_fixture
+set_updates ov-skill skill-a
+mkdir -p "$TREES/claude/ov-skill" "$TREES/codex/ov-skill"
+: >"$TREES/claude/ov-skill/LAYERED"
+: >"$TREES/codex/ov-skill/LAYERED"
+run_wrapper layer-off
+assert_rc 0 "localized skill upgrades"
+assert_calls "localized skill is upgraded by name" "$LIST" "$CONFIG" 'upgrade ov-skill' 'upgrade skill-a'
+printf '%s\n' 'unapply ov-skill' 'unapply skill-a' >"$TMP/loc.expected"
+assert_text "$TMP/loc.expected" "$LOC_CALLS" "every pending skill is unapplied, once, by name"
+if [ ! -e "$TREES/claude/ov-skill/LAYERED" ] && [ ! -e "$TREES/codex/ov-skill/LAYERED" ]; then ok
+else bad "the layer was still on when jsm ran"; fi
+assert_no_marker "localized skill upgrades"
+if grep -Eq 'held|jsm diff' "$LAST_OUTPUT"; then bad "the hold path is back"; else ok; fi
+
+# The skills-localize lock is held from each unapply until jsm has written, so no
+# dotup apply lands in between: the unapply reuses the held lock through
+# SKILLS_LOCALIZE_LOCK_FD, jsm runs without the fd, and the lock is free after.
+reset_fixture
+set_updates ov-skill ov2
+printf '3\n' >"$FIXTURE/unapply-ov2.rc"
+: >"$TMP/lock.log"
+FAKE_LOCK_LOG="$TMP/lock.log" run_wrapper layer-lock
+assert_rc 0 "layer lock"
+printf '%s\n' 'unapply ov-skill fd-on-lock locked' 'jsm upgrade-ov-skill fd8-closed locked' \
+  'unapply ov2 fd-on-lock locked' 'jsm install-ov2 fd8-closed locked' >"$TMP/lock.expected"
+assert_text "$TMP/lock.expected" "$TMP/lock.log" "the lock is held from each unapply until jsm has written"
+if flock -n -x "$TMP/localize-state/.lock" true; then ok; else bad "the wrapper left the skills-localize lock held"; fi
+
+# A layer still on when jsm runs (an unapply that put nothing back) makes jsm
+# refuse that skill, and the night fails, not passes.
+cat >"$TMP/bin/localize-noop" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$FAKE_LOC_CALLS"
+STUB
+chmod +x "$TMP/bin/localize-noop"
 reset_fixture
 set_updates ov-skill
-set_diff ov-skill '["references/NEW.md"]' '[]' '["references/OTHER.md","GUIDE.md"]'
-run_wrapper overlay-safe
-assert_rc 0 "untouched overlay skill"
-assert_calls "untouched overlay skill is force-installed" "$LIST" "$CONFIG" 'diff ov-skill --json' 'install ov-skill --force'
-assert_no_marker "untouched overlay skill"
+mkdir -p "$TREES/claude/ov-skill"
+: >"$TREES/claude/ov-skill/LAYERED"
+JSM_LOCALIZE="$TMP/bin/localize-noop" run_wrapper layer-left-on
+assert_rc 1 "layer left on"
+assert_calls "layer left on: jsm is asked and refuses" "$LIST" "$CONFIG" 'upgrade ov-skill'
+assert_marker 'JSM_CAUSE=reported-failure' "layer left on cause"
 
-# An update that changes or removes a file we overlay is held, not failed:
-# laying our copy back would throw the upstream change away.
-for touched in modified removed; do
+# No saved pristine copy (exit 3): only a forced install restores pristine, and
+# ExecStopPost merges the overlay back afterwards. Not a failure.
+reset_fixture
+set_updates ov-skill
+printf '3\n' >"$FIXTURE/unapply-ov-skill.rc"
+printf 'unrecorded: claude ov-skill has an overlay but no saved pristine copy\n' >"$FIXTURE/unapply-ov-skill.stdout"
+run_wrapper layer-unrecorded
+assert_rc 0 "unrecorded layer"
+assert_calls "unrecorded layer is force-installed" "$LIST" "$CONFIG" 'install ov-skill --force'
+assert_line 'unrecorded: claude ov-skill has an overlay but no saved pristine copy' "unapply output reaches the journal"
+assert_line 'jsm-auto-update: ov-skill has no pristine copy to put back; reinstalling it with --force' "unrecorded layer"
+assert_no_marker "unrecorded layer"
+
+# A hand edit (exit 4) is a person's call: jsm never touches that skill, the
+# other skills still update, and the night fails with the recipe in the journal.
+reset_fixture
+set_updates ov-skill skill-a
+printf '4\n' >"$FIXTURE/unapply-ov-skill.rc"
+printf 'hand-edited claude ov-skill/SKILL.md\n' >"$FIXTURE/unapply-ov-skill.stdout"
+run_wrapper layer-hand-edited
+assert_rc 1 "hand-edited layer fails the night"
+assert_calls "a hand-edited skill never reaches jsm; the others still update" "$LIST" "$CONFIG" 'upgrade skill-a'
+assert_line 'hand-edited claude ov-skill/SKILL.md' "the hand-edited file is named"
+assert_line 'jsm-auto-update: ov-skill was not updated: a file above was edited by hand after skills-localize wrote it; to discard the edit run skills-localize.sh forget ov-skill, jsm install ov-skill --force, then skills-localize.sh apply' "hand edit recipe"
+assert_marker 'JSM_STAGE=upgrade' "hand-edited stage"
+assert_marker 'JSM_CAUSE=reported-failure' "hand-edited cause"
+
+# Any other exit, or no localizer at all, decides nothing: that skill is not
+# updated and the first such exit becomes the unit's.
+for case_rc in 2 127; do
   reset_fixture
   set_updates ov-skill skill-a
-  if [ "$touched" = modified ]; then
-    set_diff ov-skill '[]' '[]' '["references/GUIDE.md","SKILL.md","references/OTHER.md"]'
-    held_files='SKILL.md references/GUIDE.md'
+  if [ "$case_rc" -eq 2 ]; then
+    printf '2\n' >"$FIXTURE/unapply-ov-skill.rc"
+    run_wrapper layer-unapply-error
+    expected_calls=('upgrade skill-a')
   else
-    set_diff ov-skill '[]' '["references/GUIDE.md"]' '[]'
-    held_files='references/GUIDE.md'
+    JSM_LOCALIZE="$TMP/no-such-localizer" run_wrapper layer-missing-localizer
+    expected_calls=()
   fi
-  run_wrapper "overlay-held-$touched"
-  assert_rc 0 "overlay skill held ($touched)"
-  assert_calls "held overlay skill is neither installed nor upgraded ($touched)" \
-    "$LIST" "$CONFIG" 'diff ov-skill --json' 'upgrade skill-a'
-  if grep -qxF "jsm-auto-update: held ov-skill (v6 to v12): the update changes $held_files, which skills-patches/ov-skill replaces; rebase the overlay onto v12, merge it, then run jsm install ov-skill --version 12 --force and skills-localize.sh apply (the rebase alone never releases the hold), or retire the skill" "$LAST_OUTPUT"; then ok
-  else bad "held overlay skill is not reported in plain words ($touched)"; fi
-  assert_no_marker "held overlay skill ($touched)"
-done
-
-# A failed diff decides nothing, so nothing is installed.
-reset_fixture
-set_updates ov-skill
-printf '9\n' >"$FIXTURE/diff-ov-skill.rc"
-run_wrapper overlay-diff-failed
-assert_rc 9 "overlay diff failure"
-assert_calls "failed diff installs nothing" "$LIST" "$CONFIG" 'diff ov-skill --json'
-assert_marker 'JSM_CAUSE=stage-failed' "overlay diff failure cause"
-
-# A diff of an unexpected shape could hide an overlaid file, so it fails too.
-for shape in '{"added":[],"removed":[],"modified":[{"path":"SKILL.md"}]}' '{"modified":["references/OTHER.md"]}' 'not json'; do
-  reset_fixture
-  set_updates ov-skill
-  printf '%s\n' "$shape" >"$FIXTURE/diff-ov-skill.stdout"
-  run_wrapper overlay-diff-shape
-  assert_rc 1 "unexpected diff shape"
-  assert_calls "unexpected diff shape installs nothing" "$LIST" "$CONFIG" 'diff ov-skill --json'
-  assert_marker 'JSM_CAUSE=output-unavailable' "unexpected diff shape cause"
+  assert_rc "$case_rc" "unapply exit $case_rc"
+  assert_calls "unapply exit $case_rc: that skill never reaches jsm" "$LIST" "$CONFIG" "${expected_calls[@]}"
+  assert_line "jsm-auto-update: ov-skill was not updated: skills-localize.sh unapply exited $case_rc" "unapply exit $case_rc"
+  assert_marker 'JSM_CAUSE=stage-failed' "unapply exit $case_rc cause"
 done
 
 # Python bytecode in a pending skill is cleared in every tree before jsm sees
@@ -433,33 +512,49 @@ if [ -d "$TREES/claude/other-skill/__pycache__" ]; then ok; else bad "cleanup to
 if [ -d "$TMP/outside/linked-skill/__pycache__" ]; then ok; else bad "cleanup followed a symlinked skill dir"; fi
 rm -rf "$TMP/outside"
 
-# The overlay set is found through the ~/.claude/scripts symlink the unit runs.
-mkdir -p "$TMP/install/scripts" "$TMP/install/skills-patches/ov-skill" "$TMP/home/.claude/scripts"
+# The localizer is the skills-localize.sh beside the wrapper's real path, found
+# through the ~/.claude/scripts symlink the unit runs. A stand-in sits there, so
+# the real script never runs here.
+mkdir -p "$TMP/install/scripts" "$TMP/home/.claude/scripts"
 cp "$WRAPPER" "$TMP/install/scripts/"
-printf 'ours\n' >"$TMP/install/skills-patches/ov-skill/SKILL.md"
+cat >"$TMP/install/scripts/skills-localize.sh" <<'STUB'
+#!/usr/bin/env bash
+printf 'beside %s\n' "$*" >>"$FAKE_LOC_CALLS"
+STUB
+chmod +x "$TMP/install/scripts/skills-localize.sh"
 ln -s "$TMP/install/scripts/jsm-auto-update-wrapper.sh" "$TMP/home/.claude/scripts/jsm-auto-update-wrapper.sh"
 reset_fixture
 set_updates ov-skill
-set_diff ov-skill '[]' '[]' '["SKILL.md"]'
 LAST_OUTPUT=$TMP/symlinked.output
 FAKE_CALLS="$CALLS" FAKE_FIXTURE="$FIXTURE" FAKE_TREES="$TREES" JSM_BIN="$FAKE_JSM" \
-  env -u JSM_SKILLS_PATCHES "$TMP/home/.claude/scripts/jsm-auto-update-wrapper.sh" >"$LAST_OUTPUT" 2>&1
+  env -u JSM_LOCALIZE "$TMP/home/.claude/scripts/jsm-auto-update-wrapper.sh" >"$LAST_OUTPUT" 2>&1
 LAST_RC=$?
 assert_rc 0 "symlinked wrapper"
-assert_calls "symlinked wrapper finds the tracked overlay set" "$LIST" "$CONFIG" 'diff ov-skill --json'
-if grep -qF 'no overlay directory' "$LAST_OUTPUT"; then bad "a present overlay set warned as missing"; else ok; fi
+assert_calls "symlinked wrapper upgrades after the unapply" "$LIST" "$CONFIG" 'upgrade ov-skill'
+printf 'beside unapply ov-skill\n' >"$TMP/loc.expected"
+assert_text "$TMP/loc.expected" "$LOC_CALLS" "symlinked wrapper finds skills-localize.sh beside its real path"
 
-# A missing overlay set still upgrades, plainly, and says so (#42).
+# Files where an overlay kept our side of a conflict (skills-localize state)
+# go to the journal every night; malformed lines are dropped, more than 20 are
+# counted, and no file means no line.
 reset_fixture
-set_updates ov-skill
-LAST_OUTPUT=$TMP/no-overlay.output
-FAKE_CALLS="$CALLS" FAKE_FIXTURE="$FIXTURE" FAKE_TREES="$TREES" JSM_BIN="$FAKE_JSM" \
-  JSM_SKILLS_PATCHES="$TMP/no-such-overlay" "$WRAPPER" >"$LAST_OUTPUT" 2>&1
-LAST_RC=$?
-assert_rc 0 "missing overlay set"
-assert_calls "missing overlay set upgrades the skill plainly" "$LIST" "$CONFIG" 'upgrade ov-skill'
-if grep -qF "jsm-auto-update: warning: no overlay directory at $TMP/no-such-overlay" "$LAST_OUTPUT"; then ok
-else bad "missing overlay set gave no warning"; fi
+mkdir -p "$TMP/localize-state"
+printf '%s\n' 'agents gh-cli/SKILL.md' 'claude gh-cli/SKILL.md' '@everyone x/y' 'claude ../escape/x' \
+  'claude bad name/x' 'gemini gh-cli/SKILL.md' 'codex papers/scripts/workflow.py' >"$TMP/localize-state/conflicts"
+run_wrapper conflicts
+assert_rc 0 "conflicts"
+assert_line 'jsm-auto-update: overlay conflicts, our side kept: agents gh-cli/SKILL.md; claude gh-cli/SKILL.md; codex papers/scripts/workflow.py' "nightly conflict line"
+reset_fixture
+mkdir -p "$TMP/localize-state"
+for ((i=1; i<=22; i++)); do printf 'claude s%s/SKILL.md\n' "$i"; done >"$TMP/localize-state/conflicts"
+run_wrapper conflicts-capped
+assert_rc 0 "capped conflicts"
+if grep -q '^jsm-auto-update: overlay conflicts, our side kept: claude s1/SKILL.md; .*claude s20/SKILL.md; and 2 more$' "$LAST_OUTPUT"; then ok
+else bad "more than 20 conflicts are not capped and counted"; fi
+if grep -q 's21/' "$LAST_OUTPUT"; then bad "conflict 21 printed past the cap"; else ok; fi
+reset_fixture
+run_wrapper conflicts-none
+if grep -q 'overlay conflicts' "$LAST_OUTPUT"; then bad "a conflict line without a conflicts file"; else ok; fi
 
 # No marker may carry an absent, malformed, or injectable invocation ID.
 for invocation in '' unknown $'282b9a9bf6eb486aaa4dc81424feb4db\nJSM_CAUSE=manual-attention'; do
@@ -502,7 +597,7 @@ assert_rc 23 "failed journal write keeps real exit"
 if grep -qxF 'jsm-auto-update: failure summary could not be written to journal' "$LAST_OUTPUT"; then
   ok
 else bad "failed journal write has no local diagnostic"; fi
-FAKE_CALLS="$CALLS" FAKE_FIXTURE="$FIXTURE" JSM_BIN="$FAKE_JSM" JSM_SKILLS_PATCHES="$PATCHES" \
+FAKE_CALLS="$CALLS" FAKE_FIXTURE="$FIXTURE" JSM_BIN="$FAKE_JSM" \
   FAKE_LOGGER_HANG=1 timeout 4 "$WRAPPER" >"$TMP/logger-hang.output" 2>&1
 LAST_RC=$?
 assert_rc 23 "hung journal write is bounded and keeps real exit"
@@ -513,7 +608,7 @@ set_updates skill-a
 printf 'first streamed line\n' >"$FIXTURE/upgrade-skill-a.stdout"
 LAST_OUTPUT=$TMP/streaming.output
 FAKE_CALLS="$CALLS" FAKE_FIXTURE="$FIXTURE" FAKE_TREES="$TREES" JSM_BIN="$FAKE_JSM" \
-  JSM_SKILLS_PATCHES="$PATCHES" FAKE_STREAM_KEY=upgrade-skill-a \
+  FAKE_STREAM_KEY=upgrade-skill-a \
   FAKE_STREAM_GATE="$TMP/stream-gate" "$WRAPPER" >"$LAST_OUTPUT" 2>&1 &
 stream_pid=$!
 stream_seen=0
@@ -546,7 +641,10 @@ else bad "OnFailure= is not under [Unit] — systemd silently ignores it there";
 if grep -qF 'jsm-auto-update-wrapper.sh' "$DROPIN"; then ok
 else bad "drop-in lost its ExecStart= override — the vendor's deadlocking auto-update path would return"; fi
 
-assertion_floor=111
+if [ "$(real_state_sum)" = "$REAL_STATE_BEFORE" ]; then ok
+else bad "the real skills-localize state changed during this suite"; fi
+
+assertion_floor=127
 assertion_total=$((pass + fail))
 if [ "$assertion_total" -lt "$assertion_floor" ]; then
   bad "assertion floor: ran $assertion_total, expected at least $assertion_floor"

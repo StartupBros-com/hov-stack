@@ -1,0 +1,1 @@
+> **Local tooling on this machine.** Work is tracked in GitHub issues: wherever this skill says to create, list, update or close beads issues (`br`, `bv`), use `gh issue create`, `gh issue list`, `gh issue edit` and `gh issue close`, with labels for type and priority. beads, NTM and Agent Mail are not installed.
