@@ -21,12 +21,9 @@ traffic in it included, so it bounds the run's cost from above and is not the
 run's cost. It was named cost_usd before dotfiles#1429; the ledger summary
 still reads that key on older rows.
 
-A successful lookup also prints the value under cost_usd, as an alias. A
-claude-loop.sh that started before the rename keeps its old exit trap in
-memory, reads cost_usd, and runs this script from disk when it exits, so
-without the alias that run would record a null cost. claude-loop records
-only window_cost_usd in the ledger. Drop the alias on or after 2026-10-06,
-once every loop run started before the rename has ended.
+The cost_usd alias that covered loop runs started before the rename was
+dropped on 2026-10-19 (dotfiles#1429). claude-loop.sh still reads either
+key, which covers a rollback of this script.
 """
 
 import importlib.util
@@ -73,8 +70,7 @@ def main() -> int:
             cost, _n, tokens = window_row(con.cursor(), start_ms, end_ms)
         finally:
             con.close()
-        # cost_usd is the pre-rename alias described in the module docstring.
-        print(json.dumps({"window_cost_usd": cost, "cost_usd": cost, "tokens": tokens}))
+        print(json.dumps({"window_cost_usd": cost, "tokens": tokens}))
     except Exception as e:  # noqa: BLE001 -- best-effort, never fatal to the caller
         print(f"WARN dispatcher-cost: lookup failed ({type(e).__name__}: {e})", file=sys.stderr)
         print(json.dumps(NULLS))

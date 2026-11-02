@@ -3,7 +3,7 @@
 - Resolve ambiguities from code, patterns and context; ask only when truly blocked.
 - Identify the full scope of affected components, not just what's mentioned. Diagnose root causes: grep every caller before editing; one guard in the shared function beats one per call site.
 - Run linters, type checks, and tests before finalizing; fix every failure before committing.
-- Ask before reimplementing an existing feature from scratch.
+- Ask before reimplementing an existing feature from scratch; a background job, with nobody to answer, reuses it, or reimplements and says why reuse was impossible.
 - Don't remove or narrow existing config, flags, compat surfaces or callers as a side effect of a task that didn't ask for it; flag it instead.
 - Conventional commit prefixes: feat, fix, perf, chore, docs.
 - Structural code search or rewrite: `ast-grep` before line-based grep/sed. Never write paired bounded regex spans; use `rg -F` with literal anchors.
@@ -31,7 +31,7 @@ This applies for the whole session, whatever the topic.
 The harness outranks the shape:
 
 1. Background jobs still narrate, restate tool results in prose and emit the literal `result:` / `needs input:` / `failed:` lines; none of that is preamble. A session that authored a PR ends with `result:` once the Merge-and-end rule below has run: `merged at <sha>`, or `blocked on <reason>` with the PR left open. It never waits for an owner, nor for any review tier beyond the gated `/pro-gate` review. `needs input:` carries a filed `needs-human` issue citing a category from `scripts/escalation-exceptions.json`. This file overrides the background prompt's never-merge: the session merges its own PR. Direct pushes to main and force-pushes stay forbidden, and a `CLAUDE_LOOP_GUARD=1` run stays hook-fenced from ready and merge.
-2. A destructive action gets confirmation before it runs.
+2. A destructive action (what dcg and git-guard classify as one) gets confirmation before it runs.
 3. "Explain" or "walk me through" gets full length with headers; "what are my options" gets 2-4 ranked options with one-line trade-offs.
 4. A third straight "still broken" turn gets one named assumption and one diagnostic question, not another patch.
 5. When a rule would delete the answer, the answer wins.
@@ -83,7 +83,7 @@ Process serves working, deployable capability and never becomes the product.
 
 ## Harness
 
-- `~/hov-stack/HARNESS.md` holds harness internals; read it before changing harness config. Detail docs live in `~/hov-stack/harness/`: GH tracking in `harness/gh-tracking-and-claims.md`, the VERIFY.md/NOTES.md convention in `harness/verification-architecture.md`.
+- `HARNESS.md` in the hov-stack checkout (the directory `./setup` ran from) holds harness internals; read it before changing harness config. Detail docs live in its `harness/` directory: GH tracking in `harness/gh-tracking-and-claims.md`, the VERIFY.md/NOTES.md convention in `harness/verification-architecture.md`.
 - Vet third-party skills before install (`harness/third-party-skill-vetting.md`); research briefs follow `harness/research-delegation.md`.
 - Learnings live in `docs/solutions/` (written by `/ce-compound`); `CONCEPTS.md` is the shared vocabulary.
 - MCP placement: http servers in `~/.claude.json`, stdio in per-repo `.mcp.json`; `settings.json` `mcpServers` is silently ignored. Committed API keys in private-repo `.mcp.json` stay unless the repo's trust boundary changes (`harness/cc-mcp-architecture.md`).
@@ -92,7 +92,7 @@ Process serves working, deployable capability and never becomes the product.
 
 ## Environment
 
-- Projects in `~/SITES/`; **mise** manages runtimes. `~/.claude` is the live agent config, symlinked into `~/hov-stack` by `./setup`. Every `harness/...`, `scripts/...` or `hooks/...` path in this file is relative to `~/hov-stack`.
+- Projects in `~/SITES/`; **mise** manages runtimes. `~/.claude` is the live agent config, symlinked into the hov-stack checkout by `./setup`. Every `harness/...`, `scripts/...` or `hooks/...` path in this file is relative to that checkout (the directory `./setup` ran from).
 
 ## Data-source access: prefer a CLI over an MCP server
 

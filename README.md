@@ -51,7 +51,7 @@ Then start a new Claude Code session and type `/hov-setup`, setup's second stage
 ## What's here
 
 - `CLAUDE.md`, the global rules file every session and subagent loads (15 KB), and `HARNESS.md` with 34 detail docs in `harness/` explaining the decisions behind it
-- `hooks/`: 20 hook scripts that `settings.json` registers across 7 hook events; 12 of them run before a tool call (`git-guard`, `settings-guard`, `loop-guard`, `read-ceiling-chunk` and the rest), and `dcg` runs beside them when it is installed. The hook suite is the 46 test files in `hooks/tests/`.
+- `hooks/`: 19 hook scripts that `settings.json` registers across 6 hook events; 12 of them run before a tool call (`git-guard`, `settings-guard`, `loop-guard`, `read-ceiling-chunk` and the rest), and `dcg` runs beside them when it is installed. The hook suite is the 46 test files in `hooks/tests/`.
 - `settings.json`: the allow / ask / deny lists I run under bypass-permissions mode (291 / 75 / 70 entries)
 - `plugins/hov-stack/skills/` (also reachable as `skills/`): 45 skills, 31 of them slash-command only so they never cost tokens until called, plus patches to 2 third-party skills in `skills-patches/` (papers, and de-slopify's fact-check scripts), each with a note of its upstream
 - `skills-stack/`: 2 more slash-command skills (memory-mine, review-adversarial-first) that run this repo's scripts, so `./setup` links them and the plugin does not ship them
@@ -102,6 +102,7 @@ This repository is the `hov` marketplace, and `./setup` adds it. To add it by ha
   `config/settings.example.json`, `config/CLAUDE.example.md` and `config/env.example` show each, and `./setup --check` names an import not yet written, out of step with the overlay or whose file is gone, an `env` that does not parse, and a `settings.json` setup would refuse.
 - A release train for the harness. It changes when my setup changes: `main` is its only version, `git pull` is the update, and no editions or support are owed. Each plugin carries its own version, which the `hov` marketplace serves.
 - The private repo's test dispatcher. CI here runs the three repository suites under `tests/repo/` (the fresh-HOME setup test, the layout and marketplace-collision check, the suite runner's own test), the hook tests, every unit suite `tests/run-claude-tests.sh` finds in the tree, a secrets scan (gitleaks) and the public-safety scan: `scripts/public-safety-scan.sh` fails on a home-directory path, a personal address, a private-network host or a private repository name anywhere in the tree, the skipped suites' sources included, and `.public-safety-allow` names each exception and why. `tests/claude-tests.skips` names the 5 suites that cannot pass from this repo and why: 4 read the author's host roster, install manifest or install-smoke launcher, 1 needs real Docker. The runner still runs the first 4, each with the failure signature its log must match, and fails the day one of them passes, times out, or fails for a different reason, so the list cannot go stale quietly.
+- A ccflare gateway. `scripts/reclaim-sweep.py` and `scripts/dispatcher-cost.py` assume one (better-ccflare, state under `~/.config/better-ccflare/`) and have nothing to read without it.
 
 ## Where it came from
 

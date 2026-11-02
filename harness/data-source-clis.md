@@ -381,10 +381,10 @@ The migration only removes retired entries; it adds no grants, and sync never
 merges `permissions.allow` into the runtime file. Without the next step a
 non-bypass session prompts for every `ga4` and `discord-cli` call. In the same
 quiet window, append the tracked grants that the runtime file lacks (idempotent;
-other keys and entries are untouched), review the diff, then move it into place:
+other keys and entries are untouched), review the diff, then move it into place (run from the hov-stack checkout root, the directory `./setup` ran from):
 
 ```bash
-jq --slurpfile t ~/hov-stack/settings.json '
+jq --slurpfile t settings.json '
   .permissions.allow += ([$t[0].permissions.allow[]
     | select(test("^Bash\\((ga4|discord-cli) "))] - .permissions.allow)
 ' ~/.claude/settings.json > /tmp/settings.next.json
