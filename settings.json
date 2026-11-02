@@ -793,7 +793,8 @@
     "skill-creator@claude-plugins-official": true,
     "skill-tuner@hov": true,
     "wsl-cdp@hov": true,
-    "memory-dream@hov": true
+    "memory-dream@hov": true,
+    "papercut@hov": true
   },
   "extraKnownMarketplaces": {
     "every-marketplace": {
