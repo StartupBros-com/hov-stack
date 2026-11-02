@@ -7,7 +7,7 @@
 #   --force      skip the "already installed" note (install always overwrites in place)
 #   --quiet      errors only
 #   --uninstall  remove installed files and symlink
-# Env: WSL_CDP_REF=<branch|tag|sha> (default main; release tags look like wsl-cdp--v0.3.6), HTTPS_PROXY/HTTP_PROXY honored.
+# Env: WSL_CDP_REF=<branch|tag|sha> (default main; release tags look like wsl-cdp--v0.3.7), HTTPS_PROXY/HTTP_PROXY honored.
 #
 # What it does: resolves the current commit of the repo, downloads the four
 # scripts pinned to that commit (so a mid-install push can't tear the set),

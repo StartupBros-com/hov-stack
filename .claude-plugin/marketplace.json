@@ -12,15 +12,16 @@
     {
       "name": "token-eater",
       "source": {
-        "source": "url",
-        "url": "https://github.com/StartupBros-com/token-eater.git",
-        "sha": "80ebac8f554eb836423430a7796322de431c1ff0"
+        "source": "git-subdir",
+        "url": "https://github.com/StartupBros-com/hov-stack.git",
+        "path": "plugins/token-eater",
+        "sha": "c81c35f3d37b754637ed8ce9b4fbc21ae61cad43"
       },
       "description": "Spend expiring AI credits on isolated, verified code cleanup that opens a draft pull request and never merges.",
       "metadata": {
-        "version": "0.1.2",
-        "releaseId": 397449033,
-        "releaseTag": "v0.1.2"
+        "version": "0.1.3",
+        "releaseId": 431257926,
+        "releaseTag": "token-eater--v0.1.3"
       },
       "card": {
         "rows": [
@@ -78,15 +79,16 @@
     {
       "name": "wsl-cdp",
       "source": {
-        "source": "url",
-        "url": "https://github.com/StartupBros-com/wsl-cdp.git",
-        "sha": "e166d75a13a40500cec505f33ae3203952a092b0"
+        "source": "git-subdir",
+        "url": "https://github.com/StartupBros-com/hov-stack.git",
+        "path": "plugins/wsl-cdp",
+        "sha": "76a057b5be17b20a0a0e26c218fb8ef18dee8877"
       },
       "description": "Drive your real, logged-in Windows browser (Chrome, Edge, or Brave) from Claude Code inside WSL2 over the Chrome DevTools Protocol. Read authenticated dashboards, take real screenshots, and run a guided one-time setup; sends native-Windows users to the official extension instead.",
       "metadata": {
-        "version": "0.3.6",
-        "releaseId": 397449292,
-        "releaseTag": "v0.3.6"
+        "version": "0.3.7",
+        "releaseId": 431242922,
+        "releaseTag": "wsl-cdp--v0.3.7"
       },
       "card": {
         "tagline": "Claude Code plugin \u00b7 WSL2 only \u00b7 2-min setup \u00b7 auto-updates",
@@ -101,15 +103,16 @@
     {
       "name": "memory-dream",
       "source": {
-        "source": "url",
-        "url": "https://github.com/StartupBros-com/memory-dream.git",
-        "sha": "687cf4f147ed313c2604a209729ba4073c82b9af"
+        "source": "git-subdir",
+        "url": "https://github.com/StartupBros-com/hov-stack.git",
+        "path": "plugins/memory-dream",
+        "sha": "fdf29328cb800628a4a5c808417a52abe72b3a43"
       },
       "description": "The sleep cycle for Claude Code's auto-memory. /memory-dream:dream runs an operator-gated consolidation pass: deterministic triage finds superseded, stale, and oversized notes, a zero-tool subagent drafts the fixes it cannot apply, and you approve each change by hand before anything is written. /memory-dream:eval measures whether recall actually improved. Also a standalone stdlib-only CLI; it never merges, deletes, or compresses a note on its own.",
       "metadata": {
-        "version": "0.4.0",
-        "releaseId": 394196410,
-        "releaseTag": "v0.4.0"
+        "version": "0.4.1",
+        "releaseId": 431229598,
+        "releaseTag": "memory-dream--v0.4.1"
       },
       "card": {
         "rows": [
@@ -213,15 +216,16 @@
     {
       "name": "product-video",
       "source": {
-        "source": "url",
-        "url": "https://github.com/StartupBros-com/product-video.git",
-        "sha": "9aa8637fbe4f48be9bc5388c55b747a4bfd7415b"
+        "source": "git-subdir",
+        "url": "https://github.com/StartupBros-com/hov-stack.git",
+        "path": "plugins/product-video",
+        "sha": "eecad57d88a8adcc7160163af2357c16adb4e6b5"
       },
       "description": "Agent-native product walkthrough videos. Capture a real authenticated browser tour over CDP at a forced 16:9 geometry so a tall operator window cannot letterbox the recording, overlay a real cursor driven by telemetry that carries no URLs, DOM text, or account data, compose in Remotion, and render a digest-bound H.264 you can verify frame by frame.",
       "metadata": {
-        "version": "0.1.0",
-        "releaseId": 385914492,
-        "releaseTag": "v0.1.0"
+        "version": "0.2.0",
+        "releaseId": 431213906,
+        "releaseTag": "product-video--v0.2.0"
       },
       "card": {
         "rows": [
