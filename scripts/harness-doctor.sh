@@ -1370,10 +1370,30 @@ PC_CLI=$HOME/.claude/bin/papercut.py
 [ -f "$PC_HOOK" ] || warn "papercut: hook missing at ~/.claude/hooks/PostToolUseFailure/papercut-log.js"
 [ -f "$PC_CLI" ]  || warn "papercut: CLI missing at ~/.claude/bin/papercut.py"
 [ -x "$PC_CLI" ]  || warn "papercut: ~/.claude/bin/papercut.py is not executable (the ~/.local/bin/papercut symlink will fail)"
+# The papercut plugin (papercut@hov) registers papercut-log, read-ceiling-chunk and
+# structured-output-unwrap itself, and sync.sh retires the settings.json copies once
+# the plugin is installed at user scope and enabled. Either registration is capture.
+# Both is a finding too: Claude Code runs the two copies separately, so every
+# failure is logged twice and read-ceiling-chunk counts each denial twice.
 if [ -f "$HOME/.claude/settings.json" ] && command -v jq >/dev/null 2>&1; then
-  jq -e '.hooks.PostToolUseFailure[]?.hooks[]? | select(.command | test("papercut-log"))' \
-    "$HOME/.claude/settings.json" >/dev/null 2>&1 \
-    || warn "papercut: PostToolUseFailure hook NOT registered in settings.json — capture is dead and silent (fix: sync.sh reconcile-papercut-hook)"
+  _pc_registry=${CLAUDE_INSTALLED_PLUGINS:-$HOME/.claude/plugins/installed_plugins.json}
+  _pc_plugin=0
+  [ -f "$_pc_registry" ] \
+    && jq -e '(.plugins["papercut@hov"] // []) | any(.scope == "user")' "$_pc_registry" >/dev/null 2>&1 \
+    && jq -e '.enabledPlugins["papercut@hov"] == true' "$HOME/.claude/settings.json" >/dev/null 2>&1 \
+    && _pc_plugin=1
+  if [ "$_pc_plugin" -eq 1 ]; then
+    for _pc_dup in papercut-log:reconcile-papercut-hook read-ceiling-chunk:reconcile-read-ceiling-chunk \
+        structured-output-unwrap:reconcile-structured-output-unwrap; do
+      jq -e --arg h "${_pc_dup%%:*}.js" '[.hooks[]?[]?.hooks[]? | (.command // "") | select(contains($h))] | length > 0' \
+        "$HOME/.claude/settings.json" >/dev/null 2>&1 \
+        && warn "papercut: ${_pc_dup%%:*} is registered twice, by papercut@hov and in settings.json, so it runs twice per event (fix: sync.sh ${_pc_dup#*:})"
+    done
+  else
+    jq -e '.hooks.PostToolUseFailure[]?.hooks[]? | select(.command | test("papercut-log"))' \
+      "$HOME/.claude/settings.json" >/dev/null 2>&1 \
+      || warn "papercut: PostToolUseFailure hook NOT registered (papercut@hov is not installed and enabled, and settings.json has no copy) — capture is dead and silent (fix: claude plugin install papercut@hov)"
+  fi
 fi
 HW="$HOME/.claude/scripts/harness-weekly.sh"
 if [ -f "$HW" ]; then

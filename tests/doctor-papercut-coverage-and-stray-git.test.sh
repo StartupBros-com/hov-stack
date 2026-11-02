@@ -66,7 +66,7 @@ coverage() {
 run_check() {
   # $1 = home, $2 = section file, $3 = fs root for the stray scan
   ( export HOME=$1 STRAY_DOT_GIT_FS_ROOT=${3:-$TMP/empty-root}
-    unset PAPERCUT_STORE CLAUDE_CONFIG_DIR
+    unset PAPERCUT_STORE CLAUDE_CONFIG_DIR CLAUDE_INSTALLED_PLUGINS
     WARNS=0
     warn() { echo "WARN: $*"; WARNS=$((WARNS + 1)); }
     ok()   { echo "  ok: $*"; }
@@ -140,6 +140,54 @@ h=$(make_home unwired); coverage "$h" "$T"
 sed -i '/papercut-backfill/d' "$h/.claude/scripts/harness-weekly.sh"
 out=$(run_check "$h" "$TMP/check19.sh")
 contains "$out" "papercut transcript backfill not wired" "an unwired backfill is a finding"
+
+# 8b. registration: the papercut plugin or a settings.json copy is capture (case 1
+#     is the settings-only host); both runs each hook twice; neither is dead capture.
+# plugin <home> <scope> <enabled>: record papercut@hov in the plugin registry and
+# set its enabledPlugins value ("absent" leaves the key out).
+plugin() {
+  mkdir -p "$1/.claude/plugins"
+  printf '{"version":2,"plugins":{"papercut@hov":[{"scope":"%s","version":"0.1.23"}]}}\n' "$2" \
+    > "$1/.claude/plugins/installed_plugins.json"
+  [ "$3" = absent ] && return 0
+  jq --argjson on "$3" '.enabledPlugins["papercut@hov"] = $on' "$1/.claude/settings.json" > "$1/.claude/s.new" \
+    && mv "$1/.claude/s.new" "$1/.claude/settings.json"
+}
+drop_settings_hook() {
+  jq 'del(.hooks.PostToolUseFailure)' "$1/.claude/settings.json" > "$1/.claude/s.new" \
+    && mv "$1/.claude/s.new" "$1/.claude/settings.json"
+}
+h=$(make_home plugin-only); coverage "$h" "$T"; drop_settings_hook "$h"; plugin "$h" user true
+out=$(run_check "$h" "$TMP/check19.sh")
+omits "$out" "WARN" "the enabled plugin alone is capture"
+contains "$out" "per-tool capture covered" "the plugin-only host prints the ok line"
+
+h=$(make_home both); coverage "$h" "$T"; plugin "$h" user true
+jq '.hooks.PreToolUse = [{"matcher":"Read","hooks":[{"command":"node \"$HOME/.claude/hooks/PreToolUse/read-ceiling-chunk.js\""}]}]' \
+  "$h/.claude/settings.json" > "$h/.claude/s.new" && mv "$h/.claude/s.new" "$h/.claude/settings.json"
+out=$(run_check "$h" "$TMP/check19.sh")
+contains "$out" "papercut-log is registered twice" "plugin plus settings copy is a double registration"
+contains "$out" "fix: sync.sh reconcile-papercut-hook" "the double registration names its fix"
+contains "$out" "read-ceiling-chunk is registered twice" "each duplicated hook is named"
+omits "$out" "structured-output-unwrap is registered twice" "a hook only the plugin registers is not a duplicate"
+omits "$out" "NOT registered" "a double registration is not dead capture"
+
+h=$(make_home neither); coverage "$h" "$T"; drop_settings_hook "$h"
+out=$(run_check "$h" "$TMP/check19.sh")
+contains "$out" "NOT registered" "no plugin and no settings copy is dead capture"
+contains "$out" "fix: claude plugin install papercut@hov" "dead capture names the plugin install"
+
+# Installed but not usable: disabled, never enabled, or a project-scope install
+# (it runs only in that project) -- none of these is capture.
+h=$(make_home disabled); coverage "$h" "$T"; drop_settings_hook "$h"; plugin "$h" user false
+out=$(run_check "$h" "$TMP/check19.sh")
+contains "$out" "NOT registered" "a disabled plugin is not capture"
+h=$(make_home unenabled); coverage "$h" "$T"; drop_settings_hook "$h"; plugin "$h" user absent
+out=$(run_check "$h" "$TMP/check19.sh")
+contains "$out" "NOT registered" "a plugin with no enabledPlugins entry is not counted as capture"
+h=$(make_home project-scope); coverage "$h" "$T"; drop_settings_hook "$h"; plugin "$h" project true
+out=$(run_check "$h" "$TMP/check19.sh")
+contains "$out" "NOT registered" "a project-scope install is not capture everywhere"
 
 # ---- check 34 -------------------------------------------------------------
 # 9. clean host
