@@ -1017,6 +1017,74 @@ reconcile_papercut_hook() {
   retire_papercut_settings_hook "papercut" "$PAPERCUT_HOOK_COMMAND"
 }
 
+# install installs papercut@hov itself, just before the three papercut reconciles, so
+# the settings.json copies are retired in the same run. ./setup installs it too
+# (lib/default-plugins.txt), but a host that only ever runs `sync.sh install` never
+# runs ./setup, and the seed carries none of the three hooks: without the plugin, a
+# fresh host captures no failures at all. Left alone: an explicit
+# enabledPlugins["papercut@hov"] = false (a choice; harness-doctor section 19 still
+# reports the dead capture), a host with no claude CLI, and adding the hov marketplace
+# (./setup's job; adding a marketplace trusts a new source).
+# CLAUDE_SYNC_CLAUDE_BIN names the claude CLI to run (default: the one on PATH); a
+# path that is not executable counts as no CLI. Returns 1 when the CLI is there and
+# the install or enable failed; install() then finishes and exits non-zero.
+PAPERCUT_MARKETPLACE_SOURCE=StartupBros-com/hov-stack
+PAPERCUT_INSTALL_ERROR=
+papercut_claude() {
+  # The CLI writes the plugin registry and enabledPlugins under its config directory,
+  # which must be the $H this run reads. CLAUDE_CONFIG_DIR also moves where Claude
+  # Code reads .claude.json, so it is set only when $H is not the default.
+  if [ "$H" = "$HOME/.claude" ]; then
+    env -u CLAUDE_CONFIG_DIR "$@"
+  else
+    env CLAUDE_CONFIG_DIR="$H" "$@"
+  fi
+}
+ensure_papercut_plugin() {
+  local claude registry verb out rc=0
+  local -a run=()
+  PAPERCUT_INSTALL_ERROR=
+  if papercut_plugin_active; then
+    echo "  papercut: $PAPERCUT_PLUGIN_ID is installed at user scope and enabled"
+    return 0
+  fi
+  if ! command -v jq >/dev/null 2>&1 || [ ! -f "$H/settings.json" ]; then
+    echo "  papercut: $PAPERCUT_PLUGIN_ID not installed: needs jq and $H/settings.json (sync.sh install seeds it)"
+    return 0
+  fi
+  if jq -e --arg id "$PAPERCUT_PLUGIN_ID" '.enabledPlugins[$id] == false' "$H/settings.json" >/dev/null 2>&1; then
+    echo "  papercut: $PAPERCUT_PLUGIN_ID is disabled in settings.json, so it was left as it is (claude plugin enable $PAPERCUT_PLUGIN_ID --scope user turns it back on)"
+    return 0
+  fi
+  claude=${CLAUDE_SYNC_CLAUDE_BIN:-$(command -v claude 2>/dev/null || true)}
+  if [ -z "$claude" ] || [ ! -x "$claude" ]; then
+    echo "  papercut: no claude CLI${claude:+ at $claude}, so $PAPERCUT_PLUGIN_ID was not installed (install Claude Code, then re-run sync.sh install)"
+    return 0
+  fi
+  registry=${CLAUDE_INSTALLED_PLUGINS:-$H/plugins/installed_plugins.json}
+  verb=install
+  [ -f "$registry" ] \
+    && jq -e --arg id "$PAPERCUT_PLUGIN_ID" '(.plugins[$id] // []) | any(.scope == "user")' "$registry" >/dev/null 2>&1 \
+    && verb=enable
+  command -v timeout >/dev/null 2>&1 && run=(timeout 300)
+  echo "  papercut: claude plugin $verb $PAPERCUT_PLUGIN_ID --scope user"
+  out=$(papercut_claude "${run[@]}" "$claude" plugin "$verb" "$PAPERCUT_PLUGIN_ID" --scope user </dev/null 2>&1) || rc=$?
+  [ -n "$out" ] && printf '%s\n' "$out" | sed 's/^/    /'
+  if [ "$rc" -ne 0 ]; then
+    PAPERCUT_INSTALL_ERROR="claude plugin $verb $PAPERCUT_PLUGIN_ID exited $rc: $(printf '%s\n' "$out" | sed -n '/[^[:space:]]/{p;q;}')"
+    echo "  ERROR papercut: $PAPERCUT_INSTALL_ERROR" >&2
+    echo "    If the hov marketplace is not added: claude plugin marketplace add $PAPERCUT_MARKETPLACE_SOURCE" >&2
+    echo "    If its local copy is stale: claude plugin marketplace update hov" >&2
+    return 1
+  fi
+  if ! papercut_plugin_active; then
+    PAPERCUT_INSTALL_ERROR="claude plugin $verb $PAPERCUT_PLUGIN_ID exited 0, but it is still not installed at user scope and enabled"
+    echo "  ERROR papercut: $PAPERCUT_INSTALL_ERROR" >&2
+    return 1
+  fi
+  echo "  papercut: $PAPERCUT_PLUGIN_ID is now installed at user scope and enabled"
+}
+
 reconcile_pr_record_hook() {
   reconcile_hook_group "pr-record" PostToolUse "$PR_RECORD_HOOK_COMMAND"
 }
@@ -2004,7 +2072,7 @@ reconcile_role_timers() {
 }
 
 install() {
-  local ts backup=""
+  local ts backup="" papercut_failed=0
   # install seeds settings and changes other live artifacts before the runtime
   # reconciler runs, so validate this canonical policy before any of those writes.
   validate_canonical_compact_window || return 1
@@ -2066,6 +2134,10 @@ install() {
     reconcile_dcg_hook || return 1
     reconcile_whatsapp_guard_hook || return 1
     reconcile_memory_hook || return 1
+    # Not `|| return 1`: a failed plugin install (offline, marketplace not added)
+    # leaves the settings copies in place below, and the links, units and timers
+    # after this block still matter. install exits non-zero at its end instead.
+    ensure_papercut_plugin || papercut_failed=1
     reconcile_papercut_hook || return 1
     reconcile_structured_output_unwrap_hook || return 1
     reconcile_read_ceiling_chunk_hook || return 1
@@ -2245,6 +2317,11 @@ install() {
 
   reconcile_role_timers "$_role" "$_enable" || return 1
   [ -n "$backup" ] && echo "  originals backed up to $backup"
+  if [ "$papercut_failed" = 1 ]; then
+    echo "install finished everything else, but FAILED to install $PAPERCUT_PLUGIN_ID: $PAPERCUT_INSTALL_ERROR" >&2
+    echo "  The settings.json copies of its three hooks were left in place. Fix the cause above, then re-run sync.sh install." >&2
+    return 1
+  fi
   echo "install done. Restore separately: credentials (claude login), skills (jsm sync), plugins (claude plugin — enabledPlugins already in settings.json)."
 }
 
@@ -2627,6 +2704,7 @@ case "$MODE" in
   reconcile-dcg) reconcile_dcg_hook --write-canonical ;;
   reconcile-memory-hook) reconcile_memory_hook ;;
   reconcile-papercut-hook) reconcile_papercut_hook ;;
+  ensure-papercut-plugin) ensure_papercut_plugin ;;
   reconcile-structured-output-unwrap) reconcile_structured_output_unwrap_hook ;;
   reconcile-read-ceiling-chunk) reconcile_read_ceiling_chunk_hook ;;
   reconcile-shape-rewrite) reconcile_shape_rewrite_hook ;;
@@ -2672,5 +2750,5 @@ case "$MODE" in
   check) check ;;
   memory-preview|memory-check) memory_preview ;;
   memory-push) memory_push ;;
-  *) echo "usage: sync.sh push|install|reconcile-docker-init|adopt-docker-init [--allow-existing-false]|rollback-docker-init|reconcile-dcg|reconcile-grep-cost-guard|reconcile-heavy-job-admission|reconcile-whatsapp-guard|reconcile-runtime-env|reconcile-windows-auto-mode|reconcile-memory-hook|reconcile-papercut-hook|reconcile-structured-output-unwrap|reconcile-read-ceiling-chunk|reconcile-shape-rewrite|reconcile-pr-record-hook|reconcile-push-tracking-pr-hook|reconcile-worktree-claim-advisory-hook|reconcile-codex-quota-hook|reconcile-repo-route-hook|reconcile-context-fence|reconcile-fanout-admission|check|memory-preview|memory-check|memory-push" >&2; exit 2 ;;
+  *) echo "usage: sync.sh push|install|reconcile-docker-init|adopt-docker-init [--allow-existing-false]|rollback-docker-init|reconcile-dcg|reconcile-grep-cost-guard|reconcile-heavy-job-admission|reconcile-whatsapp-guard|reconcile-runtime-env|reconcile-windows-auto-mode|reconcile-memory-hook|reconcile-papercut-hook|ensure-papercut-plugin|reconcile-structured-output-unwrap|reconcile-read-ceiling-chunk|reconcile-shape-rewrite|reconcile-pr-record-hook|reconcile-push-tracking-pr-hook|reconcile-worktree-claim-advisory-hook|reconcile-codex-quota-hook|reconcile-repo-route-hook|reconcile-context-fence|reconcile-fanout-admission|check|memory-preview|memory-check|memory-push" >&2; exit 2 ;;
 esac

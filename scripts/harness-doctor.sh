@@ -1409,9 +1409,15 @@ if [ -f "$HOME/.claude/settings.json" ] && command -v jq >/dev/null 2>&1; then
         && warn "papercut: ${_pc_dup%%:*} is registered twice, by papercut@hov and in settings.json, so it runs twice per event (fix: sync.sh ${_pc_dup#*:})"
     done
   else
-    jq -e '.hooks.PostToolUseFailure[]?.hooks[]? | select(.command | test("papercut-log"))' \
-      "$HOME/.claude/settings.json" >/dev/null 2>&1 \
-      || warn "papercut: PostToolUseFailure hook NOT registered (papercut@hov is not installed and enabled, and settings.json has no copy) — capture is dead and silent (fix: claude plugin install papercut@hov)"
+    # Without the plugin, each of the three needs its own settings.json copy under its
+    # own event: papercut-log is the capture, the other two are the guards it feeds.
+    for _pc_need in PostToolUseFailure:papercut-log PreToolUse:read-ceiling-chunk \
+        PreToolUse:structured-output-unwrap; do
+      jq -e --arg ev "${_pc_need%%:*}" --arg h "${_pc_need#*:}.js" \
+        '[.hooks[$ev][]?.hooks[]? | (.command // "") | select(contains($h))] | length > 0' \
+        "$HOME/.claude/settings.json" >/dev/null 2>&1 \
+        || warn "papercut: ${_pc_need#*:} ${_pc_need%%:*} hook NOT registered (papercut@hov is not installed and enabled, and settings.json has no copy), so Claude Code never runs it (fix: claude plugin install papercut@hov --scope user, or sync.sh install, which installs it)"
+    done
   fi
 fi
 HW="$HOME/.claude/scripts/harness-weekly.sh"

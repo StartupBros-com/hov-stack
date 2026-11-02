@@ -48,7 +48,8 @@ make_home() {
   : > "$home/.claude/hooks/PostToolUseFailure/papercut-log.js"
   : > "$home/.claude/bin/papercut.py"
   chmod +x "$home/.claude/bin/papercut.py"
-  printf '%s\n' '{"hooks":{"PostToolUseFailure":[{"hooks":[{"command":"node papercut-log.js"}]}]}}' \
+  # The settings-only host: all three hooks papercut@hov would register, each under its event.
+  printf '%s\n' '{"hooks":{"PostToolUseFailure":[{"hooks":[{"command":"node papercut-log.js"}]}],"PreToolUse":[{"matcher":"Read","hooks":[{"command":"node \"$HOME/.claude/hooks/PreToolUse/read-ceiling-chunk.js\""}]},{"matcher":"StructuredOutput","hooks":[{"command":"node \"$HOME/.claude/hooks/PreToolUse/structured-output-unwrap.js\""}]}]}}' \
     > "$home/.claude/settings.json"
   printf '%s\n' '"$HOME/.claude/bin/papercut.py" rollup' '"$HOME/.claude/bin/papercut.py" staleness' \
     'papercuts-flagged:[0-9]' 'node "$HOME/.claude/scripts/papercut-backfill.js" --days 14' \
@@ -153,8 +154,9 @@ plugin() {
   jq --argjson on "$3" '.enabledPlugins["papercut@hov"] = $on' "$1/.claude/settings.json" > "$1/.claude/s.new" \
     && mv "$1/.claude/s.new" "$1/.claude/settings.json"
 }
+# drop_settings_hook <home> [jq path]: remove the settings copies (default: all three).
 drop_settings_hook() {
-  jq 'del(.hooks.PostToolUseFailure)' "$1/.claude/settings.json" > "$1/.claude/s.new" \
+  jq "del(${2:-.hooks.PostToolUseFailure, .hooks.PreToolUse})" "$1/.claude/settings.json" > "$1/.claude/s.new" \
     && mv "$1/.claude/s.new" "$1/.claude/settings.json"
 }
 h=$(make_home plugin-only); coverage "$h" "$T"; drop_settings_hook "$h"; plugin "$h" user true
@@ -163,8 +165,7 @@ omits "$out" "WARN" "the enabled plugin alone is capture"
 contains "$out" "per-tool capture covered" "the plugin-only host prints the ok line"
 
 h=$(make_home both); coverage "$h" "$T"; plugin "$h" user true
-jq '.hooks.PreToolUse = [{"matcher":"Read","hooks":[{"command":"node \"$HOME/.claude/hooks/PreToolUse/read-ceiling-chunk.js\""}]}]' \
-  "$h/.claude/settings.json" > "$h/.claude/s.new" && mv "$h/.claude/s.new" "$h/.claude/settings.json"
+drop_settings_hook "$h" '.hooks.PreToolUse[] | select(.matcher == "StructuredOutput")'
 out=$(run_check "$h" "$TMP/check19.sh")
 contains "$out" "papercut-log is registered twice" "plugin plus settings copy is a double registration"
 contains "$out" "fix: sync.sh reconcile-papercut-hook" "the double registration names its fix"
@@ -176,6 +177,24 @@ h=$(make_home neither); coverage "$h" "$T"; drop_settings_hook "$h"
 out=$(run_check "$h" "$TMP/check19.sh")
 contains "$out" "NOT registered" "no plugin and no settings copy is dead capture"
 contains "$out" "fix: claude plugin install papercut@hov" "dead capture names the plugin install"
+contains "$out" "papercut-log PostToolUseFailure hook NOT registered" "the missing capture hook is named"
+contains "$out" "read-ceiling-chunk PreToolUse hook NOT registered" "the missing read guard is named"
+contains "$out" "structured-output-unwrap PreToolUse hook NOT registered" "the missing unwrap guard is named"
+
+# Without the plugin, one missing settings copy is a finding even when capture is
+# registered: before, only papercut-log was checked, so these two went unreported.
+h=$(make_home one-missing); coverage "$h" "$T"
+drop_settings_hook "$h" '.hooks.PreToolUse[] | select(.matcher == "Read")'
+out=$(run_check "$h" "$TMP/check19.sh")
+contains "$out" "read-ceiling-chunk PreToolUse hook NOT registered" "a missing read guard is named on its own"
+omits "$out" "papercut-log PostToolUseFailure hook NOT registered" "a registered capture hook is not reported"
+omits "$out" "structured-output-unwrap PreToolUse hook NOT registered" "a registered unwrap guard is not reported"
+# A copy under the wrong event never runs for the right one.
+h=$(make_home wrong-event); coverage "$h" "$T"
+jq '.hooks.PostToolUse = [.hooks.PreToolUse[] | select(.matcher == "StructuredOutput")] | del(.hooks.PreToolUse[] | select(.matcher == "StructuredOutput"))' \
+  "$h/.claude/settings.json" > "$h/.claude/s.new" && mv "$h/.claude/s.new" "$h/.claude/settings.json"
+out=$(run_check "$h" "$TMP/check19.sh")
+contains "$out" "structured-output-unwrap PreToolUse hook NOT registered" "a copy under another event is not a registration"
 
 # Installed but not usable: disabled, never enabled, or a project-scope install
 # (it runs only in that project) -- none of these is capture.

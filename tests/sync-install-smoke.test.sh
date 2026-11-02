@@ -2940,8 +2940,11 @@ else
 fi
 
 pure_before=$(cd "$PURE" && find . -type f -exec sha256sum {} + | sort)
+# CLAUDE_SYNC_CLAUDE_BIN names a missing CLI: with the hook block on, install would
+# otherwise run the real `claude plugin install papercut@hov` from PATH on a dev box.
 pure_out=$(env -u CLAUDE_SYNC_SKIP_HOOK_RECONCILE \
   HOME="$PURE_HOME" \
+  CLAUDE_SYNC_CLAUDE_BIN="$TMP/no-claude" \
   CLAUDE_SYNC_SYSTEM_SYS_DIR="$TMP/pure-etc-systemd" \
   CLAUDE_SYNC_MANAGED_LOCK="$TMP/pure-etc-claude/managed-settings.json" \
   "$PURE/sync.sh" install 2>&1)
