@@ -184,6 +184,8 @@ DOTFILES_HARNESS=(
   harness
   hooks
   keybindings.json
+  local-tooling-note.codex.md
+  local-tooling-note.md
   managed-settings.json
   memory-dream.json
   memory-filename-allowlist.txt
@@ -193,6 +195,7 @@ DOTFILES_HARNESS=(
   scripts
   settings.json
   skills
+  skills-legacy-overlays.txt
   skills-patches
   skills-stack
   statusline-stack

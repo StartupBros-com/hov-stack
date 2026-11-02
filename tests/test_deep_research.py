@@ -115,6 +115,9 @@ class DeepResearchTests(unittest.TestCase):
             # No global retirements, overlays, or Codex adoption in this fixture.
             (harness / "retired-skills.txt").write_text("")
             (harness / "codex-skills.txt").write_text("")
+            # The localizer refuses to run its layer without its note files.
+            for note in ("local-tooling-note.md", "local-tooling-note.codex.md"):
+                shutil.copy2(CLAUDE / note, harness / note)
             home = root / "home"
             skills = home / ".claude" / "skills"
             codex = home / ".codex" / "skills"

@@ -1,0 +1,81 @@
+# Pre-#2091 overlay files: the bytes the old whole-file layer wrote into jsm skills.
+# One line per file version: <sha256> <swapped|added> <skill>/<path>. "swapped" replaced a
+# file upstream ships; "added" is a file upstream does not ship. A path the old layer wrote
+# more than once has one line per version, all of one kind.
+#
+# Read by skills-localize.sh. In a skill with no saved layer state, a live file with
+# one of these hashes (and not identical to the current overlay) is pre-#2091 text, not
+# pristine: apply, --dry-run and check leave the skill alone and print "DRIFT: <tree>
+# <skill> still holds pre-#2091 overlay text", and unapply removes its "added" files and
+# exits 3, so the nightly reinstalls it with --force. Without this, the first apply after
+# #2091 saved the old renamed text as pristine, and jsm refused those skills every night.
+#
+# Generated 2026-10-29 from origin/main's skills-patches (kinds from jsm's cache).
+# Delete this file once `skills-localize.sh check` prints no "pre-#2091" line on any
+# host; a missing file reads as an empty list.
+047544abaa5b4e79c78367289c9f0ffadc29c8a30f8e8604982afd3469c9619d swapped codebase-audit/SKILL.md
+4012476af8a4c1a550f0931c308ed893b66e63a16051f7793ba1d18ca5317073 swapped de-slopify/SKILL.md
+0f2a36ab99227ebe064e735cf7c1860f5e456a95510e9e3e76c7a9f2db6c81a3 added de-slopify/scripts/UPSTREAM.md
+9e2f4d36ae5b9843886bc6a26dc7d5636c18e9e4b489130329246653973f0c92 added de-slopify/scripts/facts-check.cjs
+192fce177e861e3b0e6888edbd74fcd42b6e05da542d55c62f1cf8070af81528 added de-slopify/scripts/facts.LICENSE
+e887d0f2fbc77ac8d7f5972a9e4489d184e285e1d0ba14ccc0608bbec13b603b added de-slopify/scripts/facts.js
+d7922390a4ea0df8439a2da4ab262dd440eb7ab49582f76f401e8ecb2e53877b added de-slopify/scripts/rules.prose.mjs
+e4d251c77718f3a0ed6bce281b22f518ff0fae0f5ffd70e753805c7006bc3c99 swapped documentation-website-for-software-project/SKILL.md
+370d3594dd2a71f4812dc6073a461ebbe5572d809fd29e4a52e211c84feda92d swapped documentation-website-for-software-project/references/ORCHESTRATION.md
+f30c7d57df3fba029c657e9f48adeab828ee3877eb36dd9d014c0712e164f154 swapped documentation-website-for-software-project/scripts/check-skills.sh
+b244beaba15e98d043218d87f0c4fc409555b3f86e54387b60f63f46dea6e6dc swapped documentation-website-for-software-project/subagents/orchestrator.md
+d1d76af05e594e4a11ac6a4202e536edcedc992b104dd2d2216fc27c939ee040 swapped gh-cli/SKILL.md
+285dbe68acf7151091e3a131050e90e80c799237a3604cf180f0f327243986e2 swapped mock-code-finder/SKILL.md
+dea11af9a4998c95cc170845b551db070c0d029156b7fc3af5ec92312a6db2d9 swapped mock-code-finder/references/RESOLUTION-STRATEGIES.md
+b8889895cdd5dcb655c1dfa84402824bf27dd37b79c0a3e8360109468662be93 swapped papers/AGENTS.md
+02d24ff804bc646182268d0cd4ed28bef76616910f90f4ee4cf7a1554d0c4868 added papers/LICENSE
+4adbb86b25de673e61a3eb75002de4cf4661e9a6429a9ac2f5e1bd808b7094af swapped papers/SKILL.md
+40f5e2d429285ccfa1441505e203d06d856eec1a7f664b50249cb7b9943653b6 added papers/UPSTREAM.md
+323a8652f79c32b2a82d7054e4fc7201e9d3daaf5b8b03767a010afe485a5f43 swapped papers/scripts/paper_search.py
+586a760078d7c94fef00f1c850053df04c0bd955c164788fb7904547368e2337 swapped papers/scripts/workflow.py
+01c0a7c88db6da70031296732d13b9001e3909adb635f3a802a34934f93b9bee swapped profiling-software-performance/references/LANGUAGE-GUIDES.md
+3099296a8c7f93fc67726827ca42bf5ca00fbf55a1b1b1be5ae9ae2072684adb swapped readme-writing/SKILL.md
+f148adca6fdd34b1830b8ae6977cd19a9b654d99e6eee76d64a84b5ce6bb1a07 swapped readme-writing/references/QUICK-REFERENCE.md
+c1b4cf240eef9554d06ad5bf8a0ce15b664a163eb6b2b5465e76864da530b78a swapped reality-check-for-project/SKILL.md
+4e1307d007f622af30b16f54b4752469dbd30788f2559d9ad8be14b03f26187a added reality-check-for-project/agents/openai.yaml
+5b09a63a08ae25582548c729fa62271b3e8e4c148979b3cb4381c4e9bbd12fd2 swapped reality-check-for-project/references/BRIDGE-PLAN.md
+d317588ec9f2dc904a42b70cdf11a033b5b2593d506278d715b5de2beae57a0a swapped reality-check-for-project/references/GAP-ANALYSIS.md
+533369eff504a361b5cff83a9bf078b9c1ff838a218279349654a1412b490013 added reality-check-for-project/references/GITHUB-INTEGRATION.md
+7ccfb84fb69a7ffc0f6dfdf9466c43f59230c4732b5139cc7e547a679e39dc35 swapped saas-billing-patterns-for-stripe-and-paypal/SKILL.md
+374ce88b554ec4567066d5a1b6ff0582629803cd8fedc46e48512bfdc90218b7 swapped saas-billing-patterns-for-stripe-and-paypal/references/methodology/AGENT-PROMPTS.md
+e1ea047b2b955c4474377d0bc6300098db657951324c89c81addf519f4b18b59 swapped saas-billing-patterns-for-stripe-and-paypal/references/methodology/GIT-WORKFLOW-FOR-BILLING.md
+4cfddf9517b025b339b96c2dd73878f9f8ff2fbf3edce5b23b802e5860edaafb swapped saas-billing-patterns-for-stripe-and-paypal/references/methodology/HOOKS-INTEGRATION.md
+e6ddb60dc642767bf5f07790c884de8c590d037ba857d3f840009788575843d7 swapped saas-billing-patterns-for-stripe-and-paypal/references/methodology/KICKOFF-PROMPTS.md
+d33cbb2bddd9e01b462ea1d11461630a0a0c83cf17003e1c91647a7bb2e88520 swapped saas-billing-patterns-for-stripe-and-paypal/references/methodology/NTM-SWARM-ORCHESTRATION.md
+186465f54dc39363728b56131dbd4c6078b3ff0c92dd7d951a10f20b872e4d24 swapped saas-billing-patterns-for-stripe-and-paypal/references/methodology/ORCHESTRATION.md
+d23cbe9b777df287113bacb1798a9f2de4dc04a94b7ded1d1d4bc8c5241e15d4 swapped saas-billing-patterns-for-stripe-and-paypal/scripts/check-skills.sh
+f79817fd1dceb665832fbf9943f961a461ebf807e83986bea93883935d900d1d swapped security-audit-for-saas/SKILL.md
+a270d8295b3816d531b861d4d3192a08720c7faadf74118d5029e7dc8c717ffc swapped seo-for-saas-businesses/SKILL.md
+a94e84ecc676741eccf125f82839521d4639c48b39a07c14eeca6206e87f4450 swapped seo-for-saas-businesses/assets/PR-DESCRIPTION-TEMPLATE.md
+ee920e1fcb50161ff700c2f5fe9fa09154ae2924377ee7d3a0712a1330fdb290 swapped seo-for-saas-businesses/references/EDITORIAL-CALENDAR.md
+de2f81d8543c1a4cbc9bacb455d602bca7358afae958eb12bca1073f6990b734 swapped seo-for-saas-businesses/references/INTAKE-CHECKLIST.md
+ccd9630953e3bbe015c25901619bc76c1185621d766b1b47af1b69b4c51b9cb2 swapped transcribing-audio-from-calls-and-meetings/SKILL.md
+6715013ca24c6148b01f8cd88cc101f251cd16baabd90dc959aca48ccdf89b02 swapped transcribing-audio-from-calls-and-meetings/references/WORKFLOWS.md
+c94b17398d5126f58401519d1a2e128e9f8d88db8bca230e8faf96066584e8fc added transcribing-audio-from-calls-and-meetings/scripts/mac_transcribe.sh
+f863bbc10acf47cd8767fe444a7599d8997d1fcd941fb6879366c1d19850cb64 swapped user-support-triage-for-saas-and-open-source-projects/SKILL.md
+c4c9b2483ccaeb1142144d0a29fd6dedc34fefb0d691271bb9450aac1deba224 swapped user-support-triage-for-saas-and-open-source-projects/references/BEADS-INTEGRATION.md
+45cedcc7cfe7ce35a04719e5741b67a36a4e3041e8116c11f7bc800832d0c4ff added user-support-triage-for-saas-and-open-source-projects/references/GITHUB-INTEGRATION.md
+23e079fa0ca7710e5bb84b0622d56d3c307bee61d5d594b2764c62ae2cbe375b swapped user-support-triage-for-saas-and-open-source-projects/references/MULTI-TIER-SUPPORT-ORG.md
+01c2bce8943c2a23a0f4eb8fe009ac26dd35b05f7902d53d9261790bdabfba42 swapped user-support-triage-for-saas-and-open-source-projects/references/OPERATOR-LIBRARY.md
+35dc740d254981043a40e067e5200240c6973b01bfc12d3ef5f3dc6854cd435c swapped user-support-triage-for-saas-and-open-source-projects/references/SAAS-CUSTOM.md
+7a643d688d6a026deaedd9bfe96c7d10fbeb61d20f641f05435b23d0f7e40e55 swapped user-support-triage-for-saas-and-open-source-projects/references/TRIAGE-WORKFLOW.md
+e17f917adec41078e5a31a078dc93af29bb9cbd080f682b7b735f1f96ce1dd31 swapped user-support-triage-for-saas-and-open-source-projects/scripts/check-skills.sh
+bc772bf07d3583b00a0fb38e42ac8ea174b65d7249ce6ede8ecf20e31c076dba swapped user-support-triage-for-saas-and-open-source-projects/subagents/draft-bundler.md
+5a03e978b6219cbe21ec6680aa42efc0347792e87cbf836cc42321edc79a502f swapped user-support-triage-for-saas-and-open-source-projects/subagents/onboarding-cartographer.md
+f8b05dcd0184aabe70261239609c4cfd8438c2f9f17f71cc1932ed6835b6c598 swapped xf/SKILL.md
+#
+# Added 2026-10-29: older overlay versions still in the ~/.agents/skills mirror, which
+# Codex reads. Each swaps beads wording for gh-issue wording against upstream's copy.
+f3bd7fd70493150e1e4f20f17cffaca907465e4801e7a1fac7d9e3a676a613d9 swapped saas-billing-patterns-for-stripe-and-paypal/SKILL.md
+c879f5f299a6ae189ef8635fc74c59ed8b79f45763515945b23cf05a67c4b5f9 swapped saas-billing-patterns-for-stripe-and-paypal/references/methodology/AGENT-PROMPTS.md
+f2b15f1dfd01b7de6975f3fd000acb6f2303b5eeda25061512ab3acca4ea906c swapped saas-billing-patterns-for-stripe-and-paypal/references/methodology/ORCHESTRATION.md
+439a045ddeaab736804d863bfe7c2512bcf8f1b00b9027b2389b2570eff60eaf swapped saas-billing-patterns-for-stripe-and-paypal/scripts/check-skills.sh
+a2700a0c8175013b50245e572f2a112f94e9028002ea3f991359b00b24025a21 swapped security-audit-for-saas/SKILL.md
+b57c3a7cec1889d12b1bdc2f7563e46410a01f97fb90268643440764443df8b2 swapped user-support-triage-for-saas-and-open-source-projects/SKILL.md
+8960ec85edb52102905362d654a2300f413fd06fba0a349ccf0601f4275d0800 swapped user-support-triage-for-saas-and-open-source-projects/references/OPERATOR-LIBRARY.md
+5959cc52050cc65e5b2d618d74d11f933fbd900e2c3179020c41d44e336028dc swapped user-support-triage-for-saas-and-open-source-projects/scripts/check-skills.sh
