@@ -1,0 +1,302 @@
+#!/usr/bin/env bash
+# pro-gate doctor — verify the setup. Exit 0 if ready to run a review, 1 if something blocks it.
+set -uo pipefail
+SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+for c in "$SELF/lib.sh" "$SELF/../lib/pro-gate-lib.sh" "${PRO_GATE_HOME:-$HOME/.pro-review-daemon}/lib.sh"; do
+  [ -f "$c" ] && { . "$c"; break; }
+done
+type pg_os >/dev/null 2>&1 || { echo "ERROR: lib.sh not found"; exit 1; }
+pg_augment_path; pg_load_env
+OS="$(pg_os)"; MODE="$(pg_browser_mode)"; SVC="$(pg_service_mgr)"
+PORT="${ORACLE_BROWSER_PORT:-9222}"
+ORACLE_BIN="${PRO_GATE_ORACLE_BIN:-oracle}"
+TIMEOUT_BIN="${PRO_GATE_TIMEOUT_BIN:-timeout}"
+GH_BIN="${PRO_GATE_GH_BIN:-gh}"
+
+have_bin() {
+  case "$1" in
+    */*) [ -x "$1" ] ;;
+    *) pg_have "$1" ;;
+  esac
+}
+run_bounded() {
+  if have_bin "$TIMEOUT_BIN"; then "$TIMEOUT_BIN" "$@"; else return 127; fi
+}
+
+# The release lookup is advisory, but must not leave a TERM-ignoring gh child
+# behind on an offline/broken host. The configured timeout command is the
+# portable `timeout`/`gtimeout` surface used everywhere else; -k supplies the
+# hard-stop phase after the normal five-second deadline.
+run_hard_bounded() {
+  if have_bin "$TIMEOUT_BIN"; then "$TIMEOUT_BIN" -k 1s 5s "$@"; else return 127; fi
+}
+
+ok=0; warn=0; bad=0
+P(){ printf '  \033[32m✓\033[0m %s\n' "$*"; ok=$((ok+1)); }
+W(){ printf '  \033[33m!\033[0m %s\n' "$*"; warn=$((warn+1)); }
+X(){ printf '  \033[31m✗\033[0m %s\n' "$*"; bad=$((bad+1)); }
+
+echo "pro-gate doctor — $OS (browser mode: $MODE, service: $SVC)"
+
+INSTALLED_VERSION="$(pg_runtime_version)"
+EXPECTED_VERSION="$(pg_expected_version)"
+if [ -z "$INSTALLED_VERSION" ]; then
+  X "runtime version record missing; install the exact plugin release with install.sh --version <plugin-version>"
+elif [ -n "$EXPECTED_VERSION" ] && [ "$INSTALLED_VERSION" != "$EXPECTED_VERSION" ]; then
+  # Direction-aware (issue #37): the routed installer always targets the PLUGIN version, so when the
+  # runtime is AHEAD, blindly running it DOWNGRADES the runtime. Say which side is ahead and warn on
+  # the downgrade case, using the same pg_semver_lt the timer path already relies on.
+  if pg_semver_lt "$INSTALLED_VERSION" "$EXPECTED_VERSION"; then
+    X "runtime $INSTALLED_VERSION is BEHIND plugin $EXPECTED_VERSION — upgrade it: install.sh --version $EXPECTED_VERSION"
+  elif pg_semver_lt "$EXPECTED_VERSION" "$INSTALLED_VERSION"; then
+    X "runtime $INSTALLED_VERSION is AHEAD of plugin $EXPECTED_VERSION (local auto-update, a dogfood build, or a stale/rolled-back active plugin). Running 'install.sh --version $EXPECTED_VERSION' would DOWNGRADE the runtime — update the active plugin to $INSTALLED_VERSION instead, unless the downgrade is intended."
+  else
+    X "runtime $INSTALLED_VERSION does not match plugin $EXPECTED_VERSION (non-semver); exact-release setup required"
+  fi
+else
+  P "runtime version ${INSTALLED_VERSION}${EXPECTED_VERSION:+ matches plugin}"
+fi
+
+# review-decision/v1 compatibility is independent of package semver. The plugin/skill passes its
+# expected record with narrowly scoped values; the runtime record must first be exact canonical
+# metadata and match the loaded runtime library before either side can dispatch a decision.
+identity_read() { # path -> id<TAB>version<TAB>contract-digest<TAB>corpus-digest
+  local path="$1" canonical
+  [ -f "$path" ] && [ ! -L "$path" ] && pg_have jq || return 1
+  canonical="$(LC_ALL=C jq -ceS '
+    if type == "object" and
+       keys == ["contract_digest","contract_id","contract_version","corpus_digest"] and
+       (.contract_id | type == "string" and length > 0) and
+       (.contract_version | type == "number" and floor == . and . > 0) and
+       (.contract_digest | type == "string" and test("^[0-9a-f]{64}$")) and
+       (.corpus_digest | type == "string" and test("^[0-9a-f]{64}$"))
+    then . else error("invalid review-decision identity") end
+  ' "$path" 2>/dev/null)" || return 1
+  printf '%s' "$canonical" | cmp -s - "$path" || return 1
+  jq -r '[.contract_id, (.contract_version|tostring), .contract_digest, .corpus_digest] | @tsv' "$path"
+}
+
+RUNTIME_IDENTITY_FILE="${PRO_GATE_HOME:-$HOME/.pro-review-daemon}/review-decision-v1.json"
+if ! RUNTIME_IDENTITY="$(identity_read "$RUNTIME_IDENTITY_FILE")"; then
+  X "runtime review-decision metadata missing or malformed; install the exact plugin release with install.sh --version ${EXPECTED_VERSION:-<plugin-version>}"
+else
+  IFS=$'\t' read -r RUNTIME_CONTRACT_ID RUNTIME_CONTRACT_VERSION RUNTIME_CONTRACT_DIGEST RUNTIME_CORPUS_DIGEST <<< "$RUNTIME_IDENTITY"
+  if ! type pg_review_decision_contract_id >/dev/null 2>&1 \
+      || [ "$RUNTIME_CONTRACT_ID" != "$(pg_review_decision_contract_id)" ] \
+      || [ "$RUNTIME_CONTRACT_VERSION" != "$(pg_review_decision_contract_version)" ] \
+      || [ "$RUNTIME_CONTRACT_DIGEST" != "$(pg_review_decision_contract_digest)" ] \
+      || [ "$RUNTIME_CORPUS_DIGEST" != "$(pg_review_decision_corpus_digest)" ]; then
+    X "runtime review-decision metadata does not match the installed library; install the exact plugin release with install.sh --version ${EXPECTED_VERSION:-<plugin-version>}"
+  else
+    P "runtime review-decision identity matches installed library"
+  fi
+fi
+
+EXPECTED_CONTRACT_ID="${PRO_GATE_EXPECTED_CONTRACT_ID:-}"
+EXPECTED_CONTRACT_VERSION="${PRO_GATE_EXPECTED_CONTRACT_VERSION:-}"
+EXPECTED_CONTRACT_DIGEST="${PRO_GATE_EXPECTED_CONTRACT_DIGEST:-}"
+EXPECTED_CORPUS_DIGEST="${PRO_GATE_EXPECTED_CORPUS_DIGEST:-}"
+EXPECTED_IDENTITY_COUNT=0
+for value in "$EXPECTED_CONTRACT_ID" "$EXPECTED_CONTRACT_VERSION" "$EXPECTED_CONTRACT_DIGEST" "$EXPECTED_CORPUS_DIGEST"; do
+  [ -n "$value" ] && EXPECTED_IDENTITY_COUNT=$((EXPECTED_IDENTITY_COUNT + 1))
+done
+if [ "$EXPECTED_IDENTITY_COUNT" -ne 0 ] && [ "$EXPECTED_IDENTITY_COUNT" -ne 4 ]; then
+  X "adapter review-decision identity is incomplete; use the exact plugin update path"
+elif [ "$EXPECTED_IDENTITY_COUNT" -eq 4 ]; then
+  if ! [[ "$EXPECTED_CONTRACT_ID" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*$ ]] \
+      || ! [[ "$EXPECTED_CONTRACT_VERSION" =~ ^[0-9]+$ ]] \
+      || ! [[ "$EXPECTED_CONTRACT_DIGEST" =~ ^[0-9a-f]{64}$ ]] \
+      || ! [[ "$EXPECTED_CORPUS_DIGEST" =~ ^[0-9a-f]{64}$ ]]; then
+    X "adapter review-decision identity is malformed; use the exact plugin update path"
+  elif [ -z "${RUNTIME_IDENTITY:-}" ]; then
+    X "adapter review-decision identity cannot compare to missing runtime metadata; use the exact plugin update path"
+  elif [ "$RUNTIME_CONTRACT_ID" != "$EXPECTED_CONTRACT_ID" ]; then
+    X "unknown contract: runtime $RUNTIME_CONTRACT_ID, adapter $EXPECTED_CONTRACT_ID — update through the exact version path"
+  elif [ "$RUNTIME_CONTRACT_VERSION" -gt "$EXPECTED_CONTRACT_VERSION" ]; then
+    X "runtime-newer contract v$RUNTIME_CONTRACT_VERSION exceeds adapter v$EXPECTED_CONTRACT_VERSION — update the active plugin; do not downgrade the runtime"
+  elif [ "$RUNTIME_CONTRACT_VERSION" -lt "$EXPECTED_CONTRACT_VERSION" ]; then
+    X "adapter-newer contract v$EXPECTED_CONTRACT_VERSION exceeds runtime v$RUNTIME_CONTRACT_VERSION — install the exact plugin release"
+  elif [ "$RUNTIME_CONTRACT_DIGEST" != "$EXPECTED_CONTRACT_DIGEST" ]; then
+    X "contract-digest mismatch for $RUNTIME_CONTRACT_ID v$RUNTIME_CONTRACT_VERSION — update through the exact version path"
+  elif [ "$RUNTIME_CORPUS_DIGEST" != "$EXPECTED_CORPUS_DIGEST" ]; then
+    X "corpus mismatch for $RUNTIME_CONTRACT_ID v$RUNTIME_CONTRACT_VERSION — update through the exact version path"
+  else
+    P "runtime and adapter review-decision identities match"
+  fi
+fi
+# Distribution-layer skew (issue #84): the block above only compares runtime
+# against plugin — two things that come from the SAME machine's cache and so
+# will always "match" once both have settled, even when both are stale. That
+# is exactly how a box can run an old version, report "matches", while a newer
+# release has already shipped. This check adds the layer above: is either side
+# of the pair behind the newest pro-gate release that has actually been
+# PUBLISHED (independent of whether the marketplace card has caught up yet)?
+#
+# pro-gate releases live in the hov-stack repository, which hosts many plugins
+# and publishes without make_latest, so releases/latest says nothing about
+# pro-gate. Instead read the repository's release list and take the newest
+# non-draft, non-prerelease release whose tag starts with pro-gate--v. "Newest"
+# is the publication time, then the numeric release id: created_at is not the
+# key because GitHub lets a historical release be published later. The jq filter
+# keeps only well-formed candidates (a string published_at and a numeric id) and
+# prints one tab-separated line per release; ISO timestamps in one format sort
+# lexically, so sort and tail finish the ordering. Stripping pro-gate--v from
+# the winning tag gives the version.
+#
+# Best-effort like the oracle skew nudge below: gh missing, unauthenticated,
+# or offline all degrade to total silence (no P/W path for "could not
+# check") — this must never block, and the doctor must stay usable offline.
+# The whole lookup runs under the hard timeout in run_hard_bounded.
+PG_RELEASE_TAG_PREFIX="pro-gate--v"
+PG_RELEASE_JQ='.[] | select(.draft == false and .prerelease == false and (.tag_name | type == "string") and (.tag_name | startswith("pro-gate--v")) and (.published_at | type == "string") and (.id | type == "number")) | [.published_at, (.id | tostring), .tag_name] | @tsv'
+if have_bin "$GH_BIN"; then
+  NEWEST_TAG="$(run_hard_bounded "$GH_BIN" api --paginate 'repos/StartupBros-com/hov-stack/releases?per_page=100' --jq "$PG_RELEASE_JQ" 2>/dev/null | LC_ALL=C sort -t "$(printf '\t')" -k1,1 -k2,2n | tail -n 1 | cut -f3 || true)"
+  NEWEST_VERSION="${NEWEST_TAG#"$PG_RELEASE_TAG_PREFIX"}"
+  LOCAL_VERSION="${EXPECTED_VERSION:-$INSTALLED_VERSION}"
+  if [ -n "$NEWEST_VERSION" ] && [ -n "$LOCAL_VERSION" ] && pg_semver_lt "$LOCAL_VERSION" "$NEWEST_VERSION"; then
+    W "pro-gate $NEWEST_VERSION has been published (this box is on $LOCAL_VERSION) — once the marketplace card lists it: install.sh --version $NEWEST_VERSION"
+  fi
+fi
+if pg_dangerous_consent_ok; then
+  P "dangerous automatic-fixer disclosure accepted (consent v$(pg_consent_version))"
+else
+  W "daemon/dangerous mode disabled until operator consent v$(pg_consent_version) is recorded"
+fi
+
+# core deps
+if ! have_bin "$TIMEOUT_BIN"; then
+  X "configured timeout command missing: $TIMEOUT_BIN"
+fi
+if have_bin "$ORACLE_BIN"; then
+  ORACLE_VERSION="$(run_bounded 5 "$ORACLE_BIN" --version 2>/dev/null | head -1 || true)"
+  P "oracle installed${ORACLE_VERSION:+ ($ORACLE_VERSION)}"
+else
+  X "configured oracle command missing: $ORACLE_BIN"
+fi
+# oracle is NOT pinned: install.sh runs `pnpm add -g @steipete/oracle` (unpinned), so it
+# floats to npm latest at install time and is then never auto-upgraded. Two warn-only,
+# offline-tolerant signals below: a version FLOOR (releases below it are known-broken for
+# pro-gate) and a skew nudge (a newer release than installed often fixes ChatGPT UI drift).
+ORACLE_MIN="${PRO_GATE_ORACLE_MIN_VERSION:-0.16.0}"
+if have_bin "$ORACLE_BIN" && have_bin "$TIMEOUT_BIN"; then
+  ORACLE_LOCAL="$(run_bounded 5 "$ORACLE_BIN" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)"
+  # Version floor (no network needed): below 0.16.0 oracle can capture a settled preamble as
+  # the final answer and flag healthy ChatGPT pages as Cloudflare challenges; pro-gate's round
+  # budget and Cloudflare backoff then amplify those into spurious exit-12 blocks and account
+  # cooldowns. 0.16.0 also lands the GPT-5.6/Work-tab picker handling. Tune with
+  # PRO_GATE_ORACLE_MIN_VERSION.
+  # pg_semver_lt is portable (no `sort -V`, which BSD/macOS sort rejects) and returns non-zero
+  # for a non-semver ORACLE_LOCAL or ORACLE_MIN, so a bad value degrades to "no warning".
+  if [ -n "$ORACLE_LOCAL" ] && pg_semver_lt "$ORACLE_LOCAL" "$ORACLE_MIN"; then
+    W "oracle $ORACLE_LOCAL is below the $ORACLE_MIN floor: 0.16.0 fixes preamble-capture double-spends, false Cloudflare detection, and the GPT-5.6/Work-tab picker. Upgrade: pnpm add -g @steipete/oracle"
+  fi
+  # Skew nudge (needs npm): a newer published release than installed often means upstream
+  # fixed ChatGPT UI drift. Upgrade DELIBERATELY when reviews misbehave, never automatically.
+  if pg_have npm; then
+    ORACLE_LATEST="$(run_bounded 10 npm view @steipete/oracle version 2>/dev/null || true)"
+    if [ -n "$ORACLE_LATEST" ] && [ -n "$ORACLE_LOCAL" ] && [ "$ORACLE_LATEST" != "$ORACLE_LOCAL" ]; then
+      W "oracle $ORACLE_LOCAL installed, $ORACLE_LATEST published — upgrade deliberately (pnpm add -g @steipete/oracle) if reviews misbehave"
+    elif [ -n "$ORACLE_LATEST" ]; then
+      P "oracle up to date ($ORACLE_LOCAL = npm latest)"
+    fi
+  fi
+fi
+# cdp-salvage helper (v0.15): without it the no-think probe cannot distinguish
+# a live run from a dead submission — live runs get killed AND retried
+# (double-spend risk), and the last-resort tab salvage is disabled.
+CDP_HELPER=""
+for c in "$SELF/cdp-salvage.mjs" "${PRO_GATE_HOME:-$HOME/.pro-review-daemon}/cdp-salvage.mjs"; do
+  [ -f "$c" ] && { CDP_HELPER="$c"; break; }
+done
+if [ -n "$CDP_HELPER" ]; then
+  NODE_MAJ="$(node -v 2>/dev/null | sed 's/^v\([0-9]*\).*/\1/')"
+  if [ "${NODE_MAJ:-0}" -ge 21 ] 2>/dev/null; then
+    P "cdp-salvage helper present (node v${NODE_MAJ} >= 21)"
+  else
+    W "cdp-salvage present but node ${NODE_MAJ:-missing} < 21 — probe/tab-salvage disabled (needs built-in WebSocket)"
+  fi
+else
+  W "cdp-salvage.mjs missing — no-think probe + tab salvage DISABLED; live runs can be misclassified as dead and retried (double-spend risk)"
+fi
+have_bin "$GH_BIN" && { "$GH_BIN" auth status >/dev/null 2>&1 && P "gh authenticated" || X "gh not authenticated — gh auth login"; } || X "gh (GitHub CLI) missing"
+pg_have git && P "git present" || X "git missing"
+pg_have claude && P "claude CLI present" || W "claude CLI missing (needed for the daemon's fixer)"
+pg_have jq && P "jq present" || W "jq missing (usage guardrail degraded)"
+pg_have flock && P "concurrency serialized (flock)" || P "concurrency serialized (portable mkdir lock; flock absent — normal on macOS)"
+
+# fixer tier available?
+if [ -f "$HOME/.claude/skills/ce-work-beta/SKILL.md" ] || ls "$HOME/.claude/plugins"/**/ce-work-beta* >/dev/null 2>&1; then
+  P "fixer: Compound Engineering (ce-work-beta) available"
+elif pg_have codex; then P "fixer: codex available"
+else W "fixer: will fall back to plain Claude Code edits (fine; no codex/CE detected)"; fi
+
+# browser reachability
+if [ "$MODE" = remote-chrome ]; then
+  if curl -sf "localhost:${PORT}/json/version" >/dev/null 2>&1; then
+    title=$(curl -s "localhost:${PORT}/json" 2>/dev/null | jq -r '[.[]|select(.type=="page")][0].url // ""' 2>/dev/null)
+    P "browser session up on :${PORT} (${title:-chatgpt})"
+    TABS=$(curl -s "localhost:${PORT}/json" 2>/dev/null | jq -r '[.[]|select(.type=="page")]|length' 2>/dev/null)
+    case "$TABS" in ''|*[!0-9]*) : ;; *)
+      if [ "$TABS" -le 10 ]; then P "browser tabs: ${TABS} open"
+      else W "browser tabs: ${TABS} open (leaked root tabs eat memory headroom; the engine sweeps them pre-run, or: node \$PRO_GATE_HOME/cdp-salvage.mjs --sweep-root - 25 ${PORT})"; fi ;;
+    esac
+    [ "$SVC" = systemd ] && { systemctl is-active --quiet oracle-chrome.service 2>/dev/null && P "oracle-chrome.service active" || W "oracle-chrome.service not active"; }
+  else
+    X "browser session not reachable on :${PORT} — start it (sudo systemctl start oracle-chrome) and sign in (login-view.sh)"
+  fi
+else
+  W "macOS native mode — cannot pre-check ChatGPT login; ensure Chrome is signed into ChatGPT Pro"
+fi
+
+# environment fitness (mirrors the engine's pre-slot health gate, so the doctor predicts a defer)
+if [ "$MODE" = remote-chrome ]; then
+  up="$(pg_service_uptime)"
+  if [ "${up:-999999}" -ge "${PRO_GATE_MIN_UPTIME:-60}" ]; then P "oracle-chrome stable (${up}s uptime)"; else W "oracle-chrome only ${up}s uptime — engine will defer until it stabilizes"; fi
+fi
+if memreason="$(pg_mem_headroom_ok)"; then
+  if memnote="$(pg_mem_pressure_note)"; then W "memory tight: ${memnote} — the engine still runs, but a long review may be unstable; free memory (close apps/tabs) for best results";
+  else P "memory headroom ok for a review ($(pg_mem_status))"; fi
+else W "memory pressure: ${memreason} — the engine will DEFER the slot (no quota spent); free memory and retry"; fi
+# #212 step 2: cgroup-scoped browser memory sentinel, separate from the host-wide check above.
+if browser_mem_reason="$(pg_browser_mem_pressure)"; then P "browser memory pressure: none"
+else W "browser memory pressure: ${browser_mem_reason}"; fi
+# gate r3 P2: "no pressure" is only meaningful while the sampler runs. It starts with the browser
+# wrapper, and an upgrade never restarts a running browser, so say so where the operator looks.
+if sampler_state="$(pg_browser_mem_sampler_state)"; then P "browser memory sampler: ${sampler_state}"
+elif [ "$SVC" = systemd ]; then W "browser memory sampler: not running (${sampler_state}) — the sentinel starts with the browser wrapper and an upgrade does not restart a running browser; once --status shows no review in flight, start or restart oracle-chrome.service to activate it"
+else P "browser memory sampler: not running (${sampler_state}; no pro-gate browser service on this platform, so the cgroup sentinel is inactive)"; fi
+
+# config
+[ -n "${PRO_REVIEW_OWNERS:-}" ] && P "PRO_REVIEW_OWNERS='${PRO_REVIEW_OWNERS}'" || W "PRO_REVIEW_OWNERS unset (daemon needs it; interactive /pro-gate does not)"
+P "concurrency: up to ${PRO_GATE_MAX_CONCURRENCY:-3} review slot(s) (per-PR serialized; health-governed)"
+ROUND_POLICY="$(pg_round_policy_mode doctor)"; ROUND_SOURCE="$(pg_round_policy_source)"
+P "round policy: ${ROUND_POLICY} (source: ${ROUND_SOURCE}; history and churn remain visible in --status)"
+TERMINAL_CLEANUP_PENDING=0
+while IFS= read -r disposition; do
+  [ -z "$disposition" ] || ! pg_attempt_disposition_cleanup_pending "$disposition" || TERMINAL_CLEANUP_PENDING=$((TERMINAL_CLEANUP_PENDING + 1))
+done < <(pg_attempt_disposition_scan)
+if [ "$TERMINAL_CLEANUP_PENDING" -gt 0 ]; then
+  W "$TERMINAL_CLEANUP_PENDING terminal attempt cleanup(s) pending — the same typed pro-gate request will reconcile them before any new charge"
+fi
+# .env can hold keys; warn when group/other can read it (installer sets 600 since v0.30.1).
+if [ -f "$PRO_GATE_HOME/.env" ]; then
+  ENV_MODE="$(stat -c '%a' "$PRO_GATE_HOME/.env" 2>/dev/null || stat -f '%Lp' "$PRO_GATE_HOME/.env" 2>/dev/null || true)"
+  case "$ENV_MODE" in
+    ''|*00) : ;;
+    *) W ".env is mode $ENV_MODE (group/other-readable) and may hold keys — chmod 600 '$PRO_GATE_HOME/.env'" ;;
+  esac
+fi
+
+# Auto-update health (v0.23): three consecutive failed unattended updates escalate here
+# instead of retrying silently forever into an unread log.
+AUS="$PRO_GATE_HOME/autoupdate.state"
+if [ -f "$AUS" ]; then
+  AUS_STREAK="$(awk -F'\t' 'NR==1{print $1}' "$AUS" 2>/dev/null)"
+  case "$AUS_STREAK" in ''|*[!0-9]*) AUS_STREAK=0;; esac
+  if [ "$AUS_STREAK" -ge 3 ]; then
+    W "runtime auto-update has failed $AUS_STREAK times in a row (see $PRO_GATE_HOME/logs/autoupdate.log; disable with install.sh --no-auto-update)"
+  fi
+fi
+
+echo "  ── $ok ok, $warn warnings, $bad blocking ──"
+[ "$bad" -eq 0 ]

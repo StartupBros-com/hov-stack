@@ -1,0 +1,5436 @@
+#!/usr/bin/env bash
+# pro-gate shared library — platform detection, path/dep resolution.
+# Sourced by oracle-review.sh, daemon.sh, and pro-gate-doctor.sh. No side effects on source
+# except defining functions + PRO_GATE_HOME.
+
+PRO_GATE_HOME="${PRO_GATE_HOME:-$HOME/.pro-review-daemon}"
+
+# os: macos | wsl | linux | other
+pg_os() {
+  case "$(uname -s)" in
+    Darwin) echo macos ;;
+    Linux)  if grep -qiE 'microsoft|wsl' /proc/version 2>/dev/null; then echo wsl; else echo linux; fi ;;
+    *)      echo other ;;
+  esac
+}
+
+# How oracle reaches Chrome:
+#   native        — macOS: oracle drives the user's signed-in Chrome itself (no Xvfb/CDP)
+#   remote-chrome — WSL/Linux: attach to the durable Xvfb Chrome over CDP (127.0.0.1:PORT)
+# Override with PRO_GATE_BROWSER_MODE.
+pg_browser_mode() {
+  if [ -n "${PRO_GATE_BROWSER_MODE:-}" ]; then echo "$PRO_GATE_BROWSER_MODE"; return; fi
+  case "$(pg_os)" in macos) echo native ;; *) echo remote-chrome ;; esac
+}
+
+# service manager for the daemon: launchd (macOS) | systemd (linux/wsl with systemctl) | none
+pg_service_mgr() {
+  if [ -n "${PRO_GATE_SERVICE_MANAGER:-}" ]; then
+    case "$PRO_GATE_SERVICE_MANAGER" in
+      launchd|systemd|none) echo "$PRO_GATE_SERVICE_MANAGER"; return ;;
+      *) echo "invalid PRO_GATE_SERVICE_MANAGER: $PRO_GATE_SERVICE_MANAGER" >&2; return 1 ;;
+    esac
+  fi
+  case "$(pg_os)" in
+    macos) echo launchd ;;
+    *)     command -v systemctl >/dev/null 2>&1 && echo systemd || echo none ;;
+  esac
+}
+
+pg_have() { command -v "$1" >/dev/null 2>&1; }
+
+# Timing overrides are an internal fixture seam, not production configuration. Every
+# timing helper requires this exact test-private token before it reads a PRO_GATE_TEST_* value.
+pg_test_timing_enabled() {
+  [ "${PRO_GATE_TEST_MODE:-}" = 'ci-fixture' ]
+}
+
+# Test-only override for the pre-retry CDP probe. Invalid input deliberately
+# falls back to the production 30-second deadline and can never extend it.
+pg_test_pre_retry_probe_secs() {
+  pg_test_timing_enabled || { printf '30\n'; return; }
+  case "${PRO_GATE_TEST_PRE_RETRY_PROBE_SECS:-}" in
+    [1-9]|[12][0-9]|30) printf '%s\n' "$PRO_GATE_TEST_PRE_RETRY_PROBE_SECS" ;;
+    *) printf '30\n' ;;
+  esac
+}
+
+# Test-only watchdog observation cadence. Invalid input deliberately falls back
+# to the production 10-second cadence and can never extend it.
+pg_test_watchdog_sleep_secs() {
+  pg_test_timing_enabled || { printf '10\n'; return; }
+  case "${PRO_GATE_TEST_WATCHDOG_SLEEP_SECS:-}" in
+    [1-9]|10) printf '%s\n' "$PRO_GATE_TEST_WATCHDOG_SLEEP_SECS" ;;
+    *) printf '10\n' ;;
+  esac
+}
+
+# Test-only watchdog TERM-drain duration. Invalid input deliberately falls back
+# to the production 30-second bound and can never extend it.
+pg_test_watchdog_term_drain_secs() {
+  pg_test_timing_enabled || { printf '30\n'; return; }
+  case "${PRO_GATE_TEST_WATCHDOG_TERM_DRAIN_SECS:-}" in
+    [1-9]|[12][0-9]|30) printf '%s\n' "$PRO_GATE_TEST_WATCHDOG_TERM_DRAIN_SECS" ;;
+    *) printf '30\n' ;;
+  esac
+}
+
+# Test-only watchdog post-drain force-settle wait. Invalid input deliberately
+# falls back to the production 5-second bound and can never extend it.
+pg_test_watchdog_force_settle_secs() {
+  pg_test_timing_enabled || { printf '5\n'; return; }
+  case "${PRO_GATE_TEST_WATCHDOG_FORCE_SETTLE_SECS:-}" in
+    [1-5]) printf '%s\n' "$PRO_GATE_TEST_WATCHDOG_FORCE_SETTLE_SECS" ;;
+    *) printf '5\n' ;;
+  esac
+}
+
+pg_runtime_version() {
+  tr -d '[:space:]' < "$PRO_GATE_HOME/VERSION" 2>/dev/null || true
+}
+
+pg_expected_version() {
+  if [ -n "${PRO_GATE_EXPECTED_VERSION:-}" ]; then
+    printf '%s\n' "$PRO_GATE_EXPECTED_VERSION"
+  elif [ -f "$PRO_GATE_HOME/EXPECTED_VERSION" ]; then
+    tr -d '[:space:]' < "$PRO_GATE_HOME/EXPECTED_VERSION"
+  fi
+}
+
+pg_consent_version() { printf '%s\n' "${PRO_GATE_CONSENT_VERSION:-1}"; }
+pg_consent_file() { printf '%s/dangerous-mode-consent\n' "${PRO_GATE_CONSENT_HOME:-${XDG_CONFIG_HOME:-$HOME/.config}/pro-gate}"; }
+pg_dangerous_consent_ok() {
+  local recorded
+  # The braces matter: on a bare `< file 2>/dev/null` bash reports a failed open to the OLD
+  # stderr (redirections apply left to right, so 2> is not yet in effect when `<` fails),
+  # leaking a raw "No such file or directory" into every doctor/daemon run on a consent-less
+  # box. The group redirect catches the open failure too.
+  recorded="$( { tr -d '[:space:]' < "$(pg_consent_file)"; } 2>/dev/null || true)"
+  [ "$recorded" = "$(pg_consent_version)" ]
+}
+
+# ── active marketplace plugin discovery (v0.23) ──────────────────────────────
+# Shared by pro-gate-autoupdate.sh (what version should the runtime follow) and daemon.sh
+# (defer dispatch while the runtime lags the plugin a headless /pro-gate child would load).
+pg_semver3_ok() { grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' <<<"${1:-}"; }
+
+# pg_semver_lt <a> <b>: 0 when a < b, 1 when a >= b (both strict X.Y.Z), 2 when either is not
+# strict semver. Portable component-wise numeric compare via parameter expansion only: `sort -V`
+# is a GNU extension that BSD sort (the default on macOS, a supported platform) rejects, so a
+# sort-based compare errors and silently mis-orders there (dogfood Pro review, PR #32 P2).
+pg_semver_lt() {
+  pg_semver3_ok "${1:-}" && pg_semver3_ok "${2:-}" || return 2
+  local a="$1" b="$2" a1 a2 a3 b1 b2 b3
+  a1="${a%%.*}"; a="${a#*.}"; a2="${a%%.*}"; a3="${a#*.}"
+  b1="${b%%.*}"; b="${b#*.}"; b2="${b%%.*}"; b3="${b#*.}"
+  if [ "$a1" -ne "$b1" ]; then [ "$a1" -lt "$b1" ]; return; fi
+  if [ "$a2" -ne "$b2" ]; then [ "$a2" -lt "$b2" ]; return; fi
+  [ "$a3" -lt "$b3" ]
+}
+
+pg_max_semver() {  # stdin: candidate versions; echoes the highest strict-semver one
+  local v best=""
+  while IFS= read -r v; do
+    pg_semver3_ok "$v" || continue
+    if [ -z "$best" ] || pg_semver_lt "$best" "$v"; then
+      best="$v"
+    fi
+  done
+  [ -n "$best" ] && printf '%s\n' "$best"
+}
+
+# pg_active_plugin_version: the version of the ACTIVE installed pro-gate plugin.
+#   0 + version  -> found
+#   1            -> no active install of the expected plugin identity
+#   2            -> manifest exists but is UNUSABLE (unparseable, or no jq/python3):
+#                   callers that would change code unattended must fail closed on this
+# Source of truth is installed_plugins.json, pinned to ONE plugin identity
+# (PRO_GATE_PLUGIN_KEY, default pro-gate@hov, the marketplace's DECLARED name, not its repo name: an entry from another marketplace
+# or a project-local scope must not move a machine-wide runtime; dogfood gate P1), preferring
+# user-scope entries. A readable manifest is authoritative INCLUDING its silence; the
+# cache-layout glob (real <marketplace>/<name>/<version>/ shape) is only for older Claude
+# Code versions that have no manifest at all, because cache directories retain stale
+# higher-versioned copies that would invert a deliberate rollback.
+pg_active_plugin_version() {
+  local dir="${PRO_GATE_PLUGIN_SEARCH_DIR:-$HOME/.claude/plugins}" key="${PRO_GATE_PLUGIN_KEY:-pro-gate@hov}"
+  local manifest out="" name f
+  manifest="$dir/installed_plugins.json"
+  if [ -f "$manifest" ]; then
+    # USER scope only (dogfood gate round-2 P1): a project-scoped install applies to one
+    # repository's sessions, and letting it move the MACHINE-WIDE runtime would gate every
+    # other repository on it. No user-scope entry means "not globally installed": rc 1.
+    if pg_have jq; then
+      jq -e . "$manifest" >/dev/null 2>&1 || return 2
+      out="$(jq -r --arg k "$key" '.plugins[$k][]? | select((.scope // "user") == "user") | .version // empty' "$manifest" 2>/dev/null | pg_max_semver || true)"
+    elif pg_have python3; then
+      out="$(python3 -c '
+import json, sys
+d = json.load(open(sys.argv[1]))
+entries = d.get("plugins", {}).get(sys.argv[2], []) or []
+print("\n".join(e.get("version", "") for e in entries if e.get("scope", "user") == "user"))' "$manifest" "$key" 2>/dev/null)" || return 2
+      out="$(printf '%s\n' "$out" | pg_max_semver || true)"
+    else
+      return 2
+    fi
+    [ -n "$out" ] || return 1
+    printf '%s\n' "$out"
+    return 0
+  fi
+  name="${key%@*}"
+  out="$(
+    while IFS= read -r f; do
+      if pg_have jq; then
+        jq -er .version "$f" 2>/dev/null || true
+      else
+        sed -nE 's/.*"version"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/p' "$f" | head -1
+      fi
+    done < <(find "$dir" -path "*/$name/*/.claude-plugin/plugin.json" -type f 2>/dev/null) \
+    | pg_max_semver || true
+  )"
+  [ -n "$out" ] || return 1
+  printf '%s\n' "$out"
+}
+
+# Prepend likely locations of node/oracle/gh/jq so scripts work under a minimal
+# systemd/launchd PATH without hardcoding any version.
+pg_augment_path() {
+  export PATH="$HOME/.local/bin:$HOME/.local/share/mise/shims:$HOME/.local/share/pnpm:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:${PATH:-}"
+}
+
+# Source the user's config if present. The .env provides DEFAULTS: any variable ALREADY set in
+# the environment (e.g. an inline one-shot override like `PRO_GATE_MAX_CONCURRENCY=1 oracle-review.sh`)
+# must WIN over the file. Plain `set -a; . .env` inverts that (the file clobbers the caller), so
+# a documented inline override was silently ignored. Snapshot the pre-existing exported env,
+# source .env for anything unset, then re-apply the snapshot so caller/inline values override the
+# file. Sourcing is left intact, so comments and quoting in .env keep working.
+pg_load_env() {
+  [ -f "$PRO_GATE_HOME/.env" ] || return 0
+  local __pg_env_snapshot
+  # `export -p` emits `declare -x NAME=VALUE`; rewrite to `declare -gx` so the re-apply below
+  # sets GLOBALS (a bare `declare` inside a function scopes to the function and would not
+  # propagate the caller's values back out).
+  __pg_env_snapshot="$(export -p | sed 's/^declare -x /declare -gx /; s/^export /declare -gx /')"
+  set -a; . "$PRO_GATE_HOME/.env"; set +a
+  eval "$__pg_env_snapshot" 2>/dev/null || true
+}
+
+# pg_dur_secs <dur>: "90", "90s", "30m", "2h" -> seconds (bare number = seconds).
+# Unparseable input falls back to 1800 so a typo can never mean "no timeout".
+pg_dur_secs() {
+  local d="${1:-}" n
+  n="${d%[smhSMH]}"
+  case "$n" in ''|*[!0-9]*) echo 1800; return;; esac
+  case "$d" in
+    *m|*M) echo $(( n * 60 ));;
+    *h|*H) echo $(( n * 3600 ));;
+    *)     echo "$n";;
+  esac
+}
+
+# pg_hours_1dp <secs>: seconds -> one-decimal hour string ("3.5"), for human-facing round-budget
+# totals (ledger-timing-split R2). Bash has no float arithmetic, so this is the one shared spot —
+# every caller that needs "~X.Yh" text uses this rather than re-deriving its own rounding.
+# Garbage/negative input reads as 0.0 (a display helper never errors out a refusal message).
+pg_hours_1dp() {
+  local s="${1:-0}"
+  case "$s" in ''|*[!0-9]*) s=0;; esac
+  awk -v s="$s" 'BEGIN{printf "%.1f", s/3600}'
+}
+
+# pg_file_sig <file...>: a stable content signature over the given files, used to detect that
+# on-disk code was redeployed (the daemon's self-reload). cksum is POSIX and always present; the
+# per-file content checksum plus its path is folded into one final checksum, so a change in ANY
+# file's content, or a file appearing/disappearing, changes the signature. Order-stable. Echoes a
+# single token, or nothing if cksum is unavailable (callers treat empty as "cannot determine" and
+# do not act, so a missing tool degrades to "never reload" rather than "reload constantly").
+pg_file_sig() {
+  pg_have cksum || return 0
+  local f line acc=""
+  for f in "$@"; do
+    if [ -f "$f" ]; then line="$(cksum < "$f" 2>/dev/null)"; else line="absent"; fi
+    acc="${acc}${f}=${line}|"
+  done
+  printf '%s' "$acc" | cksum 2>/dev/null | awk '{print $1"-"$2}'
+}
+
+# Cross-process lock — waits up to $2 seconds; returns 0 acquired / 1 timeout. Uses flock when
+# present (Linux); else an atomic mkdir spinlock (macOS has no flock). Held until the shell exits.
+# Chained EXIT handlers (gate #61 r2 P1): bash `trap ... EXIT` REPLACES the previous handler,
+# so the no-flock lock-cleanup traps used to silently disable the engine's scratch-cleanup
+# trap on macOS (leaking WORK and dropping run logs). Every EXIT registration in engine+lib
+# goes through here; handlers run in registration order, each isolated by `;` so one failing
+# handler cannot skip the rest.
+pg_on_exit() {
+  PG_EXIT_HANDLERS="${PG_EXIT_HANDLERS:-}${PG_EXIT_HANDLERS:+; }$1"
+  # shellcheck disable=SC2064
+  trap 'eval "${PG_EXIT_HANDLERS:-:}"' EXIT
+}
+
+# Process-identity token: pid start time, so a RECYCLED pid can never impersonate a live run
+# (gate #61 r2 P1: kill -0 alone made a stale active record/lock "live" forever once an
+# unrelated long-lived process inherited the pid). Empty output = no such process.
+pg_pid_token() {
+  local p="${1:-}" st=""
+  [ -n "$p" ] || return 1
+  if [ -r "/proc/$p/stat" ]; then
+    # Field 22 counted AFTER the comm field, which may itself contain spaces/parens:
+    # strip through the last ')' first, then starttime is field 20 of the remainder.
+    st="$(sed 's/^.*) //' "/proc/$p/stat" 2>/dev/null | awk '{print $20}')"
+  else
+    st="$(ps -o lstart= -p "$p" 2>/dev/null | tr -s ' ' | sed 's/^ *//;s/ *$//' | tr ' ' '_')"
+  fi
+  [ -n "$st" ] || return 1
+  printf '%s' "$st"
+}
+
+# pg_pid_recycled <pid> <stored-token>: 0 ONLY when it is positively PROVEN that <pid> has been
+# recycled -- the process now holding that pid is not the one that wrote <stored-token>. 1 in
+# every other case, including the two "cannot tell" cases, which must fail closed toward "still
+# the original holder" rather than toward "recycled": an unreadable/empty stored token (nothing
+# to compare against) and a failed recomputation of <pid>'s CURRENT token (a /proc read or `ps`
+# fork can fail transiently for a perfectly live pid). Treating either failure as proof of
+# recycling is the defect issue #177 named in pg_harvest_claimed's and st_inflight's own copies
+# of this comparison: an empty recomputed token compared unequal to a valid stored one, so a
+# live, correctly-identified holder read as dead. Liveness must be positively DISPROVED, never
+# inferred from a failed measurement (gate #148 r8 P0, applied here to every reader of this
+# shape: pg_dirlock_reclaim_dead, pg_harvest_claimed's no-flock branch, and st_inflight in
+# bin/oracle-review.sh).
+pg_pid_recycled() {
+  local pid="$1" tok="$2" cur
+  [ -n "$tok" ] || return 1
+  cur="$(pg_pid_token "$pid" 2>/dev/null || true)"
+  [ -n "$cur" ] || return 1
+  [ "$tok" != "$cur" ]
+}
+
+pg_lock() {
+  local lockfile="$1" wait_s="${2:-2400}"
+  if pg_have flock; then
+    # Braces scope 2>/dev/null to the exec itself — a bare `exec 9>f 2>/dev/null`
+    # permanently redirects the CALLER's stderr to /dev/null (v0.11 bug: every engine
+    # log line after the first pg_lock call was silently discarded).
+    if { exec 9>>"$lockfile"; } 2>/dev/null; then
+      flock -w "$wait_s" 9; return $?
+    fi
+    return 0   # unwritable lock path -> proceed unlocked (preserves prior behavior)
+  fi
+  local lockdir="${lockfile}.d" start spins=0 max_spins
+  start=$(date +%s)
+  # A successful reclaim is not a wait: it retries mkdir at once, spending neither the sleep below
+  # nor the wait bound beside it. That is progress only while it is finite, so the reclaim path
+  # carries its own bound, exactly as pg_reservation_guard_acquire's does and for the same reason
+  # (#189). Without one, sustained reclaim-success with mkdir still failing -- the pathological
+  # alternation of dead owners, another process re-creating this pathname between our reclaim and
+  # our mkdir -- retried forever at 100% CPU and never honoured wait_s at all.
+  #
+  # The counter is the ONLY bound on that path, deliberately, and an elapsed check does NOT belong
+  # beside it: it would throw away a reclaim that had just succeeded, and the free lock with it.
+  # A directory orphaned between its mkdir and its owner record is reclaimable only once it has
+  # sat unmarked for PRO_GATE_DIRLOCK_ORPHAN_GRACE (default 5s), which a waiter reaches one sleep
+  # AFTER a stock 5s budget has already run out -- so the reclaim that recovers a crashed run is
+  # routinely the late one. It acquired the lock before this change and it must keep acquiring it;
+  # crash recovery is the case this whole branch exists for. Reproduced at the shipped 5s/5s
+  # defaults during review, with a regression test beside the spin test.
+  #
+  # Sized off wait_s but computed from a SANITIZED copy, never by overwriting wait_s: the value
+  # arrives from operator env knobs (PRO_GATE_CHANGE_LOCK_WAIT and friends) and is handed to
+  # `flock -w` above, so it must keep behaving exactly as it does today. `10#` forces base ten --
+  # a zero-padded budget like `08` is not a valid OCTAL literal, and bash aborts the whole function
+  # on that arithmetic error, refusing even an uncontended lock. The digit clamp keeps an absurd
+  # budget from overflowing int64 into a NEGATIVE bound, which would compare true on the first
+  # reclaim and refuse a lock whose owner is provably dead. Both were caught in review, both are
+  # regressions this bound would otherwise have introduced, and both have their own test.
+  max_spins="$wait_s"; case "$max_spins" in ''|*[!0-9]*) max_spins=2400;; esac
+  [ "${#max_spins}" -le 9 ] || max_spins=2400
+  max_spins=$(( 10#$max_spins * 100 + 100 ))
+  while ! mkdir "$lockdir" 2>/dev/null; do
+    # The old inline reclaim read the owner pid, and on a dead one rm -rf'd the directory and
+    # retried. Three things were wrong with it and all three are the reclaimer's job now:
+    # two waiters reading the same dead pid could both remove and both enter; rm -rf could
+    # take a REPLACEMENT directory a live winner had already created; and the token written
+    # on the line below was never read back, so a recycled pid read as the original owner.
+    # Racing this is safe -- reclaiming is not the mutual exclusion, mkdir is, and the loser
+    # of that simply comes round again.
+    if pg_dirlock_reclaim_dead "$lockdir" 2>/dev/null; then
+      spins=$(( spins + 1 ))
+      [ "$spins" -ge "$max_spins" ] && return 1
+    else
+      [ $(( $(date +%s) - start )) -ge "$wait_s" ] && return 1
+      sleep 2
+    fi
+  done
+  echo "$$" > "$lockdir/pid" 2>/dev/null || true
+  pg_pid_token "$$" > "$lockdir/token" 2>/dev/null || true
+  pg_on_exit 'pg_dirlock_release_own "'"$lockdir"'" "'"$$"'"'
+  return 0
+}
+
+# Counting semaphore — acquire one of $maxn slots ("<base>.slotN"), so up to N reviews share the
+# single ChatGPT account concurrently (the account tolerates several parallel chats; this just
+# bounds it). Returns 0 with a slot HELD until the process exits, 1 on timeout. flock-based on Linux
+# (the winning fd is kept open and auto-released on exit); mkdir-spinlock fallback on macOS scans N
+# slot dirs and self-heals stale ones via the dead-pid check. maxn<=1 is plain mutual exclusion.
+pg_lock_n() {
+  local base="$1" maxn="${2:-1}" wait_s="${3:-2400}" exclude="${4:-}" start i fd lockdir
+  [ "${maxn:-1}" -ge 1 ] 2>/dev/null || maxn=1
+  # v0.20.3: report WHICH slot was won (durable reservations must remember their slot so fresh
+  # runs exclude it instead of shrinking the scan range, which overbooked real capacity), and
+  # optionally skip reserved slot numbers ($4, space-separated).
+  PG_SLOT_ACQUIRED=""
+  start=$(date +%s)
+  if pg_have flock; then
+    while :; do
+      i=1
+      while [ "$i" -le "$maxn" ]; do
+        case " $exclude " in *" $i "*) i=$((i + 1)); continue;; esac
+        # Braces scope 2>/dev/null to the exec (same stderr-nuking bug class as pg_lock).
+        if { exec {fd}>>"${base}.slot${i}"; } 2>/dev/null && flock -n "$fd"; then
+          PG_SLOT_ACQUIRED="$i"
+          return 0   # keep $fd OPEN (do not close) -> slot held until this process exits
+        fi
+        [ -n "${fd:-}" ] && eval "exec ${fd}>&-" 2>/dev/null
+        i=$((i + 1))
+      done
+      [ $(( $(date +%s) - start )) -ge "$wait_s" ] && return 1
+      sleep 3
+    done
+  fi
+  # macOS / no flock: atomic mkdir over N slot dirs (self-heals dirs left by dead pids)
+  while :; do
+    i=1
+    while [ "$i" -le "$maxn" ]; do
+      case " $exclude " in *" $i "*) i=$((i + 1)); continue;; esac
+      lockdir="${base}.slot${i}.d"
+      if mkdir "$lockdir" 2>/dev/null; then
+        echo "$$" > "$lockdir/pid" 2>/dev/null || true
+        pg_pid_token "$$" > "$lockdir/token" 2>/dev/null || true
+        pg_on_exit 'pg_dirlock_release_own "'"$lockdir"'" "'"$$"'"'
+        PG_SLOT_ACQUIRED="$i"
+        return 0
+      fi
+      # Same hardened reclaimer as pg_lock and the reservation guard; see the note there.
+      pg_dirlock_reclaim_dead "$lockdir" 2>/dev/null || true
+      i=$((i + 1))
+    done
+    [ $(( $(date +%s) - start )) -ge "$wait_s" ] && return 1
+    sleep 3
+  done
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Reliability (v0.1.1): don't burn a precious Pro review slot into a broken box,
+# salvage a review whose connection dropped, and gate before retrying.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Seconds the oracle-chrome service has been continuously active (systemd only).
+# Echoes 0 when the service is down, and 999999 when uptime isn't applicable/knowable
+# (macOS native, no systemd, or unparseable) so callers don't gate on it spuriously.
+pg_service_uptime() {
+  [ "$(pg_service_mgr)" = systemd ] || { echo 999999; return; }
+  systemctl is-active --quiet oracle-chrome.service 2>/dev/null || { echo 0; return; }
+  local t act now
+  t=$(systemctl show oracle-chrome.service -p ActiveEnterTimestamp --value 2>/dev/null)
+  [ -n "$t" ] || { echo 999999; return; }
+  act=$(date -d "$t" +%s 2>/dev/null) || { echo 999999; return; }
+  now=$(date +%s)
+  echo $(( now - act ))
+}
+
+# Memory/swap headroom. Returns 0 with enough room to run a heavy browser review;
+# 1 + a one-line reason on stdout when the box is genuinely starved. Deliberately
+# conservative (low false-positive): a full swap with ample free RAM does NOT block.
+# Thresholds: PRO_GATE_MIN_AVAIL_MB (default 1024), PRO_GATE_MAX_SWAP_PCT (default 97).
+pg_mem_headroom_ok() {
+  pg_have free || return 0   # can't measure (e.g. macOS) -> never block
+  local avail swap_total swap_used min_avail max_swap_pct pct
+  min_avail="${PRO_GATE_MIN_AVAIL_MB:-1024}"
+  max_swap_pct="${PRO_GATE_MAX_SWAP_PCT:-97}"
+  avail=$(free -m | awk '/^Mem:/{print $7}')
+  swap_total=$(free -m | awk '/^Swap:/{print $2}')
+  swap_used=$(free -m | awk '/^Swap:/{print $3}')
+  if [ "${avail:-0}" -lt "$min_avail" ]; then
+    echo "available memory ${avail:-0}MB < ${min_avail}MB"; return 1
+  fi
+  if [ "${swap_total:-0}" -gt 0 ]; then
+    pct=$(( swap_used * 100 / swap_total ))
+    if [ "$pct" -ge "$max_swap_pct" ] && [ "${avail:-0}" -lt $(( min_avail * 2 )) ]; then
+      echo "swap ${pct}% used with only ${avail}MB free RAM — box is thrashing"; return 1
+    fi
+  fi
+  return 0
+}
+
+# pg_mem_status: one-line human memory snapshot for user-facing messages (e.g. "1234MB free RAM,
+# swap 94% used"). Empty when free(1) is unavailable (e.g. macOS). Never blocks anything.
+pg_mem_status() {
+  pg_have free || return 0
+  local avail swap_total swap_used tail=""
+  avail=$(free -m | awk '/^Mem:/{print $7}')
+  swap_total=$(free -m | awk '/^Swap:/{print $2}')
+  swap_used=$(free -m | awk '/^Swap:/{print $3}')
+  [ "${swap_total:-0}" -gt 0 ] && tail=", swap $(( swap_used * 100 / swap_total ))% used"
+  echo "${avail:-?}MB free RAM${tail}"
+}
+
+# pg_mem_pressure_note: 0 + a one-line advisory on stdout when the box is under memory pressure but
+# NOT starved enough for pg_mem_headroom_ok to block — a heavy browser review may still destabilize
+# on a small machine. Returns 1 (no output) with ample headroom, no swap, or no measurement.
+# Soft threshold: PRO_GATE_SWAP_WARN_PCT (default 80). Advisory only; never blocks a run.
+pg_mem_pressure_note() {
+  pg_have free || return 1
+  local avail swap_total swap_used warn pct
+  warn="${PRO_GATE_SWAP_WARN_PCT:-80}"
+  avail=$(free -m | awk '/^Mem:/{print $7}')
+  swap_total=$(free -m | awk '/^Swap:/{print $2}')
+  swap_used=$(free -m | awk '/^Swap:/{print $3}')
+  [ "${swap_total:-0}" -gt 0 ] || return 1
+  pct=$(( swap_used * 100 / swap_total ))
+  [ "$pct" -ge "$warn" ] || return 1
+  echo "memory is tight (${avail:-?}MB free RAM, swap ${pct}% used); a long Pro review may destabilize the browser on a low-memory machine"
+}
+
+# pg_browser_restarted_midrun <run_start_epoch>: 0 (+ the service uptime on stdout) when the
+# remote-chrome service (re)started AFTER this run began — i.e. it restarted mid-review, which
+# loses the CDP tab and is almost always memory pressure on a small box. Returns 1 otherwise, and
+# for native mode (no managed service). Diagnosis only: the run has already failed by the time this
+# is consulted.
+pg_browser_restarted_midrun() {
+  local run_start="$1" up dur
+  [ "$(pg_browser_mode)" = remote-chrome ] || return 1
+  case "$run_start" in ''|*[!0-9]*) return 1 ;; esac
+  dur=$(( $(date +%s) - run_start ))
+  up="$(pg_service_uptime)"
+  case "$up" in ''|*[!0-9]*) return 1 ;; esac
+  # up==0 means the service is DOWN right now (pg_service_uptime's inactive sentinel), a different
+  # failure than a mid-run restart — don't misreport a down/looping service as an OOM restart.
+  { [ "$up" -gt 0 ] && [ "$up" -lt "$dur" ]; } || return 1
+  echo "$up"
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# #212 step 2: cgroup-scoped browser memory sentinel. pg_mem_headroom_ok above is host-wide
+# (free -m) and cannot see a cgroup MemoryHigh/MemoryMax throttle while host RAM is idle — the
+# exact failure mode measured on PR #209 rounds 4-5 (2026-09-18: VmHWM 7.63 GiB, cgroup 8.42/8.59
+# GB). daemon/run-oracle-chrome.sh has no functions and top-level side effects (set -euo
+# pipefail), so all decision logic lives here (source-safe) and the daemon only backgrounds the
+# loop.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# pg_cgroup_mem_pct <cgroup-dir>: echoes memory.current as an integer percent of the effective
+# memory limit in a cgroup v2 directory. The effective limit is the SMALLER finite positive value
+# of memory.high and memory.max (gate r2 P2, v0.53.0): memory.max is enforced on its own -- it is
+# where the kernel OOM-kills -- so an operator MemoryHigh drop-in above the shipped MemoryMax must
+# not hide the hard line (current 3.5 GiB, high 8 GiB, max 4 GiB is 87% of what can kill, not
+# 43%). The literal "max" (or a missing/unreadable file) means that file names no limit. Echoes
+# nothing and returns 0 (fail-open) when the directory or memory.current is missing/non-numeric,
+# or neither file names a positive limit -- never divides by zero, never errors.
+pg_cgroup_mem_pct() {
+  local dir="$1" cur high max lim='' v
+  [ -n "$dir" ] && [ -d "$dir" ] || return 0
+  cur="$(cat "$dir/memory.current" 2>/dev/null)" || return 0
+  case "$cur" in ''|*[!0-9]*) return 0 ;; esac
+  high="$(cat "$dir/memory.high" 2>/dev/null || echo max)"
+  max="$(cat "$dir/memory.max" 2>/dev/null || echo max)"
+  for v in "$high" "$max"; do
+    case "$v" in ''|*[!0-9]*) continue ;; esac
+    [ "$v" -gt 0 ] 2>/dev/null || continue
+    if [ -z "$lim" ] || [ "$v" -lt "$lim" ]; then lim="$v"; fi
+  done
+  [ -n "$lim" ] || return 0
+  echo $(( cur * 100 / lim ))
+  return 0
+}
+
+# pg_browser_cgroup_dir: echoes this process's cgroup v2 directory under /sys/fs/cgroup, or the
+# PRO_GATE_CGROUP_PATH override (tests). Echoes nothing on a v1 host (/proc/self/cgroup has more
+# than the single unified "0::/path" line) or any parse failure -- fail-open, the sampler simply
+# never arms.
+pg_browser_cgroup_dir() {
+  [ -n "${PRO_GATE_CGROUP_PATH:-}" ] && { echo "$PRO_GATE_CGROUP_PATH"; return 0; }
+  [ -r /proc/self/cgroup ] || return 0
+  local n line path
+  n="$(wc -l < /proc/self/cgroup 2>/dev/null)"
+  case "$n" in ''|*[!0-9]*) return 0 ;; esac
+  [ "$n" -eq 1 ] || return 0
+  line="$(cat /proc/self/cgroup 2>/dev/null)"
+  case "$line" in
+    0::/*) path="${line#0::}" ;;
+    *) return 0 ;;
+  esac
+  echo "/sys/fs/cgroup${path}"
+}
+
+# pg_browser_mem_sampler_tick <cgroup-dir>: one sample. Reads pg_cgroup_mem_pct, keeps a
+# consecutive-high-sample counter in $PRO_GATE_HOME/.browser-mem-streak, and atomically writes
+# (tmp + mv) $PRO_GATE_HOME/browser.memory-pressure ("<pct> <epoch>", one line) once TWO
+# consecutive samples are at/above PRO_GATE_BROWSER_MEM_PRESSURE_PCT (default 85). A sample below
+# the threshold (or no pct available -- fail-open) resets the counter and removes the sentinel.
+# No-op (returns 0) when PRO_GATE_HOME is unset. Never errors.
+pg_browser_mem_sampler_tick() {
+  local cgroup_dir="$1" home sentinel state threshold pct streak
+  home="${PRO_GATE_HOME:-}"
+  [ -n "$home" ] || return 0
+  sentinel="$home/browser.memory-pressure"
+  state="$home/.browser-mem-streak"
+  threshold="${PRO_GATE_BROWSER_MEM_PRESSURE_PCT:-85}"
+  case "$threshold" in ''|*[!0-9]*) threshold=85 ;; esac
+  pct="$(pg_cgroup_mem_pct "$cgroup_dir" 2>/dev/null)"
+  streak="$(cat "$state" 2>/dev/null)"
+  case "$streak" in ''|*[!0-9]*) streak=0 ;; esac
+  if [ -n "$pct" ] && [ "$pct" -ge "$threshold" ] 2>/dev/null; then
+    streak=$(( streak + 1 ))
+    if [ "$streak" -ge 2 ]; then
+      { printf '%s %s\n' "$pct" "$(date +%s)" > "$sentinel.tmp.$$" && mv -f "$sentinel.tmp.$$" "$sentinel"; } 2>/dev/null || true
+    fi
+  else
+    streak=0
+    rm -f "$sentinel" 2>/dev/null || true
+  fi
+  { printf '%s' "$streak" > "$state.tmp.$$" && mv -f "$state.tmp.$$" "$state"; } 2>/dev/null || true
+  return 0
+}
+
+# pg_browser_mem_sampler_loop <cgroup-dir>: runs pg_browser_mem_sampler_tick every
+# PRO_GATE_BROWSER_MEM_SAMPLE_SECS seconds (default 5), forever, in the caller's process -- meant
+# to be backgrounded (`pg_browser_mem_sampler_loop & PID=$!`) by daemon/run-oracle-chrome.sh for
+# the life of the browser. Clears any leftover .browser-mem-streak/browser.memory-pressure from a
+# prior invocation before its first tick, so a restarted daemon (crash/deploy/manual restart)
+# always starts its 2-consecutive-sample count from zero rather than combining a leftover streak
+# with one fresh sample (review finding P1 #1). Backgrounds each sleep so a TERM/INT received
+# between samples kills the sleep immediately instead of leaving it as an orphan (review finding
+# P2 #2). Exits quietly on any error; never propagates a failure to the caller (that script runs
+# under set -e and must not die because a sample failed).
+pg_browser_mem_sampler_loop() {
+  local cgroup_dir="$1" secs home sleep_pid
+  secs="${PRO_GATE_BROWSER_MEM_SAMPLE_SECS:-5}"
+  case "$secs" in ''|*[!0-9]*) secs=5 ;; esac
+  [ "$secs" -ge 1 ] 2>/dev/null || secs=5
+  home="${PRO_GATE_HOME:-}"
+  if [ -n "$home" ]; then
+    rm -f "$home/.browser-mem-streak" "$home/browser.memory-pressure" 2>/dev/null || true
+  fi
+  trap '[ -n "${sleep_pid:-}" ] && kill "$sleep_pid" 2>/dev/null; [ -n "$home" ] && rm -f "$home/browser.memory-sampler" 2>/dev/null; exit 0' TERM INT
+  while :; do
+    pg_browser_mem_sampler_tick "$cgroup_dir" 2>/dev/null || true
+    pg_browser_mem_sampler_heartbeat 2>/dev/null || true
+    sleep "$secs" 2>/dev/null &
+    sleep_pid=$!
+    wait "$sleep_pid" 2>/dev/null || return 0
+  done
+}
+
+# pg_browser_mem_sampler_heartbeat: the loop above stamps $PRO_GATE_HOME/browser.memory-sampler
+# ("<pid> <epoch>", tmp + mv) after every sample and removes it when it exits on TERM/INT, so
+# "no pressure" can be told apart from "no sampler" (gate r3 P2, v0.53.0): an upgrade replaces the
+# browser wrapper on disk but never restarts a running browser, so the sampler only starts with
+# the next oracle-chrome.service start. Best-effort, never errors.
+pg_browser_mem_sampler_heartbeat() {
+  local home="${PRO_GATE_HOME:-}" f tmp
+  [ -n "$home" ] && [ -d "$home" ] || return 0
+  # gate r4 P2: the wrapper launches the loop as "( ... ) &", where $$ is still the WRAPPER's pid,
+  # so a stamp of $$ made the reader monitor the wrapper and call a SIGKILLed sampler "live" for
+  # the whole freshness window. BASHPID is the subshell's own pid (bash >= 4; $$ is the fallback
+  # on a bash 3.2 host, where the wrapper never runs anyway). Contrast the reservation guard's
+  # owner record, which refuses to guess on a shell without BASHPID because every shell reaches
+  # it; this stamp has exactly one caller, the Linux-only browser wrapper, so the fallback is
+  # unreachable rather than dangerous.
+  local self="${BASHPID:-$$}"
+  f="$home/browser.memory-sampler"; tmp="$f.tmp.$self"
+  { printf '%s %s\n' "$self" "$(date +%s)" > "$tmp" 2>/dev/null && mv -f "$tmp" "$f" 2>/dev/null; } || rm -f "$tmp" 2>/dev/null
+  return 0
+}
+
+# pg_browser_mem_sampler_state: one line on stdout and rc 0 when the sampler's heartbeat is fresh
+# (within four sample intervals, at least 20s) and its pid is alive: "live (pid N, last sample Ns
+# ago)". Otherwise rc 1 with "absent", "stale (...)" or "dead (...)". Read by the doctor; the
+# health gate deliberately does NOT consult it (a missing sampler must stay fail-open). Known
+# limit: a loop killed with SIGKILL leaves its last stamp, and if the kernel recycles that pid
+# for an unrelated process inside the freshness window (20 s by default) the reader says live
+# for the rest of that window; the next doctor run corrects it.
+pg_browser_mem_sampler_state() {
+  local f="${PRO_GATE_HOME:-}/browser.memory-sampler" secs win mt age pid
+  [ -n "${PRO_GATE_HOME:-}" ] && [ -f "$f" ] || { echo absent; return 1; }
+  secs="${PRO_GATE_BROWSER_MEM_SAMPLE_SECS:-5}"; case "$secs" in ''|*[!0-9]*) secs=5 ;; esac
+  win=$(( secs * 4 )); [ "$win" -ge 20 ] || win=20
+  mt="$(stat -c %Y "$f" 2>/dev/null || stat -f %m "$f" 2>/dev/null || echo 0)"
+  age=$(( $(date +%s) - mt ))
+  pid="$(awk '{print $1}' "$f" 2>/dev/null)"
+  if [ "$age" -lt 0 ] || [ "$age" -ge "$win" ]; then echo "stale (last sample ${age}s ago, pid ${pid:-?})"; return 1; fi
+  case "$pid" in ''|*[!0-9]*) echo "stale (unreadable pid, last sample ${age}s ago)"; return 1 ;; esac
+  if ! kill -0 "$pid" 2>/dev/null; then echo "dead (pid ${pid} exited, last sample ${age}s ago)"; return 1; fi
+  echo "live (pid ${pid}, last sample ${age}s ago)"
+  return 0
+}
+
+# pg_browser_mem_pressure: 1 + a one-line typed reason on stdout when the sampler above has a
+# fresh browser.memory-pressure sentinel (mtime within PRO_GATE_BROWSER_MEM_PRESSURE_TTL seconds,
+# default 60) -- i.e. the browser's own cgroup has been at/above the pressure threshold for two
+# consecutive samples recently. Returns 0 silently (no output) when the sentinel is missing or
+# stale. Mirrors pg_mem_headroom_ok's return convention (0 = fine, 1 + reason = block) and
+# pg_cooldown_remaining_secs' mtime-age idiom (lib:526).
+pg_browser_mem_pressure() {
+  local sentinel ttl mt age pct
+  sentinel="${PRO_GATE_HOME:-}/browser.memory-pressure"
+  [ -n "${PRO_GATE_HOME:-}" ] && [ -f "$sentinel" ] || return 0
+  ttl="${PRO_GATE_BROWSER_MEM_PRESSURE_TTL:-60}"
+  case "$ttl" in ''|*[!0-9]*) ttl=60 ;; esac
+  mt="$(stat -c %Y "$sentinel" 2>/dev/null || stat -f %m "$sentinel" 2>/dev/null || echo 0)"
+  age=$(( $(date +%s) - mt ))
+  [ "$age" -ge 0 ] && [ "$age" -lt "$ttl" ] || return 0
+  pct="$(awk '{print $1}' "$sentinel" 2>/dev/null)"
+  echo "browser cgroup memory at ${pct:-?}% for 2+ consecutive samples (sentinel ${age}s old) — deferring the slot, no quota spent"
+  return 1
+}
+
+# pg_cooldown_active: 0 + a one-line reason on stdout while the account back-off cooldown is
+# live (v0.18: written by cdp-salvage on the "requests too quickly / temporarily limited"
+# throttle interstitial, and by oracle-review.sh on a Cloudflare anti-bot challenge).
+# Submitting (or even salvage-rendering) during the cooldown deepens the block. Age-based: the
+# file expires by mtime, no cleanup needed. GNU stat || BSD stat. Checked alone by --harvest
+# (which spends nothing, so box-fitness gates don't apply) and inside pg_health_gate.
+pg_cooldown_active() {
+  local cdf left
+  cdf="${PRO_GATE_COOLDOWN_FILE:-$PRO_GATE_HOME/throttle.cooldown}"
+  left="$(pg_cooldown_remaining_secs)"
+  [ "$left" -gt 0 ] 2>/dev/null || return 1
+  echo "ChatGPT account back-off cooldown active (${left}s left; throttle/cloudflare; rm $cdf to override)"
+}
+# pg_cooldown_remaining_secs: whole seconds left on that cooldown, 0 when none is active. The
+# typed review decision carries this number (#162) so a wrapper can wait it out instead of
+# re-querying blindly; pg_cooldown_active derives its one-line reason from the same clock.
+pg_cooldown_remaining_secs() {
+  local cdf cds mt age
+  cdf="${PRO_GATE_COOLDOWN_FILE:-$PRO_GATE_HOME/throttle.cooldown}"
+  cds="${PRO_GATE_THROTTLE_COOLDOWN:-900}"
+  case "$cds" in ''|*[!0-9]*) cds=900;; esac
+  [ -f "$cdf" ] || { echo 0; return 0; }
+  mt="$(stat -c %Y "$cdf" 2>/dev/null || stat -f %m "$cdf" 2>/dev/null || echo 0)"
+  age=$(( $(date +%s) - mt ))
+  if [ "$age" -ge 0 ] && [ "$age" -lt "$cds" ]; then echo $(( cds - age )); else echo 0; fi
+}
+
+# pg_health_gate: call right before spending a Pro review slot (and before each retry).
+# Returns 0 when the box is fit to spend a slot; 1 + a one-line reason on stdout otherwise.
+# Only blocks on signals that actually cause wasted slots (unreachable/just-restarted Chrome,
+# genuine memory starvation, an account-level ChatGPT throttle) — not on transient noise.
+pg_health_gate() {
+  local mode port min_uptime up reason
+  mode="$(pg_browser_mode)"; port="${ORACLE_BROWSER_PORT:-9222}"
+  min_uptime="${PRO_GATE_MIN_UPTIME:-60}"
+  if reason="$(pg_cooldown_active)"; then echo "$reason"; return 1; fi
+  if [ "$mode" = remote-chrome ]; then
+    pg_cdp_heal || { echo "Chrome CDP unreachable on :${port} (self-heal failed or disabled)"; return 1; }
+    up="$(pg_service_uptime)"
+    if [ "${up:-999999}" -lt "$min_uptime" ]; then
+      echo "oracle-chrome only ${up}s up (<${min_uptime}s) — just restarted/flapping"; return 1
+    fi
+  fi
+  if ! reason="$(pg_mem_headroom_ok)"; then echo "$reason"; return 1; fi
+  if ! reason="$(pg_browser_mem_pressure)"; then echo "$reason"; return 1; fi
+  return 0
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# v0.19: self-healing + run ledger + adaptive concurrency ("ramp")
+# ─────────────────────────────────────────────────────────────────────────────
+
+# pg_cdp_heal: return 0 when Chrome CDP is reachable, attempting ONE non-interactive
+# service start first if it is not (passwordless sudo only — silently a no-op without it,
+# and never on macOS/native where oracle drives the user's own Chrome). A healed Chrome
+# still trips the min-uptime gate above by design: don't submit into a cold browser; the
+# caller (daemon next cycle, or the engine's defer/retry) comes back a minute later.
+# Disable with PRO_GATE_SELF_HEAL=0.
+pg_cdp_heal() {
+  local port="${ORACLE_BROWSER_PORT:-9222}"
+  curl -sf "localhost:${port}/json/version" >/dev/null 2>&1 && return 0
+  [ "${PRO_GATE_SELF_HEAL:-1}" = 1 ] || return 1
+  [ "$(pg_service_mgr)" = systemd ] || return 1
+  echo "[pro-gate] Chrome CDP down on :${port} — self-heal: sudo -n systemctl start oracle-chrome" >&2
+  sudo -n systemctl start oracle-chrome.service >/dev/null 2>&1 || true
+  sleep "${PRO_GATE_SELF_HEAL_WAIT:-10}"
+  curl -sf "localhost:${port}/json/version" >/dev/null 2>&1
+}
+
+# v0.20: durable reservations for reviews whose wrapper budget ended while ChatGPT is still
+# generating. Process-owned flock slots disappear when exit 9 releases the engine; without a
+# durable reservation, a second run immediately under-counts real live Pro tabs and can double-
+# spend the same PR. One file per marker survives the process:
+#   $PRO_GATE_HOME/in-progress/<marker> = "pr<TAB>out<TAB>created_epoch<TAB>miss_streak<TAB>slot<TAB>model"
+# Fresh runs reconcile files via marker probes and subtract the count from effective semaphore
+# capacity. Live resets the miss streak; throttle/inconclusive stays fail-closed; only several
+# consecutive confirmed absences release the reservation before TTL.
+# Harvest success/lost removes the file. Writes/removes serialize under one flock/mkdir lock.
+pg_reservation_dir() { echo "${PRO_GATE_RESERVATION_DIR:-$PRO_GATE_HOME/in-progress}"; }
+# v0.28: change-manifest sidecars (the diff's file list, for provenance checks) live in their
+# OWN directory — NOT inside in-progress/. Every reservation enumerator globs that directory
+# and the marker validator accepts dots, so a "<marker>.paths" file there read as a legacy
+# reservation: slot planning counted it, and reconciliation probed it and rewrote it as a miss
+# record, destroying the manifest (gate #54 P1).
+pg_manifest_dir() { echo "${PRO_GATE_MANIFEST_DIR:-$PRO_GATE_HOME/manifests}"; }
+# v0.42 (#109): per-marker record of what the salvage helper concluded on its LATEST pass, so
+# --status can name a stall (owned-incomplete, inconclusive, browser-down, absent, cross-bound,
+# throttle, terminal, terminal-infrastructure) instead of one word for every unresolved
+# attempt. A sidecar directory, not a reservation column: the record's tab-separated column count
+# is fragile (the per-field reads above exist because `read` collapses empty columns). The kind is
+# the closed vocabulary the helper prints as `evidence-kind: <kind>`; anything else is dropped.
+# pg_salvage_class_ok is the single allowlist gating both the writer and the reader, so a
+# malformed or unrecognized sidecar can never be read back as a valid classification.
+# Swept with the same 14-day hygiene as conversation memos. Observation only — nothing reads this
+# to decide release, refund, or admission.
+pg_salvage_class_dir() { printf '%s\n' "${PRO_GATE_SALVAGE_CLASS_DIR:-$PRO_GATE_HOME/salvage-class}"; }
+pg_salvage_class_ok() { # kind
+  case "$1" in
+    owned-incomplete|inconclusive|browser-down|absent|cross-bound|throttle|terminal|terminal-infrastructure|template-verdict) return 0;;
+    *) return 1;;
+  esac
+}
+pg_salvage_class_write() { # marker kind
+  local marker="$1" kind="$2" dir tmp
+  pg_reservation_marker_ok "$marker" || return 1
+  pg_salvage_class_ok "$kind" || return 1
+  dir="$(pg_salvage_class_dir)"; mkdir -p "$dir" 2>/dev/null || return 1
+  tmp="$dir/$marker.tmp.$$"
+  printf '%s\t%s\n' "$kind" "$(date +%s)" > "$tmp" 2>/dev/null && mv -f "$tmp" "$dir/$marker" 2>/dev/null
+}
+pg_salvage_class_read() { # marker -> "kind<TAB>epoch" (empty and rc 1 when absent or malformed)
+  local marker="$1" f line kind epoch
+  pg_reservation_marker_ok "$marker" || return 1
+  f="$(pg_salvage_class_dir)/$marker"; [ -s "$f" ] || return 1
+  line="$(head -n1 "$f" 2>/dev/null | awk -F'\t' 'NF==2 {print $1 "\t" $2}')"
+  [ -n "$line" ] || return 1
+  kind="${line%%$'\t'*}"
+  epoch="${line#*$'\t'}"
+  pg_salvage_class_ok "$kind" || return 1
+  case "$epoch" in
+    ''|*[!0-9]*) return 1;;
+  esac
+  printf '%s\t%s\n' "$kind" "$epoch"
+}
+
+pg_reservation_lock() { echo "${PRO_GATE_RESERVATION_LOCK:-$PRO_GATE_HOME/in-progress.lock}"; }
+# The collection wait every operator-facing hint prints. It lives here, not in the engine, because
+# the library prints hints too (pg_report_capacity_holders): v0.41 sized the engine's hints but
+# left this one at the old fixed 20m, and the test that guards the sizing grepped only the engine,
+# so the drift was invisible. One helper, one default, every renderer.
+pg_harvest_hint_timeout() { echo "${PRO_GATE_HARVEST_TIMEOUT:-45m}"; }
+# The fresh review's hard cap, sibling of the above. The engine needs this value in two places
+# ~3000 lines apart -- the run's own --timeout default and the change-lock budget's holder
+# envelope -- and a second literal is exactly how the 20m harvest default drifted out of sync
+# and survived a passing test. One helper, one default, every reader.
+pg_fresh_hint_timeout() { echo "${PRO_GATE_TIMEOUT:-60m}"; }
+
+# A plain-integer knob, or the default when it is anything else. The change-lock budget feeds
+# several operator-settable knobs straight into $(( )), where a duration-style typo is not a
+# small error: under `set -e` an arithmetic abort kills the whole run before any lock is taken.
+# .env.example documents 60m/45m durations a few lines from these second-valued knobs, so
+# PRO_GATE_TIMEOUT_GRACE=2m is an invited mistake rather than a hostile one. This is the same
+# idiom PRO_GATE_RESERVATION_TTL already uses in three places; one helper so every budget term
+# gets it instead of two of six.
+pg_int_or() {
+  case "${1:-}" in ''|*[!0-9]*) printf '%s\n' "$2" ;; *) printf '%s\n' "$1" ;; esac
+}
+# Markers become filenames under PRO_GATE_HOME and lock paths; every character must be from the
+# safe class (in particular no "/" anywhere), not just the first one after the prefix.
+pg_reservation_marker_ok() {
+  case "${1:-}" in
+    pg-run-?*) case "$1" in *[!A-Za-z0-9.-]*) return 1;; *) return 0;; esac;;
+    *) return 1;;
+  esac
+}
+
+# Recovery identity must retain the canonical host/owner/repo triple. ROUND_KEY's historic
+# owner-repo slug is deliberately NOT reversible: a-b/c and a/b-c both become a-b-c.
+pg_run_meta_dir() { echo "${PRO_GATE_RUN_META_DIR:-$PRO_GATE_HOME/run-meta}"; }
+pg_active_dir() { echo "${PRO_GATE_ACTIVE_DIR:-$PRO_GATE_HOME/active}"; }
+pg_canonical_repo_ok() { # host owner repo
+  local host="${1:-}" owner="${2:-}" repo="${3:-}"
+  case "$host" in ''|*[!A-Za-z0-9.-]*) return 1;; esac
+  case "$owner" in ''|*[!A-Za-z0-9._-]*) return 1;; esac
+  case "$repo" in ''|*[!A-Za-z0-9._-]*) return 1;; esac
+  return 0
+}
+pg_pr_number_normalize() { # digit-only spelling -> canonical positive decimal
+  local pr="${1:-}"
+  case "$pr" in ''|*[!0-9]*) return 1;; esac
+  while [ "${pr#0}" != "$pr" ]; do pr="${pr#0}"; done
+  [ -n "$pr" ] || return 1
+  printf '%s\n' "$pr"
+}
+pg_repo_identity_from_url() { # GitHub/Git remote URL -> host<TAB>owner<TAB>repo
+  local url="${1:-}" host owner repo
+  if [[ "$url" =~ ^https?://([^/]+)/([^/]+)/([^/]+)(/pull/[0-9]+)?/?$ ]]; then
+    host="${BASH_REMATCH[1]}"; owner="${BASH_REMATCH[2]}"; repo="${BASH_REMATCH[3]}"
+  # .git is common but optional on both SSH forms. The repo capture is greedy, so it swallows a
+  # trailing ".git" when present; the repo="${repo%.git}" strip below normalizes it either way.
+  elif [[ "$url" =~ ^git@([^:]+):([^/]+)/([^/]+)$ ]] || [[ "$url" =~ ^ssh://git@([^/]+)/([^/]+)/([^/]+)$ ]]; then
+    host="${BASH_REMATCH[1]}"; owner="${BASH_REMATCH[2]}"; repo="${BASH_REMATCH[3]}"
+  else
+    return 1
+  fi
+  repo="${repo%.git}"
+  pg_canonical_repo_ok "$host" "$owner" "$repo" || return 1
+  printf '%s\t%s\t%s\n' "$host" "$owner" "$repo"
+}
+# PR identity comes from GitHub, not the feature branch's tracking ref (#221).
+# Keep metadata acquisition separate from file-only advisory proof reads.
+pg_pr_metadata_validate() { # canonical metadata host owner repo pr
+  local json="$1" host="$2" owner="$3" repo="$4" pr="$5"
+  pg_canonical_repo_ok "$host" "$owner" "$repo" || return 1
+  pr="$(pg_pr_number_normalize "$pr")" || return 1
+  jq -e --arg host "$host" --arg owner "$owner" --arg repo "$repo" --argjson pr "$pr" '
+    def oid: type=="string" and test("^[0-9a-f]{40}([0-9a-f]{24})?$");
+    keys==["repository","target"] and
+    .repository=={host:$host,owner:$owner,repo:$repo} and
+    (.target|keys)==["base_oid","base_ref","head_oid","pr"] and
+    .target.pr==$pr and (.target.base_oid|oid) and (.target.head_oid|oid) and
+    (.target.base_ref|type=="string" and length>0 and length<=255 and
+      (test("[\u0000- \u007f]")|not))
+  ' <<<"$json" >/dev/null 2>&1
+}
+
+pg_pr_metadata_fetch() { # host owner repo pr -> canonical identity, bounded and read-only
+  local host="$1" owner="$2" repo="$3" pr="$4" raw metadata
+  local gh_bin="${PRO_GATE_GH_BIN:-gh}" timeout_bin="${PRO_GATE_TIMEOUT_BIN:-timeout}"
+  pg_canonical_repo_ok "$host" "$owner" "$repo" || return 1
+  pr="$(pg_pr_number_normalize "$pr")" || return 1
+  command -v "$gh_bin" >/dev/null 2>&1 && command -v "$timeout_bin" >/dev/null 2>&1 || return 1
+  raw="$("$timeout_bin" -k 1s 10s "$gh_bin" pr view "$pr" --repo "$host/$owner/$repo" \
+    --json number,url,state,baseRefName,baseRefOid,headRefOid)" || return 1
+  [ "${#raw}" -le 65536 ] || return 1
+  metadata="$(jq -ceS --arg host "$host" --arg owner "$owner" --arg repo "$repo" --argjson pr "$pr" '
+    select(.number==$pr and .state=="OPEN" and
+      (.url|ascii_downcase)==(("https://"+$host+"/"+$owner+"/"+$repo+"/pull/"+($pr|tostring))|ascii_downcase)) |
+    {repository:{host:$host,owner:$owner,repo:$repo},
+     target:{pr:$pr,base_ref:.baseRefName,base_oid:.baseRefOid,head_oid:.headRefOid}}
+  ' <<<"$raw")" || return 1
+  pg_pr_metadata_validate "$metadata" "$host" "$owner" "$repo" "$pr" || return 1
+  printf '%s' "$metadata"
+}
+
+pg_pr_evidence_read() { # snapshot endpoint repo host owner name pr [candidate-head] -> validated snapshot
+  local file="$1" endpoint="$2" repo="$3" host="$4" owner="$5" name="$6" pr="$7"
+  local evidence metadata digest head
+  [ -f "$file" ] && [ ! -L "$file" ] && [ "$(wc -c < "$file")" -le 65536 ] || return 1
+  [ -f "$endpoint" ] && [ ! -L "$endpoint" ] && [ "$(wc -c < "$endpoint")" -le 26214400 ] || return 1
+  evidence="$(jq -ceS '
+    select(keys==["endpoint_digest","metadata","patch_format","record_type","record_version"] and
+      .record_type=="review-pr-evidence/v1" and .record_version==1 and
+      .patch_format=="github-compare-diff" and
+      (.endpoint_digest|type=="string" and test("^[0-9a-f]{64}$")))
+  ' "$file")" || return 1
+  metadata="$(jq -cS .metadata <<<"$evidence")" || return 1
+  pg_pr_metadata_validate "$metadata" "$host" "$owner" "$name" "$pr" || return 1
+  head="${8:-}"
+  [ -n "$head" ] || head="$(git -C "$repo" rev-parse HEAD)" || return 1
+  digest="$(pg_sha256 "$endpoint")" || return 1
+  jq -e --arg head "$head" --arg digest "$digest" \
+    '.metadata.target.head_oid==$head and .endpoint_digest==$digest' <<<"$evidence" >/dev/null || return 1
+  printf '%s' "$evidence"
+}
+
+pg_pr_evidence_current() { # validated snapshot -> authoritative pre-effect check
+  local evidence="$1" metadata current host owner repo pr
+  metadata="$(jq -cS .metadata <<<"$evidence")" || return 1
+  host="$(jq -r .repository.host <<<"$metadata")"; owner="$(jq -r .repository.owner <<<"$metadata")"
+  repo="$(jq -r .repository.repo <<<"$metadata")"; pr="$(jq -r .target.pr <<<"$metadata")"
+  current="$(pg_pr_metadata_fetch "$host" "$owner" "$repo" "$pr")" || return 1
+  [ "$current" = "$metadata" ]
+}
+
+# The one canonicalization shared by every binding writer and verifier: a drift
+# between them would let a binding silently stop proving its PR identity.
+pg_pr_evidence_metadata_digest() { # validated snapshot -> pr_metadata_digest
+  local metadata
+  metadata="$(jq -ceS '.metadata|objects' <<<"$1")" || return 1
+  pg_review_sha256_text "$metadata"
+}
+
+pg_prepare_pr_evidence() ( # repo host owner name pr new-output-directory [candidate-head]
+  set -euo pipefail
+  local repo="$1" host="$2" owner="$3" name="$4" pr="$5" dest="$6" before after base head checkout_head tmp digest
+  local gh_bin="${PRO_GATE_GH_BIN:-gh}" timeout_bin="${PRO_GATE_TIMEOUT_BIN:-timeout}" claimed=false published=false
+  [ ! -e "$dest" ] && [ ! -L "$dest" ] || { echo 'ERROR: evidence output directory must be new' >&2; exit 2; }
+  # Callers use this helper in conditionals, where Bash suppresses errexit even
+  # in a subshell. Every fallible preparation/publication step must stop explicitly.
+  checkout_head="$(git -C "$repo" rev-parse HEAD)" || exit 2
+  head="${7:-$checkout_head}"
+  before="$(pg_pr_metadata_fetch "$host" "$owner" "$name" "$pr")" || {
+    echo 'ERROR: cannot establish current PR metadata; no review submitted' >&2; exit 2;
+  }
+  jq -e --arg head "$head" '.target.head_oid==$head' <<<"$before" >/dev/null || {
+    echo 'ERROR: candidate head is not the current PR head; no review submitted' >&2; exit 2;
+  }
+  mkdir -p "$(dirname "$dest")" || exit 2
+  tmp="$(mktemp -d "${dest}.prepare.XXXXXX")" || exit 2
+  # A claimed but unpublished destination is released on any exit, including a
+  # caught signal, so a failed publish never blocks the next attempt at that path.
+  trap 'rm -f "$tmp/endpoint.patch" "$tmp/pr-evidence.json"; rmdir "$tmp" 2>/dev/null || true
+    if [ "$claimed" = true ] && [ "$published" != true ]; then
+      rm -f "$dest/endpoint.patch" "$dest/pr-evidence.json"; rmdir "$dest" 2>/dev/null || true
+    fi' EXIT
+  chmod 700 "$tmp" || exit 2
+  # The mutable PR diff endpoint can lag a push while PR metadata is already
+  # current. Address the comparison by immutable commit IDs instead (#221).
+  base="$(jq -r .target.base_oid <<<"$before")" || exit 2
+  "$timeout_bin" -k 1s 30s "$gh_bin" api "repos/$owner/$name/compare/$base...$head" \
+    --hostname "$host" -H 'Accept:application/vnd.github.diff' > "$tmp/endpoint.patch" || {
+    echo 'ERROR: PR patch fetch failed; no review submitted' >&2; exit 2;
+  }
+  [ -s "$tmp/endpoint.patch" ] && [ "$(wc -c < "$tmp/endpoint.patch")" -le 26214400 ] || {
+    echo 'ERROR: PR patch is empty or exceeds the evidence limit' >&2; exit 2;
+  }
+  after="$(pg_pr_metadata_fetch "$host" "$owner" "$name" "$pr")" || exit 2
+  [ "$before" = "$after" ] && [ "$checkout_head" = "$(git -C "$repo" rev-parse HEAD)" ] || {
+    echo 'ERROR: PR head/base changed while preparing evidence; no review submitted' >&2; exit 2;
+  }
+  digest="$(pg_sha256 "$tmp/endpoint.patch")" || exit 2
+  jq -cnS --argjson metadata "$before" --arg digest "$digest" \
+    '{record_type:"review-pr-evidence/v1",record_version:1,patch_format:"github-compare-diff",metadata:$metadata,endpoint_digest:$digest}' \
+    > "$tmp/pr-evidence.json" || exit 2
+  chmod 600 "$tmp/endpoint.patch" "$tmp/pr-evidence.json" || exit 2
+  # mkdir owns publication; a concurrent preparer cannot overwrite a completed pair.
+  mkdir "$dest" || exit 2
+  claimed=true
+  chmod 700 "$dest" || exit 2
+  mv "$tmp/endpoint.patch" "$dest/endpoint.patch" || exit 2
+  mv "$tmp/pr-evidence.json" "$dest/pr-evidence.json" || exit 2
+  dest="$(cd "$dest" && pwd -P)" || exit 2
+  jq -cnS --arg endpoint "$dest/endpoint.patch" --arg snapshot "$dest/pr-evidence.json" \
+    '{endpoint_patch:$endpoint,pr_evidence:$snapshot}' || exit 2
+  published=true
+)
+
+# A compact, marker-addressed sidecar survives reservation retirement and completion:
+# host<TAB>owner<TAB>repo<TAB>round_key<TAB>pr<TAB>out<TAB>charged_spend_epoch
+# charged_spend_epoch is REQUIRED (no caller may write an uncharged/empty-spend record): the
+# only writer is the charged call site adjacent to pg_round_record, so a run-meta record's mere
+# existence proves a round was actually spent. An attempt that never reaches that charge must
+# never mint a sidecar for recovery to find.
+pg_run_meta_write() { # marker host owner repo round_key pr out charged_spend_epoch
+  local marker="$1" host="$2" owner="$3" repo="$4" key="$5" pr="$6" out="$7" spend="${8:-}" dir f
+  pg_reservation_marker_ok "$marker" || return 1
+  pg_canonical_repo_ok "$host" "$owner" "$repo" || return 1
+  pg_round_key_ok "$key" || return 1
+  pr="$(pg_pr_number_normalize "$pr")" || return 1
+  case "$key" in *-"$pr") ;; *) return 1;; esac
+  case "$marker" in "pg-run-${key}-"*) ;; *) return 1;; esac
+  case "$out" in *$'\t'*|*$'\n'*) return 1;; esac
+  case "$spend" in ''|*[!0-9]*) return 1;; esac
+  dir="$(pg_run_meta_dir)"; mkdir -p "$dir" 2>/dev/null || return 1
+  f="$dir/$marker"
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$host" "$owner" "$repo" "$key" "$pr" "$out" "$spend" > "$dir/.$marker.tmp.$$" 2>/dev/null \
+    && mv -f "$dir/.$marker.tmp.$$" "$f" 2>/dev/null
+  local rc=$?
+  rm -f "$dir/.$marker.tmp.$$" 2>/dev/null
+  return "$rc"
+}
+pg_run_meta_remove() { # marker -- retire an attempt proven never submitted/spent
+  local marker="$1"
+  pg_reservation_marker_ok "$marker" || return 0
+  rm -f "$(pg_run_meta_dir)/$marker" 2>/dev/null || true
+}
+
+pg_run_meta_read() { # marker -> one validated compact record
+  local marker="$1" f host owner repo key pr out spend
+  pg_reservation_marker_ok "$marker" || return 1
+  f="$(pg_run_meta_dir)/$marker"; [ -f "$f" ] && [ ! -L "$f" ] || return 1
+  IFS=$'\t' read -r host owner repo key pr out spend < "$f" 2>/dev/null || return 1
+  pg_canonical_repo_ok "$host" "$owner" "$repo" || return 1
+  pg_round_key_ok "$key" || return 1
+  pr="$(pg_pr_number_normalize "$pr")" || return 1
+  case "$key" in *-"$pr") ;; *) return 1;; esac
+  case "$marker" in "pg-run-${key}-"*) ;; *) return 1;; esac
+  case "$out" in *$'\t'*|*$'\n'*) return 1;; esac
+  case "$spend" in ''|*[!0-9]*) return 1;; esac
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$host" "$owner" "$repo" "$key" "$pr" "$out" "$spend"
+}
+# Shared read-only marker enumerator. Status uses it to discover sidecar-only keys; recovery
+# uses the same records rather than scraping status's human or JSON renderings.
+pg_run_meta_scan() {
+  local dir f marker rec tail
+  dir="$(pg_run_meta_dir)"; [ -d "$dir" ] || return 0
+  for f in "$dir"/pg-run-*; do
+    [ -f "$f" ] || continue
+    marker="$(basename "$f")"
+    # Belt-and-suspenders: pg_run_meta_write's own publication temp is dot-prefixed (excluded by
+    # the glob above), but LEGACY temps written by pre-fix versions were not — they land as
+    # "<valid-marker>.tmp.<pid>", which DOES match the pg-run-* glob, so skip those leftovers too
+    # rather than trust the glob alone. The check is anchored to the LAST ".tmp." and requires an
+    # all-digit tail (the pid) rather than a bare substring test: a bare `*.tmp.*` match hides any
+    # charged record whose repo/branch legitimately contains the literal ".tmp." (e.g. a repo
+    # named app.tmp.v2) from every future recovery scan forever. A real marker always ends
+    # "-<epoch>-<pid>", which can never take that "digits after the last .tmp." shape.
+    case "$marker" in
+      *.tmp.*)
+        tail="${marker##*.tmp.}"
+        case "$tail" in ''|*[!0-9]*) ;; *) continue;; esac
+        ;;
+    esac
+    pg_reservation_marker_ok "$marker" || continue
+    rec="$(pg_run_meta_read "$marker" 2>/dev/null)" || continue
+    printf '%s\t%s\n' "$marker" "$rec"
+  done
+}
+
+# A charged run-meta row is unresolved until that exact marker has durable review bytes. This is
+# lifecycle only: a terminal artifact can be stale for the caller's current code/evidence, but it
+# still proves its own attempt is no longer unknown-fate. Keep this predicate shared so public
+# decision queries and guarded dispatch rechecks cannot disagree about the same sidecar.
+pg_run_meta_has_terminal_review() { # marker
+  pg_attempt_artifact "$1" >/dev/null
+}
+
+pg_run_meta_find_latest() { # host owner repo pr terminal-filter [exclude-marker] -> newest exact marker
+  local want_host="$1" want_owner="$2" want_repo="$3" want_pr="$4" filter="${5:-any}" exclude="${6:-}"
+  local marker host owner repo key pr out spend best_marker="" best_spend="" terminal LC_ALL=C
+  pg_canonical_repo_ok "$want_host" "$want_owner" "$want_repo" || return 1
+  want_pr="$(pg_pr_number_normalize "$want_pr")" || return 1
+  case "$filter" in any|review|unresolved) ;; *) return 1;; esac
+  while IFS=$'\t' read -r marker host owner repo key pr out spend; do
+    [ "$host" = "$want_host" ] && [ "$owner" = "$want_owner" ] && [ "$repo" = "$want_repo" ] \
+      && [ "$pr" = "$want_pr" ] || continue
+    # Skipped before selection, not after: the excluded marker is often the newest record, and
+    # discarding it once chosen would hide every older one (#204 gate r1).
+    [ -n "$exclude" ] && [ "$marker" = "$exclude" ] && continue
+    terminal=false; pg_run_meta_has_terminal_review "$marker" && terminal=true
+    case "$filter:$terminal" in review:false|unresolved:true) continue;; esac
+    if [ -z "$best_spend" ] || [ "$spend" -gt "$best_spend" ] \
+      || { [ "$spend" = "$best_spend" ] && [[ "$marker" > "$best_marker" ]]; }; then
+      best_marker="$marker"; best_spend="$spend"
+    fi
+  done < <(pg_run_meta_scan)
+  [ -n "$best_marker" ] || return 1
+  printf '%s\n' "$best_marker"
+}
+
+pg_run_meta_find_unresolved() { pg_run_meta_find_latest "$1" "$2" "$3" "$4" unresolved; }
+
+pg_attempt_disposition_dir() { printf '%s\n' "${PRO_GATE_ATTEMPT_DISPOSITION_DIR:-$PRO_GATE_HOME/attempt-dispositions}"; }
+
+pg_attempt_disposition_validate() { # canonical JSON [expected marker]
+  local json="${1-}" marker="${2:-}" canonical
+  canonical="$(printf '%s' "$json" | jq -sceS 'if length==1 then .[0] else error("expected one disposition") end' 2>/dev/null)" || return 1
+  jq -e --arg marker "$marker" '. as $d |
+    ((($d|keys) == ["charged_spend_epoch","marker","observed_at","proof_kind","record_type","record_version","repository","round_key","target","terminal_kind"] and
+      $d.record_type=="review-attempt-disposition/v1" and $d.record_version==1) or
+     (($d|keys) == ["charged_spend_epoch","delivery","marker","observed_at","proof_kind","record_type","record_version","repository","round_key","target","terminal_kind"] and
+      $d.record_type=="review-attempt-disposition/v2" and $d.record_version==2 and
+      ($d.terminal_kind=="not-submitted" or
+       ($d.proof_kind=="no-conversation-after-send" and ($d.delivery|type=="object") and $d.delivery.state=="known")))) and
+    ($d.marker|type=="string" and test("^pg-run-[A-Za-z0-9.-]+$")) and ($marker=="" or $d.marker==$marker) and
+    ($d.round_key|type=="string" and test("^[A-Za-z0-9.-]+$")) and ($d.marker|startswith("pg-run-" + $d.round_key + "-")) and
+    ($d.charged_spend_epoch|type=="number" and floor==. and .>0) and
+    ($d.observed_at|type=="number" and floor==. and .>=$d.charged_spend_epoch) and
+    ($d.terminal_kind|IN("not-submitted","submitted-terminal","recovery-exhausted")) and
+    ($d.proof_kind|IN("proven-no-submit","exact-owned-infrastructure-terminal","bounded-recovery-exhausted","no-conversation-after-send")) and
+    (($d.terminal_kind=="not-submitted" and $d.proof_kind=="proven-no-submit") or
+     ($d.terminal_kind=="submitted-terminal" and $d.proof_kind=="exact-owned-infrastructure-terminal") or
+     ($d.terminal_kind=="recovery-exhausted" and ($d.proof_kind|IN("bounded-recovery-exhausted","no-conversation-after-send")))) and
+    ($d.repository|keys)==["host","owner","repo"] and
+    ($d.repository.host|test("^[A-Za-z0-9.-]+$")) and ($d.repository.owner|test("^[A-Za-z0-9._-]+$")) and ($d.repository.repo|test("^[A-Za-z0-9._-]+$")) and
+    ($d.target|keys)==["kind","pr"] and $d.target.kind=="pull-request" and ($d.target.pr|type=="number" and floor==. and .>0) and
+    ($d.round_key|endswith("-" + ($d.target.pr|tostring)))
+  ' <<<"$canonical" >/dev/null 2>&1 || return 1
+  if [ "$(jq -r .record_version <<<"$canonical")" = 2 ]; then
+    pg_delivery_snapshot_validate "$(jq -cS .delivery <<<"$canonical")" >/dev/null || return 1
+  fi
+  printf '%s' "$canonical"
+}
+
+pg_attempt_disposition_bytes() { # bounded regular-file read, also used for damaged payload inspection
+  local marker="$1" f json LC_ALL=C
+  pg_reservation_marker_ok "$marker" || return 1
+  f="$(pg_attempt_disposition_dir)/$marker"
+  [ -f "$f" ] && [ ! -L "$f" ] || return 1
+  # Bound the actual read, including growth after the file check. The sentinel preserves
+  # trailing newlines so the byte limit cannot be defeated by command substitution.
+  json="$(head -c 65537 "$f" 2>/dev/null && printf '.')" || return 1
+  json="${json%.}"
+  [ "${#json}" -le 65536 ] || return 1
+  printf '%s' "$json"
+}
+
+pg_attempt_disposition_read() { # marker -> canonical disposition
+  local marker="$1" json
+  json="$(pg_attempt_disposition_bytes "$marker")" || return 1
+  pg_attempt_disposition_validate "$json" "$marker"
+}
+
+pg_attempt_disposition_write() { # host owner repo pr round-key marker charged-epoch terminal-kind proof-kind [delivery snapshot]
+  local host="$1" owner="$2" repo="$3" pr="$4" key="$5" marker="$6" epoch="$7" kind="$8" proof="$9"
+  local delivery="${10:-}" dir f tmp canonical now rc=1
+  pg_canonical_repo_ok "$host" "$owner" "$repo" || return 1
+  pr="$(pg_pr_number_normalize "$pr")" || return 1
+  pg_round_key_ok "$key" || return 1
+  pg_reservation_marker_ok "$marker" || return 1
+  case "$epoch" in ''|*[!0-9]*) return 1;; esac
+  now="$(date +%s)"
+  canonical="$(jq -cnS --arg host "$host" --arg owner "$owner" --arg repo "$repo" --argjson pr "$pr" \
+    --arg key "$key" --arg marker "$marker" --argjson epoch "$epoch" --argjson now "$now" --arg kind "$kind" --arg proof "$proof" \
+    '{charged_spend_epoch:$epoch,marker:$marker,observed_at:$now,proof_kind:$proof,record_type:"review-attempt-disposition/v1",record_version:1,repository:{host:$host,owner:$owner,repo:$repo},round_key:$key,target:{kind:"pull-request",pr:$pr},terminal_kind:$kind}')" || return 1
+  if [ -n "$delivery" ]; then
+    delivery="$(pg_delivery_snapshot_validate "$delivery")" || return 1
+    canonical="$(jq -cS --argjson delivery "$delivery" '.record_type="review-attempt-disposition/v2" | .record_version=2 | .delivery=$delivery' <<<"$canonical")" || return 1
+  fi
+  canonical="$(pg_attempt_disposition_validate "$canonical" "$marker")" || return 1
+  dir="$(pg_attempt_disposition_dir)"; mkdir -p "$dir" 2>/dev/null || return 1
+  f="$dir/$marker"; tmp="$dir/.$marker.tmp.$$"
+  if [ -f "$f" ] && [ ! -L "$f" ]; then
+    local existing
+    existing="$(pg_attempt_disposition_read "$marker" 2>/dev/null || true)"
+    [ -n "$existing" ] || return 1
+    if jq -e --argjson candidate "$canonical" '
+      .charged_spend_epoch==$candidate.charged_spend_epoch and .marker==$candidate.marker and
+      .proof_kind==$candidate.proof_kind and .repository==$candidate.repository and
+      .round_key==$candidate.round_key and .target==$candidate.target and .terminal_kind==$candidate.terminal_kind and
+      .record_version==$candidate.record_version and .delivery==$candidate.delivery
+    ' <<<"$existing" >/dev/null 2>&1; then return 0; fi
+    return 1
+  fi
+  if printf '%s' "$canonical" > "$tmp" 2>/dev/null && ln "$tmp" "$f" 2>/dev/null; then
+    rc=0
+  elif [ -f "$f" ] && [ ! -L "$f" ] && cmp -s "$tmp" "$f" 2>/dev/null; then
+    rc=0
+  fi
+  rm -f "$tmp" 2>/dev/null
+  return "$rc"
+}
+
+pg_attempt_disposition_scan() { # one canonical disposition JSON object per line
+  local dir f marker json
+  dir="$(pg_attempt_disposition_dir)"; [ -d "$dir" ] || return 0
+  for f in "$dir"/pg-run-*; do
+    [ -f "$f" ] && [ ! -L "$f" ] || continue
+    marker="${f##*/}"; json="$(pg_attempt_disposition_read "$marker" 2>/dev/null || true)"
+    [ -z "$json" ] || printf '%s\n' "$json"
+  done
+}
+
+pg_attempt_disposition_sweep() { # delete only old dispositions whose cleanup is complete
+  local dir cdir now round_secs ttl retain f marker json mt age
+  dir="$(pg_attempt_disposition_dir)"; cdir="$(pg_delivery_condition_dir)"
+  [ -d "$dir" ] || [ -d "$cdir" ] || return 0
+  now="$(date +%s)"; round_secs="$(pg_round_window_secs)"; ttl="${PRO_GATE_RESERVATION_TTL:-21600}"
+  case "$ttl" in ''|*[!0-9]*) ttl=21600;; esac
+  retain="$round_secs"; [ "$ttl" -gt "$retain" ] && retain="$ttl"
+  for f in "$dir"/pg-run-*; do
+    [ -f "$f" ] && [ ! -L "$f" ] || continue
+    marker="${f##*/}"; json="$(pg_attempt_disposition_read "$marker" 2>/dev/null || true)"; [ -n "$json" ] || continue
+    pg_attempt_disposition_cleanup_pending "$json" && continue
+    mt="$(stat -c %Y "$f" 2>/dev/null || stat -f %m "$f" 2>/dev/null || echo "$now")"
+    case "$mt" in ''|*[!0-9]*) continue;; esac
+    age=$(( now - mt )); [ "$age" -ge "$retain" ] || continue
+    rm -f "$f" 2>/dev/null || true
+  done
+  # #204: a delivery-condition record is read only beside its marker's disposition. Once that
+  # disposition is gone (swept above, or never written because the refund failed), the record goes
+  # at the same age.
+  for f in "$cdir"/pg-run-*; do
+    [ -f "$f" ] || [ -L "$f" ] || continue
+    marker="${f##*/}"; [ -e "$dir/$marker" ] && continue
+    mt="$(stat -c %Y "$f" 2>/dev/null || stat -f %m "$f" 2>/dev/null || echo "$now")"
+    case "$mt" in ''|*[!0-9]*) continue;; esac
+    age=$(( now - mt )); [ "$age" -ge "$retain" ] || continue
+    rm -f "$f" 2>/dev/null || true
+  done
+}
+
+pg_attempt_disposition_find() { # host owner repo pr [exclude-marker] -> newest exact disposition
+  local host="$1" owner="$2" repo="$3" pr="$4" exclude="${5:-}" dir f marker json epoch best="" best_epoch="" LC_ALL=C
+  pg_canonical_repo_ok "$host" "$owner" "$repo" || return 1
+  pr="$(pg_pr_number_normalize "$pr")" || return 1
+  dir="$(pg_attempt_disposition_dir)"; [ -d "$dir" ] || return 1
+  for f in "$dir"/pg-run-*; do
+    [ -f "$f" ] && [ ! -L "$f" ] || continue
+    marker="${f##*/}"; [ "$marker" != "$exclude" ] || continue
+    json="$(pg_attempt_disposition_read "$marker" 2>/dev/null || true)"; [ -n "$json" ] || continue
+    jq -e --arg h "$host" --arg o "$owner" --arg r "$repo" --argjson p "$pr" \
+      '.repository.host==$h and .repository.owner==$o and .repository.repo==$r and .target.pr==$p' <<<"$json" >/dev/null 2>&1 || continue
+    epoch="$(jq -r .charged_spend_epoch <<<"$json")"
+    if [ -z "$best_epoch" ] || [ "$epoch" -gt "$best_epoch" ] || { [ "$epoch" = "$best_epoch" ] && [[ "$marker" > "$best" ]]; }; then
+      best="$marker"; best_epoch="$epoch"
+    fi
+  done
+  [ -n "$best" ] || return 1
+  pg_attempt_disposition_read "$best"
+}
+
+# ── Rejected-capture records (#271) ───────────────────────────────────────────────────────────
+# A harvest whose salvage child proved the capture is the one finished response to this attempt's
+# latest prompt (cdp-salvage `completion-proof`), but whose bytes failed review validation, keeps
+# those exact bytes here, bound to the attempt's input binding and conversation. The record is
+# write-once evidence for a typed stop; it is never an accepted review and never authority to
+# collect, refund, finalize or resend. Damaged, partial or foreign records read as absent.
+PG_REJECTED_CAPTURE_MAX_BYTES=4194304
+
+pg_rejected_capture_dir() { printf '%s\n' "$PRO_GATE_HOME/rejected-captures"; }
+
+pg_conversation_url_ok() { # url: cdp-salvage.mjs CONVERSATION_URL_RE
+  [[ "${1-}" =~ ^https://chatgpt\.com/c/[A-Za-z0-9-]+([?#].*)?$ ]]
+}
+
+pg_rejected_capture_validate() { # canonical-json marker input-binding-json
+  local json="$1" marker="$2" binding="$3" epoch ib digest
+  epoch="$(jq -r .charged_spend_epoch <<<"$binding" 2>/dev/null)" || return 1
+  case "$epoch" in ''|*[!0-9]*) return 1;; esac
+  ib="$(pg_review_sha256_text "$binding")" || return 1
+  jq -e --arg marker "$marker" --argjson epoch "$epoch" --arg ib "$ib" '
+    keys == ["capture","capture_sha256","charged_spend_epoch","conversation_url","input_binding_digest","marker","record_type","record_version","rejection"]
+    and .record_type=="rejected-capture/v1" and .record_version==1 and .marker==$marker
+    and (.rejection|IN("template-verdict","unbound")) and .charged_spend_epoch==$epoch
+    and .input_binding_digest==$ib and (.capture|type=="string" and length>0)
+    and (.capture_sha256|type=="string" and test("^[0-9a-f]{64}$"))
+    and (.conversation_url|type=="string")' <<<"$json" >/dev/null 2>&1 || return 1
+  pg_conversation_url_ok "$(jq -r .conversation_url <<<"$json")" || return 1
+  digest="$(pg_sha256 <(jq -j .capture <<<"$json" 2>/dev/null))" || return 1
+  [ -n "$digest" ] && [ "$digest" = "$(jq -r .capture_sha256 <<<"$json")" ]
+}
+
+pg_rejected_capture_read() { # marker input-binding-json -> capture_sha256 (read-only, exact path)
+  local marker="$1" binding="$2" f json canonical LC_ALL=C
+  pg_reservation_marker_ok "$marker" || return 1
+  f="$(pg_rejected_capture_dir)/$marker"
+  [ -f "$f" ] && [ ! -L "$f" ] || return 1
+  json="$(head -c "$((PG_REJECTED_CAPTURE_MAX_BYTES + 1))" "$f" 2>/dev/null && printf '.')" || return 1
+  json="${json%.}"
+  [ "${#json}" -le "$PG_REJECTED_CAPTURE_MAX_BYTES" ] || return 1
+  canonical="$(jq -cS . <<<"$json" 2>/dev/null)" || return 1
+  [ "$canonical" = "$json" ] || return 1
+  pg_rejected_capture_validate "$canonical" "$marker" "$binding" || return 1
+  jq -r .capture_sha256 <<<"$canonical"
+}
+
+pg_rejected_capture_write() { # marker rejection capture-file conversation-url input-binding-json
+  local marker="$1" rejection="$2" capture="$3" url="$4" binding="$5" dir f tmp canonical rc=1 LC_ALL=C
+  pg_reservation_marker_ok "$marker" || return 1
+  case "$rejection" in template-verdict|unbound) ;; *) return 1;; esac
+  [ -f "$capture" ] && [ ! -L "$capture" ] && [ -s "$capture" ] || return 1
+  canonical="$(jq -cnS --arg marker "$marker" --arg rejection "$rejection" --arg url "$url" \
+    --argjson epoch "$(jq -r .charged_spend_epoch <<<"$binding" 2>/dev/null)" \
+    --arg ib "$(pg_review_sha256_text "$binding")" --arg digest "$(pg_sha256 "$capture")" --rawfile capture "$capture" \
+    '{capture:$capture,capture_sha256:$digest,charged_spend_epoch:$epoch,conversation_url:$url,input_binding_digest:$ib,
+      marker:$marker,record_type:"rejected-capture/v1",record_version:1,rejection:$rejection}' 2>/dev/null)" || return 1
+  [ "${#canonical}" -le "$PG_REJECTED_CAPTURE_MAX_BYTES" ] || return 1
+  # Invalid UTF-8 would become a lossy JSON string; only an exact byte round trip is evidence.
+  cmp -s "$capture" <(jq -j .capture <<<"$canonical" 2>/dev/null) || return 1
+  pg_rejected_capture_validate "$canonical" "$marker" "$binding" || return 1
+  dir="$(pg_rejected_capture_dir)"
+  f="$dir/$marker"
+  # Write-once: an existing final record is never replaced. It stands as the evidence, whatever
+  # this pass collected, only while it still validates for this attempt; otherwise refuse loudly.
+  if [ -e "$f" ] || [ -L "$f" ]; then
+    pg_rejected_capture_read "$marker" "$binding" >/dev/null 2>&1
+    return
+  fi
+  mkdir -p "$dir" 2>/dev/null || return 1
+  tmp="$dir/.$marker.tmp.$$"
+  rm -f "$tmp" 2>/dev/null
+  if (umask 077 && printf '%s' "$canonical" > "$tmp") 2>/dev/null && ln "$tmp" "$f" 2>/dev/null; then
+    rc=0
+  elif pg_rejected_capture_read "$marker" "$binding" >/dev/null 2>&1; then
+    rc=0
+  fi
+  rm -f "$tmp" 2>/dev/null
+  return "$rc"
+}
+
+# ── Delivery-condition records (#204) ──────────────────────────────────────────────────────────
+# Proven no-send refunds retain delivery evidence in the required v2 disposition. The v1
+# sidecar remains a compatibility mirror and reader; its failure cannot discard the evidence
+# that bounds a repeated failed delivery. Neither record claims successful delivery.
+pg_delivery_condition_dir() { printf '%s\n' "${PRO_GATE_DELIVERY_CONDITION_DIR:-$PRO_GATE_HOME/delivery-conditions}"; }
+
+# pg_oracle_identity: the installed Oracle build as its own --version prints it. Upgrading or
+# re-pinning Oracle is the usual repair for a delivery failure, so a new build is a changed
+# condition. Bounded like pg_reattach_render, and "unknown" (never a guess) when the executable or
+# the timeout command is unavailable. An empty read is tried once more: the refund and the next
+# query each read the build, and one slow start under load reading as a different build would
+# silently restart the failed-delivery count.
+pg_oracle_identity() {
+  local oracle_bin="${PRO_GATE_ORACLE_BIN:-oracle}" timeout_bin="${PRO_GATE_TIMEOUT_BIN:-timeout}" v="" raw tries=0
+  if [[ "$oracle_bin" == */* ]]; then
+    [ -x "$oracle_bin" ] || { printf 'unknown\n'; return 0; }
+  else
+    pg_have "$oracle_bin" || { printf 'unknown\n'; return 0; }
+  fi
+  if { [[ "$timeout_bin" == */* ]] && [ -x "$timeout_bin" ]; } || pg_have "$timeout_bin"; then
+    while [ -z "$v" ] && [ "$tries" -lt 2 ]; do
+      tries=$(( tries + 1 ))
+      # A failing probe may print a plausible version. Its stdout is not build evidence.
+      if raw="$(set -o pipefail; "$timeout_bin" 5s "$oracle_bin" --version </dev/null 2>/dev/null | head -c 4096)"; then
+        v="$(printf '%s\n' "$raw" | head -n 1 | tr -cd 'A-Za-z0-9._+-' | cut -c1-64)"
+      fi
+    done
+  fi
+  printf '%s\n' "${v:-unknown}"
+}
+
+pg_delivery_condition_digest() { # relation-identity input-mode attachment-policy oracle-identity
+  pg_review_sha256_text "$(jq -cnS --arg relation "$1" --arg input "$2" --arg attachments "$3" --arg oracle "$4" \
+    '{attachments:$attachments,input:$input,oracle:$oracle,relation:$relation}')"
+}
+
+pg_delivery_condition_validate() { # canonical JSON [expected marker]
+  local json="${1-}" marker="${2:-}" canonical
+  canonical="$(printf '%s' "$json" | jq -sceS 'if length==1 then .[0] else error("expected one delivery record") end' 2>/dev/null)" || return 1
+  jq -e --arg marker "$marker" '. as $d |
+    ($d|keys) == ["condition_digest","consecutive","marker","record_type","record_version","round_key"] and
+    $d.record_type=="review-delivery-condition/v1" and $d.record_version==1 and
+    ($d.marker|type=="string" and test("^pg-run-[A-Za-z0-9.-]+$")) and ($marker=="" or $d.marker==$marker) and
+    ($d.round_key|type=="string" and test("^[A-Za-z0-9.-]+$")) and ($d.marker|startswith("pg-run-" + $d.round_key + "-")) and
+    ($d.condition_digest|type=="string" and test("^[0-9a-f]{64}$")) and
+    ($d.consecutive|type=="number" and floor==. and .>=1 and .<=1000)
+  ' <<<"$canonical" >/dev/null 2>&1 || return 1
+  printf '%s' "$canonical"
+}
+
+pg_delivery_condition_read() { # marker -> canonical record
+  local marker="$1" f json
+  pg_reservation_marker_ok "$marker" || return 1
+  f="$(pg_delivery_condition_dir)/$marker"
+  [ -f "$f" ] && [ ! -L "$f" ] || return 1
+  [ "$(wc -c < "$f" 2>/dev/null | tr -d ' ')" -le 4096 ] || return 1
+  json="$(cat "$f" 2>/dev/null)" || return 1
+  pg_delivery_condition_validate "$json" "$marker"
+}
+
+pg_delivery_condition_write() { # marker round-key condition-digest consecutive; write-once
+  local marker="$1" key="$2" digest="$3" consecutive="$4" dir f tmp canonical rc=1
+  pg_reservation_marker_ok "$marker" || return 1
+  pg_round_key_ok "$key" || return 1
+  case "$consecutive" in ''|*[!0-9]*) return 1;; esac
+  canonical="$(jq -cnS --arg marker "$marker" --arg key "$key" --arg digest "$digest" --argjson n "$consecutive" \
+    '{condition_digest:$digest,consecutive:$n,marker:$marker,record_type:"review-delivery-condition/v1",record_version:1,round_key:$key}' 2>/dev/null)" || return 1
+  canonical="$(pg_delivery_condition_validate "$canonical" "$marker")" || return 1
+  dir="$(pg_delivery_condition_dir)"; mkdir -p "$dir" 2>/dev/null || return 1
+  f="$dir/$marker"; tmp="$dir/.$marker.tmp.$$"
+  if [ -e "$f" ] || [ -L "$f" ]; then
+    [ "$(pg_delivery_condition_read "$marker" 2>/dev/null || true)" = "$canonical" ]; return
+  fi
+  if printf '%s' "$canonical" > "$tmp" 2>/dev/null && ln "$tmp" "$f" 2>/dev/null; then
+    rc=0
+  elif [ -f "$f" ] && [ ! -L "$f" ] && cmp -s "$tmp" "$f" 2>/dev/null; then
+    rc=0
+  fi
+  rm -f "$tmp" 2>/dev/null
+  return "$rc"
+}
+
+# Legacy sidecar writer API. New refunds use pg_delivery_snapshot_json and mirror its known count
+# with pg_delivery_condition_write. Excluding this marker reads the attempt before it. The run continues
+# only when that attempt was itself a proven no-send under the same condition; a sent attempt, a
+# review, or a different condition in between starts the count again at one.
+pg_delivery_condition_record() {
+  local host="$1" owner="$2" repo="$3" pr="$4" key="$5" marker="$6" digest="$7" prev prev_record n=1
+  prev="$(pg_attempt_snapshot "$host" "$owner" "$repo" "$pr" "$key" "$marker" 2>/dev/null || true)"
+  if [ -n "$prev" ] && jq -e '.source=="disposition" and .state=="not-submitted"' <<<"$prev" >/dev/null 2>&1; then
+    prev_record="$(pg_delivery_condition_read "$(jq -r .marker <<<"$prev")" 2>/dev/null || true)"
+    if [ -n "$prev_record" ] && [ "$(jq -r .condition_digest <<<"$prev_record")" = "$digest" ]; then
+      n=$(( $(jq -r .consecutive <<<"$prev_record") + 1 ))
+      [ "$n" -le 1000 ] || n=1000
+    fi
+  fi
+  pg_delivery_condition_write "$marker" "$key" "$digest" "$n"
+}
+
+# An unavailable snapshot still retains every known component. A later proven component change
+# can break the chain; learning an identity that was previously unknown cannot do so.
+pg_delivery_condition_json() { # relation input attachments oracle
+  jq -cnS --arg relation "$1" --arg input "$2" --arg attachments "$3" --arg oracle "$4" \
+    '{attachments:$attachments,input:$input,oracle:$oracle,relation:$relation}'
+}
+
+pg_delivery_snapshot_validate() { # one v2 disposition delivery value
+  local canonical
+  canonical="$(printf '%s' "${1-}" | jq -sceS 'if length==1 then .[0] else error("expected one snapshot") end' 2>/dev/null)" || return 1
+  jq -e '
+    if .state=="not-applicable" then keys==["state"] else
+      keys==["condition","consecutive","state"] and (.state|IN("known","unavailable")) and
+      (.condition|keys)==["attachments","input","oracle","relation"] and
+      (.condition.attachments|IN("auto","always","never","unknown")) and
+      (.condition.input|IN("bundle","both","connector","unknown")) and
+      (.condition.oracle|type=="string" and test("^[A-Za-z0-9._+-]{1,64}$")) and
+      (.condition.relation|type=="string" and (length==0 or test("^relation:[0-9a-f]{64}$"))) and
+      (if .state=="known" then
+        .condition.attachments!="unknown" and .condition.input!="unknown" and
+        .condition.oracle!="unknown" and .condition.relation!="" and
+        (.consecutive|type=="number" and floor==. and .>=1 and .<=1000)
+       else .consecutive==null end)
+    end' <<<"$canonical" >/dev/null 2>&1 || return 1
+  printf '%s' "$canonical"
+}
+
+# A malformed disposition cannot authorize cleanup, but it also cannot disappear from admission
+# merely because the strict disposition reader skipped it. This is a read-only uncertainty check
+# over the same per-change filenames. It never repairs, refunds, or removes any record.
+pg_delivery_history_unavailable() { # attempt snapshot -> 0 when potentially relevant bytes are uncertain
+  local snapshot="$1" key dir entries marker marker_key json core epoch selected_epoch selected_marker
+  key="$(jq -r '.target.round_key // empty' <<<"$snapshot" 2>/dev/null)"
+  [ -n "$key" ] || return 1
+  pg_round_key_ok "$key" || return 0
+  dir="$(pg_attempt_disposition_dir)"
+  [ -e "$dir" ] || [ -L "$dir" ] || return 1
+  # Use the checked listing itself, not a second glob which could fail independently and skip
+  # a retained record. A listed candidate that cannot then be read stays uncertain.
+  [ -d "$dir" ] && [ -x "$dir" ] || return 0
+  entries="$(LC_ALL=C ls -A1 "$dir" 2>/dev/null)" || return 0
+  selected_epoch="$(jq -r '.charged_spend_epoch // 0' <<<"$snapshot")"
+  selected_marker="$(jq -r '.marker // empty' <<<"$snapshot")"
+  case "$selected_epoch" in ''|*[!0-9]*) selected_epoch=0;; esac
+  while IFS= read -r marker; do
+    case "$marker" in "pg-run-$key-"*) ;; *) continue;; esac
+    marker_key="${marker#pg-run-}"; marker_key="${marker_key%-*-*}"
+    [ "$marker_key" = "$key" ] || continue
+    if ! json="$(pg_attempt_disposition_read "$marker" 2>/dev/null)"; then
+      # A damaged delivery payload can still have valid target/charge metadata. Use that
+      # metadata ONLY to order it behind a newer authoritative attempt, never for cleanup.
+      # Unreadable/truncated outer metadata has no such proof: marker mint time is not charge.
+      json="$(pg_attempt_disposition_bytes "$marker")" || return 0
+      core="$(jq -sceS 'if length==1 and .[0].record_type=="review-attempt-disposition/v2" and .[0].record_version==2
+        then .[0] | del(.delivery) | .record_type="review-attempt-disposition/v1" | .record_version=1
+        else error("unavailable disposition core") end' <<<"$json" 2>/dev/null)" || return 0
+      core="$(pg_attempt_disposition_validate "$core" "$marker")" || return 0
+      epoch="$(jq -r .charged_spend_epoch <<<"$core")"
+      if [ "$selected_epoch" -gt "$epoch" ] \
+         || { [ "$selected_epoch" -eq "$epoch" ] && [[ "$selected_marker" > "$marker" ]]; }; then continue; fi
+      return 0
+    fi
+  done <<<"$entries"
+  return 1
+}
+
+pg_delivery_state_emit() { # state count-or-null
+  jq -cnS --arg state "$1" --argjson n "$2" '{failed_unchanged:$n,state:$state}'
+}
+
+# Shared comparison for query, effect recheck, and terminal snapshot construction. The optional
+# Oracle argument is the already-captured attempt-time identity. Otherwise probe only when known
+# components have not already proven change. Ordinary unrelated queries never invoke Oracle.
+pg_delivery_state_json() { # attempt snapshot relation input attachments [attempt-time Oracle]
+  local snapshot="$1" relation="$2" input="$3" attachments="$4" oracle_id="${5:-}"
+  local marker disposition delivery record f old key dir
+  if ! jq -e 'type=="object" and (.source|IN("none","artifact","disposition","active","reservation","run-meta")) and
+      (.state|type=="string") and (.marker|type=="string") and (.fresh_eligible|type=="boolean")' \
+      <<<"$snapshot" >/dev/null 2>&1; then pg_delivery_state_emit unavailable null; return; fi
+  if pg_delivery_history_unavailable "$snapshot"; then pg_delivery_state_emit unavailable null; return; fi
+  # #246: a send that produced no ChatGPT conversation is a failed delivery too, but only its v2
+  # record (known evidence, round refunded) counts. A v1 one kept its round and still reads as 0.
+  if ! jq -e '.source=="disposition" and .fresh_eligible==true and
+      (.state=="not-submitted" or
+       (.state=="recovery-exhausted" and .terminal.record_version==2 and .terminal.proof_kind=="no-conversation-after-send"))' \
+      <<<"$snapshot" >/dev/null 2>&1; then
+    pg_delivery_state_emit known 0; return
+  fi
+  marker="$(jq -r .marker <<<"$snapshot")"
+  disposition="$(jq -cS '.terminal // empty' <<<"$snapshot")"
+  if [ -n "$disposition" ]; then
+    disposition="$(pg_attempt_disposition_validate "$disposition" "$marker")" || { pg_delivery_state_emit unavailable null; return; }
+  elif ! disposition="$(pg_attempt_disposition_read "$marker" 2>/dev/null)"; then
+    # Minimal historical callers supplied only a marker; an existing unreadable disposition is
+    # still uncertainty. A missing one can only be interpreted through its legacy sidecar below.
+    f="$(pg_attempt_disposition_dir)/$marker"
+    if [ -e "$f" ] || [ -L "$f" ]; then pg_delivery_state_emit unavailable null; return; fi
+    disposition=""
+  fi
+  if [ -n "$disposition" ] && [ "$(jq -r .record_version <<<"$disposition")" = 2 ]; then
+    delivery="$(jq -cS .delivery <<<"$disposition")"
+    if [ "$(jq -r .state <<<"$delivery")" = not-applicable ]; then pg_delivery_state_emit known 0; return; fi
+    # Empty/unknown -> known is not evidence of change. Any independently known changed
+    # component is enough, even when another component or the previous count was unavailable.
+    if jq -e --arg relation "$relation" --arg input "$input" --arg attachments "$attachments" '
+      .condition as $c |
+      ($c.relation!="" and $relation!="" and $c.relation!=$relation) or
+      ($c.input!="unknown" and $input!="unknown" and $c.input!=$input) or
+      ($c.attachments!="unknown" and $attachments!="unknown" and $c.attachments!=$attachments)
+    ' <<<"$delivery" >/dev/null 2>&1; then pg_delivery_state_emit known 0; return; fi
+    [ -n "$relation" ] || { pg_delivery_state_emit unavailable null; return; }
+    [ -n "$oracle_id" ] || oracle_id="$(pg_oracle_identity)"
+    old="$(jq -r .condition.oracle <<<"$delivery")"
+    if [ "$old" != unknown ] && [ "$oracle_id" != unknown ] && [ "$old" != "$oracle_id" ]; then
+      pg_delivery_state_emit known 0; return
+    fi
+    if [ "$oracle_id" = unknown ] || [ "$old" = unknown ] || [ "$(jq -r .state <<<"$delivery")" != known ]; then
+      pg_delivery_state_emit unavailable null; return
+    fi
+    pg_delivery_state_emit known "$(jq -r .consecutive <<<"$delivery")"; return
+  fi
+
+  dir="$(pg_delivery_condition_dir)"
+  if { [ -e "$dir" ] || [ -L "$dir" ]; } \
+     && ! { [ -d "$dir" ] && [ -x "$dir" ] && ls -A "$dir" >/dev/null 2>&1; }; then
+    pg_delivery_state_emit unavailable null; return
+  fi
+  f="$dir/$marker"
+  if [ ! -e "$f" ] && [ ! -L "$f" ]; then
+    # v0.58 and older cannot distinguish pre-feature history, Cloudflare, and failed/missing
+    # sidecar publication. Keep this explicit compatibility exception, never call it a change.
+    pg_delivery_state_emit legacy-untracked null; return
+  fi
+  if ! record="$(pg_delivery_condition_read "$marker" 2>/dev/null)"; then
+    pg_delivery_state_emit unavailable null; return
+  fi
+  key="$(jq -r '.target.round_key // empty' <<<"$snapshot")"
+  if [ -n "$key" ] && [ "$(jq -r .round_key <<<"$record")" != "$key" ]; then
+    pg_delivery_state_emit unavailable null; return
+  fi
+  [ -n "$relation" ] || { pg_delivery_state_emit unavailable null; return; }
+  [ -n "$oracle_id" ] || oracle_id="$(pg_oracle_identity)"
+  if [ "$oracle_id" = unknown ]; then pg_delivery_state_emit unavailable null; return; fi
+  old="$(jq -r .condition_digest <<<"$record")"
+  if [ "$old" = "$(pg_delivery_condition_digest "$relation" "$input" "$attachments" "$oracle_id")" ]; then
+    pg_delivery_state_emit known "$(jq -r .consecutive <<<"$record")"
+  elif [ "$old" = "$(pg_delivery_condition_digest "$relation" "$input" "$attachments" unknown)" ]; then
+    pg_delivery_state_emit unavailable null
+  else
+    pg_delivery_state_emit known 0
+  fi
+}
+
+pg_delivery_snapshot_json() { # host owner repo pr key marker attempt-time condition JSON
+  local host="$1" owner="$2" repo="$3" pr="$4" key="$5" marker="$6" condition="$7"
+  local previous state n snapshot published
+  # Terminal publication fixes the count and attempt-time components. A cleanup replay must
+  # never count itself or replace that evidence with the caller's current configuration.
+  published="$(pg_attempt_disposition_read "$marker" 2>/dev/null || true)"
+  if [ -n "$published" ]; then
+    jq -e --arg h "$host" --arg o "$owner" --arg r "$repo" --arg p "$pr" --arg k "$key" '
+      .record_version==2 and
+      ((.terminal_kind=="not-submitted" and .proof_kind=="proven-no-submit") or
+       (.terminal_kind=="recovery-exhausted" and .proof_kind=="no-conversation-after-send")) and
+      .repository=={host:$h,owner:$o,repo:$r} and (.target.pr|tostring)==$p and .round_key==$k
+    ' <<<"$published" >/dev/null 2>&1 || return 1
+    jq -cS .delivery <<<"$published"; return
+  fi
+  snapshot="$(jq -cnS --argjson condition "$condition" '{condition:$condition,consecutive:null,state:"unavailable"}')" || return 1
+  snapshot="$(pg_delivery_snapshot_validate "$snapshot")" || return 1
+  previous="$(pg_attempt_snapshot "$host" "$owner" "$repo" "$pr" "$key" "$marker")" \
+    || { printf '%s' "$snapshot"; return 0; }
+  state="$(pg_delivery_state_json "$previous" "$(jq -r .relation <<<"$condition")" "$(jq -r .input <<<"$condition")" \
+    "$(jq -r .attachments <<<"$condition")" "$(jq -r .oracle <<<"$condition")")" \
+    || { printf '%s' "$snapshot"; return 0; }
+  if [ "$(jq -r .state <<<"$state")" = known ] && jq -e '.relation!="" and .input!="unknown" and .attachments!="unknown" and .oracle!="unknown"' <<<"$condition" >/dev/null; then
+    n=$(( $(jq -r .failed_unchanged <<<"$state") + 1 )); [ "$n" -le 1000 ] || n=1000
+    snapshot="$(jq -cS --argjson n "$n" '.state="known" | .consecutive=$n' <<<"$snapshot")" || return 1
+  fi
+  pg_delivery_snapshot_validate "$snapshot"
+}
+
+# Both public query and every effect recheck use this wrapper. FORCE can repeat a known failed
+# condition; it does not turn unavailable evidence into a known count.
+pg_delivery_facts_json() { # attempt snapshot relation input
+  local state override=false
+  [ "${PRO_GATE_FORCE_ROUND:-0}" = 1 ] && override=true
+  state="$(pg_delivery_state_json "$1" "$2" "$3" "${PRO_GATE_BROWSER_ATTACHMENTS:-auto}")" || return 1
+  jq -cS --argjson override "$override" '. + {override:$override}' <<<"$state"
+}
+
+pg_round_has_epoch() { # round-key epoch
+  local key="$1" epoch="$2" value
+  pg_round_key_ok "$key" || return 1
+  [ -f "$(pg_rounds_dir)/$key" ] || return 1
+  while IFS= read -r value; do [ "$value" = "$epoch" ] && return 0; done < "$(pg_rounds_dir)/$key"
+  return 1
+}
+
+pg_round_unrecord_epoch() { # round-key exact epoch; remove exactly one matching entry
+  local key="$1" epoch="$2" f rfd lockdir="" waited=0 value removed=0 rc=0
+  pg_round_key_ok "$key" || return 1
+  case "$epoch" in ''|*[!0-9]*) return 1;; esac
+  f="$(pg_rounds_dir)/$key"; [ -f "$f" ] || return 0
+  if pg_have flock; then
+    { exec {rfd}>>"$f.lock"; } 2>/dev/null && flock -w 10 "$rfd" 2>/dev/null || return 1
+  else
+    lockdir="$f.lock.d"
+    while ! mkdir "$lockdir" 2>/dev/null; do waited=$((waited + 1)); [ "$waited" -ge 10 ] && return 1; sleep 1; done
+  fi
+  if ! : > "$f.tmp" 2>/dev/null; then
+    rc=1
+  else
+    while IFS= read -r value; do
+      if [ "$removed" -eq 0 ] && [ "$value" = "$epoch" ]; then removed=1; continue; fi
+      printf '%s\n' "$value" >> "$f.tmp" 2>/dev/null || { rc=1; break; }
+    done < "$f"
+  fi
+  if [ "$rc" -eq 0 ] && [ "$removed" -eq 1 ]; then
+    if [ -s "$f.tmp" ]; then mv -f "$f.tmp" "$f" || rc=1; else rm -f "$f" "$f.tmp" || rc=1; fi
+  else
+    rm -f "$f.tmp" 2>/dev/null || true
+  fi
+  [ -n "${rfd:-}" ] && eval "exec ${rfd}>&-" 2>/dev/null
+  [ -n "$lockdir" ] && rmdir "$lockdir" 2>/dev/null
+  return "$rc"
+}
+
+# #246: which settled attempts give their charged round back. A proven no-submit always does. A
+# send that produced no ChatGPT conversation does only with a v2 record, which the validator admits
+# only with known delivery evidence: that record counts it toward delivery-failed-unchanged. Without
+# one, the retained round is the only bound on repeating the same failed send, so it stays charged.
+pg_attempt_disposition_refunds_round() { # canonical disposition
+  jq -e '.terminal_kind=="not-submitted" or (.record_version==2 and .proof_kind=="no-conversation-after-send")' \
+    <<<"$1" >/dev/null 2>&1
+}
+
+pg_attempt_disposition_cleanup_pending() { # canonical disposition
+  local json="$1" marker key epoch kind active_file active_marker
+  marker="$(jq -r .marker <<<"$json")"; key="$(jq -r .round_key <<<"$json")"
+  epoch="$(jq -r .charged_spend_epoch <<<"$json")"; kind="$(jq -r .terminal_kind <<<"$json")"
+  [ -f "$(pg_run_meta_dir)/$marker" ] && return 0
+  [ -f "$(pg_reservation_dir)/$marker" ] && return 0
+  active_file="$(pg_active_dir)/$key"
+  if [ -f "$active_file" ] && [ ! -L "$active_file" ]; then
+    IFS=$'\t' read -r active_marker _ < "$active_file" 2>/dev/null || true
+    [ "$active_marker" = "$marker" ] && return 0
+  fi
+  if pg_attempt_disposition_refunds_round "$json"; then
+    pg_round_has_epoch "$key" "$epoch" && return 0
+  fi
+  if [ "$kind" = not-submitted ]; then
+    [ -f "$(pg_review_input_binding_dir)/$marker" ] && return 0
+  fi
+  return 1
+}
+
+pg_attempt_disposition_cleanup() { # canonical disposition; idempotent after proof is durable
+  local json="$1" marker key epoch kind active_file active_marker
+  json="$(pg_attempt_disposition_validate "$json")" || return 1
+  marker="$(jq -r .marker <<<"$json")"; key="$(jq -r .round_key <<<"$json")"
+  epoch="$(jq -r .charged_spend_epoch <<<"$json")"; kind="$(jq -r .terminal_kind <<<"$json")"
+  if pg_attempt_disposition_refunds_round "$json"; then
+    pg_round_unrecord_epoch "$key" "$epoch" || return 1
+  fi
+  if [ "$kind" = not-submitted ]; then
+    # #134: this unlink was the reservation-adjacent mutation outside the guard on the supersession
+    # path (pg_fresh_dispatch_refund's legacy no-PR branch has another, but nothing without a PR
+    # number can reach pg_reservation_supersede). Bindings are otherwise write-once
+    # (pg_review_binding_write_immutable uses `ln`), so an unguarded removal is what made
+    # remove-then-rewrite-with-a-different-head reachable against a concurrent supersede.
+    # Scope is the unlink ONLY: pg_reservation_remove below acquires the guard itself and the flock
+    # here is not reentrant, so widening this would self-deadlock for the full 10s timeout.
+    # Acquire can fail (10s flock timeout) AFTER pg_round_unrecord_epoch above already succeeded —
+    # the same partial-state exit a failing bare `rm -f` already produced, now with a second trigger.
+    # Safe to retry rather than unwind: the terminal disposition is written durably before any caller
+    # reaches cleanup, pg_round_unrecord_epoch is a no-op once the epoch is gone, and the
+    # TTL/miss sweep in pg_reservation_note_miss reclaims capacity regardless.
+    pg_reservation_guard_acquire || return 1
+    rm -f "$(pg_review_input_binding_dir)/$marker" 2>/dev/null \
+      || { pg_reservation_guard_release; return 1; }
+    pg_reservation_guard_release
+  fi
+  pg_reservation_remove "$marker" 2>/dev/null || return 1
+  pg_run_meta_remove "$marker"
+  active_file="$(pg_active_dir)/$key"
+  if [ -f "$active_file" ] && [ ! -L "$active_file" ]; then
+    IFS=$'\t' read -r active_marker _ < "$active_file" 2>/dev/null || true
+    [ "$active_marker" != "$marker" ] || rm -f "$active_file" 2>/dev/null || return 1
+  fi
+  ! pg_attempt_disposition_cleanup_pending "$json"
+}
+
+pg_attempt_reconcile_terminal() { # marker; caller holds the per-change lock
+  local marker="$1" disposition
+  disposition="$(pg_attempt_disposition_read "$marker" 2>/dev/null || true)"
+  [ -n "$disposition" ] || return 1
+  pg_attempt_disposition_cleanup "$disposition"
+}
+
+pg_attempt_terminal_from_meta() { # marker terminal-kind proof-kind -> persist proof without cleanup
+  local marker="$1" kind="$2" proof="$3" meta host owner repo key pr _out epoch
+  meta="$(pg_run_meta_read "$marker" 2>/dev/null || true)"; [ -n "$meta" ] || return 1
+  IFS=$'\t' read -r host owner repo key pr _out epoch <<<"$meta"
+  pg_attempt_disposition_write "$host" "$owner" "$repo" "$pr" "$key" "$marker" "$epoch" "$kind" "$proof"
+}
+
+pg_attempt_terminal_transition() { # host owner repo pr key marker epoch kind proof [delivery snapshot]
+  local host="$1" owner="$2" repo="$3" pr="$4" key="$5" marker="$6" epoch="$7" kind="$8" proof="$9"
+  local disposition meta active_file active_marker active_epoch latest="" binding normalized_pr
+  normalized_pr="$(pg_pr_number_normalize "$pr")" || return 1
+  disposition="$(pg_attempt_disposition_read "$marker" 2>/dev/null || true)"
+  if [ -n "$disposition" ]; then
+    jq -e --arg h "$host" --arg o "$owner" --arg r "$repo" --arg key "$key" --argjson p "$normalized_pr" --argjson epoch "$epoch" --arg kind "$kind" --arg proof "$proof" \
+      '.repository.host==$h and .repository.owner==$o and .repository.repo==$r and .round_key==$key and .target.pr==$p and .charged_spend_epoch==$epoch and .terminal_kind==$kind and .proof_kind==$proof' \
+      <<<"$disposition" >/dev/null 2>&1 || return 1
+  else
+    meta="$(pg_run_meta_read "$marker" 2>/dev/null || true)"; [ -n "$meta" ] || return 1
+    IFS=$'\t' read -r _h _o _r _key _pr _out _epoch <<<"$meta"
+    [ "$_h" = "$host" ] && [ "$_o" = "$owner" ] && [ "$_r" = "$repo" ] && [ "$_key" = "$key" ] \
+      && [ "$_pr" = "$normalized_pr" ] && [ "$_epoch" = "$epoch" ] || return 1
+    if [ "$kind" = not-submitted ]; then
+      active_file="$(pg_active_dir)/$key"; [ -f "$active_file" ] && [ ! -L "$active_file" ] || return 1
+      IFS=$'\t' read -r active_marker _ _ _ _ _ _ active_epoch < "$active_file" 2>/dev/null || return 1
+      [ "$active_marker" = "$marker" ] && [ "$active_epoch" = "$epoch" ] || return 1
+      latest="$(tail -n 1 "$(pg_rounds_dir)/$key" 2>/dev/null)"
+      [ "$latest" = "$epoch" ] || return 1
+      binding="$(pg_review_input_binding_read "$marker" 2>/dev/null || true)"
+      if [ "${REVIEW_DECISION_EXECUTE:-0}" = 1 ]; then [ -n "$binding" ] || return 1; fi
+      if [ -n "$binding" ]; then [ "$(jq -r .charged_spend_epoch <<<"$binding")" = "$epoch" ] || return 1; fi
+    fi
+    pg_attempt_disposition_write "$host" "$owner" "$repo" "$pr" "$key" "$marker" "$epoch" "$kind" "$proof" "${10:-}" || return 1
+    disposition="$(pg_attempt_disposition_read "$marker" 2>/dev/null || true)"; [ -n "$disposition" ] || return 1
+  fi
+  pg_attempt_disposition_cleanup "$disposition"
+}
+
+pg_attempt_artifact() { # marker -> kind<TAB>path for a validated canonical review
+  local marker="$1" path
+  pg_reservation_marker_ok "$marker" || return 1
+  path="$(pg_completed_dir)/$marker"
+  if [ -f "$path" ] && [ ! -L "$path" ] && pg_is_review "$path" \
+     && [ -z "$(pg_capture_foreign_echo "$path" "$marker")" ]; then
+    printf 'completed\t%s\n' "$path"; return 0
+  fi
+  path="$PRO_GATE_HOME/pending/$marker"
+  if [ -f "$path" ] && [ ! -L "$path" ] && pg_is_review "$path" \
+     && [ -z "$(pg_capture_foreign_echo "$path" "$marker")" ]; then
+    printf 'pending\t%s\n' "$path"; return 0
+  fi
+  return 1
+}
+
+# Canonical read-only attempt ownership for one PR. Every caller gets the same precedence and
+# marker rather than independently interpreting active, reservation, run-meta, and artifacts.
+# A later terminal-disposition layer augments this snapshot without changing its interface.
+pg_attempt_snapshot() { # host owner repo pr round-key [exclude-marker] -> canonical JSON
+  local host="$1" owner="$2" repo="$3" pr="$4" key="$5" exclude="${6:-}"
+  local marker="" source=none state=none active_state=none epoch=0 out="" rec artifact="" artifact_kind="" artifact_path=""
+  local active_file reservation latest_unresolved latest_review="" latest_review_epoch=0 disposition="" disposition_artifact="" cleanup=false terminal_json=null recoverable=false fresh=true
+  local disposition_marker="" disposition_epoch=0 competing_marker="" competing_epoch=0 competing_pid="" competing_token="" ignore_disposition=false
+  pg_have jq || return 1
+  pg_canonical_repo_ok "$host" "$owner" "$repo" || return 1
+  pr="$(pg_pr_number_normalize "$pr")" || return 1
+  pg_round_key_ok "$key" || return 1
+
+  # An exclude marker reads the change as if that attempt did not exist: every lookup below skips it
+  # before choosing, so an older attempt it would otherwise shadow still counts.
+  latest_review="$(pg_run_meta_find_latest "$host" "$owner" "$repo" "$pr" review "$exclude" 2>/dev/null || true)"
+  if [ -n "$latest_review" ]; then
+    rec="$(pg_run_meta_read "$latest_review" 2>/dev/null || true)"
+    [ -z "$rec" ] || IFS=$'\t' read -r _ _ _ _ _ _ latest_review_epoch <<<"$rec"
+    case "$latest_review_epoch" in ''|*[!0-9]*) latest_review_epoch=0;; esac
+  fi
+  disposition="$(pg_attempt_disposition_find "$host" "$owner" "$repo" "$pr" "$exclude" 2>/dev/null || true)"
+  if [ -n "$disposition" ]; then
+    disposition_marker="$(jq -r .marker <<<"$disposition")"; disposition_epoch="$(jq -r .charged_spend_epoch <<<"$disposition")"
+    active_file="$(pg_active_dir)/$key"
+    if [ -f "$active_file" ] && [ ! -L "$active_file" ]; then
+      IFS=$'\t' read -r competing_marker _ competing_pid _ _ competing_token _ competing_epoch < "$active_file" 2>/dev/null || true
+      if pg_reservation_marker_ok "$competing_marker" && [ "$competing_marker" != "$disposition_marker" ] && [ "$competing_marker" != "$exclude" ]; then
+        case "$competing_epoch" in
+          ''|*[!0-9]*)
+            case "$competing_pid" in ''|*[!0-9]*) ;; *)
+              if kill -0 "$competing_pid" 2>/dev/null \
+                 && { [ -z "$competing_token" ] || [ "$(pg_pid_token "$competing_pid" 2>/dev/null || true)" = "$competing_token" ]; }; then ignore_disposition=true; fi
+              ;;
+            esac
+            ;;
+          *) if [ "$competing_epoch" -gt "$disposition_epoch" ] || { [ "$competing_epoch" = "$disposition_epoch" ] && [[ "$competing_marker" > "$disposition_marker" ]]; }; then ignore_disposition=true; fi;;
+        esac
+      fi
+    fi
+    if [ "$ignore_disposition" = false ]; then
+      competing_marker="$(pg_reservation_find_pr "$key" "" "$exclude" 2>/dev/null || true)"
+      if pg_reservation_marker_ok "$competing_marker" && [ "$competing_marker" != "$disposition_marker" ] && [ "$competing_marker" != "$exclude" ]; then
+        competing_epoch="$(pg_reservation_read_spend "$competing_marker" 2>/dev/null || pg_marker_epoch "$competing_marker" 2>/dev/null || true)"
+        case "$competing_epoch" in
+          ''|*[!0-9]*) ignore_disposition=true;;
+          *) if [ "$competing_epoch" -gt "$disposition_epoch" ] || { [ "$competing_epoch" = "$disposition_epoch" ] && [[ "$competing_marker" > "$disposition_marker" ]]; }; then ignore_disposition=true; fi;;
+        esac
+      fi
+    fi
+    if [ "$ignore_disposition" = false ] && [ -n "$latest_review" ] && [ "$latest_review" != "$disposition_marker" ]; then
+      if [ "$latest_review_epoch" -gt "$disposition_epoch" ] || { [ "$latest_review_epoch" = "$disposition_epoch" ] && [[ "$latest_review" > "$disposition_marker" ]]; }; then ignore_disposition=true; fi
+    fi
+    if [ "$ignore_disposition" = false ]; then
+      competing_marker="$(pg_run_meta_find_latest "$host" "$owner" "$repo" "$pr" unresolved "$exclude" 2>/dev/null || true)"
+      if [ -n "$competing_marker" ] && [ "$competing_marker" != "$disposition_marker" ] && [ "$competing_marker" != "$exclude" ]; then
+        rec="$(pg_run_meta_read "$competing_marker" 2>/dev/null || true)"
+        [ -z "$rec" ] || IFS=$'\t' read -r _ _ _ _ _ _ competing_epoch <<<"$rec"
+        case "$competing_epoch" in ''|*[!0-9]*) competing_epoch=0;; esac
+        if [ "$competing_epoch" -gt "$disposition_epoch" ] || { [ "$competing_epoch" = "$disposition_epoch" ] && [[ "$competing_marker" > "$disposition_marker" ]]; }; then ignore_disposition=true; fi
+      fi
+    fi
+    if [ "$ignore_disposition" = true ]; then disposition=""; else
+      marker="$disposition_marker"; epoch="$disposition_epoch"
+      disposition_artifact="$(pg_attempt_artifact "$marker" 2>/dev/null || true)"
+      if [ -n "$disposition_artifact" ]; then
+        IFS=$'\t' read -r artifact_kind artifact_path <<<"$disposition_artifact"
+        source=artifact; state=review-ready; fresh=false; terminal_json=null
+      else
+        cleanup=false; pg_attempt_disposition_cleanup_pending "$disposition" && cleanup=true
+        source=disposition; recoverable=false; terminal_json="$disposition"
+        if [ "$cleanup" = true ]; then state=cleanup-pending; fresh=false; else state="$(jq -r .terminal_kind <<<"$disposition")"; fresh=true; fi
+      fi
+      rec="$(pg_run_meta_read "$marker" 2>/dev/null || true)"
+      if [ -n "$rec" ]; then IFS=$'\t' read -r _ _ _ _ _ out _ <<<"$rec"; fi
+    fi
+  fi
+
+  if [ -z "$marker" ]; then
+    active_file="$(pg_active_dir)/$key"
+    if [ -f "$active_file" ] && [ ! -L "$active_file" ]; then
+      IFS=$'\t' read -r marker out _ _ _ _ active_state epoch < "$active_file" 2>/dev/null || true
+      if ! pg_reservation_marker_ok "$marker" || [ "$marker" = "$exclude" ]; then marker=""; fi
+      # Supersession is exact-marker proof and outranks mutable sidecars left by that same attempt.
+      # A distinct active marker still wins below as newer applicable work.
+      if [ -n "$marker" ] && [ "$(pg_reservation_state "$marker" 2>/dev/null || true)" = superseded ]; then
+        marker=""; active_state=none
+      fi
+      if [ -n "$marker" ]; then
+        case "$active_state" in pre-charge|round-recorded|charged|run-meta-written|input-bound|submitted|unknown-fate|live) ;; *) active_state=unknown-fate;; esac
+        source=active; state="$active_state"; recoverable=true; fresh=false
+      fi
+    fi
+  fi
+
+  if [ -z "$marker" ]; then
+    # Applicable work always outranks audit-only superseded records for the same change. Only fall
+    # back to superseded when no capacity-holding reservation exists.
+    reservation="$(pg_reservation_find_pr "$key" "" "$exclude" 2>/dev/null || true)"
+    [ -n "$reservation" ] || reservation="$(pg_reservation_find_pr "$key" include-superseded "$exclude" 2>/dev/null || true)"
+    if pg_reservation_marker_ok "$reservation" && [ "$reservation" != "$exclude" ]; then
+      marker="$reservation"; source=reservation
+      if [ "$(pg_reservation_state "$marker" 2>/dev/null || echo generating)" = superseded ]; then
+        state=superseded; recoverable=false; fresh=true
+      else
+        state=recoverable; recoverable=true; fresh=false
+      fi
+      rec="$(pg_run_meta_read "$marker" 2>/dev/null || true)"
+      if [ -n "$rec" ]; then IFS=$'\t' read -r _ _ _ _ _ out epoch <<<"$rec"; fi
+    fi
+  fi
+
+  if [ -z "$marker" ]; then
+    latest_unresolved="$(pg_run_meta_find_latest "$host" "$owner" "$repo" "$pr" unresolved "$exclude" 2>/dev/null || true)"
+    if [ -n "$latest_unresolved" ] && [ "$latest_unresolved" != "$exclude" ]; then
+      marker="$latest_unresolved"; source=run-meta; state=unknown-fate; recoverable=true; fresh=false
+      rec="$(pg_run_meta_read "$marker" 2>/dev/null || true)"
+      if [ -n "$rec" ]; then IFS=$'\t' read -r _ _ _ _ _ out epoch <<<"$rec"; fi
+    fi
+  fi
+
+  if [ -z "$marker" ] && [ -n "$latest_review" ] && [ "$latest_review" != "$exclude" ]; then
+    marker="$latest_review"; epoch="$latest_review_epoch"; source=artifact; state=review-ready; recoverable=false; fresh=false
+  fi
+
+  if [ -n "$marker" ]; then
+    artifact="$(pg_attempt_artifact "$marker" 2>/dev/null || true)"
+    if [ -n "$artifact" ]; then
+      IFS=$'\t' read -r artifact_kind artifact_path <<<"$artifact"
+      source=artifact; state=review-ready; recoverable=false; fresh=false
+    fi
+    if [ "$epoch" = 0 ] || [ -z "$epoch" ]; then
+      rec="$(pg_run_meta_read "$marker" 2>/dev/null || true)"
+      if [ -n "$rec" ]; then IFS=$'\t' read -r _ _ _ _ _ out epoch <<<"$rec"; fi
+    fi
+  fi
+  case "$epoch" in ''|*[!0-9]*) epoch=0;; esac
+
+  jq -cnS --arg host "$host" --arg owner "$owner" --arg repo "$repo" --argjson pr "$pr" \
+    --arg key "$key" --arg marker "$marker" --arg source "$source" --arg state "$state" \
+    --arg out "$out" --arg kind "$artifact_kind" --arg path "$artifact_path" --argjson epoch "$epoch" \
+    --argjson recoverable "$recoverable" --argjson fresh "$fresh" --argjson cleanup "$cleanup" --argjson terminal "$terminal_json" \
+    '{artifact:{kind:$kind,path:$path},charged_spend_epoch:$epoch,cleanup_pending:$cleanup,fresh_eligible:$fresh,marker:$marker,out:$out,recoverable:$recoverable,source:$source,state:$state,target:{host:$host,owner:$owner,pr:$pr,repo:$repo,round_key:$key},terminal:$terminal}'
+}
+
+# pg_dir_age_secs <dir>: seconds since <dir> was last modified, or failure when it cannot be read.
+# Creating the owner marker inside a directory updates that directory's mtime, so an UNMARKED
+# directory's age is the age of its mkdir.
+pg_dir_age_secs() {
+  local d="$1" mt now
+  mt="$(stat -c %Y "$d" 2>/dev/null || stat -f %m "$d" 2>/dev/null || true)"
+  case "$mt" in ''|*[!0-9]*) return 1;; esac
+  now="$(date +%s 2>/dev/null)"; case "$now" in ''|*[!0-9]*) return 1;; esac
+  echo $(( now - mt ))
+}
+
+# pg_dirlock_owner_count <dir>: how many owner.* markers the directory currently holds. A correctly
+# held guard has exactly one; two means a race let a second shell in and BOTH must stand down.
+pg_dirlock_owner_count() {
+  local d="$1" f n=0
+  for f in "$d"/owner.*; do [ -e "$f" ] && n=$(( n + 1 )); done
+  echo "$n"
+}
+
+# pg_dirlock_reclaim_dead <lockdir>: reclaim a mkdir-spinlock directory whose every owner is dead.
+# Ownership is a marker file named owner.<pid> INSIDE the directory whose CONTENTS are that pid's
+# start-time token, and this helper only ever (a) unlinks a dead marker by its exact name and
+# (b) rmdir()s the directory, which the kernel refuses unless it is empty. There is no rm -rf on a
+# shared pathname and no rename (gate #148 r1 P1, r2 P1).
+#
+# Three rules this helper must not lose, each of which cost a round:
+#
+#  1. ABSENCE IS NOT SUCCESS. The directory is probed first and a missing one returns 1. Reporting
+#     success for a directory that was never there made pg_reservation_guard_acquire spin forever
+#     at 100% CPU, ignoring its own wait bound, whenever mkdir failed for any reason other than
+#     EEXIST -- an unwritable or missing parent, for instance (v0.41 defect, reproduced).
+#  2. A RECYCLED PID IS NOT A LIVE OWNER. kill -0 alone wedges the guard permanently once the OS
+#     hands a dead owner's pid to an unrelated live process, so the marker carries pg_pid_token's
+#     process start time and liveness requires BOTH to match. Be precise about the precedent: this
+#     is the check pg_harvest_claimed applies on reclaim. pg_lock and pg_lock_n WRITE a `token`
+#     beside their `pid` but never read it back when they reclaim a dead-owner directory, so they
+#     still carry the recycled-pid hazard (and an unscoped rm -rf with it). This helper is
+#     deliberately STRICTER than they are; do not "align" it down to match them.
+#     Liveness must also be positively DISPROVED, never inferred from a failed measurement: a
+#     token that cannot be RECOMPUTED for a live pid fails closed exactly as an unreadable stored
+#     token does, or a transient /proc or `ps` failure unlinks a live owner's marker (r8 P0).
+#  3. AN UNMARKED DIRECTORY IS NOT AN ORPHAN YET. A contender that has just mkdir'd is about to
+#     write its marker. Deleting the directory in that window let the contender's later marker
+#     write land inside a REPLACEMENT directory another process had already claimed, so two live
+#     shells each believed they held the guard (v0.41 defect, reproduced: the previous comment
+#     claimed "the contender learns that when its marker creation fails", but the write succeeds
+#     because the pathname was re-created). An unmarked directory is therefore only reclaimed once
+#     it has sat unmarked for PRO_GATE_DIRLOCK_ORPHAN_GRACE seconds -- a bound a live contender
+#     never reaches and a process that died between mkdir and marker always does.
+#
+# Returns 0 when the directory is gone, 1 when it is held or too young to judge.
+pg_dirlock_reclaim_dead() {
+  local lockdir="$1" f pid tok had_marker=0 grace age
+  [ -d "$lockdir" ] || return 1
+  for f in "$lockdir"/owner.*; do
+    [ -e "$f" ] || continue
+    had_marker=1
+    pid="${f##*/owner.}"
+    case "$pid" in ''|*[!0-9]*) rm -f "$f" 2>/dev/null; continue;; esac
+    if kill -0 "$pid" 2>/dev/null; then
+      tok="$(head -c 64 "$f" 2>/dev/null | tr -d '\n')"
+      # pg_pid_recycled fails closed (held) on an unreadable/tokenless marker or a recomputation
+      # that fails transiently for a perfectly live pid (a /proc read or a `ps` fork under memory
+      # pressure) -- either failure must never be read as proof the holder is dead. Liveness must
+      # be positively DISPROVED before removal, never inferred from a failed measurement.
+      pg_pid_recycled "$pid" "$tok" || return 1
+    fi
+    rm -f "$f" 2>/dev/null
+  done
+  # pg_lock and pg_lock_n record their holder as a `pid` file with the token beside it,
+  # rather than as an owner.<pid> marker. Same question, same fail-closed rules, one
+  # implementation -- v0.41 deferred the guard's self-heal specifically so one hardened
+  # helper could serve all three call sites instead of two divergent ones. Their shape is
+  # read outside this function too (st_inflight in the engine, pg_harvest_claimed here),
+  # so it stays as it is and the reclaimer learns it.
+  if [ "$had_marker" = 0 ] && [ -e "$lockdir/pid" ]; then
+    pid="$(cat "$lockdir/pid" 2>/dev/null || true)"
+    case "$pid" in
+      ''|*[!0-9]*)
+        # A torn or empty record is not a live claim -- but it is NOT a marker either, and
+        # counting it as one skips rule 3 above. `echo "$$" > "$lockdir/pid"` opens with
+        # O_CREAT|O_TRUNC and writes a syscall later, so "exists but empty" is a state every
+        # live winner passes through on its way to publishing itself, and it is the PERSISTENT
+        # state when that write fails (the call is `|| true`). Treating it as a marker made a
+        # winner's directory reclaimable mid-write with no grace at all, which is exactly the
+        # double-entry rule 3 exists to prevent (v0.44.0 defect, reproduced: the same winner was
+        # kept one syscall earlier and removed one syscall later). Leave had_marker at 0 so the
+        # grace still has to elapse, and leave the file alone so a merely slow winner can still
+        # finish its own record.
+        : ;;
+      *)
+        had_marker=1
+        if kill -0 "$pid" 2>/dev/null; then
+          tok="$(head -c 64 "$lockdir/token" 2>/dev/null | tr -d '\n')"
+          # A tokenless lock is legacy: a live pid is the whole claim, so it holds.
+          # pg_pid_recycled fails closed the same way for a transient recompute failure -- a
+          # merely-unlucky read must never hand a live holder's lock to a reclaimer.
+          pg_pid_recycled "$pid" "$tok" || return 1
+        fi
+        rm -f "$lockdir/pid" "$lockdir/token" 2>/dev/null
+        ;;
+    esac
+  fi
+  if [ "$had_marker" = 0 ]; then
+    grace="${PRO_GATE_DIRLOCK_ORPHAN_GRACE:-5}"; case "$grace" in ''|*[!0-9]*) grace=5;; esac
+    age="$(pg_dir_age_secs "$lockdir")" || return 1
+    [ "$age" -ge "$grace" ] 2>/dev/null || return 1
+    # Past the grace the directory is provably abandoned -- a live winner records itself in
+    # microseconds -- so a torn record may be cleared here, where age has authorized it, and
+    # nowhere else. RE-READ it first: for the owner.<pid> shape the final rmdir is itself the
+    # check, because the kernel refuses a directory a contender has just written a marker into.
+    # Unlinking by name would throw that away, so re-reading restores the equivalent guarantee
+    # and narrows the window from the whole grace to the gap before rmdir.
+    if [ -e "$lockdir/pid" ]; then
+      # No `|| true` here, deliberately. An unreadable record and an EMPTY one are different
+      # facts, and `|| true` reports both as the empty string -- so a cat that merely failed
+      # (a fork under memory pressure, a stalled mount) would authorize deleting a record that
+      # may name a live owner. That is the same fail-open the token checks above refuse, and it
+      # would be a new instance of it in the one branch that unlinks another process's claim.
+      # A failed READ is not evidence of an absent owner: keep the lock and re-decide later.
+      pid="$(cat "$lockdir/pid" 2>/dev/null)" || return 1
+      case "$pid" in
+        ''|*[!0-9]*) rm -f "$lockdir/pid" "$lockdir/token" 2>/dev/null ;;
+        *) return 1 ;;   # a slow winner finished its record during the grace: it holds
+      esac
+    fi
+  fi
+  rmdir "$lockdir" 2>/dev/null || [ ! -d "$lockdir" ]
+}
+
+# Release a mkdir-fallback lock this process still owns. A holder whose directory was
+# reclaimed -- correctly, because it looked dead -- must never delete the replacement a live
+# process has since created at the same path. Check the recorded owner is still us, drop our
+# own two files by name, then rmdir, which refuses a directory that still holds anyone's.
+# Never rm -rf a pathname another live process may own by now (the same rule the reservation
+# guard's release follows).
+pg_dirlock_release_own() { # <lockdir> <pid>
+  local dir="$1" pid="$2" opid
+  [ -d "$dir" ] || return 0
+  opid="$(cat "$dir/pid" 2>/dev/null || true)"
+  [ "$opid" = "$pid" ] || return 0
+  rm -f "$dir/pid" "$dir/token" 2>/dev/null
+  rmdir "$dir" 2>/dev/null || true
+}
+
+# Shared guard for reservation writes/removes AND the fresh-run count+slot-acquire decision.
+# This makes the handoff atomic: an exit-9 run writes its durable reservation while it still
+# owns the process slot; no waiter can observe "slot released, reservation not counted" (or
+# compute capacity before the write and acquire the just-released slot on stale information).
+pg_reservation_guard_acquire() {
+  local lock wait_s; lock="$(pg_reservation_lock)"
+  wait_s="${PRO_GATE_RESERVATION_GUARD_WAIT:-10}"; case "$wait_s" in ''|*[!0-9]*) wait_s=10;; esac
+  if pg_have flock; then
+    { exec {PG_RESERVATION_GUARD_FD}>>"$lock"; } 2>/dev/null || { PG_RESERVATION_GUARD_FD=""; return 1; }
+    if ! flock -w "$wait_s" "$PG_RESERVATION_GUARD_FD" 2>/dev/null; then
+      # A timed-out acquire returns 1 to a caller that never calls release, so the descriptor
+      # must be closed HERE or every contended acquire leaks one fd for the life of the process
+      # (v0.41; pg_lock_n already closes its losing descriptors the same way).
+      eval "exec ${PG_RESERVATION_GUARD_FD}>&-" 2>/dev/null
+      PG_RESERVATION_GUARD_FD=""
+      return 1
+    fi
+    return 0
+  fi
+  # macOS / no flock: a mkdir spinlock in the same family as pg_lock's, but with a stricter reclaim
+  # (see pg_dirlock_reclaim_dead: token-checked liveness, orphan grace, no rm -rf). Without it a guard
+  # directory left by a killed process wedged every later reservation write for the full wait, and
+  # a failed acquire left PG_RESERVATION_GUARD_DIR pointing at a directory this process did not
+  # own, so a later release could remove another process's guard. Ownership is the marker file
+  # owner.<pid> inside the directory and reclamation goes through pg_dirlock_reclaim_dead (gate
+  # #148 r1 P1 and r2 P1): the bare `rm -rf` that used to live here let two waiters that read the
+  # same dead pid both end up inside the guard, and let a remover orphaned by a dying holder
+  # delete the replacement a reclaimer had already re-created.
+  PG_RESERVATION_GUARD_DIR="${lock}.d"
+  # gate #148 r2 P1: $$ is the parent shell even inside a command substitution or subshell, so a
+  # restore running under $( ) would publish an owner pid that can die while the real holder lives.
+  # BASHPID names the shell that actually holds the guard and performs the guarded mutation, and it
+  # MUST be read by direct expansion here -- reading it inside $( ) would name the substitution's
+  # own short-lived subshell and reinstate exactly the defect it fixes.
+  #
+  # BASHPID is bash 4+. Stock macOS /bin/bash is 3.2, and macOS is also the platform with no flock,
+  # so the one shell that always reaches this fallback is the one that was silently falling back to
+  # $$ and re-opening r2 P1 (v0.41 defect).
+  #
+  # `exec` is load-bearing (gate #148 r5 P1). Bash replaces a command-substitution subshell with a
+  # lone simple command, so $PPID there names the shell that actually holds the guard. Adding any
+  # `|| fallback` INSIDE the substitution makes it a compound command, bash forks an extra subshell,
+  # and sh reports THAT subshell -- a pid which has already exited by the time the marker is
+  # published, whose /proc entry is gone, and which therefore yields an empty token and reads as
+  # dead to every reclaimer. A contender then reclaimed a guard whose real holder was still inside
+  # its critical section: the exact double-hold this release fixes, reintroduced by the fallback.
+  # Failure is handled OUT here and REFUSES the acquisition rather than publishing a wrong owner.
+  PG_RESERVATION_GUARD_OWNER="${BASHPID:-}"
+  if [ -z "$PG_RESERVATION_GUARD_OWNER" ]; then
+    PG_RESERVATION_GUARD_OWNER="$(exec sh -c 'echo "$PPID"' 2>/dev/null)"
+    case "$PG_RESERVATION_GUARD_OWNER" in
+      ''|*[!0-9]*) PG_RESERVATION_GUARD_DIR=""; PG_RESERVATION_GUARD_OWNER=""; return 1;;
+    esac
+  fi
+  local waited=0 spins=0 max_spins guard_token
+  # Reclaim retries are not sleeps, so they need their own bound or a pathological alternation of
+  # dead owners loops without ever reaching the wait bound.
+  max_spins=$(( wait_s * 100 + 100 ))
+  while :; do
+    if mkdir "$PG_RESERVATION_GUARD_DIR" 2>/dev/null; then
+      # Publish the start-time token so a recycled pid cannot later impersonate this owner, then
+      # confirm we are the ONLY owner. A second marker means a reclaimer took our still-empty
+      # directory and another shell re-created it at the same pathname, in which case our write
+      # landed in a guard we do not hold: stand down and retry rather than return a false hold.
+      #
+      # gate #148 r5 P1: the token must be NON-EMPTY before the marker is published. An empty token
+      # means the owner pid has no readable process, so every reclaimer reads this marker as dead
+      # and takes the guard while we are inside it. Refuse rather than publish an unprovable owner.
+      guard_token="$(pg_pid_token "$PG_RESERVATION_GUARD_OWNER" 2>/dev/null || true)"
+      if [ -n "$guard_token" ] \
+         && printf '%s' "$guard_token" \
+           > "$PG_RESERVATION_GUARD_DIR/owner.$PG_RESERVATION_GUARD_OWNER" 2>/dev/null \
+         && [ "$(pg_dirlock_owner_count "$PG_RESERVATION_GUARD_DIR")" = 1 ]; then
+        return 0
+      fi
+      rm -f "$PG_RESERVATION_GUARD_DIR/owner.$PG_RESERVATION_GUARD_OWNER" 2>/dev/null
+      rmdir "$PG_RESERVATION_GUARD_DIR" 2>/dev/null
+    elif [ -d "$PG_RESERVATION_GUARD_DIR" ] && pg_dirlock_reclaim_dead "$PG_RESERVATION_GUARD_DIR"; then
+      # mkdir failing while the directory does not exist is NOT contention (a missing or unwritable
+      # parent, say); it must fall through to the bounded wait instead of retrying forever.
+      spins=$(( spins + 1 ))
+      [ "$spins" -ge "$max_spins" ] && { PG_RESERVATION_GUARD_DIR=""; PG_RESERVATION_GUARD_OWNER=""; return 1; }
+      continue
+    fi
+    waited=$(( waited + 1 ))
+    [ "$waited" -ge "$wait_s" ] && { PG_RESERVATION_GUARD_DIR=""; PG_RESERVATION_GUARD_OWNER=""; return 1; }
+    sleep 1
+  done
+}
+pg_reservation_guard_release() {
+  local dir owner
+  if [ -n "${PG_RESERVATION_GUARD_FD:-}" ]; then
+    eval "exec ${PG_RESERVATION_GUARD_FD}>&-" 2>/dev/null
+    PG_RESERVATION_GUARD_FD=""
+  fi
+  if [ -n "${PG_RESERVATION_GUARD_DIR:-}" ]; then
+    dir="$PG_RESERVATION_GUARD_DIR"; owner="${PG_RESERVATION_GUARD_OWNER:-}"
+    PG_RESERVATION_GUARD_DIR=""; PG_RESERVATION_GUARD_OWNER=""
+    # gate #148 r2 P1: unlink only OUR marker, by exact name, then rmdir. A remover orphaned by a
+    # holder that dies here cannot touch a replacement: the replacement's marker has another name
+    # and rmdir refuses a directory that still holds one. Never rm -rf a pathname another live
+    # process may own by now.
+    [ -n "$owner" ] && rm -f "$dir/owner.$owner" 2>/dev/null
+    rmdir "$dir" 2>/dev/null
+  fi
+}
+
+pg_reservation_write() { # marker [pr] [out] [slot] [model] [spend_epoch] -- empty fields preserve the record's
+  local marker="$1" pr="${2:-}" out="${3:-}" slot="${4:-}" model="${5:-}" spend="${6:-}" dir rc created state tmp prev_pr="" prev_slot="" prev_model="" prev_spend="" prev_state=""
+  pg_reservation_marker_ok "$marker" || return 1
+  dir="$(pg_reservation_dir)"; mkdir -p "$dir" 2>/dev/null || return 1
+  pg_reservation_guard_acquire || return 1
+  # Preserve the original creation time (repeated exit-9 harvests must not extend the TTL
+  # forever), the pr key, the recorded slot, and the captured model (a harvest rewrite has none
+  # of its own); reset the reconciliation miss streak, since this write IS a positive live
+  # observation. The trailing `model` field (v0.21) records the model oracle resolved for the run
+  # so the later --harvest process can name it without re-deriving; legacy 5-field records read it
+  # back as empty.
+  created=""
+  # awk (NOT `read`): tab is IFS-whitespace, so consecutive tabs from an empty slot/model
+  # collapse and shift later fields — the same trap pg_reservation_read_model documents.
+  if [ -L "$dir/$marker" ]; then pg_reservation_guard_release; return 1; fi
+  if [ -f "$dir/$marker" ]; then
+    prev_pr="$(awk -F'\t' 'NR==1{print $1}' "$dir/$marker" 2>/dev/null)"
+    created="$(awk -F'\t' 'NR==1{print $3}' "$dir/$marker" 2>/dev/null)"
+    prev_slot="$(awk -F'\t' 'NR==1{print $5}' "$dir/$marker" 2>/dev/null)"
+    prev_model="$(awk -F'\t' 'NR==1{print $6}' "$dir/$marker" 2>/dev/null)"
+    prev_spend="$(awk -F'\t' 'NR==1{print $7}' "$dir/$marker" 2>/dev/null)"
+    prev_state="$(awk -F'\t' 'NR==1{print $8}' "$dir/$marker" 2>/dev/null)"
+  fi
+  case "$created" in ''|*[!0-9]*) created="$(date +%s)";; esac
+  [ -n "$pr" ] || pr="${prev_pr:-diff}"
+  case "$slot" in ''|*[!0-9]*) slot="$prev_slot";; esac
+  case "$slot" in *[!0-9]*) slot="";; esac
+  [ -n "$model" ] || model="$prev_model"
+  model="$(printf '%s' "$model" | tr -d '\t\n')"   # keep the record single-line + 7-field
+  # v0.31 (#66 gate r3): field 7 is the epoch pg_round_record CHARGED this run's round at, so a
+  # later harvest process stamps trajectory history with the charge time rather than the
+  # marker's pre-queue launch time. Empty on legacy records; readers fall back accordingly.
+  [ -n "$spend" ] || spend="$prev_spend"
+  case "$spend" in *[!0-9]*) spend="";; esac
+  # v0.33 (#82): field 8 is the lifecycle state. Positive live evidence re-arms an ordinary
+  # complete/generating record, but never a proof-backed superseded one: an old-head review stays
+  # collectable without regaining capacity merely because its conversation is still rendering.
+  case "$prev_state" in superseded) state=superseded;; *) state=generating;; esac
+  tmp="$(mktemp "$dir/.${marker}.write.XXXXXX" 2>/dev/null)" \
+    || { pg_reservation_guard_release; return 1; }
+  printf '%s\t%s\t%s\t0\t%s\t%s\t%s\t%s\n' "$pr" "$out" "$created" "$slot" "$model" "$spend" "$state" > "$tmp" 2>/dev/null \
+    && mv -f "$tmp" "$dir/$marker"
+  rc=$?; [ "$rc" -eq 0 ] || rm -f "$tmp" 2>/dev/null
+  pg_reservation_guard_release; return "$rc"
+}
+
+# pg_reservation_read_model <marker>: echo the model field (6th) recorded for an in-progress
+# reservation, or nothing (legacy 5-field records, or none recorded). The --harvest path reads
+# the model straight back from here rather than re-deriving it (KTD3: harvest has no $RUNLOG).
+pg_reservation_read_model() {
+  local marker="$1" dir f
+  pg_reservation_marker_ok "$marker" || return 1
+  dir="$(pg_reservation_dir)"; f="$dir/$marker"
+  [ -f "$f" ] || return 1
+  # awk -F'\t' (NOT `read`): tab is an IFS-whitespace char, so `IFS=$'\t' read` collapses
+  # consecutive tabs and an empty middle field (empty slot + present model) would shift the model
+  # out of reach. awk keeps empty fields, and prints "" for a legacy 5-field record.
+  awk -F'\t' 'NR==1{print $6}' "$f" 2>/dev/null
+}
+
+# pg_model_label <captured-model>: render the model for any human/machine surface. Echoes the
+# captured model when it is present and not oracle's "(unavailable)" sentinel; otherwise a
+# role-based, version-free fallback so no surface ever hardcodes a model version (R5). Override
+# the fallback wording with PRO_GATE_MODEL_ROLE_LABEL.
+pg_model_label() {
+  local m="${1:-}"
+  case "$m" in
+    ''|'(unavailable)') printf '%s\n' "${PRO_GATE_MODEL_ROLE_LABEL:-the frontier OpenAI Pro reasoning model (web-UI-only, via the oracle bridge)}" ;;
+    *) printf '%s\n' "$m" ;;
+  esac
+}
+
+# pg_derive_model_warn <resolved-model> <selection-status>: compute the advisory downgrade
+# warning (R6), or echo nothing. Advisory only; the caller logs it and stores it in the status
+# file, and it never changes the exit code.
+#   - a captured model matching the weak-model denylist (cheap markers) -> weak-model warning
+#   - a captured non-weak model -> no warning
+#   - NO captured model but oracle reported status=already-selected -> BENIGN, no warning: under
+#     the default `current` strategy oracle 0.15.2 reports resolved=(unavailable) whenever the
+#     account's model was already selected (the steady state), so this is a healthy run whose
+#     exact label just was not re-read; warning here would cry wolf on nearly every default run
+#     (found by dogfooding PR #20). pg_model_label still renders role-based text.
+#   - NO captured model and NO benign status (the run was killed before oracle emitted the
+#     evidence line, e.g. an exit-9/harvest, or a genuine read failure) -> cannot-confirm warning.
+# The denylist (not a Pro-tier allowlist) is deliberate: an allowlist would false-warn on a
+# legitimate future top model whose name lacks "Pro" (e.g. a hypothetical "Sol Ultra").
+pg_derive_model_warn() {
+  local m="${1:-}" st="${2:-}" weak
+  weak="${PRO_GATE_MODEL_WEAK_PATTERN:-mini|nano|instant}"
+  if [ -n "$m" ]; then
+    grep -qiE "$weak" <<<"$m" 2>/dev/null \
+      && printf "resolved model '%s' matches the weak-model denylist; not the top Pro tier\n" "$m"
+    return 0
+  fi
+  case "$st" in
+    already-selected) : ;;  # benign steady state under `current`: no warning
+    *) printf '%s\n' "could not confirm the resolved model (the run ended before oracle reported it, or none was captured); showing role-based text" ;;
+  esac
+}
+
+pg_reservation_restore_from_meta() { # marker -> restore legacy recovery ownership without spending
+  local marker="$1" meta host owner repo key pr out spend dir f tmp created existing_pr existing_spend
+  meta="$(pg_run_meta_read "$marker" 2>/dev/null || true)"; [ -n "$meta" ] || return 1
+  IFS=$'\t' read -r host owner repo key pr out spend <<<"$meta"
+  pg_canonical_repo_ok "$host" "$owner" "$repo" || return 1
+  pg_round_key_ok "$key" || return 1
+  pr="$(pg_pr_number_normalize "$pr")" || return 1
+  case "$spend" in ''|*[!0-9]*) return 1;; esac
+  dir="$(pg_reservation_dir)"; mkdir -p "$dir" 2>/dev/null || return 1
+  f="$dir/$marker"; pg_reservation_guard_acquire || return 1
+  if [ -e "$f" ] || [ -L "$f" ]; then
+    if [ -f "$f" ] && [ ! -L "$f" ]; then
+      existing_pr="$(awk -F'\t' 'NR==1{print $1}' "$f" 2>/dev/null)"
+      existing_spend="$(awk -F'\t' 'NR==1{print $7}' "$f" 2>/dev/null)"
+      pg_reservation_guard_release
+      if [ "$existing_pr" = "$key" ] && [ "$existing_spend" = "$spend" ]; then echo existing; return 0; fi
+      return 1
+    fi
+    pg_reservation_guard_release
+    return 1
+  fi
+  created="$spend"
+  tmp="$(mktemp "$dir/.${marker}.restore.XXXXXX" 2>/dev/null || true)"
+  if [ -n "$tmp" ] && [ -f "$tmp" ] && [ ! -L "$tmp" ] \
+     && printf '%s\t%s\t%s\t0\t\t\t%s\tgenerating\n' "$key" "$out" "$created" "$spend" > "$tmp" 2>/dev/null \
+     && mv -f "$tmp" "$f" 2>/dev/null; then
+    pg_reservation_guard_release
+    echo created
+    return 0
+  fi
+  [ -z "$tmp" ] || rm -f "$tmp" 2>/dev/null || true
+  pg_reservation_guard_release
+  return 1
+}
+
+pg_reservation_remove() { # marker
+  local marker="$1" dir
+  pg_reservation_marker_ok "$marker" || return 0
+  dir="$(pg_reservation_dir)"; pg_reservation_guard_acquire || return 1
+  # v0.28: the manifest sidecar (the change's file list for provenance checks) lives and dies
+  # with its reservation.
+  rm -f "$dir/$marker" "$(pg_manifest_dir)/$marker" "$(pg_manifest_dir)/$marker.nonce" 2>/dev/null
+  pg_reservation_guard_release
+}
+
+# pg_reservation_note_miss <marker>: one confirmed-absent observation. Echoes "released" when
+# the miss limit is reached (reservation removed) or "retained miss/limit" otherwise. Shared by
+# reconciliation and the harvest not-found path so both apply the same fail-closed policy.
+pg_reservation_note_miss() {
+  local marker="$1" dir f pr out created misses slot model spend state state_field miss_limit ttl now age
+  miss_limit="${PRO_GATE_RESERVATION_MISSES:-3}"
+  case "$miss_limit" in ''|*[!0-9]*) miss_limit=3;; esac
+  [ "$miss_limit" -ge 2 ] 2>/dev/null || miss_limit=2
+  pg_reservation_marker_ok "$marker" || { echo released; return 0; }
+  dir="$(pg_reservation_dir)"; f="$dir/$marker"
+  pg_reservation_guard_acquire || { echo "retained 0/$miss_limit"; return 0; }
+  if [ ! -f "$f" ]; then pg_reservation_guard_release; echo released; return 0; fi
+  if pg_memo_claim_pending "$marker"; then
+    pg_reservation_guard_release; echo "retained unresolved-memo"; return 0
+  fi
+  # Superseded work is intentionally retained for optional audit harvest and already holds no
+  # capacity. Absence cannot improve that proof, so it must not rewrite or terminalize the record.
+  if [ "$(awk -F'\t' 'NR==1{print $8}' "$f" 2>/dev/null)" = superseded ]; then
+    pg_reservation_guard_release; echo "retained superseded"; return 0
+  fi
+  # Every miss source shares the same wall-clock spacing. This check runs under the reservation
+  # guard so concurrent harvest/recover/reconcile callers cannot compress one absence window into
+  # the full terminal threshold.
+  local interval mt now
+  interval="${PRO_GATE_RECONCILE_INTERVAL:-60}"; case "$interval" in ''|*[!0-9]*) interval=60;; esac
+  mt="$(stat -c %Y "$f" 2>/dev/null || stat -f %m "$f" 2>/dev/null || echo 0)"; now="$(date +%s)"
+  if [ "$(( now - mt ))" -lt "$interval" ] 2>/dev/null; then
+    pg_reservation_guard_release; echo "retained interval/$miss_limit"; return 0
+  fi
+  # Per-field awk, and EVERY field (#68 gate P1): `read` collapses consecutive tabs, and
+  # a 6-field rewrite silently erased the v0.31 spend epoch on the first confirmed miss —
+  # which then forced a later harvest onto the marker-time fallback and corrupted round
+  # ordering. Every reservation mutation must round-trip the whole record, including the v0.33
+  # lifecycle state in field 8: dropping it turned a `complete` review — one that holds no
+  # capacity — back into account occupancy on its first confirmed miss (#236). A legacy record
+  # without the field keeps its seven-field shape.
+  pr="$(awk -F'\t' 'NR==1{print $1}' "$f" 2>/dev/null)"
+  out="$(awk -F'\t' 'NR==1{print $2}' "$f" 2>/dev/null)"
+  created="$(awk -F'\t' 'NR==1{print $3}' "$f" 2>/dev/null)"
+  misses="$(awk -F'\t' 'NR==1{print $4}' "$f" 2>/dev/null)"
+  slot="$(awk -F'\t' 'NR==1{print $5}' "$f" 2>/dev/null)"
+  model="$(awk -F'\t' 'NR==1{print $6}' "$f" 2>/dev/null)"
+  spend="$(awk -F'\t' 'NR==1{print $7}' "$f" 2>/dev/null)"
+  state="$(awk -F'\t' 'NR==1{print $8}' "$f" 2>/dev/null)"
+  state_field=""; [ -z "$state" ] || state_field="$(printf '\t%s' "$state")"
+  case "$misses" in ''|*[!0-9]*) misses=0;; esac
+  case "$created" in ''|*[!0-9]*) created=0;; esac
+  ttl="${PRO_GATE_RESERVATION_TTL:-21600}"; case "$ttl" in ''|*[!0-9]*) ttl=21600;; esac
+  now="$(date +%s)"; age=$(( now - created )); [ "$age" -lt 0 ] && age=0
+  misses=$(( misses + 1 ))
+  # The miss threshold is terminal only when durable run-meta can bind the proof to one charged
+  # attempt. Publish disposition BEFORE releasing the reservation so no fresh caller sees a gap.
+  # Every other outcome shares the one rewrite below, so the record's fields cannot diverge by path.
+  if [ "$misses" -ge "$miss_limit" ] && [ "$created" -gt 0 ] && [ "$age" -ge "$ttl" ] \
+     && pg_attempt_terminal_from_meta "$marker" recovery-exhausted bounded-recovery-exhausted; then
+    rm -f "$f" "$(pg_manifest_dir)/$marker" "$(pg_manifest_dir)/$marker.nonce" 2>/dev/null
+    pg_reservation_guard_release
+    pg_attempt_reconcile_terminal "$marker" 2>/dev/null || true
+    echo released
+  else
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s%s\n' "${pr:-diff}" "${out:-}" "${created:-0}" "$misses" "${slot:-}" "${model:-}" "${spend:-}" "$state_field" > "$f.tmp" 2>/dev/null \
+      && mv -f "$f.tmp" "$f"
+    pg_reservation_guard_release
+    echo "retained $misses/$miss_limit"
+  fi
+}
+
+pg_reservation_find_pr() { # pr-key [include-superseded] [exclude-marker] -> marker (oldest, best-effort)
+  local pr="$1" include="${2:-}" exclude="${3:-}" dir f found_pr state
+  [ -n "$pr" ] || return 1
+  dir="$(pg_reservation_dir)"; [ -d "$dir" ] || return 1
+  for f in "$dir"/*; do
+    [ -f "$f" ] || continue
+    pg_reservation_marker_ok "$(basename "$f")" || continue
+    [ -n "$exclude" ] && [ "$(basename "$f")" = "$exclude" ] && continue
+    found_pr="$(awk -F'\t' 'NR==1{print $1}' "$f" 2>/dev/null)"
+    state="$(awk -F'\t' 'NR==1{print $8}' "$f" 2>/dev/null)"
+    [ "$state" = superseded ] && [ "$include" != include-superseded ] && continue
+    [ "$found_pr" = "$pr" ] && { basename "$f"; return 0; }
+  done
+  return 1
+}
+
+pg_reservation_count() {
+  local dir f n=0; dir="$(pg_reservation_dir)"; [ -d "$dir" ] || { echo 0; return; }
+  for f in "$dir"/*; do [ -f "$f" ] && n=$((n + 1)); done
+  echo "$n"
+}
+
+# pg_reservation_holds_capacity <record-file> [now]: exit 0 when the reservation occupies account
+# capacity, 1 when it does not. Every capacity reader (slot plan, holding count, holder report,
+# --status) asks this one question, so they cannot disagree about what is held.
+#
+# complete/superseded never hold (#82, #234). Empty/legacy or unknown state always holds: an
+# unknown state must never free capacity. An explicit `generating` record holds only while its
+# charge is younger than PRO_GATE_GENERATION_CEILING (#273). Measured on the live ledger and owner
+# logs (2026-10-17): owner probes saw a completed answer within 592s of send (n=30); 1,817 fresh
+# successes spent at most 3,838s after taking their slot (a sample the run timeout bounds); and the
+# longest conversation ever seen still writing, at 9,432s, never produced a review and ended
+# recovery-exhausted. A record past the default 3h is a review nothing is waiting on: its owner
+# died, or parked on an unbindable capture that nothing retries, and it used to hold a slot until
+# the TTL and miss proof finally removed it. Two such records held half the account for hours
+# while queued runs timed out (#273). The cost of being wrong the other way is one extra
+# concurrent chat on the account, not a lost review.
+#
+# This is read-side only: nothing is rewritten, removed, refunded or terminalized. The record stays
+# collectable by --harvest, same-change admission still finds it (pg_reservation_find_pr reads no
+# capacity), and the TTL/miss rule in pg_reservation_note_miss stays the only removal path. A
+# harvest re-arm cannot reset the clock: pg_reservation_write keeps field 7 (spend) unless a fresh
+# dispatch passes a new one. The clock is the charge epoch, falling back to the creation epoch only
+# when a record predates field 7. A clock that is missing, zero, non-numeric or in the future holds.
+# 0 disables the ceiling.
+pg_reservation_holds_capacity() {
+  local f="$1" now="${2:-}" ceiling clock
+  [ -f "$f" ] || return 1
+  case "$(awk -F'\t' 'NR==1{print $8}' "$f" 2>/dev/null)" in
+    complete|superseded) return 1 ;;
+    generating) ;;
+    *) return 0 ;;
+  esac
+  ceiling="${PRO_GATE_GENERATION_CEILING:-10800}"
+  case "$ceiling" in ''|*[!0-9]*) ceiling=10800;; esac
+  [ "$ceiling" -gt 0 ] 2>/dev/null || return 0
+  clock="$(awk -F'\t' 'NR==1{print $7}' "$f" 2>/dev/null)"
+  [ -n "$clock" ] || clock="$(awk -F'\t' 'NR==1{print $3}' "$f" 2>/dev/null)"
+  case "$clock" in ''|*[!0-9]*) return 0;; esac
+  [ "$clock" -gt 0 ] 2>/dev/null || return 0
+  case "$now" in ''|*[!0-9]*) now="$(date +%s)";; esac
+  [ "$(( now - clock ))" -lt "$ceiling" ]
+}
+
+# pg_reservation_slot_plan <effective-concurrency>: compute the slot-acquisition plan under the
+# reservation guard. Echoes "R|excluded slots": scan slots 1..R skipping the excluded ones.
+# Slot-tagged reservations exclude their exact slot (the tab still occupies that account
+# capacity); reservations without a slot (legacy) and tagged slots outside the current range
+# shrink the range instead. Processed descending so range shrink cascades correctly.
+pg_reservation_slot_plan() {
+  local eff="${1:-1}" dir f slot slots="" excl="" r legacy=0 s avail now
+  dir="$(pg_reservation_dir)"
+  r="$eff"
+  if [ -d "$dir" ]; then
+    now="$(date +%s)"
+    for f in "$dir"/*; do
+      [ -f "$f" ] || continue
+      # A COMPLETE reservation is a harvest pointer, not account occupancy (#82): its review
+      # stopped generating, so it holds no slot even though it stays collectable until TTL.
+      # Empty/legacy state reads as generating, so pre-state records keep their hold — an
+      # unknown state must never free capacity. A known `generating` record past the generation
+      # ceiling stops holding (#273); pg_reservation_holds_capacity carries the measured bound.
+      # Its slot number is a flock file only, so a new run taking it cannot disturb the old
+      # record's tab: harvest finds that conversation by marker, never by slot.
+      pg_reservation_holds_capacity "$f" "$now" || continue
+      slot="$(awk -F'\t' 'NR==1{print $5}' "$f" 2>/dev/null)"
+      case "$slot" in
+        ''|*[!0-9]*) legacy=$(( legacy + 1 ));;
+        *) slots="$slots $slot";;
+      esac
+    done
+  fi
+  r=$(( r - legacy ))
+  for s in $(printf '%s\n' $slots | sort -rn); do
+    if [ "$s" -le "$r" ] 2>/dev/null; then excl="$excl $s"; else r=$(( r - 1 )); fi
+  done
+  # Field 3 is the TRUE availability: the scan bound MINUS its in-range exclusions. Callers must
+  # gate on this and never on the bound — "1|1" is a bound of 1 whose only slot is excluded, i.e.
+  # an EMPTY scannable set. Gating on the bound made runs call pg_lock_n against an impossible
+  # plan every wait slice and report "all N slots busy" while the locks were free (#82).
+  avail="$r"
+  for s in $excl; do [ "$s" -le "$r" ] 2>/dev/null && avail=$(( avail - 1 )); done
+  [ "$avail" -ge 0 ] 2>/dev/null || avail=0
+  printf '%s|%s|%s\n' "$r" "${excl# }" "$avail"
+}
+
+# pg_reservation_set_state <marker> <generating|complete|superseded>: flip ONLY the lifecycle field,
+# preserving every other field verbatim. Deliberately not pg_reservation_write: that helper takes
+# `out` as an argument and would blank the harvest pointer when called without it, and it resets
+# the miss counter. Marking completion must change exactly one thing — whether this review still
+# occupies account capacity — and nothing about how it is later collected (#82).
+# pg_reservation_supersede <marker> <canonical-key> <spend> <expected-head>: exact transition for
+# current and legacy `diff` records. The caller has already proved GitHub supersession; this helper
+# revalidates immutable input + canonical run-meta under the reservation guard before its final
+# compare-and-swap. Arbitrary key, identity, and charge mismatches remain fail-closed.
+#
+# <expected-head> (#134) is the head OID the CALLER read from the binding and then validated against
+# GitHub. Without it the CAS compared repository, PR and charge but never the head, so a decision
+# taken against one binding could commit against another: bindings are write-once via `ln`, but
+# pg_attempt_disposition_cleanup unlinks one outside this guard, making remove-then-rewrite with a
+# different head reachable. That releases capacity for CURRENT-head work and permits a second paid
+# review of the same change. Required and fail-closed: an empty or malformed head is a refusal, never
+# a fall-through to the old unchecked behaviour.
+pg_reservation_supersede() {
+  local marker="$1" key="$2" expected_spend="$3" expected_head="${4:-}"
+  local dir f rc pr out created misses slot model spend tmp
+  local meta mh mo mr mkey mpr mout mspend binding bh bo br bpr bepoch bhead
+  pg_reservation_marker_ok "$marker" || return 1
+  pg_round_key_ok "$key" || return 1
+  case "$expected_spend" in ''|*[!0-9]*) return 1;; esac
+  # Same shape gate the caller applies to a binding head before trusting it (oracle-review.sh).
+  case "$expected_head" in ''|*[!0-9a-f]*) return 1;; esac
+  { [ "${#expected_head}" -eq 40 ] || [ "${#expected_head}" -eq 64 ]; } || return 1
+  dir="$(pg_reservation_dir)"; f="$dir/$marker"
+  [ -f "$f" ] && [ ! -L "$f" ] || return 1
+  pg_reservation_guard_acquire || return 1
+  if [ ! -f "$f" ] || [ -L "$f" ]; then pg_reservation_guard_release; return 1; fi
+
+  # Re-read both marker-addressed immutable identities inside the mutation critical section. Marker
+  # mint time can precede charge while a run waits for locks, so it is not charge evidence.
+  meta="$(pg_run_meta_read "$marker" 2>/dev/null || true)"
+  binding="$(pg_review_input_binding_read "$marker" 2>/dev/null || true)"
+  if [ -z "$meta" ] || [ -z "$binding" ]; then pg_reservation_guard_release; return 1; fi
+  IFS=$'\t' read -r mh mo mr mkey mpr mout mspend <<<"$meta"
+  bh="$(jq -r .repository.host <<<"$binding")"; bo="$(jq -r .repository.owner <<<"$binding")"
+  br="$(jq -r .repository.repo <<<"$binding")"; bpr="$(jq -r .target.pr <<<"$binding")"
+  bepoch="$(jq -r .charged_spend_epoch <<<"$binding")"
+  bhead="$(jq -r '.target.head_oid // ""' <<<"$binding")"
+  # #134: the head is part of the compare-and-swap, not just the caller's private reasoning. The
+  # binding under this guard must still carry the exact head the caller validated against GitHub.
+  if [ "$mkey" != "$key" ] || [ "$mspend" != "$expected_spend" ] \
+     || [ "$bh" != "$mh" ] || [ "$bo" != "$mo" ] || [ "$br" != "$mr" ] \
+     || [ "$bpr" != "$mpr" ] || [ "$bepoch" != "$mspend" ] \
+     || [ "$bhead" != "$expected_head" ]; then
+    pg_reservation_guard_release; return 1
+  fi
+
+  pr="$(awk -F'\t' 'NR==1{print $1}' "$f" 2>/dev/null)"
+  out="$(awk -F'\t' 'NR==1{print $2}' "$f" 2>/dev/null)"
+  created="$(awk -F'\t' 'NR==1{print $3}' "$f" 2>/dev/null)"
+  misses="$(awk -F'\t' 'NR==1{print $4}' "$f" 2>/dev/null)"
+  slot="$(awk -F'\t' 'NR==1{print $5}' "$f" 2>/dev/null)"
+  model="$(awk -F'\t' 'NR==1{print $6}' "$f" 2>/dev/null)"
+  spend="$(awk -F'\t' 'NR==1{print $7}' "$f" 2>/dev/null)"
+  case "$pr" in "$key"|diff) ;; *) pg_reservation_guard_release; return 1;; esac
+  if [ "$spend" != "$expected_spend" ]; then
+    if [ "$pr" != diff ] || [ -n "$spend" ]; then pg_reservation_guard_release; return 1; fi
+    spend="$expected_spend"
+  fi
+  case "$misses" in ''|*[!0-9]*) misses=0;; esac
+  tmp="$(mktemp "$dir/.${marker}.supersede.XXXXXX" 2>/dev/null)" \
+    || { pg_reservation_guard_release; return 1; }
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\tsuperseded\n' \
+    "$key" "$out" "$created" "$misses" "$slot" "$model" "$spend" > "$tmp" 2>/dev/null \
+    && mv -f "$tmp" "$f"
+  rc=$?; [ "$rc" -eq 0 ] || rm -f "$tmp" 2>/dev/null
+  pg_reservation_guard_release; return "$rc"
+}
+
+# pg_reservation_superseded_proof <marker>: print the proof that this reservation's review no
+# longer applies — `pr-merged:<bound-head>`, `pr-closed:<bound-head>` or
+# `head-moved:<bound-head>:<current-head>` — or return 1. The immutable input binding, canonical
+# charged run-meta and the reservation record must all name the same exact attempt before GitHub is
+# asked anything; a valid-but-crossed sidecar must never let another repository/PR release this
+# marker. Missing, malformed or unavailable evidence of any kind returns 1 (fail closed). Reads
+# only: it takes no guard, so a caller never holds the reservation guard across this GitHub call.
+# Two callers: --recover on its one selected marker, and a slot wait that found no free slot (#234).
+pg_reservation_superseded_proof() {
+  local marker="$1" binding meta host owner repo pr bound_head binding_epoch mh mo mr mkey mpr mout mspend rkey rspend gh_bin timeout_bin payload state current_head
+  pg_reservation_marker_ok "$marker" || return 1
+  binding="$(pg_review_input_binding_read "$marker" 2>/dev/null || true)"; [ -n "$binding" ] || return 1
+  meta="$(pg_run_meta_read "$marker" 2>/dev/null || true)"; [ -n "$meta" ] || return 1
+  IFS=$'\t' read -r mh mo mr mkey mpr mout mspend <<<"$meta"
+  host="$(jq -r .repository.host <<<"$binding")"; owner="$(jq -r .repository.owner <<<"$binding")"
+  repo="$(jq -r .repository.repo <<<"$binding")"; pr="$(jq -r .target.pr <<<"$binding")"
+  bound_head="$(jq -r .target.head_oid <<<"$binding")"; binding_epoch="$(jq -r .charged_spend_epoch <<<"$binding")"
+  pg_canonical_repo_ok "$host" "$owner" "$repo" || return 1
+  case "$pr" in ''|*[!0-9]*) return 1;; esac
+  case "$bound_head" in ''|*[!0-9a-f]*) return 1;; esac
+  { [ "${#bound_head}" -eq 40 ] || [ "${#bound_head}" -eq 64 ]; } || return 1
+  [ "$host" = "$mh" ] && [ "$owner" = "$mo" ] && [ "$repo" = "$mr" ] \
+    && [ "$pr" = "$mpr" ] && [ "$binding_epoch" = "$mspend" ] || return 1
+  rkey="$(awk -F'\t' 'NR==1{print $1}' "$(pg_reservation_dir)/$marker" 2>/dev/null)"
+  rspend="$(awk -F'\t' 'NR==1{print $7}' "$(pg_reservation_dir)/$marker" 2>/dev/null)"
+  case "$rkey" in "$mkey"|diff) ;; *) return 1;; esac
+  if [ "$rspend" != "$mspend" ]; then
+    # Pre-v0.31 `diff` reservations have no spend field. Exact immutable binding + canonical
+    # run-meta already identify this marker's charge; queued runs legitimately mint the marker
+    # before that charge, so marker time is not a third equality proof.
+    [ "$rkey" = diff ] && [ -z "$rspend" ] || return 1
+  fi
+  gh_bin="${PRO_GATE_GH_BIN:-gh}"; command -v "$gh_bin" >/dev/null 2>&1 || return 1
+  timeout_bin="${PRO_GATE_TIMEOUT_BIN:-timeout}"
+  command -v "$timeout_bin" >/dev/null 2>&1 || return 1
+  payload="$("$timeout_bin" -k 1s 10s "$gh_bin" pr view "$pr" --repo "$host/$owner/$repo" --json state,headRefOid 2>/dev/null || true)"
+  state="$(jq -r '.state // ""' <<<"$payload" 2>/dev/null)"
+  current_head="$(jq -r '.headRefOid // ""' <<<"$payload" 2>/dev/null)"
+  # #134: every branch emits the bound head it validated against, so the caller can require the
+  # compare-and-swap to commit against that exact binding rather than whatever is on disk later.
+  case "$state" in
+    MERGED|CLOSED) printf 'pr-%s:%s\n' "$(printf '%s' "$state" | tr '[:upper:]' '[:lower:]')" "$bound_head"; return 0;;
+    OPEN) ;;
+    *) return 1;;
+  esac
+  case "$current_head" in ''|*[!0-9a-f]*) return 1;; esac
+  { [ "${#current_head}" -eq 40 ] || [ "${#current_head}" -eq 64 ]; } || return 1
+  [ "$current_head" = "$bound_head" ] && return 1
+  printf 'head-moved:%s:%s\n' "$bound_head" "$current_head"
+}
+
+# pg_reservation_supersede_proven <marker>: prove supersession, then commit it through
+# pg_reservation_supersede's compare-and-swap against the exact bound head GitHub was asked about
+# (#134), and record the ledger event. Prints the proof and returns 0 once the reservation holds no
+# capacity. Returns 1 when there is no proof (nothing changed) and 2 when proof existed but the
+# locked revalidation refused it. The charge, binding, run-meta and record all stay, so the review
+# remains harvestable for audit.
+pg_reservation_supersede_proven() {
+  local marker="$1" proof meta key spend head event
+  proof="$(pg_reservation_superseded_proof "$marker" 2>/dev/null || true)"
+  [ -n "$proof" ] || return 1
+  meta="$(pg_run_meta_read "$marker" 2>/dev/null || true)"
+  IFS=$'\t' read -r _ _ _ key _ _ spend <<<"$meta"
+  # Field 2 is the validated bound head in all three proof shapes.
+  head="${proof#*:}"; head="${head%%:*}"
+  pg_reservation_supersede "$marker" "$key" "$spend" "$head" || return 2
+  event="$(jq -nc --arg ts "$(date +%Y-%m-%dT%H:%M:%S%z)" --arg marker "$marker" --arg proof "$proof" \
+    '{ts:$ts,outcome:"superseded",marker:$marker,proof:$proof,holds_capacity:false,charge_retained:true}' 2>/dev/null || true)"
+  pg_ledger_append "$event"
+  printf '%s\n' "$proof"
+}
+
+pg_reservation_set_state() {
+  local marker="$1" state="$2" dir f rc pr out created misses slot model spend current tmp
+  case "$state" in generating|complete|superseded) ;; *) return 1;; esac
+  pg_reservation_marker_ok "$marker" || return 1
+  dir="$(pg_reservation_dir)"; f="$dir/$marker"
+  [ -f "$f" ] && [ ! -L "$f" ] || return 1
+  pg_reservation_guard_acquire || return 1
+  # Re-check under the guard: a concurrent harvest may have released the record while we probed,
+  # and rewriting here would resurrect a collected reservation and re-block capacity until TTL.
+  if [ ! -f "$f" ] || [ -L "$f" ]; then pg_reservation_guard_release; return 1; fi
+  # Supersession is monotonic. Later recovery/harvest bookkeeping may refresh the record, but no
+  # generic state write can make obsolete evidence occupy account capacity again.
+  current="$(awk -F'\t' 'NR==1{print $8}' "$f" 2>/dev/null)"
+  [ "$current" = superseded ] && state=superseded
+  # awk per field, NOT `read`: tab is IFS-whitespace, so consecutive tabs from an empty
+  # slot/model collapse and shift every later field.
+  pr="$(awk -F'\t' 'NR==1{print $1}' "$f" 2>/dev/null)"
+  out="$(awk -F'\t' 'NR==1{print $2}' "$f" 2>/dev/null)"
+  created="$(awk -F'\t' 'NR==1{print $3}' "$f" 2>/dev/null)"
+  misses="$(awk -F'\t' 'NR==1{print $4}' "$f" 2>/dev/null)"
+  slot="$(awk -F'\t' 'NR==1{print $5}' "$f" 2>/dev/null)"
+  model="$(awk -F'\t' 'NR==1{print $6}' "$f" 2>/dev/null)"
+  spend="$(awk -F'\t' 'NR==1{print $7}' "$f" 2>/dev/null)"
+  case "$misses" in ''|*[!0-9]*) misses=0;; esac
+  tmp="$(mktemp "$dir/.${marker}.state.XXXXXX" 2>/dev/null)" \
+    || { pg_reservation_guard_release; return 1; }
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+    "$pr" "$out" "$created" "$misses" "$slot" "$model" "$spend" "$state" > "$tmp" 2>/dev/null \
+    && mv -f "$tmp" "$f"
+  rc=$?; [ "$rc" -eq 0 ] || rm -f "$tmp" 2>/dev/null
+  pg_reservation_guard_release; return "$rc"
+}
+
+# pg_reservation_holding_count: how many reservations actually OCCUPY account capacity, i.e.
+# everything except the ones proven complete or superseded and the ones past the generation
+# ceiling (pg_reservation_holds_capacity). Distinct from pg_reservation_count, which counts
+# collectable records: once a finished review stops holding its slot, "a reservation exists" and
+# "capacity is reserved" stop being the same question, and a timeout caused by genuinely busy
+# runs must not be blamed on an uncollected review that is holding nothing (#82).
+pg_reservation_holding_count() {
+  local dir f n=0 now
+  dir="$(pg_reservation_dir)"; [ -d "$dir" ] || { echo 0; return 0; }
+  now="$(date +%s)"
+  for f in "$dir"/*; do
+    [ -f "$f" ] || continue
+    pg_reservation_holds_capacity "$f" "$now" || continue
+    n=$(( n + 1 ))
+  done
+  echo "$n"
+}
+
+# pg_report_capacity_holders [effective]: explain, on stderr, why no slot is free. The wait loop
+# and the exit-7 path both use it because "all N review slots are busy" is the one thing an
+# operator can already see is false — the locks are free and the browser is idle. What they cannot
+# see is that a FINISHED review still holds its slot until someone collects it (#82). Naming the
+# marker and the exact free-it command turns a 40-minute mystery into one command.
+pg_report_capacity_holders() {
+  local eff="${1:-}" dir f marker pr held=0 now
+  dir="$(pg_reservation_dir)"; [ -d "$dir" ] || return 0
+  now="$(date +%s)"
+  for f in "$dir"/*; do
+    [ -f "$f" ] || continue
+    pg_reservation_holds_capacity "$f" "$now" || continue
+    held=$(( held + 1 ))
+  done
+  [ "$held" -gt 0 ] || return 0
+  echo "[pro-gate] 0 of ${eff:-?} effective slot(s) free — ${held} held by in-progress reservation(s):" >&2
+  for f in "$dir"/*; do
+    [ -f "$f" ] || continue
+    pg_reservation_holds_capacity "$f" "$now" || continue
+    marker="$(basename "$f")"
+    pr="$(awk -F'\t' 'NR==1{print $1}' "$f" 2>/dev/null)"
+    echo "  $marker  [$pr] generating — still using the account" >&2
+  done
+  echo "  collect a finished one for FREE (no new spend, never re-run):" >&2
+  echo "    oracle-review.sh --harvest <marker> --out <path> --timeout $(pg_harvest_hint_timeout)" >&2
+  # #234: a waiting run already releases holders whose PR merged, closed or moved its head, so one
+  # listed here is either still current or its GitHub state could not be read. The second case is
+  # the one an operator can finish by hand, with the same proof and the charge kept.
+  echo "  a holder whose PR has merged, closed or moved on is released while a run waits; if GitHub could not be read:" >&2
+  echo "    oracle-review.sh --recover <marker>" >&2
+}
+
+# pg_reservation_state <marker>: echo the lifecycle state (8th field) of a reservation —
+# "complete" once its review is provably finished, "superseded" once immutable target proof shows
+# it cannot apply to the current/merged PR, and "generating" otherwise. Legacy/unknown states keep
+# occupying capacity (fail closed).
+pg_reservation_state() {
+  local marker="$1" f state
+  pg_reservation_marker_ok "$marker" || return 1
+  f="$(pg_reservation_dir)/$marker"
+  [ -f "$f" ] || return 1
+  state="$(awk -F'\t' 'NR==1{print $8}' "$f" 2>/dev/null)"
+  case "$state" in complete) echo complete;; superseded) echo superseded;; *) echo generating;; esac
+}
+
+# pg_reservation_expire_if_stale <marker>: report THIS marker past TTL without releasing it.
+# TTL is a precondition for recovery exhaustion, never terminal proof by itself. The caller must
+# combine it with confirmed marker misses through pg_reservation_note_miss; only that bounded proof
+# publishes a disposition before releasing capacity.
+# Echoes "stale" when past TTL, nothing otherwise.
+pg_reservation_expire_if_stale() {
+  local marker="$1" f created ttl now
+  pg_reservation_marker_ok "$marker" || return 0
+  f="$(pg_reservation_dir)/$marker"
+  [ -f "$f" ] || return 0
+  created="$(awk -F'\t' 'NR==1{print $3}' "$f" 2>/dev/null)"
+  case "$created" in ''|*[!0-9]*) return 0;; esac
+  ttl="${PRO_GATE_RESERVATION_TTL:-21600}"; case "$ttl" in ''|*[!0-9]*) ttl=21600;; esac
+  now="$(date +%s)"
+  [ $(( now - created )) -ge "$ttl" ] || return 0
+  echo stale
+}
+
+# pg_harvest_claimed <marker>: 0 when some process is COLLECTING this marker right now, i.e.
+# holds its harvest lock (#68 gate r2 P1). Every reconciler consults this before reaping, so a
+# reservation cannot be removed out from under an in-flight collection by ANY process — the
+# collector's own sweep, a concurrent harvest, or a fresh dispatch. Non-blocking probe: we test
+# whether the lock is takeable and immediately release, never queueing behind the holder.
+# A stale lock FILE with no holder reads as unclaimed (flock is inode-scoped, not path-scoped),
+# which is what the housekeeping sweep of harvest-locks/ already relies on.
+pg_harvest_claimed() {
+  local marker="$1" f pfd rc=1
+  pg_reservation_marker_ok "$marker" || return 1
+  f="${PRO_GATE_HARVEST_LOCK_DIR:-$PRO_GATE_HOME/harvest-locks}/$marker"
+  if pg_have flock; then
+    [ -f "$f" ] || return 1
+    if { exec {pfd}>>"$f"; } 2>/dev/null; then
+      flock -n "$pfd" 2>/dev/null || rc=0     # could NOT take it => someone holds it
+      eval "exec ${pfd}>&-" 2>/dev/null
+    fi
+    return "$rc"
+  fi
+  # mkdir-lock platforms (stock macOS): the directory exists only while held. Owner metadata
+  # must PROVE a live holder (#68 gate r3 P2) — a crash between mkdir and the pid write, or a
+  # recycled pid, would otherwise mark the reservation claimed forever and freeze reconciliation
+  # (pg_lock cannot reap an empty-pid directory either). Require a live pid AND, when the lock
+  # recorded a process-identity token, a matching one.
+  [ -d "$f.d" ] || return 1
+  local opid otok
+  opid="$(cat "$f.d/pid" 2>/dev/null || true)"
+  case "$opid" in ''|*[!0-9]*) return 1;; esac        # torn/missing owner record: not a claim
+  kill -0 "$opid" 2>/dev/null || return 1             # dead holder: stale directory
+  otok="$(cat "$f.d/token" 2>/dev/null || true)"
+  # pg_pid_recycled fails closed (not recycled -> still held) when otok is empty/unreadable or
+  # the recomputation fails transiently -- issue #177: comparing a failed recompute's empty
+  # output directly against otok made a live, correctly-identified holder read as dead.
+  pg_pid_recycled "$opid" "$otok" && return 1         # pid reused by an unrelated process
+  return 0
+}
+
+# pg_reservation_reconcile <salvage-script> <port>: drop reservations older than TTL or only
+# after N consecutive confirmed-absent probes. A single 10s miss is NOT proof of loss: suspended
+# renderers, hydration delays, and temporary marker-read failures caused false releases in review.
+# Live (0) resets misses; throttle (5) and other errors keep state fail-closed. A live probe that
+# reports `probe-state: throttled` (#162: the limiter's modal over this run's conversation) is
+# neither progress nor absence: the record is retained with its miss streak untouched, and
+# because every probe is a page load against the throttled account, no further marker is probed
+# while the cooldown that probe wrote is active. TTL-only sweeps never rendered and still run.
+pg_reservation_reconcile() {
+  local salvage="$1" port="$2" dir ttl miss_limit interval now f marker pr out created misses slot model spend age mt rc probe_out live_state cooldown_noted=0
+  dir="$(pg_reservation_dir)"; [ -d "$dir" ] || return 0
+  ttl="${PRO_GATE_RESERVATION_TTL:-21600}"; miss_limit="${PRO_GATE_RESERVATION_MISSES:-3}"
+  interval="${PRO_GATE_RECONCILE_INTERVAL:-60}"; now="$(date +%s)"
+  case "$miss_limit" in ''|*[!0-9]*) miss_limit=3;; esac
+  [ "$miss_limit" -ge 2 ] 2>/dev/null || miss_limit=2
+  for f in "$dir"/*; do
+    [ -f "$f" ] || continue; marker="$(basename "$f")"
+    pg_reservation_marker_ok "$marker" || continue
+    [ "$(pg_reservation_state "$marker" 2>/dev/null || echo generating)" = superseded ] && continue
+    # Never reap a marker that is being COLLECTED RIGHT NOW (#68 gate P1, r2 P1). Removing it
+    # mid-harvest lets a concurrent same-change run submit a duplicate, and a still-generating
+    # result would then recreate the record from scratch — fresh `created` (defeating TTL
+    # self-clear) under a fallback "diff" key (defeating same-change redirection). The harvest
+    # LOCK FILE is that claim, so this holds for EVERY reconciler (fresh dispatch and other
+    # harvests), not just the collecting process: a per-invocation skip variable would only
+    # have protected the one sweep that already knew.
+    if pg_harvest_claimed "$marker"; then continue; fi
+    # awk per field, NOT `read`: tab is IFS-whitespace, so consecutive tabs from an empty
+    # slot/model collapse and shift every later field (the trap pg_reservation_read_model
+    # documents). That would silently drop the v0.31 spend epoch on the rewrite below.
+    pr="$(awk -F'\t' 'NR==1{print $1}' "$f" 2>/dev/null)"
+    out="$(awk -F'\t' 'NR==1{print $2}' "$f" 2>/dev/null)"
+    created="$(awk -F'\t' 'NR==1{print $3}' "$f" 2>/dev/null)"
+    misses="$(awk -F'\t' 'NR==1{print $4}' "$f" 2>/dev/null)"
+    slot="$(awk -F'\t' 'NR==1{print $5}' "$f" 2>/dev/null)"
+    model="$(awk -F'\t' 'NR==1{print $6}' "$f" 2>/dev/null)"
+    spend="$(awk -F'\t' 'NR==1{print $7}' "$f" 2>/dev/null)"
+    case "$created" in ''|*[!0-9]*) created=0;; esac
+    case "$misses" in ''|*[!0-9]*) misses=0;; esac
+    age=$(( now - created ))
+    if [ "$created" -gt 0 ] && [ "$age" -ge "$ttl" ]; then
+      echo "[pro-gate] reservation $marker is past TTL (${age}s >= ${ttl}s); retaining until bounded marker-miss proof terminalizes it" >&2
+    fi
+    # TTL-only mode: harvest performs its own observation. It never releases on elapsed time alone;
+    # misses remain explicit proof and are counted by that caller when its capture is absent.
+    [ "${PG_RES_TTL_ONLY:-0}" = 1 ] && continue
+    # Checked per marker, not once per sweep: the throttle can first surface on this sweep's own
+    # probe of an earlier marker, and every later render would deepen the block.
+    if pg_cooldown_active >/dev/null 2>&1; then
+      [ "$cooldown_noted" = 1 ] || echo "[pro-gate] reservation probes skipped: $(pg_cooldown_active) — records retained, misses unchanged" >&2
+      cooldown_noted=1
+      continue
+    fi
+    # Rate-limit probes per marker by file mtime: N concurrent fresh runs must not turn one
+    # real absence window into N miss increments, and back-to-back reconciles should not spam
+    # conversation probes. Writes/updates touch mtime, so consecutive misses are spaced by at
+    # least this interval of wall time.
+    mt="$(stat -c %Y "$f" 2>/dev/null || stat -f %m "$f" 2>/dev/null || echo 0)"
+    [ "$(( now - mt ))" -lt "$interval" ] 2>/dev/null && continue
+    rc=2; probe_out="$(node "$salvage" --probe "$marker" 10 "$port" 2>&1 >/dev/null)"; rc=$?
+    # v0.42 (#109): remember what this probe concluded, for --status. Observation only.
+    pg_salvage_class_write "$marker" "$(printf '%s' "$probe_out" | sed -n 's/^evidence-kind: //p' | tail -1)" 2>/dev/null || true
+    case "$rc" in
+      0)
+        # A found conversation is not automatically an OCCUPIED one. ChatGPT keeps conversations
+        # server-side forever, so a finished review probes as present on every sweep, resets its
+        # miss streak, and used to hold its slot for the full 6h TTL — one uncollected review
+        # could starve the whole machine at effective concurrency 1 (#82). Release the capacity
+        # the moment completion is proven, while KEEPING the record so the review stays
+        # collectable for free. Anything short of proof stays generating.
+        if grep -q '^probe-state: complete$' <<<"$probe_out"; then
+          if [ "$(pg_reservation_state "$marker" 2>/dev/null)" != complete ] \
+             && pg_reservation_set_state "$marker" complete; then
+            echo "[pro-gate] reservation $marker is complete — releasing its slot; collect it with --harvest (no new spend)" >&2
+          fi
+        elif grep -q '^probe-state: terminal-infrastructure$' <<<"$probe_out"; then
+          if pg_attempt_terminal_from_meta "$marker" submitted-terminal exact-owned-infrastructure-terminal \
+             && pg_attempt_reconcile_terminal "$marker"; then
+            echo "[pro-gate] reservation $marker ended in an exact-owned ChatGPT infrastructure error — recovery released, round retained" >&2
+          else
+            echo "[pro-gate] terminal infrastructure proof for $marker could not be persisted safely — reservation retained" >&2
+          fi
+        elif grep -q '^probe-state: throttled$' <<<"$probe_out"; then
+          # The conversation exists under the "Too many requests" modal: not absence (no miss),
+          # not progress (no reset). The probe wrote the cooldown; the check above skips the rest
+          # of this sweep, pg_health_gate pauses fresh spends, and --harvest defers until it clears.
+          echo "[pro-gate] reservation $marker is throttled — ChatGPT's rate-limit modal covers its conversation; retained with misses unchanged, cooldown engaged" >&2
+        else
+          [ "$misses" -eq 0 ] || {
+            pg_reservation_guard_acquire || continue
+            # The harvest may have removed the file during the probe; rewriting would resurrect a
+            # released reservation and block capacity until TTL, so re-check under the guard.
+            # The state is re-read here too: the skip at the top of this loop ran before a probe
+            # that can take 10s, and a supersession proven in that window (--recover, or another
+            # run's slot wait, #234) must not be turned back into account occupancy. The same holds
+            # for a completion another sweep proved in that window, and for one proven before it: a
+            # confirmed miss keeps `complete` (#236), and this rewrite only resets that miss count.
+            # `probe-state: generating` is everything short of a proven verdict, a still-hydrating
+            # page included, so it is not evidence that a finished review started generating again.
+            live_state="$(awk -F'\t' 'NR==1{print $8}' "$f" 2>/dev/null)"
+            if [ -f "$f" ] && [ "$live_state" != superseded ]; then
+              [ "$live_state" = complete ] || live_state=generating
+              printf '%s\t%s\t%s\t0\t%s\t%s\t%s\t%s\n' "$pr" "$out" "$created" "${slot:-}" "${model:-}" "${spend:-}" "$live_state" > "$f.tmp" 2>/dev/null && mv -f "$f.tmp" "$f"
+            fi
+            pg_reservation_guard_release
+          }
+        fi
+        ;;
+      4)
+        echo "[pro-gate] reservation $marker probe miss -> $(pg_reservation_note_miss "$marker")" >&2
+        ;;
+      *) : ;; # throttle/CDP error/inconclusive: retain without incrementing misses
+    esac
+  done
+}
+
+# pg_ledger_append <json-line>: flock-guarded append to the run ledger
+# ($PRO_GATE_HOME/ledger.jsonl) — one line per finished/deferred run. Best-effort:
+# observability must never fail a review.
+pg_ledger_append() {
+  local ledger="${PRO_GATE_LEDGER:-$PRO_GATE_HOME/ledger.jsonl}" line="$1" lfd
+  [ -n "$line" ] || return 0
+  if pg_have flock; then
+    if { exec {lfd}>>"$ledger"; } 2>/dev/null; then
+      flock -w 5 "$lfd" 2>/dev/null || true
+      { printf '%s\n' "$line" >&"$lfd"; } 2>/dev/null || true
+      eval "exec ${lfd}>&-" 2>/dev/null
+      return 0
+    fi
+  fi
+  { printf '%s\n' "$line" >> "$ledger"; } 2>/dev/null || true
+}
+
+# Adaptive concurrency governor: effective review slots EARN their way up to the ceiling
+# (PRO_GATE_MAX_CONCURRENCY) and drop instantly on trouble, so raising the ceiling is safe
+# to try without babysitting. State: $PRO_GATE_HOME/ramp.state = "level<TAB>streak<TAB>ts".
+# Rules (pg_ramp_update, serialized under flock):
+#   clean run (exit 0, no throttle) -> streak+1; level+1 when streak >= PRO_GATE_RAMP_STREAK
+#                                      (default 5), streak resets
+#   throttle observed               -> level=1, streak=0 (the engine cooldown also defers)
+#   failed run (exit 6)             -> streak=0, level held
+#   deferred / lock-timeout (7, 8)  -> no change (nothing was spent, nothing learned)
+# PRO_GATE_RAMP=0 pins effective = ceiling (pre-v0.19 behavior).
+pg_ramp_level() {  # $1 = ceiling; echoes the effective concurrency
+  local ceiling="${1:-1}" state level
+  [ "${PRO_GATE_RAMP:-1}" = 1 ] || { echo "$ceiling"; return 0; }
+  state="${PRO_GATE_RAMP_STATE:-$PRO_GATE_HOME/ramp.state}"
+  level="$(awk -F'\t' 'NR==1{print $1}' "$state" 2>/dev/null)"
+  case "$level" in ''|*[!0-9]*) level=1 ;; esac
+  [ "$level" -lt 1 ] && level=1
+  [ "$level" -gt "$ceiling" ] && level="$ceiling"
+  echo "$level"
+}
+
+pg_ramp_update() {  # $1 = clean|throttle|failed, $2 = ceiling
+  [ "${PRO_GATE_RAMP:-1}" = 1 ] || return 0
+  local outcome="$1" ceiling="${2:-1}" state need level streak rfd lockdir="" waited
+  state="${PRO_GATE_RAMP_STATE:-$PRO_GATE_HOME/ramp.state}"
+  need="${PRO_GATE_RAMP_STREAK:-5}"
+  # Serialize the read-modify-write (v0.19.1, pro-gate self-review P1): flock where
+  # available, else a mkdir spinlock (macOS). If NO lock can be obtained, skip the update
+  # rather than racing — a lost 'clean' credit is harmless, and a lost 'throttle' drop is
+  # still covered by the independent cooldown file, which blocks all new spends regardless
+  # of the ramp level.
+  if pg_have flock; then
+    if ! { { exec {rfd}>>"$state.lock"; } 2>/dev/null && flock -w 10 "$rfd" 2>/dev/null; }; then
+      echo "[pro-gate ramp] could not lock ramp state — skipping this update" >&2
+      [ -n "${rfd:-}" ] && eval "exec ${rfd}>&-" 2>/dev/null
+      return 0
+    fi
+  else
+    lockdir="$state.lock.d"; waited=0
+    while ! mkdir "$lockdir" 2>/dev/null; do
+      waited=$(( waited + 1 ))
+      if [ "$waited" -ge 10 ]; then
+        echo "[pro-gate ramp] could not lock ramp state — skipping this update" >&2
+        return 0
+      fi
+      sleep 1
+    done
+  fi
+  level="$(awk -F'\t' 'NR==1{print $1}' "$state" 2>/dev/null)"
+  streak="$(awk -F'\t' 'NR==1{print $2}' "$state" 2>/dev/null)"
+  case "$level" in ''|*[!0-9]*) level=1 ;; esac
+  case "$streak" in ''|*[!0-9]*) streak=0 ;; esac
+  case "$outcome" in
+    clean)
+      streak=$(( streak + 1 ))
+      if [ "$streak" -ge "$need" ] && [ "$level" -lt "$ceiling" ]; then
+        level=$(( level + 1 )); streak=0
+        echo "[pro-gate ramp] ${need} clean runs at level $(( level - 1 )) — raising concurrency to ${level} (ceiling ${ceiling})" >&2
+      fi
+      ;;
+    throttle)
+      level=1; streak=0
+      echo "[pro-gate ramp] throttle observed — concurrency dropped to 1 (re-earns via clean streaks)" >&2
+      ;;
+    failed) streak=0 ;;
+    *) : ;;
+  esac
+  { printf '%s\t%s\t%s\n' "$level" "$streak" "$(date +%Y-%m-%dT%H:%M:%S%z)" > "$state.tmp" && mv -f "$state.tmp" "$state"; } 2>/dev/null || true
+  [ -n "${rfd:-}" ] && eval "exec ${rfd}>&-" 2>/dev/null
+  [ -n "$lockdir" ] && rmdir "$lockdir" 2>/dev/null
+  return 0
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# v0.22: per-PR review round budget. Ledger evidence (2026-07-08..16): unbounded
+# review->fix->re-review loops spent 10-16 Pro slots on a SINGLE PR in one day (each slot
+# 10-60+ min, serialized against one account), 8h+ of wall clock per PR plus queue starvation
+# for every other PR. Each slot-spending engine invocation records one "round" against a
+# repo-scoped key (PR_KEY for PR runs; repo+branch for --diff runs); a fresh run whose key has
+# exhausted its budget inside the rolling PRO_GATE_ROUNDS_WINDOW (default 24h) is refused
+# BEFORE any lock or slot is taken (exit 12, NO quota spent). Harvests and no-spend exits
+# (7 lock timeout, 8 deferred, 11 oversized, 12 round-capped) never record a round.
+#
+# v0.31 (#65): the budget is a trajectory-aware GOVERNOR, same shape as the concurrency ramp
+# (pg_ramp_*): adaptive within a hard ceiling, earned by demonstrated progress, collapsed on
+# churn. Fleet evidence (254 gated changes, 737 spends, 28 audit trails): a flat cap of 4 was
+# wrong in BOTH directions — converging gates (open P0/P1 shrinking every round, e.g.
+# 6→5→3→2→0-SHIP at round 5) needed per-run human forcing past it, while whack-a-mole gates
+# (5→7→8→10) burned all four slots on churn. Governor: base grant PRO_GATE_ROUNDS_BASE
+# (default 2); each completed re-review whose OPEN P0+P1 count (RESOLVED-filtered, from the
+# rounds/<key>.hist trajectory) is strictly below its predecessor's earns +1, clamped to the
+# immovable ceiling PRO_GATE_ROUNDS_CEILING (default 8); two consecutive non-shrinking
+# re-reviews collapse the grant (early exit 12 — churn stops BEFORE the base is spent, not
+# after). An explicitly SET PRO_GATE_MAX_ROUNDS_PER_PR pins the legacy flat cap instead
+# (trajectory ignored; =0 stays the operator lockdown). PRO_GATE_ROUND_GUARD=0 disables the
+# budget; PRO_GATE_FORCE_ROUND=1 lets ONE deliberate invocation past it (its round still
+# records, so the next unforced run stays governed). State: $PRO_GATE_HOME/rounds/<key>
+# (one epoch-seconds line per slot-spending run) + rounds/<key>.hist (one line per COMPLETED
+# review: epoch, verdict, open P0, open P1, resolved, still-present), both pruned to the
+# window. The caller-side converge policy (SKILL.md §6) remains the stricter first line;
+# this governor is the engine-enforced backstop that catches EVERY caller.
+# ─────────────────────────────────────────────────────────────────────────────
+pg_rounds_dir() { echo "${PRO_GATE_ROUNDS_DIR:-$PRO_GATE_HOME/rounds}"; }
+
+pg_round_window_secs() {
+  # pg_dur_secs falls back to 1800s on garbage, the right direction for timeouts ("a typo can
+  # never mean no timeout") but the WRONG one here: "1d" or "24hr" would silently shrink the
+  # 24h window to 30 min and un-cap the loop. Validate first and fail LARGE (24h) instead.
+  local w="${PRO_GATE_ROUNDS_WINDOW:-24h}" n
+  n="${w%[smhSMH]}"
+  case "$n" in ''|*[!0-9]*)
+    echo "[pro-gate rounds] unparseable PRO_GATE_ROUNDS_WINDOW='${w}' (use 90 / 45m / 24h); defaulting to 24h" >&2
+    echo 86400; return;;
+  esac
+  pg_dur_secs "$w"
+}
+
+# Keys become filenames under PRO_GATE_HOME: enforce the same safe charset as reservation
+# markers (every character, no "/" anywhere).
+pg_round_key_ok() {
+  case "${1:-}" in '') return 1;; *[!A-Za-z0-9.-]*) return 1;; *) return 0;; esac
+}
+
+# pg_title_seq_next <key>: monotonic per-change ordinal for the sidebar title label — NEVER
+# window-pruned. Lives in its OWN directory (gate #57 r4): rounds/ is swept whole by engines
+# <v0.29, so a supported >24h rollback would delete a rounds/-resident sequence and restart
+# labels at r1. Single writer (called only under the per-change lock); gaps are fine. Returns
+# NONZERO when the ordinal could not be persisted (r4 P2) — the caller must then use a unique
+# fallback label rather than risk duplicate ordinals from a broken store.
+pg_title_seq_dir() { echo "${PRO_GATE_TITLE_SEQ_DIR:-$PRO_GATE_HOME/title-seq}"; }
+pg_title_seq_next() {
+  local f n
+  pg_round_key_ok "$1" || return 1
+  f="$(pg_title_seq_dir)/$1"
+  mkdir -p "$(pg_title_seq_dir)" 2>/dev/null || return 1
+  # One-time migration from the short-lived rounds/<key>.seq location (v0.29 pre-release).
+  [ -f "$f" ] || { [ -f "$(pg_rounds_dir)/$1.seq" ] && mv "$(pg_rounds_dir)/$1.seq" "$f" 2>/dev/null; } || true
+  n="$(cat "$f" 2>/dev/null)"; case "$n" in ''|*[!0-9]*) n=0;; esac
+  n=$((n + 1))
+  { printf '%s' "$n" > "$f.tmp" && mv -f "$f.tmp" "$f"; } 2>/dev/null || { rm -f "$f.tmp" 2>/dev/null; return 1; }
+  echo "$n"
+}
+
+# v0.32: marker-addressed canonical conversation title. The engine publishes this before the
+# browser run starts; later harvest/fast-path processes can therefore organize the same server-
+# side conversation without reconstructing PR or round state. Atomic replacement prevents the
+# CDP organizer from reading a partial title while a fresh run is publishing it.
+pg_conversation_title_dir() { echo "$PRO_GATE_HOME/conversation-titles"; }
+pg_conversation_title_write() {  # <marker> <one-line-title>
+  local marker="$1" title="$2" dir f tmp
+  pg_reservation_marker_ok "$marker" || return 1
+  [ -n "$title" ] && [ "${#title}" -le 200 ] || return 1
+  case "$title" in *$'\n'*|*$'\r'*) return 1;; esac
+  dir="$(pg_conversation_title_dir)"; f="$dir/$marker"; tmp="$f.tmp.$$"
+  mkdir -p "$dir" 2>/dev/null || return 1
+  if printf '%s\n' "$title" > "$tmp" 2>/dev/null && mv -f "$tmp" "$f" 2>/dev/null; then
+    return 0
+  fi
+  rm -f "$tmp" 2>/dev/null
+  return 1
+}
+
+pg_round_count() {  # $1 = key; echoes the rounds recorded inside the rolling window
+  local key="$1" f now win t n=0
+  pg_round_key_ok "$key" || { echo 0; return; }
+  f="$(pg_rounds_dir)/$key"
+  [ -f "$f" ] || { echo 0; return; }
+  win="$(pg_round_window_secs)"; now="$(date +%s)"
+  while IFS= read -r t; do
+    case "$t" in ''|*[!0-9]*) continue;; esac
+    [ $(( now - t )) -lt "$win" ] && n=$(( n + 1 ))
+  done < "$f"
+  echo "$n"
+}
+
+pg_round_record() {  # $1 = key; prune entries older than the window, append now. Sets
+  # PG_ROUND_SPEND_EPOCH to the epoch actually appended — the round's charge time, which is
+  # what trajectory history must be stamped with (#66 gate r3 P1). The marker's epoch is NOT
+  # that moment: it is minted before the per-change lock AND the account-slot wait (each up to
+  # PRO_GATE_LOCK_WAIT, 3900s by default since v0.41), so a queued run's history row could expire
+  # ~130 min before its own spend, or order concurrent runs by process start rather than charge
+  # order.
+  # Best-effort
+  # bookkeeping (same posture as pg_ledger_append): it must never fail a review, but every
+  # fail-open path WARNS on stderr, because a silently unrecordable round means the budget
+  # under-counts and the guard quietly stops guarding. Same-key engine runs are already
+  # serialized by the per-change lock; this file lock just keeps the rewrite atomic against
+  # out-of-band readers/writers.
+  local key="$1" dir f now win t rfd lockdir="" waited=0
+  PG_ROUND_SPEND_EPOCH=""
+  pg_round_key_ok "$key" || return 0
+  dir="$(pg_rounds_dir)"
+  mkdir -p "$dir" 2>/dev/null || {
+    echo "[pro-gate rounds] cannot create ${dir}; round NOT recorded (budget will under-count)" >&2
+    return 0
+  }
+  f="$dir/$key"; win="$(pg_round_window_secs)"; now="$(date +%s)"
+  if pg_have flock; then
+    if ! { { exec {rfd}>>"$f.lock"; } 2>/dev/null && flock -w 10 "$rfd" 2>/dev/null; }; then
+      echo "[pro-gate rounds] could not lock ${f}; round NOT recorded (budget will under-count)" >&2
+      [ -n "${rfd:-}" ] && eval "exec ${rfd}>&-" 2>/dev/null
+      return 0
+    fi
+  else
+    lockdir="$f.lock.d"
+    while ! mkdir "$lockdir" 2>/dev/null; do
+      waited=$(( waited + 1 ))
+      if [ "$waited" -ge 10 ]; then
+        echo "[pro-gate rounds] could not lock ${f}; round NOT recorded (budget will under-count)" >&2
+        return 0
+      fi
+      sleep 1
+    done
+  fi
+  {
+    if [ -f "$f" ]; then
+      while IFS= read -r t; do
+        case "$t" in ''|*[!0-9]*) continue;; esac
+        [ $(( now - t )) -lt "$win" ] && printf '%s\n' "$t"
+      done < "$f"
+    fi
+    printf '%s\n' "$now"
+  } > "$f.tmp" 2>/dev/null && mv -f "$f.tmp" "$f" && PG_ROUND_SPEND_EPOCH="$now" \
+    || echo "[pro-gate rounds] could not write ${f}; round NOT recorded (budget will under-count)" >&2
+  [ -n "${rfd:-}" ] && eval "exec ${rfd}>&-" 2>/dev/null
+  [ -n "$lockdir" ] && rmdir "$lockdir" 2>/dev/null
+  return 0
+}
+
+# pg_round_unrecord <key>: refund ONE round (drop the newest entry). Called ONLY on outcomes
+# that PROVE the submission never landed (the Cloudflare challenge path: oracle detects the
+# interstitial before any prompt reaches the model). Without the refund, a few challenge
+# responses inside the window would exit-12-block a change for a day despite zero Pro spend
+# (dogfood gate round-2 P1). Outcomes with an UNKNOWN fate (throttle, watchdog kills, failed
+# salvage) must NOT refund: over-counting wastes one retry, under-counting resurrects the
+# unbounded loop.
+pg_round_unrecord() {
+  local key="$1" f rfd lockdir="" waited=0 n
+  pg_round_key_ok "$key" || return 0
+  f="$(pg_rounds_dir)/$key"
+  [ -f "$f" ] || return 0
+  if pg_have flock; then
+    if ! { { exec {rfd}>>"$f.lock"; } 2>/dev/null && flock -w 10 "$rfd" 2>/dev/null; }; then
+      [ -n "${rfd:-}" ] && eval "exec ${rfd}>&-" 2>/dev/null
+      return 0
+    fi
+  else
+    lockdir="$f.lock.d"
+    while ! mkdir "$lockdir" 2>/dev/null; do
+      waited=$(( waited + 1 )); [ "$waited" -ge 10 ] && return 0; sleep 1
+    done
+  fi
+  n="$(grep -c . "$f" 2>/dev/null)"; [ -n "$n" ] || n=0
+  if [ "$n" -le 1 ] 2>/dev/null; then
+    rm -f "$f" 2>/dev/null
+  else
+    head -n $(( n - 1 )) "$f" > "$f.tmp" 2>/dev/null && mv -f "$f.tmp" "$f"
+  fi
+  [ -n "${rfd:-}" ] && eval "exec ${rfd}>&-" 2>/dev/null
+  [ -n "$lockdir" ] && rmdir "$lockdir" 2>/dev/null
+  return 0
+}
+
+# One grammar for blocker counts and deferred blocks, interpreted from the same review bytes.
+# Unsupported blocking labels make counts unavailable; absence of a regex match is not proof.
+pg_review_finding_summary() {
+  local out="$1"
+  [ -f "$out" ] && [ -r "$out" ] || return 1
+  jq -cS -Rs '
+    def normalized:
+      sub("^\\s+";"") | sub("^(?:[-*+]|[0-9]+[.)])\\s+";"");
+    def headline:
+      if test("^(?:\\*\\*|__)?\\[") then
+        capture("^(?:\\*\\*|__)?\\[(?<severity>[Pp][0-3])\\](?:\\*\\*|__)?\\s*:?\\s*(?<text>.*)$")
+      else
+        capture("^(?:\\*\\*|__)?(?<severity>[Pp][0-3])(?=\\s|:|—|-|\\*\\*|__|$)(?:\\*\\*|__)?\\s*:?\\s*(?:[-—]\\s+)?(?<text>.*)$")
+      end | .severity |= ascii_upcase;
+    def none_declaration:
+      test("^(?:none|—|-)[.!]?\\s*$";"i");
+    def resolved_headline:
+      test("^\\S+\\s+(?:—|--|-)\\s+RESOLVED([^_[:alnum:]]|$)");
+    def path_anchor:
+      test("^(?:\\*\\*|__|`)?[^\\s`*:]+:[0-9]+([^0-9]|$)");
+    def explicit_finding($severity):
+      test("^(?:\\*\\*|__)?\\[") and
+        (([headline] | first // null) as $finding |
+         $finding!=null and $finding.severity==$severity and
+         ($finding.text|test("^\\s*$")|not) and ($finding.text|none_declaration|not));
+    def section_text:
+      "(?:findings?|issues?|items?|blockers?|blocking|notes?|comments?|severity|level|must[ -]fix|should fix|nice to have|none|empty|n/a)" as $word |
+      test("^\\s*(?:"+$word+"(?:\\s+"+$word+")*)?\\s*:?[ \\t]*(?:\\((?:"+$word+"|[0-9]+)\\))?\\s*:?\\s*$";"i");
+    def unsupported_label:
+      gsub("[*_`]";"") | sub("^[^[:alpha:]]+";"") |
+      capture("^(?<severity>[Pp][0-3])(?=[^_[:alnum:]]|$)").severity | ascii_upcase;
+    def flush:
+      if .current==null then . else
+        if .current.section then
+          .current.lines |= map(select((test("^\\s*$") or none_declaration or
+            test("^no\\s+(?:\\S+\\s+){0,3}(?:findings?|issues?|blockers?|items?|problems?)\\b";"i"))|not))
+        else . end |
+        if .current.section and (.current.lines|length)==0 then .current=null
+        else .blocks += [(.current|del(.section))] | .current=null end
+      end;
+    def bounded:
+      if length<=1024 then . else
+        . as $text | length as $size |
+        # Iterate the suffix length to account for the digit count in the omitted length.
+        ("… [truncated \($size-1024) chars]") as $first |
+        ("… [truncated \($size-1024+($first|length)) chars]") as $second |
+        ("… [truncated \($size-1024+($second|length)) chars]") as $marker |
+        $text[:1024-($marker|length)] + $marker
+      end;
+    reduce (split("\n")[] | sub("\r$";"")) as $line
+      ({blocks:[],current:null,unknown:false,fence:null,pending:null,standalone:null};
+       ($line|normalized) as $normal |
+       # A standalone P0/P1 label resolves at the next non-blank line: only an explicit
+       # same-severity [Pn] finding keeps counts available, and that line then parses normally.
+       # .standalone holds that severity while further same-severity findings continue the section.
+       (if .pending==null or ($line|test("^\\s*$")) then .
+        else .pending as $severity |
+          (if ($normal|explicit_finding($severity)) then .standalone=$severity else .unknown=true end) | .pending=null
+        end) |
+       if .fence!=null then
+         (if .current!=null then .current.lines += [$line] else . end) |
+         .fence as $fence |
+         if ($normal|test("^"+$fence[0:1]+"{"+($fence|length|tostring)+",}\\s*$")) then .fence=null else . end
+       elif ($normal|test("^(?:```|~~~)")) then
+         .fence=($normal|capture("^(?<fence>`{3,}|~{3,})").fence) |
+         if .current!=null then .current.lines += [$line] else . end
+       else
+         ($normal|test("^#{1,6}\\s+")) as $heading |
+         ([$normal | if $heading then sub("^#{1,6}\\s+";"") else . end | headline] | first // null) as $head |
+         ([$normal|unsupported_label] | first // null) as $unsupported |
+         if $heading and $head==null then
+           flush | .standalone=null | .unknown=(.unknown or ($unsupported|IN("P0","P1")))
+         elif $heading and ($head.text|section_text or none_declaration) then
+           flush | .standalone=null | .current={severity:$head.severity,lines:[],section:true}
+         elif $head!=null then
+           flush |
+           .standalone as $section |
+           (if $section!=null and ($normal|explicit_finding($section)) then . else .standalone=null end) |
+           if ($head.text|test("^\\s*$")) then
+             if ($head.severity|IN("P0","P1")|not) then .
+             elif ($line|test("^\\s*[Pp][01]\\s*$")) then .pending=$head.severity
+             else .unknown=true end
+           elif ($head.text|none_declaration) then .
+           else .current={severity:$head.severity,lines:[$head.text]} end
+         elif $unsupported!=null then
+           # Quoted labels end the preceding block without becoming live findings.
+           flush | .standalone=null | .unknown=(.unknown or ($unsupported|IN("P0","P1")))
+         elif .current!=null and ($normal|test("^Correction\\s*:";"i")) then
+           .current.lines += [$line]
+         elif ($normal|test("^(?:(?:\\*\\*|__)?(?:VERDICT|CHOICE)(?:\\*\\*|__)?\\s*:|[A-Za-z][A-Za-z -]*:\\s*$)";"i")) then
+           flush | .standalone=null
+         elif .current!=null then
+           # Under a standalone label, an unbracketed path:line line after a RESOLVED finding has
+           # no severity of its own; folding it into the resolved block could hide a blocker.
+           (if .standalone!=null and (.current.lines[0]|resolved_headline) and ($normal|path_anchor)
+            then .unknown=true else . end) |
+           .current.lines += [$line]
+         else . end
+       end) |
+    flush | .unknown=(.unknown or .fence!=null or .pending!=null) |
+    # A reopen marker anywhere in the block, the RESOLVED headline included, keeps it open.
+    [.blocks[] | select(.severity|IN("P0","P1")) |
+      select((.lines[0]|resolved_headline|not) or
+        (.lines|join("\n")|test("(^|[^_[:alnum:]])(?:STILL-PRESENT|REOPENED|NOT\\s+RESOLVED|NOT\\s+FIXED)([^_[:alnum:]]|$)|Correction\\s*:";"i")))] as $open |
+    {open_p0:(if .unknown then null else [$open[]|select(.severity=="P0")]|length end),
+     open_p1:(if .unknown then null else [$open[]|select(.severity=="P1")]|length end),
+     deferred_findings:[.blocks[]|select(.severity|IN("P2","P3"))|
+       {severity,text:(.lines|join("\n")|sub("\\s+$";"")|bounded)}]}' "$out"
+}
+
+# Print P0<TAB>P1, or fail without counts when any blocking headline is unavailable.
+pg_review_open_severity() {
+  local summary
+  summary="$(pg_review_finding_summary "$1")" || return 1
+  jq -er 'select(.open_p0!=null and .open_p1!=null) | [.open_p0,.open_p1] | @tsv' <<<"$summary"
+}
+
+# Follow-up display data in body order, bounded to the normalized string limit.
+pg_review_deferred_findings() {
+  local summary
+  summary="$(pg_review_finding_summary "$1")" || return 1
+  jq -cS .deferred_findings <<<"$summary"
+}
+
+# pg_round_note_severity <key> <review-file>: record the P0/P1 counts of a change's most
+# recent COMPLETED review in a sidecar ($rounds/<key>.last), and append the full per-round
+# line (epoch, verdict word, open P0, open P1, resolved, still-present, wall-clock secs) to
+# the trajectory history ($rounds/<key>.hist) the v0.31 round governor scores. .last is read
+# back at round-cap time so a capped gate can say "you are stopping WITH an open P0" (the one
+# case a human may want PRO_GATE_FORCE_ROUND=1 for). Best-effort: only keys that have recorded
+# rounds get sidecars (this also skips legacy "diff" markers on the harvest path). A lost
+# hist line (concurrent harvest completions race the rewrite) only UNDER-counts earned
+# rounds — the governor degrades toward the base grant, never past the ceiling.
+pg_round_note_severity() {
+  local key="$1" out="$2" spend_epoch="${3:-}" dir p0 p1 counts verdict res sp now win t rest stamp dur
+  pg_round_key_ok "$key" || return 0
+  dir="$(pg_rounds_dir)"
+  [ -f "$dir/$key" ] || return 0
+  [ -s "$out" ] || return 0
+  counts="$(pg_review_open_severity "$out")" || return 0
+  IFS=$'\t' read -r p0 p1 <<<"$counts"
+  { printf '%s\t%s\t%s\n' "$(date +%s)" "$p0" "$p1" > "$dir/$key.last.tmp" \
+      && mv -f "$dir/$key.last.tmp" "$dir/$key.last"; } 2>/dev/null || true
+  # v0.31 trajectory history for the round governor. Verdict word from the review's own
+  # terminal line; RESOLVED/STILL-PRESENT tallies use the same status-position anchor as the
+  # open-count filter above (P0+P1 lines only — the governor scores blocking severities).
+  verdict="$(pg_extract_verdict "$out")"; [ -n "$verdict" ] || verdict=UNKNOWN
+  res="$(grep -icE '^[[:space:]]*\[P[01]\][[:space:]]+[^[:space:]]+[[:space:]]+(—|--|-)[[:space:]]+RESOLVED([^_[:alnum:]]|$)' "$out" 2>/dev/null)"; [ -n "$res" ] || res=0
+  sp="$(grep -icE '^[[:space:]]*\[P[01]\][[:space:]]+[^[:space:]]+[[:space:]]+(—|--|-)[[:space:]]+STILL-PRESENT([^_[:alnum:]]|$)' "$out" 2>/dev/null)"; [ -n "$sp" ] || sp=0
+  now="$(date +%s)"; win="$(pg_round_window_secs)"
+  # A hist row is stamped with the epoch of the SPEND it describes, not the moment it was
+  # collected (#66 gate P1/r2 P1): a review collected long after its charge — an exit-9
+  # harvest, or just a slow fresh run — would otherwise stay in the scored trajectory after
+  # its spend aged out of pg_round_count's window, earning rounds, faking a churn brake, or
+  # landing out of order after newer rounds. Both engine paths pass the marker's launch epoch
+  # (pg_marker_epoch), which is when pg_round_record charged the round. Rows are pruned on the
+  # same window as the spends, so history and budget expire together.
+  # The re-sort is STABLE (-s): rounds inside one second are common in tests and fast gates,
+  # and an unstable sort would silently reorder the trajectory it exists to keep honest.
+  stamp="$spend_epoch"; case "$stamp" in ''|*[!0-9]*) stamp="$now";; esac
+  [ "$stamp" -gt "$now" ] 2>/dev/null && stamp="$now"
+  # Field 7 (ledger-timing-split R2): wall-clock seconds from $stamp (the round's recorded
+  # spend epoch, stamped above) to this row being written — NOT pure generation time. On the
+  # harvest path that span includes however long the finished review sat uncollected before
+  # someone ran --harvest (bounded only by the reservation TTL); when no spend epoch was
+  # available, $stamp fell back to the marker's mint time (pg_marker_epoch), which can precede
+  # the real charge by up to two PRO_GATE_LOCK_WAIT periods. Clamped at 0 as a defensive floor;
+  # $stamp is already clamped to never exceed $now so this should never go negative.
+  dur=$(( now - stamp )); [ "$dur" -lt 0 ] 2>/dev/null && dur=0
+  {
+    if [ -f "$dir/$key.hist" ]; then
+      while IFS= read -r t; do
+        rest="${t%%$'\t'*}"
+        case "$rest" in ''|*[!0-9]*) continue;; esac
+        [ $(( now - rest )) -lt "$win" ] && printf '%s\n' "$t"
+      done < "$dir/$key.hist"
+    fi
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$stamp" "$verdict" "$p0" "$p1" "$res" "$sp" "$dur"
+  } > "$dir/$key.hist.tmp" 2>/dev/null \
+    && sort -s -n -k1,1 -o "$dir/$key.hist.tmp" "$dir/$key.hist.tmp" 2>/dev/null \
+    && mv -f "$dir/$key.hist.tmp" "$dir/$key.hist" 2>/dev/null \
+    || rm -f "$dir/$key.hist.tmp" 2>/dev/null
+  return 0
+}
+
+# pg_reservation_read_spend <marker>: echo the charged-round epoch (field 7), or nothing on a
+# legacy record. This is the AUTHORITATIVE spend time for trajectory stamping on the harvest
+# path; pg_marker_epoch is only the last-resort fallback below.
+pg_reservation_read_spend() {
+  local marker="$1" f
+  pg_reservation_marker_ok "$marker" || return 1
+  f="$(pg_reservation_dir)/$marker"
+  [ -f "$f" ] || return 1
+  awk -F'\t' 'NR==1{print $7}' "$f" 2>/dev/null
+}
+
+# pg_marker_epoch <marker>: the launch epoch embedded in "pg-run-<key>-<epoch>-<pid>". This is
+# a FALLBACK only (#66 gate r3 P1): the marker is minted before the per-change lock and the
+# account-slot wait, so on a queued run it can precede the actual charge by up to two
+# PRO_GATE_LOCK_WAIT periods. Prefer pg_round_record's PG_ROUND_SPEND_EPOCH (fresh completions)
+# or pg_reservation_read_spend (harvests); use this only when neither is recorded, and never
+# for a value that must line up exactly with the budget window.
+pg_marker_epoch() {
+  local m="${1:-}" rest e
+  case "$m" in pg-run-*) rest="${m#pg-run-}";; *) return 1;; esac
+  rest="${rest%-*}"          # strip -<pid>
+  e="${rest##*-}"            # take <epoch>
+  case "$e" in ''|*[!0-9]*) return 1;; esac
+  printf '%s\n' "$e"
+}
+
+# pg_round_last_severity <key>: echo "p0 p1" from the sidecar, or fail when none/unparseable.
+pg_round_last_severity() {
+  local key="$1" f e p0 p1
+  pg_round_key_ok "$key" || return 1
+  f="$(pg_rounds_dir)/$key.last"
+  [ -f "$f" ] || return 1
+  { IFS=$'\t' read -r e p0 p1 < "$f"; } 2>/dev/null
+  case "$p0" in ''|*[!0-9]*) return 1;; esac
+  case "$p1" in ''|*[!0-9]*) p1=0;; esac
+  echo "$p0 $p1"
+}
+
+# pg_round_score <key>: score the in-window trajectory and resolve the governor's tunables in
+# ONE place so --status and enforcement cannot drift. Sets process globals PG_ROUND_EARNED,
+# PG_ROUND_STREAK, PG_ROUND_ARROW, PG_ROUND_BASE, PG_ROUND_CEILING, PG_ROUND_GRANT,
+# PG_ROUND_ELAPSED_SECS (ledger-timing-split R2: sum of field-7 wall-clock durations across the
+# in-window trajectory — a legacy 6-field row has no field 7 and contributes 0, never breaking
+# the scan), PG_ROUND_SCORED (ledger-timing-split R2: count of in-window .hist rows folded into
+# that sum — legacy and 7-field rows alike — distinct from pg_round_count's "rounds charged",
+# since a charged-but-lost round writes no .hist row at all and so is never scored here).
+# Missing history scores 0/0/""/0/0. In flat mode, GRANT is the explicit legacy cap and
+# the trajectory remains available for human-facing notes even though it does not affect
+# enforcement. Called IN-SHELL (never via command substitution) by every caller that needs these
+# globals afterward — a subshell would compute them and then drop them on exit.
+pg_round_default_base() { printf '%s\n' 2; }
+
+pg_round_score() {
+  local key="$1" f now win e verdict p0 p1 res sp dur open prev="" used
+  PG_ROUND_EARNED=0; PG_ROUND_STREAK=0; PG_ROUND_ARROW=""; PG_ROUND_ELAPSED_SECS=0; PG_ROUND_SCORED=0
+  PG_ROUND_BASE="${PRO_GATE_ROUNDS_BASE:-$(pg_round_default_base)}"; case "$PG_ROUND_BASE" in ''|*[!0-9]*) PG_ROUND_BASE="$(pg_round_default_base)";; esac
+  PG_ROUND_CEILING="${PRO_GATE_ROUNDS_CEILING:-8}"; case "$PG_ROUND_CEILING" in ''|*[!0-9]*) PG_ROUND_CEILING=8;; esac
+  # The ceiling is the IMMOVABLE backstop: an inconsistent config clamps the BASE DOWN to it,
+  # never the ceiling up (#66 gate P1 — raising it let BASE=10/CEILING=8 grant 10 rounds and
+  # defeat the one limit that exists to contain optimistic callers and config mistakes).
+  if [ "$PG_ROUND_BASE" -gt "$PG_ROUND_CEILING" ]; then
+    echo "[pro-gate rounds] PRO_GATE_ROUNDS_BASE=${PG_ROUND_BASE} exceeds PRO_GATE_ROUNDS_CEILING=${PG_ROUND_CEILING}; clamping the base to the ceiling (the ceiling never moves)" >&2
+    PG_ROUND_BASE="$PG_ROUND_CEILING"
+  fi
+  if pg_round_key_ok "$key"; then
+    f="$(pg_rounds_dir)/$key.hist"
+    if [ -f "$f" ]; then
+      now="$(date +%s)"; win="$(pg_round_window_secs)"
+      while IFS=$'\t' read -r e verdict p0 p1 res sp dur; do
+        case "$e" in ''|*[!0-9]*) continue;; esac
+        [ $(( now - e )) -lt "$win" ] || continue
+        case "$p0" in ''|*[!0-9]*) p0=0;; esac
+        case "$p1" in ''|*[!0-9]*) p1=0;; esac
+        case "$dur" in ''|*[!0-9]*) dur=0;; esac
+        PG_ROUND_ELAPSED_SECS=$(( PG_ROUND_ELAPSED_SECS + dur ))
+        PG_ROUND_SCORED=$(( PG_ROUND_SCORED + 1 ))
+        open=$(( p0 + p1 ))
+        if [ "$open" -eq 0 ]; then
+          # gate r5 P2 (v0.53.0): a clean round converges the chain. Zero cannot shrink further,
+          # so zero-to-zero is not churn -- three clean SHIPs on successive heads inside the
+          # window must not leave a streak that stops the next fresh review. A shrink INTO zero
+          # still earns a round like any other shrink.
+          if [ -n "$prev" ] && [ "$prev" -gt 0 ]; then PG_ROUND_EARNED=$(( PG_ROUND_EARNED + 1 )); fi
+          PG_ROUND_STREAK=0
+        elif [ -n "$prev" ]; then
+          if [ "$open" -lt "$prev" ]; then PG_ROUND_EARNED=$(( PG_ROUND_EARNED + 1 )); PG_ROUND_STREAK=0
+          else PG_ROUND_STREAK=$(( PG_ROUND_STREAK + 1 )); fi
+        fi
+        PG_ROUND_ARROW="${PG_ROUND_ARROW:+${PG_ROUND_ARROW}→}${open}"
+        prev="$open"
+      done < "$f"
+    fi
+  fi
+  if [ -n "${PRO_GATE_MAX_ROUNDS_PER_PR:-}" ]; then
+    case "$PRO_GATE_MAX_ROUNDS_PER_PR" in *[!0-9]*|'') PG_ROUND_GRANT="$(pg_round_default_base)";; *) PG_ROUND_GRANT="$PRO_GATE_MAX_ROUNDS_PER_PR";; esac
+    return 0
+  fi
+  PG_ROUND_GRANT=$(( PG_ROUND_BASE + PG_ROUND_EARNED ))
+  [ "$PG_ROUND_GRANT" -gt "$PG_ROUND_CEILING" ] && PG_ROUND_GRANT="$PG_ROUND_CEILING"
+  # CONTINUE removes only the churn collapse. The original base + earned grant and its
+  # ceiling remain the single numeric authority for status, facts, and enforcement.
+  if [ "$PG_ROUND_STREAK" -ge 2 ] && ! pg_round_continue_override; then
+    used="$(pg_round_count "$key")"
+    [ "$used" -lt "$PG_ROUND_GRANT" ] && PG_ROUND_GRANT="$used"
+  fi
+}
+
+# Compatibility/read-only accessors. pg_round_trajectory stays useful to shell callers and
+# tests; pg_round_grant is the status helper. Both delegate to the single scorer above.
+pg_round_trajectory() { pg_round_score "$1"; printf '%s\t%s\t%s\n' "$PG_ROUND_EARNED" "$PG_ROUND_STREAK" "$PG_ROUND_ARROW"; }
+pg_round_grant() { pg_round_score "$1"; echo "$PG_ROUND_GRANT"; }
+
+pg_round_policy_mode() { # advisory|enforced|lockdown|off
+  local guard_set=false guard="${PRO_GATE_ROUND_GUARD:-}"
+  [ -z "${PRO_GATE_ROUND_GUARD+x}" ] || guard_set=true
+  if [ "$guard_set" = true ]; then
+    [ "$guard" = 0 ] && { echo off; return; }
+    [ "$guard" = 1 ] || { echo advisory; return; }
+  elif [ -z "${PRO_GATE_MAX_ROUNDS_PER_PR+x}${PRO_GATE_ROUNDS_BASE+x}${PRO_GATE_ROUNDS_CEILING+x}" ]; then
+    echo advisory; return
+  fi
+  pg_round_score "${1:-}"
+  if { [ -n "${PRO_GATE_MAX_ROUNDS_PER_PR:-}" ] && [ "$PG_ROUND_GRANT" -eq 0 ]; } \
+     || { [ -z "${PRO_GATE_MAX_ROUNDS_PER_PR:-}" ] && [ "$PG_ROUND_BASE" -eq 0 ]; }; then
+    echo lockdown
+  else
+    echo enforced
+  fi
+}
+
+pg_round_policy_source() {
+  if [ -n "${PRO_GATE_ROUND_GUARD+x}" ]; then echo PRO_GATE_ROUND_GUARD
+  elif [ -n "${PRO_GATE_MAX_ROUNDS_PER_PR+x}" ]; then echo PRO_GATE_MAX_ROUNDS_PER_PR
+  elif [ -n "${PRO_GATE_ROUNDS_BASE+x}" ]; then echo PRO_GATE_ROUNDS_BASE
+  elif [ -n "${PRO_GATE_ROUNDS_CEILING+x}" ]; then echo PRO_GATE_ROUNDS_CEILING
+  else echo default
+  fi
+}
+
+pg_round_guard() {  # $1 = key. 0 = proceed; 1 + a one-line reason on stdout = explicitly denied.
+  local key="$1" used policy
+  policy="$(pg_round_policy_mode "$key")"
+  case "$policy" in advisory|off) return 0;; enforced|lockdown) ;; *) return 0;; esac
+  [ "${PRO_GATE_FORCE_ROUND:-0}" = 1 ] && return 0   # deliberate one-invocation override
+  pg_round_key_ok "$key" || return 0
+  pg_round_score "$key"
+  # Legacy flat mode: an EXPLICITLY set PRO_GATE_MAX_ROUNDS_PER_PR pins the v0.22 behavior
+  # (trajectory ignored). Unset = the v0.31 governor below.
+  if [ -n "${PRO_GATE_MAX_ROUNDS_PER_PR:-}" ]; then
+    # cap 0 takes its natural reading: ZERO fresh runs allowed (an operator lockdown of a
+    # runaway change). "Unlimited" is PRO_GATE_ROUND_GUARD=0, never a magic cap value.
+    if [ "$PG_ROUND_GRANT" -eq 0 ]; then
+      echo "review round budget for ${key} is 0: fresh Pro runs are disabled (PRO_GATE_MAX_ROUNDS_PER_PR=0)"
+      return 1
+    fi
+    used="$(pg_round_count "$key")"
+    if [ "$used" -ge "$PG_ROUND_GRANT" ]; then
+      echo "review round budget exhausted for ${key}: ${used}/${PG_ROUND_GRANT} slot-spending runs in the last ${PRO_GATE_ROUNDS_WINDOW:-24h}${PG_ROUND_ARROW:+; open P0/P1 by round: ${PG_ROUND_ARROW}}"
+      return 1
+    fi
+    return 0
+  fi
+  # Governor mode (#65): base grant, +1 earned per strictly-shrinking re-review, immovable
+  # ceiling, early stop on churn. base 0 keeps the lockdown reading.
+  if [ "$PG_ROUND_BASE" -eq 0 ]; then
+    echo "review round budget for ${key} is 0: fresh Pro runs are disabled (PRO_GATE_ROUNDS_BASE=0)"
+    return 1
+  fi
+  used="$(pg_round_count "$key")"
+  if [ "$PG_ROUND_STREAK" -ge 2 ] && ! pg_round_continue_override; then
+    echo "review rounds stopped early for ${key}: the open-P0/P1 trajectory (${PG_ROUND_ARROW:-none}) has not shrunk for ${PG_ROUND_STREAK} consecutive re-reviews — this loop is churning, not converging (${used} slot-spending runs in the last ${PRO_GATE_ROUNDS_WINDOW:-24h})"
+    return 1
+  fi
+  if [ "$used" -ge "$PG_ROUND_GRANT" ]; then
+    echo "review round budget exhausted for ${key}: ${used}/${PG_ROUND_GRANT} rounds (base ${PG_ROUND_BASE} + ${PG_ROUND_EARNED} earned by a shrinking open-P0/P1 trajectory${PG_ROUND_ARROW:+ ${PG_ROUND_ARROW}}, ceiling ${PG_ROUND_CEILING}) in the last ${PRO_GATE_ROUNDS_WINDOW:-24h}"
+    return 1
+  fi
+  return 0
+}
+
+# pg_round_continue_override: true when PRO_GATE_ROUNDS_CONTINUE=1 bypasses the scorer/guard's
+# churn brake and reducer's rounds-not-converging stop for the configured invocation (#174 R2).
+# It never enlarges the uncollapsed numeric grant or bypasses exhaustion/lockdown. Read fresh on
+# every call, never written to disk and never remembered past this process — the same stateless,
+# one-invocation idiom as PRO_GATE_FORCE_ROUND (see pg_round_guard above). The reducer itself
+# stays a pure function of its facts (daemon.sh replays pg_review_decision_envelope_valid against
+# a saved decision in a process that never carries this env), so the override is resolved HERE,
+# at facts-build time, and threaded into governor.continue_override rather than re-read later.
+pg_round_continue_override() { [ "${PRO_GATE_ROUNDS_CONTINUE:-0}" = 1 ]; }
+
+# pg_round_governor_facts_json <key> <granted:true|false>: single-line JSON governor object
+# {arrow,continue_override,earned,grant,granted,policy_mode,scored,streak} for the
+# review-decision/v1 facts builders (#174 R5/R6). Every trajectory value is read straight from
+# pg_round_score's own globals and pg_round_policy_mode's own accessor for <key> — no review text
+# is parsed and no value is duplicated as a second jq literal. <granted> is the boolean the caller
+# already resolved via pg_round_guard; this function does not recompute it. Must be called
+# IN-SHELL by callers that also need pg_round_score's globals afterward, same as pg_round_score
+# itself (a command-substitution subshell would drop them silently).
+pg_round_governor_facts_json() {
+  local key="$1" granted="$2" arrow_json policy_mode continue_override=false
+  pg_round_score "$key"
+  policy_mode="$(pg_round_policy_mode "$key")"
+  if [ -z "$PG_ROUND_ARROW" ]; then
+    arrow_json='[]'
+  else
+    # gate r1 P2 (v0.53.0): export only the latest 32 counts. pg_review_decision_reduce refuses
+    # any normalized-input array longer than 32 as unsafe-normalized-input before it looks at
+    # completed results or recovery, so an unbounded arrow (advisory mode permits any number of
+    # shrinking rounds) would make every decision for that change fail -- including collecting a
+    # finished SHIP. The counters (scored/earned/streak) keep the full in-window history; only the
+    # serialized trajectory is bounded.
+    arrow_json="$(printf '%s' "$PG_ROUND_ARROW" | jq -R -c 'split("→") | map(tonumber) | .[-32:]' 2>/dev/null)"
+    case "$arrow_json" in ''|null) arrow_json='[]';; esac
+  fi
+  pg_round_continue_override && continue_override=true
+  jq -cn --argjson granted "$granted" --argjson scored "$PG_ROUND_SCORED" --argjson arrow "$arrow_json" \
+    --argjson earned "$PG_ROUND_EARNED" --argjson streak "$PG_ROUND_STREAK" --argjson grant "$PG_ROUND_GRANT" \
+    --arg policy_mode "$policy_mode" --argjson continue_override "$continue_override" '
+    {arrow:$arrow,continue_override:$continue_override,earned:$earned,grant:$grant,granted:$granted,
+     policy_mode:$policy_mode,scored:$scored,streak:$streak}'
+}
+
+# pg_filter_diff <in> <out>: strip diff sections for noise paths (lockfiles, generated,
+# vendored, minified, snapshots) so the Pro model spends its thinking budget on real code and
+# its review window stays short. Writes the filtered unified diff to <out>; prints each
+# excluded path to STDERR (the caller surfaces them — no silent truncation). Override the
+# match with PRO_GATE_DIFF_EXCLUDE.
+pg_filter_diff() {
+  local in="$1" out="$2" exclude
+  # Literal dots are written [.] (a char class) rather than \. so awk's dynamic-regex lexer
+  # doesn't warn + downgrade the escape. Override wholesale with PRO_GATE_DIFF_EXCLUDE.
+  exclude="${PRO_GATE_DIFF_EXCLUDE:-(^|/)([^/]*[.]lock|pnpm-lock[.]yaml|package-lock[.]json|yarn[.]lock|bun[.]lockb|Cargo[.]lock|poetry[.]lock|Gemfile[.]lock|composer[.]lock|go[.]sum)$|(^|/)(node_modules|vendor|dist|build|out|[.]next|coverage|__snapshots__)/|[.](min[.](js|css)|map|snap)$|[.]generated[.]|_pb2[.]py$}"
+  awk -v ex="$exclude" '
+    /^diff --git / { path=$0; sub(/^diff --git a\/.* b\//,"",path); skip=(path ~ ex)?1:0; if (skip) print path > "/dev/stderr" }
+    !skip { print }
+  ' "$in" > "$out"
+}
+
+# pg_extract_verdict <file>: the final authoritative verdict must be within the last six
+# non-empty lines. Use the ownership scanner so quoted examples cannot supply SHIP authority.
+pg_extract_verdict() {
+  pg_capture_verdict_claims "$1" verdict
+}
+
+# pg_is_review <file>: true only when <file> looks like a COMPLETE review, not a truncated or
+# garbage capture. Our prompt mandates Pn severity blocks AND one final verdict line, so require
+# BOTH (v0.15, pro-gate PR#5 review P1: the old OR-grep accepted a capture truncated after its
+# first finding, which then skipped salvage/retry and shipped an incomplete review). The verdict
+# must sit near the end (last few non-empty lines): that rejects mid-file truncation while
+# tolerating trailing footer lines from the capture (e.g. a "Sources" block).
+pg_is_review() {
+  local f="$1"
+  [ -s "$f" ] || return 1
+  [ "$(wc -c < "$f" 2>/dev/null || echo 0)" -ge 40 ] || return 1
+  grep -qiE '\[P[0-3]\]|P[0-3][*_ ]*:[[:space:]]*(none|—|-)' "$f" 2>/dev/null || return 1
+  [ -n "$(pg_extract_verdict "$f")" ]
+}
+
+# #262: keep the reviewed vocabulary across collection invocations. This is derived from the
+# already-prepared payload, never a new GitHub fetch. Unlike the provenance manifest it must
+# survive reservation removal so an idempotent completed-result replay uses the same predicate.
+pg_review_tokens_dir() { printf '%s\n' "${PRO_GATE_REVIEW_TOKENS_DIR:-$PRO_GATE_HOME/review-tokens}"; }
+pg_review_tokens() { # file [rationale]: canonical tokens; rationale emits shaped tokens only
+  LC_ALL=C awk -v rationale="${2:-}" '
+    {
+      line=$0
+      if (rationale) {
+        sub(/^[[:space:]]*[-*#>_]*[[:space:]]*/, "", line)
+        if (line ~ /^[Pp][0-3][*_ ]*:/) next
+        # The whole verdict line is excluded (gate r1 P2): a diff path appended to "VERDICT: SHIP"
+        # is still the skeleton, so the rationale has to stand in its own paragraph.
+        if (line ~ /^[Vv][Ee][Rr][Dd][Ii][Cc][Tt][*_ ]*:/) next
+        sub(/\([Rr]un marker:.*$/, "", line)
+        if (line ~ /^[Rr]un marker:/) next
+      } else {
+        # Paths and trailing hunk context contribute tokens; range prefixes do not.
+        if (line ~ /^diff --git /) sub(/^diff --git /, "", line)
+        else if (line ~ /^(---|\+\+\+) /) sub(/^(---|\+\+\+) /, "", line)
+        else if (line ~ /^@@/) sub(/^@@[^@]*@@[[:space:]]*/, "", line)
+        else if (line ~ /^(index |new file mode |deleted file mode |old mode |new mode )/) next
+        else sub(/^[+ -]/, "", line)
+      }
+      gsub(/[^A-Za-z0-9_./:-]+/, " ", line)
+      n=split(line, words, /[[:space:]]+/)
+      for (i=1; i<=n; i++) {
+        t=words[i]
+        if (rationale) {
+          # Retained diff suffixes keep hidden-path dots. Emit that spelling too,
+          # without replacing the established stripped candidate or diff vocabulary.
+          literal=t
+          while (sub(/^\.\//, "", literal)) {}
+          sub(/[.:\/]+$/, "", literal)
+          if (literal ~ /^\.[A-Za-z0-9_-]/ && literal ~ /[A-Za-z]/) {
+            sub(/:[0-9]+(-[0-9]+)?$/, "", literal)
+            print literal
+          }
+        }
+        sub(/^[.\/]+/, "", t); sub(/[.:\/]+$/, "", t)
+        if (t !~ /[A-Za-z]/) continue
+        shaped=(t == "VERSION" || t ~ /[\/_]/ || t ~ /\.[A-Za-z][A-Za-z0-9]*(:[0-9]+(-[0-9]+)?)?$/ || t ~ /:[0-9]+(-[0-9]+)?$/ ||
+          (t ~ /[a-z]/ && substr(t,2) ~ /[A-Z]/))
+        if (rationale && !shaped) continue
+        sub(/:[0-9]+(-[0-9]+)?$/, "", t)
+        print t
+        if (!rationale) {
+          # A cited path may omit diff prefixes or directories; retain component boundaries,
+          # never arbitrary substrings of an identifier (fooBarExtra cannot prove fooBar).
+          rest=t
+          while (index(rest,"/")) { rest=substr(rest,index(rest,"/")+1); print rest }
+          count=split(t, components, /[.\/:]/)
+          for (j=1; j<=count; j++) if (components[j] != "") print components[j]
+        }
+      }
+    }' "$1" | LC_ALL=C sort -u
+}
+pg_review_tokens_write() { # marker reviewed-diff
+  local marker="$1" diff="$2" dir tmp
+  pg_reservation_marker_ok "$marker" || return 1
+  [ -r "$diff" ] || return 1
+  dir="$(pg_review_tokens_dir)"; mkdir -p "$dir" || return 1
+  tmp="$(mktemp "$dir/.tokens.XXXXXX")" || return 1
+  if pg_review_tokens "$diff" > "$tmp" && mv -f "$tmp" "$dir/$marker"; then return 0; fi
+  rm -f "$tmp"; return 1
+}
+pg_review_shape() { # body tokens-file -> PG_BODY_BYTES, PG_NAMES_NOTHING; rc 0 iff grounded
+  local body="$1" tokens="$2" candidates
+  PG_BODY_BYTES="$(wc -c < "$body" 2>/dev/null | tr -d '[:space:]')"
+  PG_BODY_BYTES="${PG_BODY_BYTES:-0}"
+  PG_NAMES_NOTHING=true
+  candidates="$(pg_review_tokens "$body" rationale)"
+  if [ -n "$candidates" ] && [ -r "$tokens" ] \
+     && printf '%s\n' "$candidates" | grep -Fx -f "$tokens" >/dev/null; then
+    PG_NAMES_NOTHING=false
+    return 0
+  fi
+  return 1
+}
+
+# Contract digests written into input bindings by engines that predate retained review vocabulary
+# (every release before 0.62.0). Their completions were accepted without it, and reservation
+# removal already deleted their path manifests, so nothing on disk can say which diff they
+# reviewed (gate r1 P1: 1616 of 1616 production input bindings). Frozen on purpose: a later
+# contract bump never joins it, because every engine since 0.62.0 retains the vocabulary at
+# submission or refuses to submit.
+PG_REVIEW_PRE_VOCABULARY_CONTRACT_DIGESTS='bf36fdb5f8625e917be0539ca014fec518649d1160584846aca1cb9149533abb 7f5ece9bfa5aa19f858431da23302a9bc02a4a8f5770830d529f22484e5982ee 5fcd19c12600061af6d90ed9cb980dd7067cff199c374910639003eec4caf5c3 6da6866bab4e95ad138cdc946fa1388be9c386bca7b592c3370c9f52e34b315f fa91787e3fbf3c0852c78f5269b2f670d84b86561be64d6edef4229bf46aee9b'
+pg_review_input_binding_predates_vocabulary() { # marker -> rc 0 iff a validated pre-0.62.0 input binding exists
+  local digest
+  digest="$(pg_review_input_binding_read "$1" 2>/dev/null | jq -r '.contract_digest // empty' 2>/dev/null)"
+  [ -n "$digest" ] || return 1
+  case " $PG_REVIEW_PRE_VOCABULARY_CONTRACT_DIGESTS " in *" $digest "*) return 0;; esac
+  return 1
+}
+
+# Read-only acceptance for saved evidence. No vocabulary means no proof of a grounded review;
+# a legacy path manifest is sufficient without creating or repairing any persistent records.
+# A completion whose input binding predates retained vocabulary is judged on its own shape: the
+# review must still name some path or identifier (both #262 skeletons name none), but nothing
+# can be compared against the diff it reviewed. Every later binding keeps the full requirement.
+pg_review_shape_for_marker() { # marker body [private tokens-file] -> rc 0 or typed exit 6
+  local marker="$1" body="$2" tokens="${3:-$(pg_review_tokens_dir)/$1}" manifest
+  pg_reservation_marker_ok "$marker" || return 6
+  manifest="$(pg_manifest_dir)/$marker"
+  if [ -f "$tokens" ] && [ ! -L "$tokens" ] && [ -r "$tokens" ]; then
+    pg_review_shape "$body" "$tokens" && return 0
+  elif [ -f "$manifest" ] && [ ! -L "$manifest" ] && [ -r "$manifest" ]; then
+    pg_review_shape "$body" <(pg_review_tokens "$manifest") && return 0
+  elif pg_review_input_binding_predates_vocabulary "$marker"; then
+    pg_review_shape "$body" <(pg_review_tokens "$body" rationale) && return 0
+  else
+    pg_review_shape "$body" /dev/null || true
+  fi
+  echo 'template-verdict: review names no path or identifier from the retained reviewed diff' >&2
+  return 6
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# v0.28 (#48): review provenance. A structurally-complete review can still be the WRONG
+# conversation's answer — a failed send once salvaged a different PR's finished review with no
+# indication it was foreign (widget #1245), sending its caller off to fix phantom findings.
+# The check is deliberately lenient to make false rejections vanishingly rare: it fires only
+# when the review cites at least one file AND none of those citations overlap the change's
+# path manifest, matching exact paths or component-anchored suffixes (never basenames).
+# ─────────────────────────────────────────────────────────────────────────────
+# pg_diff_paths <unified-diff>: the change's file manifest, one path per line.
+pg_diff_paths() {
+  sed -nE 's#^\+\+\+ b/(.+)#\1#p; s#^--- a/(.+)#\1#p' "$1" 2>/dev/null \
+    | grep -v '^/dev/null$' | sort -u
+}
+# pg_review_cited_paths <review>: paths cited in [Pn] headline lines ("[P1] path:line — ...").
+pg_review_cited_paths() {
+  sed -nE 's/^[[:space:]]*\[P[0-3]\][[:space:]]+([^[:space:]:]+):[0-9].*/\1/p' "$1" 2>/dev/null | sort -u
+}
+# pg_review_matches_change <review> <paths-file>: rc 0 = accept (no manifest, fewer than two
+# distinct citations, or any overlap); rc 1 = REJECT (≥2 cited paths, manifest exists, zero
+# overlap → foreign). The two-citation floor keeps single-finding reviews that legitimately
+# cite one caller/context file outside the diff from being misread as foreign — the observed
+# foreign captures are whole other PRs' reviews, which cite several of their own files.
+pg_review_matches_change() {
+  local review="$1" pathsf="$2" cited c p
+  [ -s "$pathsf" ] || return 0
+  cited="$(pg_review_cited_paths "$review")"
+  [ -n "$cited" ] || return 0
+  [ "$(printf '%s\n' "$cited" | grep -c .)" -ge 2 ] 2>/dev/null || return 0
+  # Overlap = exact path equality, or one path being a component-anchored SUFFIX of the other
+  # (a review may cite repo-relative paths while the diff carries a prefix, or vice versa) —
+  # but ONLY when the shorter side itself carries >=2 components (contains a slash). A bare
+  # single-component citation matching via the suffix rule IS basename matching by another
+  # door (index.ts vs lib/index.ts — gate #54 r6): bare names require exact equality.
+  while IFS= read -r c; do
+    [ -n "$c" ] || continue
+    while IFS= read -r p; do
+      [ -n "$p" ] || continue
+      case "$p" in "$c") return 0;; esac
+      case "$c" in */*) case "$p" in */"$c") return 0;; esac;; esac
+      case "$p" in */*) case "$c" in */"$p") return 0;; esac;; esac
+    done < "$pathsf"
+  done <<PG_EOF
+$cited
+PG_EOF
+  return 1
+}
+
+# pg_provenance_reject <marker>: invalidate a marker's memoized conversation candidate after
+# its capture failed the provenance check. Without this, cdp-salvage's URL memo (written the
+# moment the capture matched) makes the next harvest PREFER the same foreign conversation and
+# starve the real one indefinitely (gate #54 P1). The URL goes on the per-marker blacklist —
+# deliberately bypassing cdp-salvage's own "never blacklist ourUrls" guard: marker match said
+# "ours", but the CONTENT proved the answer is not this change's review, which is the stronger
+# signal — and the memo is removed so the next pass rescans all candidates.
+# A claim remains a recovery handle until its bytes were read and convicted or restored.
+# Check the canonical memo before claims at callers: renaming publishes the claim atomically.
+pg_memo_claim_pending() { # marker
+  local marker="$1" claim dir entries
+  pg_reservation_marker_ok "$marker" || return 1
+  # Use the checked listing itself, not a second glob which could fail independently.
+  # Recheck storage even when the earlier browser scan completed before an I/O fault.
+  [ -d "$PRO_GATE_HOME" ] && [ -r "$PRO_GATE_HOME" ] && [ -x "$PRO_GATE_HOME" ] || return 0
+  for dir in "$PRO_GATE_HOME/conversation-urls" "$PRO_GATE_HOME/legacy-review-receipts"; do
+    [ -e "$dir" ] || [ -L "$dir" ] || continue
+    [ -d "$dir" ] && [ ! -L "$dir" ] && [ -r "$dir" ] && [ -x "$dir" ] || return 0
+    entries="$(LC_ALL=C ls -A1 "$dir" 2>/dev/null)" || return 0
+    while IFS= read -r claim; do
+      case "$claim" in "$marker.rej."*) ;; *) continue;; esac
+      [ "$(pg_memo_claim_marker "$claim")" = "$marker" ] && return 0
+    done <<<"$entries"
+  done
+  return 1
+}
+
+pg_memo_read() { # bounded regular memo bytes; uncertainty leaves the original path intact
+  local file="$1" size value LC_ALL=C
+  [ -f "$file" ] && [ ! -L "$file" ] || return 1
+  size="$(stat -c %s "$file" 2>/dev/null || stat -f %z "$file" 2>/dev/null)" || return 1
+  case "$size" in ''|*[!0-9]*) return 1;; esac
+  [ "$size" -le 4096 ] || return 1
+  value="$(head -c 4097 "$file" 2>/dev/null)" || return 1
+  [ "${#value}" -le 4096 ] || return 1
+  printf '%s' "$value"
+}
+
+pg_memo_claim_marker() { # filename -> original marker, including markers containing .rej.
+  local name="${1##*/}" unique='\.rej\.([0-9a-f]{64}\.[A-Za-z0-9-]+|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$'
+  if [[ "$name" =~ ^pg-run-[A-Za-z0-9.-]+-[0-9]+-[0-9]+$ ]] && ! [[ "$name" =~ $unique ]]; then
+    printf '%s\n' "$name"; return
+  fi
+  if [[ "$name" =~ ^(pg-run-[A-Za-z0-9.-]+-[0-9]+-[0-9]+)\.rej\.[A-Za-z0-9.-]+$ ]]; then
+    name="${BASH_REMATCH[1]}"
+  fi
+  pg_reservation_marker_ok "$name" || return 1
+  printf '%s\n' "$name"
+}
+
+pg_memo_claim_resolve() { # claim legacy-receipt
+  local claim="$1" receipt="$2"
+  if [ -n "$receipt" ]; then
+    # The unique suffix survives; only the unresolved tag changes. Preserve original mtime.
+    mv "$claim" "${claim%.rej.*}.${claim##*.rej.}" 2>/dev/null || true
+  else
+    rm -f "$claim" 2>/dev/null || true
+  fi
+}
+
+pg_provenance_reject() {  # <marker> [matched-url]
+  # Prefer the EXPLICIT matched URL the CDP child reported for this very capture: reading the
+  # shared memo afterwards races concurrent probes/retries, which can re-learn the GENUINE
+  # conversation in the interim — condemning it while the foreign source stays eligible
+  # (gate #54 r5). Memo removal is CLAIM-then-verify (gate #54 r6): the memo is atomically
+  # renamed aside first, its content checked against the rejected URL, and restored when it
+  # names a DIFFERENT (newer, possibly genuine) conversation — a read-append-remove sequence
+  # left a window where a concurrently refreshed genuine memo was deleted by a stale compare.
+  local m="$1" url="${2:-}" memo claim="" snap receipt="" digest token published=1 settled
+  pg_reservation_marker_ok "$m" || return 0
+  memo="$PRO_GATE_HOME/conversation-urls/$m"
+  # With no explicit conviction, establish the URL before claiming. A failed read leaves
+  # the canonical bytes untouched; a replacement during claim remains distinguishable.
+  if [ -z "$url" ]; then
+    url="$(pg_memo_read "$memo")" || return 0
+    url="${url//$'\n'/}"
+  fi
+  digest="$(pg_review_sha256_text "$url")" || return 0
+  [[ "$digest" =~ ^[0-9a-f]{64}$ ]] || return 0
+  # A recall may discover the claim immediately after rename. Publish an explicit conviction
+  # first so it cannot restore that rejected URL while this process is still inspecting it.
+  if [ -n "$url" ]; then
+    { printf '%s\t%s\n' "$m" "$url" >> "$PRO_GATE_HOME/salvage-nonmatching.txt"; } 2>/dev/null && published=0
+  else
+    published=0 # an empty memo convicts nothing
+  fi
+  # A legacy round's memo is claimed straight into its receipt (pg_legacy_review_receipt_path);
+  # when that receipt cannot exist, the memo is not claimed at all.
+  # Like the Node claim, this name exists only once the memo inode lands. A mktemp
+  # placeholder in the receipt store would itself become false legacy-review evidence on crash.
+  # The suffix is bounded as in cdp-salvage.mjs memoClaimName: 38 bytes after a marker of at
+  # most 174 bytes stays under the common 255-byte filename limit.
+  token="$(LC_ALL=C od -An -N8 -tx1 /dev/urandom 2>/dev/null | tr -d ' \n')" || return 0
+  [[ "$token" =~ ^[0-9a-f]{16}$ ]] || return 0
+  if receipt="$(pg_legacy_review_receipt_path "$m")"; then
+    claim="$PRO_GATE_HOME/legacy-review-receipts/$m.rej.${digest:0:16}.$token"
+  elif [ $? -eq 1 ]; then
+    receipt=""; claim="$memo.rej.${digest:0:16}.$token"
+  fi
+  if [ -n "$claim" ] && [ ! -e "$claim" ] && [ ! -L "$claim" ] && mv "$memo" "$claim" 2>/dev/null; then
+    if snap="$(pg_memo_read "$claim")"; then
+      snap="${snap//$'\n'/}"
+      settled=1
+      if [ -z "$snap" ] || [ "$snap" = "$url" ]; then
+        settled=0
+      elif { ln "$claim" "$memo" 2>/dev/null && [ "$claim" -ef "$memo" ]; } \
+        || { [ -f "$memo" ] && [ ! -L "$memo" ] && { [ "$claim" -ef "$memo" ] || cmp -s "$claim" "$memo"; }; }; then
+        # A hard link never overwrites a concurrent memo. Resolved legacy receipts remain
+        # even after restoration, on the original memo's 14-day clock (#227 round 6).
+        settled=0
+      fi
+      # EEXIST preserves the concurrent memo AND this alternate. Other link failures and
+      # failed reads likewise leave a discoverable claim for the next ordinary salvage.
+      # Without a blacklist line, the claim's name is the conviction's only durable record,
+      # whatever it holds: another claim may still hold the URL. Ordinary recall resolves it
+      # once the blacklist records the conviction, by URL or by the claim's fingerprint.
+      if [ "$settled" -eq 0 ] && [ "$published" -eq 0 ]; then
+        pg_memo_claim_resolve "$claim" "$receipt"
+      fi
+    fi
+  fi
+  return 0
+}
+
+# pg_trim_file <file> <max-lines> <keep-lines>: bound an append-only file by keeping only
+# the newest <keep-lines> once it exceeds <max-lines>. The rewrite lands via mv (atomic), so
+# readers never see a partial file — but a line APPENDED between the tail and the mv is
+# LOST, so this is for SINGLE-WRITER files whose writer calls it while holding that file's
+# own serialization (e.g. autoupdate.log under the updater's singleton lock). Multi-writer
+# files (the salvage blacklist: bash engines + Node salvage children) are deliberately NOT
+# compacted — a correct compaction there needs one cross-platform lock shared by every
+# appender in both languages (#63 gate r2), machinery a ~16KB/week diagnostic doesn't earn.
+pg_trim_file() {
+  local f="$1" max="$2" keep="$3" n tmp
+  [ -f "$f" ] || return 0
+  n="$(wc -l < "$f" 2>/dev/null)" || return 0
+  [ "$n" -gt "$max" ] 2>/dev/null || return 0
+  tmp="$(mktemp "${f}.trim.XXXXXX" 2>/dev/null)" || return 0
+  if tail -n "$keep" "$f" > "$tmp" 2>/dev/null; then mv -f "$tmp" "$f" 2>/dev/null || rm -f "$tmp"; else rm -f "$tmp"; fi
+  return 0
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# v0.28 (#55): positive run-binding. The review prompt instructs the model to append
+# "(run marker: <marker>)" to its VERDICT line; a browser-matched capture carrying that token
+# was provably written for THIS prompt — content heuristics can't be fooled into accepting a
+# foreign or stale conversation's answer. The engine strips the token before returning output.
+# ─────────────────────────────────────────────────────────────────────────────
+# pg_capture_nonce_ok <file> <marker>: the terminal authoritative verdict must echo this run.
+# Case-SENSITIVE on purpose, and the asymmetry with the browser side is the point (#166/#167).
+# This is an ACCEPTANCE predicate: rc 0 publishes the capture as this run's review. A false
+# positive here ships a possibly-foreign answer, so it fails closed and a case-only echo drift
+# stays nonce-less -- the run retries, costing liveness, never correctness. The browser-side
+# ownership checks in cdp-salvage.mjs are CONVICTION predicates: a false positive there
+# blacklists the conversation and discards a finished review permanently, so those fold case.
+# Fail closed where a wrong accept publishes; fail open where a wrong refusal destroys evidence.
+# #166 locked this direction with a test ("mis-cased own echo remains unbound without becoming a
+# foreign claim"); do not fold this comparison without retiring that test on the record.
+pg_capture_nonce_ok() {
+  local f="$1" marker="$2"
+  [ -s "$f" ] || return 1
+  pg_capture_verdict_claims "$f" terminal | grep -qxF -- "$marker"
+}
+# pg_strip_nonce <file> <marker>: remove the echoed token (harmless when absent).
+pg_strip_nonce() {
+  local f="$1" marker="$2" tmp="$1.nonce.$$"
+  [ -s "$f" ] || return 0
+  # Fixed-string removal via awk (the marker is regex-safe by charset, but the parentheses
+  # around it are not; index/substr avoids regex entirely).
+  # The LOOKUP is case-folded and the SLICE is not (#167). This does NOT mirror
+  # pg_capture_nonce_ok, which stays case-sensitive by design; it mirrors cdp-salvage.mjs's
+  # stripMarkerEcho, because finalizerOwnership compares its stripped bytes against the bytes
+  # stripped here. One folding and the other not is a result-mismatch on a valid review. tolower() applies only to the search operands, so every other byte
+  # on the line is published exactly as the model wrote it. Same LC_ALL=C reasoning as
+  # pg_capture_nonce_ok: gawk's tolower() is locale-sensitive, and the C locale keeps
+  # index()/substr()/length() on one consistent byte basis.
+  LC_ALL=C awk -v tok="(run marker: $marker)" '
+  BEGIN { lower_tok = tolower(tok) }
+  {
+    i = index(tolower($0), lower_tok)
+    if (i > 0) { $0 = substr($0, 1, i - 1) substr($0, i + length(tok)) ; sub(/[ \t]+$/, "") }
+    print
+  }' "$f" > "$tmp" 2>/dev/null && mv -f "$tmp" "$f" 2>/dev/null
+  rm -f "$tmp" 2>/dev/null
+  return 0
+}
+
+# Review ownership is claimed by top-level authoritative verdicts, never by arbitrary
+# marker mentions. Mirror reviewVerdictClaims in bin/cdp-organizer-expressions.mjs.
+# Markdown quotes, indented examples and fenced code are reference text; the browser
+# preserves that context when collecting rendered blockquote/pre elements.
+# In CLAIMS mode, normalize inline-code around run-marker tokens so a code-wrapped
+# foreign marker still counts as foreign. Keep terminal ownership strictly canonical.
+# Scan the WHOLE response before accepting it: a foreign verdict after our own is just
+# as mixed as one before it.
+pg_capture_verdict_claims() { # file [verdict|terminal] -> claims, decision or terminal claims
+  # Read the file TWICE. A fence suppresses the lines inside it, but a fence that is never
+  # closed is not a code block -- it is a model that forgot a ``` -- and treating it as one
+  # made every later line invisible, INCLUDING this run's own terminal VERDICT. A complete,
+  # single-run, unambiguous review then read as "still generating" and was discarded and
+  # retried forever (gate #166 r3 P1; verified by two documents differing only by a closing
+  # fence). The first pass finds the opener still open at EOF; the second treats that one
+  # line as ordinary text so the tail is classified normally. Recovery stays fail-closed:
+  # mixed-claim detection runs over the recovered region too, so a foreign verdict hiding
+  # behind an unterminated fence is refused rather than published.
+  awk -v mode="${2:-claims}" '
+    NR == FNR {
+      p = $0
+      sub(/\r$/, "", p)
+      if (p ~ /^(    |\t)/) next
+      sub(/^ +/, "", p)
+      if (p ~ /^>/) next
+      if (match(p, /^(```+|~~~+)/)) {
+        prun = substr(p, 1, RLENGTH)
+        prest = substr(p, RLENGTH + 1)
+        if (pfence == "") { pfence = substr(prun, 1, 1); pwidth = length(prun); dangling = FNR }
+        else if (substr(prun, 1, 1) == pfence && length(prun) >= pwidth && prest ~ /^[ \t]*$/) { pfence = ""; dangling = 0 }
+      }
+      next
+    }
+    {
+      s = $0
+      if (s !~ /^[ \t\r]*$/) nonempty++
+      sub(/\r$/, "", s)
+      if (s ~ /^(    |\t)/) next
+      sub(/^ +/, "", s)
+      if (s ~ /^>/) next
+      if (match(s, /^(```+|~~~+)/) && FNR != dangling) {
+        run = substr(s, 1, RLENGTH)
+        rest = substr(s, RLENGTH + 1)
+        if (fence == "") { fence = substr(run, 1, 1); width = length(run) }
+        else if (substr(run, 1, 1) == fence && length(run) >= width && rest ~ /^[ \t]*$/) fence = ""
+        next
+      }
+      if (fence != "") next
+      if (tolower(s) !~ /^[*_# \t-]*verdict[*_ \t]*:[*_ \t]*(ship|fix-first|needs-discussion)([^a-z0-9_-]|$)/) next
+      last = nonempty; last_line = NR; terminal = ""
+      if (mode == "verdict") {
+        low = tolower(s)
+        match(low, /(ship|fix-first|needs-discussion)/)
+        decision = toupper(substr(low, RSTART, RLENGTH))
+        next
+      }
+      while (match(tolower(s), /\(run marker:[ \t]*`?pg-run-[a-z0-9.-]+`?[ \t]*\)/)) {
+        token = substr(s, RSTART, RLENGTH)
+        literal = token
+        s = substr(s, RSTART + RLENGTH)
+        sub(/^\([^:]*:[ \t]*/, "", token)
+        sub(/[ \t]*\)$/, "", token)
+        gsub(/^`|`$/, "", token)
+        if (mode == "terminal") {
+          if (literal == "(run marker: " token ")") terminal = terminal token "\n"
+        } else print token
+      }
+    }
+    END {
+      if (mode == "verdict" && decision != "" && nonempty - last < 6) print decision
+      if (mode == "terminal" && NR - last_line < 6) printf "%s", terminal
+    }
+  ' "$1" "$1"
+}
+
+pg_capture_foreign_echo() { # file marker -> first foreign authoritative claim, or nothing
+  pg_capture_verdict_claims "$1" | awk -v marker="$2" '
+    tolower($0) != tolower(marker) { print; exit }
+  '
+}
+
+# Pure acceptance predicate shared by fresh/direct capture, harvest and artifact replay.
+# rc 0: exact owned claim and no foreign claim; rc 1: no claim for this run (caller applies
+# its existing nonce/legacy rules); rc 2: foreign authoritative claim, including mixed answers
+# and a single verdict claiming two markers. Never cut, rewrite or delete the input.
+# Case-only echo drift stays nonce-less, as before; it is not another run.
+pg_capture_bind() {
+  local f="$1" marker="$2" claims
+  PG_CAPTURE_FOREIGN=""
+  [ -s "$f" ] || return 1
+  claims="$(pg_capture_verdict_claims "$f")" || { PG_CAPTURE_FOREIGN=unreadable; return 2; }
+  PG_CAPTURE_FOREIGN="$(printf '%s\n' "$claims" | awk -v marker="$marker" '
+    NF && tolower($0) != tolower(marker) { print; exit }
+  ')"
+  [ -z "$PG_CAPTURE_FOREIGN" ] || return 2
+  pg_capture_nonce_ok "$f" "$marker"
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# v0.42 (#164, gate r1 P2): the Oracle session name a run asks for.
+#
+# Oracle NORMALIZES a custom --slug before storing it (sessionManager.js slugify/normalizeCustomSlug:
+# lowercase, split into [a-z0-9]+ words, keep the FIRST 5, truncate each to 10 characters, join with
+# "-", and reject fewer than 3 words). A run marker handed over raw does not survive that:
+# "pg-run-StartupBros-com-pro-gate-166-1788719459-1312546" is stored as "pg-run-startupbro-com-pro",
+# dropping the PR number, launch epoch and pid — everything that made the marker unique — so EVERY
+# run in the repository asks for one name and Oracle disambiguates with the same collision counter
+# the pin was meant to retire. The name we send must therefore be a FIXED POINT of that normalizer:
+# then what we ask for is exactly what Oracle stores, which is what the reattach fallback addresses
+# when the run log carries no session id of its own.
+# ─────────────────────────────────────────────────────────────────────────────
+# pg_slug_normalize <text>: Oracle's normalization, reimplemented. Idempotent by construction.
+pg_slug_normalize() {
+  printf '%s\n' "$1" | awk '{
+    s = tolower($0); out = ""; n = 0
+    while (n < 5 && match(s, /[a-z0-9]+/)) {
+      w = substr(s, RSTART, RLENGTH); s = substr(s, RSTART + RLENGTH)
+      if (length(w) > 10) w = substr(w, 1, 10)
+      out = (out == "" ? w : out "-" w); n++
+    }
+    print out
+  }'
+}
+# pg_oracle_slug <marker>: the session name for a run marker — unique per invocation AND a fixed
+# point of pg_slug_normalize. A marker is "pg-run-<round key>-<epoch>-<pid>": the epoch and pid are
+# what make it unique, and the round key's last field (the PR number, or "diff") is what makes the
+# session recognizable in `oracle sessions`. Five words, none over ten characters, so Oracle stores
+# it verbatim. A marker of another shape still round-trips: it is normalized rather than trusted.
+#
+# Deliberately NOT prefixed "pg-run-": a run marker is a token this codebase scans for wherever
+# text might carry one (FOREIGN_MARKER_RE, foreignRunMarkerAfter, isThrottlePage), and the slug
+# travels in oracle's argv and run log. A session name that parses as a marker is a second thing
+# claiming to be one, which is the whole class of bug #164 is about.
+pg_oracle_slug() {
+  local marker="$1" pid rest epoch key keytail
+  pid="${marker##*-}"; rest="${marker%-*}"
+  epoch="${rest##*-}"; key="${rest%-*}"
+  keytail="$(printf '%s' "${key##*-}" | tr -cd 'A-Za-z0-9' | cut -c1-10)"
+  case "$epoch$pid" in
+    ''|*[!0-9]*) pg_slug_normalize "pro-gate-review-$marker" ;;
+    *) pg_slug_normalize "pro-gate-${keytail:-review}-$epoch-$pid" ;;
+  esac
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# v0.28 (#56): immutable completed-artifact store — $PRO_GATE_HOME/completed/<marker>,
+# written ONCE at collection time. Recovery paths previously trusted mutable, path-addressed
+# files (a reused/overwritten --out could impersonate a collection); the artifact store is
+# marker-addressed, write-once, and digest-recorded in the ledger row. Deliberately NOT under
+# the 24h sweeps: these are the durable record (bounded by review volume, a few KB each).
+# ─────────────────────────────────────────────────────────────────────────────
+pg_completed_dir() { echo "${PRO_GATE_COMPLETED_DIR:-$PRO_GATE_HOME/completed}"; }
+# Hash through STDIN so the pathname is invisible to the tool (#168). GNU sha256sum and
+# shasum -a 256 frame their output line around the filename and escape that WHOLE line with a
+# leading backslash when the name carries a backslash, a CR or a newline, so `awk '{print $1}'`
+# reads `\<hex>`; openssl prints `SHA2-256(<name>)= <hex>`, whose $NF is the name's own last
+# token once the name contains a newline. Either way the digest binds to nothing — not to the
+# same bytes hashed elsewhere, and not to itself on recovery: pg_publish_log_proof stores the
+# digest that pg_verified_log_lacks then recomputes, and a `\<hex>` is rejected by that reader's
+# own 64-hex shape check, so a transcript under such a path fails closed against itself.
+# The redirect belongs INSIDE a group whose stderr is discarded: a failed redirect is the
+# shell's own diagnostic, raised before a `2>` on the command itself is installed, so the naive
+# rewrite leaks `No such file or directory` for a missing file where the pathname form was silent.
+pg_sha256() {  # <file>: echo the hex digest, or nothing when no tool is available
+  if pg_have sha256sum; then { sha256sum < "$1" | awk '{print $1}'; } 2>/dev/null
+  elif pg_have shasum; then { shasum -a 256 < "$1" | awk '{print $1}'; } 2>/dev/null
+  elif pg_have openssl; then { openssl dgst -sha256 < "$1" | awk '{print $NF}'; } 2>/dev/null
+  fi
+}
+# pg_signal_producer <signal> <pid>: signal Oracle's whole PROCESS GROUP, falling back to the pid
+# plus its direct children when it does not lead one. Oracle sits under `timeout` and itself drives
+# a browser client, so signalling the bare pid can leave grandchildren running after the engine has
+# released the account slot and its locks — an orphan that keeps using the browser we just freed.
+pg_signal_producer() {
+  local sig="$1" pid="$2"
+  [ -n "$pid" ] || return 0
+  case "$pid" in ''|*[!0-9]*) return 0 ;; esac
+  kill -"$sig" -- "-$pid" 2>/dev/null && return 0
+  pkill -"$sig" -P "$pid" 2>/dev/null
+  kill -"$sig" "$pid" 2>/dev/null
+  return 0
+}
+
+# pg_publish_log_proof <transcript> <digest-proof>: publish the digest that makes <transcript>
+# trustworthy evidence. Call this ONLY once no writer remains (the tee drained to EOF, or the
+# pipeline was killed AND reaped) — the proof asserts the transcript is final, so publishing it
+# over a live stream would let a half-written log pass as complete. Atomic: a partial temp file
+# is removed rather than left where pg_verified_log_lacks would read it.
+pg_publish_log_proof() {
+  local transcript="$1" proof="$2" sha
+  [ -f "$transcript" ] && [ ! -L "$transcript" ] || return 1
+  sha="$(pg_sha256 "$transcript")"
+  [ -n "$sha" ] || return 1
+  printf '%s\n' "$sha" > "$proof.tmp" 2>/dev/null \
+    && mv -f "$proof.tmp" "$proof" 2>/dev/null \
+    || { rm -f "$proof.tmp" 2>/dev/null; return 1; }
+}
+# pg_verified_log_lacks <transcript> <digest-proof> <extended-regex>: true only when the
+# immutable transcript still matches the digest published after its tee drained successfully
+# AND grep completed with the exact no-match status. Missing/truncated/unreadable logs fail closed.
+pg_verified_log_lacks() {
+  local transcript="$1" proof="$2" pattern="$3" expected actual grep_rc
+  [ -f "$transcript" ] && [ ! -L "$transcript" ] || return 1
+  [ -f "$proof" ] && [ ! -L "$proof" ] || return 1
+  IFS= read -r expected < "$proof" || return 1
+  case "$expected" in ''|*[!0-9a-fA-F]*) return 1 ;; esac
+  [ "${#expected}" -eq 64 ] || return 1
+  actual="$(pg_sha256 "$transcript")"
+  [ -n "$actual" ] && [ "$actual" = "$expected" ] || return 1
+  grep -qE "$pattern" "$transcript" 2>/dev/null
+  grep_rc=$?
+  [ "$grep_rc" -eq 1 ]
+}
+pg_completed_write() {  # <marker> <file>: write-once; an existing artifact is never replaced
+  local marker="$1" f="$2" dir rc
+  pg_reservation_marker_ok "$marker" || return 1
+  [ -s "$f" ] || return 1
+  pg_capture_bind "$f" "$marker" && rc=0 || rc=$?
+  [ "$rc" != 2 ] || return 1
+  dir="$(pg_completed_dir)"
+  mkdir -p "$dir" 2>/dev/null || return 1
+  # Atomic NO-CLOBBER install (gate #54 r14): link(2) fails when the artifact exists, so
+  # concurrent writers cannot replace each other. On EEXIST the existing artifact must be
+  # byte-identical to what we hold — write-once means one review per marker, and accepting
+  # different bytes would let callers drop recovery state while RESULT_FILE names the wrong
+  # review. Fail closed otherwise.
+  if cp "$f" "$dir/$marker.tmp.$$" 2>/dev/null && ln "$dir/$marker.tmp.$$" "$dir/$marker" 2>/dev/null; then
+    rc=0
+  elif [ -f "$dir/$marker" ] && cmp -s "$f" "$dir/$marker" 2>/dev/null; then
+    rc=0
+  else
+    rc=1
+  fi
+  # Never leave a pg-run-*-globbable temp behind (r11 P2).
+  rm -f "$dir/$marker.tmp.$$" 2>/dev/null
+  [ "$rc" = 0 ] || return 1
+  # An installed artifact supersedes any pending-recovery copy for the marker (r11 P2).
+  rm -f "$PRO_GATE_HOME/pending/$marker" 2>/dev/null
+  return 0
+}
+pg_completed_lookup() {  # <marker> <out>: place the artifact at <out>; rc 0 on success
+  local marker="$1" out="$2" src rc
+  pg_reservation_marker_ok "$marker" || return 1
+  src="$(pg_completed_dir)/$marker"
+  { [ -s "$src" ] && [ ! -L "$src" ] && pg_is_review "$src"; } || return 1
+  pg_capture_bind "$src" "$marker" && rc=0 || rc=$?
+  [ "$rc" != 2 ] || return 1
+  [ "$src" = "$out" ] && return 0
+  # Copy-then-rename only — never pre-delete the destination (gate #54 r4 P2): a copy/rename
+  # failure must leave any existing valid output intact, not destroy it and then fail.
+  cp "$src" "$out.already.$$" 2>/dev/null && mv -f "$out.already.$$" "$out" 2>/dev/null
+  rc=$?
+  rm -f "$out.already.$$" 2>/dev/null
+  return "$rc"
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# review-decision/v1: pure continuation policy and immutable marker bindings.
+#
+# The reducer below deliberately receives one already-normalized JSON value. It performs no
+# filesystem reads, writes, locking, allocation, browser work, round work, or publication. The
+# fixture digests are compiled into the runtime so resolving an answer never makes metadata files
+# an ambient policy input. Fixture validation is a packaging/test concern exposed by the digest
+# accessors; callers supply their claimed compatibility identity in the normalized snapshot.
+# ─────────────────────────────────────────────────────────────────────────────
+PG_REVIEW_DECISION_CONTRACT_ID='review-decision/v1'
+PG_REVIEW_DECISION_CONTRACT_VERSION=1
+PG_REVIEW_DECISION_CONTRACT_DIGEST='c5586d5f4cde6b5ba6590b5840a3a21cf76af2be81d2c53f28d61c34d8c297ac'
+PG_REVIEW_DECISION_CORPUS_DIGEST='7e944bd4cce21191ad6df85452630f05d26ae2b63a4162429e8d0952a8eb6d19'
+
+# Binding-record compatibility only (#214, gate r2 P1). review-input-binding/v1 and
+# review-result-binding/v1 records are validated by their own record_type/record_version shape
+# rules, not the decision/effect envelope's contract identity check. Every contract change since
+# the digests below was additive (new reasons for #147/#174/#204, new governor/result/delivery
+# fields), so the proof rules those already-written records carry still hold under the current runtime — only the
+# CURRENT digest below is ever written into a fresh binding. When a future bump changes a proof
+# rule (not just adds a reason or fact), drop the affected predecessor digest here so its bindings
+# stop being trusted, rather than widening the rule that reads them.
+# Writers share these validators with readers: every production write site passes the CURRENT digest
+# (pg_review_decision_contract_digest), so this list only widens what can be READ back, never what a
+# fresh record may claim. Keep it that way when adding a writer.
+PG_REVIEW_DECISION_COMPATIBLE_CONTRACT_DIGESTS='bf36fdb5f8625e917be0539ca014fec518649d1160584846aca1cb9149533abb 7f5ece9bfa5aa19f858431da23302a9bc02a4a8f5770830d529f22484e5982ee 5fcd19c12600061af6d90ed9cb980dd7067cff199c374910639003eec4caf5c3 6da6866bab4e95ad138cdc946fa1388be9c386bca7b592c3370c9f52e34b315f fa91787e3fbf3c0852c78f5269b2f670d84b86561be64d6edef4229bf46aee9b 246b9e4e1d58f1820b4381a90cf93cf3fb7fb849f3ce4dd34b4d757be79c2e4f 31f41b872c7cdffef6fe17a41e9bac1dc829418b738d9bdbcf9fd775ae781667'
+
+pg_review_decision_contract_id() { printf '%s\n' "$PG_REVIEW_DECISION_CONTRACT_ID"; }
+pg_review_decision_contract_version() { printf '%s\n' "$PG_REVIEW_DECISION_CONTRACT_VERSION"; }
+pg_review_decision_contract_digest() { printf '%s\n' "$PG_REVIEW_DECISION_CONTRACT_DIGEST"; }
+pg_review_decision_corpus_digest() { printf '%s\n' "$PG_REVIEW_DECISION_CORPUS_DIGEST"; }
+pg_review_decision_compatible_contract_digests_json() { # sorted JSON array of readable predecessor binding-record digests
+  jq -cnS --arg digests "$PG_REVIEW_DECISION_COMPATIBLE_CONTRACT_DIGESTS" '$digests | split(" ") | map(select(length > 0)) | sort'
+}
+
+# Compatibility metadata only: reducers continue to use the compiled constants above.
+pg_review_decision_identity_json() {
+  jq -cnS --arg contract_id "$PG_REVIEW_DECISION_CONTRACT_ID" \
+    --argjson contract_version "$PG_REVIEW_DECISION_CONTRACT_VERSION" \
+    --arg contract_digest "$PG_REVIEW_DECISION_CONTRACT_DIGEST" \
+    --arg corpus_digest "$PG_REVIEW_DECISION_CORPUS_DIGEST" \
+    '{contract_digest:$contract_digest,contract_id:$contract_id,contract_version:$contract_version,corpus_digest:$corpus_digest}'
+}
+
+pg_review_decision_identity_file_valid() { # path; exact compact canonical metadata from these constants
+  local path="$1" canonical expected
+  [ -f "$path" ] && [ ! -L "$path" ] && pg_have jq || return 1
+  canonical="$(LC_ALL=C jq -ceS '
+    if type == "object" and
+       keys == ["contract_digest","contract_id","contract_version","corpus_digest"] and
+       (.contract_id | type == "string" and length > 0) and
+       (.contract_version | type == "number" and floor == . and . > 0) and
+       (.contract_digest | type == "string" and test("^[0-9a-f]{64}$")) and
+       (.corpus_digest | type == "string" and test("^[0-9a-f]{64}$"))
+    then . else error("invalid review-decision identity") end
+  ' "$path" 2>/dev/null)" || return 1
+  expected="$(pg_review_decision_identity_json)" || return 1
+  [ "$canonical" = "$expected" ] && printf '%s' "$expected" | cmp -s - "$path"
+}
+
+# Canonical JSON is intentionally a small, shared primitive: jq -S recursively sorts object
+# keys, -c removes insignificant whitespace, and command substitution removes jq's one LF. Arrays
+# retain their source order. The C locale avoids locale-dependent diagnostics/character classes.
+pg_review_json_canonical() { # [json]; with no argument, read stdin
+  local json canonical
+  if [ "$#" -gt 0 ]; then json="$1"; else json="$(cat)"; fi
+  canonical="$(LC_ALL=C printf '%s' "$json" | jq -ceS . 2>/dev/null)" || return 1
+  printf '%s' "$canonical"
+}
+
+pg_review_sha256_text() { # text: digest bytes exactly, without adding a newline
+  local text="${1-}"
+  if pg_have sha256sum; then LC_ALL=C printf '%s' "$text" | sha256sum | awk '{print $1}'
+  elif pg_have shasum; then LC_ALL=C printf '%s' "$text" | shasum -a 256 | awk '{print $1}'
+  elif pg_have openssl; then LC_ALL=C printf '%s' "$text" | openssl dgst -sha256 | awk '{print $NF}'
+  else return 1
+  fi
+}
+
+# pg_review_relation_identity binding-or-template-json -> "relation:<sha256>": the review's
+# complete relation identity (repository, target and evidence, canonicalized). The query's
+# evidence identity, the prior-review candidates, the dispatch recheck and the #204 delivery record
+# must all derive it here: a copy that drifts makes the query and the record disagree silently.
+pg_review_relation_identity() {
+  local relation
+  relation="$(jq -cS '{repository,target,evidence}' <<<"${1-}" 2>/dev/null)" && [ -n "$relation" ] || return 1
+  printf 'relation:%s\n' "$(pg_review_sha256_text "$relation")"
+}
+
+# A choice is fresh only for the prompt context that named it. The selected value and its proof
+# are excluded from that context; otherwise the proof would be self-referential.
+pg_review_decision_choice_snapshot() { # normalized facts JSON -> sha256
+  local canonical
+  canonical="$(printf '%s' "${1-}" | jq -ceS '.named_choice.selected_id=null | .named_choice.snapshot_digest=""' 2>/dev/null)" || return 1
+  pg_review_sha256_text "$canonical"
+}
+
+# Parse the deliberately tiny choice grammar from a canonical review artifact. Decision callers
+# default to NEEDS-DISCUSSION; retained-facts readers supply their independently validated verdict.
+# Only schema-bounded JSON is returned, not owner-policy authority.
+# rc 0: valid alternatives; rc 2: no choice block; rc 1: malformed or unreadable.
+pg_review_decision_named_choices() { # review artifact [expected verdict] -> canonical outcomes JSON
+  local f="$1" expected="${2:-NEEDS-DISCUSSION}" line id label consequence choices='[]' count=0 verdict_seen=false choices_started=false
+  [ -f "$f" ] && [ ! -L "$f" ] && pg_is_review "$f" || return 1
+  [ "$(pg_extract_verdict "$f")" = "$expected" ] || return 1
+  while IFS= read -r line || [ -n "$line" ]; do
+    if [[ "$line" =~ ^[[:space:]]*[*_\>#-]*[[:space:]]*VERDICT[*_[:space:]]*: ]]; then
+      verdict_seen=true
+      continue
+    fi
+    if [[ "$line" != CHOICE:* ]]; then
+      # #201: a whitespace-only line carries no grammar, so it can never be the start of a second
+      # block — and the engine's own prompt asks for the choice lines "immediately before the final
+      # VERDICT line", which a model satisfies while still separating them with an empty line. That
+      # is ordinary formatting, not an uncooperative answer, and rejecting it stranded a completed
+      # NEEDS-DISCUSSION review: the outcomes came back empty and the reducer reduced to
+      # invalid-named-choice with no path forward for the operator, on a round already paid for.
+      # Content after the block still ends the parse, exactly as before.
+      if [ -z "${line//[[:space:]]/}" ]; then continue; fi
+      # Choice lines form one terminal block; prose after that block is not a machine grammar.
+      [ "$choices_started" = false ] || return 1
+      continue
+    fi
+    [ "$verdict_seen" = false ] || return 1
+    choices_started=true
+    [[ "$line" =~ ^CHOICE:[[:space:]]+([A-Za-z0-9._:/+-]+)[[:space:]]\|[[:space:]]([^\|[:cntrl:]]{1,120})[[:space:]]\|[[:space:]]([^\|[:cntrl:]]{1,240})[[:space:]]*$ ]] || return 1
+    id="${BASH_REMATCH[1]}"; label="${BASH_REMATCH[2]}"; consequence="${BASH_REMATCH[3]}"
+    [ "${#id}" -le 256 ] || return 1
+    # The grammar's separators consume one optional display space; trim only separator-adjacent
+    # whitespace so stored values never contain formatting padding.
+    label="${label#"${label%%[![:space:]]*}"}"; label="${label%"${label##*[![:space:]]}"}"
+    consequence="${consequence#"${consequence%%[![:space:]]*}"}"; consequence="${consequence%"${consequence##*[![:space:]]}"}"
+    [ -n "$label" ] && [ -n "$consequence" ] || return 1
+    [ "${#label}" -le 120 ] && [ "${#consequence}" -le 240 ] || return 1
+    jq -e --arg id "$id" --arg label "$label" --arg consequence "$consequence" \
+      'all(.[]; .id != $id)' <<<"$choices" >/dev/null 2>&1 || return 1
+    choices="$(jq -cS --arg id "$id" --arg label "$label" --arg consequence "$consequence" \
+      '. + [{consequence:$consequence,id:$id,label:$label}]' <<<"$choices")" || return 1
+    count=$((count + 1))
+    [ "$count" -le 8 ] || return 1
+  done < "$f"
+  [ "$verdict_seen" = true ] || return 1
+  [ "$choices_started" = true ] || return 2
+  [ "$count" -ge 2 ] || return 1
+  printf '%s' "$choices"
+}
+
+pg_review_decision_emit() { # action reason facts snapshot-digest applicable-ref
+  local action="$1" reason="$2" facts="$3" snapshot="$4" ref="${5:-}" class out
+  # The ask payload supplies the exact selection context, not the surrounding decision envelope.
+  [ "$action" != ask-named-product-choice ] || snapshot="$(pg_review_decision_choice_snapshot "$facts")" || return 1
+  case "$action" in
+    collect-existing-result|recover-existing-review|run-granted-review) class='runtime-guarded-effect' ;;
+    fix-review-findings|prepare-matching-review-evidence) class='agent-task' ;;
+    stop-without-new-review|allow-existing-merge-workflow) class='report-only' ;;
+    ask-named-product-choice) class='named-product-choice' ;;
+    *) return 1 ;;
+  esac
+  out="$(jq -cnS \
+    --arg action "$action" --arg reason "$reason" --arg class "$class" --arg snapshot "$snapshot" \
+    --arg ref "$ref" --arg cid "$PG_REVIEW_DECISION_CONTRACT_ID" \
+    --argjson cv "$PG_REVIEW_DECISION_CONTRACT_VERSION" \
+    --arg cd "$PG_REVIEW_DECISION_CONTRACT_DIGEST" --arg xd "$PG_REVIEW_DECISION_CORPUS_DIGEST" \
+    --argjson facts "$facts" '
+      {action:$action,
+       contract:{contract_digest:$cd,contract_id:$cid,contract_version:$cv,corpus_digest:$xd},
+       effect_request:{action:$action,applicable_ref:(if $ref=="" then null else $ref end),
+         contract_digest:$cd,effect:$action,execution_class:$class,snapshot_digest:$snapshot,
+         target:($facts.target // null)},
+       facts:$facts,observation:($facts.observation // {kind:"rejected"}),reason:$reason}' 2>/dev/null)" || return 1
+  printf '%s' "$out"
+}
+
+pg_review_decision_reject() { # reason snapshot; never reflect rejected untrusted data
+  pg_review_decision_emit stop-without-new-review "$1" '{}' "$2" ''
+}
+
+# Shared envelope validator for bash consumers (v0.41). The daemon used to carry this schema
+# privately, which made it the one renderer of the closed action table no conformance test
+# covered. Every bash consumer now validates a saved decision here: exact key sets, the installed
+# runtime's contract identity, the closed action/effect/execution-class table, no status or
+# next_action field anywhere, no control characters, and finally a byte-identical re-run of the
+# pure reducer over the envelope's own facts, so a fabricated outer action cannot ride on
+# otherwise plausible JSON. Files must be regular, non-symlink, and at most 64 KiB.
+pg_review_decision_envelope_valid() { # decision-file
+  local decision="$1" canonical facts expected
+  [ -f "$decision" ] && [ ! -L "$decision" ] && command -v jq >/dev/null 2>&1 || return 1
+  [ "$(wc -c < "$decision" 2>/dev/null | tr -d ' ')" -le 65536 ] || return 1
+  jq -e --arg cd "$(pg_review_decision_contract_digest)" --arg xd "$(pg_review_decision_corpus_digest)" '
+    type == "object" and keys == ["action","contract","effect_request","facts","observation","reason"] and
+    .contract == {contract_digest:$cd,contract_id:"review-decision/v1",contract_version:1,corpus_digest:$xd} and
+    (.action | IN("collect-existing-result","recover-existing-review","fix-review-findings","prepare-matching-review-evidence","run-granted-review","stop-without-new-review","allow-existing-merge-workflow","ask-named-product-choice")) and
+    (. as $envelope | .effect_request | type == "object" and keys == ["action","applicable_ref","contract_digest","effect","execution_class","snapshot_digest","target"] and
+      .effect == .action and .contract_digest == $cd and
+      (.snapshot_digest | type == "string" and test("^[0-9a-f]{64}$")) and .target == $envelope.facts.target and
+      ((.action == "collect-existing-result" or .action == "recover-existing-review" or .action == "run-granted-review") and .execution_class == "runtime-guarded-effect" or
+       ((.action == "fix-review-findings" or .action == "prepare-matching-review-evidence") and .execution_class == "agent-task") or
+       ((.action == "stop-without-new-review" or .action == "allow-existing-merge-workflow") and .execution_class == "report-only") or
+       (.action == "ask-named-product-choice" and .execution_class == "named-product-choice"))) and
+    (.effect_request.action == .action) and
+    ([.. | objects | keys[] | select(. == "status" or . == "next_action")] | length == 0) and
+    # Only deferred display text may contain newlines and tabs; every other field is closed.
+    ([del(.facts.deferred_findings[]?.text) | .. | strings | select(test("[[:cntrl:]]"))] | length == 0) and
+    ([.facts.deferred_findings[]?.text | strings | select(test("[\u0000-\u0008\u000b-\u001f\u007f]"))] | length == 0)
+  ' "$decision" >/dev/null 2>&1 || return 1
+  facts="$(jq -cS .facts "$decision" 2>/dev/null)" || return 1
+  expected="$(pg_review_decision_reduce "$facts")" || return 1
+  canonical="$(pg_review_json_canonical "$(<"$decision")")" || return 1
+  [ "$canonical" = "$expected" ]
+}
+
+pg_review_decision_reduce() { # [normalized-facts-json]; with no argument, read stdin
+  local supplied canonical snapshot unsafe valid reason selected selected_ref selected_count selected_shape
+  local action prior prior_applicable verdict choice_snapshot rounds_not_converging
+  pg_have jq || return 1
+  if [ "$#" -gt 0 ]; then supplied="$1"; else supplied="$(cat)"; fi
+  canonical="$(pg_review_json_canonical "$supplied")" || return 1
+  snapshot="$(pg_review_sha256_text "$canonical")" || return 1
+
+  # Raw/caller control fields, credentials, control characters, and unbounded structures are not
+  # normalized facts. Reject them before any response can reflect their values.
+  unsafe="$(printf '%s' "$canonical" | jq -r '
+    if (type != "object") then "yes"
+    elif ([.. | objects | keys[] |
+      test("^(raw|.*_text|prose|prompt|caller.*|status|next_action|approval.*|.*ledger.*|.*password.*|.*secret.*|.*credential.*|authorization|api[_-]?key|api[_-]?token|access[_-]?token|private[_-]?key)$";"i")] | any) then "yes"
+    elif ([.. | strings | length > 1024] | any) then "yes"
+    elif ([del(.deferred_findings[]?.text) | .. | strings | test("[\u0000-\u001f\u007f]")] | any) then "yes"
+    elif ([.deferred_findings[]?.text | strings | test("[\u0000-\u0008\u000b-\u001f\u007f]")] | any) then "yes"
+    elif ([.. | arrays | length > 32] | any) then "yes"
+    else "no" end' 2>/dev/null)" || unsafe=yes
+  if [ "$unsafe" != no ]; then
+    pg_review_decision_reject unsafe-normalized-input "$snapshot"; return
+  fi
+
+  # Compatibility and transport are checked before the domain shape so skew and collision have
+  # stable directional reasons, even when a newer producer also carries unfamiliar fields.
+  if ! jq -e --arg id "$PG_REVIEW_DECISION_CONTRACT_ID" --argjson v "$PG_REVIEW_DECISION_CONTRACT_VERSION" \
+      --arg cd "$PG_REVIEW_DECISION_CONTRACT_DIGEST" --arg xd "$PG_REVIEW_DECISION_CORPUS_DIGEST" \
+      '.contract.contract_id==$id and .contract.contract_version==$v and .contract.contract_digest==$cd and .contract.corpus_digest==$xd' \
+      <<<"$canonical" >/dev/null 2>&1; then
+    pg_review_decision_reject unknown-contract "$snapshot"; return
+  fi
+  if [ "$(jq -r '.transport // ""' <<<"$canonical")" != "$PG_REVIEW_DECISION_CONTRACT_ID" ]; then
+    pg_review_decision_reject transport-collision "$snapshot"; return
+  fi
+
+  # Closed normalized-facts grammar. Only extracted, bounded finding lines carry review text;
+  # marker references use the filename-safe grammar and nested objects have exact key sets.
+  valid="$(printf '%s' "$canonical" | jq -r '
+    def keys_are($x): keys == ($x|sort);
+    def marker: type=="string" and (length==0 or test("^pg-run-[A-Za-z0-9.-]+$"));
+    def ident: type=="string" and length<=256 and test("^[A-Za-z0-9._:/+-]*$");
+    def hex: type=="string" and test("^[0-9a-f]{64}$");
+    def oid: type=="string" and test("^[0-9a-f]{40}([0-9a-f]{24})?$");
+    def result:
+      keys_are(["applicable","artifact_digest","bindable","binding_valid","canonical_identity","charged_spend_epoch","collected","evidence_mode","legacy","marker","provenance_valid","verdict"] +
+        (if has("shape") then ["shape"] else [] end))
+      and (.applicable|type=="boolean") and (.artifact_digest|hex) and (.bindable|type=="boolean") and (.binding_valid|type=="boolean")
+      and (.canonical_identity|ident and length>0) and (.charged_spend_epoch|type=="number" and floor==.)
+      and (.collected|type=="boolean") and (.evidence_mode|IN("full-pr","scoped-delta","connector","caller-patch","none"))
+      and (.legacy|type=="boolean") and (.marker|marker and length>0)
+      and (.provenance_valid|type=="boolean") and (.verdict|IN("SHIP","FIX-FIRST","NEEDS-DISCUSSION","NONE"))
+      and (if has("shape") then (.shape|IN("template-verdict","rejected-capture")) and .applicable==false and .legacy==false
+        and .bindable==false and .binding_valid==false and .provenance_valid==false and .verdict=="NONE"
+        and .collected==true else true end);
+    (keys_are(["active_index","completed_results","contract","cooldown","deferred_count","deferred_findings","delivery","evidence","governor","input","named_choice","observation","open_blocking","prior_review","reservation","target","transport"]))
+    and (.contract|keys_are(["contract_digest","contract_id","contract_version","corpus_digest"]))
+    and (.cooldown|keys_are(["active","seconds_remaining"])) and (.cooldown.active|type=="boolean")
+    and (.cooldown.seconds_remaining|type=="number" and floor==. and .>=0)
+    and (.delivery|keys_are(["failed_unchanged","override","state"]))
+    and (.delivery.state|IN("known","unavailable","legacy-untracked")) and (.delivery.override|type=="boolean")
+    and (if .delivery.state=="known" then (.delivery.failed_unchanged|type=="number" and floor==. and .>=0 and .<=1000)
+         else .delivery.failed_unchanged==null end)
+    and (.active_index|keys_are(["binding_valid","charged_spend_epoch","marker","state"]))
+    and (.active_index.binding_valid|type=="boolean") and (.active_index.charged_spend_epoch|type=="number" and floor==.)
+    and (.active_index.marker|marker)
+    and (.active_index.state|IN("none","live","pre-charge","round-recorded","charged","run-meta-written","input-bound","submitted","unknown-fate"))
+    and (.completed_results|type=="array" and all(.[];result))
+    and (.open_blocking==null or (.open_blocking|type=="number" and floor==. and .>=0))
+    and (.deferred_findings|type=="array" and all(.[];
+      keys_are(["severity","text"]) and (.severity|IN("P2","P3")) and (.text|type=="string")))
+    and (.deferred_count|type=="number" and floor==. and .>=0)
+    and (.deferred_count==(.deferred_findings|length))
+    and (.evidence|keys_are(["identity","safe_to_prepare","state"])) and (.evidence.identity|ident)
+    and (.evidence.safe_to_prepare|type=="boolean") and (.evidence.state|IN("matching","missing","unsafe","invalid","undefined"))
+    and (.governor|keys_are(["arrow","continue_override","earned","grant","granted","policy_mode","scored","streak"]))
+    and (.governor.granted|type=="boolean") and (.governor.continue_override|type=="boolean")
+    and (.governor.scored|type=="number" and floor==. and .>=0) and (.governor.earned|type=="number" and floor==. and .>=0)
+    and (.governor.streak|type=="number" and floor==. and .>=0) and (.governor.grant|type=="number" and floor==. and .>=0)
+    and (.governor.policy_mode|IN("advisory","enforced","lockdown","off"))
+    and (.governor.arrow|type=="array" and all(.[]; type=="number" and floor==. and .>=0))
+    and (.input|keys_are(["binding_valid","identity","proven"])) and (.input.binding_valid|type=="boolean")
+    and (.input.identity|ident) and (.input.proven|type=="boolean")
+    and (.named_choice|keys_are(["outcomes","selected_id","snapshot_digest"]))
+    and (.named_choice.outcomes|type=="array" and length<=8 and all(.[];
+      keys_are(["consequence","id","label"]) and (.id|ident and length>0) and
+      (.label|type=="string" and length>0 and length<=120) and (.consequence|type=="string" and length>0 and length<=240)))
+    and (([.named_choice.outcomes[].id]|length)==([.named_choice.outcomes[].id]|unique|length))
+    and (.named_choice.selected_id==null or (.named_choice.selected_id|ident and length>0))
+    and (.named_choice.snapshot_digest|type=="string" and (length==0 or .=="CURRENT" or hex))
+    and (.observation|keys_are(["kind"])) and (.observation.kind|IN("idle","queued","running","waiting","observed"))
+    and (.prior_review|keys_are(["applicable","binding_valid","code_identity","evidence_identity","legacy","marker","provenance_valid","verdict"]))
+    and (.prior_review.applicable|type=="boolean") and (.prior_review.binding_valid|type=="boolean")
+    and (.prior_review.code_identity|ident) and (.prior_review.evidence_identity|ident) and (.prior_review.legacy|type=="boolean")
+    and (.prior_review.marker|marker) and (.prior_review.provenance_valid|type=="boolean")
+    and (.prior_review.verdict|IN("SHIP","FIX-FIRST","NEEDS-DISCUSSION","NONE"))
+    and (.reservation|keys_are(["binding_valid","legacy","marker","state"]))
+    and (.reservation.binding_valid|type=="boolean") and (.reservation.legacy|type=="boolean")
+    and (.reservation.marker|marker) and (.reservation.state|IN("none","live","recoverable","unknown-fate"))
+    and (.target|keys_are(["head_oid","host","owner","pr","repo"])) and (.target.head_oid|oid)
+    and (.target.host|test("^[A-Za-z0-9.-]+$") and length<=253)
+    and (.target.owner|test("^[A-Za-z0-9._-]+$") and length<=100)
+    and (.target.repo|test("^[A-Za-z0-9._-]+$") and length<=100)
+    and (.target.pr|type=="number" and floor==. and .>0)
+    and (.transport=="review-decision/v1")' 2>/dev/null)" || valid=false
+  if [ "$valid" != true ]; then
+    pg_review_decision_reject undefined-state "$snapshot"; return
+  fi
+
+  # #174 R1/R4: the churn streak stop is independent of the numeric round grant and its policy
+  # mode (advisory|enforced|lockdown|off) — it fires with no policy setting present, so it is
+  # computed once here from governor.streak alone, never from governor.granted. A stateless
+  # PRO_GATE_ROUNDS_CONTINUE=1 override is resolved by the facts builder into
+  # governor.continue_override (R2); the reducer stays a pure function of the facts it was given.
+  rounds_not_converging=no
+  if [ "$(jq -r '.governor.streak' <<<"$canonical")" -ge 2 ] \
+     && [ "$(jq -r '.governor.continue_override' <<<"$canonical")" != true ]; then
+    rounds_not_converging=yes
+  fi
+
+  # Existing completed work wins. Selection is newest charged epoch, then canonical identity;
+  # duplicate rows still tied on both fields are unresolved and stop closed.
+  selected="$(jq -cS '[.completed_results[] | select(.applicable or .legacy or .shape=="template-verdict" or .shape=="rejected-capture")] | sort_by(.charged_spend_epoch,.canonical_identity) | last // empty' <<<"$canonical")"
+  if [ -n "$selected" ]; then
+    selected_count="$(jq -r --argjson s "$selected" '[.completed_results[] | select(.charged_spend_epoch==$s.charged_spend_epoch and .canonical_identity==$s.canonical_identity)] | length' <<<"$canonical")"
+    if [ "$selected_count" -gt 1 ]; then
+      pg_review_decision_emit stop-without-new-review completed-result-tie "$canonical" "$snapshot"; return
+    fi
+    selected_ref="$(jq -r .canonical_identity <<<"$selected")"
+    selected_shape="$(jq -r '.shape // ""' <<<"$selected")"
+    # Rejected saved bytes participate in the same newest-epoch selection without supplying
+    # accepted authority. A newer grounded completion can supersede them; a newest rejection stops.
+    if [ "$selected_shape" = template-verdict ]; then
+      pg_review_decision_emit stop-without-new-review template-verdict "$canonical" "$snapshot" "$selected_ref"; return
+    fi
+    # #271: a retained proven completion that failed validation stops only its own attempt. While
+    # another marker is active or reserved, that live work is recovered by the branches below.
+    if [ "$selected_shape" = rejected-capture ] \
+       && jq -e --argjson s "$selected" '.active_index.state=="none" and (.reservation.state=="none" or .reservation.marker==$s.marker)' <<<"$canonical" >/dev/null; then
+      pg_review_decision_emit stop-without-new-review rejected-capture "$canonical" "$snapshot" "$selected_ref"; return
+    fi
+    if [ "$(jq -r .collected <<<"$selected")" = false ]; then
+      # An uncollected result whose evidence mode can never carry merge proof (a connector SHIP,
+      # #147) is unrepairable, not transient: re-issuing collect would loop forever. Stop typed,
+      # with the mode and marker in the facts, and never route it to merge eligibility.
+      if [ "$(jq -r .bindable <<<"$selected")" = false ]; then
+        pg_review_decision_emit stop-without-new-review result-not-bindable-for-mode "$canonical" "$snapshot" "$selected_ref"; return
+      fi
+      pg_review_decision_emit collect-existing-result completed-result-awaits-collection "$canonical" "$snapshot" "$selected_ref"; return
+    fi
+  fi
+
+  # Active and reserved facts are authority even when a crash happened between charge protocol
+  # steps. None of these states can become fresh eligibility by absence of a later sidecar.
+  if [ "$(jq -r .active_index.state <<<"$canonical")" != none ]; then
+    pg_review_decision_emit recover-existing-review active-work-requires-recovery "$canonical" "$snapshot" \
+      "$(jq -r .active_index.marker <<<"$canonical")"; return
+  fi
+  if [ "$(jq -r .reservation.state <<<"$canonical")" != none ]; then
+    pg_review_decision_emit recover-existing-review active-work-requires-recovery "$canonical" "$snapshot" \
+      "$(jq -r .reservation.marker <<<"$canonical")"; return
+  fi
+
+  # A missing but safely preparable evidence relation must reach the preparer before the absent
+  # input binding can stop it. Unsafe/invalid/undefined evidence is still terminal, while a
+  # matching relation remains unable to authorize a run until its input binding is proven.
+  case "$(jq -r .evidence.state <<<"$canonical")" in
+    missing)
+      if [ "$(jq -r .evidence.safe_to_prepare <<<"$canonical")" = true ]; then
+        pg_review_decision_emit prepare-matching-review-evidence matching-evidence-requires-preparation "$canonical" "$snapshot"
+      else
+        pg_review_decision_emit stop-without-new-review evidence-preparation-unsafe "$canonical" "$snapshot"
+      fi
+      return ;;
+    unsafe|invalid)
+      pg_review_decision_emit stop-without-new-review no-safe-action "$canonical" "$snapshot"; return ;;
+    undefined)
+      pg_review_decision_emit stop-without-new-review undefined-state "$canonical" "$snapshot"; return ;;
+  esac
+  if [ "$(jq -r '.input.proven' <<<"$canonical")" != true ]; then
+    pg_review_decision_emit stop-without-new-review unproven-input "$canonical" "$snapshot"; return
+  fi
+  if [ "$(jq -r '.input.binding_valid' <<<"$canonical")" != true ]; then
+    pg_review_decision_emit stop-without-new-review invalid-binding "$canonical" "$snapshot"; return
+  fi
+
+  # A collected exact-evidence result is terminal. A same-code prior with different evidence is
+  # progress context only: it participates in the identical-evidence check below, but its verdict
+  # cannot route this continuation.
+  if [ -n "$selected" ]; then
+    prior="$selected"; prior_applicable=true
+  else
+    prior="$(jq -cS .prior_review <<<"$canonical")"
+    prior_applicable="$(jq -r .applicable <<<"$prior")"
+  fi
+  if [ "$prior_applicable" = true ]; then
+    if [ "$(jq -r '.legacy // false' <<<"$prior")" = true ]; then
+      pg_review_decision_emit stop-without-new-review legacy-not-authoritative "$canonical" "$snapshot"; return
+    fi
+    if [ "$(jq -r '.marker // ""' <<<"$prior")" != "" ] && \
+       { [ "$(jq -r '.binding_valid // false' <<<"$prior")" != true ] || [ "$(jq -r '.provenance_valid // false' <<<"$prior")" != true ]; }; then
+      if [ "$(jq -r '.binding_valid // false' <<<"$prior")" != true ]; then reason=invalid-binding; else reason=invalid-result-provenance; fi
+      pg_review_decision_emit stop-without-new-review "$reason" "$canonical" "$snapshot"; return
+    fi
+
+    verdict="$(jq -r '.verdict // "NONE"' <<<"$prior")"
+    selected_ref="$(jq -r '.canonical_identity // .marker // ""' <<<"$prior")"
+    case "$verdict" in
+      FIX-FIRST)
+        # #174 R1: the churn stop preempts a fix dispatch, not just a fresh round grant — this is
+        # the site the FIX-FIRST branch would otherwise return from BEFORE the later
+        # round-governor-denied check is ever reached (AE1: a prior FIX-FIRST round is exactly
+        # how a chain that keeps churning gets here).
+        if [ "$rounds_not_converging" = yes ]; then
+          pg_review_decision_emit stop-without-new-review rounds-not-converging "$canonical" "$snapshot" "$selected_ref"; return
+        fi
+        # #274: only proven zero open P0/P1 defers the lower-severity items. Unknown counts
+        # retain the fix action; the existing churn stop above always has precedence.
+        if [ "$(jq -r '.open_blocking' <<<"$canonical")" = 0 ]; then
+          if [ "$(jq -r '.deferred_count' <<<"$canonical")" -eq 0 ]; then
+            pg_review_decision_emit fix-review-findings fix-first-without-findings "$canonical" "$snapshot" "$selected_ref"; return
+          fi
+          pg_review_decision_emit allow-existing-merge-workflow fix-first-deferred-p2-only "$canonical" "$snapshot" "$selected_ref"; return
+        fi
+        pg_review_decision_emit fix-review-findings review-findings-require-fix "$canonical" "$snapshot" "$selected_ref"; return ;;
+      SHIP)
+        pg_review_decision_emit allow-existing-merge-workflow current-ship-is-merge-eligible "$canonical" "$snapshot" "$selected_ref"; return ;;
+      NEEDS-DISCUSSION)
+        if [ "$(jq -r '.named_choice.outcomes|length' <<<"$canonical")" -lt 2 ]; then
+          pg_review_decision_emit stop-without-new-review invalid-named-choice "$canonical" "$snapshot" "$selected_ref"; return
+        fi
+        if [ "$(jq -r '.named_choice.selected_id // ""' <<<"$canonical")" = "" ]; then
+          pg_review_decision_emit ask-named-product-choice named-product-choice-required "$canonical" "$snapshot" "$selected_ref"; return
+        fi
+        if ! jq -e '.named_choice as $c | any($c.outcomes[]; .id==$c.selected_id)' <<<"$canonical" >/dev/null 2>&1; then
+          pg_review_decision_emit stop-without-new-review invalid-named-choice "$canonical" "$snapshot" "$selected_ref"; return
+        fi
+        choice_snapshot="$(pg_review_decision_choice_snapshot "$canonical")" || return 1
+        if [ "$(jq -r .named_choice.snapshot_digest <<<"$canonical")" != "$choice_snapshot" ]; then
+          pg_review_decision_emit stop-without-new-review stale-named-choice "$canonical" "$snapshot" "$selected_ref"; return
+        fi
+        # gate #174-review P1: a selected named choice dispatches a fix round exactly like a
+        # FIX-FIRST verdict does (same fix-review-findings/agent-task action) -- so it is the same
+        # "fix dispatch" R1 and every consumer doc (README/SKILL/oracle-reviewer) promise the churn
+        # stop replaces, unqualified by verdict type. Without this guard a churning chain that
+        # happens to phrase its repeated finding as a NEEDS-DISCUSSION choice, once answered, still
+        # buys an unbounded run of further paid rounds the brake exists to stop. The override
+        # (rounds_not_converging already folds in governor.continue_override, R2) lets an operator
+        # who has just made the decision proceed exactly as PRO_GATE_ROUNDS_CONTINUE=1 does for the
+        # FIX-FIRST arm above -- it does not invent a second override idiom.
+        if [ "$rounds_not_converging" = yes ]; then
+          pg_review_decision_emit stop-without-new-review rounds-not-converging "$canonical" "$snapshot" "$selected_ref"; return
+        fi
+        pg_review_decision_emit fix-review-findings named-product-choice-selected "$canonical" "$snapshot" "$selected_ref"; return ;;
+    esac
+  fi
+
+  if jq -e '.prior_review.binding_valid and .prior_review.provenance_valid and
+      .prior_review.code_identity==.input.identity and .prior_review.evidence_identity==.evidence.identity' \
+      <<<"$canonical" >/dev/null 2>&1; then
+    pg_review_decision_emit stop-without-new-review identical-code-and-evidence "$canonical" "$snapshot"; return
+  fi
+  # #174 R1: same churn stop as the FIX-FIRST arm above, covering the OTHER half of "in place of
+  # a new round grant or a fix dispatch" — a fresh grant attempt (no applicable prior review, or
+  # one with no recognized verdict) on a change whose streak already reached two. Unreachable for
+  # SHIP/NEEDS-DISCUSSION, whose own branches above already returned (AE7 stays unaffected).
+  if [ "$rounds_not_converging" = yes ]; then
+    pg_review_decision_emit stop-without-new-review rounds-not-converging "$canonical" "$snapshot"; return
+  fi
+  if [ "$(jq -r .governor.granted <<<"$canonical")" != true ]; then
+    pg_review_decision_emit stop-without-new-review round-governor-denied "$canonical" "$snapshot"; return
+  fi
+  # The account back-off cooldown (#162) gates only a FRESH spend: collection, recovery, fixes,
+  # evidence preparation, and merge handoff above spend nothing and stay reachable during it.
+  # facts.cooldown.seconds_remaining tells the wrapper how long to wait before re-querying.
+  if [ "$(jq -r .cooldown.active <<<"$canonical")" = true ]; then
+    pg_review_decision_emit stop-without-new-review account-cooldown-active "$canonical" "$snapshot"; return
+  fi
+  # #204: a fresh grant is the one action that would repeat a delivery the runtime proved never
+  # reached ChatGPT. Two failed deliveries in a row (proven no-send, or since #246 a send that
+  # produced no conversation and had its round refunded) under the same evidence relation, input
+  # mode, attachment policy and Oracle build stop here, typed, instead of being granted until the
+  # caller's time budget runs out. A change to any of those, or an operator's one-invocation
+  # PRO_GATE_FORCE_ROUND=1 (resolved into delivery.override by the facts builder), grants again.
+  # Unknown history/build is not an exhausted count or proof of changed conditions. FORCE
+  # bypasses only a known failed condition; it cannot manufacture missing evidence.
+  if [ "$(jq -r .delivery.state <<<"$canonical")" = unavailable ]; then
+    pg_review_decision_emit stop-without-new-review delivery-state-unavailable "$canonical" "$snapshot"; return
+  fi
+  if [ "$(jq -r .delivery.state <<<"$canonical")" = known ] \
+     && [ "$(jq -r .delivery.failed_unchanged <<<"$canonical")" -ge 2 ] \
+     && [ "$(jq -r .delivery.override <<<"$canonical")" != true ]; then
+    pg_review_decision_emit stop-without-new-review delivery-failed-unchanged "$canonical" "$snapshot"; return
+  fi
+  if [ "$(jq -r .evidence.state <<<"$canonical")" = matching ]; then
+    pg_review_decision_emit run-granted-review round-granted-for-changed-input "$canonical" "$snapshot"; return
+  fi
+  pg_review_decision_emit stop-without-new-review no-safe-action "$canonical" "$snapshot"
+}
+
+# Exactly two marker-addressed immutable sibling record stores. Existing run-meta, reservation,
+# active-index, completed-artifact, and round layouts are intentionally untouched.
+pg_review_input_binding_dir() { printf '%s\n' "${PRO_GATE_REVIEW_INPUT_BINDING_DIR:-$PRO_GATE_HOME/review-input-bindings}"; }
+pg_review_result_binding_dir() { printf '%s\n' "${PRO_GATE_REVIEW_RESULT_BINDING_DIR:-$PRO_GATE_HOME/review-result-bindings}"; }
+
+# Whether a run left anything that is, or may still become, its review: captured or pending
+# bytes, a recovered copy, a result binding, or a remembered conversation (including one later
+# convicted as cross-bound). Any record counts, so an unreadable or partial one fails closed.
+# Bytes and bindings are never swept. Conversation and cross-bound memos expire with pg_finish's
+# 14-day sweep, the horizon after which pro-gate treats any uncollected conversation as abandoned;
+# a round whose only record was such a memo is then treated like one that left nothing.
+# rememberUrl()'s count cap exempts a legacy round's memo, and a revocation moves it into a
+# legacy-review-receipts/<marker>.* receipt on its own clock, so nothing expires it sooner.
+# Markers end in -<epoch>-<pid>, so that pattern never matches another marker's receipts.
+# Every writer that moves a record publishes the destination before removing the source
+# (pending/ -> completed/, crossbound/ -> conversation-urls/ on proven ownership, memo ->
+# receipt), so each source is checked before its destination: a move landing between two
+# checks is still seen (#227 rounds 5 and 7).
+pg_run_left_review_record() { # marker
+  local marker="$1"
+  [ -e "$PRO_GATE_HOME/pending/$marker" ] || [ -e "$(pg_completed_dir)/$marker" ] \
+    || [ -e "$PRO_GATE_HOME/recovered/$marker.md" ] || [ -e "$(pg_review_result_binding_dir)/$marker" ] \
+    || [ -e "$PRO_GATE_HOME/crossbound/$marker" ] || [ -e "$PRO_GATE_HOME/conversation-urls/$marker" ] \
+    || pg_memo_claim_pending "$marker" \
+    || compgen -G "$PRO_GATE_HOME/legacy-review-receipts/$marker.*" >/dev/null
+}
+
+# A pre-v0.55 full-PR or scoped binding never proved its PR base (no PR metadata proof).
+# cdp-salvage.mjs legacyReviewBinding() is the same predicate.
+pg_review_input_binding_is_legacy() { # binding-json
+  jq -e '(.evidence.mode=="full-pr" or .evidence.mode=="scoped-delta") and
+    (.evidence.proof|has("pr_metadata_digest")|not)' <<<"$1" >/dev/null
+}
+
+# Housekeeping expires a marker's unresolved claims only once no legacy binding can protect
+# them. A binding that exists but cannot be read or validated may be legacy, so it protects.
+pg_review_input_binding_may_be_legacy() { # marker
+  local dir binding
+  dir="$(pg_review_input_binding_dir)"
+  [ -e "$dir" ] || [ -L "$dir" ] || return 1
+  [ -d "$dir" ] && [ -x "$dir" ] || return 0
+  [ -e "$dir/$1" ] || [ -L "$dir/$1" ] || return 1
+  binding="$(pg_review_input_binding_read "$1" 2>/dev/null)" || return 0
+  pg_review_input_binding_is_legacy "$binding"
+}
+
+# A new round at a legacy binding's head would buy a replacement for that round's review; that
+# stays refused while the round left a review record. The query and every guarded dispatch
+# recheck share this one predicate, because its answer can change after a grant: a late
+# --harvest can find or publish that record.
+pg_review_input_binding_legacy_reviewed() { # binding-json marker
+  pg_review_input_binding_is_legacy "$1" && pg_run_left_review_record "$2"
+}
+
+# A legacy round's memo can be its only review record, so a revocation claims it by renaming it
+# straight into a receipt of its own. The claimed inode, with its mtime, is exactly what the
+# receipt keeps (the 14-day sweep expires it on the memo's clock); there is no moment when
+# neither exists; and no revocation ever replaces another's receipt. Mirrors cdp-salvage.mjs
+# legacyReceiptPath(). Prints the receipt path; returns 1 for a marker without a legacy binding,
+# and 2 when a legacy memo cannot be receipted, in which case the caller keeps the memo.
+pg_legacy_review_receipt_path() { # marker
+  local binding dir="$PRO_GATE_HOME/legacy-review-receipts"
+  binding="$(pg_review_input_binding_read "$1" 2>/dev/null)" || return 1
+  pg_review_input_binding_is_legacy "$binding" || return 1
+  mkdir -p "$dir" 2>/dev/null || return 2
+  printf '%s\n' "$dir/$1.$$.$(date +%s).$RANDOM"
+}
+
+pg_review_input_binding_validate() { # canonical record JSON [expected marker]
+  local json="${1-}" marker="${2:-}" canonical
+  canonical="$(pg_review_json_canonical "$json")" || return 1
+  jq -e --arg marker "$marker" --arg cid "$PG_REVIEW_DECISION_CONTRACT_ID" \
+    --argjson cv "$PG_REVIEW_DECISION_CONTRACT_VERSION" --arg cd "$PG_REVIEW_DECISION_CONTRACT_DIGEST" \
+    --argjson compat "$(pg_review_decision_compatible_contract_digests_json)" '
+    def keys_are($x): keys == ($x|sort);
+    def hex: type=="string" and test("^[0-9a-f]{64}$");
+    def oid: type=="string" and test("^[0-9a-f]{40}([0-9a-f]{24})?$");
+    ([.. | strings | (length>1024 or test("[\u0000-\u001f\u007f]"))] | any | not)
+    and keys_are(["charged_spend_epoch","contract_digest","contract_id","contract_version","evidence","marker","record_type","record_version","repository","target"])
+    and .record_type=="review-input-binding/v1" and .record_version==1
+    and .contract_id==$cid and .contract_version==$cv
+    and (.contract_digest==$cd or (.contract_digest|IN($compat[])))
+    and (.marker|test("^pg-run-[A-Za-z0-9.-]+$")) and ($marker=="" or .marker==$marker)
+    and (.charged_spend_epoch|type=="number" and floor==. and .>0)
+    and (.repository|keys_are(["host","owner","repo"]))
+    and (.repository.host|test("^[A-Za-z0-9.-]+$")) and (.repository.owner|test("^[A-Za-z0-9._-]+$")) and (.repository.repo|test("^[A-Za-z0-9._-]+$"))
+    and (.target|keys_are(["head_oid","kind","pr"])) and .target.kind=="pull-request"
+    and (.target.pr|type=="number" and floor==. and .>0) and (.target.head_oid|oid)
+    and (.evidence|keys_are(["identity","mode","proof"])) and (.evidence.identity|type=="string" and test("^[A-Za-z0-9._:/+-]+$") and length<=256)
+    and (.evidence.mode|IN("full-pr","scoped-delta","connector","caller-patch"))
+    and (if .evidence.mode=="full-pr" then
+      (.evidence.proof|keys_are(["base_oid","endpoint_digest","head_oid","raw_patch_digest"]) or
+        (keys_are(["base_oid","endpoint_digest","head_oid","pr_metadata_digest","raw_patch_digest"]) and (.pr_metadata_digest|hex)))
+      and (.evidence.proof.base_oid|oid) and (.evidence.proof.head_oid|oid) and .evidence.proof.head_oid==.target.head_oid
+      and (.evidence.proof.endpoint_digest|hex) and (.evidence.proof.raw_patch_digest|hex)
+    elif .evidence.mode=="scoped-delta" then
+      (.evidence.proof|keys_are(["base_oid","end_oid","filtering_manifest_digest","lineage_identity","raw_digest","reviewed_payload_digest","scope_algorithm"]) or
+        (keys_are(["base_oid","end_oid","filtering_manifest_digest","lineage_identity","pr_metadata_digest","raw_digest","reviewed_payload_digest","scope_algorithm"]) and (.pr_metadata_digest|hex)))
+      and (.evidence.proof.base_oid|oid) and (.evidence.proof.end_oid|oid) and .evidence.proof.end_oid==.target.head_oid
+      and (.evidence.proof.filtering_manifest_digest|hex) and (.evidence.proof.raw_digest|hex) and (.evidence.proof.reviewed_payload_digest|hex)
+      and (.evidence.proof.lineage_identity|type=="string" and length>0 and length<=256)
+      and (.evidence.proof.scope_algorithm|type=="string" and length>0 and length<=64)
+    else
+      # connector and caller-patch share a shape: target proven exactly the same way, endpoint/raw
+      # digests nullable. connector never sent the diff bytes to the model at all; caller-patch
+      # sent bytes the caller supplied but the engine never independently fetched or proved them
+      # against the endpoint, so neither mode earns full-pr non-null digests (#161).
+      (.evidence.proof|keys_are(["commit_target","endpoint_digest","raw_diff_digest","repository_target"]))
+      and (.evidence.proof.commit_target|oid) and .evidence.proof.commit_target==.target.head_oid
+      and (.evidence.proof.repository_target|type=="string" and length>0 and length<=256)
+      and ((.evidence.proof.endpoint_digest==null) or (.evidence.proof.endpoint_digest|hex))
+      and ((.evidence.proof.raw_diff_digest==null) or (.evidence.proof.raw_diff_digest|hex))
+    end)' <<<"$canonical" >/dev/null 2>&1
+}
+
+pg_review_result_binding_validate() { # canonical record JSON [expected marker]
+  local json="${1-}" marker="${2:-}" canonical
+  canonical="$(pg_review_json_canonical "$json")" || return 1
+  jq -e --arg marker "$marker" --arg cid "$PG_REVIEW_DECISION_CONTRACT_ID" \
+    --argjson cv "$PG_REVIEW_DECISION_CONTRACT_VERSION" --arg cd "$PG_REVIEW_DECISION_CONTRACT_DIGEST" \
+    --argjson compat "$(pg_review_decision_compatible_contract_digests_json)" '
+    def keys_are($x): keys == ($x|sort);
+    def hex: type=="string" and test("^[0-9a-f]{64}$");
+    def oid: type=="string" and test("^[0-9a-f]{40}([0-9a-f]{24})?$");
+    ([.. | strings | (length>1024 or test("[\u0000-\u001f\u007f]"))] | any | not)
+    and keys_are(["accepted_epoch","artifact","contract_digest","contract_id","contract_version","input_binding_digest","input_binding_identity","marker","named_choice","provenance","record_type","record_version","ship_proof","verdict"])
+    and .record_type=="review-result-binding/v1" and .record_version==1
+    and .contract_id==$cid and .contract_version==$cv
+    and (.contract_digest==$cd or (.contract_digest|IN($compat[])))
+    and (.marker|test("^pg-run-[A-Za-z0-9.-]+$")) and ($marker=="" or .marker==$marker)
+    and (.accepted_epoch|type=="number" and floor==. and .>0)
+    and (.input_binding_digest|hex) and .input_binding_identity==.marker
+    and (.artifact|keys_are(["digest","path"])) and (.artifact.digest|hex)
+    and .artifact.path==( "completed/" + .marker )
+    and (.provenance|keys_are(["outcome","validated_epoch"])) and .provenance.outcome=="accepted"
+    and (.provenance.validated_epoch|type=="number" and floor==. and .>0)
+    and (.verdict|IN("SHIP","FIX-FIRST","NEEDS-DISCUSSION"))
+    and (.named_choice==null or ((.named_choice|keys_are(["consequence","id","label"])) and (.named_choice.id|type=="string" and length>0 and length<=256) and (.named_choice.label|type=="string" and length>0 and length<=120) and (.named_choice.consequence|type=="string" and length>0 and length<=240)))
+    and (if .verdict=="SHIP" then
+      (.ship_proof|keys_are(["base_oid","diff_digest","head_oid"])) and (.ship_proof.base_oid|oid) and (.ship_proof.head_oid|oid) and (.ship_proof.diff_digest|hex)
+    else .ship_proof==null end)' <<<"$canonical" >/dev/null 2>&1
+}
+
+pg_review_binding_write_immutable() { # type marker json
+  local type="$1" marker="$2" json="$3" canonical dir f tmp rc
+  pg_reservation_marker_ok "$marker" || return 1
+  canonical="$(pg_review_json_canonical "$json")" || return 1
+  case "$type" in
+    input) pg_review_input_binding_validate "$canonical" "$marker" || return 1; dir="$(pg_review_input_binding_dir)" ;;
+    result) pg_review_result_binding_validate "$canonical" "$marker" || return 1; dir="$(pg_review_result_binding_dir)" ;;
+    *) return 1 ;;
+  esac
+  mkdir -p "$dir" 2>/dev/null || return 1
+  f="$dir/$marker"; tmp="$dir/.$marker.tmp.$$"
+  if LC_ALL=C printf '%s' "$canonical" > "$tmp" 2>/dev/null && ln "$tmp" "$f" 2>/dev/null; then
+    rc=0
+  elif [ -f "$f" ] && [ ! -L "$f" ] && cmp -s "$tmp" "$f" 2>/dev/null; then
+    rc=0
+  else
+    rc=1
+  fi
+  rm -f "$tmp" 2>/dev/null
+  return "$rc"
+}
+
+pg_review_input_binding_write() { pg_review_binding_write_immutable input "$1" "$2"; }
+pg_review_result_binding_write() { pg_review_binding_write_immutable result "$1" "$2"; }
+
+pg_review_binding_read() { # type marker
+  local type="$1" marker="$2" dir f json canonical
+  pg_reservation_marker_ok "$marker" || return 1
+  case "$type" in input) dir="$(pg_review_input_binding_dir)";; result) dir="$(pg_review_result_binding_dir)";; *) return 1;; esac
+  f="$dir/$marker"; [ -f "$f" ] && [ ! -L "$f" ] || return 1
+  json="$(cat "$f" 2>/dev/null)" || return 1
+  canonical="$(pg_review_json_canonical "$json")" || return 1
+  [ "$(wc -c < "$f" 2>/dev/null | tr -d ' ')" = "${#canonical}" ] || return 1
+  case "$type" in input) pg_review_input_binding_validate "$canonical" "$marker";; result) pg_review_result_binding_validate "$canonical" "$marker";; esac || return 1
+  printf '%s' "$canonical"
+}
+
+pg_review_input_binding_read() { pg_review_binding_read input "$1"; }
+pg_review_result_binding_read() { pg_review_binding_read result "$1"; }
+pg_review_input_binding_digest() { local r; r="$(pg_review_input_binding_read "$1")" || return 1; pg_review_sha256_text "$r"; }
+pg_review_result_binding_digest() { local r; r="$(pg_review_result_binding_read "$1")" || return 1; pg_review_sha256_text "$r"; }
+
+# Read one accepted completion without collection, repair, scoring or persistent writes.
+# All interpretation uses a private byte snapshot, not several reads of a changing artifact.
+# rc 0: accepted facts; rc 1: unavailable (no output); rc 6: template-verdict;
+# rc 2: verdict disagreement (diagnostic
+# facts only, never counts). The caller retains the decision reducer's distinct repair projection.
+pg_review_accepted_artifact_read() ( # marker [expected canonical input binding]
+  local marker="$1" expected="${2:-}" input result artifact snapshot digest canonical verdict stored choices='[]' summary p0 p1 text retained deferred='[]'
+  pg_reservation_marker_ok "$marker" || return 1
+  input="$(pg_review_input_binding_read "$marker")" || return 1
+  [ -z "$expected" ] || [ "$input" = "$expected" ] || return 1
+  result="$(pg_review_result_binding_read "$marker")" || return 1
+  artifact="$(pg_completed_dir)/$marker"
+  [ -f "$artifact" ] && [ ! -L "$artifact" ] && [ -r "$artifact" ] || return 1
+  snapshot="$(mktemp "${TMPDIR:-/tmp}/pg-accepted-review.XXXXXX")" || return 1
+  trap 'rm -f "$snapshot"' EXIT
+  cat "$artifact" > "$snapshot" || return 1
+  digest="$(pg_sha256 "$snapshot")"; [ -n "$digest" ] || return 1
+  jq -e --arg ib "$(pg_review_sha256_text "$input")" --arg digest "$digest" \
+    '.input_binding_digest==$ib and .artifact.digest==$digest' <<<"$result" >/dev/null || return 1
+  # A JSON text roundtrip rejects invalid UTF-8 and NUL without silently repairing accepted bytes.
+  text="$(jq -Rs . "$snapshot")" || return 1
+  jq -e 'index("\u0000")==null' <<<"$text" >/dev/null || return 1
+  [ "$(jq -jr . <<<"$text" | pg_sha256 /dev/stdin)" = "$digest" ] || return 1
+  pg_is_review "$snapshot" || return 1
+  [ -z "$(pg_capture_foreign_echo "$snapshot" "$marker")" ] || return 1
+  pg_review_shape_for_marker "$marker" "$snapshot" || return 6
+  stored="$(jq -r .verdict <<<"$result")"
+  verdict="$(pg_extract_verdict "$snapshot")"
+  canonical="$(pg_review_sha256_text "$result")"
+  if [ "$stored" = "$verdict" ]; then
+    # Retained SHIP must have the relationships the real producer could bind. This is historical
+    # acceptance, independent of current checkout/proof and compatible with predecessor inputs.
+    if [ "$verdict" = SHIP ]; then
+      retained="$(jq -cnS --argjson input "$input" --argjson result "$result" '{input_binding:$input,result_binding:$result}')" || return 1
+      pg_review_accepted_ship_matches "$retained" "$(jq -r '.evidence.proof.base_oid // empty' <<<"$input")" \
+        "$(jq -r .target.head_oid <<<"$input")" "$(jq -r '.evidence.proof.raw_patch_digest // empty' <<<"$input")" || return 1
+    fi
+    summary="$(pg_review_finding_summary "$snapshot")" || return 1
+    p0="$(jq -r .open_p0 <<<"$summary")"; p1="$(jq -r .open_p1 <<<"$summary")"
+    deferred="$(jq -cS .deferred_findings <<<"$summary")" || return 1
+    if choices="$(pg_review_decision_named_choices "$snapshot" "$verdict")"; then
+      :
+    elif [ "$?" -eq 2 ]; then
+      choices='[]'
+    else
+      choices=null
+    fi
+  fi
+  # Refuse a source or binding replaced during interpretation. Canonical identity always hashes
+  # the result we actually read, including supported predecessor contract identities.
+  [ -f "$artifact" ] && [ ! -L "$artifact" ] && [ "$(pg_sha256 "$artifact")" = "$digest" ] || return 1
+  [ "$(pg_review_input_binding_read "$marker")" = "$input" ] || return 1
+  [ "$(pg_review_result_binding_read "$marker")" = "$result" ] || return 1
+  if [ "$stored" != "$verdict" ]; then
+    echo "ERROR: result binding verdict $stored disagrees with parsed artifact verdict ${verdict:-NONE} for $marker; artifact=completed/$marker binding=review-result-bindings/$marker. Stop concurrent writers, archive the original binding outside the active result directory without deleting it, then rerun the query and apply its collect-existing-result effect." >&2
+    jq -cnS --arg digest "$digest" '{artifact_digest:$digest}'
+    return 2
+  fi
+  jq -cnS --argjson input "$input" --argjson result "$result" --arg digest "$digest" \
+    --arg canonical "$canonical" --arg verdict "$verdict" --argjson choices "$choices" \
+    --argjson p0 "$p0" --argjson p1 "$p1" --argjson deferred "$deferred" \
+    '{input_binding:$input,result_binding:$result,artifact_digest:$digest,canonical_identity:$canonical,verdict:$verdict,named_choices:$choices,open_p0:$p0,open_p1:$p1,deferred_findings:$deferred}'
+)
+
+# Current SHIP applicability is separate from retained acceptance. In particular, a connector
+# review can inform progress but never supply handoff authority. The caller proves current input.
+pg_review_accepted_ship_matches() { # accepted facts base head raw-digest
+  local accepted="$1" base="$2" head="$3" raw="$4" mode digest
+  mode="$(jq -r .input_binding.evidence.mode <<<"$accepted")"
+  case "$mode" in
+    full-pr) [ -n "$base" ] && [ -n "$raw" ] || return 1; digest="$raw" ;;
+    scoped-delta) digest="$(jq -r .input_binding.evidence.proof.raw_digest <<<"$accepted")" ;;
+    *) return 1 ;;
+  esac
+  jq -e --arg base "$base" --arg head "$head" --arg digest "$digest" \
+    '.result_binding.ship_proof | .base_oid==$base and .head_oid==$head and .diff_digest==$digest' \
+    <<<"$accepted" >/dev/null
+}
+
+# Rebuild a binding's evidence relation from the exact files named by the invocation. This checks
+# proof only: marker and charged epoch remain immutable history, and are separately validated.
+# Scoped review deliberately hashes its raw endpoint and reviewed payload independently.
+pg_review_decision_input_proof_current() { # binding repo pr host owner name head base [explicit-candidate]
+  local binding="$1" repo="$2" pr="$3" host="$4" owner="$5" name="$6" head="$7" base="$8"
+  local mode endpoint reviewed manifest confirmation raw_digest reviewed_digest manifest_digest confirmation_digest lineage pr_evidence metadata_digest
+  pg_review_input_binding_validate "$binding" "$(jq -r '.marker // ""' <<<"$binding" 2>/dev/null)" || return 1
+  jq -e --arg h "$host" --arg o "$owner" --arg r "$name" --argjson p "$pr" --arg head "$head" \
+    '.repository.host==$h and .repository.owner==$o and .repository.repo==$r and .target.pr==$p and .target.head_oid==$head' \
+    <<<"$binding" >/dev/null 2>&1 || return 1
+  mode="$(jq -r .evidence.mode <<<"$binding")"
+  case "$mode" in full-pr|scoped-delta)
+    pr_evidence="$(pg_pr_evidence_read "${PRO_GATE_REVIEW_PR_EVIDENCE:-}" "${PRO_GATE_REVIEW_ENDPOINT_PATCH:-}" \
+      "$repo" "$host" "$owner" "$name" "$pr" "${9:-}")" || return 1
+    metadata_digest="$(pg_pr_evidence_metadata_digest "$pr_evidence")" || return 1
+    jq -e --arg digest "$metadata_digest" '.evidence.proof.pr_metadata_digest==$digest' <<<"$binding" >/dev/null || return 1
+    [ "$base" = "$(jq -r .metadata.target.base_oid <<<"$pr_evidence")" ] || return 1
+    ;;
+  esac
+  reviewed="${REVIEW_DECISION_REVIEWED_DIFF_FILE:-${DIFF_FILE:-}}"
+  case "$mode" in
+    connector)
+      [ "$INPUT" = connector ] || [ "$INPUT" = both ] || return 1
+      jq -e --arg target "$host/$owner/$name" --arg head "$head" \
+        '.evidence.proof.repository_target==$target and .evidence.proof.commit_target==$head' \
+        <<<"$binding" >/dev/null 2>&1 ;;
+    full-pr)
+      [ "$INPUT" = bundle ] || [ "$INPUT" = both ] || return 1
+      endpoint="${PRO_GATE_REVIEW_ENDPOINT_PATCH:-}"
+      [ -n "$base" ] && [ -f "$endpoint" ] && [ ! -L "$endpoint" ] \
+        && [ -f "$reviewed" ] && [ ! -L "$reviewed" ] || return 1
+      [ "$(wc -c < "$endpoint" 2>/dev/null | tr -d ' ')" -le 26214400 ] \
+        && [ "$(wc -c < "$reviewed" 2>/dev/null | tr -d ' ')" -le 26214400 ] || return 1
+      raw_digest="$(pg_sha256 "$reviewed" 2>/dev/null || true)"
+      endpoint="$(pg_sha256 "$endpoint" 2>/dev/null || true)"
+      # Full-PR authority requires the full prepared payload. A partial payload
+      # needs its scoped manifest/confirmation; it cannot fall back to full-pr.
+      [ -n "$raw_digest" ] && [ "$raw_digest" = "$endpoint" ] || return 1
+      jq -e --arg base "$base" --arg head "$head" --arg raw "$raw_digest" --arg endpoint "$endpoint" \
+        '.evidence.proof.base_oid==$base and .evidence.proof.head_oid==$head and .evidence.proof.raw_patch_digest==$raw and .evidence.proof.endpoint_digest==$endpoint' \
+        <<<"$binding" >/dev/null 2>&1 ;;
+    scoped-delta)
+      [ "$INPUT" = bundle ] || [ "$INPUT" = both ] || return 1
+      endpoint="${PRO_GATE_REVIEW_ENDPOINT_PATCH:-}"; manifest="${PRO_GATE_REVIEW_FILTER_MANIFEST:-}"; confirmation="${CONFIRM_FILE:-}"
+      [ -n "$base" ] && [ -f "$endpoint" ] && [ ! -L "$endpoint" ] \
+        && [ -f "$reviewed" ] && [ ! -L "$reviewed" ] && [ -f "$manifest" ] && [ ! -L "$manifest" ] \
+        && [ -f "$confirmation" ] && [ ! -L "$confirmation" ] || return 1
+      [ "$(wc -c < "$endpoint" 2>/dev/null | tr -d ' ')" -le 26214400 ] \
+        && [ "$(wc -c < "$reviewed" 2>/dev/null | tr -d ' ')" -le 26214400 ] \
+        && [ "$(wc -c < "$manifest" 2>/dev/null | tr -d ' ')" -le 65536 ] \
+        && [ "$(wc -c < "$confirmation" 2>/dev/null | tr -d ' ')" -le 262144 ] && pg_is_review "$confirmation" || return 1
+      raw_digest="$(pg_sha256 "$endpoint" 2>/dev/null || true)"
+      reviewed_digest="$(pg_sha256 "$reviewed" 2>/dev/null || true)"
+      manifest_digest="$(pg_sha256 "$manifest" 2>/dev/null || true)"
+      confirmation_digest="$(pg_sha256 "$confirmation" 2>/dev/null || true)"
+      lineage="confirmation:${confirmation_digest}"
+      jq -e --arg base "$base" --arg head "$head" --arg raw "$raw_digest" --arg reviewed "$reviewed_digest" \
+        --arg manifest "$manifest_digest" --arg lineage "$lineage" \
+        '.evidence.proof.base_oid==$base and .evidence.proof.end_oid==$head and .evidence.proof.raw_digest==$raw and .evidence.proof.reviewed_payload_digest==$reviewed and .evidence.proof.filtering_manifest_digest==$manifest and .evidence.proof.lineage_identity==$lineage' \
+        <<<"$binding" >/dev/null 2>&1 ;;
+    *) return 1 ;;
+  esac
+}
+
+# Compare folded GitHub identities without changing the bytes authenticated by the result binding.
+pg_review_facts_target_matches() { # input-json host owner repo pr
+  jq -e --arg h "$2" --arg o "$3" --arg r "$4" --argjson p "$5" \
+    '(.repository | with_entries(.value |= ascii_downcase))=={host:($h|ascii_downcase),owner:($o|ascii_downcase),repo:($r|ascii_downcase)} and .target.pr==$p' \
+    <<<"$1" >/dev/null 2>&1
+}
+
+# One batch of the candidate prefilter. Prints "<index><TAB>1" for each marker that could still be
+# relevant, or "<index><TAB>0" for one the per-marker scan would skip. Ownership mirrors that scan:
+# the input binding's sole JSON object through pg_review_facts_target_matches, the sidecar's first
+# line split the way `IFS=$'\t' read` splits it (a valid sidecar's PR is that field normalized), and
+# this PR's key prefix. Bytes the scan might read differently (anything outside printable ASCII)
+# and JSON this filter cannot evaluate count as possible relevance.
+pg_review_facts_relevance_batch() { # host owner repo pr target key [--arg mN marker --rawfile iN input --rawfile sN sidecar]...
+  local host="$1" owner="$2" repo="$3" pr="$4" target="$5" key="$6"
+  shift 6
+  jq -nr --arg h "$host" --arg o "$owner" --arg r "$repo" --argjson p "$pr" --arg pr "$pr" \
+    --arg target "$target" --arg key "$key" "$@" '
+    def bound_target($s):
+      if ($s | test("^[\t\n\r ]*$")) then false
+      elif ($s | test("[^\t\n\r -~]")) then true
+      else try ($s | fromjson | if type == "object" then
+          ((.repository | with_entries(.value |= ascii_downcase))=={host:($h|ascii_downcase),owner:($o|ascii_downcase),repo:($r|ascii_downcase)} and .target.pr==$p)
+        else false end) catch true
+      end;
+    def sidecar_target($s):
+      ($s | split("\n")[0] // "") as $line
+      | if ($line | test("[^\t -~]")) then true
+        else ($line | split("\t") | map(select(. != ""))) as $f
+          | ([$f[0], $f[1], $f[2]] | map(. // "") | join("/") | ascii_downcase) == $target
+            and (($f[4] // "") | test("^0*" + $pr + "$"))
+        end;
+    $ARGS.named as $a
+    | $a | keys[] | select(test("^m[0-9]+$")) | .[1:] as $i
+    | (($a["m" + $i] | ascii_downcase | startswith("pg-run-" + $key + "-"))
+        or sidecar_target($a["s" + $i]) or bound_target($a["i" + $i])) as $need
+    | "\($i)\t\(if $need then 1 else 0 end)"'
+}
+
+# Rule out, in a few jq processes instead of about ten per marker, the markers whose validation in
+# pg_review_facts_candidates can only end in `continue` (#292). For a full-shape marker that loop
+# keeps relevance only from its input binding's target, its sidecar's attribution (valid or
+# damaged), or this PR's key prefix: a valid sidecar for another target skips it, and otherwise an
+# irrelevant marker is skipped whether its result is bound or not. So a full-shape marker with none
+# of the three is skipped here without computing bound. Every other marker is passed through,
+# including a non-full-shape name (an unbound result may keep it relevant), a binding or sidecar
+# that is a symlink, FIFO, unreadable or larger than 64 KiB, and on any failure the whole list.
+# Output keeps the sorted input order, so the candidate list is byte-identical.
+pg_review_facts_prefilter() { # host owner repo pr target key < sorted markers -> markers to validate
+  local host="$1" owner="$2" repo="$3" pr="$4" target="$5" key="$6" input_dir meta_dir dir big
+  local marker f i n=0 sent=0 out='' idx flag
+  local markers=() need=() args=() dirs=() paths=()
+  while IFS= read -r marker; do markers+=("$marker"); n=$((n + 1)); done
+  [ "$n" -gt 0 ] || return 0
+  case "$pr" in ''|*[!0-9]*) printf '%s\n' "${markers[@]}"; return 0 ;; esac
+  input_dir="$(pg_review_input_binding_dir)"; meta_dir="$(pg_run_meta_dir)"
+  for dir in "$input_dir" "$meta_dir"; do
+    if [ -e "$dir" ] || [ -L "$dir" ]; then dirs+=("$dir"); fi
+  done
+  # Bounds what one pass reads into memory, as the scan's own 64 KiB guards do.
+  big=$'\n'
+  if [ "${#dirs[@]}" -gt 0 ]; then
+    big="$big$(find -H "${dirs[@]}" -type f -size +65536c 2>/dev/null)"$'\n' || { printf '%s\n' "${markers[@]}"; return 0; }
+  fi
+  for ((i = 0; i < n; i++)); do
+    marker="${markers[i]}"; need[i]=1
+    pg_reservation_marker_ok "$marker" || continue
+    [[ "$marker" =~ ^pg-run-.+-.+-[1-9][0-9]*-[0-9]+-[0-9]+$ ]] || continue
+    case "$big" in *"/$marker"$'\n'*) continue ;; esac
+    paths=()
+    for dir in "$input_dir" "$meta_dir"; do
+      f="$dir/$marker"
+      if [ ! -e "$f" ] && [ ! -L "$f" ]; then
+        paths+=(/dev/null)
+      elif [ -f "$f" ] && [ ! -L "$f" ] && [ -r "$f" ]; then
+        paths+=("$f")
+      else
+        break
+      fi
+    done
+    [ "${#paths[@]}" -eq 2 ] || continue
+    need[i]=''
+    args+=(--arg "m$i" "$marker" --rawfile "i$i" "${paths[0]}" --rawfile "s$i" "${paths[1]}")
+    sent=$((sent + 1))
+    if [ "$sent" -eq 200 ]; then
+      out="$out$(pg_review_facts_relevance_batch "$host" "$owner" "$repo" "$pr" "$target" "$key" "${args[@]}")"$'\n' \
+        || { printf '%s\n' "${markers[@]}"; return 0; }
+      args=(); sent=0
+    fi
+  done
+  if [ "$sent" -gt 0 ]; then
+    out="$out$(pg_review_facts_relevance_batch "$host" "$owner" "$repo" "$pr" "$target" "$key" "${args[@]}")"$'\n' \
+      || { printf '%s\n' "${markers[@]}"; return 0; }
+  fi
+  # Every marker sent must be answered exactly once, or nothing is ruled out.
+  while IFS=$'\t' read -r idx flag; do
+    [ -n "$idx$flag" ] || continue
+    case "$idx" in ''|*[!0-9]*) printf '%s\n' "${markers[@]}"; return 0 ;; esac
+    if [ "$idx" -ge "$n" ] || [ -n "${need[idx]}" ]; then printf '%s\n' "${markers[@]}"; return 0; fi
+    case "$flag" in 0|1) need[idx]="$flag" ;; *) printf '%s\n' "${markers[@]}"; return 0 ;; esac
+  done <<<"$out"
+  for ((i = 0; i < n; i++)); do
+    [ -n "${need[i]}" ] || { printf '%s\n' "${markers[@]}"; return 0; }
+  done
+  for ((i = 0; i < n; i++)); do
+    [ "${need[i]}" = 0 ] || printf '%s\n' "${markers[i]}"
+  done
+}
+
+# Discover completion records before validating acceptance. Attribution metadata and the marker's
+# PR key establish possible relevance only; they never supply a verdict or counts. Missing/corrupt
+# input siblings can therefore obstruct an older accepted review instead of disappearing in a scan.
+pg_review_facts_candidates() { # host owner repo pr -> candidate metadata JSON
+  local host="$1" owner="$2" repo="$3" pr="$4" key dir f marker raw meta mh mo mr mk mp out spend
+  local epoch identity relevant conflict input result bound tail target meta_target candidates='[]'
+  target="$(printf '%s/%s/%s' "$host" "$owner" "$repo" | LC_ALL=C tr 'A-Z' 'a-z')"
+  key="$(printf '%s-%s-%s' "$owner" "$repo" "$pr" | tr -c 'A-Za-z0-9.\n-' '-' | LC_ALL=C tr 'A-Z' 'a-z')"
+  for dir in "$(pg_completed_dir)" "$(pg_review_result_binding_dir)" "$PRO_GATE_HOME/pending" "$PRO_GATE_HOME/recovered"; do
+    [ ! -e "$dir" ] || { [ -d "$dir" ] && [ -r "$dir" ] && [ -x "$dir" ]; } || return 1
+  done
+  while IFS= read -r marker; do
+    pg_reservation_marker_ok "$marker" || continue
+    relevant=false; conflict=false; epoch=''; raw=''; spend=''
+    f="$(pg_review_input_binding_dir)/$marker"
+    if [ -f "$f" ] && [ ! -L "$f" ] && [ -r "$f" ] && [ "$(wc -c < "$f")" -le 65536 ]; then
+      raw="$(jq -sceS 'select(length==1 and (.[0]|type)=="object") | .[0]' "$f" 2>/dev/null || true)"
+    fi
+    if [ -n "$raw" ]; then
+      pg_review_facts_target_matches "$raw" "$host" "$owner" "$repo" "$pr" && relevant=true
+    fi
+    # Shape-valid input is only a relevance hint until the accepted result binds its bytes.
+    # Otherwise editing its target can exclude it, or editing its epoch can demote it below SHIP.
+    bound=false
+    input="$(pg_review_input_binding_read "$marker" 2>/dev/null || true)"
+    result="$(pg_review_result_binding_read "$marker" 2>/dev/null || true)"
+    if [ -n "$input" ] && [ -n "$result" ]; then
+      if [ "$(pg_review_sha256_text "$input")" = "$(jq -r .input_binding_digest <<<"$result")" ]; then
+        bound=true
+        epoch="$(jq -r .charged_spend_epoch <<<"$input")"
+      else
+        echo "ERROR: input-result binding digest mismatch for $marker; input metadata cannot establish completion target or ordering." >&2
+      fi
+    fi
+    meta="$(pg_run_meta_read "$marker" 2>/dev/null || true)"
+    if [ -n "$meta" ]; then
+      IFS=$'\t' read -r mh mo mr mk mp out spend <<<"$meta"
+      meta_target="$(printf '%s/%s/%s' "$mh" "$mo" "$mr" | LC_ALL=C tr 'A-Z' 'a-z')"
+      if [ "$meta_target" = "$target" ] && [ "$mp" = "$pr" ]; then
+        relevant=true
+      elif [ "$relevant" = true ]; then
+        conflict=true
+      fi
+      # A known other-host/repository sidecar disambiguates the host-less marker key.
+      [ "$relevant" = true ] || continue
+      if [ -n "$epoch" ] && [ "$epoch" != "$spend" ]; then conflict=true; epoch=null; fi
+      [ -n "$epoch" ] || epoch="$spend"
+    else
+      # A damaged sidecar can still attribute this completion, but cannot prove its ordering.
+      f="$(pg_run_meta_dir)/$marker"
+      if [ -f "$f" ] && [ ! -L "$f" ] && [ -r "$f" ] && [ "$(wc -c < "$f")" -le 65536 ]; then
+        IFS=$'\t' read -r mh mo mr mk mp out spend < "$f" || true
+        meta_target="$(printf '%s/%s/%s' "$mh" "$mo" "$mr" | LC_ALL=C tr 'A-Z' 'a-z')"
+        if [ "$meta_target" = "$target" ] && [ "$mp" = "$pr" ]; then relevant=true; fi
+      fi
+    fi
+    # Only a digest-bound input can exclude a colliding key without a valid sidecar.
+    # An unscoped surviving result cannot rule this target out. A result-bound marker with the
+    # full owner-repo-PR-epoch-PID shape can identify another PR without blocking unrelated PRs.
+    if [ "$relevant" = false ] && [ "$bound" = true ]; then continue; fi
+    if [ -z "$meta" ] && [ "$bound" = false ] && [ -n "$result" ] \
+      && ! [[ "$marker" =~ ^pg-run-.+-.+-[1-9][0-9]*-[0-9]+-[0-9]+$ ]]; then relevant=true; fi
+    case "$(printf '%s' "$marker" | LC_ALL=C tr 'A-Z' 'a-z')" in "pg-run-$key-"*) relevant=true ;; esac
+    [ "$relevant" = true ] || continue
+    # Contradictory full attribution is not permission to reinterpret a target-looking marker.
+    if [ -n "$raw" ] && jq -e '.repository.host and .repository.owner and .repository.repo and .target.pr' <<<"$raw" >/dev/null 2>&1; then
+      pg_review_facts_target_matches "$raw" "$host" "$owner" "$repo" "$pr" || conflict=true
+    fi
+    if [ -n "$meta" ] && { [ "$meta_target" != "$target" ] || [ "$mp" != "$pr" ]; }; then conflict=true; fi
+    case "$epoch" in ''|0|*[!0-9]*) epoch=null ;; esac
+    identity="$(pg_review_result_binding_digest "$marker" 2>/dev/null || true)"
+    candidates="$(jq -cS --arg marker "$marker" --arg identity "$identity" --argjson epoch "$epoch" --argjson conflict "$conflict" \
+      '. + [{marker:$marker,canonical_identity:(if $identity=="" then null else $identity end),charged_spend_epoch:$epoch,conflict:$conflict}]' <<<"$candidates")" || return 1
+  done < <(
+    for dir in "$(pg_completed_dir)" "$(pg_review_result_binding_dir)" "$PRO_GATE_HOME/pending" "$PRO_GATE_HOME/recovered"; do
+      for f in "$dir"/pg-run-*; do
+        [ -e "$f" ] || [ -L "$f" ] || continue
+        marker="${f##*/}"
+        [ "$dir" != "$PRO_GATE_HOME/recovered" ] || marker="${marker%.md}"
+        # Match publication PID suffixes only, not legitimate names such as .tmp.v2. The leading
+        # parentheses keep bash 3.2 (stock macOS) from reading a pattern's `)` as the end of this
+        # process substitution (#295).
+        case "$marker" in
+          (*.tmp.*) tail="${marker##*.tmp.}"; case "$tail" in (''|*[!0-9]*) ;; (*) continue ;; esac ;;
+        esac
+        printf '%s\n' "$marker"
+      done
+    done | LC_ALL=C sort -u | pg_review_facts_prefilter "$host" "$owner" "$repo" "$pr" "$target" "$key"
+  )
+  printf '%s' "$candidates"
+}
+
+pg_review_facts_emit() { # status reason repository pr candidate-head selected-marker applicable accepted-json
+  jq -cnS --arg status "$1" --arg reason "$2" --argjson repository "$3" --argjson pr "$4" \
+    --arg head "$5" --arg marker "$6" --argjson applicable "$7" --argjson accepted "$8" \
+    --arg evidence "$(if [ "$8" != null ]; then pg_review_relation_identity "$(jq -cS .input_binding <<<"$8")"; fi)" '
+    {schema:"review-facts/v1",status:$status,reason:$reason,repository:$repository,pr:$pr,
+     candidate_head:(if $head=="" then null else $head end),selected_marker:(if $marker=="" then null else $marker end),
+     applicable:$applicable,review:(if $accepted==null then null else
+       {canonical_identity:$accepted.canonical_identity,charged_spend_epoch:$accepted.input_binding.charged_spend_epoch,
+        reviewed_head:$accepted.input_binding.target.head_oid,evidence_mode:$accepted.input_binding.evidence.mode,
+        evidence_identity:$evidence,artifact_digest:$accepted.artifact_digest,verdict:$accepted.verdict,
+        named_choice:$accepted.result_binding.named_choice,named_choices:$accepted.named_choices,
+        open_p0:$accepted.open_p0,open_p1:$accepted.open_p1} end)}'
+}
+
+pg_review_facts_cli() { # checkout number-or-canonical-PR-URL [candidate-head]; inspection only
+  local repo="$1" query="$2" ident host owner name pr head repository candidates newest selected marker accepted input rc
+  local applicable=null reason=accepted-review base='' pr_evidence='' mode path field expected actual raw_digest='' differing=false
+  local REVIEW_DECISION_REVIEWED_DIFF_FILE="${DIFF_FILE:-}"
+  pg_have jq || { echo 'ERROR: --review-facts requires jq' >&2; return 2; }
+  [ "$(git -C "$repo" rev-parse --is-inside-work-tree 2>/dev/null)" = true ] \
+    || { echo 'ERROR: --review-facts requires a local git working tree' >&2; return 2; }
+  case "$query" in
+    http*://*/pull/*) pr="${query%/}"; pr="${pr##*/}"; ident="$(pg_repo_identity_from_url "${query%/}")" ;;
+    *) pr="$query"; ident="$(pg_repo_identity_from_url "$(git -C "$repo" remote get-url origin 2>/dev/null)")" ;;
+  esac
+  [ -n "$ident" ] && pr="$(pg_pr_number_normalize "$pr")" \
+    || { echo 'ERROR: --review-facts requires a numeric PR with canonical origin, or a canonical PR URL' >&2; return 2; }
+  IFS=$'\t' read -r host owner name <<<"$ident"
+  repository="$(jq -cnS --arg h "$host" --arg o "$owner" --arg r "$name" '{host:$h,owner:$o,repo:$r}')"
+  head="${3:-}"
+  [ -n "$head" ] || head="$(git -C "$repo" rev-parse --verify HEAD 2>/dev/null || true)"
+  case "$head" in ''|*[!0-9a-f]*) head='' ;; esac
+  candidates="$(pg_review_facts_candidates "$host" "$owner" "$name" "$pr")" || {
+    pg_review_facts_emit invalid completion-store-unreadable "$repository" "$pr" "$head" '' null null; return;
+  }
+  if [ "$(jq length <<<"$candidates")" -eq 0 ]; then
+    pg_review_facts_emit missing no-relevant-completion "$repository" "$pr" "$head" '' null null; return
+  fi
+  if jq -e 'any(.[]; .charged_spend_epoch==null)' <<<"$candidates" >/dev/null; then
+    pg_review_facts_emit ambiguous unproved-completion-order "$repository" "$pr" "$head" '' null null; return
+  fi
+  newest="$(jq -cS 'max_by(.charged_spend_epoch).charged_spend_epoch as $epoch | map(select(.charged_spend_epoch==$epoch))' <<<"$candidates")"
+  if [ "$(jq length <<<"$newest")" -gt 1 ] && jq -e 'any(.[]; .canonical_identity==null) or ([.[].canonical_identity]|length!=(unique|length))' <<<"$newest" >/dev/null; then
+    pg_review_facts_emit ambiguous ambiguous-completion-order "$repository" "$pr" "$head" '' null null; return
+  fi
+  selected="$(jq -cS 'sort_by(.canonical_identity) | last' <<<"$newest")"
+  marker="$(jq -r .marker <<<"$selected")"
+  if [ "$(jq -r .conflict <<<"$selected")" = true ]; then
+    pg_review_facts_emit invalid conflicting-completion-metadata "$repository" "$pr" "$head" "$marker" null null; return
+  fi
+  for path in "$(pg_review_input_binding_dir)/$marker" "$(pg_review_result_binding_dir)/$marker" "$(pg_completed_dir)/$marker"; do
+    if [ ! -e "$path" ] && [ ! -L "$path" ]; then
+      pg_review_facts_emit incomplete missing-accepted-record "$repository" "$pr" "$head" "$marker" null null; return
+    fi
+  done
+  rc=0; accepted="$(pg_review_accepted_artifact_read "$marker")" || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    reason=unaccepted-review; [ "$rc" -ne 2 ] || reason=verdict-disagreement
+    if [ "$rc" -eq 6 ]; then
+      pg_review_facts_emit invalid template-verdict "$repository" "$pr" "$head" "$marker" null null
+      return 6
+    fi
+    pg_review_facts_emit invalid "$reason" "$repository" "$pr" "$head" "$marker" null null; return
+  fi
+  input="$(jq -cS .input_binding <<<"$accepted")"
+  if ! pg_review_facts_target_matches "$input" "$host" "$owner" "$name" "$pr"; then
+    pg_review_facts_emit invalid target-mismatch "$repository" "$pr" "$head" "$marker" null null; return
+  fi
+  mode="$(jq -r .evidence.mode <<<"$input")"
+  if [ -n "$head" ] && [ "$head" != "$(jq -r .target.head_oid <<<"$input")" ]; then
+    differing=true
+  fi
+  if [ "${INPUT_SUPPLIED:-0}" = 1 ]; then
+    case "$INPUT:$mode" in connector:connector|bundle:full-pr|bundle:scoped-delta|both:full-pr|both:scoped-delta|both:connector) ;; *) differing=true ;; esac
+  fi
+  # Absence/unreadability is unknown; readable supplied bytes that differ are known non-matches.
+  # These comparisons can only establish false. Only the shared complete proof can establish true.
+  for field in reviewed endpoint manifest confirmation; do
+    expected=''; path=''
+    case "$mode:$field" in
+      full-pr:reviewed) path="${DIFF_FILE:-}"; expected="$(jq -r .evidence.proof.raw_patch_digest <<<"$input")" ;;
+      full-pr:endpoint) path="${PRO_GATE_REVIEW_ENDPOINT_PATCH:-}"; expected="$(jq -r .evidence.proof.endpoint_digest <<<"$input")" ;;
+      scoped-delta:reviewed) path="${DIFF_FILE:-}"; expected="$(jq -r .evidence.proof.reviewed_payload_digest <<<"$input")" ;;
+      scoped-delta:endpoint) path="${PRO_GATE_REVIEW_ENDPOINT_PATCH:-}"; expected="$(jq -r .evidence.proof.raw_digest <<<"$input")" ;;
+      scoped-delta:manifest) path="${PRO_GATE_REVIEW_FILTER_MANIFEST:-}"; expected="$(jq -r .evidence.proof.filtering_manifest_digest <<<"$input")" ;;
+      scoped-delta:confirmation) path="${CONFIRM_FILE:-}"; expected="$(jq -r .evidence.proof.lineage_identity <<<"$input")"; expected="${expected#confirmation:}" ;;
+    esac
+    if [ -n "$expected" ] && [ -f "$path" ] && [ ! -L "$path" ] && [ -r "$path" ]; then
+      actual="$(pg_sha256 "$path")"; [ -z "$actual" ] || [ "$actual" = "$expected" ] || differing=true
+    fi
+  done
+  pr_evidence="$(pg_pr_evidence_read "${PRO_GATE_REVIEW_PR_EVIDENCE:-}" "${PRO_GATE_REVIEW_ENDPOINT_PATCH:-}" \
+    "$repo" "$host" "$owner" "$name" "$pr" "${3:-}" 2>/dev/null || true)"
+  if [ -n "$pr_evidence" ]; then
+    base="$(jq -r .metadata.target.base_oid <<<"$pr_evidence")"
+    expected="$(jq -r '.evidence.proof.pr_metadata_digest // empty' <<<"$input")"
+    if [ -n "$expected" ] && [ "$expected" != "$(pg_pr_evidence_metadata_digest "$pr_evidence")" ]; then differing=true; fi
+  fi
+  if [ "$differing" = true ]; then
+    applicable=false; reason=different-head-or-evidence
+  elif pg_review_decision_input_proof_current "$input" "$repo" "$pr" "$host" "$owner" "$name" "$head" "$base" "${3:-}" >/dev/null 2>&1; then
+    applicable=true; reason=matching-current-proof
+    if [ "$(jq -r .verdict <<<"$accepted")" = SHIP ]; then
+      [ ! -f "${DIFF_FILE:-}" ] || raw_digest="$(pg_sha256 "$DIFF_FILE")"
+      if ! pg_review_accepted_ship_matches "$accepted" "$base" "$head" "$raw_digest"; then applicable=false; reason=ship-proof-mismatch; fi
+    fi
+  else
+    reason=current-proof-unavailable
+  fi
+  pg_review_facts_emit accepted "$reason" "$repository" "$pr" "$head" "$marker" "$applicable" "$accepted"
+}
+
+# pg_ledger_lookup_clean <marker>: echo "out<TAB>sha256" from the newest CLEAN ledger row for
+# a marker, or nothing. Fallback for pre-artifact collections (#52 item 2): lets a harvest
+# whose reservation is already absent return an ALREADY-COLLECTED review instead of declaring
+# it lost. Scans the WHOLE ledger (append-only, ~KBs per hundred runs) — a fixed tail window
+# forgot completions older than N newer rows (gate #54 r2 P2). Markers land in the ledger
+# from v0.27 on; legacy rows never match (callers fall back to the old behavior).
+pg_ledger_lookup_clean() {
+  local marker="$1" ledger="${PRO_GATE_LEDGER:-$PRO_GATE_HOME/ledger.jsonl}"
+  pg_reservation_marker_ok "$marker" || return 1
+  [ -s "$ledger" ] || return 1
+  pg_have jq || return 1
+  jq -r --arg m "$marker" 'select((.marker // "") == $m and .outcome == "clean" and .names_nothing != true) | [.out, (.sha256 // "")] | @tsv' \
+    "$ledger" 2>/dev/null | tail -n 1
+}
+
+# pg_reattach_render <slug> <out> [timeout_s]: bounded attempt to SALVAGE a review whose
+# generation may have completed server-side after the live oracle call lost its Chrome
+# connection. Hard-timeout-wrapped so a missing tab can never hang the caller. Accepts the
+# salvage ONLY when it is a COMPLETE review (ends with a VERDICT: line) — a partial snapshot
+# is rejected so the caller falls through to a clean retry. Returns 0 on a usable salvage.
+pg_reattach_render() {
+  local slug="$1" out="$2" t="${3:-150}" tmp="${2}.salvage"
+  local oracle_bin="${PRO_GATE_ORACLE_BIN:-oracle}" timeout_bin="${PRO_GATE_TIMEOUT_BIN:-timeout}"
+  if [[ "$oracle_bin" == */* ]]; then
+    [ -x "$oracle_bin" ] || return 1
+  else
+    pg_have "$oracle_bin" || return 1
+  fi
+  [ -n "$slug" ] || return 1
+  rm -f "$tmp"
+  if { [[ "$timeout_bin" == */* ]] && [ -x "$timeout_bin" ]; } || pg_have "$timeout_bin"; then
+    "$timeout_bin" "${t}s" "$oracle_bin" session "$slug" --harvest --write-output "$tmp" >/dev/null 2>&1 || true
+  else
+    "$oracle_bin" session "$slug" --harvest --write-output "$tmp" >/dev/null 2>&1 || true
+  fi
+  if pg_is_review "$tmp"; then
+    mv "$tmp" "$out"; return 0
+  fi
+  rm -f "$tmp"; return 1
+}

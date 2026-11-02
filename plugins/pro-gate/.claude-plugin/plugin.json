@@ -1,0 +1,13 @@
+{
+  "name": "pro-gate",
+  "version": "0.65.2",
+  "description": "Run the final, deepest pull request review through the account's selected Pro reasoning model, then route confirmed findings to the best available fixer.",
+  "author": {
+    "name": "StartupBros / House of Vibe",
+    "url": "https://houseofvibe.ai"
+  },
+  "homepage": "https://houseofvibe.ai",
+  "repository": "https://github.com/StartupBros-com/hov-stack",
+  "license": "MIT",
+  "keywords": ["house-of-vibe", "code-review", "pull-request", "pro-gate"]
+}

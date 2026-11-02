@@ -1,0 +1,431 @@
+# Changelog
+
+Orientation layer for pro-gate's full history: what changed, when, why, and where to look
+first. Scope window: 2026-06-29 → 2026-08-08 (complete history). Reconstructed 2026-08-03
+from the full git log (66 non-merge commits), all 11 tags and GitHub Releases, the
+VERSION-bump record, and the issue tracker. Release notes on individual GitHub Releases remain per-release; this file is the
+durable cross-version record.
+
+Conventions in this file:
+
+- **Release** means a published GitHub Release (tag + assets + marketplace promotion).
+- **Untagged** versions are real version numbers that shipped without a tag; the early ones
+  lived on the operator's machine before the repo became the source of truth, and v0.22.0
+  was bumped in-repo before the release chain existed.
+- Every version from v0.23.0 onward was produced by the automated release chain and exists
+  as a Release.
+
+## Version Timeline
+
+<!-- prettier-ignore -->
+| Version | Date | Artifact | Theme |
+|---|---|---|---|
+| v0.65.2 | 2026-10-18 | Pending release | `lib/pro-gate-lib.sh` parses again under bash 3.2, the stock macOS `/bin/bash` (#295). Since #266 (3754f81, first released in v0.61.1) a `case` pattern inside the review-facts candidate scan's `< <( )` had no leading parenthesis, which bash before 4 reads as the end of the substitution, so nothing that sourced the library could start on a Mac. The three patterns now carry leading parentheses; behaviour is unchanged (the extracted logic gives identical results under bash 3.2.57 and 5.2). `scripts/validate-source.sh` now also parses every shell file outside `tests/` with bash 3.2.57 (pinned `bash:3.2` image), so CI rejects this class before release; `tests/ci-assurance.test.sh` plants the construct and checks the validator rejects it. |
+| v0.65.1 | 2026-10-17 | Pending release | The review prompt's run-marker example now carries the reason the final-line format asks for, before the marker's own parentheses: `VERDICT: <SHIP\|FIX-FIRST\|NEEDS-DISCUSSION> — <reason> (run marker: X)`, plus "never put the reason inside the marker's parentheses". The old example (`VERDICT: <your verdict> (run marker: X)`) contradicted the `— <=15 word reason` format above it, and Pro reconciled them as `VERDICT: SHIP (reason; run marker: X)`, which the strict terminal parser never binds; six finished SHIP reviews were refused 2026-10-13..17 (#271). Prompt-only: the parser, nonce rules and contract digests are unchanged. `tests/template-verdict.test.sh` now checks that the example in the prompt actually sent puts the reason before the marker and, filled in, binds to the sending run. |
+| v0.65.0 | 2026-10-17 | Pending release | A reservation still marked `generating` stops counting against review capacity once its charge is older than `PRO_GATE_GENERATION_CEILING` (default 10800 s, `0` disables). One predicate, `pg_reservation_holds_capacity`, now answers the question for the slot plan, the holding count, the slot-wait holder report and `--status`; status adds `past_generation_ceiling` and the state `past-generation-ceiling`. The clock is the charge epoch (field 7), falling back to creation only when a record predates it; missing, zero, non-numeric or future clocks, legacy records and unknown states keep holding. Read-side only: nothing is rewritten, removed, refunded or terminalized, harvest is unchanged, and TTL plus confirmed misses remain the only removal path. Basis: probes saw completed answers by 592 s (n=30), fresh successes finished by 3,838 s after their slot (n=1,817), and the one conversation seen still writing at 9,432 s ended recovery-exhausted. The slot-wait supersession sweep no longer reports freeing a slot for a holder already past the ceiling (#273). |
+| v0.64.1 | 2026-10-17 | Pending release | A standalone `P0` or `P1` line (the label alone, no decoration) is a provisional section label: blank lines may separate it from an explicit same-severity `[Pn]` finding, which is counted. Before, the label alone made both open counts unavailable, so `--review-facts` returned `open_p0: null, open_p1: null` for a completed review that said `P0: none`, the owner's completed-review stop merge refused with "invalid counts", and the round never reached `.last`/`.hist` (#291; widget #4377 parked on it). An empty section, a different severity, an unsupported label, a fence, prose before the finding, or end of input keeps counts unavailable, and so does an unbracketed `path:line` line after a `RESOLVED` finding in such a section, which has no severity of its own. A reopen marker (`NOT RESOLVED`, `STILL-PRESENT`, `REOPENED`, `NOT FIXED`, `Correction:`) on the `RESOLVED` headline itself now keeps the finding open, as one on a later line already did. Decorated empty labels (`P1:`, `[P0]`, `**P1**`, `- P1`), `none` declarations, headings, bindings and review authority are unchanged; existing round history is not backfilled. |
+| v0.64.0 | 2026-10-15 | Pending release | A harvest that refuses a completed, current answer (a verdict skeleton without a grounded diff reference, or a review without the run-marker echo) keeps its existing exit, charge, reservation and input binding, and now also writes one write-once, mode-0600 `rejected-captures/<marker>` record binding the exact bytes and SHA-256 to the marker, charged epoch, input binding and conversation URL. It does this only when the CDP helper proved the bytes are the finished last assistant response after the attempt's marked prompt (not generating, finished-turn actions present, identical on a ~2.5 s re-read, same conversation URL as the memo and any matched source). The next typed decision returns `stop-without-new-review` / `rejected-capture` (`report-only`, exit 0) with a `shape:"rejected-capture"`, `applicable:false` row, while no other attempt is active or reserved; a newer applicable completion supersedes it and other live work still recovers. Repairs never resume the stopped attempt or rewrite the record; an explicit `--harvest` may reinspect. Damaged, foreign or tampered records read as absent. Additive contract change: the outgoing digest joins the binding-compatibility list (#271). |
+| v0.63.4 | 2026-10-17 | Pending release | `--review-facts` no longer validates every stored marker for every PR and repository before deciding relevance: one read per batch of markers rules out, in a few `jq` processes, the full-shape markers whose input binding, run-meta sidecar (valid or damaged) and name all point at another target. Every other marker still gets the unchanged per-marker validation, and any failure in that read falls back to validating all of them. On a copy of the live store (2,216 markers), the widget#4221 query went from 101.3 s to 1.8 s with byte-identical output, so verdict recording stops missing its 120 s timeout. Candidate lists matched old vs new for eight targets. The input-result digest-mismatch diagnostic now prints only for markers that reach full validation (#292). |
+| v0.63.3 | 2026-10-16 | Pending release | The optional status recorder accepts a review base equal to the PR resource's own `base.sha` (the snapshot the daemon binds completed reviews to, refreshed only when the PR syncs) as well as the live default-branch tip, both read from GitHub at recording time; on busy repositories the two differ for most open PRs, so a correct SHIP was refused and its owner parked (#288). Base repository/ref must still match and head/base/default-branch rechecks are unchanged. The status description now records the base the review ran against instead of the record-time tip, so `--verify-for-merge` computes its overlap window from the reviewed base to the current tip, including commits between the snapshot and recording; the success log keeps the record-time tip on a separate `live tip:` line. An injected PR reader without `baseSha` keeps the live-tip-only rule. |
+| v0.63.0 | 2026-10-14 | Pending release | An accepted current FIX-FIRST with proven zero open P0/P1 and at least one deferred finding hands off to the existing merge workflow with reason `fix-first-deferred-p2-only`, carrying `open_blocking: 0`, ordered P2/P3 `deferred_findings` and `deferred_count`; severity forms normalize list markers, bold/underscore markup, optional colons and case, while unsupported P0/P1 labels leave counts unavailable and require a fix. Severity section headings are boundaries and heading-form findings count; an unsupported P2/P3 label closes the open block instead of extending it. A section-like blocker heading followed by a finding body counts as that finding; a heading whose blocking label cannot be parsed keeps counts unavailable. Whole finding blocks reconcile later reopening over RESOLVED; zero blockers with no deferred findings dispatches `fix-review-findings` / `fix-first-without-findings`. Deferred text retains continuation evidence and fixes within 1,024 characters including any `… [truncated N chars]` marker. The daemon treats the deferral allow as current-head completion, and status derives base 2 from the scorer; `rounds-not-converging` still wins and any open P0/P1 still requires a fix. The advisory base grant and invalid flat-cap fallback are now 2; the ceiling stays 8 and explicit overrides still work (#274). Countermetric: among decisions with reason `fix-first-deferred-p2-only`, count deferred items later fixed as real bugs through fix PRs closing `review-deferred` issues (including the stale-lock P2 from #1560); review after 30 days of data. |
+| v0.62.0 | 2026-10-14 | Pending release | Empty verdict skeletons fail with exit 6 and outcome `template-verdict`. Clean reviews must include a separate rationale paragraph citing a changed path, file:line or identifier, including paths for VERSION-only and docs-only changes; the whole VERDICT line is excluded, so a diff reference appended to the verdict does not count, and plain English does not either. One read-only marker-based shape check guards recovery, accepted-artifact reads, typed decisions, public facts, binding repair and legacy daemon completion using retained tokens or a legacy path manifest; a completion whose input binding predates retained vocabulary (contract digests before 0.62.0) is judged on its own shape, so grounded historical reviews keep their acceptance while skeletons stay refused, and a current-contract result without vocabulary fails closed. Typed queries for saved skeletons emit a complete `stop-without-new-review` / `template-verdict` envelope at exit 0, with the rejected marker and artifact digest in facts. Newest charged-epoch selection lets a newer grounded review supersede an older skeleton and stops closed on a newest skeleton; the additive contract update preserves predecessor binding reads. Removed identifiers and trailing hunk-context identifiers are indexed without range prefixes, and deferred exit-9 recovery stays `in-progress` without ramp failure training. Every run ledger row carries `body_bytes` and `names_nothing`, and salvage waits within its existing budget for an assistant paragraph beyond the verdict block (#262). |
+| v0.60.1 | 2026-10-03 | Pending release | A confirming pass (`--confirm`) now rechecks every prior P0, P1 and P2 finding as RESOLVED (with the fix's file:line) or STILL-PRESENT before reporting new findings; it rechecked only P0/P1, so a prior P2 left unfixed was neither rechecked nor new and could drop out of the follow-up review. P3 nits are still not rechecked, and the round governor still scores only P0/P1 lines. The full diff, output format, verdicts and input modes are unchanged (#252) |
+| v0.60.0 | 2026-09-29 | Pending release | A send that produced no ChatGPT conversation (`recovery-exhausted`, proof `no-conversation-after-send`) no longer spends a governor round when its attempt-time delivery evidence is known: its disposition is written as v2 with that evidence, it counts toward `delivery-failed-unchanged` alongside proven no-sends, and cleanup refunds its exact round epoch. With unknown evidence it keeps the v1 record and its round, since nothing else would bound a repeat. The ledger reason stays `no-conversation`. v0.59.x cannot read the new record (#246). |
+| v0.59.1 | 2026-09-29 | Pending release | The Node salvage helper no longer trims `salvage-nonmatching.txt` to its newest 500 lines past 800; like every other writer it only appends, so a resolved memo claim's fingerprint line and a concurrent shell append can no longer be dropped. Node memo pruning treats a symlinked review-input binding as unreadable, which protects its claims, matching the shell's reader |
+| [v0.59.0](https://github.com/StartupBros-com/pro-gate/releases/tag/v0.59.0) | 2026-09-28 | Release | Reliability repair: per-PR query failures no longer latch the whole daemon; unique, conviction-bound memo claims preserve recovery bytes through read, restore and storage faults without authorizing foreign results; proven no-send dispositions durably retain attempt-time delivery evidence before refund, with explicit unavailable and legacy-untracked facts instead of invented counts. CONTINUE bypasses churn only within enforced numeric headroom. Trusted CI propagates parser failures and exercises adapter conformance and deterministic fault cases. Producer and pinned pi/Windows consumers must upgrade together; prior binding formats remain readable. No default-policy or durable one-use override redesign (#240, #241; dotfiles #1434). |
+| [v0.58.0](https://github.com/StartupBros-com/pro-gate/releases/tag/v0.58.0) | 2026-09-28 | Release | A review-decision fresh run whose Send Oracle's own session record proves was never dispatched now records its delivery condition (exact evidence relation, input mode, `PRO_GATE_BROWSER_ATTACHMENTS`, and the Oracle build `oracle --version` reports) in a write-once `delivery-conditions/<marker>` sidecar beside the refunded disposition, with a count of such refunds in a row for the change. The query and the guarded dispatch recheck report it through one helper as `facts.delivery.failed_unchanged`; at two, the reducer returns `stop-without-new-review` / `delivery-failed-unchanged` instead of re-granting the identical run, which before repeated until the caller's time budget ran out. A changed condition, or an operator's one-run `PRO_GATE_FORCE_ROUND=1` (resolved into `facts.delivery.override`), grants again; a Cloudflare refund, a sent attempt or a review between refunds is not counted. Additive contract change: the outgoing contract digest joins the binding-compatibility list (#204, part of #175) |
+| v0.57.0 | 2026-09-27 | Pending release | A fresh run that finds no free review slot now releases the reservations of merged, closed or moved-on PRs itself: it runs `--recover`'s supersession proof (immutable binding + canonical run-meta + a bounded GitHub read) on each exited run still holding capacity, with the reservation guard released during the GitHub call, at most once per `PRO_GATE_RECONCILE_INTERVAL`, never past the wait's deadline, and takes the freed slot in the same run; the charge, ledger `superseded` event and optional audit harvest match `--recover`. The dispatch sweep's live-probe rewrite no longer turns a concurrently superseded reservation back into account occupancy, and a confirmed probe miss keeps a `complete` reservation complete instead of re-arming its slot (#234, #236). The engine watchdog waits in 1s steps and stops as soon as Oracle exits, instead of holding a finished run for the rest of its 10s poll. Its stall and no-think checks never judge an Oracle that has already exited, so a self-exited run is no longer relabelled watchdog-killed and keeps its transcript proof. CI's test step fell from 41m28s to 31m22s (#233, PR #237) |
+| v0.56.0 | 2026-09-26 | Pending release | A send that produced no ChatGPT conversation (Oracle `prompt-commit-timeout` with a recorded tab URL still off any `/c/` conversation, no conversation ID, and an empty composer, bound by the same digest-verified exact-session record as the refund proof, plus a clean final scan) no longer buys a futile reattach, the 62-minute live-review salvage budget, or a 6-hour unknown-fate hold. The round stays charged and a `recovery-exhausted`/`no-conversation-after-send` disposition releases the slot at exit; a run without a GitHub repository and PR keeps the hold. New ledger reason `no-conversation`. Both send proofs read Oracle's `promptSubmitted` through one strict reader, so a malformed or disputed value leaves the send's fate unknown instead of authorizing a `--force` retry or a refund (#230, part of #163) |
+| v0.55.3 | 2026-09-26 | Pending release | `--recover` reports a harvest that proved the review gone as **No review remains** instead of **Browser needs attention**: a live reservation past its TTL skips the restored-reservation probes, and when its full harvest reaches the confirmed-miss limit it writes a `recovery-exhausted` disposition, releases the reservation and exits 6 like browser trouble; the relay now re-reads the disposition after that harvest and reconciles it under the change lock, while real browser trouble, which writes no disposition, is unchanged (#228) |
+| v0.55.2 | 2026-09-25 | Pending release | A pre-v0.55 PR round that left no review behind (charged, but no captured bytes, result, or conversation) no longer strands its unchanged head at `invalid-binding`; a legacy round that left captured bytes or a result still cannot trigger a replacement spend, and one that left only a remembered conversation cannot for the 14 days pro-gate keeps that memo, which neither the newest-200 memo cap nor a revocation (a cross-bound probe or a provenance rejection) shortens: a revocation claims a legacy memo by renaming it straight into a `legacy-review-receipts/` entry of its own, so the claimed memo is the one kept, with its 14-day clock, no later revoker can replace it, and only the 14-day sweep removes it; the record scan checks each record before the one a writer moves it to (`pending/` before `completed/`, the cross-bind sidecar before the memo), so a move between two checks is still seen; and a legacy round's cross-bind sidecar is left to the 14-day sweep too. The refusal is re-read at every guarded dispatch boundary, so a record that appears after the grant still stops the charge (#226). A salvage listing started just before its deadline gets a 1s floor, so its abort no longer reports a decisive result as browser-down (v0.55.1 regression, #227) |
+| v0.55.1 | 2026-09-25 | Pending release | Every Chrome DevTools request in the CDP helper is bounded: in-window lists share the invocation deadline, post-deadline closes/re-lists/revalidation get a small fixed budget, the list-failure backoff is clamped, and cleanup counts only confirmed closes (#224) |
+| v0.55.0 | 2026-09-24 | Pending release | PR evidence uses authoritative GitHub base ref/tip and head rather than feature tracking; stable metadata/patch preparation, file-only advisory queries, pre-charge freshness checks, and daemon retarget invalidation. Historical full/scoped bindings remain recoverable but cannot silently become current merge authority or trigger replacement spend (#221, PR #222). |
+| v0.54.0 | 2026-09-21 | Pending release | Two fixes rebuilt on main after the v0.52.0 release branch conflicted: a stale throttle modal on an abandoned tab is charged once per seven-day horizon instead of re-arming the account cooldown on every attempt, through one gate for every unowned sighting, atomic per-fingerprint records under `throttle.cooldown.seen.d/` with TTL and count pruning, generation-checked deletes, a kernel advisory lock on a fixed pool of 64 slot files, age-aware admission and the atomic create as the fail-open arbiter (#208, PR #215, twelve gate rounds; retire-on-healthy pulled to #217); and a retained reservation's `conversation-urls` memo survives the newest-200 eviction and the 14-day sweep, with the path overrides resolved through one empty-or-unset-safe helper (#206 groundwork, PR #216; scoped close and `--close --url` pulled to #218) |
+| v0.53.0 | 2026-09-19 | Pending release | Browser-memory legibility and typed stops: the shipped browser unit is bounded with `MemoryMax=70%`/`OOMPolicy=continue` and no `MemoryHigh` (#212); a cgroup-reading sentinel defers a slot before the browser wedges, instead of reading host-wide free RAM (#212); a review whose open-finding count stops shrinking for two rounds stops typed as `rounds-not-converging` with its trajectory in the facts, overridable with `PRO_GATE_ROUNDS_CONTINUE=1` (#174); a completed result that can never carry merge proof stops as `result-not-bindable-for-mode` instead of collecting forever (#147); a caller-supplied `--diff` run installs a `caller-patch` binding bound to the PR's GitHub head, so a stuck reservation can be proof-superseded (#161); binding records written under a predecessor contract digest stay readable after an upgrade (`PG_REVIEW_DECISION_COMPATIBLE_CONTRACT_DIGESTS`) the browser memory sentinel measures against the smaller of `memory.high`/`memory.max`, and the doctor reports whether the sampler is running so an upgraded host knows to restart `oracle-chrome.service` (gate rounds 1–3) |
+| v0.52.0 | 2026-09-18 | Pending release | Operational hardening round: the account-slot wait (#179) and `pg_lock`'s no-flock reclaim spin (#189) are bounded; a selection file with one trailing newline is accepted (#203); a connector-only classic run installs a connector binding, never a full-pr proof (#150); `install.sh` hashes through stdin (#172); remaining bare empty-array expansions guarded for bash 3.2 (#176) |
+| v0.51.0 | 2026-09-15 | Pending release | Expose Oracle file-delivery policy: text bundles can opt into inline delivery with `PRO_GATE_BROWSER_ATTACHMENTS=never`, while automatic delivery remains the default |
+| v0.50.0 | 2026-09-14 | Pending release | A blank line between the last CHOICE and the VERDICT no longer empties a NEEDS-DISCUSSION review's outcomes: whitespace carries no grammar, so choices already paid for stay reachable, while content after the block still ends the parse |
+| v0.49.0 | 2026-09-13 | Pending release | Liveness must be positively disproved, never inferred from a failed measurement: pg_harvest_claimed's and st_inflight's no-flock/mkdir-fallback branches now share pg_dirlock_reclaim_dead's fail-closed token-recompute rule, so a transient read failure for a live holder no longer reads as dead |
+| v0.48.0 | 2026-09-12 | Pending release | A rate-limit modal over a live review conversation is a typed throttled state that engages the account cooldown, instead of reading as still-generating; the remaining cooldown is a normalized fact the daemon and callers can wait on |
+| v0.47.0 | 2026-09-12 | Pending release | A remembered conversation URL must look like a conversation id, checked on write and on read, so a synthetic placeholder can no longer park a run on a slot forever; --status names the stall class and the TTL remaining |
+| v0.46.0 | 2026-09-11 | Pending release | Run-marker binding folds ASCII case: a lowercased self-echo binds instead of convicting the run's own conversation |
+| v0.45.0 | 2026-09-11 | Pending release | Only a finished review completes a revision; checks must settle before a review starts; exhausted retries are visible instead of counting as done |
+| v0.44.1 | 2026-09-10 | Pending release | An empty lock-owner record no longer counts as a marker, so a winner between creating its owner file and writing into it keeps the orphan grace that protects it from a concurrent reclaimer |
+| v0.44.0 | 2026-09-10 | Pending release | One hardened dirlock reclaimer for every no-flock lock: a recycled pid no longer reads as the original owner, two reclaimers cannot both enter, and a release never takes a replacement |
+| v0.43.0 | 2026-09-09 | Pending release | No-flock reservation guard self-heal: a directory left by a killed process is reclaimed, a live owner is never reclaimed, and liveness must be positively disproved rather than inferred from a failed measurement |
+| v0.42.0 | 2026-09-09 | Pending release | Mixed cross-task verdicts rejected before publication or replay; owned answers and quoted examples preserved; Oracle session names remain unique per invocation |
+| v0.41.0 | 2026-09-08 | Pending release | Wait sizing: 60m fresh / 45m collection defaults from the ledger's p90, with the queued-review wait sized to match and the skill, relay and daemon no longer pinning the value past it; daemon envelope validation moved to the library and conformance-tested |
+| v0.40.0 | 2026-09-04 | Pending release | Ledger failure reasons: a closed-enum `reason` and the status `detail` on every failed row |
+| v0.33.0 | 2026-08-15 | Pending release | Reservation lifecycle: a finished review releases its account slot instead of holding it to TTL |
+| [v0.32.0](https://github.com/StartupBros-com/pro-gate/releases/tag/v0.32.0) | 2026-08-08 | Release | Exact marker-owned conversation titles and durable-success archive lifecycle |
+| [v0.31.1](https://github.com/StartupBros-com/pro-gate/releases/tag/v0.31.1) | 2026-08-04 | Release | Cross-bound conversation memos: answer-ownership check, memo eviction, harvest-path TTL |
+| [v0.31.0](https://github.com/StartupBros-com/pro-gate/releases/tag/v0.31.0) | 2026-08-04 | Release | Trajectory-aware round governor: earned rounds, churn brake, never-landed refunds |
+| [v0.30.1](https://github.com/StartupBros-com/pro-gate/releases/tag/v0.30.1) | 2026-08-03 | Release | Hygiene close-out: consent stderr leak, run-log sweep allowlist, autoupdate.log bound, `.env` perms, salvage-window knob |
+| [v0.30.0](https://github.com/StartupBros-com/pro-gate/releases/tag/v0.30.0) | 2026-08-03 | Release | Residuals close-out: daemon recoverable-state guard, scratch hygiene, memoized-URL recovery (plus the #58–#60 docs wave) |
+| [v0.29.0](https://github.com/StartupBros-com/pro-gate/releases/tag/v0.29.0) | 2026-08-02 | Release | ChatGPT sidebar titling: run-naming prompt line |
+| [v0.28.0](https://github.com/StartupBros-com/pro-gate/releases/tag/v0.28.0) | 2026-08-02 | Release | Capture provenance: nonce run-binding, early URL capture, immutable artifacts |
+| [v0.27.0](https://github.com/StartupBros-com/pro-gate/releases/tag/v0.27.0) | 2026-08-01 | Release | `--status` run rediscovery, ledger identity fields |
+| [v0.26.0](https://github.com/StartupBros-com/pro-gate/releases/tag/v0.26.0) | 2026-08-01 | Release | Convergence-based rounds policy, work-disposition rule |
+| [v0.25.0](https://github.com/StartupBros-com/pro-gate/releases/tag/v0.25.0) | 2026-07-28 | Release | Tab-death recovery via remembered conversation URL |
+| [v0.24.1](https://github.com/StartupBros-com/pro-gate/releases/tag/v0.24.1) | 2026-07-22 | Release | Direction-aware version precheck; launchd auto-update timer dropped |
+| [v0.24.0](https://github.com/StartupBros-com/pro-gate/releases/tag/v0.24.0) | 2026-07-22 | Release | Cook-and-harvest oversized diffs; low-memory diagnosis |
+| [v0.23.1](https://github.com/StartupBros-com/pro-gate/releases/tag/v0.23.1) | 2026-07-17 | Release | Follow the marketplace's declared plugin name |
+| [v0.23.0](https://github.com/StartupBros-com/pro-gate/releases/tag/v0.23.0) | 2026-07-17 | Release | Automated release chain end to end |
+| v0.22.0 | 2026-07-16 | Untagged (VERSION bump only) | Per-change round budget |
+| [v0.21.0](https://github.com/StartupBros-com/pro-gate/releases/tag/v0.21.0) | 2026-07-17 | Release | First packaged, versioned runtime distribution |
+| v0.11–v0.20 | 2026-07-02 → 07-11 | Untagged (pre-repo versions) | Salvage and resilience, run ledger, harvest and reservations |
+| [v0.1.0](https://github.com/StartupBros-com/pro-gate/releases/tag/v0.1.0) | 2026-06-30 | Release | Bootstrap: engine, daemon, installer, doctor |
+
+## Capability waves
+
+### 1. Bootstrap: the final-tier gate (2026-06-29 → 06-30, v0.1.0)
+
+The founding commit set: drive the web-only ChatGPT Pro reasoning model as an automated
+last review tier on a PR, then route findings to a tiered fixer. Everything since is
+hardening of this loop.
+
+Delivered capability: `oracle-review.sh` engine, shared platform lib (macOS/WSL/Linux),
+label-gated daemon, cross-platform installer with service templates, `pro-gate-doctor.sh`,
+tiered fixer routing, portable locking, model-strategy auto-fallback.
+
+Representative commits:
+[c68a1e8](https://github.com/StartupBros-com/pro-gate/commit/c68a1e8) (engine),
+[4beaad4](https://github.com/StartupBros-com/pro-gate/commit/4beaad4) (platform core),
+[942759d](https://github.com/StartupBros-com/pro-gate/commit/942759d) (installer + doctor),
+[cd736c0](https://github.com/StartupBros-com/pro-gate/commit/cd736c0) (model-strategy fallback).
+
+### 2. Browser-drift resilience and salvage (2026-07-02 → 07-03, v0.11–v0.18.1, untagged)
+
+ChatGPT UI drift broke oracle's thinking-detection and capture paths in production; this
+wave made the browser the ground truth and built recovery around it. The repo also became
+the source of truth here:
+[0a5ef27](https://github.com/StartupBros-com/pro-gate/commit/0a5ef27) synced live daemon
+versions v0.11–v0.14 back into git, which is why v0.2–v0.14 have no tags.
+
+Delivered capability: CDP tab salvage, run-marker tab identity, strict review-completeness
+checks, forced-retry safety (`--force`, probe-before-kill), fresh-tab render fallback for
+dead renderers, throttle-aware salvage with cooldown files, machine-readable status JSON.
+
+Representative commits:
+[3bb5891](https://github.com/StartupBros-com/pro-gate/commit/3bb5891) (first CDP salvage),
+[f20282c](https://github.com/StartupBros-com/pro-gate/commit/f20282c) (run-marker identity, v0.15),
+[422b2a0](https://github.com/StartupBros-com/pro-gate/commit/422b2a0) (fresh-tab render, v0.17),
+[8e0ace1](https://github.com/StartupBros-com/pro-gate/commit/8e0ace1) (throttle-aware salvage, v0.18).
+
+### 3. Operations at scale: ledger and governor (2026-07-08 → 07-09, v0.19–v0.19.1, untagged)
+
+Once runs were surviving, the problem became fleet behavior: how many runs, how fast, and
+what actually happened. This wave added the run ledger every later analysis relies on.
+
+Delivered capability: append-only run ledger, adaptive concurrency governor (earn
+parallelism on clean streaks, drop on throttle), self-healing Chrome restart,
+`pro-gate-stats.sh`; fixes for the archive/probe double-spend, GPT-5.6 verdict-format
+tolerance, and Cloudflare challenge backoff.
+
+Closed workstreams:
+[#11](https://github.com/StartupBros-com/pro-gate/pull/11) (double-spend),
+[#12](https://github.com/StartupBros-com/pro-gate/pull/12) (Cloudflare backoff),
+[#13](https://github.com/StartupBros-com/pro-gate/pull/13) (verdict tolerance).
+
+Representative commits:
+[a5d94ba](https://github.com/StartupBros-com/pro-gate/commit/a5d94ba) (ledger + governor, v0.19),
+[a2cfade](https://github.com/StartupBros-com/pro-gate/commit/a2cfade) (double-spend fix),
+[10b9e24](https://github.com/StartupBros-com/pro-gate/commit/10b9e24) (Cloudflare backoff).
+
+### 4. Harvest and reservations: spend protection (2026-07-10 → 07-11, v0.20–v0.21 era, untagged)
+
+The Pro model can reason far longer than any caller can wait. This wave stopped treating
+that as a loss: an interrupted run leaves a reservation and its review is collected later.
+Exit 9 plus `--harvest` date from here, and spend protection became the engine's prime
+directive.
+
+Delivered capability: preserve-and-harvest for long-running reviews (exit 9), reservation
+reconciliation with serialized harvests, repo-scoped reservations with slot-true capacity,
+atomic runtime installs, leaked root-tab sweep, de-versioned model labels (capture the
+resolved model at runtime), daemon self-reload on redeploy.
+
+Representative commits:
+[55c21a5](https://github.com/StartupBros-com/pro-gate/commit/55c21a5) (harvest),
+[36ebf9d](https://github.com/StartupBros-com/pro-gate/commit/36ebf9d) (reconciliation),
+[a1e958a](https://github.com/StartupBros-com/pro-gate/commit/a1e958a) (repo-scoped reservations),
+[b1a1d54](https://github.com/StartupBros-com/pro-gate/commit/b1a1d54) (daemon self-reload).
+
+### 5. Distribution and release automation (2026-07-15 → 07-18, v0.21.0 → v0.23.1)
+
+pro-gate became an installable product: a packaged, versioned, checksummed runtime promoted
+through the HOV marketplace, with the release chain automated end to end. The `VERSION`
+file was born at 0.21.0; from v0.23.0 every VERSION bump auto-produces a tag, tested
+release assets, and a marketplace promotion.
+[#27](https://github.com/StartupBros-com/pro-gate/issues/27) records the era's main bug
+(release train never fired for workflow-published releases), which is also why v0.22.0
+exists only as a VERSION bump with no tag.
+
+Delivered capability: versioned plugin runtime packaging, marketplace deploy key, checksum
+verification from dist, auto-release chain (`auto-release.yml` → `release.yml` → release
+train), marketplace-declared plugin name (`pro-gate@hov`), oracle version floor in the
+doctor, gpt-5.6 model hint with select→current fallback, lead-paragraph release
+announcements.
+
+Closed workstreams:
+[#22](https://github.com/StartupBros-com/pro-gate/pull/22),
+[#25](https://github.com/StartupBros-com/pro-gate/pull/25),
+[#27](https://github.com/StartupBros-com/pro-gate/issues/27),
+[#28](https://github.com/StartupBros-com/pro-gate/pull/28).
+
+Representative commits:
+[f28b7b3](https://github.com/StartupBros-com/pro-gate/commit/f28b7b3) (packaged runtime),
+[6ff616a](https://github.com/StartupBros-com/pro-gate/commit/6ff616a) (release chain, v0.23),
+[c3f9367](https://github.com/StartupBros-com/pro-gate/commit/c3f9367) (marketplace name, v0.23.1).
+
+### 6. Budgets and bounded loops (2026-07-16 → 07-17, v0.22.0, untagged)
+
+Review→fix→re-review loops needed a governor: a per-change budget of slot-spending rounds
+per rolling window (default 4 per 24 h, exit 12 above it, no spend), with loud flagging
+when the budget refuses a run that has an unconfirmed open P0. The confirming pass
+(`--confirm`: verify every prior P0/P1 as RESOLVED or STILL-PRESENT) was hardened in the
+same wave through two dogfood gate rounds.
+
+Representative commits:
+[f049eb7](https://github.com/StartupBros-com/pro-gate/commit/f049eb7) (round budget, v0.22),
+[821d353](https://github.com/StartupBros-com/pro-gate/commit/821d353) (open-P0 flag),
+[88e560d](https://github.com/StartupBros-com/pro-gate/commit/88e560d) (confirming-pass gaps).
+
+### 7. Large diffs and low memory (2026-07-21 → 07-22, v0.24.0 → v0.24.1)
+
+Oversized diffs flipped from refuse-at-6000-lines to cook-and-harvest: the run proceeds and
+lands as an in-progress harvest, and only past the hard ceiling (25,000 lines) does the
+engine refuse without spend. Low-memory hosts got honest OOM diagnosis. v0.24.1 is a
+deliberate subtraction: a macOS launchd auto-update timer was built, gate-reviewed twice,
+and then dropped as too fragile for a distributable; the lesson is written up in
+[#43](https://github.com/StartupBros-com/pro-gate/pull/43) (ship the legible core, decline
+fragile automation). [#37](https://github.com/StartupBros-com/pro-gate/issues/37) made the
+version-mismatch precheck direction-aware.
+
+Representative commits:
+[c1abb51](https://github.com/StartupBros-com/pro-gate/commit/c1abb51) (cook-and-harvest, v0.24),
+[20e9b5b](https://github.com/StartupBros-com/pro-gate/commit/20e9b5b) (OOM diagnosis),
+[7f0cfc6](https://github.com/StartupBros-com/pro-gate/commit/7f0cfc6) (timer dropped, v0.24.1).
+
+### 8. The recovery-correctness campaign (2026-07-28 → 08-02, v0.25.0 → v0.29.0)
+
+A ledger-driven usage analysis (723 runs) showed salvage had become the primary capture
+path and that runs were being falsely declared lost. Five releases in six days rebuilt
+recovery on positive evidence instead of heuristics; each PR was itself reviewed through
+the Pro gate it modifies.
+
+Delivered capability, by release:
+
+- **v0.25.0**: recover reviews whose tab died by remembering the conversation URL at
+  submission instead of equating "no open tab" with "review lost"
+  ([#44](https://github.com/StartupBros-com/pro-gate/pull/44),
+  [f65acf7](https://github.com/StartupBros-com/pro-gate/commit/f65acf7)).
+- **v0.26.0**: convergence-based rounds policy (continue while findings strictly shrink,
+  stop on oscillation), explicit work-disposition rule (committed work stays at any stop;
+  the gate never reverts as a budget response), engine-first lost-run recovery, active-run
+  index ([#46](https://github.com/StartupBros-com/pro-gate/issues/46),
+  [#51](https://github.com/StartupBros-com/pro-gate/pull/51),
+  [45b8eae](https://github.com/StartupBros-com/pro-gate/commit/45b8eae)).
+- **v0.27.0**: `--status` read-only run rediscovery (answers "what runs exist, what do I
+  harvest, how many rounds remain" from a bare PR number), marker and round-key identity in
+  the ledger ([#47](https://github.com/StartupBros-com/pro-gate/issues/47),
+  [#53](https://github.com/StartupBros-com/pro-gate/pull/53),
+  [b1b7d22](https://github.com/StartupBros-com/pro-gate/commit/b1b7d22)).
+- **v0.28.0**: positive capture provenance. Every run embeds a nonce the model echoes on
+  its verdict line; browser-matched captures are accepted nonce-or-nothing by default.
+  Early conversation-URL capture per attempt, an immutable completed-artifact store with a
+  durability ladder, idempotent harvests
+  ([#48](https://github.com/StartupBros-com/pro-gate/issues/48),
+  [#55](https://github.com/StartupBros-com/pro-gate/issues/55),
+  [#56](https://github.com/StartupBros-com/pro-gate/issues/56),
+  [#54](https://github.com/StartupBros-com/pro-gate/pull/54),
+  [3e8cc3f](https://github.com/StartupBros-com/pro-gate/commit/3e8cc3f)).
+- **v0.29.0**: review chats open by naming the PR, round, and repo, so ChatGPT sidebar
+  titles identify each run; monotonic per-change round ordinals survive rollbacks
+  ([#49](https://github.com/StartupBros-com/pro-gate/issues/49) phase 1,
+  [#57](https://github.com/StartupBros-com/pro-gate/pull/57),
+  [b2eb3c4](https://github.com/StartupBros-com/pro-gate/commit/b2eb3c4)).
+
+### 9. Announcements, documentation, and residuals close-out (2026-08-02 → 08-03, v0.30.0)
+
+Release announcement cards stopped being identical: the release train now derives
+card-ready "What's new" bullets from each release body (an author-written `## Highlights`
+section wins), and the README was rebuilt value-first with the full engine command and
+exit-code reference. v0.30.0 then closed the standing residuals: the daemon consults
+`--status --json` and skips fail-counting engine states that are recoverable, run scratch
+dirs are cleaned on exit (with a backfill sweep for pre-trap leaks), and an exit-6 run
+that remembered its conversation URL prints the exact free `--harvest` command. The first
+v0.30.0 tag failed CI on a test-environment flake (a test reaching the real default CDP
+port, absent on CI); [#62](https://github.com/StartupBros-com/pro-gate/pull/62) pinned the
+mock port and the release chain went green.
+
+Representative commits:
+[8077d12](https://github.com/StartupBros-com/pro-gate/commit/8077d12) (card bullets, [#58](https://github.com/StartupBros-com/pro-gate/pull/58)),
+[5d3e47e](https://github.com/StartupBros-com/pro-gate/commit/5d3e47e) (README revamp, [#59](https://github.com/StartupBros-com/pro-gate/pull/59)),
+[9020281](https://github.com/StartupBros-com/pro-gate/commit/9020281) (residuals close-out, [#61](https://github.com/StartupBros-com/pro-gate/pull/61)),
+[cf59d37](https://github.com/StartupBros-com/pro-gate/commit/cf59d37) (release-test fix, [#62](https://github.com/StartupBros-com/pro-gate/pull/62)).
+
+### 10. Hygiene close-out and salvage-window decoupling (2026-08-03, v0.30.1)
+
+A post-v0.30.0 field audit (22 production runs in the first day: zero regressions, both
+exit-9 runs harvested clean) surfaced a handful of small residuals this release closes:
+`pg_dangerous_consent_ok` no longer leaks a raw bash "No such file or directory" to stderr
+when the consent file is absent (redirect-order bug — `2>/dev/null` cannot catch a failed
+`<` open listed before it); the run-log sweep matches an allowlist of run-log shapes
+(`pg-run-*` plus the pre-v0.27 epoch-suffixed names) so pre-v0.27 logs finally retire while
+`autoupdate.log` and the launchd daemon's open `daemon.{out,err}.log` are structurally
+unmatched; `autoupdate.log` is bounded by the new `pg_trim_file` helper, only while the updater's
+singleton lock is actually held (lock losers announce the skip on stderr without touching
+the log; no-flock platforms never trim); `.env` is installed owner-only (a failed `chmod 600` now aborts
+the install before the version stamps land) and the doctor warns when it is
+group/other-readable. The non-live salvage window became its own knob
+(`PRO_GATE_SALVAGE_SECS`, default: follows `PRO_GATE_STALL_SECS` as before) so the stall
+watchdog can be tuned without silently halving recovery windows. Two candidate cleanups
+were deliberately REJECTED by the gate's own two-round review of this change:
+`title-seq/` counters stay unswept (documented monotonic-ordinal invariant, gate #57 r4 —
+pruning one would re-title a post-idle round r1 beside the old r1 conversation), and the
+multi-writer salvage blacklist stays append-only (a read→rename compaction can drop a
+concurrent bash/Node append without one cross-platform lock shared by every writer;
+~16KB/week does not earn that machinery). Comments calling CDP salvage "defense-in-depth"
+were updated to match observed reality (100% of clean runs 2026-07-22 → 08-03 landed via
+salvage/harvest; oracle 0.17.0 restored primary capture for runs that finish inside the
+stall fuse).
+
+### 11. Trajectory-aware round governor (2026-08-04, v0.31.0)
+
+The flat 4-per-24h round cap became a governor ([#65](https://github.com/StartupBros-com/pro-gate/issues/65)),
+grounded in a fleet-wide mining pass (254 gated changes, 737 spends, 43 reconstructed
+verdict sequences, 28 deep-read audit trails): the flat cap fired only twice ever, yet was
+too tight for converging gates (widget#987 shrank open P1s 6→5→3→2→0-SHIP at round 5;
+other-app#322 reached SHIP at round 14 — both needed per-run human forcing) and too
+loose for churning ones (open counts GREW 5→7→8→10 while four slots burned). The engine now
+scores each completed review into `rounds/<key>.hist` (verdict word, open P0/P1
+RESOLVED-filtered, resolved/still-present tallies) and grants rounds by trajectory: base
+`PRO_GATE_ROUNDS_BASE` (3), +1 earned per strictly-shrinking re-review, immovable ceiling
+`PRO_GATE_ROUNDS_CEILING` (8), with an early stop after two consecutive non-shrinking
+re-reviews — the same adaptive-within-a-ceiling shape as the v0.19 concurrency ramp. An
+explicitly set `PRO_GATE_MAX_ROUNDS_PER_PR` pins the legacy flat cap. Exit-12 refusals now
+carry the whole trajectory ("open P0/P1 by round: 5→7→8") so a human deciding on
+`PRO_GATE_FORCE_ROUND` sees churning-vs-converging at a glance, `--status` reports each
+key's live grant, and a failure proven before Oracle's browser lifecycle (Oracle EXITED on its
+own leaving a complete, digest-verified transcript; browser scanned clean; no URL memo,
+throttle, or Chrome restart) refunds its round the way the Cloudflare path always has —
+pre-browser failures had eaten 2 of pro-gate#61's 4 window rounds while spending zero Pro
+quota. Incomplete logging, post-click DOM timeouts, and watchdog-KILLED attempts stay charged
+because delivery is ambiguous: an interrupted run cannot prove what it sent, and inferring
+completeness from kill paths cost three review rounds and three distinct races. The skill's §6 stop rules
+gained the matching refinement: a returning finding whose fix the reviewer ACCEPTS but
+calls incomplete is convergence work, not oscillation — only a disputed fix approach
+escalates.
+
+### 12. Cross-bound conversation memos (2026-08-04, v0.31.1)
+
+Two production incidents stranded a change's remaining rounds and lost one review
+([#67](https://github.com/StartupBros-com/pro-gate/issues/67)): widget#1334 (slot spent,
+four unbindable harvests, then exit 6 — the only unresolved exit-9 marker in ~800 ledger
+rows) and pro-gate#66 (escaped by hand). The nonce guard was **working correctly** in both
+— the captures it rejected were genuinely another PR's review, citing another repo's files.
+The defect was upstream of it: `cdp-salvage` decided "this conversation is ours" from a bare
+full-page substring match on the run marker, and the marker rides the submitted _prompt_, so
+a mis-navigated render could show our prompt above someone else's finished answer. That page
+was then memoized as ours — and because a remembered URL is exempt from blacklisting, the
+memo stayed poisoned permanently, while the harvest path had no way to expire a reservation
+(`pg_reservation_reconcile` ran only in fresh dispatch, and fresh runs are redirected to the
+reservation before they can submit — both exits closed).
+
+Fix: ownership now requires the _answer_ to be ours. A page whose completed verdict echoes a
+different run's marker is that run's conversation regardless of prompt text — but only when
+that verdict sits AFTER our prompt, since a reused conversation legitimately holds an older
+round's verdict above it and convicting on scrollback would blacklist the live conversation.
+Such a page is never memoized, is blacklisted, and evicts a matching memo through
+claim-and-verify (rename aside, inspect, restore via `link()`), the same protocol
+`pg_provenance_reject` uses — a plain compare-then-delete races a concurrently republished
+genuine memo. `--harvest` applies the reservation TTL in a probe-free sweep that skips the
+marker being collected (reaping it mid-harvest would admit a duplicate submission and let a
+still-generating result recreate the record under a fallback key).
+
+`--status` now names three states, not two: `cross-bound` (positively convicted, terminally
+stuck, recorded by cdp-salvage in `crossbound/<marker>`), `unbindable-ambiguous` (a
+nonce-less capture that may be an older answer while ours generates — retryable), and
+ordinary generating/recoverable. Collapsing the middle case into "stuck" would tell an
+operator to delete a live reservation. The skill doc states plainly that
+`PRO_GATE_REQUIRE_NONCE=0` is the wrong response.
+
+Reservation-record integrity fixed throughout: `pg_reservation_reconcile` AND
+`pg_reservation_note_miss` both rewrote six fields, so a single confirmed miss silently
+erased v0.31's spend epoch and pushed later harvests onto the marker-time fallback; both
+also used `read`, which collapses consecutive tabs and mis-shifts fields when slot/model are
+empty. Every reservation mutation now round-trips all seven fields via per-field `awk`.
+
+### 14. Reservation capacity lifecycle (2026-08-15, v0.33.0)
+
+Five runs sat in `waiting-slot` for their full 40-minute windows while the ChatGPT account was
+idle and all four slot locks were provably free. Issue
+[#82](https://github.com/StartupBros-com/pro-gate/issues/82) traced it to a single conflation: a
+reservation stood for both "this review still occupies the account" and "this review is still
+collectable", but only the second was ever true for long.
+
+Because ChatGPT retains conversations server-side, a finished review kept probing as present, so
+its miss streak reset on every sweep and its slot stayed held for the full six-hour TTL. With the
+ramp governor at effective concurrency 1 after a throttle, one uncollected review starved the
+whole machine.
+
+Reservations now carry an explicit lifecycle state. `--probe` reports `probe-state:
+complete|generating` as an additive stderr line — deliberately not a new exit code, because the
+no-think and pre-retry watchdogs read rc 0 as "demonstrably live" and any other code would fall
+through them toward a retry against an already-spent slot. Reconciliation releases the slot the
+moment completion is proven under the same marker-owned VERDICT contract salvage uses, while
+keeping the record so the review stays harvestable for free. Unknown, legacy, unowned, and
+ambiguous states all keep holding capacity: overbooking the account is the worse error.
+
+The slot planner now returns a true available count alongside its scan bound, since a bound of 1
+whose only slot is excluded is an empty set — gating on the bound is what made runs call the lock
+scanner against an impossible plan every wait slice. When no slot is free, the wait loop and the
+timeout error now name each holding marker, its state, and the exact free-it command, and
+distinguish capacity held by running reviews from capacity held by uncollected ones.
+
+### 13. Exact conversation lifecycle (2026-08-08, v0.32.0)
+
+The prompt-title hint introduced in v0.29 made ChatGPT titles more legible, but it could not
+make them exact and it left completed server-side conversations accumulating indefinitely.
+Issue [#71](https://github.com/StartupBros-com/pro-gate/issues/71) closes both gaps without
+weakening the recovery invariants built in v0.25–v0.31.
+
+Fresh runs now publish one atomic, marker-addressed canonical-title memo before launching
+Oracle. A bounded remote-CDP organizer proves answer ownership with the same cross-bound
+rules as salvage, coalesces duplicate tabs by conversation URL, and uses only ChatGPT's
+rendered menu/input controls to apply and verify the exact PR/round title. A remembered URL
+can be opened in a retained scratch tab when the original renderer is gone; foreign, stale,
+throttled, login-wall, ambiguous, and provenance-rejected candidates are never mutated.
+
+Conversation cleanup is now a positive durable-success transition. Only exit 0 with readable,
+exact bytes under `completed/<marker>` or `pending/<marker>` may archive through ChatGPT's UI
+and close the validated local tab. Exit 3, 6, and 9 may be named for recovery, but are never
+archived or closed; UI drift and helper timeouts cannot alter output bytes, status, ledger,
+reservation state, or the engine exit code. `PRO_GATE_CHAT_RENAME` and
+`PRO_GATE_CHAT_ARCHIVE` independently control the new mutations. The exact legacy escape
+hatches remain: `PRO_GATE_KEEP_TABS=1` still suppresses both server archive and local close
+while allowing rename, and `PRO_GATE_BROWSER_ARCHIVE` is still passed through to Oracle
+unchanged (with `never` remaining the safe default).
+
+## Notes for agents
+
+- **Start with the caller contract, not the code.** `skills/pro-gate/SKILL.md` is the
+  authoritative caller guide (exit codes, recovery semantics, round policies);
+  `bin/oracle-review.sh` is the engine; the two change in the same PR by convention.
+- **The engine's exit codes are the API.** 0 review, 8 deferred without spend, 9 harvest
+  later, 11 oversized, 12 round-capped; full table in the README.
+- **For any lost or unclear run, `oracle-review.sh --status <pr>` first.** It joins
+  reservations, round budget, remembered URLs, and the ledger, and prints the exact next
+  command.
+- **History habit to know:** since v0.22 nearly every feature PR was dogfooded through the
+  Pro gate it modifies, and the gate's findings landed as follow-up commits in the same PR
+  (subjects like "address the Pro gate's findings…"). Reading a PR's commit sequence shows
+  you the reviewed evolution, not just the end state.
+- **Open residuals** as of 2026-08-03:
+  [#31](https://github.com/StartupBros-com/pro-gate/issues/31) (gate deferrals needing
+  human decision), [#35](https://github.com/StartupBros-com/pro-gate/issues/35) (manual
+  OOM recovery hint), [#39](https://github.com/StartupBros-com/pro-gate/issues/39) (macOS
+  launchd timer follow-up), [#41](https://github.com/StartupBros-com/pro-gate/issues/41)
+  (version-drift design), [#50](https://github.com/StartupBros-com/pro-gate/issues/50)
+  (hygiene batch), [#52](https://github.com/StartupBros-com/pro-gate/issues/52) (engine
+  follow-ups, partially closed by v0.28).

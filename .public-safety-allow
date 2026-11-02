@@ -26,6 +26,11 @@
 # must catch it; the planted line is the suite's negative, not a path on any machine. The
 # row brackets a letter of the name so the scan does not read the row itself as a path.
 ^tests/repo/setup\.test\.sh$	^/home/[j]doe$	the setup suite's planted negative: a non-placeholder user its host-literal scan must catch	linux-home
+# The pro-gate suites run the runtime under a fake home whose own directory is named "home", so
+# a state path under that directory reads to the scan as a home-directory path. Each leaf below is a state file or directory
+# of that fake runtime home, not a user's home directory. The row lists the exact leaves in an anchored
+# alternation and never a /home/<anything> pattern, so a real home path is still caught.
+^plugins/pro-gate/tests/	^/home/(active|autoupdate|completed|conversation-titles|conversation-urls|daemon|harvest-locks|in-progress|ledger|lib|logs|manifests|organizer-locks|run-daemon|salvage-class|salvage-nonmatching|throttle)$	fixture leaves of the pro-gate suites' fake runtime home (the runtime state files and directories under a scratch directory named home), not user home directories	linux-home
 # Vendor addresses the tree must keep: the git-guard rule that denies AI-attribution
 # trailers matches the vendors' domains (one full address sits in its comment), its test
 # proves each address is denied, and one vet cites such a trailer as evidence; the vastai test asserts on the vendor's SSH

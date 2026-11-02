@@ -1,0 +1,260 @@
+---
+title: "Separate review lifecycle, applicability, capacity, and input trust"
+date: "2026-09-02"
+last_updated: "2026-09-27"
+category: "conventions"
+module: "pro-gate"
+problem_type: "architecture_pattern"
+component: "development_workflow"
+severity: "medium"
+applies_when:
+  - "a gate spends a scarce subscription-backed browser session instead of a metered API"
+  - "recovery must collect an existing external attempt without resubmitting it"
+  - "an external connector can read more context than the caller supplied"
+tags:
+  - "pro-gate"
+  - "review-decision"
+  - "reservation-lifecycle"
+  - "capacity-release"
+  - "input-policy"
+  - "exact-marker-recovery"
+---
+
+# Separate review lifecycle, applicability, capacity, and input trust
+
+## Context
+
+A browser-driven ChatGPT Pro review spends a scarce subscription-backed conversation slot, but the
+provider exposes no trustworthy quota meter to the local engine. A local round count can describe
+history; it cannot answer how much ChatGPT allowance remains. The engine instead has to answer four
+smaller questions with evidence:
+
+1. Which exact attempt owns the review?
+2. Does that attempt still own recovery and account capacity?
+3. Does its evidence still apply to the current target?
+4. What review context is Pro-Gate allowed to request or attach?
+
+Earlier work let callers infer too much from prose, exit codes, or surviving sidecars. One concrete
+regression treated completed or pending review bytes as unresolved run metadata and sent callers back
+into recovery (session history, August 28-29). Other adapter tests went green while exercising archive
+or missing-path fixtures rather than installed recovery behavior (session history, August 26-28). These
+failures established the core rule: observation and state assembly can evolve, but action authority
+and proof ownership must stay centralized.
+
+The shipped architecture was completed through PRs #118, #120, #123, and #124. This learning treats the closed historical ideation and alternative wait/input branches as context,
+not parallel supported designs. Issue #109 remains an open residual for this architecture: a
+current-head, exact-owned conversation can remain verdict-less without positive generic terminal-UI
+proof.
+
+## Guidance
+
+### Resolve one canonical attempt before choosing an action
+
+`pg_attempt_snapshot` gives every caller the same precedence over dispositions, durable artifacts,
+active state, reservations, and run metadata (`lib/pro-gate-lib.sh:944-1084`). A newer distinct
+attempt can outrank old proof; stale mutable sidecars from the same superseded attempt cannot.
+Callers must not recreate this precedence from status prose.
+
+`review-decision/v1` is a pure continuation policy over normalized facts. Its contract explicitly
+excludes filesystem, lock, browser, round, and publication work (`lib/pro-gate-lib.sh:2476-2484`),
+and the reducer implements that policy at `lib/pro-gate-lib.sh:2616-2805`. The skill,
+relay, and daemon dispatch its typed action and re-resolve at the effect boundary; they do not infer a
+continuation from a `VERDICT`, exit code, recoverability flag, or round count.
+
+### Make capacity a query over proof-backed attempt state
+
+A durable reservation can exist without consuming capacity. Completed and superseded reservations
+are excluded by `pg_reservation_holding_count` (`lib/pro-gate-lib.sh:1493-1502`), and so is a
+still-generating reservation whose charge is older than the generation ceiling (#273). Every capacity
+reader (slot plan, holding count, holder report, `--status`) asks the one predicate
+`pg_reservation_holds_capacity`. This avoids a second manually synchronized “active count.”
+
+Supersession is monotonic. The transition rechecks the exact marker, canonical key, charged epoch,
+legacy proof, **and the head OID the caller validated against GitHub** under the reservation lock
+before writing the canonical record (`lib/pro-gate-lib.sh:1399-1453`). It preserves the charge and
+audit/recovery pointers while releasing capacity and current applicability. It is not a refund and
+does not accept review bytes.
+
+The head belongs in that list for the same reason the others do (#134). The decision is taken in
+`pg_reservation_superseded_proof` against a binding read before the GitHub query; without the head in the
+compare-and-swap, the commit could land against a *different* binding substituted afterwards —
+reachable because `pg_attempt_disposition_cleanup` unlinked the binding outside the guard, and
+bindings are otherwise write-once. The failure it prevents is releasing a slot still held by
+current-head work. Review of that change found no current production caller that writes a binding
+for a marker which already exists (every run mints a fresh marker), so the head clause is defense in
+depth for that invariant rather than a fix for an observed release. Note what the control is: a
+serialization guarantee between cooperating callers, not an authorization boundary. `flock` is advisory, so a process writing `$PRO_GATE_HOME` directly
+bypasses this API entirely — that trust boundary is the single-user-owned state directory, unchanged.
+
+Terminal dispositions are also proof records, not guesses. Their immutable payload binds repository,
+target, marker, round key, charged epoch, terminal kind, and proof kind
+(`lib/pro-gate-lib.sh:713-746`). Only positively proven non-submission can remove the recorded round,
+plus one post-submission case since v0.60.0: a send that produced no ChatGPT conversation, when its
+attempt-time delivery evidence is known (pro-gate#246). That refund is bounded by the failed-delivery
+count instead of the round governor; with unknown evidence it keeps its charge. Every other
+post-submission terminal outcome retains the charge (`pg_attempt_disposition_refunds_round` in
+`lib/pro-gate-lib.sh`).
+
+### Recover the exact attempt; never “try again” as diagnosis
+
+Recovery selects an exact marker or a canonically identified charged attempt and collects it without
+a new submission. Ambiguous state stays fail-closed. This prevents retries from turning a browser
+hydration failure, crashed wrapper, or long-running answer into duplicate paid work.
+
+The same principle applies to legacy compatibility: each added compatibility path narrowed a positive
+proof predicate rather than making missing evidence acceptable. PR #120 admitted only a literal
+legacy `diff` key after exact identity agreement; PR #123 initially admitted an empty legacy spend
+when marker time equaled the immutable charged epoch. Queued runs later disproved marker time as charge
+evidence, so v0.38.1 instead revalidates exact immutable binding and canonical run metadata under the
+reservation lock before filling the proven charge.
+
+### A stalled attempt is superseded by external proof, not by its own state
+
+The head-OID clause above has an operational consequence that is easy to miss, and missing it is
+expensive. When a review conversation stalls and never renders a terminal signal, its reservation
+holds a shared slot with **zero misses, indefinitely** — every probe observes it still generating, so
+the miss threshold that would release it is never reached. From the outside this reads as a slot only
+the provider's own UI can free.
+
+It is not. Supersession's proof is *external to the attempt's execution*: a moved head, or a MERGED
+or CLOSED pull request, read from the repository host. The conversation's own state is not an input.
+So the remedy is to move the head for a legitimate reason and then recover that exact marker — the
+transition releases capacity, retains the charge, and keeps the attempt collectable for audit.
+Since v0.57.0 a run that finds no free slot also runs this proof on every reservation holding one
+(#234), so once the proof exists a waiting run releases the slot without anyone running `--recover`.
+
+Four constraints keep this honest, and the last two bound where it applies at all:
+
+- **The head move must be work you were going to do anyway.** A rebase the branch needs, a fix, a
+  real commit. Manufacturing a commit to free a slot games the runtime and corrupts the proof this
+  whole model rests on. When nothing is pending, the accurate statement is that the slot stays held
+  until the next real push, or until the generation ceiling (#273) stops it counting 3 h after its
+  charge — not that it cannot be released.
+- **A free collection attempt is not a substitute.** Harvesting a stalled conversation returns the
+  same in-progress result; it neither completes nor releases anything.
+- **This is not the current-head stuck case.** If the head has *not* moved, no proof exists yet and
+  the reservation is correctly still recoverable — that is the open terminal-without-verdict research
+  question, a genuinely different shape. The error being described here is mistaking a
+  proof-already-exists situation for that one, not skipping proof.
+- **It requires an input binding.** The proof path reads the attempt's immutable input binding before
+  it will query the host, and fails closed when there is none. A classic run given a caller-supplied
+  diff has no such binding, so supersession can never be proven for it and this remedy simply does
+  not apply — a known open gap, not a misuse. The generation ceiling (#273) bounds it: such a
+  reservation still stops counting against capacity 3 h after its charge, though it is never
+  superseded.
+
+The failure this prevents is a reasoning error, not a code defect: treating the absence of one proof
+(the conversation terminating) as the absence of *any* proof, and escalating to a human for something
+the runtime could already settle. A session that made exactly this call left a slot pinned for 57
+hours while other work queued behind it, and reported to its operator that only they could resolve
+it. Once recognised, the same release took seconds and was exercised three times in one session.
+
+This is the same shape as the sibling learning on dead-owner lock reclaim: infer nothing from the
+absence of evidence, require positive proof — and be precise about *which* proof the mechanism
+actually asks for.
+
+### Treat local round history as advisory, not quota
+
+By default, `pg_round_policy_mode` returns `advisory` unless an operator explicitly configures an
+enforced cap or lockdown (`lib/pro-gate-lib.sh:2143-2159`). History and convergence signals remain
+useful diagnostics, but they do not impersonate ChatGPT subscription allowance or block changed,
+proven evidence.
+
+### Default to the narrowest input surface
+
+Input delivery is resolved before state, output, locks, browser, repository, or Oracle work
+(`bin/oracle-review.sh:151-188`). The default `bundle-only` policy attaches the reviewed change and
+rejects connector-capable input. `connector-enabled` is a deliberate compatibility opt-in.
+
+This is a local request boundary, not an external permission attestation. Pro-Gate can prove whether
+it emitted the connector directive and attached a diff. Input Policy does not itself attest to,
+inspect, or revoke connector grants independently attached to the browser identity or ChatGPT
+project. Those grants remain an operator trust boundary.
+
+### Leave evidence-gated residuals open
+
+Do not force a new failure into an existing state because a timeout feels plausible. Issue #109's
+current-head, exact-owned, verdict-less conversation is real, but elapsed time, repeated missing
+`VERDICT`, or an absent spinner is not positive terminal proof. The issue body retains an earlier
+timeout hypothesis as historical context; the latest issue guidance is evidence-gated instead. A
+future evidence-gated implementation should require a turn-scoped rendered terminal affordance after
+the latest exact marker, no active-generation control, no newer or foreign marker, and bounded
+fresh-render confirmation. Until that DOM contract is proven, the reservation correctly stays
+recoverable and charged. The generation ceiling (#273) does not change this: it is not terminal
+proof, and past it the reservation only stops counting against capacity, staying `generating`,
+recoverable and charged.
+
+## Why This Matters
+
+The architecture maximizes useful subscription capacity without inventing a quota API. It marks a
+reservation complete or superseded only when evidence says the review is complete or no longer
+applicable, and it resubmits only when the canonical lifecycle says no recoverable attempt remains.
+This protects both directions: starvation from obsolete reservations and double-spend from premature
+release. The one time-based rule, the generation ceiling (#273), stops a still-generating reservation
+from counting against capacity 3 h after its charge, without removing, refunding or terminalizing it.
+Same-change admission still reads the record, so each such reservation can add at most one concurrent
+chat on the account and never a second charge for the same change. It exists because a reservation
+whose owner died held its slot until the 6 h TTL plus three confirmed misses, starving queued runs.
+
+Centralizing action in the typed reducer also keeps safety fixes accretive. Capacity proof, legacy
+recovery, and input trust changed across several releases without creating a second caller protocol or
+rewriting the decision contract. The alternative wait/heartbeat/`next_action` design was closed
+because it added observation machinery but no new submit, collect, or recovery capability.
+
+## When to Apply
+
+- A browser automation or human-in-the-loop gate consumes a scarce resource whose real allowance is
+  not exposed through an API.
+- A long-running external operation must survive process crashes and be collected without duplicate
+  submission.
+- Completion and applicability can diverge: a result may be finished but stale, or unfinished but no
+  longer relevant.
+- An external agent or connector has broader authority than the payload the local caller intends to
+  provide.
+- A proposed wait loop, dashboard, or retry protocol duplicates an existing typed action surface.
+
+## Examples
+
+### Do not conflate existence, capacity, and applicability
+
+```text
+Bad:
+  reservation_exists => slot_busy => answer_current
+
+Good:
+  attempt = canonical_snapshot(target)
+  holds_capacity = attempt is recoverable and not complete/superseded
+                   and (if generating) its charge is younger than the generation ceiling
+  applicable = immutable evidence still matches the current target
+  next_action = review_decision(attempt, applicable, current_evidence)
+```
+
+### Do not use local attempts as provider quota
+
+```text
+Bad:
+  three local rounds happened => ChatGPT quota exhausted
+
+Good:
+  local history is advisory
+  active exact-owned work, browser health, throttle, concurrency, and provenance remain hard gates
+```
+
+### Default narrow; opt into connector delivery once
+
+```bash
+# Safe default: Pro-Gate attaches the reviewed bundle and emits no connector request.
+PRO_GATE_INPUT_POLICY=bundle-only
+
+# Deliberate deployment-level compatibility opt-in.
+PRO_GATE_INPUT_POLICY=connector-enabled
+```
+
+The second setting does not prove the browser connector is repository-scoped; it only permits
+Pro-Gate to request connector-capable delivery.
+
+## Related
+
+- [Ship the legible core; let the terminal gate decline fragile automation](./ship-the-legible-core-let-the-gate-decline-fragile-automation.md)
+- [Issue #109: prove current-head terminal-without-verdict UI state](https://github.com/StartupBros-com/pro-gate/issues/109)
+- PRs [#118](https://github.com/StartupBros-com/pro-gate/pull/118), [#120](https://github.com/StartupBros-com/pro-gate/pull/120), [#123](https://github.com/StartupBros-com/pro-gate/pull/123), and [#124](https://github.com/StartupBros-com/pro-gate/pull/124)
