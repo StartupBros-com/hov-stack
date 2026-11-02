@@ -13,6 +13,7 @@ same walls a probe report does.
 from __future__ import annotations
 
 import json
+import shutil
 import sys
 import tempfile
 import unittest
@@ -23,7 +24,15 @@ SCRIPTS_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SCRIPTS_DIR))
 
 import compare  # noqa: E402
-from _test_cli import run_cli as _run_cli  # noqa: E402
+from _test_cli import run_cli  # noqa: E402
+
+
+def _run_cli(*argv: str) -> tuple[int, str]:
+    """run_cli with compare's reports dir pointed at a temp dir, so the compare
+    log never lands in the source tree."""
+    reports = tempfile.mkdtemp()
+    unittest.addModuleCleanup(shutil.rmtree, reports, True)
+    return run_cli(*argv, "--reports-dir", reports)
 
 
 def _scores_file(base: Path, name: str, scores: dict) -> Path:
