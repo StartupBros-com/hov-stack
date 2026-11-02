@@ -803,7 +803,7 @@ forget_cmd() {
 
 # rebase_cmd <skill> <version> — run from a worktree; rewrites skills-patches/<skill>.
 rebase_cmd() {
-  local skill="$1" version="${2#v}" rel noteline=""
+  local skill="$1" version="${2#v}" rel noteline="" lbl
   case "$HERE" in
     */.claude/worktrees/*) ;;
     *) note "ERROR: rebase rewrites skills-patches/$skill — run a worktree's copy of this script (this one is $HERE)"; return 2 ;;
@@ -812,8 +812,8 @@ rebase_cmd() {
   [[ "$version" =~ ^[0-9]+$ ]] || { note "ERROR: version must be the jsm version number, e.g. 12"; return 2; }
   [ -d "$PATCHES/$skill" ] || { note "ERROR: no overlay at $PATCHES/$skill"; return 2; }
   [ -d "$SKILLS/$skill" ] || { note "ERROR: $skill is not installed in $SKILLS"; return 2; }
-  state_owns claude "$SKILLS" || return 2
-  if [ ! -e "$STATE/claude/manifest/$skill" ] && legacy_hits claude "$SKILLS/$skill" "$skill"; then
+  lbl=claude; state_owns "$lbl" "$SKILLS" || return 2
+  if [ ! -e "$STATE/$lbl/manifest/$skill" ] && legacy_hits "$lbl" "$SKILLS/$skill" "$skill"; then
     note "ERROR: $skill still holds pre-#2091 overlay text (${LEGACY_HITS[*]}), which is not upstream's — reinstall it first: skills-localize.sh unapply $skill; jsm install $skill --force"
     return 4
   fi

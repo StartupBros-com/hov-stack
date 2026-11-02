@@ -51,7 +51,7 @@ NOTE_CODEX='> **Local tooling on this machine.** Track work in GitHub issues. (c
 printf '%s\n' "$NOTE" >"$T/note.md"
 printf '%s\n' "$NOTE_CODEX" >"$T/note.codex.md"
 : >"$T/codex-skills.txt"
-C=$T/claude X=$T/codex A=$T/agents P=$T/patches S=$T/state U=$T/upstream
+C=$T/claude X=$T/codex A=$T/agents P=$T/patches S=$T/state U=$T/upstream LBL=claude
 
 reset() {
   rm -rf "$C" "$X" "$A" "$P" "$S" "$U" "$T/local"
@@ -170,8 +170,8 @@ assert_same "$U/zzl-noted/references/guide.md" "$C/zzl-noted/references/guide.md
 assert_same "$U/zzl-plain/SKILL.md" "$C/zzl-plain/SKILL.md" "a skill without the vocabulary is untouched"
 assert_same "$U/zzl-npm/SKILL.md" "$C/zzl-npm/SKILL.md" "vocabulary under node_modules does not count"
 assert_same "$T/local/zzl-fork/SKILL.md" "$C/zzl-fork/SKILL.md" "a fork is deployed as written, never noted"
-assert_gone "$S/claude/manifest/zzl-plain" "no state for an untouched skill"
-if [ -f "$S/claude/manifest/zzl-noted" ] && [ -f "$S/codex/manifest/zzl-noted" ] &&
+assert_gone "$S/$LBL/manifest/zzl-plain" "no state for an untouched skill"
+if [ -f "$S/$LBL/manifest/zzl-noted" ] && [ -f "$S/codex/manifest/zzl-noted" ] &&
    [ -f "$S/agents/manifest/zzl-noted" ]; then ok
 else bad "apply saved no state for the noted skill"; fi
 if [ -f "$S/conflicts" ] && [ ! -s "$S/conflicts" ]; then ok; else bad "apply with no conflicts must leave an empty conflicts file"; fi
@@ -192,7 +192,7 @@ assert_same "$U/zzl-noted/SKILL.md" "$C/zzl-noted/SKILL.md" "unapply restores cl
 assert_same "$U/zzl-noted/SKILL.md" "$X/zzl-noted/SKILL.md" "unapply restores codex byte-exactly"
 assert_same "$U/zzl-noted/SKILL.md" "$A/zzl-noted/SKILL.md" "unapply restores agents byte-exactly"
 assert_same "$U/zzl-refvocab/SKILL.md" "$C/zzl-refvocab/SKILL.md" "unapply restores the reference-noted skill"
-assert_gone "$S/claude/manifest/zzl-noted" "unapply drops claude state"
+assert_gone "$S/$LBL/manifest/zzl-noted" "unapply drops claude state"
 assert_gone "$S/codex/manifest/zzl-noted" "unapply drops codex state"
 assert_gone "$S/agents/manifest/zzl-noted" "unapply drops agents state"
 if [ ! -s "$JSM_CALLED" ]; then ok; else bad "the layer called jsm: $(cat "$JSM_CALLED")"; fi
@@ -328,7 +328,7 @@ else bad "unapply changed something although a file was hand-edited"; fi
 run hand-forget forget zzl-merge
 assert_rc 0 "forget"
 assert_line 'forgot claude layer state: zzl-merge' "forget names what it dropped"
-assert_gone "$S/claude/manifest/zzl-merge" "forget drops claude state"
+assert_gone "$S/$LBL/manifest/zzl-merge" "forget drops claude state"
 assert_gone "$S/codex/pristine/zzl-merge" "forget drops codex state"
 assert_gone "$S/agents/pristine/zzl-merge" "forget drops agents state"
 install "$C" zzl-merge
@@ -363,7 +363,7 @@ skill_md zzl-noted '# Noted' 'Run br create to file the issue.' >"$U/zzl-noted/S
 install "$C" zzl-noted
 install "$X" zzl-noted
 mkdir -p "$S/claude"
-printf '/some/other/tree\n' >"$S/claude/root"
+printf '/some/other/tree\n' >"$S/$LBL/root"
 run owns apply
 assert_rc 1 "apply against state for another tree"
 assert_has "ERROR: $S/claude holds state for /some/other/tree, not $C — claude layer skipped (set SKILLS_LOCALIZE_STATE)" "mismatched state is named"
@@ -418,7 +418,7 @@ assert_rc 0 "legacy first apply"
 assert_lacks '^(ERROR|DRIFT)' "legacy first apply raises nothing"
 assert_same "$P/zzl-legacy/SKILL.md" "$C/zzl-legacy/SKILL.md" "legacy overlay text survives the first apply"
 assert_same "$P/zzl-legacy/scripts/added.js" "$C/zzl-legacy/scripts/added.js" "legacy added file survives the first apply"
-assert_same "$U/zzl-legacy/SKILL.md" "$S/claude/pristine/zzl-legacy/SKILL.md" "legacy pristine is the overlay's base"
+assert_same "$U/zzl-legacy/SKILL.md" "$S/$LBL/pristine/zzl-legacy/SKILL.md" "legacy pristine is the overlay's base"
 noted "$T/renamed-old" "$NOTE" >"$T/expect"
 assert_same "$T/expect" "$C/zzl-renamed/SKILL.md" "an old renamed text is noted as found"
 run legacy-check check
@@ -501,9 +501,9 @@ assert_lacks 'zzl-kept2 still holds' "live files equal to the current overlay ar
 if diff -r "$T/claude-legacy-before/zzl-oldren" "$C/zzl-oldren" >/dev/null &&
    diff -r "$T/claude-legacy-before/zzl-kept" "$C/zzl-kept" >/dev/null; then ok
 else bad "apply changed a legacy skill"; fi
-assert_gone "$S/claude/manifest/zzl-oldren" "no state is saved from legacy text"
-assert_gone "$S/claude/pristine/zzl-kept" "no pristine is saved from legacy text"
-assert_same "$U/zzl-kept2/SKILL.md" "$S/claude/pristine/zzl-kept2/SKILL.md" "the kept overlay takes its .base as pristine"
+assert_gone "$S/$LBL/manifest/zzl-oldren" "no state is saved from legacy text"
+assert_gone "$S/$LBL/pristine/zzl-kept" "no pristine is saved from legacy text"
+assert_same "$U/zzl-kept2/SKILL.md" "$S/$LBL/pristine/zzl-kept2/SKILL.md" "the kept overlay takes its .base as pristine"
 
 run leg-check check
 assert_rc 1 "check fails while legacy text remains"
@@ -566,7 +566,7 @@ if [ "$(id -u)" -ne 0 ]; then
   run drop-fail apply
   assert_rc 1 "a failed restore is an error"
   assert_has "ERROR: kept claude layer state for 'zzl-drop' until its files are restored" "the kept state is named"
-  if [ -f "$S/claude/manifest/zzl-drop" ] && [ -f "$S/claude/pristine/zzl-drop/SKILL.md" ]; then ok
+  if [ -f "$S/$LBL/manifest/zzl-drop" ] && [ -f "$S/$LBL/pristine/zzl-drop/SKILL.md" ]; then ok
   else bad "state was dropped although the restore failed"; fi
   chmod 644 "$C/zzl-drop/SKILL.md"
 else
@@ -575,8 +575,8 @@ fi
 run drop-retry apply
 assert_rc 0 "the next apply restores and drops the state"
 assert_same "$U/zzl-drop/SKILL.md" "$C/zzl-drop/SKILL.md" "the skill is upstream again"
-assert_gone "$S/claude/manifest/zzl-drop" "the state is dropped once the files are back"
-assert_gone "$S/claude/pristine/zzl-drop" "the pristine copy is dropped once the files are back"
+assert_gone "$S/$LBL/manifest/zzl-drop" "the state is dropped once the files are back"
+assert_gone "$S/$LBL/pristine/zzl-drop" "the pristine copy is dropped once the files are back"
 
 # ---------------------------------------------------------------------------
 # 10. A failed live write never loses what the last apply recorded: its hashes and
@@ -601,8 +601,8 @@ fail_cp "$C/zzl-keep/references/ref.md" "$SCRIPT" apply >"$OUT" 2>&1
 RC=$?
 assert_rc 1 "a failed restore of a retired overlay is an error"
 assert_has "ERROR: kept claude layer state for 'zzl-keep' until its files are restored" "the kept state is named"
-if grep -q "^references/ref.md	" "$S/claude/manifest/zzl-keep" 2>/dev/null &&
-   [ -f "$S/claude/pristine/zzl-keep/references/ref.md" ]; then ok
+if grep -q "^references/ref.md	" "$S/$LBL/manifest/zzl-keep" 2>/dev/null &&
+   [ -f "$S/$LBL/pristine/zzl-keep/references/ref.md" ]; then ok
 else bad "the record of the retired overlay went before its file was restored"; fi
 assert_same "$T/keep-overlay" "$C/zzl-keep/references/ref.md" "the failed restore left the overlay text"
 run keep-drop-check check
@@ -611,8 +611,8 @@ assert_line 'DRIFT: claude zzl-keep/references/ref.md is not the localized copy 
 run keep-drop-retry apply
 assert_rc 0 "the retry restores the file"
 assert_same "$U/zzl-keep/references/ref.md" "$C/zzl-keep/references/ref.md" "the retired overlay is gone after the retry"
-if grep -q "^references/ref.md	" "$S/claude/manifest/zzl-keep"; then bad "the restored file is still recorded"; else ok; fi
-assert_gone "$S/claude/pristine/zzl-keep/references" "its pristine copy goes once the file is back"
+if grep -q "^references/ref.md	" "$S/$LBL/manifest/zzl-keep"; then bad "the restored file is still recorded"; else ok; fi
+assert_gone "$S/$LBL/pristine/zzl-keep/references" "its pristine copy goes once the file is back"
 run keep-drop-check-2 check
 assert_rc 0 "check converges after the retry"
 
@@ -628,8 +628,8 @@ assert_rc 0 "apply after a failed note update"
 assert_lacks 'edited after' "the last applied note is not taken for a hand edit"
 noted "$U/zzl-keep/SKILL.md" "$NOTE v2" >"$T/expect"
 assert_same "$T/expect" "$C/zzl-keep/SKILL.md" "the new note lands on the retry"
-if [ "$(cut -f2 "$S/claude/manifest/zzl-keep")" = "$(sha "$T/expect")" ]; then ok
-else bad "the manifest kept more than the hash apply wrote: $(cat "$S/claude/manifest/zzl-keep")"; fi
+if [ "$(cut -f2 "$S/$LBL/manifest/zzl-keep")" = "$(sha "$T/expect")" ]; then ok
+else bad "the manifest kept more than the hash apply wrote: $(cat "$S/$LBL/manifest/zzl-keep")"; fi
 printf '%s\n' "$NOTE v3" >"$T/note.md"
 OUT=$T/out.keep-note-fail-2
 fail_cp "$C/zzl-keep/SKILL.md" "$SCRIPT" apply >"$OUT" 2>&1
@@ -638,7 +638,7 @@ assert_rc 1 "a second failed note update"
 run keep-note-unapply unapply zzl-keep
 assert_rc 0 "unapply after a failed note update"
 assert_same "$U/zzl-keep/SKILL.md" "$C/zzl-keep/SKILL.md" "unapply after a failed note update gives back upstream"
-assert_gone "$S/claude/manifest/zzl-keep" "unapply drops the state"
+assert_gone "$S/$LBL/manifest/zzl-keep" "unapply drops the state"
 printf '%s\n' "$NOTE" >"$T/note.md"
 
 # ---------------------------------------------------------------------------
@@ -669,8 +669,8 @@ install "$C" zzl-adopt
 run adopt-apply-2 apply
 assert_rc 0 "apply over an upstream that adopted the overlay"
 assert_lacks '^(ERROR|DRIFT|conflict)' "adoption raises nothing"
-if grep -Eq "^(references/ref.md|scripts/add.sh)	" "$S/claude/manifest/zzl-adopt" 2>/dev/null; then
-  bad "adopted upstream files were recorded as the layer's: $(cat "$S/claude/manifest/zzl-adopt")"
+if grep -Eq "^(references/ref.md|scripts/add.sh)	" "$S/$LBL/manifest/zzl-adopt" 2>/dev/null; then
+  bad "adopted upstream files were recorded as the layer's: $(cat "$S/$LBL/manifest/zzl-adopt")"
 else ok; fi
 run adopt-check check
 assert_rc 0 "check after adoption"
@@ -688,7 +688,7 @@ printf 'fresh one\nfresh two\n' >"$P/zzl-fresh/.base/references/ref.md"
 install "$C" zzl-fresh
 run fresh-apply apply
 assert_rc 0 "apply on a never-layered skill equal to its overlay"
-if grep -q "^references/ref.md	" "$S/claude/manifest/zzl-fresh" 2>/dev/null; then
+if grep -q "^references/ref.md	" "$S/$LBL/manifest/zzl-fresh" 2>/dev/null; then
   bad "unlisted bytes equal to the overlay were taken as a pre-#2091 copy"
 else ok; fi
 run fresh-unapply unapply zzl-fresh

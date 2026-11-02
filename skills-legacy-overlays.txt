@@ -10,7 +10,7 @@
 # exits 3, so the nightly reinstalls it with --force. Without this, the first apply after
 # #2091 saved the old renamed text as pristine, and jsm refused those skills every night.
 #
-# Generated 2026-10-29 from origin/main's claude/skills-patches (kinds from jsm's cache).
+# Generated 2026-10-29 from origin/main's skills-patches (kinds from jsm's cache).
 # Delete this file once `skills-localize.sh check` prints no "pre-#2091" line on any
 # host; a missing file reads as an empty list.
 047544abaa5b4e79c78367289c9f0ffadc29c8a30f8e8604982afd3469c9619d swapped codebase-audit/SKILL.md
