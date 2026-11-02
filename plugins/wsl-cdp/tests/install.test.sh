@@ -42,7 +42,7 @@ for f in wsl-cdp wsl-cdp-forward.py wsl-cdp-drive.mjs wsl-cdp-setup.ps1; do
 done
 case "$log" in *StartupBros-com/wsl-cdp*) _no "no URL points at the old repo" ;; *) _ok "no URL points at the old repo" ;; esac
 
-run_install WSL_CDP_REF=wsl-cdp--v0.3.6
-assert_contains "WSL_CDP_REF accepts a release tag" "$(cat "$t/curl.log")" "/repos/StartupBros-com/hov-stack/commits/wsl-cdp--v0.3.6"
+run_install WSL_CDP_REF=wsl-cdp--v0.3.7
+assert_contains "WSL_CDP_REF accepts a release tag" "$(cat "$t/curl.log")" "/repos/StartupBros-com/hov-stack/commits/wsl-cdp--v0.3.7"
 
 t_summary
