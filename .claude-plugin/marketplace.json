@@ -101,15 +101,16 @@
     {
       "name": "memory-dream",
       "source": {
-        "source": "url",
-        "url": "https://github.com/StartupBros-com/memory-dream.git",
-        "sha": "687cf4f147ed313c2604a209729ba4073c82b9af"
+        "source": "git-subdir",
+        "url": "https://github.com/StartupBros-com/hov-stack.git",
+        "path": "plugins/memory-dream",
+        "sha": "fdf29328cb800628a4a5c808417a52abe72b3a43"
       },
       "description": "The sleep cycle for Claude Code's auto-memory. /memory-dream:dream runs an operator-gated consolidation pass: deterministic triage finds superseded, stale, and oversized notes, a zero-tool subagent drafts the fixes it cannot apply, and you approve each change by hand before anything is written. /memory-dream:eval measures whether recall actually improved. Also a standalone stdlib-only CLI; it never merges, deletes, or compresses a note on its own.",
       "metadata": {
-        "version": "0.4.0",
-        "releaseId": 394196410,
-        "releaseTag": "v0.4.0"
+        "version": "0.4.1",
+        "releaseId": 431229598,
+        "releaseTag": "memory-dream--v0.4.1"
       },
       "card": {
         "rows": [
