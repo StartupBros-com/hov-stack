@@ -9,7 +9,7 @@ lints the one you wrote. **design-rails runs the whole loop against your actual
 codebase** — and keeps it true after you leave.
 
 ```
-npx -y "github:StartupBros-com/design-rails#v0.13.0" posture .
+pnpm dlx "github:StartupBros-com/hov-stack#design-rails--v0.13.1&path:/plugins/design-rails" posture .
 ```
 
 ```
@@ -74,7 +74,7 @@ Run it pinned from GitHub — the bare `design-rails` name is unclaimed on npm,
 so an unpinned `npx design-rails` is a supply-chain bet, not an install:
 
 ```bash
-alias design-rails='npx -y "github:StartupBros-com/design-rails#v0.13.0"'
+alias design-rails='pnpm dlx "github:StartupBros-com/hov-stack#design-rails--v0.13.1&path:/plugins/design-rails"'
 
 # 1. Where do you stand?
 design-rails posture .
