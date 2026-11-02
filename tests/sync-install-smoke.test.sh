@@ -1676,6 +1676,14 @@ EOF_MIGRATED_SERVICES
 # With no crontab nothing owns either job, so both migrated timers are admitted.
 [ "$(enabled_migrated_count)" -eq 2 ] \
   && ok || bad "workstation with no crontab did not admit both migrated timers"
+# backup-harness.timer is opt-in: its script refuses a public origin, so a workstation
+# install must not be the thing that schedules it.
+if ! timer_enabled backup-harness.timer && timer_enabled dcg-auto-update.timer \
+   && timer_enabled tools-auto-update.timer; then
+  ok
+else
+  bad "workstation install enabled the opt-in backup-harness.timer, or skipped its own role set"
+fi
 
 # -- scheduler ownership/role reconciliation (all hermetic) ----------------
 # One exact legacy owner excludes only its own replacement. Its service is
@@ -1935,10 +1943,14 @@ fi
 docker_missing_profile_before=$(sha256sum "$DOCKER_DAEMON_TARGET" "$DOCKER_ADOPTION_STATE" "$DOCKER_ADOPTION_BACKUP")
 docker_missing_profile_validations_before=$(wc -l <"$DOCKER_VALIDATE_LOG")
 mv "$REPO/lib/profile.sh" "$TMP/profile.sh.authoritative"
+# The workstation set leaves an opted-in backup-harness.timer enabled where the satellite
+# set disables it, so seeding it enabled tells the two roles apart.
+printf '%s\n' backup-harness.timer >>"$SYSTEMCTL_ENABLED_TIMERS"
 missing_profile_out=$(DOTFILES_ROLE=workstation "$SYNC" install 2>&1); missing_profile_status=$?
 missing_profile_check_out=$(DOTFILES_ROLE=workstation "$SYNC" check 2>&1); missing_profile_check_status=$?
 mv "$TMP/profile.sh.authoritative" "$REPO/lib/profile.sh"
-if [ "$missing_profile_status" -eq 0 ] && timer_enabled backup-harness.timer; then
+if [ "$missing_profile_status" -eq 0 ] && timer_enabled backup-harness.timer \
+   && timer_enabled dcg-auto-update.timer && timer_enabled tools-auto-update.timer; then
   ok
 else
   bad "missing profile library broke the unrelated role fallback (check=$missing_profile_check_status):"$'\n'"$missing_profile_out"$'\n'"$missing_profile_check_out"

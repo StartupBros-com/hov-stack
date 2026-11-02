@@ -52,7 +52,7 @@ These carry a `# TEMPLATE:` header at the top that lists the lines to change. "N
 
 | Unit | Timer schedule | Lines the header lists | Notes |
 | --- | --- | --- | --- |
-| `backup-harness` | `OnCalendar=*-*-* 03:30:00` | 17: `Environment=DOTFILES=<clone path>` | Uncomment and set it; the script defaults to `~/dotfiles`, and the clone needs an origin to push to |
+| `backup-harness` | `OnCalendar=*-*-* 03:30:00` | 17: `Environment=DOTFILES=<clone path>` | Uncomment and set it; the script defaults to `~/dotfiles`, and the clone needs an origin to push to. Opt-in: the script refuses a public origin, and `sync.sh install` never enables the timer (it disables it on a satellite). Skip it if something else already backs up `~/.claude/projects` |
 | `disk-watermark` | `OnCalendar=*-*-* 06:30:00` | 22: `WARN_PCT=90` | Tuned to the author's `/mnt/c` drive; the script's own default is 85 |
 | `docker-hygiene` | `OnCalendar=*-*-* 01:50:00` | nothing | Ships plan-only |
 | `reclaim-sweep` | `OnCalendar=Fri *-*-* 02:05:00` | nothing | Ships plan-only |

@@ -9,8 +9,9 @@
 #   declare a second workstation      -> case 4
 #   let profile_role default a role   -> case 2
 #   raise the shrink threshold        -> case 7
-#   drop backup-harness from the       -> case 6
-#     satellite exclusion
+#   enable backup-harness in a role    -> case 6
+#     set, or stop a satellite
+#     disabling it
 set -uo pipefail
 
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
@@ -48,14 +49,18 @@ c=$(awk -F'\t' '!/^#/ && NF>=2 && $2=="workstation"' "$REPO/hosts.tsv" | wc -l)
 u=$(awk -F'\t' '!/^#/ && NF>=2 && $2!="workstation" && $2!="satellite" {print $2}' "$REPO/hosts.tsv")
 [ -z "$u" ] && ok || bad "unknown role(s) in hosts.tsv: $u"
 
-# 6. The satellite timer set must EXCLUDE the writers. A second host writing
-#    the canonical backup duplicates or clobbers the workstation's copy.
-sat=$(sed -n '/satellite)/,/;;/p' "$REPO/sync.sh" | grep -o '_enable="[^"]*"' | head -1)
-leak=""
-for t in backup-harness; do
-  case "$sat" in *"$t"*) leak="$leak $t" ;; esac
-done
-[ -z "$leak" ] && ok || bad "satellite would enable workstation-only timers:$leak"
+# 6. No role's timer set enables backup-harness.timer: it is opt-in, because
+#    scripts/backup-harness.sh refuses a public origin. A satellite install still
+#    disables it, since a second host writing the canonical backup duplicates or
+#    clobbers the workstation's copy. Reads both _enable sets directly rather than
+#    the first "satellite)" in sync.sh, which is an unrelated case statement.
+sets=$(grep -o '_enable="[^"]*"' "$REPO/sync.sh")
+n=$(printf '%s\n' "$sets" | grep -c .)
+leak=$(printf '%s\n' "$sets" | grep -F backup-harness || true)
+if [ "$n" -eq 2 ] && [ -z "$leak" ]; then ok
+else bad "expected 2 role timer sets without backup-harness, found $n: $sets"; fi
+if grep -Fq "satellite) all_role_units=\"backup-harness.timer \$all_role_units\"" "$REPO/sync.sh"; then ok
+else bad "a satellite install no longer disables backup-harness.timer"; fi
 
 # 7. The shrink guard refuses the exact accident that motivated it (693 -> 46)
 #    and permits an ordinary edit.
@@ -162,8 +167,8 @@ rc=$?
 r=$( DOTFILES_ROLE=satellite profile_role some-unregistered-box 2>/dev/null )
 [ "$r" = satellite ] && ok || bad "unregistered host could not self-declare as satellite (got '$r')"
 
-# 18. The cron-migrated role set is exactly two, and remains outside the
-# satellite base set. Workstation admission is dynamic per ownership scan, so
+# 18. The cron-migrated role set is exactly two, and remains outside both
+# base role sets (case 6's $sets). Workstation admission is dynamic per ownership scan, so
 # hardcoding these into the workstation literal would bypass the safety gate.
 critical=$(sed -n 's/^CRITICAL_SILENCE_TIMERS="\(.*\)"/\1/p' "$REPO/sync.sh")
 [ "$(printf '%s\n' "$critical" | wc -w)" -eq 2 ] \
@@ -172,7 +177,7 @@ for timer in \
   mcp-servers-update.timer \
   skills-update.timer; do
   case " $critical " in *" $timer "*) ok ;; *) bad "migrated role set omits $timer" ;; esac
-  case "$sat" in *"$timer"*) bad "satellite base role directly admits $timer" ;; *) ok ;; esac
+  case "$sets" in *"$timer"*) bad "a base role set directly admits $timer" ;; *) ok ;; esac
 done
 
 # 19. Role reconciliation and U5's record CAS share the one named lock; a

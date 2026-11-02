@@ -852,15 +852,25 @@ if [ -f "$SYNC" ]; then
   # Committed-but-not-pushed is a recovery gap the DRIFT check can't see: memory/config that lives
   # only in the local dotfiles clone is lost with the disk. Fail loud so a WSL death can't silently
   # take the unpushed delta (backup-harness.sh + its timer keep this at 0; see the recovery runbook).
+  # The timer is opt-in (sync.sh install never enables it), so off is a note, not a warning: the
+  # doctor cannot see whether another backup, such as a whole-home one, covers live memory.
+  _memory_pushed=1
   if ! systemctl --user is-enabled backup-harness.timer >/dev/null 2>&1; then
-    warn "backup-harness.timer is not enabled; daily remote memory backup is inactive (run sync.sh install)"
+    _memory_pushed=0
+    echo "  note: backup-harness.timer is not enabled, so live memory has no git backup; it is opt-in (systemd/README.md)"
   else
     state=$(systemctl --user is-active backup-harness.timer 2>/dev/null || true)
     [ "$state" != active ] && warn "backup-harness.timer is enabled but not active (state=$state)"
     last=$(systemctl --user show backup-harness.service -p ExecMainStatus --value 2>/dev/null || echo unknown)
     [ "$last" != 0 ] && warn "backup-harness.service last exit was $last; remote memory backup may be stale"
   fi
-  [ "$WARNS" -eq "$w0" ] && ok "harness matches dotfiles backup + pushed ($_sync_examined item(s) examined)"
+  if [ "$WARNS" -eq "$w0" ]; then
+    if [ "$_memory_pushed" = 1 ]; then
+      ok "harness matches dotfiles backup + pushed ($_sync_examined item(s) examined)"
+    else
+      ok "harness matches dotfiles backup ($_sync_examined item(s) examined)"
+    fi
+  fi
 else
   ok "harness not installed yet (merge the backup PR, then sync.sh install)"
 fi
