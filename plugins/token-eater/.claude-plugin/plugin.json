@@ -1,6 +1,6 @@
 {
   "name": "token-eater",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Spend your about-to-expire AI credits on safe, reviewed code cleanup. Just run /token-eater: it tidies your code in an isolated copy, verifies it, reviews it, and opens a draft PR. Never merges.",
   "author": {
     "name": "StartupBros / House of Vibe",

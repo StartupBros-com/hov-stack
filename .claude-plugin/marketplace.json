@@ -12,15 +12,16 @@
     {
       "name": "token-eater",
       "source": {
-        "source": "url",
-        "url": "https://github.com/StartupBros-com/token-eater.git",
-        "sha": "80ebac8f554eb836423430a7796322de431c1ff0"
+        "source": "git-subdir",
+        "url": "https://github.com/StartupBros-com/hov-stack.git",
+        "path": "plugins/token-eater",
+        "sha": "c81c35f3d37b754637ed8ce9b4fbc21ae61cad43"
       },
       "description": "Spend expiring AI credits on isolated, verified code cleanup that opens a draft pull request and never merges.",
       "metadata": {
-        "version": "0.1.2",
-        "releaseId": 397449033,
-        "releaseTag": "v0.1.2"
+        "version": "0.1.3",
+        "releaseId": 431257926,
+        "releaseTag": "token-eater--v0.1.3"
       },
       "card": {
         "rows": [
@@ -56,15 +57,16 @@
     {
       "name": "skill-tuner",
       "source": {
-        "source": "url",
-        "url": "https://github.com/StartupBros-com/skill-tuner.git",
-        "sha": "1252134da1b98b19a705e5c145fb82227a235a23"
+        "source": "git-subdir",
+        "url": "https://github.com/StartupBros-com/hov-stack.git",
+        "path": "plugins/skill-tuner",
+        "sha": "67cb960c3e5736427223d246c16309c3c59857a5"
       },
       "description": "Tell whether a change to an agent-consumed document actually worked. /skill-tuner:tune probes a SKILL.md, AGENTS.md or CLAUDE.md, fixes what three independent skeptics confirm, and proves the description still routes. Paired comparison with a confidence interval, content-hashed provenance with drift detection, and it reads skill-creator benchmark output.",
       "metadata": {
-        "version": "0.10.0",
-        "releaseId": 395249684,
-        "releaseTag": "v0.10.0"
+        "version": "0.10.1",
+        "releaseId": 431294679,
+        "releaseTag": "skill-tuner--v0.10.1"
       },
       "card": {
         "rows": [
@@ -78,15 +80,16 @@
     {
       "name": "wsl-cdp",
       "source": {
-        "source": "url",
-        "url": "https://github.com/StartupBros-com/wsl-cdp.git",
-        "sha": "e166d75a13a40500cec505f33ae3203952a092b0"
+        "source": "git-subdir",
+        "url": "https://github.com/StartupBros-com/hov-stack.git",
+        "path": "plugins/wsl-cdp",
+        "sha": "76a057b5be17b20a0a0e26c218fb8ef18dee8877"
       },
       "description": "Drive your real, logged-in Windows browser (Chrome, Edge, or Brave) from Claude Code inside WSL2 over the Chrome DevTools Protocol. Read authenticated dashboards, take real screenshots, and run a guided one-time setup; sends native-Windows users to the official extension instead.",
       "metadata": {
-        "version": "0.3.6",
-        "releaseId": 397449292,
-        "releaseTag": "v0.3.6"
+        "version": "0.3.7",
+        "releaseId": 431242922,
+        "releaseTag": "wsl-cdp--v0.3.7"
       },
       "card": {
         "tagline": "Claude Code plugin \u00b7 WSL2 only \u00b7 2-min setup \u00b7 auto-updates",
@@ -101,15 +104,16 @@
     {
       "name": "memory-dream",
       "source": {
-        "source": "url",
-        "url": "https://github.com/StartupBros-com/memory-dream.git",
-        "sha": "687cf4f147ed313c2604a209729ba4073c82b9af"
+        "source": "git-subdir",
+        "url": "https://github.com/StartupBros-com/hov-stack.git",
+        "path": "plugins/memory-dream",
+        "sha": "fdf29328cb800628a4a5c808417a52abe72b3a43"
       },
       "description": "The sleep cycle for Claude Code's auto-memory. /memory-dream:dream runs an operator-gated consolidation pass: deterministic triage finds superseded, stale, and oversized notes, a zero-tool subagent drafts the fixes it cannot apply, and you approve each change by hand before anything is written. /memory-dream:eval measures whether recall actually improved. Also a standalone stdlib-only CLI; it never merges, deletes, or compresses a note on its own.",
       "metadata": {
-        "version": "0.4.0",
-        "releaseId": 394196410,
-        "releaseTag": "v0.4.0"
+        "version": "0.4.1",
+        "releaseId": 431229598,
+        "releaseTag": "memory-dream--v0.4.1"
       },
       "card": {
         "rows": [
@@ -123,15 +127,16 @@
     {
       "name": "design-rails",
       "source": {
-        "source": "url",
-        "url": "https://github.com/StartupBros-com/design-rails.git",
-        "sha": "0b43fb6f4dc87c95f53435d99add683b6036a149"
+        "source": "git-subdir",
+        "url": "https://github.com/StartupBros-com/hov-stack.git",
+        "path": "plugins/design-rails",
+        "sha": "b73a7f68af670d9e2a0db52f0fc4f523aa50862a"
       },
       "description": "Guardrails that keep AI agents on your design system. Posture-check whether a real, agent-wired, CI-enforced design system exists, derive a Google-spec DESIGN.md from the code you already ship, put open taste decisions on visual pages for the human to pick, and ratchet drift budgets that only move down. Read-only on application source \u2014 it authors under design/ and never edits your code.",
       "metadata": {
-        "version": "0.13.0",
-        "releaseId": 422371716,
-        "releaseTag": "v0.13.0"
+        "version": "0.13.1",
+        "releaseId": 431277461,
+        "releaseTag": "design-rails--v0.13.1"
       },
       "card": {
         "rows": [
@@ -145,15 +150,16 @@
     {
       "name": "harness-vet",
       "source": {
-        "source": "url",
-        "url": "https://github.com/StartupBros-com/harness-vet.git",
-        "sha": "a3eff2724a3a360b74db44045165ece81216411b"
+        "source": "git-subdir",
+        "url": "https://github.com/StartupBros-com/hov-stack.git",
+        "path": "plugins/harness-vet",
+        "sha": "5eb873fb09a5efbfdf5199f1e9bfdd4896afe0b3"
       },
       "description": "Adoption gate for external agent tooling. /harness-vet deep-dives a skill, plugin, MCP server, repo, or paper against YOUR harness: a candidate can be skip globally and adopt in one project, with artifact safety judged once and utility, reachable incumbents and context cost judged per target \u2014 claims verified by running them, placement and activation verified on the live host, and an audit dividend that often outvalues the verdict.",
       "metadata": {
-        "version": "0.2.4",
-        "releaseId": 392577830,
-        "releaseTag": "v0.2.4"
+        "version": "0.3.1",
+        "releaseId": 430459702,
+        "releaseTag": "harness-vet--v0.3.1"
       },
       "card": {
         "rows": [
@@ -190,15 +196,16 @@
     {
       "name": "papercut",
       "source": {
-        "source": "url",
-        "url": "https://github.com/StartupBros-com/papercut.git",
-        "sha": "c6e0fad59846d90ec32882a4d15f0be975c7e2f4"
+        "source": "git-subdir",
+        "url": "https://github.com/StartupBros-com/hov-stack.git",
+        "path": "plugins/papercut",
+        "sha": "2491653baaab9452c2f80bd2e4665bbaf9905e64"
       },
       "description": "Friction your agents route around silently, captured automatically and mined into ranked, verified fixes. A PostToolUseFailure hook logs every hard tool failure; a stdlib-only CLI ranks by distinct sessions hit, folds duplicates into causal families, and refuses to call a fix verified on silence alone.",
       "metadata": {
-        "version": "0.1.21",
-        "releaseId": 388753098,
-        "releaseTag": "v0.1.21"
+        "version": "0.1.22",
+        "releaseId": 431311941,
+        "releaseTag": "papercut--v0.1.22"
       },
       "card": {
         "rows": [
@@ -212,15 +219,16 @@
     {
       "name": "product-video",
       "source": {
-        "source": "url",
-        "url": "https://github.com/StartupBros-com/product-video.git",
-        "sha": "9aa8637fbe4f48be9bc5388c55b747a4bfd7415b"
+        "source": "git-subdir",
+        "url": "https://github.com/StartupBros-com/hov-stack.git",
+        "path": "plugins/product-video",
+        "sha": "eecad57d88a8adcc7160163af2357c16adb4e6b5"
       },
       "description": "Agent-native product walkthrough videos. Capture a real authenticated browser tour over CDP at a forced 16:9 geometry so a tall operator window cannot letterbox the recording, overlay a real cursor driven by telemetry that carries no URLs, DOM text, or account data, compose in Remotion, and render a digest-bound H.264 you can verify frame by frame.",
       "metadata": {
-        "version": "0.1.0",
-        "releaseId": 385914492,
-        "releaseTag": "v0.1.0"
+        "version": "0.2.0",
+        "releaseId": 431213906,
+        "releaseTag": "product-video--v0.2.0"
       },
       "card": {
         "rows": [
@@ -234,15 +242,16 @@
     {
       "name": "sign-it",
       "source": {
-        "source": "url",
-        "url": "https://github.com/StartupBros-com/sign-it.git",
-        "sha": "3a66772de0ee8e0fc5f2812356040ea9fa5b8bb4"
+        "source": "git-subdir",
+        "url": "https://github.com/StartupBros-com/hov-stack.git",
+        "path": "plugins/sign-it",
+        "sha": "227412a0802aaab1d349fa8fa8e30e256b8576f4"
       },
       "description": "Agent-native PDF signing: type /sign-it with a document and get <file>-signed.pdf back; Claude never starts it on its own. Finds the signature line in form fields, the text layer (typed or drawn rules, captions under the rule), or scanned pages, stamps your stored signature and today's date, previews the result, and never stamps over an existing signature. Converts Word documents, opens owner-password forms, fails closed when the line is missing or ambiguous, and can add a PAdES seal. Your own signature only, never a counterparty's.",
       "metadata": {
-        "version": "0.6.0",
-        "releaseId": 395112853,
-        "releaseTag": "v0.6.0"
+        "version": "0.6.1",
+        "releaseId": 430468222,
+        "releaseTag": "sign-it--v0.6.1"
       },
       "card": {
         "rows": [
@@ -275,6 +284,21 @@
           "**Only when you invoke it**: existing approvals still apply; missing evidence stays visible and attempt limits are not spending caps"
         ],
         "run": "Run `/harness-optimizer:harness-optimizer` in the project you want to investigate"
+      }
+    },
+    {
+      "name": "hov-stack",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/StartupBros-com/hov-stack.git",
+        "path": "plugins/hov-stack",
+        "sha": "33d465c54b0d2af3687e482761415f2b1b9dbb74"
+      },
+      "description": "The skill pack from the hov-stack Claude Code harness, installable on its own as one plugin.",
+      "metadata": {
+        "version": "0.1.1",
+        "releaseId": 431327539,
+        "releaseTag": "hov-stack--v0.1.1"
       }
     }
   ]
