@@ -319,14 +319,18 @@ const REAL_NODE = process.execPath;
  * Otherwise it is a directory of symlinks to the checkout's hooks/ entries except bin/,
  * which is `launcherDir` (the planted-negative stub).
  */
-function makeWorld({ stubLauncher = null } = {}) {
+function makeWorld({ stubLauncher = null, countNode = false } = {}) {
   const base = mkTmp('golden-world-');
   const shims = path.join(base, 'mise', 'shims');
   const real = path.join(base, 'real');
   fs.mkdirSync(shims, { recursive: true });
   fs.mkdirSync(real, { recursive: true });
   fs.writeFileSync(path.join(shims, 'node'), `#!/bin/sh\necho hit >> "$SHIM_LOG"\nexec ${JSON.stringify(REAL_NODE)} "$@"\n`, { mode: 0o755 });
-  fs.symlinkSync(REAL_NODE, path.join(real, 'node'));
+  if (countNode) {
+    // Pass 5: count every node the launcher starts (the shim wrapper only counts the OLD form), so a
+    // case with no seam beat to look at can still prove "the gate skipped" / "the gate ran node".
+    fs.writeFileSync(path.join(real, 'node'), `#!/bin/sh\necho hit >> "$NODE_LOG"\nexec ${JSON.stringify(REAL_NODE)} "$@"\n`, { mode: 0o755 });
+  } else fs.symlinkSync(REAL_NODE, path.join(real, 'node'));
   let overlay = null;
   if (stubLauncher !== null) {
     overlay = path.join(base, 'hooks-overlay');
@@ -368,6 +372,7 @@ function runOne(world, command, spec, fx, expectFlags = {}) {
     USERPROFILE: home,
     PATH: world.path,
     SHIM_LOG: path.join(home, 'shim.log'),
+    NODE_LOG: path.join(home, 'node.log'),
     CLAUDE_SEAM_DIR: path.join(home, 'seam'),
     STRAY_DOT_GIT_FS_ROOT: path.join(home, 'fs-root'),
     ...caseEnv,
@@ -387,7 +392,7 @@ function runOne(world, command, spec, fx, expectFlags = {}) {
   const normFile = (s) => norm(s).replace(/"ppid":\d+/g, "\"ppid\":<PID>").replace(/ppid-\d+/g, "ppid-<PID>").replace(/unknown-\d+/g, "unknown-<PID>").replace(/\b[0-9a-f]{16,}\b/g, "<HASH>");
   const files = {};
   for (const rel of listFiles(home)) {
-    if (rel === 'shim.log') continue;
+    if (rel === 'shim.log' || rel === 'node.log') continue;
     let body = '';
     try {
       const buf = fs.readFileSync(path.join(home, rel));
@@ -397,8 +402,10 @@ function runOne(world, command, spec, fx, expectFlags = {}) {
   }
   let shimHits = 0;
   try { shimHits = fs.readFileSync(path.join(home, 'shim.log'), 'utf8').split('\n').filter(Boolean).length; } catch { /* none */ }
+  let nodeHits = 0;
+  try { nodeHits = fs.readFileSync(path.join(home, 'node.log'), 'utf8').split('\n').filter(Boolean).length; } catch { /* none */ }
   rmTmp(home);
-  return { status: res.status, signal: res.signal, error: res.error ? String(res.error) : null, stdout: norm(res.stdout), stderr: norm(res.stderr), files, shimHits };
+  return { nodeHits, status: res.status, signal: res.signal, error: res.error ? String(res.error) : null, stdout: norm(res.stdout), stderr: norm(res.stderr), files, shimHits };
 }
 
 function kindOf(r) {
@@ -1212,4 +1219,311 @@ test('PLANTED NEGATIVE 14: a gate that never skips cannot hide behind the seam e
   sgPlanted(t, 'never-skipping gate',
     (s) => s.replace(SG_LITERALS_RE, "*) _hn_stdin=1"),
     (spec) => spec.skips);
+});
+
+// ---------------------------------------------------------------------------
+// auto-format stdin gate (pass 5): reference = the OLD registered form
+//   node run-with-flags.js post:edit:format PostToolUse/auto-format.js standard,strict
+// through the mise shim. Compared on stdout, exit code, stderr and every file under the sandboxed HOME.
+// The side effect that matters is the formatter: each project carries a fake node_modules/.bin/biome or
+// prettier that appends `<cwd>|<argv>` to $HOME/formatter-calls.log, so "the formatter ran with these args"
+// is a compared file. A case declares `skips` (written by hand from the payload, never derived from the
+// launcher); NEW must then start NO node (counted by a wrapper on the launcher's PATH), and otherwise exactly one.
+// Every real payload carries "transcript_path":"...jsonl" (the head below), which holds the bytes `.js`.
+// ---------------------------------------------------------------------------
+
+const AFG = 'run-with-flags:post:edit:format';
+const AF_LOG = 'formatter-calls.log';
+const AF_CASES = [];
+const AF_CAP = 1024 * 1024;
+
+function afFx(kind) {
+  const fx = plainFx();
+  fs.writeFileSync(path.join(fx.root, 'package.json'), '{}');
+  if (kind === 'none') return fx;
+  const bin = path.join(fx.root, 'node_modules', '.bin');
+  fs.mkdirSync(bin, { recursive: true });
+  fs.writeFileSync(path.join(bin, kind), '#!/bin/sh\nprintf \'%s|%s\\n\' "$PWD" "$*" >> "$HOME/formatter-calls.log"\n', { mode: 0o755 });
+  fs.writeFileSync(path.join(fx.root, kind === 'biome' ? 'biome.json' : '.prettierrc'), '{}');
+  return fx;
+}
+
+const afHead = (fx) => `{"session_id":"golden-af-0001","transcript_path":"/home/u/.claude/projects/-tmp/golden-af-0001.jsonl","cwd":${JSON.stringify(fx.cwd)},"permission_mode":"bypassPermissions","hook_event_name":"PostToolUse"`;
+const afBody = { Edit: ',"old_string":"a","new_string":"b"', Write: ',"content":"x\\ny"', MultiEdit: ',"edits":[{"old_string":"a","new_string":"b"}]' };
+const afRoot = (fx) => JSON.stringify(fx.root).slice(1, -1);
+/** Raw JSON text. `fpText` is the already-escaped JSON string body of file_path (appended to the fixture root unless absolute). */
+const afRaw = (fx, tool, fpText, { resp = true, input } = {}) => {
+  const fp = fpText.startsWith('/') ? fpText : `${afRoot(fx)}/${fpText}`;
+  const tr = resp ? `,"tool_response":{"filePath":"${fp}","userModified":false,"replaceAll":false}` : '';
+  return `${afHead(fx)},"tool_name":"${tool}","tool_input":{"file_path":"${fp}"${input === undefined ? afBody[tool] : input}}${tr},"tool_use_id":"toolu_golden"}`;
+};
+const afUni = (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`;
+/**
+ * @param {string} name
+ * @param {{kind?:string,runs:number,skips:boolean,payload:Function,env?:Function|object,home?:Function,stderr?:boolean,escaped?:boolean,plugin?:boolean}} spec
+ */
+const addAf = (name, spec) => AF_CASES.push({ name, hook: AFG, kind: 'biome', stderr: false, escaped: false, plugin: false, ...spec, fx: () => afFx(spec.kind || 'biome') });
+
+// 1. Each extension x tool x formatter: the formatter runs once with the registered args.
+for (const kind of ['biome', 'prettier']) {
+  for (const tool of ['Edit', 'Write', 'MultiEdit']) {
+    for (const ext of ['ts', 'tsx', 'js', 'jsx']) {
+      addAf(`${kind}: ${tool} of x.${ext} runs the formatter`, { kind, runs: 1, skips: false, payload: (fx) => afRaw(fx, tool, `x.${ext}`) });
+    }
+  }
+  // Extensions the regex does not match: no formatter run, and the payload never needs node (no ending, no escape).
+  for (const name of ['x.json', 'x.jsonl', 'x.mjs', 'x.cjs', 'x.md', 'x.js.map', 'x.ts.bak', 'x.JS', 'x.TSX', 'xjs', 'x.js~', 'x.vue', 'x.d.mts']) {
+    addAf(`${kind}: ${name} does not match: no formatter`, { kind, runs: 0, skips: true, payload: (fx) => afRaw(fx, 'Edit', name) });
+  }
+  addAf(`${kind}: x.js followed by a newline (JS \`$\` is end-of-input): no formatter`, { kind, runs: 0, skips: true, payload: (fx) => afRaw(fx, 'Edit', 'x.js\\n') });
+  addAf(`${kind}: x.ts followed by a space: no formatter`, { kind, runs: 0, skips: true, payload: (fx) => afRaw(fx, 'Edit', 'x.ts ') });
+  addAf(`${kind}: file_path ending in an escaped backslash after .js: no formatter`, { kind, runs: 0, skips: true, payload: (fx) => afRaw(fx, 'Edit', 'x.js\\\\') });
+  addAf(`${kind}: file_path holding an escaped quote after .ts: no formatter`, { kind, runs: 0, skips: true, payload: (fx) => afRaw(fx, 'Edit', 'x.ts\\"') });
+  addAf(`${kind}: sub dir with a space, x.ts runs the formatter at the project root`, { kind, runs: 1, skips: false, payload: (fx) => afRaw(fx, 'Edit', 'sub dir/x.ts') });
+  addAf(`${kind}: non-ASCII file name, x.tsx runs the formatter`, { kind, runs: 1, skips: false, payload: (fx) => afRaw(fx, 'Write', 'caf\u00e9/\u2603.tsx') });
+  addAf(`${kind}: pretty-printed JSON, x.ts runs the formatter`, { kind, runs: 1, skips: false, payload: (fx) => JSON.stringify(JSON.parse(afRaw(fx, 'Edit', 'x.ts')), null, 2) });
+  addAf(`${kind}: pretty-printed JSON, x.md is skipped`, { kind, runs: 0, skips: true, payload: (fx) => JSON.stringify(JSON.parse(afRaw(fx, 'Edit', 'x.md')), null, 2) });
+}
+
+// 2. Escaped spellings of each ending character (tool_response omitted: its plain filePath would otherwise
+// hand an ending-keyed gate the bytes it wants).
+const AF_ESCAPED = [
+  ['dot', 'x\\u002ejs'], ['dot, uppercase hex', 'x\\u002Ejs'], ['j', 'x.\\u006as'], ['j, uppercase hex', 'x.\\u006Asx'],
+  ['s of .js', 'x.j\\u0073'], ['t of .ts', 'x.\\u0074s'], ['s of .ts', 'x.t\\u0073'], ['x of .tsx', 'x.ts\\u0078'], ['x of .jsx', 'x.js\\u0078'],
+  ['t of .tsx', 'x.\\u0074sx'], ['s of .jsx', 'x.j\\u0073x'],
+  ['every character of .js', `x${'.js'.split('').map(afUni).join('')}`], ['every character of .tsx', `x${'.tsx'.split('').map(afUni).join('')}`],
+  ['every character of .jsx, uppercase hex', `x${'.jsx'.split('').map((c) => `\\u00${c.charCodeAt(0).toString(16).toUpperCase()}`).join('')}`],
+];
+for (const kind of ['biome', 'prettier']) {
+  for (const [label, name] of AF_ESCAPED) {
+    addAf(`${kind}: escaped ${label} (${name}) runs the formatter`, { kind, runs: 1, skips: false, escaped: true, payload: (fx) => afRaw(fx, 'Edit', name, { resp: false }) });
+  }
+  // An escape spelling that decodes to a non-matching name still goes to node (the gate only needs the necessary condition) and runs nothing.
+  addAf(`${kind}: escaped dot of x.json: node runs, no formatter`, { kind, runs: 0, skips: false, escaped: true, payload: (fx) => afRaw(fx, 'Edit', 'x\\u002ejson', { resp: false }) });
+  addAf(`${kind}: escaped s then a newline (decodes to x.js<LF>): node runs, no formatter`, { kind, runs: 0, skips: false, escaped: true, payload: (fx) => afRaw(fx, 'Edit', 'x.j\\u0073\\n', { resp: false }) });
+}
+
+// 3. The literal only where it is not file_path.
+addAf('literal .js/.ts only in old_string/new_string of an Edit of x.md: skipped', { runs: 0, skips: true, payload: (fx) => afRaw(fx, 'Edit', 'x.md', { resp: false, input: ',"old_string":"see a.js and b.tsx now","new_string":"c.ts d.jsx now"' }) });
+addAf('Write of x.md whose content quotes "x.js": encoded as \\"x.js\\", skipped', { runs: 0, skips: true, payload: (fx) => afRaw(fx, 'Write', 'x.md', { resp: false, input: `,"content":${JSON.stringify('const a = require("x.js"); import b from "y.tsx"\n')}` }) });
+addAf('Write of x.md whose content is a JSON document ending in .js", skipped', { runs: 0, skips: true, payload: (fx) => afRaw(fx, 'Write', 'x.md', { resp: false, input: `,"content":${JSON.stringify(JSON.stringify({ main: 'index.js' }))}` }) });
+addAf('MultiEdit of x.md with edit strings ending in .js (separate JSON strings): node runs, no formatter', { runs: 0, skips: false, payload: (fx) => afRaw(fx, 'MultiEdit', 'x.md', { resp: false, input: ',"edits":[{"old_string":"foo.js","new_string":"bar.ts"}]' }) });
+addAf('tool_response.filePath is a .ts but tool_input.file_path is x.md: node runs, no formatter', { runs: 0, skips: false, payload: (fx) => `${afHead(fx)},"tool_name":"Edit","tool_input":{"file_path":"${afRoot(fx)}/x.md","old_string":"a","new_string":"b"},"tool_response":{"filePath":"${afRoot(fx)}/x.ts"}}` });
+addAf('transcript_path present, no file_path at all: skipped', { runs: 0, skips: true, payload: (fx) => `${afHead(fx)},"tool_name":"Edit","tool_input":{"old_string":"a"}}` });
+addAf('file_path null: skipped', { runs: 0, skips: true, payload: (fx) => `${afHead(fx)},"tool_name":"Edit","tool_input":{"file_path":null}}` });
+addAf('file_path a number: skipped', { runs: 0, skips: true, payload: (fx) => `${afHead(fx)},"tool_name":"Edit","tool_input":{"file_path":12}}` });
+addAf('file_path an empty string: skipped', { runs: 0, skips: true, payload: (fx) => `${afHead(fx)},"tool_name":"Edit","tool_input":{"file_path":""}}` });
+addAf('file_path an object: skipped', { runs: 0, skips: true, payload: (fx) => `${afHead(fx)},"tool_name":"Edit","tool_input":{"file_path":{"a":"b"}}}` });
+addAf('file_path an array of one .ts string (String() coercion matches; path.resolve throws): node runs, no formatter', { runs: 0, skips: false, payload: (fx) => `${afHead(fx)},"tool_name":"Edit","tool_input":{"file_path":["${afRoot(fx)}/x.ts"]}}` });
+addAf('file_path an array ending in a .ts string after a non-string element: node runs, no formatter', { runs: 0, skips: false, payload: (fx) => `${afHead(fx)},"tool_name":"Edit","tool_input":{"file_path":[1,"x.ts"]}}` });
+addAf('file_path an array [".ts string", null] (joins to "x.ts,", no match): node runs, no formatter', { runs: 0, skips: false, payload: (fx) => `${afHead(fx)},"tool_name":"Edit","tool_input":{"file_path":["x.ts",null]}}` });
+addAf('escaped key name file\\u005fpath with a plain .ts value runs the formatter', { runs: 1, skips: false, payload: (fx) => `${afHead(fx)},"tool_name":"Edit","tool_input":{"file\\u005fpath":"${afRoot(fx)}/x.ts"}}` });
+addAf('duplicate keys: first .ts then .md (last wins: no formatter), node runs', { runs: 0, skips: false, payload: (fx) => `${afHead(fx)},"tool_name":"Edit","tool_input":{"file_path":"${afRoot(fx)}/x.ts","file_path":"${afRoot(fx)}/x.md"}}` });
+addAf('duplicate keys: first .md then .ts (last wins: formatter runs)', { runs: 1, skips: false, payload: (fx) => `${afHead(fx)},"tool_name":"Edit","tool_input":{"file_path":"${afRoot(fx)}/x.md","file_path":"${afRoot(fx)}/x.ts"}}` });
+addAf('file_path key not under tool_input: skipped', { runs: 0, skips: true, payload: (fx) => `${afHead(fx)},"tool_name":"Edit","file_path":"x.md"}` });
+addAf('no formatter configured (package.json only), x.ts: node runs, nothing runs', { kind: 'none', runs: 0, skips: false, payload: (fx) => afRaw(fx, 'Edit', 'x.ts') });
+addAf('no formatter configured, x.md: skipped', { kind: 'none', runs: 0, skips: true, payload: (fx) => afRaw(fx, 'Edit', 'x.md') });
+
+// 4. CLAUDE_PLUGIN_ROOT: unset, empty, whitespace-only, set (real hooks root), set to a root without the script,
+// set to a root with a DIFFERENT script (which leaves a marker file when it runs).
+const altRoot = (home) => {
+  const dir = path.join(home, 'altplug', 'PostToolUse');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'auto-format.js'), "module.exports = { run(raw) { require('fs').writeFileSync(require('path').join(process.env.HOME, 'alt-ran'), 'ran'); return raw; } };\n");
+};
+for (const [label, value, tsRuns, mdSkips] of [['unset', undefined, 1, true], ['empty', '', 1, true], ['one space', ' ', 1, false], ['tab and newline', '\t\n', 1, false], ['the real hooks root', HOOKS, 1, false]]) {
+  const env = value === undefined ? {} : { CLAUDE_PLUGIN_ROOT: value };
+  addAf(`plugin root ${label}: x.ts runs the formatter`, { runs: tsRuns, skips: false, plugin: true, gateOff: value !== undefined && value !== '', env, payload: (fx) => afRaw(fx, 'Edit', 'x.ts') });
+  addAf(`plugin root ${label}: x.md`, { runs: 0, skips: mdSkips, plugin: true, env, payload: (fx) => afRaw(fx, 'Edit', 'x.md') });
+}
+addAf('plugin root set to a dir without the script: x.ts prints Script not found', { runs: 0, skips: false, stderr: true, plugin: true, env: { CLAUDE_PLUGIN_ROOT: '/nonexistent-plugin-root' }, payload: (fx) => afRaw(fx, 'Edit', 'x.ts') });
+addAf('plugin root set to a dir without the script: x.md prints Script not found (a gate must not hide it)', { runs: 0, skips: false, stderr: true, plugin: true, env: { CLAUDE_PLUGIN_ROOT: '/nonexistent-plugin-root' }, payload: (fx) => afRaw(fx, 'Edit', 'x.md') });
+addAf('plugin root set to a dir with a different script: x.md still runs THAT script (marker file)', { runs: 0, skips: false, plugin: true, home: altRoot, env: (fx, home) => ({ CLAUDE_PLUGIN_ROOT: path.join(home, 'altplug') }), payload: (fx) => afRaw(fx, 'Edit', 'x.md') });
+addAf('plugin root set to a dir with a different script: x.ts runs THAT script, not the formatter', { runs: 0, skips: false, plugin: true, home: altRoot, env: (fx, home) => ({ CLAUDE_PLUGIN_ROOT: path.join(home, 'altplug') }), payload: (fx) => afRaw(fx, 'Edit', 'x.ts') });
+
+// 5. Disabled / profile flags (hooks/lib/hook-flags.js reads HOOK_DISABLED and HOOK_PROFILE only).
+for (const [label, env, tsRuns] of [
+  ['HOOK_DISABLED=post:edit:format', { HOOK_DISABLED: 'post:edit:format' }, 0],
+  ['HOOK_DISABLED with spaces and upper case in a list', { HOOK_DISABLED: 'other, POST:Edit:Format ,x' }, 0],
+  ['HOOK_DISABLED naming another hook', { HOOK_DISABLED: 'pre:git-guard' }, 1],
+  ['HOOK_PROFILE=minimal (not in "standard,strict")', { HOOK_PROFILE: 'minimal' }, 0],
+  ['HOOK_PROFILE=strict', { HOOK_PROFILE: 'strict' }, 1],
+  ['HOOK_PROFILE=bogus (falls back to standard)', { HOOK_PROFILE: 'bogus' }, 1],
+]) {
+  addAf(`${label}: x.ts`, { runs: tsRuns, skips: false, env, payload: (fx) => afRaw(fx, 'Edit', 'x.ts') });
+  addAf(`${label}: x.md is skipped`, { runs: 0, skips: true, env, payload: (fx) => afRaw(fx, 'Edit', 'x.md') });
+}
+
+// 6. Stdin shapes.
+addAf('empty stdin', { runs: 0, skips: true, payload: () => '' });
+addAf('only a newline', { runs: 0, skips: true, payload: () => '\n' });
+addAf('malformed JSON, no ending', { runs: 0, skips: true, payload: () => 'not-json{{{' });
+addAf('malformed JSON holding a .ts" (truncated): node runs, no formatter', { runs: 0, skips: false, payload: () => '{"tool_input":{"file_path":"/a/b.ts"' });
+addAf('JSON null', { runs: 0, skips: true, payload: () => 'null' });
+addAf('JSON array', { runs: 0, skips: true, payload: () => '[]' });
+addAf('raw NUL byte after a .ts path (invalid JSON; tr turns it into \\001 and breaks the .ts-quote adjacency): skipped, OLD formats nothing', { runs: 0, skips: true, payload: (fx) => `{"tool_input":{"file_path":"${afRoot(fx)}/x.ts\u0000"}}` });
+addAf('raw NUL byte, unrelated file (invalid JSON): skipped', { runs: 0, skips: true, payload: () => '{"tool_input":{"file_path":"/a/b.md\u0000"}}' });
+addAf('trailing newlines (3), x.ts runs the formatter', { runs: 1, skips: false, payload: (fx) => `${afRaw(fx, 'Edit', 'x.ts')}\n\n\n` });
+addAf('leading and trailing whitespace, x.ts runs the formatter', { runs: 1, skips: false, payload: (fx) => `\n  ${afRaw(fx, 'Edit', 'x.ts')} \t\n` });
+addAf('200 KB Write of x.ts runs the formatter', { runs: 1, skips: false, payload: (fx) => afRaw(fx, 'Write', 'x.ts', { input: `,"content":${JSON.stringify('line of generated content 0123456789abcdef\n'.repeat(5000).slice(0, 200 * 1024))}` }) });
+addAf('200 KB Write of x.md is skipped', { runs: 0, skips: true, payload: (fx) => afRaw(fx, 'Write', 'x.md', { input: `,"content":${JSON.stringify('line of generated content 0123456789abcdef\n'.repeat(5000).slice(0, 200 * 1024))}` }) });
+const afBig = 'y'.repeat(2 * AF_CAP);
+addAf('2 MiB Write of x.md: skipped', { runs: 0, skips: true, payload: (fx) => afRaw(fx, 'Write', 'x.md', { input: `,"content":"${afBig}"` }) });
+addAf('2 MiB Write of x.ts, path BEFORE the cap (truncated, invalid JSON): node runs, no formatter', { runs: 0, skips: false, payload: (fx) => afRaw(fx, 'Write', 'x.ts', { resp: false, input: `,"content":"${afBig}"` }) });
+addAf('2 MiB Write, x.ts path only AFTER the cap (node never sees it): node runs, no formatter', { runs: 0, skips: false, payload: (fx) => `{"tool_name":"Write","tool_input":{"content":"${afBig}","file_path":"${afRoot(fx)}/x.ts"}}` });
+addAf('2 MiB, x.md path, a .ts" string only in the tail: node runs, no formatter', { runs: 0, skips: false, payload: (fx) => `{"tool_name":"Write","tool_input":{"file_path":"${afRoot(fx)}/x.md","content":"${afBig}"},"note":"a.ts"}` });
+addAf('complete x.ts object then 1.5 MiB of whitespace (valid JSON inside the cap) runs the formatter', { runs: 1, skips: false, payload: (fx) => `${afRaw(fx, 'Edit', 'x.ts')}${' '.repeat(AF_CAP + AF_CAP / 2)}` });
+addAf('complete x.md object then 1.5 MiB of whitespace is skipped', { runs: 0, skips: true, payload: (fx) => `${afRaw(fx, 'Edit', 'x.md')}${' '.repeat(AF_CAP + AF_CAP / 2)}` });
+
+let afOldCache = null;
+const afRuns = (r) => (r.files[AF_LOG] || '').split('\n').filter(Boolean).length;
+function afRun(world, command, spec) {
+  const fx = spec.fx();
+  try { return runOne(world, command, spec, fx); } finally { rmTmp(fx.root); }
+}
+function afCompare(newWorld) {
+  const reg = commandFor(seedHooks(), AFG);
+  if (!afOldCache) {
+    const oldWorld = makeWorld();
+    afOldCache = AF_CASES.map((spec) => afRun(oldWorld, oldForm(reg.command), spec));
+    process.on('exit', () => rmTmp(oldWorld.base));
+  }
+  return AF_CASES.map((spec, i) => {
+    const oldR = afOldCache[i];
+    const newR = afRun(newWorld, reg.command, spec);
+    const diffs = [];
+    if (oldR.stdout !== newR.stdout) diffs.push('stdout');
+    if (oldR.status !== newR.status || oldR.signal !== newR.signal) diffs.push(`exit ${oldR.status}/${oldR.signal} vs ${newR.status}/${newR.signal}`);
+    if (oldR.error !== newR.error) diffs.push('spawn error');
+    if (oldR.stderr !== newR.stderr) diffs.push('stderr');
+    if (JSON.stringify(oldR.files) !== JSON.stringify(newR.files)) diffs.push('files');
+    return { spec, oldR, newR, diffs, skipped: newR.nodeHits === 0 };
+  });
+}
+
+let afCur = null;
+const afCurrent = () => {
+  if (!afCur) {
+    const w = makeWorld({ countNode: true });
+    afCur = { w, records: afCompare(w) };
+    process.on('exit', () => rmTmp(w.base));
+  }
+  return afCur;
+};
+
+test('auto-format gate: the OLD form pins the corpus (formatter runs per case, quiet, exit 0, stderr only where declared)', () => {
+  afCurrent();
+  const bad = [];
+  AF_CASES.forEach((spec, i) => {
+    const r = afOldCache[i];
+    if (afRuns(r) !== spec.runs) bad.push(`${spec.name}: expected ${spec.runs} formatter run(s), OLD made ${afRuns(r)}`);
+    if (r.stdout !== '' || r.status !== 0) bad.push(`${spec.name}: OLD not quiet/0: ${JSON.stringify([r.stdout.slice(0, 80), r.status])}`);
+    if ((r.stderr !== '') !== spec.stderr) bad.push(`${spec.name}: OLD stderr ${JSON.stringify(r.stderr.slice(0, 100))}, declared ${spec.stderr}`);
+    if (!(r.shimHits >= 1)) bad.push(`${spec.name}: OLD did not go through the shim`);
+  });
+  assert.deepStrictEqual(bad, []);
+  const withRuns = AF_CASES.filter((c) => c.runs > 0).length;
+  const skips = AF_CASES.filter((c) => c.skips).length;
+  assert.ok(AF_CASES.length >= 150 && withRuns >= 60 && skips >= 40, `auto-format corpus decayed: ${AF_CASES.length} cases, ${withRuns} format, ${skips} skip`);
+  const names = AF_CASES.map((c) => c.name);
+  assert.strictEqual(new Set(names).size, names.length, 'auto-format case names are unique');
+  // The recorded argv is the registered one: biome `check --write <file>`, prettier `--write <file>`, cwd = project root.
+  const argv = (kind) => afOldCache[AF_CASES.findIndex((c) => c.name === `${kind}: Edit of x.ts runs the formatter`)].files[AF_LOG];
+  assert.strictEqual(argv('biome'), '<FX>|check --write <FX>/x.ts\n');
+  assert.strictEqual(argv('prettier'), '<FX>|--write <FX>/x.ts\n');
+  const alt = afOldCache[AF_CASES.findIndex((c) => /different script: x\.md/.test(c.name))];
+  assert.strictEqual(alt.files['alt-ran'], 'ran');
+});
+
+test('auto-format gate: OLD vs NEW identical stdout, exit, stderr and files (formatter calls included) for every case', (t) => {
+  const { records } = afCurrent();
+  const bad = records.filter((r) => r.diffs.length).map((r) => `${r.spec.name}: ${r.diffs.join(', ')}`);
+  const skipped = records.filter((r) => r.skipped).length;
+  t.diagnostic(`auto-format cases=${records.length} formatter-runs=${records.filter((r) => r.spec.runs).length} skipped(no node)=${skipped} node-run=${records.length - skipped}`);
+  assert.deepStrictEqual(bad, []);
+});
+
+test('auto-format gate: a declared-skip case starts no node (OLD does, through the shim); every other case starts exactly one, direct', () => {
+  const { records } = afCurrent();
+  const bad = [];
+  for (const r of records) {
+    if (!(r.oldR.shimHits >= 1)) bad.push(`${r.spec.name}: OLD shimHits ${r.oldR.shimHits}`);
+    if (r.newR.shimHits !== 0) bad.push(`${r.spec.name}: NEW reached the shim`);
+    const want = r.spec.skips ? 0 : 1;
+    if (r.newR.nodeHits !== want) bad.push(`${r.spec.name}: NEW started ${r.newR.nodeHits} node(s), want ${want}`);
+  }
+  assert.deepStrictEqual(bad, []);
+});
+
+test('auto-format gate: the skip path completes on 2 MiB and 1.5 MiB-of-whitespace payloads with no EPIPE', () => {
+  const { records } = afCurrent();
+  const big = records.filter((r) => r.spec.skips && /^(2 MiB Write of x\.md|complete x\.md object then 1\.5 MiB)/.test(r.spec.name));
+  assert.strictEqual(big.length, 2);
+  for (const r of big) { assert.strictEqual(r.newR.error, null); assert.strictEqual(r.newR.status, 0); assert.strictEqual(r.newR.nodeHits, 0); }
+});
+
+const AF_PATS_RE = /\*'\.js"'\* \| \*'\.jsx"'\* \| \*'\.ts"'\* \| \*'\.tsx"'\* \| \*'\\u002'\* \| \*'\\u006'\* \| \*'\\u007'\*\) _hn_stdin=1/;
+function afPlanted(t, label, mutate, mustBeRed) {
+  const src = mutate(LAUNCHER_SRC);
+  assert.notStrictEqual(src, LAUNCHER_SRC, `${label}: mutation did not apply`);
+  const stub = makeWorld({ stubLauncher: src, countNode: true });
+  try {
+    const records = afCompare(stub);
+    const red = records.filter((r) => r.diffs.length);
+    const must = records.filter((r) => mustBeRed(r.spec));
+    const missed = must.filter((r) => !r.diffs.length).map((r) => r.spec.name);
+    const skipsDeclared = records.filter((r) => r.spec.skips);
+    t.diagnostic(`${label}: ${red.length}/${records.length} red (${must.length} required red, ${must.length - missed.length} were); declared-skip cases that skipped: ${skipsDeclared.filter((r) => r.skipped).length}/${skipsDeclared.length}`);
+    assert.deepStrictEqual(missed, [], `${label}: cases that must be red were green`);
+    return { records, red, must, skipsDeclared };
+  } finally { rmTmp(stub.base); }
+}
+
+test('PLANTED NEGATIVE 15: a gate keyed to `.js` without the quote never skips (transcript_path holds .js): it is green, and its skip rate is 0', (t) => {
+  const { records, red, skipsDeclared } = afPlanted(t, 'bare-.js gate',
+    (s) => s.replace(AF_PATS_RE, "*'.js'* | *'.ts'*) _hn_stdin=1"), () => false);
+  assert.deepStrictEqual(red.map((r) => r.spec.name), [], 'a never-skipping gate cannot differ from OLD on output');
+  // Payloads of the real shape (transcript_path .jsonl present) never skip under it; only the hand-made bare ones do.
+  const dummy = { root: '/x', cwd: '/x' };
+  const realShape = skipsDeclared.filter((r) => r.spec.payload(dummy).includes('"transcript_path"'));
+  assert.ok(realShape.length >= 50);
+  assert.strictEqual(realShape.filter((r) => r.skipped).length, 0);
+  t.diagnostic(`bare-.js gate skip rate on real-shape declared-skip payloads: 0/${realShape.length}`);
+  // The real gate, for contrast: every declared-skip case skips.
+  assert.strictEqual(afCurrent().records.filter((r) => r.spec.skips && r.skipped).length, afCurrent().records.filter((r) => r.spec.skips).length);
+  assert.ok(records.length > 150);
+});
+
+test('PLANTED NEGATIVE 16: a gate keyed to the quoted endings without the escape prefixes is red on every escaped-spelling formatter case', (t) => {
+  const { must } = afPlanted(t, 'no-escape-prefix gate',
+    (s) => s.replace(AF_PATS_RE, "*'.js\"'* | *'.jsx\"'* | *'.ts\"'* | *'.tsx\"'*) _hn_stdin=1"),
+    (spec) => spec.escaped && spec.runs > 0);
+  assert.ok(must.length >= 28);
+});
+
+test('PLANTED NEGATIVE 17: a gate that drops stdin before node is red on every formatter case', (t) => {
+  const { must } = afPlanted(t, 'dropping gate',
+    (s) => s.split('printf \'%s\' "$_hn_buf" |').join('printf \'\' |'),
+    (spec) => spec.runs > 0 && !spec.gateOff);
+  assert.ok(must.length >= 60);
+});
+
+test('PLANTED NEGATIVE 18: a gate that truncates stdin before node is red on every formatter case', (t) => {
+  afPlanted(t, 'truncating gate',
+    (s) => s.split('printf \'%s\' "$_hn_buf" |').join('printf \'%.40s\' "$_hn_buf" |'),
+    (spec) => spec.runs > 0 && !spec.gateOff);
+});
+
+test('PLANTED NEGATIVE 19: a gate that ignores CLAUDE_PLUGIN_ROOT is red where a different script, or no script, sits behind the root', (t) => {
+  const { must } = afPlanted(t, 'plugin-root-blind gate',
+    (s) => s.replace(' && [ -z "$CLAUDE_PLUGIN_ROOT" ]', ''),
+    (spec) => /^plugin root set to a dir (without the script: x\.md|with a different script: x\.md)/.test(spec.name));
+  assert.strictEqual(must.length, 2);
+});
+
+test('PLANTED NEGATIVE 20: dropping the script-exists check is red nowhere in the registered configuration (the script always exists there; reported)', (t) => {
+  // The -f/-r guard only matters when run-with-flags.js has no sibling script: outside the registered configuration.
+  const { red } = afPlanted(t, 'no-script-check gate',
+    (s) => s.replace(' && [ -f "${1%/*}/PostToolUse/auto-format.js" ] && [ -r "${1%/*}/PostToolUse/auto-format.js" ]', ''), () => false);
+  assert.deepStrictEqual(red.map((r) => r.spec.name), []);
 });

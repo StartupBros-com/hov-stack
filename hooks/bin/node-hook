@@ -19,7 +19,8 @@
 # before use, so nothing in the caller's env can steer a hook's stdin.
 #
 # Bounded: only `[ -f ]` / `[ -x ]` on PATH entries, never a /mnt/* entry (a
-# drvfs lookup costs ~2 ms each), never anything outside PATH. When no non-shim
+# drvfs lookup costs ~2 ms each), never anything outside PATH except the pass 5 gate's one
+# `[ -f ]` / `[ -r ]` on the hooks dir's own auto-format.js. When no non-shim
 # node is found the last step is the literal command the hook ran before this
 # launcher existed, `exec node "$@"`, so a PATH shape this does not understand
 # behaves exactly as it did.
@@ -72,6 +73,35 @@
 # reaches node (the gate only needs the necessary condition). Same buffering as pass 3.
 # Tied to GUARDED by hooks/tests/node-hook.test.js (drift test).
 #
+# Stdin gate (#369, pass 5): the only seed PostToolUse hook on Edit|Write|MultiEdit is
+#   run-with-flags.js "post:edit:format" "PostToolUse/auto-format.js" "standard,strict"
+# (settings.json). After the flag check, auto-format.js run() does anything only when the DECODED
+# tool_input.file_path matches /\.(ts|tsx|js|jsx)$/ (JS `$` is end of input only, so `x.js\n` fails);
+# every other input returns untouched and prints nothing, exit 0, empty stderr. The launcher skips
+# node unless stdin contains one of `.js"`, `.jsx"`, `.ts"`, `.tsx"` or `\u002`, `\u006`, `\u007`.
+#   - NOT a bare `.js`: every real payload carries "transcript_path":"...<uuid>.jsonl", which holds
+#     `.js`, so a bare-substring gate never skips.
+#   - Why the quote form is necessary: file_path ends with one of those four endings, so its closing
+#     JSON quote follows the final s or x. An inner quote is always `\"`, and `s`/`x` are neither hex
+#     digits nor escape letters, so a literal `"` right after them closes the string. If any ending
+#     character is escaped instead, the escape is `\u00XY` with X in 2 (.), 6 (j), 7 (t s x): the same
+#     three prefixes as passes 3 and 4. An array file_path (String() joins it) still ends in a string
+#     closed by a quote. Duplicate keys: any `.js"` anywhere already sends the payload to node.
+#   - Measured over 7 days of real Edit/Write tool inputs: ~90% skip. The 1 MiB read cap only
+#     truncates, and a prefix of the bytes cannot hold a match the whole lacks.
+# Scope of the arm, all required, else node runs exactly as before: $2 = post:edit:format and
+# $3 = PostToolUse/auto-format.js (so `pre:git-guard` etc. are untouched); CLAUDE_PLUGIN_ROOT is
+# empty or unset (otherwise run-with-flags.js loads a different script from that root; a
+# whitespace-only value runs node, conservatively); and ${1%/*}/PostToolUse/auto-format.js is a
+# readable file (otherwise run-with-flags.js prints "Script not found" to stderr). $4 (profiles),
+# HOOK_PROFILE and HOOK_DISABLED do not matter: hook-flags.js only chooses between exit 0 and running
+# run(), and both are silent for a payload this gate skips. Same buffering as pass 3. No seam beat is
+# lost: none of the modules on this path writes one.
+# Assumption, as in passes 3 and 4: ${1%/*}/PostToolUse/auto-format.js is this repo's file. A foreign
+# run-with-flags.js + auto-format.js pair elsewhere, or run-with-flags.js symlinked as a single file out of its
+# directory, is outside the registered configuration and is not made byte-identical.
+# Tied to the JS by hooks/tests/node-hook.test.js (drift test).
+#
 # What the skip drops: the seam heartbeat settings-guard.js wrote on every Edit/Write/MultiEdit.
 # After pass 2 it was the only beat source for those tools, so scripts/hook-seam-check.py
 # BEAT_COVERED_TOOLS is now {Bash, EnterWorktree}. Evidence in that file's header.
@@ -101,6 +131,16 @@ case $1 in
       *'settings.'* | *'\u002'* | *'\u006'* | *'\u007'*) _hn_stdin=1 ;;
       *) exit 0 ;;
     esac
+    ;;
+  */run-with-flags.js)
+    if [ "$2" = post:edit:format ] && [ "$3" = PostToolUse/auto-format.js ] && [ -z "$CLAUDE_PLUGIN_ROOT" ] && [ -f "${1%/*}/PostToolUse/auto-format.js" ] && [ -r "${1%/*}/PostToolUse/auto-format.js" ]; then
+      _hn_buf=$(tr '\0' '\1'; echo x)
+      _hn_buf=${_hn_buf%x}
+      case $_hn_buf in
+        *'.js"'* | *'.jsx"'* | *'.ts"'* | *'.tsx"'* | *'\u002'* | *'\u006'* | *'\u007'*) _hn_stdin=1 ;;
+        *) exit 0 ;;
+      esac
+    fi
     ;;
 esac
 # `set -f`: the unquoted $PATH split below must not glob-expand an entry holding

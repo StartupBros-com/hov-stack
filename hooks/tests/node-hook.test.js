@@ -361,3 +361,162 @@ test('settings-guard gate: path-exact, skips without node, hands node every byte
     }
   } finally { rmTmp(base); }
 });
+
+// ---------------------------------------------------------------------------
+// auto-format stdin gate: the launcher endings must be the JS regex, the argv the seed (#369 pass 5)
+// ---------------------------------------------------------------------------
+
+const AUTO_FORMAT_JS = path.resolve(__dirname, '..', 'PostToolUse', 'auto-format.js');
+const RUN_WITH_FLAGS_JS = path.resolve(__dirname, '..', 'run-with-flags.js');
+const HOOKS_LIB = path.resolve(__dirname, '..', 'lib');
+const AF_ARM_RE = / {2}\*\/run-with-flags\.js\)\n {4}if \[ "\$2" = (\S+) \] && \[ "\$3" = (\S+) \] && \[ -z "\$CLAUDE_PLUGIN_ROOT" \] && \[ -f "\$\{1%\/\*\}\/(\S+)" \] && \[ -r "\$\{1%\/\*\}\/(\S+)" \]; then\n {6}_hn_buf=\$\(tr '\\0' '\\1'; echo x\)\n {6}_hn_buf=\$\{_hn_buf%x\}\n {6}case \$_hn_buf in\n {8}(.*)\) _hn_stdin=1 ;;\n {8}\*\) exit 0 ;;\n {6}esac\n {4}fi\n {4};;\n/;
+
+function afArm() {
+  const arm = fs.readFileSync(LAUNCHER, 'utf8').match(AF_ARM_RE);
+  assert.ok(arm, 'launcher run-with-flags arm not found in its expected shape');
+  return { hookId: arm[1], rel: arm[2], rel2: arm[3], rel3: arm[4], pats: arm[5].split(' | ').map((p) => p.replace(/^\*'/, '').replace(/'\*$/, '')) };
+}
+
+/** The shell predicate, from the arm's own patterns (a `case` pattern `*'lit'*` is a substring test). */
+const afRunsNode = (pats, raw) => pats.some((p) => raw.includes(p));
+
+test('auto-format gate drift: the launcher endings are the JS regex, the argv is the seed registration, the arm cannot skip a path run() would act on', () => {
+  const js = fs.readFileSync(AUTO_FORMAT_JS, 'utf8');
+  const rwf = fs.readFileSync(RUN_WITH_FLAGS_JS, 'utf8');
+  const sh = fs.readFileSync(LAUNCHER, 'utf8');
+  // JS: the only code that acts is behind this exact test, and run() opens parse -> file_path.
+  const m = js.match(/function run\(rawInput\) \{\n {2}try \{\n {4}const input = JSON\.parse\(rawInput\);\n {4}const filePath = input\.tool_input\?\.file_path;\n\n {4}if \(filePath && \/\\\.\(([a-z|]+)\)\$\/\.test\(filePath\)\) \{\n/);
+  assert.ok(m, 'auto-format.js run() no longer opens parse -> file_path -> /\\.(ext)$/ test: the launcher gate is invalid, remove or re-derive it');
+  const endings = m[1].split('|');
+  assert.deepStrictEqual([...endings].sort(), ['js', 'jsx', 'ts', 'tsx']);
+  // The effects (formatter spawns) sit only inside that block; the file has exactly these top-level requires.
+  assert.strictEqual(js.indexOf('execFileSync(', js.indexOf('function run(')) > js.indexOf('.test(filePath)'), true);
+  assert.deepStrictEqual(js.match(/^const .* = require\('[^']+'\);$/gm).map((l) => l.match(/require\('([^']+)'\)/)[1]),
+    ['child_process', 'path', '../lib/resolve-formatter', '../lib/hook-output']);
+  // Load-time surface of everything run-with-flags requires: these and nothing else.
+  assert.deepStrictEqual(rwf.match(/^const .* = require\('[^']+'\);$/gm).map((l) => l.match(/require\('([^']+)'\)/)[1]), ['fs', 'path', 'child_process', './lib/hook-flags', './lib/hook-output']);
+  for (const f of ['hook-flags.js', 'hook-output.js']) assert.ok(!/require\(/.test(fs.readFileSync(path.join(HOOKS_LIB, f), 'utf8')), `${f} requires nothing`);
+  assert.deepStrictEqual(fs.readFileSync(path.join(HOOKS_LIB, 'resolve-formatter.js'), 'utf8').match(/require\('[^']+'\)/g), ["require('fs')", "require('path')", "require('./package-manager')"]);
+  // run-with-flags.js: the plugin-root rule the arm mirrors, argv order, and the 1 MiB caps.
+  assert.ok(rwf.includes('if (process.env.CLAUDE_PLUGIN_ROOT && process.env.CLAUDE_PLUGIN_ROOT.trim()) {'));
+  assert.ok(rwf.includes('  return __dirname;'));
+  assert.ok(rwf.includes('const [, , hookId, relScriptPath, profilesCsv] = process.argv;'));
+  assert.ok(rwf.includes('const MAX_STDIN = 1024 * 1024;') && js.includes('const MAX_STDIN = 1024 * 1024;'));
+  // Shell: the arm's argv equals the seed's, and its patterns are exactly `<ending>"` for every ending plus the
+  // \u00XY escape prefixes of every character of every ending and the dot.
+  const { hookId, rel, rel2, rel3, pats } = afArm();
+  const settings = JSON.parse(fs.readFileSync(path.resolve(__dirname, '..', '..', 'settings.json'), 'utf8'));
+  const seed = settings.hooks.PostToolUse.flatMap((g) => (g.hooks || []).map((h) => ({ matcher: g.matcher, command: h.command }))).filter((x) => x.command.includes('post:edit:format'));
+  assert.strictEqual(seed.length, 1);
+  assert.strictEqual(seed[0].matcher, 'Edit|Write|MultiEdit');
+  assert.strictEqual(seed[0].command, `"$HOME/.claude/hooks/bin/node-hook" "$HOME/.claude/hooks/run-with-flags.js" "${hookId}" "${rel}" "standard,strict"`);
+  assert.strictEqual(rel2, rel);
+  assert.strictEqual(rel3, rel);
+  assert.strictEqual(hookId, 'post:edit:format');
+  assert.strictEqual(rel, 'PostToolUse/auto-format.js');
+  const wanted = new Set(['.', ...endings.join('').split('')].map((c) => `\\u00${c.charCodeAt(0).toString(16).padStart(2, '0')[0]}`));
+  assert.deepStrictEqual([...wanted].sort(), ['\\u002', '\\u006', '\\u007']);
+  assert.deepStrictEqual([...pats].sort(), [...endings.map((e) => `.${e}"`), ...wanted].sort());
+  assert.strictEqual((sh.match(/\[ -z "\$_hn_stdin" \] \|\| \{ printf '%s' "\$_hn_buf" \| /g) || []).length, 2);
+});
+
+test('auto-format gate: only post:edit:format is registered on PostToolUse Edit|Write|MultiEdit (the only post-phase hook there)', () => {
+  const settings = JSON.parse(fs.readFileSync(path.resolve(__dirname, '..', '..', 'settings.json'), 'utf8'));
+  const onEdit = [];
+  for (const g of settings.hooks.PostToolUse) {
+    const ms = !g.matcher ? ['*'] : g.matcher.split('|');
+    if (ms.includes('*') || ms.includes('Edit') || ms.includes('Write') || ms.includes('MultiEdit')) for (const h of g.hooks) onEdit.push([g.matcher, h.command]);
+  }
+  assert.deepStrictEqual(onEdit, [['Edit|Write|MultiEdit', '"$HOME/.claude/hooks/bin/node-hook" "$HOME/.claude/hooks/run-with-flags.js" "post:edit:format" "PostToolUse/auto-format.js" "standard,strict"']]);
+});
+
+test('auto-format gate: the predicate never skips a payload whose DECODED file_path matches the JS regex (randomised spellings)', () => {
+  const { pats } = afArm();
+  const RE = /\.(ts|tsx|js|jsx)$/;
+  let seed = 12345;
+  const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+  const names = ['x.js', 'x.jsx', 'x.ts', 'x.tsx', 'a/b.test.tsx', 'x.json', 'x.jsonl', 'x.mjs', 'x.cjs', 'x.js\n', 'x.ts ', 'x.js\\', 'x.js"', 'é.ts', 'x.t', 'x', 'jsx', 'a b/c d.ts', '.js', 'x.ts '];
+  // JSON string body with a random subset of characters rewritten as \uXXXX (either hex case).
+  const spell = (s) => {
+    let out = '';
+    for (const ch of s) {
+      const enc = JSON.stringify(ch).slice(1, -1);
+      if (rnd() < 0.06 && ch.charCodeAt(0) < 0x10000) { const h = ch.charCodeAt(0).toString(16).padStart(4, '0'); out += `\\u${rnd() < 0.5 ? h : h.toUpperCase()}`; } else out += enc;
+    }
+    assert.strictEqual(JSON.parse(`"${out}"`), s);
+    return out;
+  };
+  let acts = 0; let skipped = 0;
+  for (let i = 0; i < 4000; i += 1) {
+    const fp = `/p${Math.floor(rnd() * 3)}/${names[Math.floor(rnd() * names.length)]}`;
+    const shape = Math.floor(rnd() * 3);
+    const val = shape === 0 ? `"${spell(fp)}"` : shape === 1 ? `["${spell('q')}","${spell(fp)}"]` : `[["${spell(fp)}"]]`;
+    const raw = `{"transcript_path":"/h/.claude/projects/x/abc.jsonl","tool_name":"Edit","tool_input":{"file_path":${val}},"tool_response":{"n":1}}`;
+    const decoded = JSON.parse(raw).tool_input.file_path;
+    const hit = Boolean(decoded) && RE.test(decoded);
+    const runs = afRunsNode(pats, raw);
+    if (hit) acts += 1;
+    if (!runs) skipped += 1;
+    if (hit) assert.ok(runs, `skipped a payload run() acts on: ${raw}`);
+  }
+  assert.ok(acts > 500 && skipped > 500, `degenerate sample: ${acts} act, ${skipped} skip`);
+});
+
+test('auto-format gate: argv-exact, skips without node, hands node every byte otherwise', () => {
+  const base = mkTmp('node-hook-afgate-');
+  try {
+    const dir = path.join(base, 'real');
+    fs.mkdirSync(dir);
+    fs.writeFileSync(path.join(dir, 'node'), '#!/bin/sh\nprintf "[%s]" "$(cat; echo x)"\n', { mode: 0o755 });
+    // A hooks root with the registered script, and one without it.
+    const withHooks = path.join(base, 'with');
+    const withoutHooks = path.join(base, 'without');
+    fs.mkdirSync(path.join(withHooks, 'PostToolUse'), { recursive: true });
+    fs.writeFileSync(path.join(withHooks, 'PostToolUse', 'auto-format.js'), '');
+    fs.mkdirSync(withoutHooks);
+    const baseEnv = { ...buildEnv(), PATH: `${dir}:/usr/bin:/bin` };
+    delete baseEnv.CLAUDE_PLUGIN_ROOT;
+    const run = (args, input, extraEnv = {}) => spawnSync('/bin/sh', [LAUNCHER, ...args], { env: { ...baseEnv, ...extraEnv }, input, encoding: 'utf8' });
+    const rwf = `${withHooks}/run-with-flags.js`;
+    const reg = [rwf, 'post:edit:format', 'PostToolUse/auto-format.js', 'standard,strict'];
+    const md = '{"transcript_path":"/h/a.jsonl","tool_input":{"file_path":"/a/b.md"}}\n';
+    const ts = '{"transcript_path":"/h/a.jsonl","tool_input":{"file_path":"/a/b.ts"}}\n\n\n';
+    assert.strictEqual(run(reg, md).stdout, '', 'registered argv, non-JS: skipped, no node');
+    assert.strictEqual(run(reg, md).status, 0);
+    assert.strictEqual(run(reg, ts).stdout, `[${ts}x]`, 'registered argv, .ts: node, every byte incl. trailing newlines');
+    assert.strictEqual(run(reg, '{"p":"/a/b.\\u006As"}').stdout, '[{"p":"/a/b.\\u006As"}x]');
+    assert.strictEqual(run(reg, '{"p":"/a/b.js\\n"}').stdout, '', '`.js\\n"` is not `.js"` and not an escape prefix');
+    assert.strictEqual(run(reg, '{"p":"/a/b.json","q":"\\u001b"}').stdout, '');
+    // Any other argv shape starts node (the arm is argv-exact), including the other run-with-flags registrations.
+    const others = [
+      [rwf, 'pre:git-guard', 'PreToolUse/git-guard.js', 'standard,strict'],
+      [rwf, 'post:edit:format', 'PostToolUse/other.js', 'standard,strict'],
+      [rwf, 'post:edit:format2', 'PostToolUse/auto-format.js', 'standard,strict'],
+      [rwf, 'POST:EDIT:FORMAT', 'PostToolUse/auto-format.js', 'standard,strict'],
+      [rwf, 'post:edit:format'],
+      [rwf],
+      [`${withHooks}/run-with-flags.json`, 'post:edit:format', 'PostToolUse/auto-format.js'],
+      [`${withHooks}/not-run-with-flags.js`, 'post:edit:format', 'PostToolUse/auto-format.js'],
+      ['run-with-flags.js', 'post:edit:format', 'PostToolUse/auto-format.js'],
+    ];
+    // (`not-run-with-flags.js` still matches the glob `*/run-with-flags.js`? No: the `/` before `run` is required.)
+    for (const args of others) assert.strictEqual(run(args, md).stdout, `[${md}x]`, args.join(' '));
+    // $4 (profiles) does not matter: a skipped payload is silent for every profile string.
+    for (const prof of ['minimal', 'strict', 'standard', 'nonsense', '']) assert.strictEqual(run([...reg.slice(0, 3), prof], md).stdout, '', prof);
+    assert.strictEqual(run(reg.slice(0, 3), md).stdout, '');
+    // Env: HOOK_DISABLED / HOOK_PROFILE never matter to a skip; CLAUDE_PLUGIN_ROOT must be empty or unset.
+    assert.strictEqual(run(reg, md, { HOOK_DISABLED: 'post:edit:format', HOOK_PROFILE: 'minimal' }).stdout, '');
+    assert.strictEqual(run(reg, md, { CLAUDE_PLUGIN_ROOT: '' }).stdout, '');
+    for (const v of [' ', '\t', '  \n', '/x', withHooks, withoutHooks]) assert.strictEqual(run(reg, md, { CLAUDE_PLUGIN_ROOT: v }).stdout, `[${md}x]`, JSON.stringify(v));
+    // A hooks dir without the registered script (run-with-flags would print "Script not found"): node runs.
+    assert.strictEqual(run([`${withoutHooks}/run-with-flags.js`, ...reg.slice(1)], md).stdout, `[${md}x]`);
+    // An unreadable script (readFileSync would throw into main().catch's stderr line): node runs.
+    const script = path.join(withHooks, 'PostToolUse', 'auto-format.js');
+    fs.chmodSync(script, 0);
+    if (process.getuid && process.getuid() !== 0) assert.strictEqual(run(reg, md).stdout, `[${md}x]`, 'unreadable script: node runs');
+    fs.chmodSync(script, 0o644);
+    assert.strictEqual(run(reg, md).stdout, '');
+    // The pass-3 arm is untouched.
+    assert.strictEqual(run(['/x/PostToolUse/pr-record.js'], '{"c":"ls"}').stdout, '');
+  } finally { rmTmp(base); }
+});
