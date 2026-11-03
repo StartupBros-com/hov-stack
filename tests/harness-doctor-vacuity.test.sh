@@ -820,6 +820,40 @@ contains "$HOOKREG_HOME_DEAD_OUT" "fails: $HOOKREG_HOME_DEAD_HOME/.claude/stagin
   "B8a dead \$HOME registration named with \$HOME expanded"
 omits "$HOOKREG_HOME_DEAD_OUT" "live-home-guard.js" "B8a resolvable \$HOME sibling not reported"
 
+# B8a launcher (hook-floor #369): a command run through hooks/bin/node-hook needs
+# the launcher AND the script. PLANTED NEGATIVE: the script exists and the
+# launcher does not, so the registration looked resolvable while every event
+# exited 127 (non-blocking).
+make_launcher_hookreg_home() {
+  local name=$1 with_launcher=$2 home
+  home=$(make_home "$name" 0 0)
+  mkdir -p "$home/.claude/hooks/PreToolUse" "$home/.claude/hooks/bin"
+  : >"$home/.claude/hooks/PreToolUse/launched-guard.js"
+  if [ "$with_launcher" = 1 ]; then
+    printf '#!/bin/sh\nexit 0\n' >"$home/.claude/hooks/bin/node-hook"
+    chmod +x "$home/.claude/hooks/bin/node-hook"
+  fi
+  python3 - "$home/.claude/settings.json" <<'PY'
+import json, sys
+path = sys.argv[1]
+with open(path, encoding="utf-8") as handle:
+    settings = json.load(handle)
+cmd = '"$HOME/.claude/hooks/bin/node-hook" "$HOME/.claude/hooks/PreToolUse/launched-guard.js"'
+settings["hooks"] = {"PreToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "command": cmd}]}]}
+with open(path, "w", encoding="utf-8") as handle:
+    json.dump(settings, handle)
+PY
+  printf '%s' "$home"
+}
+LAUNCHER_OK_HOME=$(make_launcher_hookreg_home hookreg-launcher-ok 1)
+LAUNCHER_OK_OUT=$(run_doctor "$LAUNCHER_OK_HOME" "$EMPTY_HARNESS" 1)
+contains "$LAUNCHER_OK_OUT" "1 registered hook command(s), all targets present" "B8a launcher control resolves script and launcher"
+omits "$LAUNCHER_OK_OUT" "hook launcher missing" "B8a launcher control raises no launcher warning"
+LAUNCHER_GONE_HOME=$(make_launcher_hookreg_home hookreg-launcher-gone 0)
+LAUNCHER_GONE_OUT=$(run_doctor "$LAUNCHER_GONE_HOME" "$EMPTY_HARNESS" 1)
+contains "$LAUNCHER_GONE_OUT" "hook launcher missing or not executable, so every hook run through it fails: $LAUNCHER_GONE_HOME/.claude/hooks/bin/node-hook" \
+  "B8a missing launcher is named"
+
 # B8: settings.json is one of three live wiring paths. An agent's frontmatter
 # registered lean-collector's agent-scoped/readonly-bash.js (retired
 # 2026-10-17), and whatsapp-guard.js

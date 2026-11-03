@@ -1,0 +1,44 @@
+#!/bin/sh
+# node-hook: run a first-party hook script on the first non-shim `node` on PATH.
+#
+#   "$HOME/.claude/hooks/bin/node-hook" "$HOME/.claude/hooks/<Event>/<hook>.js" [args...]
+#
+# Why: a version-manager shim (mise, asdf) is a launcher that resolves the real
+# node per call. On a WSL host whose PATH ends in dozens of /mnt/c entries the
+# mise shim spends ~100-140 ms walking them before it execs node, on EVERY hook
+# of EVERY tool call (`node -e ''`: 199 ms via the shim, 28 ms direct). This
+# launcher walks PATH in the shell, takes the first `node` that is not inside a
+# shim dir, and execs it. Measured in the 2026-11-03 hook-floor profile (#369).
+#
+# Contract (hooks/tests/hook-launcher-golden.test.js holds every registered hook
+# to it): exec, so stdin, stdout, stderr, exit code, argv, cwd and env reach
+# node untouched. No pipe, no wrapper process, nothing written.
+#
+# Bounded: only `[ -f ]` / `[ -x ]` on PATH entries, never a /mnt/* entry (a
+# drvfs lookup costs ~2 ms each), never anything outside PATH. When no non-shim
+# node is found the last step is the literal command the hook ran before this
+# launcher existed, `exec node "$@"`, so a PATH shape this does not understand
+# behaves exactly as it did.
+#
+# Skipped as shims: mise (*/mise/shims) and asdf (*/.asdf/shims, */asdf/shims);
+# both resolve per call through a launcher that reads project tool-version
+# files, which is the cost being removed. Other `shims` dirs (nodenv, rbenv) are
+# not guessed at: they are not measured here.
+#
+# `set -f`: the unquoted $PATH split below must not glob-expand an entry holding
+# `*`, `?` or `[` into other directories, which the shell's own command lookup
+# never does. Nothing after it relies on globbing ("$@" is quoted).
+set -f
+_hn_ifs=$IFS
+IFS=:
+for _hn_d in $PATH; do
+  case $_hn_d in
+    '' | /mnt/* | */mise/shims | */mise/shims/ | */.asdf/shims | */.asdf/shims/ | */asdf/shims | */asdf/shims/) continue ;;
+  esac
+  if [ -f "$_hn_d/node" ] && [ -x "$_hn_d/node" ]; then
+    IFS=$_hn_ifs
+    exec "$_hn_d/node" "$@"
+  fi
+done
+IFS=$_hn_ifs
+exec node "$@"

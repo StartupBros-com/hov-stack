@@ -1021,7 +1021,7 @@ fresh_hook_out=$(CLAUDE_HOME="$fresh_hook_home" "$SYNC" reconcile-grep-cost-guar
 if [ "$fresh_hook_status" -eq 0 ]; then ok; else bad "fresh reconcile-grep-cost-guard exited $fresh_hook_status:"$'\n'"$fresh_hook_out"; fi
 if jq -e '
     [.hooks.PreToolUse[]?.hooks[]? | .command]
-    | index("node \"$HOME/.claude/hooks/PreToolUse/grep-cost-guard.js\"") != null
+    | index("\"$HOME/.claude/hooks/bin/node-hook\" \"$HOME/.claude/hooks/PreToolUse/grep-cost-guard.js\"") != null
   ' "$fresh_hook_home/settings.json" >/dev/null; then
   ok
 else
@@ -1035,7 +1035,7 @@ fresh_heavy_out=$(CLAUDE_HOME="$fresh_heavy_home" "$SYNC" reconcile-heavy-job-ad
 if [ "$fresh_heavy_status" -eq 0 ]; then ok; else bad "fresh reconcile-heavy-job-admission exited $fresh_heavy_status:"$'\n'"$fresh_heavy_out"; fi
 if jq -e '
     [.hooks.PreToolUse[]?.hooks[]? | .command]
-    | index("node \"$HOME/.claude/hooks/PreToolUse/heavy-job-admission.js\"") != null
+    | index("\"$HOME/.claude/hooks/bin/node-hook\" \"$HOME/.claude/hooks/PreToolUse/heavy-job-admission.js\"") != null
   ' "$fresh_heavy_home/settings.json" >/dev/null; then
   ok
 else
@@ -1070,7 +1070,7 @@ fresh_whatsapp_out=$(HOME="$fresh_whatsapp_root" CLAUDE_HOME="$fresh_whatsapp_ho
 if [ "$fresh_whatsapp_status" -eq 0 ]; then ok; else bad "fresh reconcile-whatsapp-guard exited $fresh_whatsapp_status:"$'\n'"$fresh_whatsapp_out"; fi
 if jq -e '
     [.hooks.PreToolUse[]?.hooks[]? | .command]
-    | index("node \"$HOME/.claude/hooks/PreToolUse/whatsapp-guard.js\"") != null
+    | index("\"$HOME/.claude/hooks/bin/node-hook\" \"$HOME/.claude/hooks/PreToolUse/whatsapp-guard.js\"") != null
   ' "$fresh_whatsapp_home/settings.json" >/dev/null; then
   ok
 else
@@ -1172,7 +1172,7 @@ fresh_shape_out=$(HOME="$fresh_shape_root" CLAUDE_HOME="$fresh_shape_home" "$SYN
 if [ "$fresh_shape_status" -eq 0 ]; then ok; else bad "fresh reconcile-shape-rewrite exited $fresh_shape_status:"$'\n'"$fresh_shape_out"; fi
 if jq -e '
     [.hooks.PreToolUse[]? | select(.matcher == "Bash") | .hooks[]? | .command]
-    | index("node \"$HOME/.claude/hooks/PreToolUse/shape-rewrite.js\"") != null
+    | index("\"$HOME/.claude/hooks/bin/node-hook\" \"$HOME/.claude/hooks/PreToolUse/shape-rewrite.js\"") != null
   ' "$fresh_shape_home/settings.json" >/dev/null; then
   ok
 else
@@ -1192,11 +1192,11 @@ fi
 # sibling Bash guard still sees the original command text; assert the
 # ordering survived the seed, not just that both groups exist.
 fresh_shape_idx=$(jq -r '
-    [.hooks.PreToolUse[] | ([.hooks[]? | select(.command == "node \"$HOME/.claude/hooks/PreToolUse/shape-rewrite.js\"")] | length > 0)]
+    [.hooks.PreToolUse[] | ([.hooks[]? | select(.command == "\"$HOME/.claude/hooks/bin/node-hook\" \"$HOME/.claude/hooks/PreToolUse/shape-rewrite.js\"")] | length > 0)]
     | index(true)
   ' "$fresh_shape_home/settings.json")
 fresh_runner_idx=$(jq -r '
-    [.hooks.PreToolUse[] | ([.hooks[]? | select(.command == "node \"$HOME/.claude/hooks/PreToolUse/runner-guard.js\"")] | length > 0)]
+    [.hooks.PreToolUse[] | ([.hooks[]? | select(.command == "\"$HOME/.claude/hooks/bin/node-hook\" \"$HOME/.claude/hooks/PreToolUse/runner-guard.js\"")] | length > 0)]
     | index(true)
   ' "$fresh_shape_home/settings.json")
 if [ "$fresh_runner_idx" = "null" ]; then
@@ -1214,7 +1214,7 @@ fi
 # with `gh pr create`. reconcile now only removes the registration. A fresh
 # host has nothing to remove and must not get a settings.json seeded with it.
 PUSHPR_COMMAND='node "$HOME/.claude/hooks/run-with-flags.js" "post:push:pr" "PostToolUse/push-tracking-pr.js" "standard,strict"'
-PR_RECORD_COMMAND='node "$HOME/.claude/hooks/PostToolUse/pr-record.js"'
+PR_RECORD_COMMAND='"$HOME/.claude/hooks/bin/node-hook" "$HOME/.claude/hooks/PostToolUse/pr-record.js"'
 fresh_pushpr_root=$TMP/push-tracking-pr-hook-fresh
 fresh_pushpr_home=$fresh_pushpr_root/.claude
 mkdir -p "$fresh_pushpr_home"
@@ -1605,7 +1605,7 @@ fi
 
 # The canonical registration must survive exactly once — retirement must not
 # take the real one with it, nor leave a second copy behind.
-twin_canon=$(printf '%s\n' "$twin_cmds" | grep -Fc 'node "$HOME/.claude/hooks/PreToolUse/grep-cost-guard.js"')
+twin_canon=$(printf '%s\n' "$twin_cmds" | grep -Fc '"$HOME/.claude/hooks/bin/node-hook" "$HOME/.claude/hooks/PreToolUse/grep-cost-guard.js"')
 if [ "$twin_canon" -eq 1 ]; then
   ok
 else
@@ -2264,9 +2264,9 @@ if jq -e --arg realhome "$HOME" '
     .hooks.PreToolUse as $groups
     | ([ $groups[] | .hooks[]? | .command
         | (. == "$HOME/.local/bin/dcg" or (startswith($realhome + "/.local/") and test("/\\.local/(lib/dcg/v[0-9]+\\.[0-9]+\\.[0-9]+|bin)/dcg$"))) ] | index(true)) as $dcg
-    | ([ $groups[] | .hooks[]? | .command ] | index("node \"$HOME/.claude/hooks/PreToolUse/grep-cost-guard.js\"")) as $guard
-    | ([ $groups[] | .hooks[]? | .command ] | index("node \"$HOME/.claude/hooks/PreToolUse/heavy-job-admission.js\"")) as $heavy
-    | ([ $groups[] | .hooks[]? | .command ] | index("node \"$HOME/.claude/hooks/PreToolUse/whatsapp-guard.js\"")) as $whatsapp
+    | ([ $groups[] | .hooks[]? | .command ] | index("\"$HOME/.claude/hooks/bin/node-hook\" \"$HOME/.claude/hooks/PreToolUse/grep-cost-guard.js\"")) as $guard
+    | ([ $groups[] | .hooks[]? | .command ] | index("\"$HOME/.claude/hooks/bin/node-hook\" \"$HOME/.claude/hooks/PreToolUse/heavy-job-admission.js\"")) as $heavy
+    | ([ $groups[] | .hooks[]? | .command ] | index("\"$HOME/.claude/hooks/bin/node-hook\" \"$HOME/.claude/hooks/PreToolUse/whatsapp-guard.js\"")) as $whatsapp
     | $dcg != null and $guard == ($dcg + 1) and $heavy == ($guard + 1) and $whatsapp == ($heavy + 1)
   ' "$CLAUDE_HOME/settings.json" >/dev/null; then
   ok
@@ -2275,11 +2275,11 @@ else
 fi
 if jq -e '
     ([.hooks.PreToolUse[]?.hooks[]? | select(
-      .command == "node \"$HOME/.claude/hooks/PreToolUse/grep-cost-guard.js\""
-      or .command == "node \"$HOME/.claude/hooks/PreToolUse/heavy-job-admission.js\""
+      .command == "\"$HOME/.claude/hooks/bin/node-hook\" \"$HOME/.claude/hooks/PreToolUse/grep-cost-guard.js\""
+      or .command == "\"$HOME/.claude/hooks/bin/node-hook\" \"$HOME/.claude/hooks/PreToolUse/heavy-job-admission.js\""
     )] | length == 2 and all(.[]; has("timeout") | not))
     and ([.hooks.PreToolUse[]?.hooks[]? | select(
-      .command == "node \"$HOME/.claude/hooks/PreToolUse/whatsapp-guard.js\""
+      .command == "\"$HOME/.claude/hooks/bin/node-hook\" \"$HOME/.claude/hooks/PreToolUse/whatsapp-guard.js\""
     )] | length == 1 and all(.[]; .timeout == 5))
   ' "$CLAUDE_HOME/settings.json" >/dev/null; then
   ok
@@ -2329,9 +2329,9 @@ jq '
       + [
           .hooks.PreToolUse[]
           | .hooks = ([.hooks[] | select(
-              .command != "node \"$HOME/.claude/hooks/PreToolUse/grep-cost-guard.js\""
-              and .command != "node \"$HOME/.claude/hooks/PreToolUse/heavy-job-admission.js\""
-              and .command != "node \"$HOME/.claude/hooks/PreToolUse/whatsapp-guard.js\""
+              .command != "\"$HOME/.claude/hooks/bin/node-hook\" \"$HOME/.claude/hooks/PreToolUse/grep-cost-guard.js\""
+              and .command != "\"$HOME/.claude/hooks/bin/node-hook\" \"$HOME/.claude/hooks/PreToolUse/heavy-job-admission.js\""
+              and .command != "\"$HOME/.claude/hooks/bin/node-hook\" \"$HOME/.claude/hooks/PreToolUse/whatsapp-guard.js\""
             )])
           | select((.hooks | length) > 0)
         ]
@@ -2339,7 +2339,7 @@ jq '
           matcher: "Bash",
           hooks: [{
             type: "command",
-            command: "node \"$HOME/.claude/hooks/PreToolUse/heavy-job-admission.js\"",
+            command: "\"$HOME/.claude/hooks/bin/node-hook\" \"$HOME/.claude/hooks/PreToolUse/heavy-job-admission.js\"",
             timeout: 5
           }]
         }]
@@ -2413,15 +2413,15 @@ if jq -e --arg realhome "$HOME" '
     .hooks.PreToolUse as $groups
     | ([ $groups[] | .hooks[]? | .command
         | (. == "$HOME/.local/bin/dcg" or (startswith($realhome + "/.local/") and test("/\\.local/(lib/dcg/v[0-9]+\\.[0-9]+\\.[0-9]+|bin)/dcg$"))) ] | index(true)) as $dcg
-    | ([ $groups[] | .hooks[]? | .command ] | index("node \"$HOME/.claude/hooks/PreToolUse/grep-cost-guard.js\"")) as $guard
-    | ([ $groups[] | .hooks[]? | .command ] | index("node \"$HOME/.claude/hooks/PreToolUse/heavy-job-admission.js\"")) as $heavy
-    | ([ $groups[] | .hooks[]? | .command ] | index("node \"$HOME/.claude/hooks/PreToolUse/whatsapp-guard.js\"")) as $whatsapp
+    | ([ $groups[] | .hooks[]? | .command ] | index("\"$HOME/.claude/hooks/bin/node-hook\" \"$HOME/.claude/hooks/PreToolUse/grep-cost-guard.js\"")) as $guard
+    | ([ $groups[] | .hooks[]? | .command ] | index("\"$HOME/.claude/hooks/bin/node-hook\" \"$HOME/.claude/hooks/PreToolUse/heavy-job-admission.js\"")) as $heavy
+    | ([ $groups[] | .hooks[]? | .command ] | index("\"$HOME/.claude/hooks/bin/node-hook\" \"$HOME/.claude/hooks/PreToolUse/whatsapp-guard.js\"")) as $whatsapp
     | $dcg != null and $guard == ($dcg + 1) and $heavy == ($guard + 1) and $whatsapp == ($heavy + 1)
     and ([ $groups[] | .hooks[]? | .command ] | index("node /tmp/unknown-live-hook.js")) != null
-    and ([ $groups[] | .hooks[]? | select(.command == "node \"$HOME/.claude/hooks/PreToolUse/heavy-job-admission.js\"") ] | length) == 1
-    and ([ $groups[] | .hooks[]? | select(.command == "node \"$HOME/.claude/hooks/PreToolUse/whatsapp-guard.js\"") ] | length) == 1
-    and ([ $groups[] | .hooks[]? | select(.command == "node \"$HOME/.claude/hooks/PreToolUse/heavy-job-admission.js\"") | has("timeout") ] | all(. == false))
-    and ([ $groups[] | .hooks[]? | select(.command == "node \"$HOME/.claude/hooks/PreToolUse/whatsapp-guard.js\"") | .timeout ] | all(. == 5))
+    and ([ $groups[] | .hooks[]? | select(.command == "\"$HOME/.claude/hooks/bin/node-hook\" \"$HOME/.claude/hooks/PreToolUse/heavy-job-admission.js\"") ] | length) == 1
+    and ([ $groups[] | .hooks[]? | select(.command == "\"$HOME/.claude/hooks/bin/node-hook\" \"$HOME/.claude/hooks/PreToolUse/whatsapp-guard.js\"") ] | length) == 1
+    and ([ $groups[] | .hooks[]? | select(.command == "\"$HOME/.claude/hooks/bin/node-hook\" \"$HOME/.claude/hooks/PreToolUse/heavy-job-admission.js\"") | has("timeout") ] | all(. == false))
+    and ([ $groups[] | .hooks[]? | select(.command == "\"$HOME/.claude/hooks/bin/node-hook\" \"$HOME/.claude/hooks/PreToolUse/whatsapp-guard.js\"") | .timeout ] | all(. == 5))
   ' "$live_settings" >/dev/null; then
   ok
 else
@@ -2875,7 +2875,7 @@ CODEX_TARGET="$TMP/codex-reconcile-target/codex-quota-guard.js"
 mkdir -p "$CODEX_HOME" "$(dirname "$CODEX_TARGET")"
 : >"$CODEX_TARGET"
 CODEX_COMMAND="node \"$CODEX_TARGET\""
-CANONICAL_CODEX_COMMAND='node "$HOME/.claude/hooks/PreToolUse/codex-quota-guard.js"'
+CANONICAL_CODEX_COMMAND='"$HOME/.claude/hooks/bin/node-hook" "$HOME/.claude/hooks/PreToolUse/codex-quota-guard.js"'
 OLD_CODEX_PRE='node "$HOME/.claude/hooks/PreToolUse/codex-doghouse-guard.js"'
 OLD_CODEX_POST='node "$HOME/.claude/hooks/PostToolUse/codex-doghouse-trip.js"'
 # dotfiles#991: the 2026-08-26 routing bundle's copy of the guard, registered
@@ -2927,7 +2927,7 @@ RECON_TARGET="$TMP/reconcile-target/canonical-worktree-route-guard.js"
 mkdir -p "$RECON_HOME" "$(dirname "$RECON_TARGET")"
 : >"$RECON_TARGET"
 RECON_COMMAND="node \"$RECON_TARGET\""
-OLD_ROUTE_COMMAND='node "$HOME/.claude/hooks/PreToolUse/canonical-worktree-route-guard.js"'
+OLD_ROUTE_COMMAND='"$HOME/.claude/hooks/bin/node-hook" "$HOME/.claude/hooks/PreToolUse/canonical-worktree-route-guard.js"'
 settings_tmp="$REPO/.settings.route-test.json"
 jq --arg old "$OLD_ROUTE_COMMAND" --arg new "$RECON_COMMAND" '
   walk(if type == "object" and .command? == $old then .command = $new else . end)
