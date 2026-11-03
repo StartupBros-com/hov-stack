@@ -341,14 +341,14 @@ Inferred bets made without a synchronous user; each names where it is checked.
 | The announce workflow stays on the watched main branch | U6 and U10 keep the pin-is-ancestor check; the R17 ancestry assertion in U10; KTD6 |
 | Releases fire on the GitHub release event | U10's release-train trigger; U8 keeps the draft and prerelease skips |
 
-**Gate status (2026-10-25)**
+**Gate status (2026-11-03)**
 
 | Gate | Status | Evidence |
 |---|---|---|
 | 1a members app accepts both | passed | U1-U4 merged in the members app on 2026-10-23; its production deploy of 2026-10-24 contains all four merges and reported success |
 | 1b marketplace tooling accepts both | passed | U5-U11 merged on the marketplace main on 2026-10-21 and 2026-10-22, as PRs #216, #218, #220, #222, #224, #227 and #229 |
 | 2 member continuity | rehearsal passed; canary open | The hosted rehearsal (U21) passed on Claude Code 2.1.76, 2.1.77 and 2.1.309, record below. The earlier directory-source pass on 2.1.305 agreed: the `url` to `git-subdir` update, a cache holding only the subdirectory, the old folder marked orphaned, enabled state and data kept, a wrong sha failing closed. The canary after the real rename (U24) is the open half (KTD8) |
-| 3 the flip | open | runbook U20-U26; the U20 freeze in place since 2026-10-24; the U22 rename and controls recorded 2026-10-25 |
+| 3 the flip | open; stranger check passed | Runbook U20-U26. The U20 freeze has been in place since 2026-10-24, and the U22 rename and controls were recorded 2026-10-25. U26's stranger check (AE7) passed on 2026-11-03 on a clean macOS 15.7.7 arm64 machine with Claude Code 2.1.317: the README's install line at main 30c2c41, `./setup` and `./setup --check` all green, and offline the dcg step skipped with its command (record below). Still open: U24-U25 (#249), and U26's guided `/hov-setup`, which needs a logged-in session |
 
 **Gate-2 rehearsal record (U21, 2026-10-23).** Two public scratch repositories in the same organization: a manifest repo holding a `hov` manifest, renamed partway through, and a monorepo holding a scratch plugin and a three-skill pack. Each client ran Claude Code 2.1.68 to 2.1.77 or 2.1.309 in a scratch home with no GitHub token; one 2.1.309 client had no SSH key. Every manifest state was checked by U6's validator, with its monorepo url aimed at the scratch monorepo, and landed through a pull request.
 
@@ -360,6 +360,34 @@ Inferred bets made without a synchronous user; each names where it is checked.
 - **Old-name reads (A1).** REST answers 301 to the repository id and, followed, serves the new name's bytes. `git ls-remote` under the old name, over HTTPS without credentials and over SSH, returns the current main. Raw content answers 200 with no redirect: it served the pre-rename manifest from its cache (`max-age=300`) until that expired, then the current bytes.
 - **Validator defect, fixed.** Full validation refused the pack-shaped entry because it required a skill named after the plugin, which the pack does not have; plugin CI had the same check. Both now require at least one skill directly under the pack's `skills/` (marketplace repo #231).
 - **Not exercised.** The real rename and the canary (U24), the OIDC claims after a rename (A2), clients older than 2.1.68.
+
+**Gate-3 stranger-check record (U26, 2026-11-03).**
+
+The machine was a Mac mini on macOS 15.7.7 arm64 with git 2.39.5, node 26 and Homebrew. It had no Claude Code login. Each run used its own fresh scratch home under `env -i`, with `PATH` set to Homebrew and the system directories only. Each began with Claude Code's official installer, which brought in 2.1.317.
+
+- **First run, at main 39a0b00.** Every row was green except dcg. Two defects stopped it:
+  - The installer's `chmod 0755 -- f` fails under BSD `chmod`, after both verifications passed, and printed no reason.
+  - The README did not name `minisign`.
+  - Issue #371 has the run. PR #372 fixed both, with installer tests for a BSD-shaped `chmod` and for the error line.
+- **Upgrade.** A first run's seed, written before dcg was installed and since rewritten by Claude Code's plugin step, did not get dcg's hook on a rerun, and `--check` called settings ok. PR #372 fixed this. On the Mac:
+  - The rerun backed the seed up byte for byte and seeded it again with the hook.
+  - It kept the `enabledPlugins` and `extraKnownMarketplaces` keys Claude Code had written.
+  - `--check` then showed every step in place.
+- **AE7, at main 30c2c41.** The README's install line ran verbatim (`git clone --depth 1 https://github.com/StartupBros-com/hov-stack ~/hov-stack && cd ~/hov-stack && ./setup`) and exited 0 in 16s.
+  - Every row was ok: 56 links; dcg installed after its checksum and signature; the seed written with dcg's hook; Claude Code 2.1.317 above the 2.1.76 floor; the `hov` marketplace added; `papercut`, `skill-tuner`, `memory-dream` and `design-rails` installed.
+  - `./setup --check` exited 0, "every step is in place".
+  - dcg's doctor reported v0.15.3 healthy, with its allow and deny checks passed.
+- **AE7 offline, at 2d841de** (PR #372's branch; it differs from main only in the put-back that follows a failed reseed).
+  - **Offline.** `./setup` ran with every outbound connection denied by `sandbox-exec` and exited 0. dcg was reported skipped, with "Re-run ./dcg/install.sh once GitHub is reachable." and its status row naming `./dcg/install.sh`. The marketplace step was skipped, with its command. `--check` named each of the three missing steps and its fix.
+  - **Back online.** A rerun backed up the offline seed, seeded it again with the hook, and installed the marketplace and plugins. `--check` then showed every step in place.
+- **Under macOS's own `/bin/bash` 3.2**, at 7594a40 (PR #372's first commit, whose installer main carries unchanged):
+  - The installer installed cleanly.
+  - Without minisign it skipped with exit 3.
+  - With a failing `chmod` it printed exactly one `dcg: error` line naming the command, and linked nothing.
+- **Not exercised.**
+  - The guided `/hov-setup` skill, which needs a logged-in Claude Code session on the clean machine.
+  - Linux was not run as a clean machine here; CI runs `tests/repo/setup.test.sh` on Ubuntu on every PR.
+- **Follow-up work scheduled.** The old-name fallback removal is #373, and the cutover solution docs are #374. Deleting the U21 rehearsal repos waits on the author's go.
 
 ---
 
