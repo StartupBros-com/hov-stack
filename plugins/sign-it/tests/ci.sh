@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # sign-it's suite, run by release/scripts/plugin-ci.sh from the plugin root. It runs the
 # four steps the old standalone repository's skill-tests workflow ran: install poppler,
-# tesseract and qpdf; install the skill's one dependency (pdf-lib and friends) with a
-# frozen lockfile; run skills/sign-it/tests/run.sh; and fail on host-specific references
-# in the skill. Not carried over: nothing from that workflow. The old repo's separate
+# tesseract and qpdf; install the skill's packages with a frozen lockfile; run
+# skills/sign-it/tests/run.sh; and fail on host-specific references in the skill. Added
+# here: a check that the bundled runtime packages in scripts/vendor/ match the lockfile
+# (#364). Not carried over: nothing from that workflow. The old repo's separate
 # name/version identity, release and announce checks are covered by plugin-ci.sh and
 # hov-stack's release workflow.
 set -euo pipefail
@@ -25,7 +26,8 @@ if [ "${#missing[@]}" -gt 0 ]; then
   fi
 fi
 
-# 2. The skill's dependency, from the frozen lockfile.
+# 2. The skill's packages, from the frozen lockfile: the test helpers use them, and so
+# does the vendor check (esbuild-wasm).
 if command -v pnpm >/dev/null; then
   pnpm --dir skills/sign-it install --frozen-lockfile
 else
@@ -33,10 +35,14 @@ else
   (cd skills/sign-it && corepack pnpm install --frozen-lockfile)
 fi
 
-# 3. The suite.
+# 3. The bundled runtime packages in skills/sign-it/scripts/vendor/ are what a plugin
+# install runs (it has no node_modules). They must be a rebuild of the lockfile, byte for byte.
+(cd skills/sign-it && node tools/vendor.mjs --check)
+
+# 4. The suite, including a fresh-install copy with no node_modules.
 (cd skills/sign-it && bash tests/run.sh)
 
-# 4. No host-specific references in the skill.
+# 5. No host-specific references in the skill.
 if grep -rnE '/home/[a-z]+|dotfiles|wt-new|open-deliverable' skills/sign-it --exclude-dir=node_modules --exclude=pnpm-lock.yaml; then
   echo "::error::host-specific reference found in the skill" >&2
   exit 1

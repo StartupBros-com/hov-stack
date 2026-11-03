@@ -41,7 +41,11 @@ import http from 'node:http';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { spawn, spawnSync } from 'node:child_process';
-import { PNG } from 'pngjs';
+// Runtime packages load from scripts/vendor/, bundled by tools/vendor.mjs: a plugin install
+// copies this directory and runs no install step, so there is no node_modules (#364). The
+// bundles are CommonJS, so Node exposes them as a default export only.
+import pngjs from './vendor/pngjs.cjs';
+const { PNG } = pngjs;
 
 const SKILL_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CONFIG_ROOT = path.join(os.homedir(), '.config');
@@ -208,9 +212,14 @@ async function openPdf(pdfLib, pdf) {
   }
 }
 
+// A bundled package that fails to load means the plugin copy is damaged, not that a step was skipped.
+function vendorMissing(pkg, e) {
+  return `the bundled ${pkg} (${path.join(SKILL_DIR, 'scripts', 'vendor', `${pkg}.cjs`)}) did not load: ${e.message}. Reinstall the sign-it plugin; in a source checkout run \`node tools/vendor.mjs\` in ${SKILL_DIR}`;
+}
+
 async function loadPdfLib() {
-  try { return await import('pdf-lib'); }
-  catch { die(4, `pdf-lib is not installed. Run: pnpm install --dir "${SKILL_DIR}"  (or npm install --prefix "${SKILL_DIR}")`); }
+  try { return (await import('./vendor/pdf-lib.cjs')).default; }
+  catch (e) { die(4, vendorMissing('pdf-lib', e)); }
 }
 
 // ---------- geometry: display space <-> content space ----------
@@ -1114,7 +1123,7 @@ async function cmdFinalize(pos, flags) {
   const outPath = flags.out ? String(flags.out) : src.replace(/\.docx$/i, '') + '-final.docx';
   if (sameFile(src, outPath)) die(1, 'refusing to overwrite the input; pass a different --out');
   if (fs.existsSync(outPath)) die(5, `refusing to overwrite ${outPath}; pass a different --out`);
-  const fflate = await import('fflate').catch(() => die(4, `fflate is not installed. Run: pnpm install --dir "${SKILL_DIR}"`));
+  const fflate = (await import('./vendor/fflate.cjs').catch(e => die(4, vendorMissing('fflate', e)))).default;
   const entries = fflate.unzipSync(new Uint8Array(fs.readFileSync(src)));
   const counts = new Map(texts.map(t => [t, { n: 0, where: new Set() }]));
   const parts = Object.keys(entries).filter(n => /^word\/(document|header\d*|footer\d*|footnotes|endnotes)\.xml$/.test(n));
@@ -1423,7 +1432,7 @@ function cmdSealSetup() {
 }
 
 async function cmdDoctor() {
-  let pdfLib = false; try { await import('pdf-lib'); pdfLib = true; } catch {}
+  let pdfLib = false; try { pdfLib = typeof (await import('./vendor/pdf-lib.cjs')).default?.PDFDocument?.load === 'function'; } catch {}
   const { SIG, CERT } = f();
   const cfg = readConfig();
   const r = { skillDir: SKILL_DIR, home: HOME, legacyHome: HOME === LEGACY_HOME ? `using the pre-rename ${LEGACY_HOME}; run \`sign-it setup\` once to move it to ${CANONICAL_HOME}` : null,
