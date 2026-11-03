@@ -18,7 +18,10 @@
 #   - dcg (#57, restructure plan U15): its licence is shown before anything is fetched; with
 #     no network it is reported skipped and the run goes on; --no-dcg fetches nothing and
 #     says so; a platform with no build is a skip naming the release page; an archive that
-#     fails its checksum is a failure that installs nothing, with the links and seed made
+#     fails its checksum is a failure that installs nothing, with the links and seed made;
+#     once dcg is installed (#371), a rerun seeds an unedited settings.json again with dcg's
+#     hook (the old one backed up) and leaves an edited one alone, and the run and --check
+#     name a settings.json no hook in which runs dcg
 #   - plugins (U15): with a fake claude first on PATH the hov marketplace is added and each
 #     plugin in lib/default-plugins.txt installed exactly once, at user scope; a rerun calls
 #     neither; a CLI below the floor, or offline, is reported and the run goes on; --check is
@@ -404,6 +407,87 @@ grep -q -E '^  dcg +failed ' "$WORK/run-bad.log" || fail "the checksum failure h
 [ -L "$WORK/home-bad/.claude/hooks" ] && [ -f "$WORK/home-bad/.claude/settings.json" ] || fail "a refused archive stopped the links or the seed"
 grep -q -F 'hov-stack: status' "$WORK/run-bad.log" || fail "a refused archive cut the run short"
 ok "an archive that fails its checksum exits 1, installs nothing, and the links and seed are still made"
+
+# dcg installed after a run that seeded settings.json without it (#371). A dcg on PATH stands
+# in for the install; the download stays stubbed, so dcg/install.sh still skips offline.
+# OBSERVED 2026-11-03 on a clean Mac: the rerun put the hook only in settings.hov-stack.json,
+# and --check said settings ok while no hook ran dcg.
+mkdir -p "$WORK/dcg-bin"
+printf '#!/bin/sh\nexit 0\n' > "$WORK/dcg-bin/dcg"
+chmod +x "$WORK/dcg-bin/dcg"
+dcg_hooks() {  # dcg_hooks <settings file>: how many PreToolUse hook commands run the stand-in dcg
+  node -e '
+    const s = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+    let n = 0;
+    for (const g of (s.hooks && s.hooks.PreToolUse) || []) for (const h of g.hooks || []) if (h.command === process.argv[2]) n += 1;
+    console.log(n);
+  ' "$1" "$WORK/dcg-bin/dcg"
+}
+HU=$WORK/home-upgrade
+HOME=$HU bash "$ROOT/setup" --no-dcg > "$WORK/run-up1.log" 2>&1 || { cat "$WORK/run-up1.log"; fail "setup --no-dcg before dcg exited non-zero"; }
+SU=$HU/.claude/settings.json
+[ "$(dcg_hooks "$SU")" = 0 ] || fail "a run without dcg seeded a dcg hook"
+seed_before=$(sha256sum < "$SU")
+rc=0; HOME=$HU PATH=$WORK/dcg-bin:$PATH bash "$ROOT/setup" --check > "$WORK/check-up1.log" 2>&1 || rc=$?
+[ "$rc" = 1 ] || { cat "$WORK/check-up1.log"; fail "--check with dcg installed and no hook exited $rc, not 1"; }
+grep -q -E '^  settings +missing .*no PreToolUse hook that runs dcg.*run \./setup' "$WORK/check-up1.log" || { cat "$WORK/check-up1.log"; fail "--check did not say the unedited seed lacks the hook and that ./setup fixes it"; }
+[ "$(sha256sum < "$SU")" = "$seed_before" ] || fail "--check changed settings.json"
+rc=0; HOME=$HU PATH=$WORK/dcg-bin:$PATH bash "$ROOT/setup" > "$WORK/run-up2.log" 2>&1 || rc=$?
+[ "$rc" = 0 ] || { cat "$WORK/run-up2.log"; fail "the rerun with dcg installed exited $rc"; }
+[ "$(dcg_hooks "$SU")" = 1 ] || { cat "$WORK/run-up2.log"; fail "the unedited seed did not get dcg's hook once dcg was installed"; }
+backup=$(find "$HU/.hov-stack-backups" -path '*/.claude/settings.json' -type f)
+[ -n "$backup" ] && [ "$(sha256sum < "$backup")" = "$seed_before" ] || fail "the replaced seed is not in ~/.hov-stack-backups byte for byte (found '$backup')"
+grep -q -F "backed up ~/.claude/settings.json -> $HU/.hov-stack-backups/" "$WORK/run-up2.log" || { cat "$WORK/run-up2.log"; fail "the rerun did not say where the old settings.json went"; }
+[ ! -e "$HU/.claude/settings.hov-stack.json" ] || fail "the rerun wrote settings.hov-stack.json instead of seeding settings.json"
+grep -q -E '^  settings +ok ' "$WORK/run-up2.log" || { cat "$WORK/run-up2.log"; fail "the rerun's settings row is not ok"; }
+rc=0; HOME=$HU PATH=$WORK/dcg-bin:$PATH bash "$ROOT/setup" --check > "$WORK/check-up2.log" 2>&1 || rc=$?
+grep -q -E '^  settings +ok ' "$WORK/check-up2.log" || { cat "$WORK/check-up2.log"; fail "--check does not show settings ok once the hook is in"; }
+ok "dcg installed after the first run: --check names the missing hook, and a rerun backs up the unedited seed and seeds it again with the hook"
+
+# The same with a settings.json someone edited: left alone, the hook goes to
+# settings.hov-stack.json, and both the run and --check say settings.json still lacks it.
+HE=$WORK/home-edited
+HOME=$HE bash "$ROOT/setup" --no-dcg > "$WORK/run-ed1.log" 2>&1 || { cat "$WORK/run-ed1.log"; fail "setup --no-dcg before dcg exited non-zero"; }
+SE=$HE/.claude/settings.json
+node -e '
+  const fs = require("fs"), s = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+  s.theirOwnKey = true;
+  fs.writeFileSync(process.argv[1], JSON.stringify(s, null, 2) + "\n");
+' "$SE"
+edited=$(sha256sum < "$SE")
+n_backups=$(find "$HE" -maxdepth 1 -name .hov-stack-backups | wc -l)
+rc=0; HOME=$HE PATH=$WORK/dcg-bin:$PATH bash "$ROOT/setup" > "$WORK/run-ed2.log" 2>&1 || rc=$?
+[ "$rc" = 0 ] || { cat "$WORK/run-ed2.log"; fail "the rerun over an edited settings.json exited $rc"; }
+[ "$(sha256sum < "$SE")" = "$edited" ] || fail "an edited settings.json was changed"
+[ "$(find "$HE" -maxdepth 1 -name .hov-stack-backups | wc -l)" = "$n_backups" ] || fail "an edited settings.json was backed up"
+[ "$(dcg_hooks "$HE/.claude/settings.hov-stack.json")" = 1 ] || fail "settings.hov-stack.json does not carry dcg's hook"
+grep -q -E '^  settings +missing .*no PreToolUse hook that runs dcg.*copy the entry .*settings\.hov-stack\.json' "$WORK/run-ed2.log" || { cat "$WORK/run-ed2.log"; fail "the rerun did not say the edited settings.json lacks dcg's hook"; }
+rc=0; HOME=$HE PATH=$WORK/dcg-bin:$PATH bash "$ROOT/setup" --check > "$WORK/check-ed.log" 2>&1 || rc=$?
+[ "$rc" = 1 ] || { cat "$WORK/check-ed.log"; fail "--check over an edited settings.json with no dcg hook exited $rc, not 1"; }
+grep -q -E '^  settings +missing .*no PreToolUse hook that runs dcg.*copy the entry' "$WORK/check-ed.log" || { cat "$WORK/check-ed.log"; fail "--check did not name the missing dcg hook"; }
+rc=0; HOME=$HE PATH=$WORK/dcg-bin:$PATH bash "$ROOT/setup" --check --no-dcg > "$WORK/check-ed-nodcg.log" 2>&1 || rc=$?
+grep -q -E '^  settings +ok ' "$WORK/check-ed-nodcg.log" || { cat "$WORK/check-ed-nodcg.log"; fail "--check --no-dcg still held settings.json to dcg's hook"; }
+[ "$(sha256sum < "$SE")" = "$edited" ] || fail "--check changed an edited settings.json"
+ok "an edited settings.json is left alone: the hook goes to settings.hov-stack.json, and the run and --check name it missing (--no-dcg leaves it out)"
+
+# What counts as a hook that runs dcg: the command's own word dcg, at any path, and nothing
+# that merely has dcg in its name.
+probe_hook() {  # probe_hook <command>: --check's settings row for a settings.json with that one PreToolUse hook
+  node -e '
+    const hook = { type: "command", command: process.argv[2] };
+    require("fs").writeFileSync(process.argv[1], JSON.stringify({ hooks: { PreToolUse: [{ matcher: "Bash", hooks: [hook] }] } }) + "\n");
+  ' "$SE" "$1"
+  HOME=$HE PATH=$WORK/dcg-bin:$PATH bash "$ROOT/setup" --check > "$WORK/probe.log" 2>&1 || true
+  grep -E '^  settings ' "$WORK/probe.log" | awk '{ print $2 }'
+}
+[ "$(probe_hook 'bash $HOME/.claude/hooks/dcg-reap.sh')" = missing ] || fail "a hook named dcg-reap.sh was taken for dcg"
+[ "$(probe_hook '/opt/somewhere/dcg-wrapper')" = missing ] || fail "a hook named dcg-wrapper was taken for dcg"
+[ "$(probe_hook '$HOME/.local/bin/dcg')" = ok ] || fail "the template's own \$HOME/.local/bin/dcg hook was not taken for dcg"
+[ "$(probe_hook "\"$WORK/dcg-bin/dcg\" --robot")" = ok ] || fail "a quoted dcg path with an argument was not taken for dcg"
+printf '{ "hooks":\n' > "$SE"
+HOME=$HE PATH=$WORK/dcg-bin:$PATH bash "$ROOT/setup" --check > "$WORK/probe.log" 2>&1 || true
+grep -q -E '^  settings +missing .*does not parse' "$WORK/probe.log" || { cat "$WORK/probe.log"; fail "--check did not say an unparseable settings.json runs no dcg hook"; }
+ok "a hook runs dcg only when its command is dcg itself (dcg-reap.sh and dcg-wrapper do not count); an unparseable settings.json is named"
 
 # The plugin steps, against a stand-in for the claude CLI: just the subcommands setup calls,
 # its state in files under $FAKE (version, marketplace, plugins, offline) and every call

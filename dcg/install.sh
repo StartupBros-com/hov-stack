@@ -6,6 +6,21 @@ SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 # shellcheck source=common.sh
 source "$SCRIPT_DIR/common.sh"
 
+# A command that fails where nothing checks it ends the script under set -e, and without
+# this it ends it silently: ./setup's status row then points at a `dcg: error` line that
+# was never printed (#371). errtrace carries the trap into functions. A failure inside a
+# command substitution is left to the assignment that ran it, which fails in turn; checking
+# BASH_SUBSHELL rather than BASHPID keeps this working under macOS's bash 3.2.
+set -o errtrace
+dcg_unexpected() {
+    local status=$1 line=$2 command=$3
+    [[ ${BASH_SUBSHELL:-0} -eq 0 ]] || return 0
+    # shellcheck disable=SC2016  # the backticks are literal: they quote the command
+    printf 'dcg: error: `%s` failed (exit %s) at line %s of %s\n' \
+        "$command" "$status" "$line" "${BASH_SOURCE[1]##*/}" >&2
+}
+trap 'dcg_unexpected $? "$LINENO" "$BASH_COMMAND"' ERR
+
 usage() {
     cat <<EOF
 Install the verified Destructive Command Guard binary (bootstrap only: the
@@ -290,7 +305,9 @@ extract_dir="${work_dir}/extract"
 mkdir -p -- "$extract_dir"
 tar -xJf "$archive" --directory "$extract_dir" --no-same-owner --no-same-permissions -- dcg
 extracted="${extract_dir}/dcg"
-chmod 0755 -- "$extracted"
+# `--` goes before the mode: BSD chmod (macOS) reads every argument after the mode as a
+# file, so `chmod 0755 -- f` fails there with "chmod: --: No such file or directory" (#371).
+chmod -- 0755 "$extracted"
 dcg_validate_binary "$extracted"
 dcg_log "architecture, version, and robot allow/deny checks passed"
 

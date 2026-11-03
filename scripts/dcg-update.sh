@@ -438,7 +438,7 @@ fi
 MINISIGN_KEY_ID=69B3955C8D2E62A8
 minisign_bin=$(type -P minisign 2>/dev/null || true)
 [ -n "$minisign_bin" ] && [ -x "$minisign_bin" ] || {
-  err "minisign not on PATH — refusing to promote an unverified binary (mise install minisign)"; }
+  err "minisign not on PATH — refusing to promote an unverified binary (brew install minisign, or mise use -g minisign)"; }
 [ -s "$tmp/$asset.minisig" ] || {
   err "v$latest publishes no $asset.minisig — cannot establish authenticity"; }
 "$minisign_bin" -Vm "$tmp/$asset" -x "$tmp/$asset.minisig" -P "$MINISIGN_PUBKEY" >/dev/null 2>&1 || {

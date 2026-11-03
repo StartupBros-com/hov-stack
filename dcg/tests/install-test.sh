@@ -37,23 +37,23 @@ test_home="${test_root}/home"
 expected_target="${test_home}/.local/lib/dcg/${DCG_TAG}/dcg"
 expected_link="${test_home}/.local/bin/dcg"
 
-printf '1/16 syntax checks\n'
+printf '1/18 syntax checks\n'
 bash -n "$DCG_DIR/common.sh" "$INSTALLER" "$DOCTOR" "$0"
 
-printf '2/16 dry run is non-mutating\n'
+printf '2/18 dry run is non-mutating\n'
 dry_output=$("$INSTALLER" --home "$test_home" --dry-run)
 [[ "$dry_output" == *"$DCG_ASSET_SHA256"* ]] ||
     fail "dry run omitted the pinned checksum"
 [[ ! -e "$test_home" ]] || fail "dry run created its requested home"
 
-printf '3/16 verified installation into temporary home\n'
+printf '3/18 verified installation into temporary home\n'
 "$INSTALLER" --home "$test_home"
 [[ -x "$expected_target" && ! -L "$expected_target" ]] || fail "versioned binary was not installed"
 [[ -L "$expected_link" ]] || fail "managed symlink was not installed"
 [[ "$(readlink -- "$expected_link")" == "$expected_target" ]] || fail "managed symlink target is wrong"
 first_hash=$(sha256sum -- "$expected_target")
 
-printf '4/16 doctor, and a rerun with the pin in place fetches nothing\n'
+printf '4/18 doctor, and a rerun with the pin in place fetches nothing\n'
 "$DOCTOR" --home "$test_home"
 # A --source-dir that does not exist proves the rerun read no artifact: any fetch or copy
 # would stop on it.
@@ -73,7 +73,7 @@ grep -q -F 'source directory not found' "${test_root}/altered.log" ||
 cp -p -- "${test_root}/pinned-dcg" "$expected_target"
 "$DOCTOR" --home "$test_home"
 
-printf '5/16 unrelated command is not overwritten without force\n'
+printf '5/18 unrelated command is not overwritten without force\n'
 rm -- "$expected_link"
 printf '#!/bin/sh\nexit 0\n' >"$expected_link"
 chmod 0755 "$expected_link"
@@ -97,7 +97,7 @@ link_to_newer() {
     ln -s -- "$newer_target" "$expected_link"
 }
 
-printf '6/16 a newer promoted version is kept, not walked backwards\n'
+printf '6/18 a newer promoted version is kept, not walked backwards\n'
 link_to_newer
 "$INSTALLER" --home "$test_home" >"${test_root}/downgrade.log" 2>&1 ||
     fail "installer exited non-zero over a newer promoted version (install.sh runs it under set -e)"
@@ -106,13 +106,13 @@ grep -q 'keeping promoted v9.9.9' "${test_root}/downgrade.log" ||
 [[ "$(readlink -- "$expected_link")" == "$newer_target" ]] ||
     fail "installer DOWNGRADED the managed symlink away from the promoted version"
 
-printf '7/16 --force still installs the pin over a newer version\n'
+printf '7/18 --force still installs the pin over a newer version\n'
 link_to_newer
 "$INSTALLER" --home "$test_home" --force
 [[ "$(readlink -- "$expected_link")" == "$expected_target" ]] ||
     fail "--force did not install the pinned version"
 
-printf '8/16 an OLDER linked version is still upgraded to the pin\n'
+printf '8/18 an OLDER linked version is still upgraded to the pin\n'
 older_dir="${test_home}/.local/lib/dcg/v0.0.1"
 mkdir -p "$older_dir"
 printf '#!/bin/sh\nexit 0\n' >"${older_dir}/dcg"
@@ -126,7 +126,7 @@ grep -q 'keeping promoted' "${test_root}/upgrade.log" &&
 [[ "$(readlink -- "$expected_link")" == "$expected_target" ]] ||
     fail "installer did not upgrade an older linked version to the pin"
 
-# Cases 9-16 are the platform table and the soft-fail contract (restructure plan U15): a host
+# Cases 9-18 are the platform table and the soft-fail contract (restructure plan U15): a host
 # with no build, a missing tool or no network is skipped with exit 3 and the fix printed,
 # while a tampered archive or a foreign signature still fails closed with exit 1. Every
 # case below asserts that nothing was installed.
@@ -139,12 +139,15 @@ expect_status() {
         fail "expected exit $want, got $status: $*"
     fi
 }
+no_error_line() {
+    ! grep -qF 'dcg: error' "$1" || fail "$2 printed a dcg: error line: $(cat -- "$1")"
+}
 nothing_installed() {
     [[ ! -e "$1/.local/lib/dcg" && ! -e "$1/.local/bin/dcg" && ! -L "$1/.local/bin/dcg" ]] ||
         fail "$2 left an installation under $1"
 }
 
-printf '9/16 each platform selects its own archive\n'
+printf '9/18 each platform selects its own archive\n'
 # The expected names are written out here, not read from common.sh: this is the mapping
 # under test. The digests come from the table, and case 10 checks them against upstream.
 while read -r os arch expected_asset; do
@@ -165,7 +168,7 @@ Darwin x86_64 dcg-x86_64-apple-darwin.tar.xz
 Darwin arm64 dcg-aarch64-apple-darwin.tar.xz
 ROWS
 
-printf '10/16 every row names the real, signed upstream archive\n'
+printf '10/18 every row names the real, signed upstream archive\n'
 # Only the host's row is ever installed in CI, so a mistyped digest in any other row would
 # reach a stranger as a hard checksum failure. Fetch each archive and check it the way the
 # installer would, short of running a binary built for another platform.
@@ -209,7 +212,7 @@ MINGW64_NT-10.0 x86_64
 MINGW64_NT-10.0 arm64
 ROWS
 
-printf '11/16 a platform with no build is skipped with the release link\n'
+printf '11/18 a platform with no build is skipped with the release link\n'
 expect_status 3 "${test_root}/unsupported.log" \
     env DCG_UNAME_S=FreeBSD DCG_UNAME_M=amd64 "$INSTALLER" --home "${test_root}/h11"
 grep -qF "ships no build for FreeBSD/amd64" "${test_root}/unsupported.log" ||
@@ -217,8 +220,9 @@ grep -qF "ships no build for FreeBSD/amd64" "${test_root}/unsupported.log" ||
 grep -qF "$DCG_RELEASE_PAGE" "${test_root}/unsupported.log" ||
     fail "unsupported-platform skip did not link the release"
 [[ ! -e "${test_root}/h11" ]] || fail "unsupported-platform skip created its home"
+no_error_line "${test_root}/unsupported.log" "an unsupported-platform skip"
 
-printf '12/16 Windows is skipped with the zip, its digest and the key\n'
+printf '12/18 Windows is skipped with the zip, its digest and the key\n'
 expect_status 3 "${test_root}/windows.log" \
     env DCG_UNAME_S=MINGW64_NT-10.0-19045 DCG_UNAME_M=x86_64 "$INSTALLER" --home "${test_root}/h12"
 windows_sha=$(DCG_UNAME_S=MINGW64_NT-10.0 DCG_UNAME_M=x86_64 dcg_select_platform || true
@@ -227,6 +231,7 @@ for expected in dcg-x86_64-pc-windows-msvc.zip "$windows_sha" "$DCG_MINISIGN_PUB
     grep -qF -- "$expected" "${test_root}/windows.log" || fail "Windows skip omitted $expected"
 done
 [[ ! -e "${test_root}/h12" ]] || fail "Windows skip created its home"
+no_error_line "${test_root}/windows.log" "the Windows skip"
 
 # The host row's real assets, fetched by case 10, seed the --source-dir cases.
 host_assets="${rows_dir}/${DCG_ASSET}"
@@ -235,7 +240,7 @@ seed_source() {
     cp -- "${host_assets}/${DCG_ASSET}" "${host_assets}/${DCG_CHECKSUM}" "${host_assets}/${DCG_MINISIG}" "$1/"
 }
 
-printf '13/16 a tampered archive fails closed and installs nothing\n'
+printf '13/18 a tampered archive fails closed and installs nothing\n'
 seed_source "${test_root}/tampered"
 printf 'x' >>"${test_root}/tampered/${DCG_ASSET}"
 expect_status 1 "${test_root}/tampered.log" \
@@ -244,7 +249,7 @@ grep -qF "checksum mismatch for ${DCG_ASSET}" "${test_root}/tampered.log" ||
     fail "tampered archive was not refused on its checksum"
 nothing_installed "${test_root}/h13" "a tampered archive"
 
-printf '14/16 a signature from another key fails closed and installs nothing\n'
+printf '14/18 a signature from another key fails closed and installs nothing\n'
 seed_source "${test_root}/wrongkey"
 minisign -G -p "${test_root}/other.pub" -s "${test_root}/other.sec" -W >/dev/null
 rm -f -- "${test_root}/wrongkey/${DCG_MINISIG}"
@@ -270,10 +275,10 @@ make_path() {
     done
     printf '#!/bin/sh\n: >"%s"\necho "curl: (6) Could not resolve host: github.com" >&2\nexit 6\n' \
         "$dir/curl-was-called" >"$dir/curl"
-    chmod 0755 -- "$dir/curl"
+    chmod -- 0755 "$dir/curl"
 }
 
-printf '15/16 a missing minisign is skipped with its install command, before any download\n'
+printf '15/18 a missing minisign is skipped with its install command, before any download\n'
 make_path "${test_root}/path-no-minisign" minisign
 expect_status 3 "${test_root}/no-minisign.log" \
     env PATH="${test_root}/path-no-minisign" "$BASH" "$INSTALLER" --home "${test_root}/h15"
@@ -284,8 +289,9 @@ grep -qF "mise use -g minisign" "${test_root}/no-minisign.log" ||
 [[ ! -e "${test_root}/path-no-minisign/curl-was-called" ]] ||
     fail "installer downloaded before checking for minisign"
 nothing_installed "${test_root}/h15" "a missing minisign"
+no_error_line "${test_root}/no-minisign.log" "a missing-minisign skip"
 
-printf '16/16 no network is skipped, not failed\n'
+printf '16/18 no network is skipped, not failed\n'
 make_path "${test_root}/path-offline"
 expect_status 3 "${test_root}/offline.log" \
     env PATH="${test_root}/path-offline" "$BASH" "$INSTALLER" --home "${test_root}/h16"
@@ -293,6 +299,55 @@ grep -qF "(offline?)" "${test_root}/offline.log" || fail "offline skip did not s
 grep -qF "Could not resolve host" "${test_root}/offline.log" || fail "offline skip hid curl's error"
 [[ -e "${test_root}/path-offline/curl-was-called" ]] || fail "offline case never reached the download"
 nothing_installed "${test_root}/h16" "an offline run"
+no_error_line "${test_root}/offline.log" "an offline skip"
+
+# A chmod shaped like macOS's: BSD chmod reads every argument after the mode as a file, so
+# `chmod 0755 -- f` fails with "chmod: --: No such file or directory". OBSERVED 2026-11-03
+# (#371): that one spelling made every Mac install fail after both verifications passed.
+printf '17/18 a BSD-shaped chmod installs: no option marker after the mode\n'
+real_chmod=$(type -P chmod)
+make_path "${test_root}/path-bsd-chmod" chmod
+cat >"${test_root}/path-bsd-chmod/chmod" <<EOF
+#!/bin/sh
+[ "\$1" = -- ] && shift
+case "\$1" in -*) echo "chmod: unexpected option \$1" >&2; exit 1 ;; esac
+mode=\$1
+shift
+for f in "\$@"; do
+    if [ "\$f" = -- ] || [ ! -e "\$f" ]; then echo "chmod: \$f: No such file or directory" >&2; exit 1; fi
+done
+exec "$real_chmod" "\$mode" "\$@"
+EOF
+"$real_chmod" 0755 "${test_root}/path-bsd-chmod/chmod"
+# Planted negative: the stub refuses the GNU-only spelling, so it is a real stand-in.
+touch "${test_root}/chmod-probe"
+if "${test_root}/path-bsd-chmod/chmod" 0755 -- "${test_root}/chmod-probe" 2>/dev/null; then
+    fail "the BSD-shaped chmod stub accepted an option marker after the mode"
+fi
+seed_source "${test_root}/bsd-source"
+expect_status 0 "${test_root}/bsd-chmod.log" \
+    env PATH="${test_root}/path-bsd-chmod" "$BASH" "$INSTALLER" --home "${test_root}/h17" \
+    --source-dir "${test_root}/bsd-source"
+[[ -x "${test_root}/h17/.local/lib/dcg/${DCG_TAG}/dcg" && -L "${test_root}/h17/.local/bin/dcg" ]] ||
+    fail "a BSD-shaped chmod did not end in an installed, linked binary"
+
+# set -e ends the installer at any unchecked failure; the ERR trap is what makes that end
+# name the command, instead of leaving ./setup pointing at a dcg: error line never printed.
+printf '18/18 an unexpected failure prints one dcg: error line naming the command\n'
+make_path "${test_root}/path-failing-chmod" chmod
+printf '#!/bin/sh\nexit 1\n' >"${test_root}/path-failing-chmod/chmod"
+"$real_chmod" 0755 "${test_root}/path-failing-chmod/chmod"
+expect_status 1 "${test_root}/failing-chmod.log" \
+    env PATH="${test_root}/path-failing-chmod" "$BASH" "$INSTALLER" --home "${test_root}/h18" \
+    --source-dir "${test_root}/bsd-source"
+# shellcheck disable=SC2016  # the backticks are literal, as install.sh prints them
+grep -qE '^dcg: error: `chmod .*` failed \(exit 1\) at line [0-9]+ of install\.sh$' \
+    "${test_root}/failing-chmod.log" ||
+    fail "a failing chmod ended the installer without a dcg: error line: $(cat -- "${test_root}/failing-chmod.log")"
+[[ $(grep -cF 'dcg: error' "${test_root}/failing-chmod.log") -eq 1 ]] ||
+    fail "a failing chmod printed more than one dcg: error line: $(cat -- "${test_root}/failing-chmod.log")"
+[[ ! -e "${test_root}/h18/.local/bin/dcg" && ! -L "${test_root}/h18/.local/bin/dcg" ]] ||
+    fail "a failing chmod still linked dcg"
 
 printf 'PASS: DCG installer tests used only %s\n' "$test_root"
 
