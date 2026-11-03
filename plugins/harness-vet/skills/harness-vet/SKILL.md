@@ -244,9 +244,17 @@ For each claim that could change a verdict, a verifier whose stated default is
 REFUTED; CONFIRMED requires file:line in the candidate or the output of a
 command the verifier ran. Empirical beats documentary:
 
-- Run the candidate's own tests and benchmarks in an isolated sandbox (fresh
-  HOME, scratch env). A bench that won't compile or a test that OOMs is a
-  verdict input [measured].
+- Run the candidate's own tests and benchmarks under
+  `env -i PATH="$PATH" HOME=<scratch>/home TMPDIR=<scratch>/tmp XDG_CONFIG_HOME=<scratch>/xdg-config XDG_CACHE_HOME=<scratch>/xdg-cache <cmd>`.
+  A fresh HOME alone does not isolate: variables the caller already exported,
+  such as API keys and tokens, still reach the candidate. Add a variable only
+  by name, never a credential; candidate code needs none. Paste this line
+  verbatim into every verifier or arm prompt that runs candidate code, and
+  quote the exact command line that ran in the evidence, since it is the
+  record of isolation [measured: 2026-11-02, three vets ran candidate code
+  with an inherited environment, and in one a candidate's own test sent a
+  real OpenAI key to api.openai.com]. A bench that won't compile or a test
+  that OOMs is a verdict input [measured].
 - A detector candidate — anything that resolves project config to decide what
   to check, then reports a count — gets a planted known-positive under the
   target's real invocation: in the target repo, at its real CWD and config
@@ -302,7 +310,15 @@ command the verifier ran. Empirical beats documentary:
   browser, and neither does a scratch `--user-data-dir` [measured: in the
   first live run, Chrome launched with only `--user-data-dir` kept writing
   the operator's default profile's crash-reporter settings; with the XDG
-  pair set it wrote under the run root instead]. A runner forked from the
+  pair set it wrote under the run root instead]. An arm that runs `claude -p`
+  also starts from `env -i`: PATH, its own `CLAUDE_CONFIG_DIR` and XDG pair,
+  and only the model-route variables the host already uses for Claude, each
+  passed by name and only if set (`ANTHROPIC_BASE_URL`,
+  `ANTHROPIC_CUSTOM_HEADERS`, `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`,
+  `CLAUDE_CODE_OAUTH_TOKEN`, `CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY`).
+  Any of those can carry a credential the arm's own tools can read, so a
+  candidate script the arm runs gets the candidate-code `env -i` line above,
+  applied inside the arm. A runner forked from the
   pattern keeps its non-zero exit on a failed invocation, or the batch is
   accepted only from each run's status line, and the note says which
   [measured: the live run's fork exited 0 on an error result; its status
