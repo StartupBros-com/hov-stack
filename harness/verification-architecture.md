@@ -70,7 +70,9 @@ loop-guard.js fence; the gate does not reimplement them.
 via trusted root, it first derives the session's plausible change set with no
 extra state: dirty files count only when their mtime is at or after the
 session start (read from the transcript's first timestamp), commits only when
-made since session start, both filtered to files the verify command actually
+made since session start and not already on the default remote branch (a pull
+or launchpad fast-forward brings other sessions' merged commits into HEAD inside
+the window; 2026-11-03), both filtered to files the verify command actually
 covers (ts/js + toolchain config for typecheck, py for ruff, everything for a
 repo's own verify.sh). Provably irrelevant sessions (read-only, docs-only,
 sessions launched in a parked dirty checkout) stop cleanly. Any uncertainty
@@ -80,8 +82,9 @@ claude-loop.sh always verifies. Separately, `package.json` present with
 in this fresh worktree, run <install cmd>" block instead of a wall of fake
 type errors (the pattern behind ~92% of historical gate failures), and the
 verify command runs with `CI=1` so package managers cannot stall on TTY
-prompts. Motivating data: 2026-07-23 transcript audit, 83 gate-failure
-sessions, 76 environmental.
+prompts, and with mise's shims dir appended to PATH so a hook process launched
+without mise activation still finds bun and pnpm (2026-11-03). Motivating data:
+2026-07-23 transcript audit, 83 gate-failure sessions, 76 environmental.
 
 Repos can (and monorepos should) ship a `.claude/verify.sh` so the gate runs
 an affected-only check instead of the auto-detected repo-wide typecheck;
