@@ -24,7 +24,13 @@
 #      attribution, cache and compaction settings, and the Claude Code env knobs.
 #      Everything bound to my machine (API gateway, login method, pinned model, plugins,
 #      status line) is dropped and listed. An existing settings.json is left untouched
-#      and the seed is written next to it as settings.hov-stack.json for you to merge.
+#      and the seed is written next to it as settings.hov-stack.json for you to merge,
+#      with one exception: a settings.json that holds just the seed setup writes without
+#      dcg, plus the plugin keys Claude Code adds to it (in any key order), so one an
+#      earlier run seeded and nobody has edited, is moved to ~/.hov-stack-backups/<timestamp>/
+#      once dcg is installed and seeded again with dcg's hook, keeping those plugin keys.
+#      With dcg installed, a settings.json with no hook that runs dcg is not in place:
+#      setup and --check both say so.
 #   4. Reads your private overlay: this machine's own files, kept out of the checkout, in
 #      $HOV_STACK_OVERLAY, else $XDG_CONFIG_HOME/hov-stack, else ~/.config/hov-stack. Each
 #      path must be absolute: a relative XDG_CONFIG_HOME is ignored, as the XDG spec says,
@@ -130,6 +136,79 @@ find_dcg() {  # the dcg the seeded hook will run: the one on PATH, else dcg/inst
   elif [ -x "$HOME/.local/bin/dcg" ]; then
     echo "$HOME/.local/bin/dcg"
   fi
+}
+
+# dcg guards nothing unless a PreToolUse hook runs it (#371). dcg_hooked <settings file>:
+# 0 when one does, 1 when none does, 2 when the file does not parse. A command counts when
+# dcg is a word of it: the seeded <home>/.local/bin/dcg, a bare dcg, any path ending in
+# /dcg. dcg-reap.sh and the like do not.
+dcg_hooked() {
+  node -e '
+    let s;
+    try { s = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")); } catch { process.exit(2); }
+    const groups = (s && s.hooks && s.hooks.PreToolUse) || [];
+    const runs = Array.isArray(groups) && groups.some((g) => g && Array.isArray(g.hooks) &&
+      g.hooks.some((h) => h && typeof h.command === "string" && /(^|[\s\/"\x27])dcg($|[\s"\x27;])/.test(h.command)));
+    process.exit(runs ? 0 : 1);
+  ' "$1"
+}
+# The fix the settings row names when dcg is installed and settings.json has no hook for it.
+dcg_hook_fix() {  # dcg_hook_fix <dcg_hooked status>
+  local none="$CFG/settings.json has no PreToolUse hook that runs dcg, so dcg guards nothing"
+  if [ "$1" = 2 ]; then echo "$CFG/settings.json does not parse, so no hook in it runs dcg"
+  elif untouched_seed "$CFG/settings.json"; then echo "$none: run ./setup, which seeds it again with the hook (it is the unedited seed of a run made before dcg was installed)"
+  else echo "$none: copy the entry that runs dcg from $CFG/settings.hov-stack.json, which ./setup writes, into it"
+  fi
+}
+
+# What Claude Code itself writes into settings.json when setup's plugin step adds the hov
+# marketplace and installs the default plugins. It also rewrites the file in its own key
+# order. OBSERVED 2026-11-03 on a clean Mac (#371): that was the only difference between the
+# first run's settings.json and its seed. The seed never sets these keys.
+CLAUDE_WRITES='["enabledPlugins","extraKnownMarketplaces"]'
+
+# untouched_seed <settings.json>: 0 when the file holds the seed this run would write with dcg
+# absent, plus at most the keys Claude Code writes (CLAUDE_WRITES), in any key order. The seed
+# is a pure function of the template, the config dir, HOME and the overlay, so a match is a
+# settings.json an earlier run seeded and nobody has edited since; any other change, one
+# value or one list entry, makes it the user's file.
+untouched_seed() {
+  local tmp rc=1
+  tmp=$(mktemp -d "${TMPDIR:-/tmp}/hov-stack-seed.XXXXXX") || return 1
+  if node "$HOV_STACK/lib/settings-seed.js" "$HOV_STACK/settings.json" "$tmp/seed.json" "$CFG" "$HOME" "" "$overlay_settings" > /dev/null 2>&1 \
+    && node -e '
+      const fs = require("fs");
+      let live, seed;
+      try { live = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); seed = JSON.parse(fs.readFileSync(process.argv[2], "utf8")); } catch { process.exit(1); }
+      if (!live || typeof live !== "object" || Array.isArray(live)) process.exit(1);
+      for (const k of JSON.parse(process.argv[3])) if (!(k in seed)) delete live[k];
+      const same = (a, b) => {
+        if (Array.isArray(a) || Array.isArray(b)) return Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((x, i) => same(x, b[i]));
+        if (a && b && typeof a === "object" && typeof b === "object") {
+          const ka = Object.keys(a), kb = Object.keys(b);
+          return ka.length === kb.length && ka.every((k) => Object.prototype.hasOwnProperty.call(b, k) && same(a[k], b[k]));
+        }
+        return a === b;
+      };
+      process.exit(same(live, seed) ? 0 : 1);
+    ' "$1" "$tmp/seed.json" "$CLAUDE_WRITES"; then
+    rc=0
+  fi
+  rm -rf "$tmp"
+  return "$rc"
+}
+
+# carry_claude_writes <from> <to>: copy the CLAUDE_WRITES keys from the settings.json an
+# upgrade moved aside into the one it seeded, so the plugins setup installed stay enabled.
+carry_claude_writes() {
+  node -e '
+    const fs = require("fs");
+    const from = JSON.parse(fs.readFileSync(process.argv[1], "utf8")), to = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+    const carried = [];
+    for (const k of JSON.parse(process.argv[3])) if (k in from && !(k in to)) { to[k] = from[k]; carried.push(k); }
+    fs.writeFileSync(process.argv[2], JSON.stringify(to, null, 2) + "\n");
+    if (carried.length) console.log(`  kept what Claude Code had written there: ${carried.join(", ")}`);
+  ' "$1" "$2" "$CLAUDE_WRITES"
 }
 
 # Every link setup makes: the harness entries, then the skills. A skill a default plugin
@@ -327,6 +406,10 @@ overlay_row() {  # overlay_row check|run
   fi
 }
 seed_ok=0
+# The overlay's settings.json the seed merges, read by the seed and by untouched_seed alike.
+overlay_settings=
+if overlay_usable && [ -f "$OVERLAY/settings.json" ]; then overlay_settings=$OVERLAY/settings.json; fi
+dcg_path=
 
 if [ "$check" = 1 ]; then
   echo "hov-stack: checking $HOV_STACK against $CFG (nothing is changed)"
@@ -344,7 +427,12 @@ if [ "$check" = 1 ]; then
     if [ -n "$dcg_path" ]; then row dcg ok "$dcg_path"; else row dcg missing "not installed: run ./dcg/install.sh (./setup --check --no-dcg leaves it out)"; fi
   fi
 
-  if [ -e "$CFG/settings.json" ]; then row settings ok "$CFG/settings.json"; else row settings missing "no settings.json: run ./setup to seed it"; fi
+  hooked=0
+  if [ -e "$CFG/settings.json" ] && [ -n "$dcg_path" ]; then dcg_hooked "$CFG/settings.json" || hooked=$?; fi
+  if [ ! -e "$CFG/settings.json" ]; then row settings missing "no settings.json: run ./setup to seed it"
+  elif [ "$hooked" != 0 ]; then row settings missing "$(dcg_hook_fix "$hooked")"
+  else row settings ok "$CFG/settings.json"
+  fi
   overlay_row check
 
   claude_row
@@ -414,18 +502,42 @@ else
   esac
 fi
 
+dcg_path=$(find_dcg)
 seed_target=$CFG/settings.json
+# A settings.json an earlier run seeded before dcg was installed, unedited since, lacks the
+# hook only because dcg was absent then: move it aside and seed it again with the hook (#371).
+moved_seed=
+if [ -n "$dcg_path" ] && [ -f "$seed_target" ] && [ ! -L "$seed_target" ] \
+  && ! dcg_hooked "$seed_target" && untouched_seed "$seed_target"; then
+  rel=${seed_target#"$HOME"/}
+  [ "$rel" != "$seed_target" ] || rel=$(basename "$seed_target")
+  if mkdir -p "$BACKUP/$(dirname "$rel")" && mv "$seed_target" "$BACKUP/$rel"; then
+    moved_seed=$BACKUP/$rel
+    echo "  backed up $(_lf_display "$seed_target") -> $moved_seed: it was an earlier run's seed, unedited and written before dcg was installed, so it is seeded again with dcg's hook"
+  fi
+fi
 if [ -e "$seed_target" ] || [ -L "$seed_target" ]; then
   seed_target=$CFG/settings.hov-stack.json
   echo "  settings.json already exists and was left alone; the hov-stack seed is at $seed_target"
 fi
-dcg_path=$(find_dcg)
-overlay_settings=
-if overlay_usable && [ -f "$OVERLAY/settings.json" ]; then overlay_settings=$OVERLAY/settings.json; fi
 if node "$HOV_STACK/lib/settings-seed.js" "$HOV_STACK/settings.json" "$seed_target" "$CFG" "$HOME" "$dcg_path" "$overlay_settings"; then
   seed_ok=1
-  row settings ok "seed written to $seed_target"
+  hooked=0
+  if [ -n "$moved_seed" ] && ! carry_claude_writes "$moved_seed" "$seed_target"; then
+    row settings failed "seeded $seed_target with dcg's hook, but could not copy the plugin keys Claude Code had written from $moved_seed; copy enabledPlugins and extraKnownMarketplaces from it"
+  else
+    if [ -n "$dcg_path" ] && [ "$no_dcg" = 0 ]; then dcg_hooked "$CFG/settings.json" || hooked=$?; fi
+    if [ "$hooked" != 0 ]; then row settings missing "$(dcg_hook_fix "$hooked")"
+    else row settings ok "seed written to $seed_target"
+    fi
+  fi
 else
+  # Never leave the config dir without the settings.json an upgrade moved aside. Anything at
+  # seed_target now is this run's own failed write (the old file was moved away just above),
+  # so the old one goes back over it.
+  if [ -n "$moved_seed" ] && mv -f -- "$moved_seed" "$seed_target"; then
+    echo "  put $(_lf_display "$seed_target") back from $moved_seed: the new seed was not written"
+  fi
   row settings failed "lib/settings-seed.js wrote no seed; the lines above say why"
 fi
 overlay_row run
@@ -433,7 +545,8 @@ if [ -z "$dcg_path" ]; then
   echo "  dcg (the destructive-command guard) is not installed, so its hook was left out."
   echo "  It is the one third-party guard this setup leans on:"
   echo "    https://github.com/Dicklesworthstone/destructive_command_guard"
-  echo "  Install it, then re-run ./setup (the seed is rebuilt only if settings.json is absent)."
+  echo "  Install it, then re-run ./setup: a settings.json this run seeded and nobody edited"
+  echo "  gets the hook then; an edited one is left alone and the hook is in settings.hov-stack.json."
 fi
 
 claude_row

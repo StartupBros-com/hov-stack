@@ -58,7 +58,7 @@ pr_owner_installed_script() {
 
 pr_owner_prepare() (
   umask 077
-  mkdir -p -- "$1" && chmod 700 -- "$1"
+  mkdir -p -- "$1" && chmod -- 700 "$1"   # `--` before the mode: BSD chmod reads one after it as a file
 )
 
 # pr_owner_new_record <repo> <pr> <head> <worktree> <environment-JSON> <now>

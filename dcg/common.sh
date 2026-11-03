@@ -321,7 +321,7 @@ dcg_verify_minisign() {
     local artifact=$1 signature=$2 pubkey=${3:-$DCG_MINISIGN_PUBKEY} bin
     bin=$(type -P minisign 2>/dev/null || true)
     [ -n "$bin" ] && [ -x "$bin" ] ||
-        dcg_die "minisign not found on PATH; required to verify ${DCG_ASSET} (mise install minisign)"
+        dcg_die "minisign not found on PATH; required to verify ${DCG_ASSET} (brew install minisign, or mise use -g minisign)"
     [ -s "$signature" ] ||
         dcg_die "minisign signature missing or empty: ${signature}"
     "$bin" -Vm "$artifact" -x "$signature" -P "$pubkey" >/dev/null 2>&1 ||
