@@ -20,8 +20,9 @@
 #     says so; a platform with no build is a skip naming the release page; an archive that
 #     fails its checksum is a failure that installs nothing, with the links and seed made;
 #     once dcg is installed (#371), a rerun seeds an unedited settings.json again with dcg's
-#     hook (the old one backed up) and leaves an edited one alone, and the run and --check
-#     name a settings.json no hook in which runs dcg
+#     hook (the old one backed up, Claude Code's plugin keys kept) and leaves an edited one
+#     alone, and the run and --check name a settings.json no hook in which runs dcg; a
+#     reseed whose write fails puts the old file back, and one whose key copy fails says so
 #   - plugins (U15): with a fake claude first on PATH the hov marketplace is added and each
 #     plugin in lib/default-plugins.txt installed exactly once, at user scope; a rerun calls
 #     neither; a CLI below the floor, or offline, is reported and the run goes on; --check is
@@ -476,6 +477,54 @@ HOME=$HN PATH=$WORK/dcg-bin:$PATH bash "$ROOT/setup" > "$WORK/run-nr2.log" 2>&1 
 [ "$(sha256sum < "$HN/.claude/settings.json")" = "$narrowed" ] || fail "a seed missing one permission was taken for setup's own and replaced"
 grep -q "settings.json already exists" "$WORK/run-nr2.log" || fail "the rerun did not leave the narrowed settings.json alone"
 ok "a seed missing one permission entry counts as edited and is left alone"
+
+# A node that fails the two writes an upgrade makes, and runs everything else for real:
+# NODE_FAIL=seed fails lib/settings-seed.js writing ~/.claude/settings.json after leaving half
+# a file there (a full disk); NODE_FAIL=carry fails the copy of Claude Code's plugin keys.
+real_node=$(command -v node)
+mkdir -p "$WORK/node-fail"
+cat > "$WORK/node-fail/node" <<EOF
+#!/bin/sh
+if [ "\$NODE_FAIL" = seed ]; then
+  case "\$1:\$3" in
+    *lib/settings-seed.js:*/.claude/settings.json) printf '{"permissions": {' > "\$3"; echo "node stub: seed write failed" >&2; exit 1 ;;
+  esac
+fi
+if [ "\$NODE_FAIL" = carry ] && [ "\$1" = -e ]; then
+  case "\$2" in *"kept what Claude Code had written"*) echo "node stub: carry failed" >&2; exit 1 ;; esac
+fi
+exec "$real_node" "\$@"
+EOF
+chmod -- 0755 "$WORK/node-fail/node"
+
+# An upgrade whose new seed is not written puts the old settings.json back over the half
+# file, byte for byte, and says so.
+HP=$WORK/home-putback
+HOME=$HP bash "$ROOT/setup" --no-dcg > "$WORK/run-pb1.log" 2>&1 || { cat "$WORK/run-pb1.log"; fail "setup --no-dcg before dcg exited non-zero"; }
+claude_writes "$HP/.claude/settings.json"
+pb_before=$(sha256sum < "$HP/.claude/settings.json")
+rc=0; HOME=$HP NODE_FAIL=seed PATH=$WORK/node-fail:$WORK/dcg-bin:$PATH bash "$ROOT/setup" > "$WORK/run-pb2.log" 2>&1 || rc=$?
+[ "$rc" = 1 ] || { cat "$WORK/run-pb2.log"; fail "a failed reseed exited $rc, not 1"; }
+grep -q -F 'node stub: seed write failed' "$WORK/run-pb2.log" || { cat "$WORK/run-pb2.log"; fail "the stub never failed the seed write, so this case tested nothing"; }
+[ "$(sha256sum < "$HP/.claude/settings.json")" = "$pb_before" ] || { cat "$WORK/run-pb2.log"; fail "a failed reseed left settings.json other than the old seed"; }
+grep -q -F "put ~/.claude/settings.json back from $HP/.hov-stack-backups/" "$WORK/run-pb2.log" || { cat "$WORK/run-pb2.log"; fail "the failed reseed did not say it put the old settings.json back"; }
+grep -q -E '^  settings +failed ' "$WORK/run-pb2.log" || { cat "$WORK/run-pb2.log"; fail "the failed reseed's settings row is not failed"; }
+ok "an upgrade whose new seed is not written puts the old settings.json back over the half-written file"
+
+# An upgrade that seeds the hook but cannot copy Claude Code's plugin keys says so, and the
+# backup still holds them.
+HC=$WORK/home-carryfail
+HOME=$HC bash "$ROOT/setup" --no-dcg > "$WORK/run-cf1.log" 2>&1 || { cat "$WORK/run-cf1.log"; fail "setup --no-dcg before dcg exited non-zero"; }
+claude_writes "$HC/.claude/settings.json"
+cf_before=$(sha256sum < "$HC/.claude/settings.json")
+rc=0; HOME=$HC NODE_FAIL=carry PATH=$WORK/node-fail:$WORK/dcg-bin:$PATH bash "$ROOT/setup" > "$WORK/run-cf2.log" 2>&1 || rc=$?
+[ "$rc" = 1 ] || { cat "$WORK/run-cf2.log"; fail "a failed carry-over exited $rc, not 1"; }
+grep -q -F 'node stub: carry failed' "$WORK/run-cf2.log" || { cat "$WORK/run-cf2.log"; fail "the stub never failed the carry-over, so this case tested nothing"; }
+grep -q -E '^  settings +failed .*could not copy the plugin keys' "$WORK/run-cf2.log" || { cat "$WORK/run-cf2.log"; fail "the failed carry-over's settings row does not say the plugin keys were not copied"; }
+[ "$(dcg_hooks "$HC/.claude/settings.json")" = 1 ] || fail "the failed carry-over lost the new seed's dcg hook"
+cf_backup=$(find "$HC/.hov-stack-backups" -path '*/.claude/settings.json' -type f)
+[ -n "$cf_backup" ] && [ "$(sha256sum < "$cf_backup")" = "$cf_before" ] || fail "the failed carry-over's backup is not the old seed byte for byte (found '$cf_backup')"
+ok "an upgrade that cannot copy Claude Code's plugin keys says so, keeps the hook, and leaves them in the backup"
 
 # The same with a settings.json someone edited: left alone, the hook goes to
 # settings.hov-stack.json, and both the run and --check say settings.json still lacks it.

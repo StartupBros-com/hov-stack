@@ -532,9 +532,11 @@ if node "$HOV_STACK/lib/settings-seed.js" "$HOV_STACK/settings.json" "$seed_targ
     fi
   fi
 else
-  # Never leave the config dir without the settings.json an upgrade moved aside.
-  if [ -n "$moved_seed" ] && [ ! -e "$seed_target" ] && mv "$moved_seed" "$seed_target"; then
-    echo "  put $(_lf_display "$seed_target") back from $moved_seed: no new seed was written"
+  # Never leave the config dir without the settings.json an upgrade moved aside. Anything at
+  # seed_target now is this run's own failed write (the old file was moved away just above),
+  # so the old one goes back over it.
+  if [ -n "$moved_seed" ] && mv -f -- "$moved_seed" "$seed_target"; then
+    echo "  put $(_lf_display "$seed_target") back from $moved_seed: the new seed was not written"
   fi
   row settings failed "lib/settings-seed.js wrote no seed; the lines above say why"
 fi
