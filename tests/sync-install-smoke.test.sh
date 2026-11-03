@@ -1231,7 +1231,7 @@ fi
 
 # A pre-existing host still carries the registration beside the sibling
 # pr-record group and an unrelated hook; reconcile removes exactly that group,
-# keeps pr-record (the handback ledger still reads it) and every other hook,
+# keeps every other hook (pr-record has its own retire, tested below),
 # keeps the file mode, and backs the old settings up.
 echo "=== push-tracking-pr hook retire (pre-existing host) ===" >&2
 PUSHPR_RECON_ROOT=$TMP/push-tracking-pr-recon-existing
@@ -1311,6 +1311,52 @@ if jq -e --arg rec "$PR_RECORD_COMMAND" '
 else
   bad "push-tracking-pr retire left the rendered-spelling registration in place:"$'\n'"$(jq -c '.hooks.PostToolUse' "$PUSHPR_RENDERED_HOME/settings.json")"
 fi
+
+# -- pr-record registration is retired ----------------------------------------
+# The PostToolUse pr-record hook wrote session->PR rows for the Stop hook's
+# hand-back check, retired 2026-11-03 without ever leaving shadow mode.
+# reconcile now only removes the registration, in either spelling; the tracked
+# settings.json no longer carries it, and a fresh host must not get it seeded.
+echo "=== pr-record hook retire ===" >&2
+if ! grep -qF 'PostToolUse/pr-record.js' "$REPO/settings.json"; then ok; else bad "the tracked settings.json still registers the retired pr-record hook"; fi
+fresh_prrec_root=$TMP/pr-record-hook-fresh
+fresh_prrec_home=$fresh_prrec_root/.claude
+mkdir -p "$fresh_prrec_home"
+ln -s "$REPO/hooks" "$fresh_prrec_home/hooks"
+fresh_prrec_out=$(HOME="$fresh_prrec_root" CLAUDE_HOME="$fresh_prrec_home" "$SYNC" reconcile-pr-record-hook 2>&1); fresh_prrec_status=$?
+if [ "$fresh_prrec_status" -eq 0 ]; then ok; else bad "fresh reconcile-pr-record-hook exited $fresh_prrec_status:"$'\n'"$fresh_prrec_out"; fi
+if [ ! -f "$fresh_prrec_home/settings.json" ] || ! jq -e --arg c "$PR_RECORD_COMMAND" '
+    [.hooks[]?[]?.hooks[]? | .command] | index($c) != null
+  ' "$fresh_prrec_home/settings.json" >/dev/null; then
+  ok
+else
+  bad "fresh reconcile-pr-record-hook registered the retired hook"
+fi
+PRREC_RECON_ROOT=$TMP/pr-record-recon-existing
+PRREC_RECON_HOME=$PRREC_RECON_ROOT/.claude
+mkdir -p "$PRREC_RECON_HOME"
+ln -s "$REPO/hooks" "$PRREC_RECON_HOME/hooks"
+prrec_rendered_cmd="node \"$PRREC_RECON_HOME/hooks/PostToolUse/pr-record.js\""
+jq -n --arg rec "$PR_RECORD_COMMAND" --arg rendered "$prrec_rendered_cmd" '
+  {hooks:{PostToolUse:[
+    {matcher:"Bash",hooks:[{type:"command",command:$rec,timeout:10}]},
+    {matcher:"Bash",hooks:[{type:"command",command:$rendered,timeout:10}]},
+    {matcher:"*",hooks:[{type:"command",command:"keep-this-unrelated-hook"}]}
+  ]}}
+' >"$PRREC_RECON_HOME/settings.json"
+chmod 0640 "$PRREC_RECON_HOME/settings.json"
+prrec_recon_out=$(HOME="$PRREC_RECON_ROOT" CLAUDE_HOME="$PRREC_RECON_HOME" \
+  "$SYNC" reconcile-pr-record-hook 2>&1); prrec_recon_status=$?
+if [ "$prrec_recon_status" -eq 0 ]; then ok; else bad "pr-record retire (pre-existing host) exited $prrec_recon_status:"$'\n'"$prrec_recon_out"; fi
+if jq -e '
+    [.hooks.PostToolUse[]?.hooks[]? | .command] == ["keep-this-unrelated-hook"]
+  ' "$PRREC_RECON_HOME/settings.json" >/dev/null; then
+  ok
+else
+  bad "pr-record retire (pre-existing host) did not remove exactly the pr-record groups:"$'\n'"$(jq -c '.hooks.PostToolUse' "$PRREC_RECON_HOME/settings.json")"
+fi
+if [ "$(stat -c %a "$PRREC_RECON_HOME/settings.json")" = 640 ]; then ok; else bad "pr-record retire (pre-existing host) changed live settings mode"; fi
+if find "$PRREC_RECON_HOME/backups" -path '*hook-retire-*' -name settings.json -type f -print -quit | grep -q .; then ok; else bad "pr-record retire (pre-existing host) did not back up live settings"; fi
 
 # -- worktree-claim-advisory registration is retired -------------------------
 # The PostToolUse EnterWorktree worktree-claim-advisory hook ran the dedup

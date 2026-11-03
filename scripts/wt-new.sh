@@ -393,17 +393,6 @@ else
   echo "note: --adopt skips the setup-worktree.sh bootstrap (worktree presumed already set up): $WT" >&2
 fi
 
-# Pending session->PR record (R15, KTD11, plan docs/plans/2026-09-27-2139-...):
-# stamped BEFORE any PR exists -- for every run, issue or not, adopt or not --
-# so the Stop gate has something to find even for a run that never gets past
-# this point. pr-record.js appends the resolved row when the agent's own
-# `gh pr create` succeeds. An --adopt run whose branch already has a PR runs
-# no create; at the next Stop, verify-on-stop.js calls pr-record.js's
-# resolvePending(), which looks the branch up with `gh pr list --head` and
-# appends the resolved row before any PR is judged. Either way this pending
-# row is superseded, never mutated.
-stamp_pr_pending "$OWNER_REPO" "$BRANCH"
-
 # Closing-keyword advisory. "Closes #N" is a standing order GitHub executes
 # the moment the PR merges, and it is the ONLY thing in this loop that ever
 # closes a tracked issue (nothing else here closes one), so

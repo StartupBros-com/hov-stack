@@ -315,12 +315,11 @@ MEMORY_HOOK_COMMAND='python3 "$HOME/.claude/scripts/memory-access-log.py"'
 # reconcile — otherwise adopting an already-configured machine would leave the
 # automatic capture half silently unregistered while every file looked correct.
 PAPERCUT_HOOK_COMMAND='node "$HOME/.claude/hooks/PostToolUseFailure/papercut-log.js"'
-# The positive-handoff protocol's record layer. Its whole failure mode is
-# silence: an unregistered observer writes no session→PR rows, so the Stop-hook
-# predicate finds nothing to gate and the hand-back metric reads a clean zero
-# while every file on disk looks correct. Needs its own reconcile for the same
-# reason papercut does — settings.json is volatile, so install() never copies
-# the repo's registration onto a machine that already has a live config.
+# Retired 2026-11-03: the pr-record hook wrote session→PR rows for the Stop
+# hook's hand-back check, which never ran past shadow mode and was deleted.
+# Live settings.json is volatile and never copied over once it exists, so
+# reconcile now removes the registration. hooks/PostToolUse/pr-record.js stays
+# as a no-op until no live settings.json registers it.
 PR_RECORD_HOOK_COMMAND='node "$HOME/.claude/hooks/PostToolUse/pr-record.js"'
 # Retired (move 7, 2026-10-17): the push-tracking-pr hook opened a branch's
 # draft PR on its first content push through pr-open-if-missing.sh. Both are
@@ -1085,8 +1084,9 @@ ensure_papercut_plugin() {
   echo "  papercut: $PAPERCUT_PLUGIN_ID is now installed at user scope and enabled"
 }
 
+# Retired 2026-11-03 (see PR_RECORD_HOOK_COMMAND): remove the registration.
 reconcile_pr_record_hook() {
-  reconcile_hook_group "pr-record" PostToolUse "$PR_RECORD_HOOK_COMMAND"
+  retire_hook_commands "pr-record" "$PR_RECORD_HOOK_COMMAND"
 }
 
 # The push-tracking-pr hook (PostToolUse on Bash) is retired (fleet teardown

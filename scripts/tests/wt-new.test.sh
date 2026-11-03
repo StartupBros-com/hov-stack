@@ -25,12 +25,11 @@ SCRIPT="$HERE/wt-new.sh"
 TMP=$(mktemp -d) || exit 1
 trap 'chmod -R u+w "$TMP" 2>/dev/null; rm -rf "$TMP"' EXIT
 
-# wt-new.sh's stamp_pr_pending() writes to $HOME/.claude/logs/session-prs.jsonl
-# whenever CLAUDE_CODE_SESSION_ID is set -- which it IS inside a real Claude Code
-# session, i.e. exactly the environment this suite normally runs under. Without
-# this override, running these tests leaks fabricated "fake/fake" PR records into
-# the operator's real ledger (caught 2026-08-17: a bare test run wrote one). Every
-# invocation below must see this HOME, not the ambient one.
+# wt-new.sh must write nothing under the operator's ~/.claude. It once stamped
+# a session->PR ledger there whenever CLAUDE_CODE_SESSION_ID was set (a bare
+# test run leaked a fabricated "fake/fake" row on 2026-08-17); that writer was
+# retired 2026-11-03. Every invocation below sees this HOME, not the ambient
+# one, and cases c, m1 and m2 check that no ledger appears in it.
 export HOME="$TMP/home"
 mkdir -p "$HOME"
 
@@ -254,16 +253,9 @@ case "$OUT" in
   *) bad "c: output does not carry the gh pr create command for the worktree's OWN branch (feature/case-c): $OUT" ;;
 esac
 
-# The pending row wt-new.sh stamps at creation time. wt-new.sh opens no PR, so it
-# writes no pending:false row itself. When the adopted branch already has a
-# PR, verify-on-stop.js's resolvePending() resolves this row at the next Stop
-# with `gh pr list --repo <repo> --head <branch>` (verify-on-stop.test.js, "U8:
-# one pending row whose branch now has a PR"). It skips a row without a repo,
-# so the row must carry the repo and the adopted branch.
-grep -q '"repo":"fake/fake","pr":null,"branch":"feature/case-c","pending":true' "$HOME/.claude/logs/session-prs.jsonl" \
-  || bad "c: no resolvable pending row (repo + adopted branch) was written for feature/case-c: $(cat "$HOME/.claude/logs/session-prs.jsonl" 2>&1)"
-grep -q '"pending":false' "$HOME/.claude/logs/session-prs.jsonl" \
-  && bad "c: a resolved (pending:false) row was written by wt-new.sh: $(cat "$HOME/.claude/logs/session-prs.jsonl")" || ok
+# The session->PR ledger writer is retired: a run inside a session (the
+# session id is set) writes no ledger row under HOME.
+if [ ! -e "$HOME/.claude/logs/session-prs.jsonl" ]; then ok; else bad "c: wt-new.sh wrote a session->PR ledger row: $(cat "$HOME/.claude/logs/session-prs.jsonl")"; fi
 unset CLAUDE_CODE_SESSION_ID
 
 echo "-- case (f): --blocked-by records native edges on the tracked issue (issue #431) --"
@@ -614,9 +606,8 @@ reset_gh_stub
 
 # ---- no-PR lifecycle (docs/plans/2026-09-27-2139-feat-issue-first-claims-
 # content-reap-plan.md): no run creates an empty commit or a PR of its own, and
-# wt-new.sh writes no branch.<name>.wt-* config; it stamps the pending
-# session->PR row and prints the `gh pr create` command for the agent to run
-# after its first push (R1-R4, KTD3, KTD11). --
+# wt-new.sh writes no branch.<name>.wt-* config; it prints the `gh pr create`
+# command for the agent to run after its first push (R1-R4, KTD3). --
 
 echo "-- case (m1): fresh --issue run creates a worktree with no commit, no PR and no branch config --"
 REPO=$(fixture case_m1)
@@ -637,8 +628,7 @@ command grep -qE '^(issue edit .*--add-label|issue comment |label create)' "$GH_
   && bad "m1: a fresh --issue run claimed the issue (label/comment/label create): $(cat "$GH_CALLS")" || ok
 [ -z "$(git -C "$REPO" config --get-regexp '^branch\.case-m1-slug\.wt-')" ] \
   || bad "m1: wt-new.sh wrote branch.<b>.wt-* config: $(git -C "$REPO" config --get-regexp '^branch\.case-m1-slug\.wt-')"
-grep -q '"branch":"case-m1-slug","pending":true' "$HOME/.claude/logs/session-prs.jsonl" \
-  || bad "m1: no pending row written for a fresh --issue run: $(cat "$HOME/.claude/logs/session-prs.jsonl")"
+if [ ! -e "$HOME/.claude/logs/session-prs.jsonl" ]; then ok; else bad "m1: wt-new.sh wrote a session->PR ledger row: $(cat "$HOME/.claude/logs/session-prs.jsonl")"; fi
 case "$OUT" in *"pr:       none yet -- after the first push, open it (ready, not draft):"*) ok ;; *) bad "m1: human output does not say no PR exists yet: $OUT" ;; esac
 case "$OUT" in
   *"gh pr create --repo fake/fake --base main --head case-m1-slug --title case-m1-slug --body 'Closes #400'"*) ok ;;
@@ -646,7 +636,7 @@ case "$OUT" in
 esac
 unset CLAUDE_CODE_SESSION_ID
 
-echo "-- case (m2): no-issue run prints the invisible-work note and an empty-body command, and still writes a pending row --"
+echo "-- case (m2): no-issue run prints the invisible-work note and an empty-body command, and writes no ledger row --"
 REPO=$(fixture case_m2)
 reset_gh_stub
 export CLAUDE_CODE_SESSION_ID=wt-new-test-m2
@@ -660,8 +650,7 @@ esac
 case "$OUT" in *"--title case-m2-slug --body ''"*) ok ;; *) bad "m2: printed command does not carry an empty --body: $OUT" ;; esac
 [ -d "$REPO/.claude/worktrees/case-m2-slug" ] || bad "m2: worktree missing for a no-issue run"
 grep -q "^pr create" "$GH_CALLS" && bad "m2: pr create ran on a no-issue run (wt-new opens no PR): $(cat "$GH_CALLS")" || ok
-grep -q '"branch":"case-m2-slug","pending":true' "$HOME/.claude/logs/session-prs.jsonl" \
-  || bad "m2: no pending row written for a no-issue run: $(cat "$HOME/.claude/logs/session-prs.jsonl")"
+if [ ! -e "$HOME/.claude/logs/session-prs.jsonl" ]; then ok; else bad "m2: wt-new.sh wrote a session->PR ledger row: $(cat "$HOME/.claude/logs/session-prs.jsonl")"; fi
 unset CLAUDE_CODE_SESSION_ID
 
 echo "-- case (m3): --no-pr is accepted as a no-op notice, behavior identical to the default --"

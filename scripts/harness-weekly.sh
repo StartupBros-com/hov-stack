@@ -690,12 +690,6 @@ TOOLSMOKE=$(grep -oE 'toolsmoke-flagged:[0-9]+' "$REPORT" | head -1 | cut -d: -f
 # timer with a non-success last result, or silent past 8 days). "Not enabled"
 # is the expected pre-activation state for these four and does not count here.
 HYG=$(grep -oE 'hyg-flagged:[0-9]+' "$REPORT" | head -1 | cut -d: -f2)
-# harness-doctor check 26 prints a trailing handback-flagged:N line: a WINDOWED
-# RAW COUNT (KTD7) of positive-handoff hand-back records over the last 7 days,
-# inconclusive rows excluded (KTD3/R14). This is the number the operator reads
-# before flipping the Stop-hook predicate from shadow to enforce, so it is
-# named explicitly rather than folded into the generic drift warning.
-HANDBACK=$(grep -oE 'handback-flagged:[0-9]+' "$REPORT" | head -1 | cut -d: -f2)
 # dispatcher-ledger summary prints a trailing dispatcher-flagged:N (issue #444):
 # broken runs plus stale (>24h) undispositioned claims. Same crash-tolerant
 # capture as every other named counter here -- a missing or failed read is
@@ -723,8 +717,8 @@ PROLANE=$(grep -oE 'pro-lane-flagged:[0-9]+' "$REPORT" | head -1 | cut -d: -f2)
 # WARN -- the report's actual findings printed into the log and notified no
 # one, which is the same silence the section exists to break.
 PIPEMIX=$(grep -oE 'pipeline-mix-flagged:[0-9]+' "$REPORT" | head -1 | cut -d: -f2)
-if [ "${WARNS:-0}" -gt 0 ] || [ "${SWEEPABLE:-0}" -gt 0 ] || [ "${FLAGGED:-0}" -gt 0 ] || [ "${CUTS:-0}" -gt 0 ] || [ "${DOCK:-0}" -gt 0 ] || [ "${AWG:-0}" -gt 0 ] || [ "${DENIALS:-0}" -gt 0 ] || [ "${SEAM:-0}" -gt 0 ] || [ "${SEAM_UNVERIFIED:-0}" -gt 0 ] || [ "${RECLAIM:-0}" -gt 0 ] || [ "${TOOLS:-0}" -gt 0 ] || [ "${TOOLSMOKE:-0}" -gt 0 ] || [ "${SPEND:-0}" -gt 0 ] || [ "${HYG:-0}" -gt 0 ] || [ "${HANDBACK:-0}" -gt 0 ] || [ "${DISPATCH:-0}" -gt 0 ] || [ "${ROUTE:-0}" -gt 0 ] || [ "${PROLANE:-0}" -gt 0 ] || [ "${PIPEMIX:-0}" -gt 0 ] || [ "${STASH:-0}" -gt 0 ]; then
-  "$SCRIPTS/notify.sh" "harness-weekly: ${WARNS:-0} drift warning(s), ${SWEEPABLE:-0} sweepable worktree(s), ${FLAGGED:-0} memory note(s) flagged, ${CUTS:-0} actionable papercut signature(s) over threshold, ${DOCK:-0} docker item(s) needing attention, ${AWG:-0} agent write-amplification finding(s), ${DENIALS:-0} actionable denial cluster(s), ${SEAM:-0} session(s) with an unenforced hook seam, ${SEAM_UNVERIFIED:-0} hook-seam scan(s) unverified, ${RECLAIM:-0} reclaimable item(s), ${TOOLS:-0} upstream tool(s) behind, ${TOOLSMOKE:-0} installed tool(s) that do not run, ${SPEND:-0} spend trend flag(s), ${HYG:-0} hygiene timer(s) unhealthy, ${HANDBACK:-0} hand-back(s), ${DISPATCH:-0} dispatcher item(s) flagged, ${ROUTE:-0} repository route group(s) needing attention, ${STASH:-0} unreaped stash(es), ${PROLANE:-0} Pro-lane flag(s), ${PIPEMIX:-0} pipeline-mix flag(s); see ~/.claude/logs/harness-weekly-latest.log" default || true
+if [ "${WARNS:-0}" -gt 0 ] || [ "${SWEEPABLE:-0}" -gt 0 ] || [ "${FLAGGED:-0}" -gt 0 ] || [ "${CUTS:-0}" -gt 0 ] || [ "${DOCK:-0}" -gt 0 ] || [ "${AWG:-0}" -gt 0 ] || [ "${DENIALS:-0}" -gt 0 ] || [ "${SEAM:-0}" -gt 0 ] || [ "${SEAM_UNVERIFIED:-0}" -gt 0 ] || [ "${RECLAIM:-0}" -gt 0 ] || [ "${TOOLS:-0}" -gt 0 ] || [ "${TOOLSMOKE:-0}" -gt 0 ] || [ "${SPEND:-0}" -gt 0 ] || [ "${HYG:-0}" -gt 0 ] || [ "${DISPATCH:-0}" -gt 0 ] || [ "${ROUTE:-0}" -gt 0 ] || [ "${PROLANE:-0}" -gt 0 ] || [ "${PIPEMIX:-0}" -gt 0 ] || [ "${STASH:-0}" -gt 0 ]; then
+  "$SCRIPTS/notify.sh" "harness-weekly: ${WARNS:-0} drift warning(s), ${SWEEPABLE:-0} sweepable worktree(s), ${FLAGGED:-0} memory note(s) flagged, ${CUTS:-0} actionable papercut signature(s) over threshold, ${DOCK:-0} docker item(s) needing attention, ${AWG:-0} agent write-amplification finding(s), ${DENIALS:-0} actionable denial cluster(s), ${SEAM:-0} session(s) with an unenforced hook seam, ${SEAM_UNVERIFIED:-0} hook-seam scan(s) unverified, ${RECLAIM:-0} reclaimable item(s), ${TOOLS:-0} upstream tool(s) behind, ${TOOLSMOKE:-0} installed tool(s) that do not run, ${SPEND:-0} spend trend flag(s), ${HYG:-0} hygiene timer(s) unhealthy, ${DISPATCH:-0} dispatcher item(s) flagged, ${ROUTE:-0} repository route group(s) needing attention, ${STASH:-0} unreaped stash(es), ${PROLANE:-0} Pro-lane flag(s), ${PIPEMIX:-0} pipeline-mix flag(s); see ~/.claude/logs/harness-weekly-latest.log" default || true
 fi
 
 # Only these two weekly safety signals page off-machine. Everything else keeps

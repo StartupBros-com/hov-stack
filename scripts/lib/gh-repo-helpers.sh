@@ -68,25 +68,3 @@ for_each_repo() {
   done
 }
 
-# stamp_pr_pending <repo> <branch>: append one session->branch pending row to
-# $HOME/.claude/logs/session-prs.jsonl, mirroring buildRow's pending-row shape
-# in hooks/PostToolUse/pr-record.js. Written once, right after a run
-# resolves its tracking unit (or, for a no-issue run, once its worktree exists)
-# -- BEFORE any PR exists. pr-record.js appends the resolved row when the
-# agent's own `gh pr create` succeeds. When no create runs (an adopted branch
-# that already has a PR), verify-on-stop.js first calls pr-record.js's
-# resolvePending(), which finds the branch's PR with `gh pr list --head` and
-# appends the resolved row. Readers (distinctSessionPrs) then ignore the
-# pending row, so it is superseded, never mutated in place. Keyed by CLAUDE_CODE_SESSION_ID only, never a hostname-$$
-# style fallback a later lookup could not match; best-effort, so it never
-# fails the caller's run over bookkeeping.
-stamp_pr_pending() {
-  [ -n "${CLAUDE_CODE_SESSION_ID:-}" ] || return 0
-  local repo="$1" branch="$2" dir="$HOME/.claude/logs"
-  mkdir -p "$dir" 2>/dev/null || return 0
-  jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg sid "$CLAUDE_CODE_SESSION_ID" \
-    --arg repo "$repo" --arg branch "$branch" \
-    '{fp:1, ts:$ts, session_id:$sid, repo:$repo, pr:null, branch:$branch, pending:true}' \
-    >>"$dir/session-prs.jsonl" 2>/dev/null || true
-}
-

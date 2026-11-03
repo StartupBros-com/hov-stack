@@ -29,19 +29,13 @@ tags:
 
 ## Context
 
-On 2026-09-17, the positive handoff protocol ran in shadow mode inside `hooks/Stop/verify-on-stop.js`: when a Stop fired, a session PR was open and green, and the final message carried no `result:` or `needs input:` tag, the hook appended one row per PR to `~/.claude/logs/handback-ledger.jsonl` and never blocked. Harness-doctor check 26 summed recent rows into the weekly `handback-flagged:N` line. Issue #409 tracked the residuals before flipping the mode to enforce. The counter read 183, and read as "hand-backs" it argued for enforcement. This is the historical measurement context, not the current predicate.
+On 2026-09-17, the positive handoff protocol ran in shadow mode inside `hooks/Stop/verify-on-stop.js`: when a Stop fired, a session PR was open and green, and the final message carried no `result:` or `needs input:` tag, the hook appended one row per PR to `~/.claude/logs/handback-ledger.jsonl` and never blocked. Harness-doctor check 26 summed recent rows into the weekly `handback-flagged:N` line. Issue #409 tracked the residuals before flipping the mode to enforce. The counter read 183, and read as "hand-backs" it argued for enforcement. This is historical measurement context.
 
 One bounded look at the ledger settled it. The file held 633 rows since 2026-08-18, one per distinct PR, 542 of them `no-tag`. Of the 44 dotfiles PRs recorded in the preceding 14 days, 40 had been merged since, none were still open, and 4 were closed. The hook was recording a Stop in the middle of a session that went on to finish. Enforce mode would have blocked nearly all of those sessions mid-task.
 
-## Current implementation boundary
+## Retired 2026-11-03
 
-The current `handbackGate()` in `hooks/Stop/verify-on-stop.js` checks the state of session-authored PRs. Merged PRs and PRs with auto-merge armed resolve the handback check; an open, gate-green PR is not resolved merely by writing `result:` or `failed:`. A `needs input:` claim must reference a matching open, `needs-human`-labeled issue. Missing tags are therefore not the sole condition for an unresolved result.
-
-Shadow ledger rows are deduplicated per session and PR, not appended for every Stop event. That bounds duplicate counting; it does not establish abandonment.
-
-Mode determines the effect: `shadow` logs unresolved PRs without blocking; `enforce` can block the initial Stop; `off` skips the lookup. Inconclusive lookups neither block nor write the ledger. The outer `gate()` now composes verification and handback feedback on the initial Stop and skips both when `stop_hook_active` is true. This is one-shot feedback, not persistent per-gate retry enforcement.
-
-These changes do not turn a Stop observation into proof that a task was abandoned. The historical counts below must not be presented as measurements of the current predicate, and a current shadow row still needs its event denominator and later PR state before it can support an incident-rate claim.
+The hand-back half of `hooks/Stop/verify-on-stop.js`, its ledger writer (`hooks/PostToolUse/pr-record.js`, now a no-op), harness-doctor check 26 and the weekly `handback-flagged` counter were deleted. The gate never ran past shadow mode, and merge-and-end made the session that opens a PR the one that merges it. The guidance below stands for any metric a per-turn hook produces.
 
 ## Guidance
 
