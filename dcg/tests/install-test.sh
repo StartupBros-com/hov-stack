@@ -12,6 +12,12 @@ fail() {
     exit 1
 }
 
+# install.sh's ERR trap speaks only for a failure: a run that installs or skips prints no
+# dcg: error line.
+no_error_line() {
+    ! grep -qF 'dcg: error' "$1" || fail "$2 printed a dcg: error line: $(cat -- "$1")"
+}
+
 # Derive the pin rather than duplicating it. This suite used to hardcode both
 # the version directory and the asset digest, so bumping DCG_VERSION broke it
 # with "dry run omitted the pinned checksum" -- a test failure that says nothing
@@ -101,6 +107,7 @@ printf '6/18 a newer promoted version is kept, not walked backwards\n'
 link_to_newer
 "$INSTALLER" --home "$test_home" >"${test_root}/downgrade.log" 2>&1 ||
     fail "installer exited non-zero over a newer promoted version (install.sh runs it under set -e)"
+no_error_line "${test_root}/downgrade.log" "keeping a newer promoted version"
 grep -q 'keeping promoted v9.9.9' "${test_root}/downgrade.log" ||
     fail "installer did not say it was keeping the promoted version"
 [[ "$(readlink -- "$expected_link")" == "$newer_target" ]] ||
@@ -121,6 +128,7 @@ rm -f -- "$expected_link"
 ln -s -- "${older_dir}/dcg" "$expected_link"
 "$INSTALLER" --home "$test_home" >"${test_root}/upgrade.log" 2>&1 ||
     fail "installer failed when the linked version was older than the pin"
+no_error_line "${test_root}/upgrade.log" "an upgrade to the pin"
 grep -q 'keeping promoted' "${test_root}/upgrade.log" &&
     fail "guard wrongly fired for a version OLDER than the pin"
 [[ "$(readlink -- "$expected_link")" == "$expected_target" ]] ||
@@ -138,9 +146,6 @@ expect_status() {
         cat -- "$log" >&2
         fail "expected exit $want, got $status: $*"
     fi
-}
-no_error_line() {
-    ! grep -qF 'dcg: error' "$1" || fail "$2 printed a dcg: error line: $(cat -- "$1")"
 }
 nothing_installed() {
     [[ ! -e "$1/.local/lib/dcg" && ! -e "$1/.local/bin/dcg" && ! -L "$1/.local/bin/dcg" ]] ||
@@ -330,6 +335,7 @@ expect_status 0 "${test_root}/bsd-chmod.log" \
     --source-dir "${test_root}/bsd-source"
 [[ -x "${test_root}/h17/.local/lib/dcg/${DCG_TAG}/dcg" && -L "${test_root}/h17/.local/bin/dcg" ]] ||
     fail "a BSD-shaped chmod did not end in an installed, linked binary"
+no_error_line "${test_root}/bsd-chmod.log" "a clean install with a BSD-shaped chmod"
 
 # set -e ends the installer at any unchecked failure; the ERR trap is what makes that end
 # name the command, instead of leaving ./setup pointing at a dcg: error line never printed.

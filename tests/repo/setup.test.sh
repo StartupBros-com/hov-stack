@@ -427,6 +427,20 @@ HU=$WORK/home-upgrade
 HOME=$HU bash "$ROOT/setup" --no-dcg > "$WORK/run-up1.log" 2>&1 || { cat "$WORK/run-up1.log"; fail "setup --no-dcg before dcg exited non-zero"; }
 SU=$HU/.claude/settings.json
 [ "$(dcg_hooks "$SU")" = 0 ] || fail "a run without dcg seeded a dcg hook"
+# What Claude Code did to the seed during that first run's plugin step, as OBSERVED on the
+# Mac: it added the two plugin keys and rewrote the file in its own key order. That is
+# still setup's unedited seed. (This harness's fake claude writes nothing to settings.json.)
+claude_writes() {  # claude_writes <settings.json>
+  node -e '
+    const fs = require("fs"), s = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+    s.enabledPlugins = { "papercut@hov": true, "skill-tuner@hov": true };
+    s.extraKnownMarketplaces = { hov: { source: { source: "github", repo: "StartupBros-com/hov-stack" } } };
+    const out = {};
+    for (const k of Object.keys(s).reverse()) out[k] = s[k];
+    fs.writeFileSync(process.argv[1], JSON.stringify(out, null, 2) + "\n");
+  ' "$1"
+}
+claude_writes "$SU"
 seed_before=$(sha256sum < "$SU")
 rc=0; HOME=$HU PATH=$WORK/dcg-bin:$PATH bash "$ROOT/setup" --check > "$WORK/check-up1.log" 2>&1 || rc=$?
 [ "$rc" = 1 ] || { cat "$WORK/check-up1.log"; fail "--check with dcg installed and no hook exited $rc, not 1"; }
@@ -439,10 +453,29 @@ backup=$(find "$HU/.hov-stack-backups" -path '*/.claude/settings.json' -type f)
 [ -n "$backup" ] && [ "$(sha256sum < "$backup")" = "$seed_before" ] || fail "the replaced seed is not in ~/.hov-stack-backups byte for byte (found '$backup')"
 grep -q -F "backed up ~/.claude/settings.json -> $HU/.hov-stack-backups/" "$WORK/run-up2.log" || { cat "$WORK/run-up2.log"; fail "the rerun did not say where the old settings.json went"; }
 [ ! -e "$HU/.claude/settings.hov-stack.json" ] || fail "the rerun wrote settings.hov-stack.json instead of seeding settings.json"
+node -e '
+  const fs = require("fs"), a = JSON.parse(fs.readFileSync(process.argv[1], "utf8")), b = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+  for (const k of ["enabledPlugins", "extraKnownMarketplaces"]) if (JSON.stringify(a[k]) !== JSON.stringify(b[k])) { console.log(k); process.exit(1); }
+' "$SU" "$backup" || fail "the reseed dropped a plugin key Claude Code had written"
+grep -q -F 'kept what Claude Code had written there: enabledPlugins, extraKnownMarketplaces' "$WORK/run-up2.log" || { cat "$WORK/run-up2.log"; fail "the rerun did not say it kept the plugin keys"; }
 grep -q -E '^  settings +ok ' "$WORK/run-up2.log" || { cat "$WORK/run-up2.log"; fail "the rerun's settings row is not ok"; }
 rc=0; HOME=$HU PATH=$WORK/dcg-bin:$PATH bash "$ROOT/setup" --check > "$WORK/check-up2.log" 2>&1 || rc=$?
 grep -q -E '^  settings +ok ' "$WORK/check-up2.log" || { cat "$WORK/check-up2.log"; fail "--check does not show settings ok once the hook is in"; }
-ok "dcg installed after the first run: --check names the missing hook, and a rerun backs up the unedited seed and seeds it again with the hook"
+ok "dcg installed after the first run: --check names the missing hook, and a rerun backs up the unedited seed (Claude Code's plugin keys and key order included) and seeds it again with the hook, keeping those keys"
+
+# Planted negative: one permission taken out of the seed is an edit, whatever else matches.
+HN=$WORK/home-narrowed
+HOME=$HN bash "$ROOT/setup" --no-dcg > "$WORK/run-nr1.log" 2>&1 || { cat "$WORK/run-nr1.log"; fail "setup --no-dcg before dcg exited non-zero"; }
+node -e '
+  const fs = require("fs"), s = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+  s.permissions.allow.pop();
+  fs.writeFileSync(process.argv[1], JSON.stringify(s, null, 2) + "\n");
+' "$HN/.claude/settings.json"
+narrowed=$(sha256sum < "$HN/.claude/settings.json")
+HOME=$HN PATH=$WORK/dcg-bin:$PATH bash "$ROOT/setup" > "$WORK/run-nr2.log" 2>&1 || { cat "$WORK/run-nr2.log"; fail "the rerun over a narrowed seed exited non-zero"; }
+[ "$(sha256sum < "$HN/.claude/settings.json")" = "$narrowed" ] || fail "a seed missing one permission was taken for setup's own and replaced"
+grep -q "settings.json already exists" "$WORK/run-nr2.log" || fail "the rerun did not leave the narrowed settings.json alone"
+ok "a seed missing one permission entry counts as edited and is left alone"
 
 # The same with a settings.json someone edited: left alone, the hook goes to
 # settings.hov-stack.json, and both the run and --check say settings.json still lacks it.
