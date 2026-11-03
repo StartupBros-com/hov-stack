@@ -51,7 +51,8 @@ Ask through the host's blocking question tool: one question at a time, multiple 
 | Signature stored, a needed detail missing (a form asks for Title, none stored) | Only that detail is asked, in plain words, then stored. |
 | Everything stored | No questions. Signing starts. |
 | `/sign-it setup`, or "change my signature" / "update my title" in a `/sign-it` conversation | Shows what is stored, offers the one item asked about, never re-asks the rest. |
-| A helper program is missing (poppler, qpdf, Node modules) | Step 0. |
+| A helper program is missing (poppler, qpdf) | Step 0. |
+| `doctor` reports `pdfLib: false` (sign-it's own bundled files did not load) | "sign-it's install on this computer is damaged; reinstalling the sign-it plugin fixes it." Stops. |
 | Native Windows without WSL | "sign-it runs on Mac, Linux, or Windows with WSL. On this computer it cannot run yet." Stops. |
 
 **Step 0: helper programs (silent when fine).** `doctor` reports tools present, signature present, and which details are stored; only a missing tool speaks:

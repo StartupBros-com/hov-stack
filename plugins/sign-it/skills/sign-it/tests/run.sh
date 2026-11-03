@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # sign-it test suite: synthetic fixtures only; never touches the real
-# ~/.config/sign-it. Requires node, pdf-lib installed in the skill dir, and
-# pdftotext. qpdf/pdftoppm/tesseract/pyhanko are used when present.
+# ~/.config/sign-it. Requires node, pdftotext, and the skill's packages installed in
+# the skill dir (pnpm install --frozen-lockfile): the fixture builders use them, while the
+# CLI runs on the bundled copies in scripts/vendor/. qpdf/pdftoppm/tesseract/pyhanko are used when present.
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SKILL="$(cd "$HERE/.." && pwd)"
@@ -655,6 +656,25 @@ chmod 755 "$T/home2" 2>/dev/null || true
 SIGN_IT_HOME="$T/home2" $CLI doctor >"$T/doctor-loose.json" 2>/dev/null || true
 check "doctor: a config folder with loose modes reports protection unverified" "grep -q '\"protection\": \"unverified\"' $T/doctor-loose.json"
 chmod 700 "$T/home2" 2>/dev/null || true
+
+# fresh plugin install (#364): a plugin install copies this directory and runs nothing,
+# so there is no node_modules. Every runtime package must load from scripts/vendor/.
+# The copy sits in its own folder under /tmp, where walking up finds no node_modules,
+# and runs from / with NODE_PATH cleared. One command per package: doctor and sign
+# (pdf-lib), setup from a JPG (pngjs, jpeg-js), finalize a .docx (fflate).
+FRESH="$(mktemp -d /tmp/sign-it-fresh.XXXXXX)"
+(cd "$SKILL" && tar --exclude=./node_modules -cf - .) | (cd "$FRESH" && tar -xf -)
+FCLI="node $FRESH/scripts/sign-it.mjs"
+check "fresh install: no node_modules in the copy or above it" "[ ! -e $FRESH/node_modules ] && [ ! -e /tmp/node_modules ] && [ ! -e /node_modules ]"
+( cd / && NODE_PATH='' SIGN_IT_HOME="$T/fresh-home" $FCLI doctor >"$T/fresh-doctor.json" 2>"$T/fresh-doctor.err" )
+check "fresh install: doctor runs and loads pdf-lib" "grep -q '\"pdfLib\": true' $T/fresh-doctor.json && ! grep -q ERR_MODULE_NOT_FOUND $T/fresh-doctor.err"
+( cd / && NODE_PATH='' SIGN_IT_HOME="$T/fresh-home" $FCLI setup --from "$T/sig.jpg" --name "Fresh Signer" >"$T/fresh-setup.json" 2>"$T/fresh-setup.err" ); rc=$?
+check "fresh install: setup --from a JPG (pngjs, jpeg-js)" "[ $rc -eq 0 ] && [ -s $T/fresh-home/signature.png ]"
+( cd / && NODE_PATH='' SIGN_IT_HOME="$T/fresh-home" $FCLI sign "$T/agreement.pdf" --find "Party B" --out "$T/fresh-signed.pdf" >"$T/fresh-sign.json" 2>"$T/fresh-sign.err" ); rc=$?
+check "fresh install: sign (pdf-lib)" "[ $rc -eq 0 ] && [ -s $T/fresh-signed.pdf ]"
+( cd / && NODE_PATH='' SIGN_IT_HOME="$T/fresh-home" $FCLI finalize "$T/proposal.docx" --remove "DRAFT" --out "$T/fresh-final.docx" >"$T/fresh-final.json" 2>"$T/fresh-final.err" ); rc=$?
+check "fresh install: finalize a .docx (fflate)" "[ $rc -eq 0 ] && [ -s $T/fresh-final.docx ]"
+rm -rf "${FRESH:?}"
 
 echo "---- $pass passed, $fail failed  (scratch: $T)"
 [ "$fail" -eq 0 ]

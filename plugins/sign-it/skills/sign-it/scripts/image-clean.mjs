@@ -12,8 +12,10 @@
 // Errors are always plain objects: { code: 'heic' | 'too-small' | 'unreadable' }.
 // Callers (scripts/sign-it.mjs) map these codes to user-facing messages.
 
-import { PNG } from 'pngjs';
-import jpeg from 'jpeg-js';
+// Bundled CommonJS copies from ./vendor/ (see tools/vendor.mjs): a default export only.
+import pngjs from './vendor/pngjs.cjs';
+import jpeg from './vendor/jpeg-js.cjs';
+const { PNG } = pngjs;
 
 const HEIC_MARKERS = ['ftypheic', 'ftypheix', 'ftypmif1', 'ftypmsf1'];
 

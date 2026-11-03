@@ -146,10 +146,10 @@ Check:
 node "<install-path>/skills/sign-it/scripts/sign-it.mjs" doctor
 ```
 
-Ready means exit 0 with `"ready": true`, which covers only the saved signature, pdf-lib and `pdftotext`. Exit 2 means no signature is saved yet (step 3); a dependency can be missing as well, so read its `pdfLib` and `pdftotext` fields too. Exit 4 means the signature is saved but pdf-lib or `pdftotext` is missing (steps 1 and 2). Its `pdftoppm` field is a poppler tool it does not count toward `ready`. It does not check `qpdf`, which sign-it needs only for an encrypted or damaged PDF, so also run `qpdf --version`. Its `missing` list names the details not yet stored. Native Windows without WSL cannot run it; the doctor's `platform` field says so.
+Ready means exit 0 with `"ready": true`, which covers only the saved signature, pdf-lib and `pdftotext`. Exit 2 means no signature is saved yet (step 3); a dependency can be missing as well, so read its `pdfLib` and `pdftotext` fields too. Exit 4 means the signature is saved but pdf-lib or `pdftotext` is missing (`pdftotext` is step 1, pdf-lib step 2). Its `pdftoppm` field is a poppler tool it does not count toward `ready`. It does not check `qpdf`, which sign-it needs only for an encrypted or damaged PDF, so also run `qpdf --version`. Its `missing` list names the details not yet stored. Native Windows without WSL cannot run it; the doctor's `platform` field says so.
 
 1. sign-it's README lists `poppler-utils` and `qpdf`. On Debian or Ubuntu the user runs `sudo apt install poppler-utils qpdf`. On macOS it is `brew install poppler qpdf`.
-2. Install its node dependencies with `pnpm install --dir "<install-path>/skills/sign-it"`. Repeat this after a plugin update.
+2. From sign-it 0.6.2 its Node packages ship inside the plugin, so a current copy needs nothing here and reports `"pdfLib": true`. On 0.6.1 or earlier, `doctor` stops with ERR_MODULE_NOT_FOUND instead of printing a report: run `claude plugin update sign-it@hov` and restart Claude Code, or on that older copy run `pnpm install --dir "<install-path>/skills/sign-it"` and repeat it after each plugin update. A current copy that reports `"pdfLib": false` is damaged: reinstall it.
 3. The user types `/sign-it:sign-it`. It runs only when typed. With no signature saved, its first run walks them through drawing one and storing their details.
 4. Run the check.
 

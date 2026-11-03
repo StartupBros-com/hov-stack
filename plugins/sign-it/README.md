@@ -7,7 +7,7 @@ Claude Code plugin from the House of Vibe marketplace. Install:
 /plugin install sign-it@hov
 ```
 
-Then, once: `pnpm install --dir <plugin>/skills/sign-it` (or `npm install --prefix <plugin>/skills/sign-it`), install `poppler-utils` and `qpdf` (plus `tesseract-ocr` for scanned PDFs, and LibreOffice or a Windows-side Word for .docx), then type `/sign-it` with a document: the first run walks you through your signature and details in plain words. The skill docs follow; where they say `scripts/sign-it.mjs`, the plugin path is `<plugin>/skills/sign-it/scripts/sign-it.mjs`.
+Then, once: install `poppler-utils` and `qpdf` (plus `tesseract-ocr` for scanned PDFs, and LibreOffice or a Windows-side Word for .docx); the Node packages ship inside the plugin. Then type `/sign-it` with a document: the first run walks you through your signature and details in plain words. The skill docs follow; where they say `scripts/sign-it.mjs`, the plugin path is `<plugin>/skills/sign-it/scripts/sign-it.mjs`.
 
 Agent-native PDF signing for Claude Code. You draw your signature once; from then on you type `/sign-it` with a document and the agent finds the signature line, stamps your signature and today's date, renders a preview of the result for you to check, and hands back `<file>-signed.pdf`. Optionally it adds a cryptographic seal so the recipient can verify the file was not altered afterwards.
 
@@ -21,7 +21,7 @@ Three sources, in confidence order, all local: a real AcroForm signature field i
 
 ## Install
 
-- As a Claude Code skill: put this directory at `~/.claude/skills/sign-it/` (or install the plugin), then `pnpm install --dir ~/.claude/skills/sign-it` (or `npm install --prefix ~/.claude/skills/sign-it`). Needs Node 18+ and `pdftotext` plus `pdftoppm` from poppler-utils (`apt install poppler-utils`, `brew install poppler`).
+- As a Claude Code skill: put this directory at `~/.claude/skills/sign-it/` (or install the plugin). Its Node packages ship inside it, bundled in `scripts/vendor/`, so there is nothing to install for them. Needs Node 18+ and `pdftotext` plus `pdftoppm` from poppler-utils (`apt install poppler-utils`, `brew install poppler`).
 - Optional: `tesseract-ocr` (scanned PDFs; set `SIGN_IT_TESSERACT` to point at a specific binary), `uv` + `openssl` (for the seal), and for Word documents either LibreOffice or, on WSL, Word installed on the Windows side (`convert` drives it through `powershell.exe`). `qpdf` opens owner-password PDFs (government fill-ins that are encrypted with an empty user password) and repairs damaged ones; without it those files are refused.
 
 ## First run
@@ -69,3 +69,5 @@ Open-Document-Alliance/PDF-Tools (MCP server with a Sign Mode), DrBaher/sign-cli
 ## Tests
 
 `bash tests/run.sh` builds synthetic agreements with pdf-lib and checks: the legal-claims lint, refusal without a configured signature, rejection of an undecodable PNG at `setup --from`, file modes, migration of a pre-rename config directory, slot detection with same-line and next-line date slots, an AcroForm signature field paired with a Date text field and stamped inside its rectangle (plus already-signed and hidden fields skipped, attributes inherited up nested parents, a date field shared across pages drawn locally, a read-only date field left alone), pages rotated 90 and 270 degrees whose stamped date OCRs upright on the right line (text and form-field variants), degenerate and off-page signature rectangles skipped, a short date field taking the ISO form, manual placement with a manual date slot, signing with preview, `dateNote` when no date field exists versus `--date none`, refusal on a prose-only document, refusal on several candidates and resolution with `--pick`, manual placement with off-page, out-of-range and non-numeric refusals, refuse-to-overwrite including through a symlink and `../`, a missing output directory, the `--` separator, a corrupt stored signature PNG, chained signatures, scanned pages (OCR candidates, refusal on a scanned prose page, exit 4 without tesseract, `--no-ocr`), and (with `SIGN_IT_TEST_SEAL=1`) the seal with no plaintext key left behind and a PAdES signature type.
+
+The suite's fixture builders use the packages in `node_modules`, so run `pnpm install --frozen-lockfile` in this directory first. The CLI never loads them from there: it runs on the copies in `scripts/vendor/`, which `node tools/vendor.mjs` rebuilds from `pnpm-lock.yaml` after a lockfile change. `node tools/vendor.mjs --check`, which CI runs, fails when the committed copies differ from a rebuild. The suite's last checks copy the skill without `node_modules` and run `doctor`, `setup --from`, `sign` and `finalize` from that copy, as a fresh plugin install would.
