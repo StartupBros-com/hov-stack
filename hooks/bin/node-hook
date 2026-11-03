@@ -12,7 +12,11 @@
 #
 # Contract (hooks/tests/hook-launcher-golden.test.js holds every registered hook
 # to it): exec, so stdin, stdout, stderr, exit code, argv, cwd and env reach
-# node untouched. No pipe, no wrapper process, nothing written.
+# node untouched. No pipe, no wrapper process, nothing written. One exception:
+# the pr-record stdin gate below hands node its buffered stdin through a pipe,
+# with the shell left as node's parent and node's exit code passed through.
+# Variables named `_hn_*` belong to this launcher; an inherited one is reset
+# before use, so nothing in the caller's env can steer a hook's stdin.
 #
 # Bounded: only `[ -f ]` / `[ -x ]` on PATH entries, never a /mnt/* entry (a
 # drvfs lookup costs ~2 ms each), never anything outside PATH. When no non-shim
@@ -39,12 +43,37 @@
 #     to the JS (drift test) and prove old == new for every env spelling.
 # The one thing the skip drops is the seam heartbeat that module load used to write;
 # scripts/hook-seam-check.py pairs beats only against tools some other guard covers.
+#
+# Stdin gate (#369, pass 3): hooks/PostToolUse/pr-record.js is the only seed PostToolUse hook on
+# Bash. Its run() parses stdin and returns it untouched (writeHookOutput prints nothing, exit 0,
+# empty stderr) unless `tool_input.command` includes the literal `gh pr create`. Nothing with an
+# effect runs before that return, and its modules have no load-time effects. So the launcher reads
+# stdin and skips node unless the raw bytes COULD decode to a command holding the literal:
+#   skip iff stdin contains none of `gh pr create`, `\u002`, `\u006`, `\u007`.
+# The last three are the JSON escape spellings of every character of the literal (space U+0020,
+# g h p r c e a t U+0061..U+0074): a producer may write any of them as \uXXXX, so soundness does
+# not depend on the encoder. Any other escape (\n, \u001b) cannot yield those characters.
+# When node is needed it gets the same bytes back: `tr '\0' '\1'` swaps NUL (which dash would
+# silently drop; a raw NUL and a raw \001 are both a JSON.parse error, so the outcome is the
+# same), and the `x` sentinel keeps the trailing newlines `$(...)` would strip.
+# Tied to the JS by hooks/tests/node-hook.test.js (drift test).
+# `_hn_stdin` is set only by that arm; clear any inherited value so an exported
+# `_hn_stdin` can never pipe `_hn_buf` into another hook in place of its stdin.
+_hn_stdin=
 case $1 in
   */PreToolUse/loop-guard.js)
     if [ "$CLAUDE_LOOP_GUARD" != 1 ]; then
       command exec cat >/dev/null 2>&1
       exit 0
     fi
+    ;;
+  */PostToolUse/pr-record.js)
+    _hn_buf=$(tr '\0' '\1'; echo x)
+    _hn_buf=${_hn_buf%x}
+    case $_hn_buf in
+      *'gh pr create'* | *'\u002'* | *'\u006'* | *'\u007'*) _hn_stdin=1 ;;
+      *) exit 0 ;;
+    esac
     ;;
 esac
 # `set -f`: the unquoted $PATH split below must not glob-expand an entry holding
@@ -59,8 +88,10 @@ for _hn_d in $PATH; do
   esac
   if [ -f "$_hn_d/node" ] && [ -x "$_hn_d/node" ]; then
     IFS=$_hn_ifs
+    [ -z "$_hn_stdin" ] || { printf '%s' "$_hn_buf" | "$_hn_d/node" "$@"; exit $?; }
     exec "$_hn_d/node" "$@"
   fi
 done
 IFS=$_hn_ifs
+[ -z "$_hn_stdin" ] || { printf '%s' "$_hn_buf" | node "$@"; exit $?; }
 exec node "$@"
