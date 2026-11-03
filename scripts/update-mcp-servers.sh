@@ -11,11 +11,17 @@ GIT_BIN="${GIT_BIN:-git}"
 UV_BIN="${UV_BIN:-uv}"
 RM_BIN="${RM_BIN:-rm}"
 REALPATH_BIN="${REALPATH_BIN:-realpath}"
-# No built-in origin: the checkout this updater may fast-forward is deployment-specific
-# (systemd/mcp-servers-update.service sets it). Unset, the updater refuses before git.
-EXPECTED_ORIGIN="${EXPECTED_ORIGIN:-}"
+# No built-in origin: the checkout this updater may fast-forward is deployment-specific.
+# An exported EXPECTED_ORIGIN wins, for one run; otherwise the HOV_MCP_EXPECTED_ORIGIN
+# line of the overlay's env file answers. That is where a host sets it: the scheduled
+# unit runs without the file in its environment, and `sync.sh install` overwrites a line
+# edited into the unit. The overlay name is namespaced because claude-env.sh exports the
+# file to every session command. Unset in both, the updater refuses before git.
+# shellcheck source=lib/overlay.sh
+. "$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")/../lib/overlay.sh"
+EXPECTED_ORIGIN="${EXPECTED_ORIGIN:-$(overlay_env_get HOV_MCP_EXPECTED_ORIGIN)}"
 if [ -z "$EXPECTED_ORIGIN" ]; then
-  printf 'ERROR: EXPECTED_ORIGIN is not set; export the <owner>/<name> the MCP checkout must match\n' >&2
+  printf 'ERROR: EXPECTED_ORIGIN is not set and the overlay env has no HOV_MCP_EXPECTED_ORIGIN; set it to the <owner>/<name> the MCP checkout must match\n' >&2
   exit 2
 fi
 

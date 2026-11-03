@@ -126,10 +126,13 @@ run_mcp() { # $1 = target clone
 
 # Planted negative: without EXPECTED_ORIGIN the updater refuses before touching git. The
 # shipped default used to name one private checkout, which a public tree cannot carry.
+# The overlay is pinned to an empty directory: the updater falls back to the overlay's env
+# file, and an ambient XDG_CONFIG_HOME or HOV_STACK_OVERLAY would otherwise point it at
+# this host's real one.
 M_UNSET=$TMP/mcp-unset
 make_fixture m-unset "$M_UNSET"
 unset_rc=0
-env -u EXPECTED_ORIGIN REAL_GIT="$REAL_GIT" HOME="$HOME_MCP" MCP_TARGET="$M_UNSET" NPX_CACHE_PATH="$HOME_MCP/.npm/_npx" \
+env -u EXPECTED_ORIGIN HOV_STACK_OVERLAY="$TMP/no-overlay" REAL_GIT="$REAL_GIT" HOME="$HOME_MCP" MCP_TARGET="$M_UNSET" NPX_CACHE_PATH="$HOME_MCP/.npm/_npx" \
   GIT_BIN="$MCP_BIN/git" UV_BIN="$MCP_BIN/uv" RM_BIN="$MCP_BIN/rm" \
   bash "$MCP_SCRIPT" >"$TMP/mcp-unset.out" 2>&1 || unset_rc=$?
 is_eq "$unset_rc" 2 "EXPECTED_ORIGIN unset: the updater exits 2 (usage) instead of trusting a built-in origin"
