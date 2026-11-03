@@ -239,7 +239,7 @@ test('explicit CLAUDE_VERIFY_ON_STOP=1 bypasses change gating (claude-loop contr
 
 // A pull or a launchpad fast-forward brings other sessions' merged commits into
 // HEAD with committer dates inside this session's window. Found 2026-10-29: a
-// read-only pushbot recovery session with no diff of its own hit the
+// read-only recovery session with no diff of its own hit the
 // missing-dependency block on every stop.
 test('commits already on the default remote branch are not this session\'s work', async () => {
   const { dir, canary, g } = gitProject({ typecheckExit: 1, nodeModules: false });
