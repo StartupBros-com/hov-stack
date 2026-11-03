@@ -237,6 +237,95 @@ test('explicit CLAUDE_VERIFY_ON_STOP=1 bypasses change gating (claude-loop contr
   }
 });
 
+// A pull or a launchpad fast-forward brings other sessions' merged commits into
+// HEAD with committer dates inside this session's window. Found 2026-10-29: a
+// read-only pushbot recovery session with no diff of its own hit the
+// missing-dependency block on every stop.
+test('commits already on the default remote branch are not this session\'s work', async () => {
+  const { dir, canary, g } = gitProject({ typecheckExit: 1, nodeModules: false });
+  try {
+    fs.writeFileSync(path.join(dir, 'landed.ts'), 'export const d = 4;\n');
+    g('add landed.ts');
+    g('commit -q -m landed-by-another-session'); // committer date = now
+    g('update-ref refs/remotes/origin/main HEAD'); // it is on origin/main
+    const p = { cwd: dir, stop_hook_active: false, transcript_path: transcriptFor(dir) };
+    assertQuietPassThrough(await runHook(HOOK, p, { env: trustEnv(dir) }));
+    assert.ok(!fs.existsSync(canary), 'commits reachable from origin/main must not arm the gate');
+  } finally {
+    rmTmp(dir);
+  }
+});
+
+test('a session commit beyond the default remote branch still triggers the gate', async () => {
+  const { dir, canary, g } = gitProject({ typecheckExit: 0, nodeModules: true });
+  try {
+    g('update-ref refs/remotes/origin/main HEAD');
+    fs.writeFileSync(path.join(dir, 'mine.ts'), 'export const e = 5;\n');
+    g('add mine.ts');
+    g('commit -q -m session-work');
+    const p = { cwd: dir, stop_hook_active: false, transcript_path: transcriptFor(dir) };
+    assertQuietPassThrough(await runHook(HOOK, p, { env: trustEnv(dir) }));
+    assert.ok(fs.existsSync(canary), 'unlanded session commits must still be verified');
+  } finally {
+    rmTmp(dir);
+  }
+});
+
+// A hook process launched without mise activation has no bun or pnpm on PATH,
+// so `bun run typecheck` died with "bun: not found" although the typecheck
+// itself passed (17 such blocks in the 30 days to 2026-11-03). The fixture's PATH is
+// one empty directory, so only the shims dir can supply `bun`.
+function bunProject() {
+  const dir = mkTmp('vos-bun-');
+  fs.writeFileSync(
+    path.join(dir, 'package.json'),
+    JSON.stringify({ name: 't', version: '1.0.0', scripts: { typecheck: 'true' } })
+  );
+  fs.writeFileSync(path.join(dir, 'bun.lock'), '{}\n');
+  fs.mkdirSync(path.join(dir, 'node_modules'));
+  fs.mkdirSync(path.join(dir, 'emptybin'));
+  const canary = path.join(dir, 'CANARY');
+  const shim = (dataDir) => {
+    const shims = path.join(dataDir, 'shims');
+    fs.mkdirSync(shims, { recursive: true });
+    fs.writeFileSync(path.join(shims, 'bun'), `#!/bin/sh\necho "$*" > ${JSON.stringify(canary)}\n`, { mode: 0o755 });
+  };
+  return { dir, canary, shim };
+}
+
+test('the verify command finds bun through mise\'s shims when PATH lacks it', async () => {
+  const { dir, canary, shim } = bunProject();
+  try {
+    shim(path.join(dir, '.local', 'share', 'mise')); // mise's default data dir under HOME
+    const p = { cwd: dir, stop_hook_active: false };
+    const env = {
+      CLAUDE_VERIFY_ON_STOP: '1', HOME: dir, USERPROFILE: dir,
+      PATH: path.join(dir, 'emptybin'), MISE_DATA_DIR: '', XDG_DATA_HOME: '',
+    };
+    assertQuietPassThrough(await runHook(HOOK, p, { env }));
+    assert.strictEqual(fs.readFileSync(canary, 'utf8').trim(), 'run typecheck');
+  } finally {
+    rmTmp(dir);
+  }
+});
+
+test('MISE_DATA_DIR moves the shims dir the verify command uses', async () => {
+  const { dir, canary, shim } = bunProject();
+  try {
+    const dataDir = path.join(dir, 'mise-data');
+    shim(dataDir);
+    const p = { cwd: dir, stop_hook_active: false };
+    const env = {
+      CLAUDE_VERIFY_ON_STOP: '1', HOME: dir, USERPROFILE: dir,
+      PATH: path.join(dir, 'emptybin'), MISE_DATA_DIR: dataDir, XDG_DATA_HOME: '',
+    };
+    assertQuietPassThrough(await runHook(HOOK, p, { env }));
+    assert.strictEqual(fs.readFileSync(canary, 'utf8').trim(), 'run typecheck');
+  } finally {
+    rmTmp(dir);
+  }
+});
+
 // =============================================================================
 // U3: positive handoff hand-back predicate (KD1-KD7, KTD1-KTD6)
 // =============================================================================
