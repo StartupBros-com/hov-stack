@@ -672,7 +672,22 @@ Inferred bets made without a synchronous user; each names where it is checked.
 - **Approach:** list what the live config draws from the dotfiles that the stack lacks (scripts, libraries, the review workflow, skills, local patches to third-party skills) and move each item into the stack or the overlay; back up the live config; run `./setup` from the checkout with the overlay present; run `./setup --check`; keep the backup for a working week, then retire the dotfiles as the live config's source.
 - **Test scenarios:** before the switch, comparing what the live config links against what `./setup` would link leaves nothing unaccounted for; after it, `./setup --check` is clean, the hooks fire, and a new session sees the same skills and plugins as before.
 - **Verification:** the `./setup --check` output and the before and after skill and plugin listings, recorded in the unit's PR.
-- **Recorded (2026-11-02):** the preparation is done and the switch is held for the author in #270. #267 ported into the stack the behaviour the live config runs, and the inventory of what the live config draws from outside the stack, with the script that reruns it, is in the author's local deliverables. The switch itself replaces the live settings, hooks and instructions, changes what scheduled user units run and enables a plugin the host lacks, so #270 lists the decisions it needs first. U26 waits on it.
+- **Recorded (2026-11-02):** done. #267 ported into the stack the behaviour the live config runs, and the inventory of what the live config draws from outside the stack, with the script that reruns it, is in the author's local deliverables. #270 listed the decisions the switch needed; the author gave the go the same day, and the switch ran at 22:27 local time:
+  - **Snapshot first.** The live links, settings, plugin records, user units, timers, crontab, overlay and skills went into the author's local backup directory, beside a rollback script.
+  - **Overlay filled.** It received its env values, the five JSON maps, the host's private skill patches and its foreign-units list.
+  - **Private units repointed.** Twelve private user units (thirteen lines) that ran scripts through the live config now run the dotfiles copy of those scripts, which stays on disk for them. The dotfiles refresh timer is masked so it cannot relink the live config.
+  - **Install.** `./setup` linked the ten harness entries and the skills, moving 40 real skill directories into its own backup. `sync.sh install` installed the stack's user units and settings hooks. The stack's units run as shipped, with no host drop-ins.
+
+  Results after the switch:
+  - `./setup --check` reports every step in place.
+  - Every path that units, settings hooks and the statusline call into the live config resolves: 34 targets, none missing.
+  - The hooks fire: the git guard blocked a commit on a main checkout.
+  - The skill listing went from 166 to 167 entries, the one addition being `hov-setup`, with no dangling links. This compares filesystem listings, not what a new session lists.
+  - `claude plugin list`, run as a new process, shows twelve user plugins where there were eleven: `papercut@hov` was added and nothing was removed.
+  - The settings hooks went from 21 to 18, because the papercut plugin now registers its three.
+  - `harness-doctor.sh` on the switched host raised 150 warnings, none of them a runtime fault from the switch. 37 kinds match the last saved pre-switch run. The new ones are the doctor still reading the old layout and running suites outside the CI runner, filed as #355 and #356.
+
+  The snapshot and the rollback script stay for a working week, to 2026-11-09. U26 no longer waits on U27.
 
 ---
 
