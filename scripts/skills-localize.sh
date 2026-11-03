@@ -10,12 +10,18 @@
 #     • local forks stay deployed
 #     • the local layer stays applied over kept jsm skills (LOCAL LAYER below)
 #
-# SOURCES OF TRUTH (all version-controlled in this repository)
+# SOURCES OF TRUTH (version-controlled in this repository, except the host's patches)
 #   retired-skills.txt           one skill name per line (# comments ok) → kept uninstalled
 #   plugins/hov-stack/skills/<name>/  full local (non-jsm) skills → deployed into ~/.claude/skills/
 #   skills-patches/<name>/<rel>   content overlays, 3-way merged onto the installed jsm skill
 #   skills-patches/<name>/.base/  the upstream files each overlay was written against, plus
 #                                 VERSION; never deployed
+#   <overlay>/skills-patches/     the host's patches, same layout (README.md, "The private
+#                                 overlay"). They add files to this repository's, never
+#                                 replace them: where both carry a file, this repository's
+#                                 applies and a differing host copy is DRIFT.
+#                                 SKILLS_HOST_PATCHES_DIR names another dir, or none when
+#                                 empty; SKILLS_PATCHES_DIR alone means no host patches
 #   local-tooling-note.md        one-line note put after the frontmatter of every jsm skill
 #   local-tooling-note.codex.md  whose pristine text names beads/br/bv, NTM, Agent Mail or
 #                                 idea-wizard (none installed here); the Codex trees get the
@@ -79,7 +85,9 @@
 #                         as pristine
 #   rebase <skill> <ver>  from a worktree's copy of this script: make the installed
 #                         pristine files the overlay's new base and the merged result its new
-#                         overlay; review the diff before committing
+#                         overlay; review the diff before committing. Each file goes back to
+#                         the root it came from, so a host patch is rewritten in place, outside
+#                         this repository's review
 #
 # WIRING
 #   1. dotup runs `skills-localize.sh apply` after install.sh (2026-09-02, #909;
@@ -128,7 +136,7 @@ case "${1:-apply}" in
   audit)          MODE="audit" ;;
   unapply|forget) MODE="$1"; shift; [ "$#" -gt 0 ] || { usage; exit 2; } ;;
   rebase)         MODE="rebase"; shift; [ "$#" -eq 2 ] || { usage; exit 2; } ;;
-  -h|--help)      sed -n '2,89p' "$SELF"; exit 0 ;;
+  -h|--help)      sed -n '2,97p' "$SELF"; exit 0 ;;
   *)              usage; exit 2 ;;
 esac
 
@@ -140,6 +148,22 @@ ts()   { date +%Y%m%d%H%M%S 2>/dev/null || echo manual; }
 WORK=""
 cleanup() { [ -z "$WORK" ] || rm -rf "$WORK"; }
 trap cleanup EXIT
+
+# The host's patches (SOURCES OF TRUTH). A unit runs without a session's environment,
+# so the overlay is found the way lib/overlay.sh finds it, from HOME.
+HOST_PATCHES=""
+if [ -n "${SKILLS_HOST_PATCHES_DIR+set}" ]; then
+  HOST_PATCHES=$SKILLS_HOST_PATCHES_DIR
+elif [ -z "${SKILLS_PATCHES_DIR+set}" ] && [ "$MODE" != audit ] && [ "$MODE" != forget ]; then
+  if [ -f "$HERE/lib/overlay.sh" ]; then
+    # shellcheck source=lib/overlay.sh
+    . "$HERE/lib/overlay.sh"
+    HOST_PATCHES=$(overlay_dir) && HOST_PATCHES=$HOST_PATCHES/skills-patches
+  else
+    note "ERROR: $HERE/lib/overlay.sh is missing — the host's skill patches were not read"
+    errors=1; drift=1
+  fi
+fi
 
 # Every skill name here arrives from a hand-edited manifest and is then interpolated
 # into a path that gets `rsync --delete`d or `mv`d. A name is a single path SEGMENT —
@@ -373,11 +397,52 @@ note_line() {
 # the end, so pipefail never sees the first grep die of SIGPIPE.
 names_vocab() { grep -vF -- "$MARKER" "$1" 2>/dev/null | grep -Eic -- "$VOCAB" >/dev/null; }
 
-# overlay_rels <skill> — the overlay's files relative to its dir, .base/ excluded.
-overlay_rels() {
-  local dir="$PATCHES/$1"
-  [ -d "$dir" ] || return 0
-  find "$dir" -path "$dir/.base" -prune -o -type f -printf '%P\n' | LC_ALL=C sort
+# root_rels <root> <skill> — one root's overlay files for a skill, relative to its dir,
+# .base/ excluded. An empty root (no host patches) has none.
+root_rels() {
+  local dir="$1/$2"
+  [ -n "$1" ] && [ -d "$dir" ] || return 0
+  find "$dir" -path "$dir/.base" -prune -o -type f -printf '%P\n'
+}
+
+# overlay_rels <skill> — the skill's overlay: this repository's files plus the host's.
+overlay_rels() { { root_rels "$PATCHES" "$1"; root_rels "$HOST_PATCHES" "$1"; } | LC_ALL=C sort -u; }
+
+# has_patch <skill> — either root patches the skill.
+has_patch() { [ -d "$PATCHES/$1" ] || { [ -n "$HOST_PATCHES" ] && [ -d "$HOST_PATCHES/$1" ]; }; }
+
+# patch_root <skill> <rel> — the root whose copy of rel, and whose .base/rel, applies:
+# this repository's whenever it carries the file, else the host's when it does.
+patch_root() {
+  if [ -n "$HOST_PATCHES" ] && [ ! -f "$PATCHES/$1/$2" ] && [ -f "$HOST_PATCHES/$1/$2" ]; then
+    printf '%s' "$HOST_PATCHES"
+  else
+    printf '%s' "$PATCHES"
+  fi
+}
+
+# same_file <a> <b> — both absent, or both files with the same bytes.
+same_file() {
+  { [ ! -e "$1" ] && [ ! -e "$2" ]; } || { [ -f "$1" ] && [ -f "$2" ] && cmp -s "$1" "$2"; }
+}
+
+# report_shadowed — a host file this repository also carries never applies. Name each
+# one whose bytes or base differ from this repository's, once per run rather than once
+# per tree; an identical copy is silent.
+report_shadowed() {
+  local d skill rel
+  [ -n "$HOST_PATCHES" ] && [ -d "$HOST_PATCHES" ] || return 0
+  for d in "$HOST_PATCHES"/*/; do
+    skill=$(basename "$d")
+    valid_skill_name "$skill" && [ -d "$PATCHES/$skill" ] || continue
+    while IFS= read -r rel; do
+      [ -n "$rel" ] && [ -f "$PATCHES/$skill/$rel" ] || continue
+      same_file "$HOST_PATCHES/$skill/$rel" "$PATCHES/$skill/$rel" &&
+        same_file "$HOST_PATCHES/$skill/.base/$rel" "$PATCHES/$skill/.base/$rel" && continue
+      note "DRIFT: host patch $HOST_PATCHES/$skill/$rel differs from this repository's copy, which applies instead — delete the host copy, or move its change into this repository"
+      drift=1
+    done < <(root_rels "$HOST_PATCHES" "$skill" | LC_ALL=C sort)
+  done
 }
 
 declare -A MH=() MK=() XK=() EK=() CONF=() CARRY=() LEG_SHA=() LEG_KIND=() LEG_SKILL=()
@@ -425,7 +490,7 @@ legacy_hits() {
     rel="${path#*/}"; live="$dir/$rel"
     [ -f "$live" ] && [ ! -L "$live" ] || continue
     legacy_copy "$skill" "$rel" "$live" || continue
-    cmp -s "$live" "$PATCHES/$skill/$rel" && continue
+    cmp -s "$live" "$(patch_root "$skill" "$rel")/$skill/$rel" && continue
     LEGACY_HITS+=("$rel")
   done < <(printf '%s\n' "${!LEG_SHA[@]}" | LC_ALL=C sort)
   [ "${#LEGACY_HITS[@]}" -gt 0 ]
@@ -469,7 +534,7 @@ recorded_as() {
 # Returns 2 when any file is foreign (FOREIGN names them).
 compute_skill() {
   local label="$1" root="$2" skill="$3" noteline="$4"
-  local dir="$root/$skill" rel live copy o b c f
+  local dir="$root/$skill" rel live copy o b c f pr
   XK=(); EK=(); CONF=(); RELS=(); FOREIGN=(); NOTED=0
   W="$WORK/$label/$skill"; rm -rf "$W"; mkdir -p "$W/x" "$W/m" "$W/e"
   load_manifest "$label" "$skill"
@@ -478,7 +543,8 @@ compute_skill() {
   done < <({ overlay_rels "$skill"; printf '%s\n' "${!MH[@]}"; echo SKILL.md; } | LC_ALL=C sort -u)
 
   for rel in "${RELS[@]}"; do
-    live="$dir/$rel"; copy="$STATE/$label/pristine/$skill/$rel"; o="$PATCHES/$skill/$rel"
+    pr=$(patch_root "$skill" "$rel")
+    live="$dir/$rel"; copy="$STATE/$label/pristine/$skill/$rel"; o="$pr/$skill/$rel"
     mkdir -p "$(dirname "$W/x/$rel")" "$(dirname "$W/m/$rel")" "$(dirname "$W/e/$rel")"
     if [ -L "$live" ]; then
       XK[$rel]=foreign; FOREIGN+=("$rel")
@@ -495,7 +561,7 @@ compute_skill() {
       fi
     elif [ -f "$o" ] && [ -f "$live" ] && ! migrated "$label" "$skill" && cmp -s "$live" "$o" &&
          legacy_copy "$skill" "$rel" "$live"; then
-      if [ -f "$PATCHES/$skill/.base/$rel" ]; then cp "$PATCHES/$skill/.base/$rel" "$W/x/$rel"; XK[$rel]="file"
+      if [ -f "$pr/$skill/.base/$rel" ]; then cp "$pr/$skill/.base/$rel" "$W/x/$rel"; XK[$rel]="file"
       else XK[$rel]=absent; fi
     elif [ -f "$live" ]; then
       { [ "$rel" = SKILL.md ] && note_strip "$live" "$W/x/$rel"; } || cp "$live" "$W/x/$rel"
@@ -519,7 +585,7 @@ compute_skill() {
   fi
 
   for rel in "${RELS[@]}"; do
-    o="$PATCHES/$skill/$rel"; b="$PATCHES/$skill/.base/$rel"
+    pr=$(patch_root "$skill" "$rel"); o="$pr/$skill/$rel"; b="$pr/$skill/.base/$rel"
     if [ -f "$o" ]; then
       cp "$o" "$W/m/$rel"
       if [ "${XK[$rel]}" = absent ]; then
@@ -615,7 +681,7 @@ layer_skill() {
     legacy_drift "$label" "$skill"; CARRY["$label $skill"]=1; return 0
   fi
   # Fast path: nothing recorded, no overlay, no note, no vocabulary.
-  if [ ! -d "$PATCHES/$skill" ] && [ ! -e "$STATE/$label/manifest/$skill" ] &&
+  if ! has_patch "$skill" && [ ! -e "$STATE/$label/manifest/$skill" ] &&
      ! grep -qF -- "$MARKER" "$dir/SKILL.md" 2>/dev/null &&
      ! grep -rEiq --include='*.md' --exclude-dir=node_modules -- "$VOCAB" "$dir" 2>/dev/null; then
     return 0
@@ -687,7 +753,7 @@ layer_skill() {
     elif ! write_state "$label" "$root" "$skill"; then note "ERROR: could not update $label layer state for '$skill'"; errors=1; fi
   fi
   # This tree has now been layered once, so its pre-#2091 copies are behind it.
-  if [ -d "$PATCHES/$skill" ] && ! migrated "$label" "$skill"; then
+  if has_patch "$skill" && ! migrated "$label" "$skill"; then
     { mkdir -p "$STATE/$label/migrated" && : > "$STATE/$label/migrated/$skill"; } ||
       { note "ERROR: could not record $label $skill as migrated"; errors=1; }
   fi
@@ -747,7 +813,7 @@ unapply_cmd() {
       elif [ -d "$dir" ] && [ ! -L "$dir" ] && legacy_hits "$label" "$dir" "$skill"; then
         note "legacy: $label $skill still holds pre-#2091 overlay text (${LEGACY_HITS[*]}); only jsm install $skill --force replaces it"
         unrec=1
-      elif [ -d "$dir" ] && [ ! -L "$dir" ] && [ -d "$PATCHES/$skill" ]; then
+      elif [ -d "$dir" ] && [ ! -L "$dir" ] && has_patch "$skill"; then
         note "unrecorded: $label $skill has an overlay but no saved pristine copy; only jsm install $skill --force restores it"
         unrec=1
       fi
@@ -778,7 +844,7 @@ unapply_cmd() {
             { note "ERROR: could not remove $label $skill/$rel"; errors=1; [ "$rc" -ge 1 ] || rc=1; continue 3; }
           say "unapplied ($label): $skill/$rel (pre-#2091 file removed)"
         done
-      elif [ -d "$dir" ] && [ ! -L "$dir" ] && [ ! -d "$PATCHES/$skill" ] && [ -f "$dir/SKILL.md" ] &&
+      elif [ -d "$dir" ] && [ ! -L "$dir" ] && ! has_patch "$skill" && [ -f "$dir/SKILL.md" ] &&
            note_strip "$dir/SKILL.md" "$WORK/strip"; then
         # A note with no saved state (state lost): strip it, the inverse of note_insert.
         cp "$WORK/strip" "$dir/SKILL.md" && say "unapplied ($label): $skill/SKILL.md (note stripped)"
@@ -801,16 +867,18 @@ forget_cmd() {
   return "$rc"
 }
 
-# rebase_cmd <skill> <version> — run from a worktree; rewrites skills-patches/<skill>.
+# rebase_cmd <skill> <version> — run from a worktree; rewrites skills-patches/<skill>,
+# and the host's files for the skill in place: the worktree guard covers only this
+# repository's.
 rebase_cmd() {
-  local skill="$1" version="${2#v}" rel noteline="" lbl
+  local skill="$1" version="${2#v}" rel noteline="" lbl pr host=0
   case "$HERE" in
     */.claude/worktrees/*) ;;
     *) note "ERROR: rebase rewrites skills-patches/$skill — run a worktree's copy of this script (this one is $HERE)"; return 2 ;;
   esac
   valid_skill_name "$skill" || { reject_name "$skill" "rebase"; return 2; }
   [[ "$version" =~ ^[0-9]+$ ]] || { note "ERROR: version must be the jsm version number, e.g. 12"; return 2; }
-  [ -d "$PATCHES/$skill" ] || { note "ERROR: no overlay at $PATCHES/$skill"; return 2; }
+  has_patch "$skill" || { note "ERROR: no overlay at $PATCHES/$skill${HOST_PATCHES:+ or $HOST_PATCHES/$skill}"; return 2; }
   [ -d "$SKILLS/$skill" ] || { note "ERROR: $skill is not installed in $SKILLS"; return 2; }
   lbl=claude; state_owns "$lbl" "$SKILLS" || return 2
   if [ ! -e "$STATE/$lbl/manifest/$skill" ] && legacy_hits "$lbl" "$SKILLS/$skill" "$skill"; then
@@ -823,15 +891,21 @@ rebase_cmd() {
   fi
   while IFS= read -r rel; do
     [ -n "$rel" ] || continue
+    pr=$(patch_root "$skill" "$rel")
+    [ "$pr" = "$PATCHES" ] || host=1
     if [ "${XK[$rel]}" = file ]; then
-      mkdir -p "$(dirname "$PATCHES/$skill/.base/$rel")" && cp "$W/x/$rel" "$PATCHES/$skill/.base/$rel"
+      mkdir -p "$(dirname "$pr/$skill/.base/$rel")" && cp "$W/x/$rel" "$pr/$skill/.base/$rel"
     else
-      rm -f "$PATCHES/$skill/.base/$rel"
+      rm -f "$pr/$skill/.base/$rel"
     fi
-    cp "$W/m/$rel" "$PATCHES/$skill/$rel"
+    cp "$W/m/$rel" "$pr/$skill/$rel"
     [ -z "${CONF[$rel]:-}" ] || note "kept our side in $skill/$rel (${CONF[$rel]}) — review the diff"
   done < <(overlay_rels "$skill")
-  mkdir -p "$PATCHES/$skill/.base" && printf '%s\n' "$version" > "$PATCHES/$skill/.base/VERSION"
+  for pr in "$PATCHES" ${HOST_PATCHES:+"$HOST_PATCHES"}; do
+    [ -d "$pr/$skill" ] || continue
+    mkdir -p "$pr/$skill/.base" && printf '%s\n' "$version" > "$pr/$skill/.base/VERSION"
+  done
+  [ "$host" = 0 ] || say "rewrote the host's patch for $skill in place at $HOST_PATCHES/$skill — it is outside this repository, so review it there"
   say "rebased $skill onto v$version — review git diff, then commit"
 }
 
@@ -908,6 +982,7 @@ enforce_retired
 reap_broken_links "$SKILLS" "claude-skills"
 reap_broken_links "$CODEX_SKILLS" "codex-skills"
 deploy_forks
+report_shadowed
 apply_layer
 deploy_codex
 if [ "$MODE" = check ]; then

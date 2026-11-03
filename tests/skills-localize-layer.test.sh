@@ -733,6 +733,175 @@ assert_has "ERROR: SKILLS_LOCALIZE_LOCK_FD=7 is not open on $S/.lock" "the bad f
 assert_same "$T/expect" "$C/zzl-locked/SKILL.md" "a refused unapply changes nothing"
 
 # ---------------------------------------------------------------------------
+# 9. The host's patches (<overlay>/skills-patches) add files to this repository's
+#    patches and never replace them. A file only the host carries applies; where
+#    both carry one, this repository's applies and a differing host copy is drift.
+#    rebase writes each file back to the root it came from and never copies a host
+#    file into this repository. SKILLS_PATCHES_DIR alone keeps its old meaning, the
+#    only patch source, so every section above ran without the host's patches.
+H=$T/home/.config/hov-stack/skills-patches
+hrun() {
+  OUT=$T/out.$1
+  shift
+  SKILLS_HOST_PATCHES_DIR=$H "$SCRIPT" "$@" >"$OUT" 2>&1
+  RC=$?
+}
+# overlay_run TAG [NAME=VALUE...] ARGS... — the script as installed: no patch-dir
+# override, so this repository's own patches (no zzl- skill among them) plus the
+# overlay's, found from HOME.
+overlay_run() {
+  local tag=$1
+  local -a envs=()
+  shift
+  while [ "$#" -gt 0 ] && [[ $1 == *=* ]]; do envs+=("$1"); shift; done
+  OUT=$T/out.$tag
+  env -u SKILLS_PATCHES_DIR -u SKILLS_HOST_PATCHES_DIR -u HOV_STACK_OVERLAY -u XDG_CONFIG_HOME \
+    "${envs[@]}" "$SCRIPT" "$@" >"$OUT" 2>&1
+  RC=$?
+}
+nlines() {   # nlines SEARCH=REPLACE... -> notes.md text
+  local l kv
+  for l in 'n a' 'n b' 'n c' 'n d' 'n e' 'n f' 'n g'; do
+    for kv in "$@"; do [ "$l" = "${kv%%=*}" ] && l=${kv#*=}; done
+    printf '%s\n' "$l"
+  done
+}
+
+# A skill only the host patches, found through the overlay.
+reset
+rm -rf "$T/home/.config"
+mkdir -p "$H/zzl-hostonly/.base" "$U/zzl-hostonly"
+lines_with zzl-hostonly >"$H/zzl-hostonly/.base/SKILL.md"
+lines_with zzl-hostonly 'line c=line c HOST' >"$H/zzl-hostonly/SKILL.md"
+lines_with zzl-hostonly 'line f=line f THEIRS' >"$U/zzl-hostonly/SKILL.md"
+install "$C" zzl-hostonly
+install "$X" zzl-hostonly
+run host-ignored apply
+assert_rc 0 "apply with SKILLS_PATCHES_DIR alone"
+assert_same "$U/zzl-hostonly/SKILL.md" "$C/zzl-hostonly/SKILL.md" "SKILLS_PATCHES_DIR alone keeps the host's patches out"
+overlay_run host-default apply
+assert_rc 0 "apply as installed, with an overlay"
+lines_with zzl-hostonly 'line c=line c HOST' 'line f=line f THEIRS' >"$T/expect"
+assert_same "$T/expect" "$C/zzl-hostonly/SKILL.md" "a skill only the host patches is layered (claude)"
+assert_same "$T/expect" "$X/zzl-hostonly/SKILL.md" "a skill only the host patches is layered (codex)"
+if [ -e "$S/$LBL/migrated/zzl-hostonly" ]; then ok; else bad "a host-only patch did not mark its skill migrated"; fi
+overlay_run host-default-check check
+assert_rc 0 "check as installed, with an overlay"
+assert_line 'skills policy in sync' "check as installed, with an overlay"
+# Moved out of HOME, the overlay is found only through XDG_CONFIG_HOME.
+mkdir -p "$T/xdgcfg"
+mv "$T/home/.config/hov-stack" "$T/xdgcfg/hov-stack"
+overlay_run host-xdg XDG_CONFIG_HOME="$T/xdgcfg" check
+assert_rc 0 "an absolute XDG_CONFIG_HOME names the overlay"
+assert_line 'skills policy in sync' "an absolute XDG_CONFIG_HOME names the overlay"
+overlay_run host-xdg-unset check
+assert_rc 1 "check without XDG_CONFIG_HOME once the overlay left HOME"
+assert_has 'DRIFT: claude zzl-hostonly/SKILL.md is not the localized copy' "without XDG_CONFIG_HOME the moved overlay is not read"
+mv "$T/xdgcfg/hov-stack" "$T/home/.config/hov-stack"
+overlay_run host-relative HOV_STACK_OVERLAY=relative/overlay check
+assert_rc 1 "check with a relative overlay"
+assert_has 'DRIFT: claude zzl-hostonly/SKILL.md is not the localized copy' "a relative overlay is ignored"
+overlay_run host-missing HOV_STACK_OVERLAY="$T/no-overlay" check
+assert_rc 1 "check with a missing overlay"
+assert_has 'DRIFT: claude zzl-hostonly/SKILL.md is not the localized copy' "a missing overlay adds nothing"
+overlay_run host-empty SKILLS_HOST_PATCHES_DIR= check
+assert_rc 1 "check with SKILLS_HOST_PATCHES_DIR empty"
+assert_has 'DRIFT: claude zzl-hostonly/SKILL.md is not the localized copy' "an empty SKILLS_HOST_PATCHES_DIR reads no host patches"
+OUT=$T/out.host-nolib
+env -u SKILLS_PATCHES_DIR -u SKILLS_HOST_PATCHES_DIR -u HOV_STACK_OVERLAY -u XDG_CONFIG_HOME \
+  "$T/wt/.claude/worktrees/x/claude/scripts/skills-localize.sh" check >"$OUT" 2>&1
+RC=$?
+assert_rc 1 "check from a copy without lib/overlay.sh"
+assert_has "ERROR: $T/wt/.claude/worktrees/x/claude/lib/overlay.sh is missing — the host's skill patches were not read" "a missing overlay library is named"
+overlay_run host-unapply unapply zzl-hostonly
+assert_rc 0 "unapply a skill only the host patches"
+assert_same "$U/zzl-hostonly/SKILL.md" "$C/zzl-hostonly/SKILL.md" "unapply puts upstream back under a host-only patch"
+overlay_run host-reapply apply
+rm -rf "$S"
+overlay_run host-unrecorded unapply zzl-hostonly
+assert_rc 3 "unapply a host-patched skill with no saved state"
+assert_has 'unrecorded: claude zzl-hostonly has an overlay but no saved pristine copy' "a host-only patch counts as an overlay"
+
+# Both roots patch one skill: disjoint files both apply, each from its own base; a
+# file both carry applies once, from this repository.
+reset
+rm -rf "$T/home/.config"
+mkdir -p "$P/zzl-both/.base" "$H/zzl-both/.base" "$H/zzl-both/scripts" "$U/zzl-both"
+lines_with zzl-both >"$P/zzl-both/.base/SKILL.md"
+lines_with zzl-both 'line b=line b REPO' >"$P/zzl-both/SKILL.md"
+nlines >"$H/zzl-both/.base/notes.md"
+nlines 'n b=n b HOST' >"$H/zzl-both/notes.md"
+printf 'echo host\n' >"$H/zzl-both/scripts/host.sh"
+lines_with zzl-both 'line f=line f V2' >"$U/zzl-both/SKILL.md"
+nlines 'n f=n f V2' >"$U/zzl-both/notes.md"
+install "$C" zzl-both
+mkdir -p "$P/zzl-shadow/.base" "$H/zzl-shadow/.base" "$U/zzl-shadow"
+lines_with zzl-shadow >"$P/zzl-shadow/.base/SKILL.md"
+lines_with zzl-shadow 'line c=line c REPO' >"$P/zzl-shadow/SKILL.md"
+cp "$P/zzl-shadow/.base/SKILL.md" "$H/zzl-shadow/.base/SKILL.md"
+cp "$P/zzl-shadow/SKILL.md" "$H/zzl-shadow/SKILL.md"
+lines_with zzl-shadow >"$U/zzl-shadow/SKILL.md"
+install "$C" zzl-shadow
+install "$X" zzl-shadow
+hrun host-both apply
+assert_rc 0 "apply with host files beside this repository's"
+lines_with zzl-both 'line b=line b REPO' 'line f=line f V2' >"$T/expect"
+assert_same "$T/expect" "$C/zzl-both/SKILL.md" "this repository's file applies beside the host's"
+nlines 'n b=n b HOST' 'n f=n f V2' >"$T/expect"
+assert_same "$T/expect" "$C/zzl-both/notes.md" "the host's file merges onto upstream from the host's base"
+assert_same "$H/zzl-both/scripts/host.sh" "$C/zzl-both/scripts/host.sh" "a file only the host adds is laid down"
+lines_with zzl-shadow 'line c=line c REPO' >"$T/expect"
+assert_same "$T/expect" "$C/zzl-shadow/SKILL.md" "a file both roots carry applies once"
+assert_lacks 'DRIFT' "a host copy identical to this repository's is not drift"
+hrun host-both-check check
+assert_rc 0 "check with an identical host copy"
+lines_with zzl-shadow 'line c=line c HOST' >"$H/zzl-shadow/SKILL.md"
+hrun host-shadow-check check
+assert_rc 1 "check with a differing host copy"
+assert_line "DRIFT: host patch $H/zzl-shadow/SKILL.md differs from this repository's copy, which applies instead — delete the host copy, or move its change into this repository" "the differing host copy is named"
+if [ "$(grep -c 'DRIFT: host patch' "$OUT")" = 1 ]; then ok; else bad "the differing host copy was named more than once in one run"; fi
+hrun host-shadow-apply apply
+assert_rc 0 "apply with a differing host copy"
+lines_with zzl-shadow 'line c=line c REPO' >"$T/expect"
+assert_same "$T/expect" "$C/zzl-shadow/SKILL.md" "this repository's copy beats a differing host copy (claude)"
+assert_same "$T/expect" "$X/zzl-shadow/SKILL.md" "this repository's copy beats a differing host copy (codex)"
+assert_has "DRIFT: host patch $H/zzl-shadow/SKILL.md" "apply names the differing host copy too"
+cp "$P/zzl-shadow/SKILL.md" "$H/zzl-shadow/SKILL.md"
+lines_with zzl-shadow 'line a=line a OLD' >"$H/zzl-shadow/.base/SKILL.md"
+hrun host-shadow-base check
+assert_rc 1 "check with a differing host base"
+assert_has "DRIFT: host patch $H/zzl-shadow/SKILL.md" "a host copy whose base differs is named"
+rm -rf "$H/zzl-shadow"
+
+# rebase from a worktree writes each file back to the root it came from.
+OUT=$T/out.host-rebase
+SKILLS_HOST_PATCHES_DIR=$H "$T/wt/.claude/worktrees/x/claude/scripts/skills-localize.sh" rebase zzl-both 2 >"$OUT" 2>&1
+RC=$?
+assert_rc 0 "rebase a skill both roots patch"
+assert_same "$U/zzl-both/SKILL.md" "$P/zzl-both/.base/SKILL.md" "rebase moves this repository's base forward"
+lines_with zzl-both 'line b=line b REPO' 'line f=line f V2' >"$T/expect"
+assert_same "$T/expect" "$P/zzl-both/SKILL.md" "rebase writes this repository's merge here"
+assert_same "$U/zzl-both/notes.md" "$H/zzl-both/.base/notes.md" "rebase moves the host's base forward on the host"
+nlines 'n b=n b HOST' 'n f=n f V2' >"$T/expect"
+assert_same "$T/expect" "$H/zzl-both/notes.md" "rebase writes the host's merge on the host"
+printf 'echo host\n' >"$T/expect"
+assert_same "$T/expect" "$H/zzl-both/scripts/host.sh" "rebase keeps a file only the host adds"
+for f in notes.md .base/notes.md scripts/host.sh .base/scripts/host.sh; do
+  assert_gone "$P/zzl-both/$f" "rebase never copies a host file into this repository ($f)"
+done
+for f in SKILL.md .base/SKILL.md .base/scripts/host.sh; do
+  assert_gone "$H/zzl-both/$f" "rebase never copies this repository's file to the host ($f)"
+done
+if [ "$(cat "$P/zzl-both/.base/VERSION" 2>/dev/null)" = 2 ] && [ "$(cat "$H/zzl-both/.base/VERSION" 2>/dev/null)" = 2 ]; then ok
+else bad "rebase did not record version 2 in both roots"; fi
+assert_has "$H/zzl-both" "rebase names the host files it wrote"
+hrun host-after-rebase apply
+assert_rc 0 "apply after a two-root rebase"
+assert_lacks '^(localized|restored|removed) ' "a two-root rebase leaves the live files as they were"
+hrun host-after-rebase-check check
+assert_rc 0 "check after a two-root rebase"
+
+# ---------------------------------------------------------------------------
 if [ ! -s "$JSM_CALLED" ]; then ok; else bad "the layer called jsm: $(cat "$JSM_CALLED")"; fi
 HOME=$REAL_HOME XDG_STATE_HOME=$REAL_XDG
 [ -n "$XDG_STATE_HOME" ] || unset XDG_STATE_HOME

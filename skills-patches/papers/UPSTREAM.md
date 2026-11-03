@@ -50,7 +50,7 @@ that a Git snapshot and verbatim upstream licence were available.
    `socket.gaierror`); retaining those warnings must not break CLI JSON output.
 
 The empty-result branch and unrelated workflow behavior remain intact. The
-existing skill localizer applies the overlay to both installed Claude and Codex
-copies. `tests/papers-workflow-warnings.test.sh` executes the actual
+existing skill localizer applies the overlay to the installed copies in
+`~/.claude/skills`, `~/.codex/skills` and `~/.agents/skills`. `tests/papers-workflow-warnings.test.sh` executes the actual
 overlaid implementation with controlled dependencies and real exception-valued
 error details. Those tests exercise error propagation, not live provider quality.

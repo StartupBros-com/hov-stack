@@ -6,7 +6,13 @@ jsm-managed `de-slopify` skill (v4, Jeffrey Emanuel, proprietary jsm license) by
 names under `~/.claude/skills/de-slopify/scripts/` do not exist). Landed as dotfiles PR #893
 (issue #892; eval note: memory `anti-slop-skill-list-vet-2026-09`).
 
-## Local changes to SKILL.md (whole-file overlay; everything else is upstream v4 text)
+This repository carries only the scripts below. The SKILL.md change is a modified copy of
+the proprietary upstream file, so a public tree cannot carry it: it lives in the host's
+patch, `<overlay>/skills-patches/de-slopify/` (`SKILL.md`, `.base/SKILL.md`,
+`.base/VERSION`), which `skills-localize.sh` adds to this one and 3-way merges onto the
+installed skill. Without it the scripts still install and SKILL.md stays upstream's.
+
+## Local changes to SKILL.md (the host's patch; everything else is upstream v4 text)
 
 - Core Insight: upstream's "You can't do this with regex or a script" replaced by "a script
   reliably catches the deterministic tells ... judgment handles everything else". Measured
@@ -45,6 +51,7 @@ Re-pull `facts.js` manually if wanted:
     gh api 'repos/Aboudjem/humanizer-skill/contents/cli/lib/facts.js?ref=HEAD' --jq .content | base64 -d > /tmp/facts-upstream.js
     sha256sum /tmp/facts-upstream.js skills-patches/de-slopify/scripts/facts.js
 
-If jsm ships a new de-slopify version, re-derive this overlay from the new upstream text
-(it is a whole-file copy) rather than re-applying the old one; `skills-localize.sh check`
-reports the drift.
+When jsm ships a new de-slopify version, `skills-localize.sh apply` merges the host's
+SKILL.md change onto it and lists any line both sides changed in its conflicts file;
+`skills-localize.sh rebase de-slopify <version>`, run from a worktree, then moves the
+host's base forward in place.
