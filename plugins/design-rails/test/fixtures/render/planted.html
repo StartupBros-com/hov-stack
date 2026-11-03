@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>render fixture</title>
+<style>
+  body { margin: 0; background: #ffffff; color: #1a1a1a; font: 16px/1.5 sans-serif; }
+  section { padding: 16px; }
+
+  /* Planted: each element with data-expect must be reported under that rule. */
+  #alpha-text { color: rgba(0, 0, 0, 0.45); }
+  #faded { opacity: 0.4; }
+  #clip-y { width: 220px; height: 48px; overflow: hidden; }
+  .tiny { width: 18px; height: 18px; padding: 0; border: 0; background: #1a1a1a; vertical-align: top; }
+  #too-wide { width: 1600px; height: 8px; background: #e0e0e0; }
+
+  /* Controls: none of these may produce a finding. */
+  #large-pass { font-size: 28px; font-weight: 700; color: #888888; }
+  #card { opacity: 0.6; background: #000000; color: #ffffff; padding: 8px; }
+  #big-button { width: 44px; height: 44px; border: 0; background: #1a56db; color: #ffffff; }
+  .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+  #ellipsis { width: 120px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #lone-icon { width: 20px; height: 20px; padding: 0; border: 0; background: #1a1a1a; margin-left: 200px; }
+  #gradient { background-image: linear-gradient(#ffffff, #f0f0f0); color: #aaaaaa; }
+  #off { color: #c8c8c8; background: #f4f4f4; border: 0; height: 44px; }
+  #collapsed { height: 0; overflow: hidden; }
+  #scroller { width: 200px; overflow-x: auto; white-space: nowrap; }
+</style>
+</head>
+<body>
+<section>
+  <p id="alpha-text" data-expect="text-contrast">Forty-five percent black reads as black in source.</p>
+  <div id="faded" data-expect="text-contrast"><p>Opacity on a wrapper fades this text.</p></div>
+  <div id="clip-y" data-expect="text-clipped"><p>Several wrapped lines of copy in a box only two lines tall, so the last of them are cut off at the bottom edge.</p></div>
+  <div><button class="tiny" id="tiny-a" data-expect="target-size" aria-label="previous"></button><button class="tiny" id="tiny-b" data-expect="target-size" aria-label="next"></button></div>
+  <div id="too-wide" data-expect="page-overflow-x"></div>
+</section>
+<section>
+  <p id="pass-text">Plain body copy at full strength.</p>
+  <h2 id="large-pass">Large grey heading</h2>
+  <div id="card">White text on a 60%-opacity black card</div>
+  <div><button id="big-button">Go</button></div>
+  <span class="sr-only" style="color: #bbbbbb">Screen-reader-only label, in a colour that would fail if it were seen</span>
+  <div id="ellipsis">A label long enough to be truncated with an ellipsis</div>
+  <p>Read the <a href="#terms">terms</a> before you start.</p>
+  <div><button id="lone-icon" aria-label="close"></button></div>
+  <div><label><input type="checkbox"> Remember me</label></div>
+  <div><button id="off" disabled>Unavailable</button></div>
+  <p id="gradient">Text over a gradient is not measured.</p>
+  <div id="collapsed"><p>Collapsed panel content, hidden on purpose.</p></div>
+  <div id="scroller">A long line inside a horizontal scroller is reachable, so it is not clipped.</div>
+</section>
+</body>
+</html>

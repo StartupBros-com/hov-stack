@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// design-rails dispatcher: posture | scan | propose | decide | tighten | bump
+// design-rails dispatcher: posture | scan | propose | decide | render | tighten | bump
 // Each verb is a self-contained dependency-free script; this file only routes.
 import { spawnSync } from "node:child_process";
 import { dirname, join } from "node:path";
@@ -13,6 +13,7 @@ const VERBS = {
   scan: "scan.mjs",
   propose: "propose.mjs",
   decide: "decide.mjs",
+  render: "render.mjs",
   // tighten and bump are scan modes:
   //   design-rails tighten <file> [root]
   //   design-rails bump <key>=<n> <file> [root] --reason="…"
@@ -28,6 +29,8 @@ usage:
   design-rails scan <root> [--json] [--fail-on=…] drift measurement + CI gate
   design-rails propose <app> [--mode=dark] [--brand=<name>] [--out=design/]  author DESIGN.md + tokens
   design-rails decide <app> [--record slug=option]          visual decision pages
+  design-rails render <url|page.html> [--viewport=WxH,…] [--json] [--fail-on=<n>]
+                                                 rendered-page checks in headless Chrome
   design-rails tighten <budgets-file> [root]     lower CI budgets to actuals
   design-rails bump <key>=<n> <budgets-file> [root] --reason="…"
                                                  the one sanctioned budget raise
