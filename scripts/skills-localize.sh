@@ -68,8 +68,10 @@
 #   apply                 (default) enforce policy on ~/.claude/skills (+ ~/.codex/skills
 #                         and ~/.agents/skills for the layer, ~/.codex/skills for
 #                         allowlisted forks)
-#   --dry-run             print what apply would do, change nothing
-#   check                 exit 1 + DRIFT: lines if a live tree diverges (consumed by
+#   --dry-run             print what apply would do, change nothing. It is a mode, not a
+#                         flag: `apply --dry-run` exits 2, as does any extra word after
+#                         apply, --dry-run, check or audit
+#   check                exit 1 + DRIFT: lines if a live tree diverges (consumed by
 #                         harness-doctor)
 #   audit                 read-only report (dotfiles#1202): for every file under
 #                         plugins/hov-stack/skills/, print name | sha256 | deployed-claude
@@ -128,6 +130,17 @@ VOCAB='\bbr (create|list|close|update|ready|show|sync|dep)\b|\bbv (--|robot|prio
 
 usage() { echo "usage: skills-localize.sh [apply|--dry-run|check|audit|unapply <skill>...|forget <skill>...|rebase <skill> <version>]" >&2; }
 
+# apply, --dry-run, check and audit take no further arguments. A trailing word used to
+# be ignored, so `apply --dry-run` did a real apply; refuse it before anything changes.
+# Checked on the original argv, before the modes below shift theirs.
+if [ "$#" -gt 1 ]; then
+  case "$1" in
+    apply|--dry-run|check|audit)
+      echo "skills-localize: '$1' takes no further arguments (got: ${*:2}). For a dry run, run 'skills-localize.sh --dry-run' with nothing after it." >&2
+      usage; exit 2 ;;
+  esac
+fi
+
 MODE="apply"; DRY=0
 case "${1:-apply}" in
   apply)          MODE="apply" ;;
@@ -136,7 +149,7 @@ case "${1:-apply}" in
   audit)          MODE="audit" ;;
   unapply|forget) MODE="$1"; shift; [ "$#" -gt 0 ] || { usage; exit 2; } ;;
   rebase)         MODE="rebase"; shift; [ "$#" -eq 2 ] || { usage; exit 2; } ;;
-  -h|--help)      sed -n '2,97p' "$SELF"; exit 0 ;;
+  -h|--help)      awk 'NR == 1 { next } /^#/ { print; next } { exit }' "$SELF"; exit 0 ;;
   *)              usage; exit 2 ;;
 esac
 
