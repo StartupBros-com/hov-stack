@@ -40,9 +40,9 @@ path:
 
 Each layer was argued for by what it catches. Nothing measured what the product repo
 actually shipped. On 2026-10-17 a read-only "harness pipeline map" did. It was archived in
-dotfiles as `claude/experiments/harness-teardown-2026-10/baseline-map-2026-10-17.txt`,
-deleted with the rest of that kit on 2026-11-03 (dotfiles commit `4f377209` last changed
-it). Its curve, which the kit's scripts reproduced on 2026-10-18:
+dotfiles and deleted with the rest of that kit on 2026-11-03; dotfiles still has it as
+`4f377209:claude/experiments/harness-teardown-2026-10/baseline-map-2026-10-17.txt`.
+Its curve, which the kit's scripts reproduced on 2026-10-18:
 
 | Week of | Merged | Median h | p90 h |
 |---|---|---|---|
@@ -245,8 +245,8 @@ extension, and the kit was deleted under its own condition.
   the product repo.
 - `docs/solutions/best-practices/stop-adversarial-review-loops-on-measured-prevalence-not-a-clean-round.md`:
   the same keep-only-what-is-measured stance, applied to one review loop.
-- dotfiles commit `4f377209`, `claude/experiments/harness-teardown-2026-10/README.md`:
-  the baseline table, the bands, the re-run commands and the kit's deletion condition,
-  met on 2026-11-03.
+- `4f377209:claude/experiments/harness-teardown-2026-10/README.md` in dotfiles: the
+  baseline table, the bands, the re-run commands and the kit's deletion condition, met on
+  2026-11-03.
 - `CLAUDE.md`, Honest Work: a process artifact must name its consumer, the feature
   it gates, its defect class and its deletion condition. The kit's README carries all four.
