@@ -34,9 +34,10 @@ So this observer lives outside the hook path and compares two independent
 signals:
 
   beat  = hooks/lib/seam-heartbeat.js, written from inside every first-party
-          PreToolUse guard process. loop-guard (matcher `*`) used to beat on every
-          tool call; its node start is now skipped unless CLAUDE_LOOP_GUARD=1, so
-          only tools with another node guard (BEAT_COVERED_TOOLS) are compared.
+          PreToolUse guard process. loop-guard (matcher `*`) and settings-guard
+          (Edit|Write|MultiEdit) used to beat on those calls; their node starts are
+          now skipped by the launcher, so only tools whose guards always start
+          (BEAT_COVERED_TOOLS) are compared.
   truth = the session transcript, which Claude Code writes regardless of hook
           health
 
@@ -94,18 +95,32 @@ from floor_assert import FloorNotMet, require_floor  # noqa: E402
 # gigabytes on every run.
 TAIL_BYTES = 256 * 1024
 
-# Tools whose PreToolUse dispatch is witnessed by a beat from a guard OTHER than
-# loop-guard: the first-party node guards that load hooks/lib/pretooluse-decision
-# (settings.json: Bash -> codex-quota/grep-cost/heavy-job/whatsapp/git/runner/shape,
-# EnterWorktree -> canonical-worktree-route-guard, Edit|Write|MultiEdit ->
-# settings-guard). loop-guard (matcher `*`) used to beat on every tool call even
-# unarmed; hooks/bin/node-hook now skips its node start unless CLAUDE_LOOP_GUARD=1
-# (#369), so in a normal session a tool outside this set produces NO beat, and
-# comparing it against beats would flag a healthy session whose last few minutes
-# were Read/Grep/TaskUpdate/Agent calls. Only these tools are therefore used as
-# "truth". Derived from settings.json by tests/test_hook_seam_check.py
-# (SeamCoverageTests), which fails when the registrations and this set drift.
-BEAT_COVERED_TOOLS = frozenset({"Bash", "EnterWorktree", "Edit", "Write", "MultiEdit"})
+# Tools whose PreToolUse dispatch is witnessed by a beat from a node guard that always
+# starts: the first-party guards that load hooks/lib/pretooluse-decision (settings.json:
+# Bash -> codex-quota/grep-cost/heavy-job/whatsapp/git/runner/shape, EnterWorktree ->
+# canonical-worktree-route-guard). Two launcher gates (hooks/bin/node-hook, #369) skip a node
+# start: loop-guard (matcher `*`) unless CLAUDE_LOOP_GUARD=1, and settings-guard (matcher
+# Edit|Write|MultiEdit) unless stdin can name a settings file (about 98.5% of Edit/Write calls
+# skip). So a tool outside this set produces NO beat in a normal session, and comparing it
+# against beats would flag a healthy session whose last few minutes were Read/Grep/Edit calls.
+# Only these tools are therefore used as "truth". Derived from settings.json by
+# tests/test_hook_seam_check.py (SeamCoverageTests), which fails when the registrations, the
+# launcher's gated scripts and this set drift.
+#
+# Detection lost by the settings-guard gate (#369 pass 4): a cwd whose tail window holds
+# Edit/Write/MultiEdit calls but no Bash/EnterWorktree call is no longer examined. Measured over
+# the 7-day weekly window (harness-weekly.sh --window-min 10080) with this file's own scan logic:
+# 1 of 96 examined cwds (1.0%; one worktree whose tail holds a single Edit); of the other 95, at
+# most 1 had its newest covered call move earlier by more than the grace window (0 and 1 in two
+# runs minutes apart). Ad-hoc 30-minute runs were not measured. The documented failure (HARNESS.md "Guard hooks can silently stop
+# firing"; anthropics/claude-code#16047, whose log shows an Edit PreToolUse and a TodoWrite
+# PostToolUse hook dying together) is session-wide: every hook in the cached set stops,
+# Bash guards included, so a dead seam still shows as stale on the next Bash call. #51420 is a
+# scope split (a plugin-scoped hook dies while user-scope hooks keep firing), which cannot
+# separate settings-guard from the Bash guards: all are user-scope registrations in the one
+# settings.json. Beats are keyed by cwd, not by matcher, so the Edit beat never proved the
+# Edit matcher specifically either.
+BEAT_COVERED_TOOLS = frozenset({"Bash", "EnterWorktree"})
 
 # Unknowns are informational; enumerating dozens of scratch cwds would bury the
 # stale lines that matter.

@@ -274,3 +274,90 @@ test('an inherited _hn_stdin / _hn_buf in the caller env never replaces another 
     assert.strictEqual(spawnSync('/bin/sh', [LAUNCHER, hook], { env, input: '{"c":"gh pr create"}', encoding: 'utf8' }).stdout, '[{"c":"gh pr create"}x]');
   } finally { rmTmp(base); }
 });
+
+// ---------------------------------------------------------------------------
+// settings-guard stdin gate: the launcher literals must be derived from GUARDED (#369 pass 4)
+// ---------------------------------------------------------------------------
+
+const SETTINGS_GUARD_JS = path.resolve(__dirname, '..', 'PreToolUse', 'settings-guard.js');
+
+/** Longest substring common to every name (brute force; the names are short). */
+function commonSubstring(names) {
+  const [first, ...rest] = names;
+  let best = '';
+  for (let i = 0; i < first.length; i += 1) {
+    for (let j = i + 1; j <= first.length; j += 1) {
+      const sub = first.slice(i, j);
+      if (sub.length > best.length && rest.every((n) => n.includes(sub))) best = sub;
+    }
+  }
+  return best;
+}
+
+test('settings-guard gate drift: the launcher skips only when run() cannot reach ask(), and its literal is derived from GUARDED', () => {
+  const js = fs.readFileSync(SETTINGS_GUARD_JS, 'utf8');
+  const sh = fs.readFileSync(LAUNCHER, 'utf8');
+  // JS: GUARDED is the only trigger, ask() is called once and only behind it, and the passes before it return the input.
+  const set = js.match(/const GUARDED = new Set\(\[\n((?:  '[^']+',\n)+)\]\);/);
+  assert.ok(set, 'settings-guard.js GUARDED no longer has the expected literal shape');
+  const guarded = [...set[1].matchAll(/'([^']+)'/g)].map((x) => x[1]);
+  assert.deepStrictEqual([...guarded].sort(), ['managed-settings.json', 'settings.json', 'settings.local.json']);
+  assert.strictEqual((js.match(/\bask\(/g) || []).length, 1, 'exactly one ask( call');
+  assert.ok(js.includes('    if (GUARDED.has(path.basename(fp))) {\n      return ask('), 'ask() is only reachable behind GUARDED.has(basename(file_path))');
+  assert.ok(js.includes("    const input = JSON.parse(rawInput);\n    const tool = input.tool_name;\n    if (tool && !/^(Edit|Write|MultiEdit)$/.test(tool)) return rawInput;\n\n    const fp = input.tool_input?.file_path;\n    if (typeof fp !== 'string') return rawInput;\n"));
+  // Entry: stdin accumulated to the cap, run() output through the quiet writer, exit 0.
+  assert.ok(js.includes('if (data.length < 1024 * 1024) data += chunk;'));
+  assert.ok(js.includes('writeHookOutput(run(data), data);'));
+  // Load-time surface: a new top-level require is a new effect to audit before the gate stays valid.
+  assert.deepStrictEqual(js.match(/^const .* = require\('[^']+'\);$/gm).map((l) => l.match(/require\('([^']+)'\)/)[1]),
+    ['path', '../lib/pretooluse-decision', '../lib/hook-output']);
+
+  // Shell: the arm is path-exact and holds the common substring of GUARDED plus the \u00XY escape
+  // prefixes of every character of it.
+  const literal = commonSubstring(guarded);
+  assert.strictEqual(literal, 'settings.');
+  const arm = sh.match(/ {2}\*\/PreToolUse\/settings-guard\.js\)\n {4}_hn_buf=\$\(tr '\\0' '\\1'; echo x\)\n {4}_hn_buf=\$\{_hn_buf%x\}\n {4}case \$_hn_buf in\n {6}(.*)\) _hn_stdin=1 ;;\n {6}\*\) exit 0 ;;\n {4}esac\n {4};;\n/);
+  assert.ok(arm, 'launcher settings-guard arm not found in its expected shape');
+  const pats = arm[1].split(' | ').map((p) => p.replace(/^\*'/, '').replace(/'\*$/, ''));
+  const wanted = new Set(literal.split('').map((c) => `\\u00${c.charCodeAt(0).toString(16).padStart(2, '0')[0]}`));
+  assert.deepStrictEqual(pats, [literal, ...[...wanted].sort()]);
+  assert.deepStrictEqual([...wanted].sort(), ['\\u002', '\\u006', '\\u007']);
+  assert.strictEqual((sh.match(/\[ -z "\$_hn_stdin" \] \|\| \{ printf '%s' "\$_hn_buf" \| /g) || []).length, 2);
+});
+
+test('settings-guard gate: the seed registers settings-guard through the launcher as the only node hook on Edit|Write|MultiEdit PreToolUse besides env-gated loop-guard', () => {
+  const settings = JSON.parse(fs.readFileSync(path.resolve(__dirname, '..', '..', 'settings.json'), 'utf8'));
+  const onEdit = [];
+  for (const g of settings.hooks.PreToolUse) {
+    const ms = !g.matcher ? ['*'] : g.matcher.split('|');
+    if (ms.includes('*') || ms.includes('Edit') || ms.includes('Write') || ms.includes('MultiEdit')) {
+      for (const h of g.hooks) onEdit.push([g.matcher, h.command]);
+    }
+  }
+  assert.deepStrictEqual(onEdit, [
+    ['*', '"$HOME/.claude/hooks/bin/node-hook" "$HOME/.claude/hooks/PreToolUse/loop-guard.js"'],
+    ['Edit|Write|MultiEdit', '"$HOME/.claude/hooks/bin/node-hook" "$HOME/.claude/hooks/PreToolUse/settings-guard.js"'],
+  ]);
+});
+
+test('settings-guard gate: path-exact, skips without node, hands node every byte otherwise', () => {
+  const base = mkTmp('node-hook-sggate-');
+  try {
+    const dir = path.join(base, 'real');
+    fs.mkdirSync(dir);
+    fs.writeFileSync(path.join(dir, 'node'), '#!/bin/sh\nprintf "[%s]" "$(cat; echo x)"\n', { mode: 0o755 });
+    const env = { ...buildEnv(), PATH: `${dir}:/usr/bin:/bin` };
+    const run = (script, input) => spawnSync('/bin/sh', [LAUNCHER, script], { env, input, encoding: 'utf8' });
+    const hook = '/x/PreToolUse/settings-guard.js';
+    assert.strictEqual(run(hook, '{"tool_input":{"file_path":"/a/b.js"}}\n').stdout, '');
+    assert.strictEqual(run(hook, '{"tool_input":{"file_path":"/a/b.js"}}\n').status, 0);
+    assert.strictEqual(run(hook, '{"tool_input":{"file_path":"/a/settings.json"}}\n\n\n').stdout, '[{"tool_input":{"file_path":"/a/settings.json"}}\n\n\nx]');
+    assert.strictEqual(run(hook, '{"p":"/a/s\\u0065ttings.json"}').stdout, '[{"p":"/a/s\\u0065ttings.json"}x]');
+    assert.strictEqual(run(hook, '{"p":"\\u001b[0m"}').stdout, '');
+    // `settings` without the dot cannot be a GUARDED basename.
+    assert.strictEqual(run(hook, '{"p":"/a/settings_json"}').stdout, '');
+    for (const other of ['/x/PreToolUse/settings-guard.json', '/x/PostToolUse/settings-guard.js', 'settings-guard.js', '/x/PreToolUse/not-settings-guard.js']) {
+      assert.strictEqual(run(other, '{"c":"ls"}').stdout, '[{"c":"ls"}x]', other);
+    }
+  } finally { rmTmp(base); }
+});

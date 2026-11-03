@@ -18,7 +18,7 @@
 // the function) used to beat on every tool call whether or not it was armed, as a
 // universal canary. Since #369 the launcher (hooks/bin/node-hook) skips its node
 // start unless CLAUDE_LOOP_GUARD=1, so an unarmed session beats only through the
-// tools another guard covers (Bash, EnterWorktree, Edit/Write/MultiEdit); the
+// tools another guard covers (Bash, EnterWorktree; settings-guard is gated too, pass 4); the
 // checker (scripts/hook-seam-check.py BEAT_COVERED_TOOLS) compares only those.
 //
 // It must be here rather than in setDenyContext(): loop-guard calls that only

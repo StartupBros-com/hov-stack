@@ -411,19 +411,24 @@ class UnknownStateTests(SeamCheckBase):
 
 
 class SeamCoverageTests(SeamCheckBase):
-    """#369: loop-guard (matcher `*`) no longer starts node unless CLAUDE_LOOP_GUARD=1,
-    so only tools another first-party guard covers are paired against beats."""
+    """#369: the launcher no longer starts node for loop-guard (matcher `*`) unless
+    CLAUDE_LOOP_GUARD=1, nor for settings-guard (Edit|Write|MultiEdit) unless stdin can name a
+    settings file, so only tools a guard that always starts covers are paired against beats."""
 
     def test_covered_set_is_exactly_what_other_node_guards_register_for(self):
         import re
 
         settings = json.loads((CLAUDE / "settings.json").read_text(encoding="utf8"))
+        launcher = (CLAUDE / "hooks" / "bin" / "node-hook").read_text(encoding="utf8")
+        # PreToolUse scripts the launcher can skip: one `*/PreToolUse/<name>.js)` case arm each.
+        gated = set(re.findall(r"^  \*/PreToolUse/([\w-]+\.js)\)$", launcher, re.M))
+        self.assertEqual(gated, {"loop-guard.js", "settings-guard.js"})
         covered: set[str] = set()
         for group in settings["hooks"]["PreToolUse"]:
             for h in group["hooks"]:
                 cmd = h["command"]
-                if "node-hook" not in cmd or "loop-guard.js" in cmd:
-                    continue  # dcg and other non-node guards never beat; loop-guard is the gated one
+                if "node-hook" not in cmd or any(f"/{g}" in cmd for g in gated):
+                    continue  # dcg and other non-node guards never beat; the gated ones may be skipped
                 matcher = group.get("matcher") or ""
                 self.assertNotIn("*", matcher, f"a wildcard guard besides loop-guard changes the model: {cmd}")
                 covered |= set(re.split(r"\|", matcher))
@@ -445,7 +450,7 @@ class SeamCoverageTests(SeamCheckBase):
         """A session reading/grepping/tasking for >grace with a beat from an earlier Bash call
         is healthy: those tools produce no beat in a normal session, by design."""
         now = time.time()
-        for tool in ("Read", "Grep", "Glob", "TaskUpdate", "Agent", "Skill", "WebFetch", "mcp__x__get_users_me", "PowerShell"):
+        for tool in ("Read", "Grep", "Glob", "TaskUpdate", "Agent", "Skill", "WebFetch", "mcp__x__get_users_me", "PowerShell", "Edit", "Write", "MultiEdit"):
             with self.subTest(tool=tool):
                 for f in list(self.projects.glob("*")):
                     import shutil

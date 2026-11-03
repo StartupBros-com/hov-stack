@@ -42,9 +42,10 @@
  * every single tool call whether or not the guard was armed. #369 changed that:
  * hooks/bin/node-hook skips loop-guard's node start unless CLAUDE_LOOP_GUARD is
  * exactly `1`, so an unarmed session beats only on tools another first-party
- * guard covers (Bash, EnterWorktree, Edit/Write/MultiEdit), and
+ * guard covers (Bash, EnterWorktree; the same launcher also skips settings-guard
+ * unless stdin can name a settings file, pass 4), and
  * scripts/hook-seam-check.py (BEAT_COVERED_TOOLS) only compares those. The seam
- * is still witnessed by every Bash/Edit/Write call; a session that makes none for
+ * is still witnessed by every Bash/EnterWorktree call; a session that makes none for
  * longer than the grace window is no longer checked.
  * Hooking setDenyContext() instead would NOT work: loop-guard calls it after the
  * opt-in early-return, and git-guard calls it only once a command parses as git.

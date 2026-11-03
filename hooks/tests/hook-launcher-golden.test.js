@@ -225,7 +225,7 @@ for (const tool of ['Edit', 'Write', 'MultiEdit']) {
   add(SG, `settings-guard: ${tool} of settings.json asks`, 'ask', { payload: () => ({ tool_name: tool, tool_input: { file_path: '/home/user/.claude/settings.json' } }) });
 }
 add(SG, 'settings-guard: Edit of managed-settings.json asks', 'ask', { payload: () => ({ tool_name: 'Edit', tool_input: { file_path: '/home/user/.claude/managed-settings.json' } }) });
-add(SG, 'settings-guard: Edit of an unrelated file allowed', 'quiet', { payload: () => ({ tool_name: 'Edit', tool_input: { file_path: '/repo/src/config.json' } }) });
+add(SG, 'settings-guard: Edit of an unrelated file allowed', 'quiet', { skips: true, payload: () => ({ tool_name: 'Edit', tool_input: { file_path: '/repo/src/config.json' } }) });
 add(SG, 'settings-guard: Bash ignored', 'quiet', { payload: () => bash('cat ~/.claude/settings.json') });
 
 const RT = 'PreToolUse/canonical-worktree-route-guard.js';
@@ -430,7 +430,8 @@ const SEAM_RE = /^seam\//;
 const isLoopGuardCase = (spec) => spec.hook === 'PreToolUse/loop-guard.js';
 const gateSkips = (spec) => {
   const e = typeof spec.env === 'object' && spec.env ? spec.env : {};
-  return isLoopGuardCase(spec) && e.CLAUDE_LOOP_GUARD !== '1';
+  // `spec.skips` is hand-declared on settings-guard cases (pass 4): the payload cannot name a settings file.
+  return (isLoopGuardCase(spec) && e.CLAUDE_LOOP_GUARD !== '1') || spec.skips === true;
 };
 const withoutSeam = (files) => Object.fromEntries(Object.entries(files).filter(([k]) => !SEAM_RE.test(k)));
 const seamCount = (files) => Object.keys(files).filter((k) => SEAM_RE.test(k)).length;
@@ -958,4 +959,257 @@ test('PLANTED NEGATIVE 9: a gate keyed to the prefix "command":"gh pr create is 
   prrPlanted(t, 'prefix-keyed gate',
     (s) => s.replace(PRR_LITERALS_RE, '*\'"command":"gh pr create\'*'),
     (spec) => /&& chain|pretty-printed|non-ASCII|escaped|every character/.test(spec.name) && spec.rows > 0);
+});
+
+// ---------------------------------------------------------------------------
+// settings-guard stdin gate (pass 4): reference = the OLD registered form (`node settings-guard.js`
+// through the mise shim). Compared on stdout, exit code, stderr and every file under the sandboxed
+// HOME. The gate may skip node only when the raw bytes cannot decode to a file_path whose basename is
+// GUARDED; a \uXXXX spelling of any character of a GUARDED name must still reach node. The ONE
+// observable the skip drops is the seam beat the hook's module load wrote: a case declares `skips`
+// (written by hand from the payload, never derived from the launcher), and then the OLD run must
+// have left exactly one beat and the NEW run none, everything else identical. Every other case
+// must match including the beat.
+// ---------------------------------------------------------------------------
+
+const SGG = 'PreToolUse/settings-guard.js';
+const SG_CASES = [];
+// expect: the KIND of the OLD answer ('ask' | 'quiet'); skips: true when the gate must not start node.
+const addSg = (name, expect, skips, payload) => SG_CASES.push({ name, hook: SGG, expect, skips, payload: () => payload });
+// transcript_path ends in .txt on purpose: a real one ends in `.jsonl`, which would hand a `.json`-keyed gate
+// the byte sequence it wants on EVERY payload and hide that gate from PLANTED NEGATIVE 12.
+const SG_HEAD = '{"session_id":"golden-sg-0001","transcript_path":"/home/u/.claude/projects/-tmp/golden-sg-0001.txt","cwd":"/tmp/golden","permission_mode":"bypassPermissions","hook_event_name":"PreToolUse"';
+const SG_MI = 'Edit';
+/** Raw JSON text. `fpText` is the already-escaped JSON string body of file_path. */
+const sgRaw = (tool, fpText, input = '', head = SG_HEAD) => `${head},"tool_name":"${tool}","tool_input":{"file_path":"${fpText}"${input}}}`;
+const SG_NAMES = ['settings.json', 'settings.local.json', 'managed-settings.json'];
+const SG_TOOLS = ['Edit', 'Write', 'MultiEdit'];
+const SG_BODY = { Edit: ',"old_string":"a","new_string":"b"', Write: ',"content":"x\\ny"', MultiEdit: ',"edits":[{"old_string":"a","new_string":"b"}]' };
+const sgUni = (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`;
+const sgEscapeAt = (s, i) => s.slice(0, i) + sgUni(s[i]) + s.slice(i + 1);
+const sgEscapeAll = (s) => s.split('').map(sgUni).join('');
+
+// 1. Each GUARDED basename via each tool: asks, node needed.
+for (const name of SG_NAMES) {
+  for (const tool of SG_TOOLS) addSg(`${tool} of ${name} asks`, 'ask', false, sgRaw(tool, `/home/u/.claude/${name}`, SG_BODY[tool]));
+}
+addSg('JSON.stringify spelling (object) of settings.json asks', 'ask', false, JSON.stringify({ session_id: 'golden-sg-0002', cwd: '/tmp/golden', tool_name: 'Edit', tool_input: { file_path: '/home/u/.claude/settings.json', old_string: 'a', new_string: 'b' } }));
+addSg('real-shape head (transcript_path ending .jsonl), settings.json asks', 'ask', false, sgRaw('Edit', '/home/u/.claude/settings.json', SG_BODY.Edit, SG_HEAD.replace('.txt', '.jsonl')));
+addSg('real-shape head (transcript_path ending .jsonl), unrelated file: quiet', 'quiet', true, sgRaw('Edit', '/repo/a.ts', SG_BODY.Edit, SG_HEAD.replace('.txt', '.jsonl')));
+addSg('pretty-printed JSON, settings.local.json asks', 'ask', false, JSON.stringify({ tool_name: 'Write', tool_input: { file_path: '/p/settings.local.json', content: 'x' } }, null, 2));
+addSg('relative path settings.json asks', 'ask', false, sgRaw('Edit', 'settings.json', SG_BODY.Edit));
+addSg('trailing slash on a guarded name still asks (posix basename drops it)', 'ask', false, sgRaw('Edit', '/a/settings.json/', SG_BODY.Edit));
+addSg('escaped slashes (\\/) around a plain guarded name ask', 'ask', false, sgRaw('Edit', '\\/home\\/u\\/.claude\\/settings.json', SG_BODY.Edit));
+addSg('escaped slashes and every character of the name escaped ask', 'ask', false, sgRaw('Write', `\\/home\\/u\\/${sgEscapeAll('settings.json')}`, SG_BODY.Write));
+addSg('no tool_name at all, guarded path (falsy tool passes the tool check) asks', 'ask', false, `${SG_HEAD},"tool_input":{"file_path":"/a/settings.json"}}`);
+addSg('escaped tool_name (Ed\\u0069t) asks', 'ask', false, `${SG_HEAD},"tool_name":"Ed\\u0069t","tool_input":{"file_path":"/a/settings.json"}}`);
+addSg('escaped key name (file\\u005fpath) with a plain value asks', 'ask', false, `${SG_HEAD},"tool_name":"Edit","tool_input":{"file\\u005fpath":"/a/settings.json"}}`);
+addSg('duplicate file_path key, guarded one last (JSON.parse keeps the last) asks', 'ask', false, `${SG_HEAD},"tool_name":"Edit","tool_input":{"file_path":"/a/b.js","file_path":"/a/settings.json"}}`);
+addSg('duplicate file_path key, guarded one first quiet', 'quiet', false, `${SG_HEAD},"tool_name":"Edit","tool_input":{"file_path":"/a/settings.json","file_path":"/a/b.js"}}`);
+addSg('non-ASCII directory, guarded name asks', 'ask', false, JSON.stringify({ tool_name: 'Edit', tool_input: { file_path: '/home/h\u00e9llo/\u2603/settings.json' } }));
+addSg('trailing newlines (3), guarded path asks', 'ask', false, `${sgRaw('Edit', '/a/settings.json', SG_BODY.Edit)}\n\n\n`);
+addSg('leading and trailing whitespace, guarded path asks', 'ask', false, `\n  ${sgRaw('Edit', '/a/settings.json', SG_BODY.Edit)} \t\n`);
+addSg('200 KB Write content, guarded path asks', 'ask', false, sgRaw('Write', '/a/settings.json', `,"content":"${'y'.repeat(200 * 1024)}"`));
+addSg('payload just under the 1 MiB cap, guarded path asks', 'ask', false, (() => {
+  const head = sgRaw('Write', '/a/settings.json', ',"content":""');
+  return sgRaw('Write', '/a/settings.json', `,"content":"${'y'.repeat(1024 * 1024 - 64 - head.length)}"`);
+})());
+
+// 2. Escaped spellings: every character of settings.json escaped on its own, then all of them, both hex cases.
+SG_NAMES[0].split('').forEach((c, i) => addSg(`escaped char ${i} (${c}) of settings.json asks`, 'ask', false, sgRaw('Edit', `/h/${sgEscapeAt('settings.json', i)}`, SG_BODY.Edit)));
+addSg('every character of settings.json escaped asks', 'ask', false, sgRaw('Edit', `/h/${sgEscapeAll('settings.json')}`, SG_BODY.Edit));
+addSg('every character of settings.json escaped, uppercase hex digits asks', 'ask', false, sgRaw('Edit', `/h/${'settings.json'.split('').map((c) => `\\u00${c.charCodeAt(0).toString(16).toUpperCase()}`).join('')}`, SG_BODY.Edit));
+addSg('every character of the whole path escaped asks', 'ask', false, sgRaw('Write', sgEscapeAll('/home/u/.claude/settings.json'), SG_BODY.Write));
+addSg('every character of settings.local.json escaped asks', 'ask', false, sgRaw('Edit', `/h/${sgEscapeAll('settings.local.json')}`, SG_BODY.Edit));
+addSg('every character of managed-settings.json escaped asks', 'ask', false, sgRaw('MultiEdit', `/h/${sgEscapeAll('managed-settings.json')}`, SG_BODY.MultiEdit));
+['settings.local.json', 'managed-settings.json'].forEach((n) => {
+  for (const i of [0, 3, n.indexOf('.')]) addSg(`escaped char ${i} (${n[i]}) of ${n} asks`, 'ask', false, sgRaw('Edit', `/h/${sgEscapeAt(n, i)}`, SG_BODY.Edit));
+});
+
+// 3. Literal only where it cannot matter, or a shape that returns the input: node still runs when the literal is
+// present anywhere (the gate is a necessary condition only), and is skipped when nothing in stdin can spell it.
+addSg('literal only in old_string, plain file_path: quiet', 'quiet', false, sgRaw('Edit', '/a/b.js', ',"old_string":"settings.json","new_string":"b"'));
+addSg('literal only in content, plain file_path: quiet', 'quiet', false, sgRaw('Write', '/a/b.js', ',"content":"{\\"settings.json\\": 1}"'));
+addSg('literal only in new_string, plain file_path: quiet', 'quiet', false, sgRaw('Edit', '/a/b.js', ',"old_string":"a","new_string":"see settings.local.json"'));
+addSg('guarded name only as a directory (settings.json/x.js): quiet', 'quiet', false, sgRaw('Edit', '/a/settings.json/x.js', SG_BODY.Edit));
+addSg('settings.jsonx is not guarded: quiet', 'quiet', false, sgRaw('Edit', '/a/settings.jsonx', SG_BODY.Edit));
+addSg('settings.json.bak is not guarded: quiet', 'quiet', false, sgRaw('Edit', '/a/settings.json.bak', SG_BODY.Edit));
+addSg('settings.js is not guarded: quiet', 'quiet', false, sgRaw('Edit', '/a/settings.js', SG_BODY.Edit));
+addSg('windows separator (a\\\\settings.json) is one posix basename: quiet', 'quiet', false, sgRaw('Edit', 'a\\\\settings.json', SG_BODY.Edit));
+addSg('cwd contains settings. but file_path does not: quiet', 'quiet', false, sgRaw('Edit', '/a/b.js', SG_BODY.Edit, SG_HEAD.replace('"cwd":"/tmp/golden"', '"cwd":"/tmp/settings.d"')));
+addSg('Settings.json (capital S) is not guarded and cannot contain the literal: quiet', 'quiet', true, sgRaw('Edit', '/a/Settings.json', SG_BODY.Edit));
+addSg('SETTINGS.JSON is not guarded: quiet', 'quiet', true, sgRaw('Edit', '/a/SETTINGS.JSON', SG_BODY.Edit));
+addSg('settings without the dot (settings_json) cannot be guarded: quiet', 'quiet', true, sgRaw('Edit', '/a/settings_json', SG_BODY.Edit));
+addSg('trivial Edit of an unrelated file: quiet', 'quiet', true, sgRaw('Edit', '/repo/src/config.json', SG_BODY.Edit));
+addSg('trivial Write of an unrelated file: quiet', 'quiet', true, sgRaw('Write', '/repo/src/app.ts', SG_BODY.Write));
+addSg('trivial MultiEdit of an unrelated file: quiet', 'quiet', true, sgRaw('MultiEdit', '/repo/src/app.ts', SG_BODY.MultiEdit));
+addSg('JSON.stringify spelling, unrelated file: quiet', 'quiet', true, JSON.stringify({ session_id: 'golden-sg-0003', cwd: '/tmp/golden', tool_name: 'Edit', tool_input: { file_path: '/repo/a.js', old_string: 'a', new_string: 'b' } }));
+addSg('escaped spelling that is not the literal (\\u0020 in a name): quiet', 'quiet', false, sgRaw('Edit', '/a/b\\u0020c.js', SG_BODY.Edit));
+addSg('ANSI escape (\\u001b) in the content, unrelated file: quiet', 'quiet', true, sgRaw('Write', '/a/b.js', ',"content":"\\u001b[31mred\\u001b[0m"'));
+addSg('short escapes (\\n \\t \\" \\\\) only, unrelated file: quiet', 'quiet', true, sgRaw('Write', '/a/b.js', ',"content":"l1\\nl2\\t\\"q\\" \\\\ end"'));
+addSg('non-ASCII, unrelated file: quiet', 'quiet', true, JSON.stringify({ tool_name: 'Edit', tool_input: { file_path: '/home/h\u00e9llo/\u2603/x.js' } }));
+addSg('trailing newlines (3), unrelated file: quiet', 'quiet', true, `${sgRaw('Edit', '/a/b.js', SG_BODY.Edit)}\n\n\n`);
+addSg('200 KB Write content, unrelated file: quiet', 'quiet', true, sgRaw('Write', '/a/b.js', `,"content":"${'y'.repeat(200 * 1024)}"`));
+
+// 4. Tool-name and shape variants.
+addSg('Bash with settings.json in the command: quiet', 'quiet', false, `${SG_HEAD},"tool_name":"Bash","tool_input":{"command":"cat ~/.claude/settings.json"}}`);
+addSg('Read of settings.json (not an edit tool): quiet', 'quiet', false, sgRaw('Read', '/a/settings.json'));
+addSg('Grep, no settings anywhere: quiet', 'quiet', true, `${SG_HEAD},"tool_name":"Grep","tool_input":{"pattern":"x"}}`);
+addSg('tool_name EditX (regex is anchored): quiet', 'quiet', false, sgRaw('EditX', '/a/settings.json'));
+addSg('no tool_name, unrelated file_path: quiet', 'quiet', true, `${SG_HEAD},"tool_input":{"file_path":"/a/b.js"}}`);
+addSg('file_path is a number: quiet', 'quiet', true, `${SG_HEAD},"tool_name":"Edit","tool_input":{"file_path":42}}`);
+addSg('file_path is null: quiet', 'quiet', true, `${SG_HEAD},"tool_name":"Edit","tool_input":{"file_path":null}}`);
+addSg('file_path is an array holding a guarded name: quiet', 'quiet', false, `${SG_HEAD},"tool_name":"Edit","tool_input":{"file_path":["/a/settings.json"]}}`);
+addSg('file_path is an object holding a guarded name: quiet', 'quiet', false, `${SG_HEAD},"tool_name":"Edit","tool_input":{"file_path":{"p":"/a/settings.json"}}}`);
+addSg('tool_input missing, no settings anywhere: quiet', 'quiet', true, `${SG_HEAD},"tool_name":"Edit"}`);
+addSg('tool_input is a string: quiet', 'quiet', true, `${SG_HEAD},"tool_name":"Edit","tool_input":"nope"}`);
+
+// 5. Malformed and degenerate stdin.
+addSg('malformed JSON, no literal: quiet', 'quiet', true, '{not json');
+addSg('malformed JSON, with a guarded path: quiet', 'quiet', false, '{"tool_name":"Edit","tool_input":{"file_path":"/a/settings.json"');
+addSg('empty stdin: quiet', 'quiet', true, '');
+addSg('only a newline: quiet', 'quiet', true, '\n');
+addSg('JSON null: quiet', 'quiet', true, 'null');
+addSg('JSON array: quiet', 'quiet', true, '[]');
+addSg('raw NUL byte inside a guarded path (invalid JSON): quiet', 'quiet', false, '{"tool_name":"Edit","tool_input":{"file_path":"/a/settings.json\u0000"}}');
+addSg('raw NUL byte, unrelated file (invalid JSON): quiet', 'quiet', true, '{"tool_name":"Edit","tool_input":{"file_path":"/a/b.js\u0000"}}');
+addSg('raw \\001 byte, unrelated file (invalid JSON): quiet', 'quiet', true, '{"tool_name":"Edit","tool_input":{"file_path":"/a/b.js\u0001"}}');
+
+// 6. Over the 1 MiB accumulate cap (settings-guard.js stops appending once data.length >= 1 MiB, so node sees a
+// truncated, invalid document in the first three: NEW feeds it the same bytes and must agree).
+const SG_CAP = 1024 * 1024;
+const sgBig = 'y'.repeat(2 * SG_CAP);
+addSg('2 MiB Write content, unrelated file: quiet', 'quiet', true, sgRaw('Write', '/a/b.js', `,"content":"${sgBig}"`));
+addSg('2 MiB Write content, guarded path BEFORE the cap (truncated, invalid JSON): quiet', 'quiet', false, `{"tool_name":"Write","tool_input":{"file_path":"/a/settings.json","content":"${sgBig}"},"cwd":"/tmp/golden"}`);
+addSg('2 MiB Write content, guarded path AFTER the cap (node never sees it): quiet', 'quiet', false, `{"tool_name":"Write","tool_input":{"content":"${sgBig}","file_path":"/a/settings.json"}}`);
+addSg('2 MiB, literal only in the tail, plain path: quiet', 'quiet', false, `{"tool_name":"Write","tool_input":{"file_path":"/a/b.js","content":"${sgBig}"},"note":"settings.json"}`);
+addSg('complete guarded object then 1.5 MiB of whitespace (valid JSON inside the cap) asks', 'ask', false, `${sgRaw('Edit', '/a/settings.json', SG_BODY.Edit)}${' '.repeat(SG_CAP + SG_CAP / 2)}`);
+
+let sgOldCache = null;
+function sgRun(world, command, spec) {
+  const fx = plainFx();
+  try { return runOne(world, command, spec, fx); } finally { rmTmp(fx.root); }
+}
+function sgCompare(newWorld) {
+  const reg = commandFor(seedHooks(), SGG);
+  if (!sgOldCache) {
+    const oldWorld = makeWorld();
+    sgOldCache = SG_CASES.map((spec) => sgRun(oldWorld, oldForm(reg.command), spec));
+    process.on('exit', () => rmTmp(oldWorld.base));
+  }
+  return SG_CASES.map((spec, i) => {
+    const oldR = sgOldCache[i];
+    const newR = sgRun(newWorld, reg.command, spec);
+    const diffs = [];
+    if (oldR.stdout !== newR.stdout) diffs.push('stdout');
+    if (oldR.status !== newR.status || oldR.signal !== newR.signal) diffs.push(`exit ${oldR.status}/${oldR.signal} vs ${newR.status}/${newR.signal}`);
+    if (oldR.error !== newR.error) diffs.push('spawn error');
+    if (oldR.stderr !== newR.stderr) diffs.push('stderr');
+    if (spec.skips) {
+      if (JSON.stringify(withoutSeam(oldR.files)) !== JSON.stringify(withoutSeam(newR.files))) diffs.push('files');
+      if (seamCount(oldR.files) !== 1 || seamCount(newR.files) !== 0) diffs.push(`seam beats old=${seamCount(oldR.files)} new=${seamCount(newR.files)} (want 1/0)`);
+    } else if (JSON.stringify(oldR.files) !== JSON.stringify(newR.files)) diffs.push('files');
+    return { spec, oldR, newR, diffs, kind: kindOf(oldR) };
+  });
+}
+
+let sgCur = null;
+const sgCurrent = () => {
+  if (!sgCur) {
+    const w = makeWorld();
+    sgCur = { w, records: sgCompare(w) };
+    process.on('exit', () => rmTmp(w.base));
+  }
+  return sgCur;
+};
+
+test('settings-guard gate: the OLD form pins the corpus (kind per case, one seam beat per run, exit 0, empty stderr)', () => {
+  sgCurrent();
+  const bad = [];
+  SG_CASES.forEach((spec, i) => {
+    const r = sgOldCache[i];
+    if (kindOf(r) !== spec.expect) bad.push(`${spec.name}: expected ${spec.expect}, OLD gave ${kindOf(r)}`);
+    if (r.status !== 0 || r.stderr !== '') bad.push(`${spec.name}: OLD exit/stderr not clean: ${r.status} ${JSON.stringify(r.stderr.slice(0, 80))}`);
+    if (seamCount(r.files) !== 1) bad.push(`${spec.name}: OLD left ${seamCount(r.files)} seam beat(s), want 1`);
+  });
+  assert.deepStrictEqual(bad, []);
+  const asks = SG_CASES.filter((c) => c.expect === 'ask').length;
+  const skips = SG_CASES.filter((c) => c.skips).length;
+  assert.ok(SG_CASES.length >= 90 && asks >= 40 && skips >= 20, `settings-guard corpus decayed: ${SG_CASES.length} cases, ${asks} ask, ${skips} skip`);
+  const names = SG_CASES.map((c) => c.name);
+  assert.strictEqual(new Set(names).size, names.length, 'settings-guard case names are unique');
+  for (const n of SG_NAMES) for (const tool of SG_TOOLS) assert.ok(SG_CASES.some((c) => c.expect === 'ask' && c.name === `${tool} of ${n} asks`));
+});
+
+test('settings-guard gate: OLD vs NEW identical stdout, exit, stderr and files; only the skipped path\'s seam beat differs', (t) => {
+  const { records } = sgCurrent();
+  const bad = records.filter((r) => r.diffs.length).map((r) => `${r.spec.name}: ${r.diffs.join(', ')}`);
+  const skipped = records.filter((r) => r.spec.skips).length;
+  t.diagnostic(`settings-guard cases=${records.length} ask=${records.filter((r) => r.kind === 'ask').length} quiet=${records.filter((r) => r.kind === 'quiet').length} skipped(no node)=${skipped} node-run=${records.length - skipped}`);
+  assert.deepStrictEqual(bad, []);
+});
+
+test('settings-guard gate: a skipped case starts no node at all (NEW never touches the shim, OLD does); node-run cases keep node', () => {
+  const { records } = sgCurrent();
+  const r = records.find((x) => x.spec.name === 'trivial Edit of an unrelated file: quiet');
+  assert.ok(r.oldR.shimHits >= 1);
+  assert.strictEqual(r.newR.shimHits, 0);
+  for (const x of records.filter((y) => y.spec.skips)) assert.strictEqual(x.newR.shimHits, 0, x.spec.name);
+  // Not-skipped cases run the real node, directly (no shim) and still produce the OLD answer.
+  for (const x of records.filter((y) => y.spec.expect === 'ask')) assert.strictEqual(x.newR.stdout, x.oldR.stdout, x.spec.name);
+});
+
+test('settings-guard gate: the skip path completes on a 2 MiB payload with no EPIPE', () => {
+  const { records } = sgCurrent();
+  const big = records.filter((r) => /^2 MiB Write content, unrelated/.test(r.spec.name));
+  assert.strictEqual(big.length, 1);
+  assert.strictEqual(big[0].newR.error, null);
+  assert.strictEqual(big[0].newR.status, 0);
+});
+
+const SG_LITERALS_RE = /\*'settings\.'\* \| \*'\\u002'\* \| \*'\\u006'\* \| \*'\\u007'\*\) _hn_stdin=1/;
+const sgRawText = (spec) => spec.payload();
+function sgPlanted(t, label, mutate, mustBeRed) {
+  const src = mutate(LAUNCHER_SRC);
+  assert.notStrictEqual(src, LAUNCHER_SRC, `${label}: mutation did not apply`);
+  const stub = makeWorld({ stubLauncher: src });
+  try {
+    const records = sgCompare(stub);
+    const red = records.filter((r) => r.diffs.length);
+    const must = records.filter((r) => mustBeRed(r.spec));
+    const missed = must.filter((r) => !r.diffs.length).map((r) => r.spec.name);
+    t.diagnostic(`${label}: ${red.length}/${records.length} red (${must.length} required red, ${must.length - missed.length} were)`);
+    assert.deepStrictEqual(missed, [], `${label}: cases that must be red were green`);
+    assert.ok(must.length >= 3 && red.length >= must.length);
+  } finally { rmTmp(stub.base); }
+}
+
+test('PLANTED NEGATIVE 10: a plain-literal-only gate (no \\u escapes) is red on every escaped-spelling case', (t) => {
+  sgPlanted(t, 'plain-literal-only gate',
+    (s) => s.replace(SG_LITERALS_RE, "*'settings.'*) _hn_stdin=1"),
+    (spec) => spec.expect === 'ask' && !sgRawText(spec).includes('settings.'));
+});
+
+test('PLANTED NEGATIVE 11: a gate that drops stdin before node is red on every ask case', (t) => {
+  sgPlanted(t, 'dropping gate',
+    (s) => s.split('printf \'%s\' "$_hn_buf" |').join('printf \'\' |'),
+    (spec) => spec.expect === 'ask');
+});
+
+test('PLANTED NEGATIVE 12: a gate keyed to `.json` is red on every ask case whose bytes lack the plain `.json`', (t) => {
+  sgPlanted(t, '.json-keyed gate',
+    (s) => s.replace(SG_LITERALS_RE, "*'.json'*) _hn_stdin=1"),
+    (spec) => spec.expect === 'ask' && !sgRawText(spec).includes('.json'));
+});
+
+test('PLANTED NEGATIVE 13: a gate keyed to the single name settings.json is red on settings.local.json asks', (t) => {
+  sgPlanted(t, 'settings.json-keyed gate',
+    (s) => s.replace(SG_LITERALS_RE, "*'settings.json'* | *'\\u002'* | *'\\u006'* | *'\\u007'*) _hn_stdin=1"),
+    (spec) => /settings\.local\.json asks$/.test(spec.name) && sgRawText(spec).includes('settings.local.json'));
+});
+
+test('PLANTED NEGATIVE 14: a gate that never skips cannot hide behind the seam exclusion (skip cases must see 0 beats)', (t) => {
+  sgPlanted(t, 'never-skipping gate',
+    (s) => s.replace(SG_LITERALS_RE, "*) _hn_stdin=1"),
+    (spec) => spec.skips);
 });
