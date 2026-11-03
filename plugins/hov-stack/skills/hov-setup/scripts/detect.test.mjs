@@ -253,6 +253,13 @@ test("SKILL.md finishes in one session: /reload-plugins, never a restart or a se
   assert.doesNotMatch(skillText, /\b(restart|relaunch) (Claude Code|the session|your session)\b(?! or to type)/i);
 });
 
+// Outside bypass mode, Claude Code refused `SKILL_DIR="..."; node "$SKILL_DIR/..."` with "A variable
+// set in this command can't be checked before it runs" (U26 rerun, 2026-11-03).
+test("SKILL.md runs the detector with the path written in, not through a shell variable", () => {
+  assert.ok(skillText.includes('node "<skill-dir>/scripts/detect.mjs" --json'), "no plain detector line");
+  assert.doesNotMatch(skillText, /^[A-Z_]+="[^"\n]*";\s*node\b/m);
+});
+
 // Through `!`, a bare `gh auth login` printed its help and logged nothing in; the web flow
 // showed its one-time code live (U26, 2026-11-03).
 test("SKILL.md's GitHub login line uses the web flow, which works through `!`", () => {

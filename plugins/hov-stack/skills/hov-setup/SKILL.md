@@ -30,10 +30,10 @@ Assume someone who pasted the install line and has never set up Claude Code tool
 
 ## Step 1: look
 
-The detector lives in `scripts/` beside this file. Replace `<skill-dir>` with the absolute path of the directory that holds this `SKILL.md`, and keep the assignment in the same command:
+The detector lives in `scripts/` beside this file. Run it with `<skill-dir>` replaced by the absolute path of the directory that holds this `SKILL.md`. Write the path into the command itself: a shell variable set in the same command makes Claude Code refuse to run it when the session is not in bypass mode.
 
 ```bash
-SKILL_DIR="<skill-dir>"; node "$SKILL_DIR/scripts/detect.mjs" --json
+node "<skill-dir>/scripts/detect.mjs" --json
 ```
 
 It reads `claude plugin marketplace list --json` and `claude plugin list --json` and changes nothing. A plugin counts only when it is installed at user scope, the rule `./setup` uses. Each entry in `plugins` has `name`, `what`, `group` (`guided` or `extra`), `state` (`absent`, `installed`, `disabled` or `not-applicable`), `version`, `installPath`, `otherScopes` and `next`. `alsoInstalled` lists the other hov plugins already installed, each with `name`, `version`, `enabled`, `what` and `start` (the command that starts it).
@@ -52,7 +52,7 @@ Show a card for each `absent` plugin, taken from its section below. Leave out `n
 2. For working on code with Claude: token-eater, pro-gate, and wsl-cdp in WSL2.
 3. For tuning your own Claude setup: harness-vet, rent-check, harness-optimizer.
 
-Then ask which to install, with one multi-select question for each group that has an absent plugin. A question holds at most four options; give a group with only one plugin a "Not now" option too. Recommend from what you know about the user. With nothing else to go on, recommend sign-it. Recommend pro-gate only to someone who already pays for ChatGPT Pro. Tell them they can type `/hov-setup` again any time to add the rest.
+Then ask which to install, with one multi-select question for each group that has an absent plugin. A question holds at most four options; give a group with only one plugin a "Not now" option too. Recommend from what the user has told you in this conversation. The CLAUDE.md and rules this session loaded came with hov-stack, so they say nothing about the user: never read them as a sign of what the user knows or does. With nothing else to go on, recommend sign-it. Recommend pro-gate only to someone who already pays for ChatGPT Pro. Tell them they can type `/hov-setup` again any time to add the rest.
 
 For a `disabled` plugin, ask before running its `next` line.
 
