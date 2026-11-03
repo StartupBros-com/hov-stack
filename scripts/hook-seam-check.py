@@ -34,8 +34,9 @@ So this observer lives outside the hook path and compares two independent
 signals:
 
   beat  = hooks/lib/seam-heartbeat.js, written from inside every first-party
-          PreToolUse guard process (loop-guard's matcher is `*`, so it beats on
-          every tool call regardless of its opt-in state)
+          PreToolUse guard process. loop-guard (matcher `*`) used to beat on every
+          tool call; its node start is now skipped unless CLAUDE_LOOP_GUARD=1, so
+          only tools with another node guard (BEAT_COVERED_TOOLS) are compared.
   truth = the session transcript, which Claude Code writes regardless of hook
           health
 
@@ -92,6 +93,19 @@ from floor_assert import FloorNotMet, require_floor  # noqa: E402
 # flagged — a deliberate false-negative bias, since the alternative is parsing
 # gigabytes on every run.
 TAIL_BYTES = 256 * 1024
+
+# Tools whose PreToolUse dispatch is witnessed by a beat from a guard OTHER than
+# loop-guard: the first-party node guards that load hooks/lib/pretooluse-decision
+# (settings.json: Bash -> codex-quota/grep-cost/heavy-job/whatsapp/git/runner/shape,
+# EnterWorktree -> canonical-worktree-route-guard, Edit|Write|MultiEdit ->
+# settings-guard). loop-guard (matcher `*`) used to beat on every tool call even
+# unarmed; hooks/bin/node-hook now skips its node start unless CLAUDE_LOOP_GUARD=1
+# (#369), so in a normal session a tool outside this set produces NO beat, and
+# comparing it against beats would flag a healthy session whose last few minutes
+# were Read/Grep/TaskUpdate/Agent calls. Only these tools are therefore used as
+# "truth". Derived from settings.json by tests/test_hook_seam_check.py
+# (SeamCoverageTests), which fails when the registrations and this set drift.
+BEAT_COVERED_TOOLS = frozenset({"Bash", "EnterWorktree", "Edit", "Write", "MultiEdit"})
 
 # Unknowns are informational; enumerating dozens of scratch cwds would bury the
 # stale lines that matter.
@@ -197,7 +211,12 @@ def newest_tool_call(path: Path) -> tuple[float | None, float | None, str | None
         content = msg.get("content") if isinstance(msg, dict) else None
         if not isinstance(content, list):
             continue
-        if not any(isinstance(b, dict) and b.get("type") == "tool_use" for b in content):
+        if not any(
+            isinstance(b, dict)
+            and b.get("type") == "tool_use"
+            and b.get("name") in BEAT_COVERED_TOOLS
+            for b in content
+        ):
             continue
         found = parse_iso(rec.get("timestamp", ""))
         if found is None:

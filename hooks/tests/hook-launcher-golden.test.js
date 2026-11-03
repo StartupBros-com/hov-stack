@@ -372,7 +372,7 @@ function runOne(world, command, spec, fx, expectFlags = {}) {
     STRAY_DOT_GIT_FS_ROOT: path.join(home, 'fs-root'),
     ...caseEnv,
   });
-  const payload = spec.payload(fx);
+  const payload = spec.payload(fx, home);
   const stdin = typeof payload === 'string' ? payload : JSON.stringify(payload);
   const res = spawnSync('/bin/sh', ['-c', command], { cwd: fx.cwd, env, input: stdin, encoding: 'utf8', timeout: 60000 });
   // Everything a run legitimately varies on: the throwaway HOME and fixture paths (and the
@@ -384,7 +384,7 @@ function runOne(world, command, spec, fx, expectFlags = {}) {
     .split(path.basename(fx.root)).join('<FXB>')
     .replace(TS_RE, '<TS>')
     .replace(EPOCH_RE, "<EPOCH>");
-  const normFile = (s) => norm(s).replace(/"ppid":\d+/g, "\"ppid\":<PID>").replace(/ppid-\d+/g, "ppid-<PID>").replace(/\b[0-9a-f]{16,}\b/g, "<HASH>");
+  const normFile = (s) => norm(s).replace(/"ppid":\d+/g, "\"ppid\":<PID>").replace(/ppid-\d+/g, "ppid-<PID>").replace(/unknown-\d+/g, "unknown-<PID>").replace(/\b[0-9a-f]{16,}\b/g, "<HASH>");
   const files = {};
   for (const rel of listFiles(home)) {
     if (rel === 'shim.log') continue;
@@ -419,6 +419,22 @@ function kindOf(r) {
  * Run every case under `oldWorld` (old spelling) and `newWorld` (registered spelling).
  * Returns per-case records; nothing is asserted here.
  */
+/**
+ * The loop-guard env gate (pass 2) skips node for loop-guard.js unless CLAUDE_LOOP_GUARD is
+ * exactly `1`. The ONE observable the skip drops is the seam heartbeat file that the hook's
+ * module load used to write (docs: hooks/bin/node-hook, scripts/hook-seam-check.py). For
+ * those cases the OLD run must have left a beat, the NEW run none, and everything else
+ * (stdout, exit code, every other file) must still be identical.
+ */
+const SEAM_RE = /^seam\//;
+const isLoopGuardCase = (spec) => spec.hook === 'PreToolUse/loop-guard.js';
+const gateSkips = (spec) => {
+  const e = typeof spec.env === 'object' && spec.env ? spec.env : {};
+  return isLoopGuardCase(spec) && e.CLAUDE_LOOP_GUARD !== '1';
+};
+const withoutSeam = (files) => Object.fromEntries(Object.entries(files).filter(([k]) => !SEAM_RE.test(k)));
+const seamCount = (files) => Object.keys(files).filter((k) => SEAM_RE.test(k)).length;
+
 function compareAll({ oldWorld, newWorld }) {
   const hooks = seedHooks();
   const records = [];
@@ -433,7 +449,10 @@ function compareAll({ oldWorld, newWorld }) {
       const diffs = [];
       if (oldR.stdout !== newR.stdout) diffs.push('stdout');
       if (oldR.status !== newR.status || oldR.signal !== newR.signal) diffs.push(`exit ${oldR.status}/${oldR.signal} vs ${newR.status}/${newR.signal}`);
-      if (JSON.stringify(oldR.files) !== JSON.stringify(newR.files)) diffs.push('files');
+      if (gateSkips(spec)) {
+        if (JSON.stringify(withoutSeam(oldR.files)) !== JSON.stringify(withoutSeam(newR.files))) diffs.push('files');
+        if (seamCount(oldR.files) !== 1 || seamCount(newR.files) !== 0) diffs.push(`gate: seam beats old=${seamCount(oldR.files)} new=${seamCount(newR.files)} (want 1/0)`);
+      } else if (JSON.stringify(oldR.files) !== JSON.stringify(newR.files)) diffs.push('files');
       records.push({ spec, reg, oldR, newR, diffs, kind: kindOf(oldR), stderrDiffers: oldR.stderr !== newR.stderr });
     } finally {
       rmTmp(fxOld.root);
@@ -583,4 +602,184 @@ test('PLANTED NEGATIVE 2: a launcher that execs node but drops stdin is caught',
     rmTmp(real.base);
     rmTmp(stub.base);
   }
+});
+
+// ---------------------------------------------------------------------------
+// loop-guard env gate (pass 2): reference = the same launcher with the gate block removed
+// ---------------------------------------------------------------------------
+
+const LAUNCHER_SRC = fs.readFileSync(path.join(HOOKS, 'bin', 'node-hook'), 'utf8');
+const GATE_BLOCK_RE = /# Env gate[\s\S]*?\ncase \$1 in[\s\S]*?\nesac\n/;
+const UNGATED_LAUNCHER = LAUNCHER_SRC.replace(GATE_BLOCK_RE, '');
+
+const lgPayload = (tool, input, extra = {}) => ({ session_id: 'golden-gate-01', tool_name: tool, tool_input: input, ...extra });
+const BIG = 'x'.repeat(2 * 1024 * 1024);
+// One entry per (payload, expected kind when armed). Unarmed, every one of them is `quiet`.
+const GATE_PAYLOADS = [
+  ['Bash gh pr merge', () => lgPayload('Bash', { command: 'gh pr merge 5' }), 'deny'],
+  ['Bash gh pr ready', () => lgPayload('Bash', { command: 'gh pr ready 5' }), 'deny'],
+  ['Bash sh -c wrapped merge', () => lgPayload('Bash', { command: 'sh -c "gh pr merge 5"' }), 'deny'],
+  ['Bash loop-ok label', () => lgPayload('Bash', { command: 'gh issue edit 3 --add-label loop-ok' }), 'deny'],
+  ['Bash ls', () => lgPayload('Bash', { command: 'ls' }), 'quiet'],
+  ['Write to the pause flag', (fx, home) => lgPayload('Write', { file_path: path.join(home, '.claude', 'dispatcher.paused'), content: 'x' }), 'deny'],
+  ['TaskUpdate', () => lgPayload('TaskUpdate', { taskId: '1', status: 'completed' }), 'quiet'],
+  ['Agent', () => lgPayload('Agent', { description: 'd', prompt: 'p', subagent_type: 'general-purpose' }), 'quiet'],
+  ['Skill', () => lgPayload('Skill', { skill: 'tdd' }), 'quiet'],
+  ['Read', () => lgPayload('Read', { file_path: '/tmp/x' }), 'quiet'],
+  ['Grep', () => lgPayload('Grep', { pattern: 'x' }), 'quiet'],
+  ['mcp tool', () => lgPayload('mcp__x__get_users_me', {}), 'quiet'],
+  ['no session id', () => ({ tool_name: 'Bash', tool_input: { command: 'ls' } }), 'quiet'],
+  ['malformed JSON', () => '{not json', 'quiet'],
+  ['empty stdin', () => '', 'quiet'],
+  ['2 MiB payload', () => lgPayload('Bash', { command: `echo ${BIG}` }), 'quiet'],
+];
+// `1` is the only value the JS arms on. The rest must all take the no-op path.
+const GATE_ENVS = [
+  ['unset', undefined, false], ['empty', '', false], ['0', '0', false], ['true', 'true', false],
+  ['space-1', ' 1', false], ['1-space', '1 ', false], ['01', '01', false], ['yes', 'yes', false],
+  ['newline-1', '1\n', false], ['1', '1', true],
+];
+const GATE_CASES = [];
+for (const [pname, pfn, armedKind] of GATE_PAYLOADS) {
+  for (const [ename, evalue, armed] of GATE_ENVS) {
+    GATE_CASES.push({
+      name: `gate[${ename}] ${pname}`,
+      hook: 'PreToolUse/loop-guard.js',
+      env: evalue === undefined ? {} : { CLAUDE_LOOP_GUARD: evalue },
+      payload: pfn,
+      armed,
+      expect: armed ? armedKind : 'quiet',
+    });
+  }
+}
+// State-bearing: an over-budget session under `1` (hard counter) and the same files under `0`.
+for (const [ename, evalue, armed] of [['0', '0', false], ['1', '1', true]]) {
+  GATE_CASES.push({
+    name: `gate[${ename}] over-budget session state`,
+    hook: 'PreToolUse/loop-guard.js',
+    env: { CLAUDE_LOOP_GUARD: evalue, CLAUDE_LOOP_MAX: '1' },
+    home: (home) => {
+      const dir = path.join(home, '.claude', '.loop-state');
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, 'golden-gate-over.json'), JSON.stringify({ count: 5, startMs: 1700000000000 }));
+    },
+    payload: () => lgPayload('Bash', { command: 'ls' }, { session_id: 'golden-gate-over' }),
+    armed,
+    expect: armed ? 'deny' : 'quiet',
+  });
+}
+
+/** Run every gate case: ref world (ungated launcher) vs new world; same registered command. */
+function compareGate(refWorld, newWorld) {
+  const reg = commandFor(seedHooks(), 'PreToolUse/loop-guard.js');
+  const out = [];
+  for (const spec of GATE_CASES) {
+    const fxA = plainFx();
+    const fxB = plainFx();
+    try {
+      const refR = runOne(refWorld, reg.command, spec, fxA);
+      const newR = runOne(newWorld, reg.command, spec, fxB);
+      const diffs = [];
+      if (refR.stdout !== newR.stdout) diffs.push('stdout');
+      if (refR.status !== newR.status || refR.signal !== newR.signal) diffs.push(`exit ${refR.status}/${refR.signal} vs ${newR.status}/${newR.signal}`);
+      if (refR.error !== newR.error) diffs.push(`spawn error ${refR.error} vs ${newR.error}`);
+      if (refR.stderr !== newR.stderr) diffs.push('stderr');
+      if (spec.armed) {
+        if (JSON.stringify(refR.files) !== JSON.stringify(newR.files)) diffs.push('files');
+      } else {
+        if (JSON.stringify(withoutSeam(refR.files)) !== JSON.stringify(withoutSeam(newR.files))) diffs.push('files');
+        // The skip path starts no node at all: no beat. The ungated reference still beats once.
+        if (seamCount(refR.files) !== 1 || seamCount(newR.files) !== 0) diffs.push(`seam beats ref=${seamCount(refR.files)} new=${seamCount(newR.files)} (want 1/0)`);
+      }
+      out.push({ spec, refR, newR, diffs, kind: kindOf(refR) });
+    } finally { rmTmp(fxA.root); rmTmp(fxB.root); }
+  }
+  return out;
+}
+
+let gateCache = null;
+function gateComparison() {
+  if (!gateCache) {
+    const ref = makeWorld({ stubLauncher: UNGATED_LAUNCHER });
+    const cur = makeWorld();
+    gateCache = { ref, cur, records: compareGate(ref, cur) };
+    process.on('exit', () => { rmTmp(ref.base); rmTmp(cur.base); });
+  }
+  return gateCache;
+}
+
+test('gate: the reference launcher really is the real one minus the gate block', () => {
+  assert.notStrictEqual(UNGATED_LAUNCHER, LAUNCHER_SRC);
+  assert.ok(!UNGATED_LAUNCHER.includes('loop-guard.js)'), 'gate removal left the case arm');
+  assert.ok(UNGATED_LAUNCHER.includes('exec "$_hn_d/node" "$@"') && UNGATED_LAUNCHER.includes('exec node "$@"'));
+});
+
+test('gate: pinned kinds (armed cases still deny, every unarmed case is quiet), corpus is not decayed', () => {
+  const { records } = gateComparison();
+  const bad = records.filter((r) => r.kind !== r.spec.expect).map((r) => `${r.spec.name}: expected ${r.spec.expect}, ungated gave ${r.kind}`);
+  assert.deepStrictEqual(bad, []);
+  const denies = records.filter((r) => r.kind === 'deny').length;
+  assert.ok(denies >= 5, `armed deny cases decayed: ${denies}`);
+  assert.ok(records.length >= 150, `gate corpus shrank: ${records.length}`);
+});
+
+test('gate: ungated vs gated launcher agree on stdout, exit, stderr and files for every env x payload; only the skipped seam beat differs', (t) => {
+  const { records } = gateComparison();
+  const bad = records.filter((r) => r.diffs.length).map((r) => `${r.spec.name}: ${r.diffs.join(', ')}`);
+  const skipped = records.filter((r) => !r.spec.armed).length;
+  t.diagnostic(`gate cases=${records.length} skipped(unarmed)=${skipped} armed=${records.length - skipped}`);
+  assert.deepStrictEqual(bad, []);
+});
+
+test('gate: the skip path completes on a 2 MiB payload with no EPIPE and drains stdin', () => {
+  const { records } = gateComparison();
+  const big = records.filter((r) => /2 MiB/.test(r.spec.name) && !r.spec.armed);
+  assert.ok(big.length >= 5);
+  for (const r of big) {
+    assert.strictEqual(r.newR.error, null, `${r.spec.name}: ${r.newR.error}`);
+    assert.strictEqual(r.newR.status, 0);
+  }
+});
+
+test('PLANTED NEGATIVE 3: a gate that skips when CLAUDE_LOOP_GUARD=1 (inverted predicate) turns the gate comparison red', (t) => {
+  const inverted = LAUNCHER_SRC.replace('[ "$CLAUDE_LOOP_GUARD" != 1 ]', '[ "$CLAUDE_LOOP_GUARD" = 1 ]');
+  assert.notStrictEqual(inverted, LAUNCHER_SRC);
+  const ref = makeWorld({ stubLauncher: UNGATED_LAUNCHER });
+  const stub = makeWorld({ stubLauncher: inverted });
+  try {
+    const records = compareGate(ref, stub);
+    const red = records.filter((r) => r.diffs.length);
+    const armedDeny = records.filter((r) => r.spec.armed && r.kind === 'deny');
+    const armedDenyLost = armedDeny.filter((r) => r.diffs.length);
+    assert.strictEqual(armedDenyLost.length, armedDeny.length, 'every authority-fence deny must be lost under the inverted gate');
+    assert.ok(armedDeny.length >= 5);
+    t.diagnostic(`inverted predicate: ${red.length}/${records.length} red; ${armedDenyLost.length}/${armedDeny.length} armed denies lost`);
+  } finally { rmTmp(ref.base); rmTmp(stub.base); }
+});
+
+test('PLANTED NEGATIVE 4: a gate with a looser predicate (skips only when the var is empty/unset) is caught by the beat contract', (t) => {
+  const loose = LAUNCHER_SRC.replace('[ "$CLAUDE_LOOP_GUARD" != 1 ]', '[ -z "$CLAUDE_LOOP_GUARD" ]');
+  assert.notStrictEqual(loose, LAUNCHER_SRC);
+  const ref = makeWorld({ stubLauncher: UNGATED_LAUNCHER });
+  const stub = makeWorld({ stubLauncher: loose });
+  try {
+    const records = compareGate(ref, stub);
+    const red = records.filter((r) => r.diffs.length);
+    const mustBeRed = records.filter((r) => !r.spec.armed && /\[(0|true|space-1|1-space|01|yes|newline-1)\]/.test(r.spec.name));
+    const missed = mustBeRed.filter((r) => !r.diffs.length).map((r) => r.spec.name);
+    assert.deepStrictEqual(missed, []);
+    t.diagnostic(`loose predicate: ${red.length}/${records.length} red`);
+  } finally { rmTmp(ref.base); rmTmp(stub.base); }
+});
+
+test('PLANTED NEGATIVE 5: a gate that skips without draining stdin (reported, see diagnostic)', (t) => {
+  const nodrain = LAUNCHER_SRC.replace('      command exec cat >/dev/null 2>&1\n', '');
+  assert.notStrictEqual(nodrain, LAUNCHER_SRC);
+  const ref = makeWorld({ stubLauncher: UNGATED_LAUNCHER });
+  const stub = makeWorld({ stubLauncher: nodrain });
+  try {
+    const records = compareGate(ref, stub);
+    const red = records.filter((r) => r.diffs.length && !r.spec.armed && /2 MiB/.test(r.spec.name));
+    t.diagnostic(`no-drain gate: ${red.length} unarmed 2 MiB cases red; EPIPE seen by the writer in ${red.filter((r) => r.diffs.some((d) => d.startsWith('spawn error'))).length}`);
+  } finally { rmTmp(ref.base); rmTmp(stub.base); }
 });

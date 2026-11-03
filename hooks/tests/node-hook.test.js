@@ -141,6 +141,53 @@ test('stdin, argv, cwd, exit code and env pass through an exec of the real node'
   } finally { rmTmp(base); }
 });
 
+// ---------------------------------------------------------------------------
+// loop-guard env gate: the launcher literal must be the JS predicate (#369 pass 2)
+// ---------------------------------------------------------------------------
+
+const LOOP_GUARD_JS = path.resolve(__dirname, '..', 'PreToolUse', 'loop-guard.js');
+
+test('gate drift: the launcher skips exactly when loop-guard.js returns at its first statement', () => {
+  const js = fs.readFileSync(LOOP_GUARD_JS, 'utf8');
+  const sh = fs.readFileSync(LAUNCHER, 'utf8');
+  // JS: the only read of the env var, and it is the first statement of run().
+  assert.strictEqual((js.match(/process\.env\.CLAUDE_LOOP_GUARD/g) || []).length, 1, 'loop-guard.js reads CLAUDE_LOOP_GUARD exactly once');
+  const m = js.match(/function run\(rawInput\) \{\n  if \(process\.env\.CLAUDE_LOOP_GUARD !== '([^']*)'\) return rawInput;\n/);
+  assert.ok(m, 'loop-guard.js run() no longer opens with the env no-op return: the launcher gate is invalid, remove or re-derive it');
+  // The entry point drains stdin and writes only a changed result (the no-op prints nothing).
+  assert.ok(js.includes("process.stdin.on('end', () => writeHookOutput(run(data), data));"));
+  // Shell: same variable, same literal, inverted comparison, same script name.
+  const g = sh.match(/case \$1 in\n  \*\/PreToolUse\/loop-guard\.js\)\n    if \[ "\$CLAUDE_LOOP_GUARD" != ([^ ]+) \]; then\n      command exec cat >\/dev\/null 2>&1\n      exit 0\n/);
+  assert.ok(g, 'launcher gate block not found in its expected shape');
+  assert.strictEqual(g[1], m[1], 'launcher literal differs from the JS literal');
+  assert.strictEqual(m[1], '1');
+});
+
+test('gate: the seed registers loop-guard through the launcher with no env or flag in the command (gate needs no settings change)', () => {
+  const settings = JSON.parse(fs.readFileSync(path.resolve(__dirname, '..', '..', 'settings.json'), 'utf8'));
+  const cmds = [];
+  for (const g of settings.hooks.PreToolUse) for (const h of g.hooks) if (h.command.includes('loop-guard.js')) cmds.push([g.matcher, h.command]);
+  assert.deepStrictEqual(cmds, [['*', '"$HOME/.claude/hooks/bin/node-hook" "$HOME/.claude/hooks/PreToolUse/loop-guard.js"']]);
+});
+
+test('gate: only the loop-guard script is gated; any other script starts node (case arm is path-exact)', () => {
+  const base = mkTmp('node-hook-gate-');
+  try {
+    const real = fakeNodeDir(base, 'real', 'real');
+    const env = { ...buildEnv(), PATH: `${real}:/usr/bin:/bin` };
+    delete env.CLAUDE_LOOP_GUARD;
+    for (const script of ['/x/PreToolUse/loop-guard.json', '/x/PreToolUse/not-loop-guard.js', '/x/PostToolUse/loop-guard.js', 'loop-guard.js']) {
+      const r = spawnSync('/bin/sh', [LAUNCHER, script], { env, input: '{}', encoding: 'utf8' });
+      assert.strictEqual(r.stdout, `real:${script}\n`, script);
+    }
+    const skipped = spawnSync('/bin/sh', [LAUNCHER, '/x/PreToolUse/loop-guard.js'], { env, input: '{}', encoding: 'utf8' });
+    assert.strictEqual(skipped.stdout, '');
+    assert.strictEqual(skipped.status, 0);
+    const armed = spawnSync('/bin/sh', [LAUNCHER, '/x/PreToolUse/loop-guard.js'], { env: { ...env, CLAUDE_LOOP_GUARD: '1' }, input: '{}', encoding: 'utf8' });
+    assert.strictEqual(armed.stdout, 'real:/x/PreToolUse/loop-guard.js\n');
+  } finally { rmTmp(base); }
+});
+
 test('the launcher never stats /mnt entries (a drvfs lookup is ~2 ms each)', () => {
   const src = fs.readFileSync(LAUNCHER, 'utf8');
   // The case arm that skips them must precede the only file test in the loop.

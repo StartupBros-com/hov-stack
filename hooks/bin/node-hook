@@ -25,6 +25,28 @@
 # files, which is the cost being removed. Other `shims` dirs (nodenv, rbenv) are
 # not guessed at: they are not measured here.
 #
+# Env gate (#369, pass 2): hooks/PreToolUse/loop-guard.js is registered with matcher `*`
+# (every tool call) and, unless env CLAUDE_LOOP_GUARD is exactly `1`, its run() returns
+# its input untouched at its first statement (loop-guard.js: `if (process.env.CLAUDE_LOOP_GUARD
+# !== '1') return rawInput;`), the entry point reads stdin to EOF and writeHookOutput()
+# prints nothing, exit 0. So the launcher skips the ~30 ms node start for that one script
+# when the same predicate is false: it drains stdin (as the JS does) and exits 0.
+#   - `[ "$X" = 1 ]` is the shell spelling of `process.env.X !== '1'` negated: both are exact
+#     string equality (unset, empty, `0`, `true`, ` 1`, `1 ` and `01` all skip in both).
+#   - Only the `case` pattern below costs anything on every other hook: a builtin string
+#     match, no process, no syscall.
+#   - hooks/tests/hook-launcher-golden.test.js and node-hook.test.js tie the literal here
+#     to the JS (drift test) and prove old == new for every env spelling.
+# The one thing the skip drops is the seam heartbeat that module load used to write;
+# scripts/hook-seam-check.py pairs beats only against tools some other guard covers.
+case $1 in
+  */PreToolUse/loop-guard.js)
+    if [ "$CLAUDE_LOOP_GUARD" != 1 ]; then
+      command exec cat >/dev/null 2>&1
+      exit 0
+    fi
+    ;;
+esac
 # `set -f`: the unquoted $PATH split below must not glob-expand an entry holding
 # `*`, `?` or `[` into other directories, which the shell's own command lookup
 # never does. Nothing after it relies on globbing ("$@" is quoted).

@@ -35,7 +35,7 @@ def iso(epoch: float) -> str:
 DEFAULT_CWD = "/home/user/SITES/repo"
 
 
-def tool_call_record(epoch: float, cwd: str = DEFAULT_CWD) -> str:
+def tool_call_record(epoch: float, cwd: str = DEFAULT_CWD, tool: str = "Bash") -> str:
     return json.dumps(
         {
             "type": "assistant",
@@ -44,7 +44,7 @@ def tool_call_record(epoch: float, cwd: str = DEFAULT_CWD) -> str:
             "message": {
                 "id": "msg_1",
                 "model": "claude-opus-5",
-                "content": [{"type": "tool_use", "name": "Bash", "input": {"command": "ls"}}],
+                "content": [{"type": "tool_use", "name": tool, "input": {"command": "ls"}}],
             },
         }
     )
@@ -408,6 +408,62 @@ class UnknownStateTests(SeamCheckBase):
         self.assertEqual(result["stale"], [])
         self.assertEqual(len(result["unknown"]), 1)
         self.assertIsNone(result["unknown"][0]["last_beat"])
+
+
+class SeamCoverageTests(SeamCheckBase):
+    """#369: loop-guard (matcher `*`) no longer starts node unless CLAUDE_LOOP_GUARD=1,
+    so only tools another first-party guard covers are paired against beats."""
+
+    def test_covered_set_is_exactly_what_other_node_guards_register_for(self):
+        import re
+
+        settings = json.loads((CLAUDE / "settings.json").read_text(encoding="utf8"))
+        covered: set[str] = set()
+        for group in settings["hooks"]["PreToolUse"]:
+            for h in group["hooks"]:
+                cmd = h["command"]
+                if "node-hook" not in cmd or "loop-guard.js" in cmd:
+                    continue  # dcg and other non-node guards never beat; loop-guard is the gated one
+                matcher = group.get("matcher") or ""
+                self.assertNotIn("*", matcher, f"a wildcard guard besides loop-guard changes the model: {cmd}")
+                covered |= set(re.split(r"\|", matcher))
+        self.assertEqual(set(HSC.BEAT_COVERED_TOOLS), covered)
+
+    def test_planted_negative_stale_seam_still_flagged_on_covered_tool(self):
+        now = time.time()
+        for tool in sorted(HSC.BEAT_COVERED_TOOLS):
+            with self.subTest(tool=tool):
+                for f in list(self.projects.glob("*")):
+                    import shutil
+
+                    shutil.rmtree(f)
+                self.write_session("-home-user-repo", [tool_call_record(now - 10, tool=tool)], mtime=now - 10)
+                self.write_beat(DEFAULT_CWD, now - 900)
+                self.assertEqual(len(self.scan()["stale"]), 1)
+
+    def test_calls_to_tools_without_another_guard_are_not_evidence(self):
+        """A session reading/grepping/tasking for >grace with a beat from an earlier Bash call
+        is healthy: those tools produce no beat in a normal session, by design."""
+        now = time.time()
+        for tool in ("Read", "Grep", "Glob", "TaskUpdate", "Agent", "Skill", "WebFetch", "mcp__x__get_users_me", "PowerShell"):
+            with self.subTest(tool=tool):
+                for f in list(self.projects.glob("*")):
+                    import shutil
+
+                    shutil.rmtree(f)
+                self.write_session("-home-user-repo", [tool_call_record(now - 10, tool=tool)], mtime=now - 10)
+                self.write_beat(DEFAULT_CWD, now - 900)
+                result = self.scan()
+                self.assertEqual(result["stale"], [])
+                self.assertEqual(result["unknown"], [])  # no covered call at all: not examined, not unknown
+                self.assertEqual(result["healthy"], 0)
+
+    def test_covered_call_after_uncovered_ones_is_still_measured_against_the_beat(self):
+        now = time.time()
+        recs = [tool_call_record(now - 400, tool="Read"), tool_call_record(now - 5, tool="Bash")]
+        self.write_session("-home-user-repo", recs, mtime=now - 5)
+        self.write_beat(DEFAULT_CWD, now - 900)
+        self.assertEqual(len(self.scan()["stale"]), 1)
 
 
 class QuietSessionTests(SeamCheckBase):
