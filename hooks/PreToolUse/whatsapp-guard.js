@@ -31,6 +31,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { allow, ask, deny, setDenyContext } = require('../lib/pretooluse-decision');
 const { writeHookOutput } = require('../lib/hook-output');
+const { executedPieces, NestingTooDeep } = require('../lib/heredoc-scan');
 
 const TRUTHY = new Set(['1', 'true', 'yes', 'on']);
 // Paths follow the home directory of the account running the hook, never a
@@ -77,6 +78,11 @@ const CLI_VALUE_FLAGS = new Set([
   '--type',
 ]);
 const LITERAL_DATA_COMMANDS = new Set(['echo', 'printf', 'rg', 'grep', 'egrep', 'fgrep', 'cat']);
+// Commands that only look a name or path up. A segment that names wacli as
+// their argument is inspection, never a run: no decision, and its `$` or `~`
+// is not the wacli call's. (`command -v` is told apart in commandShape,
+// because plain `command wacli` runs it.)
+const INSPECTION_COMMANDS = new Set(['which', 'type', 'ls', 'stat']);
 const BOUNDED_READ_PATHS = new Set([
   'calls list',
   'chats list',
@@ -172,15 +178,19 @@ function lex(script) {
   let doubleQuoted = false;
   let hadUnquoted = false;
   let shellExpanded = false;
+  let ansiC = false;
+  let wordStart = -1;
 
   const push = () => {
     if (value !== '' || quoted) {
       tokens.push({
         type: 'word',
+        start: wordStart,
         value,
         quoted,
         singleOnly: singleQuoted && !doubleQuoted && !hadUnquoted,
         shellExpanded,
+        ansiC,
       });
     }
     value = '';
@@ -189,10 +199,13 @@ function lex(script) {
     doubleQuoted = false;
     hadUnquoted = false;
     shellExpanded = false;
+    ansiC = false;
+    wordStart = -1;
   };
 
   for (let i = 0; i < script.length; i += 1) {
     const char = script[i];
+    if (quote === null && wordStart < 0 && !/\s/.test(char)) wordStart = i;
     if (quote === "'") {
       if (char === "'") quote = null;
       else value += char;
@@ -235,6 +248,7 @@ function lex(script) {
       // valueContainsWacliToken and hasRawShellExpansion already key on.
       value += char;
       hadUnquoted = true;
+      ansiC = true;
       quote = "$'";
       quoted = true;
       singleQuoted = true;
@@ -252,14 +266,17 @@ function lex(script) {
     // into a new command segment. Quoted < and > remain ordinary data.
     if (char === '<' || char === '>' || (char === '&' && script[i + 1] === '>')) {
       let prefix = '';
+      let operatorStart = i;
       if ((char === '<' || char === '>') && /^\d+$/.test(value)) {
         prefix = value;
+        operatorStart = wordStart;
         value = '';
         quoted = false;
         singleQuoted = false;
         doubleQuoted = false;
         hadUnquoted = false;
         shellExpanded = false;
+        ansiC = false;
       } else {
         push();
       }
@@ -278,8 +295,10 @@ function lex(script) {
       } else if (script[i + 1] === '|') {
         operator = '>|';
       }
+      wordStart = -1;
       tokens.push({
         type: 'word',
+        start: operatorStart,
         value: prefix + operator,
         quoted: false,
         singleOnly: false,
@@ -295,7 +314,7 @@ function lex(script) {
         operator += char;
         i += 1;
       }
-      tokens.push({ type: 'op', value: operator });
+      tokens.push({ type: 'op', value: operator, start: i - operator.length + 1 });
       continue;
     }
     if (/\s/.test(char)) {
@@ -554,21 +573,49 @@ function hasDynamicSensitiveAssignment(script) {
   return false;
 }
 
+function hasAnsiCLiteral(script) {
+  return lex(script).some((token) => token.type === 'word' && token.ansiC);
+}
+
+const STATEMENT_SEPARATORS = new Set(['\n', ';', '&', '&&', '|', '||']);
+
+/** Command segments, each carrying `raw`: the source text of the statement it
+ * sits in (between two of `\n ; & && | ||`). The lexer also splits at
+ * `( ) { }`, so a `${X}` or `<(...)` in an argument leaves its tail in another
+ * segment; `raw` keeps it with the command that owns it and leaves the other
+ * statements' `$` out. */
 function segments(script) {
   const out = [];
   let current = [];
+  let statement = [];
+  let statementStart = -1;
+  const closeStatement = (end) => {
+    const raw = script.slice(statementStart, end);
+    for (const segment of statement) segment.raw = raw;
+    statement = [];
+    statementStart = -1;
+  };
   // Keep heredoc bodies visible. A quoted delimiter suppresses expansion by
   // the outer shell but the body may still be executable input to `bash`/`sh`;
   // treating it as inert would fail open on `bash <<"EOF"`.
   for (const token of lex(script)) {
+    if (statementStart < 0) statementStart = token.start;
     if (token.type === 'op') {
-      if (current.length) out.push(current);
+      if (current.length) {
+        out.push(current);
+        statement.push(current);
+      }
       current = [];
+      if (STATEMENT_SEPARATORS.has(token.value)) closeStatement(token.start);
     } else {
       current.push(token);
     }
   }
-  if (current.length) out.push(current);
+  if (current.length) {
+    out.push(current);
+    statement.push(current);
+  }
+  if (statement.length) closeStatement(script.length);
   return out;
 }
 
@@ -623,6 +670,7 @@ function commandShape(words, inherited = {}) {
     ? inherited.privileged
     : false;
   let opaque = false;
+  let inspection = false;
 
   const applyAssignment = (parsed) => {
     if (parsed.name === 'WACLI_READONLY') {
@@ -736,6 +784,9 @@ function commandShape(words, inherited = {}) {
       const commandWrapper = wrapper === 'command';
       index += 1;
       while (index < words.length && words[index].value.startsWith('-')) {
+        // `command -v NAME` / `-V NAME` only looks NAME up; without them
+        // `command NAME` runs it.
+        if (commandWrapper && /^-[pvV]*[vV][pvV]*$/.test(words[index].value)) inspection = true;
         if (commandWrapper && words[index].value === '-p') trustedLookup = false;
         index += 1;
       }
@@ -816,6 +867,7 @@ function commandShape(words, inherited = {}) {
     trustedLookup,
     privileged,
     opaque,
+    inspection,
   };
 }
 
@@ -1115,10 +1167,25 @@ function hasDynamicWacliExecutable(script, parsedSegments, inherited) {
   return dollarCommand.test(script) || parameterCommand.test(script) || backtickCommand.test(script);
 }
 
+function isInspection(shape, executable) {
+  if (shape.inspection || INSPECTION_COMMANDS.has(executable)) return true;
+  // `test -x PATH` / `[ -x PATH ]`: a file test, not a call.
+  return (executable === 'test' || executable === '[') && /^-[a-z]$/.test(shape.args[0] || '');
+}
+
+/** True when this one segment's own words carry a shell expansion. The
+ * `$` or `~` of another segment is not its business. */
+function segmentExpands(shape) {
+  return hasShellExpansion(shape)
+    || (typeof shape.words.raw === 'string' && hasRawShellExpansion(shape.words.raw))
+    || shape.words.some((word) =>
+    word.ansiC
+    || (!word.singleOnly && /`|\$[A-Za-z0-9_@*#?!${(["'$]/.test(word.value)));
+}
+
 function classify(script, depth = 0, inherited = {}) {
   if (depth > 3) return { seen: /\bwacli\b/.test(script), unsafe: true, dynamic: true };
   const braceExpanded = hasUnquotedBraceExpansion(script);
-  const rawExpanded = hasRawShellExpansion(script);
   if (/\bwacli\b/.test(script)
       && (hasDynamicSensitiveAssignment(script) || hasSynthesizedWacliExecutable(script))) {
     return { seen: true, unsafe: true, dynamic: true };
@@ -1142,13 +1209,16 @@ function classify(script, depth = 0, inherited = {}) {
     const shape = commandShape(words, inherited);
     const executable = basename(shape.executable);
 
-    if (executable === 'wacli') {
+    if (executable === 'wacli' && !shape.inspection) {
       seen = true;
       if (braceExpanded || !safeInvocation(shape)) {
         return {
           seen: true,
           unsafe: true,
-          dynamic: rawExpanded || braceExpanded || hasShellExpansion(shape) || /[<>=]\(/.test(script),
+          // Read from this segment, not from a `$` elsewhere in the script. An
+          // ANSI-C literal anywhere still counts: it is not inspection data.
+          dynamic: braceExpanded || segmentExpands(shape) || hasAnsiCLiteral(script)
+            || /[<>=]\(/.test(script),
         };
       }
       continue;
@@ -1259,7 +1329,8 @@ function classify(script, depth = 0, inherited = {}) {
     const visibleWacli = words.some((word) =>
       !word.singleOnly && !assignment(word.value) && basename(word.value) === 'wacli'
     );
-    if ((shape.opaque || visibleWacli) && !LITERAL_DATA_COMMANDS.has(executable)) {
+    if ((shape.opaque || visibleWacli) && !LITERAL_DATA_COMMANDS.has(executable)
+        && !isInspection(shape, executable)) {
       return {
         seen: true,
         unsafe: true,
@@ -1270,6 +1341,31 @@ function classify(script, depth = 0, inherited = {}) {
   }
 
   return { seen, unsafe: false, dynamic: false, exclusive };
+}
+
+/** classify() over the shell text that runs: heredoc bodies that only get
+ * written to a file and `#` comments are not read (their quotes and `$` are
+ * data and must neither raise a false deny nor desync the lexer), while a
+ * body that runs (`bash <<EOF`, a file written then executed) is its own
+ * piece. Each piece is classified alone and the strictest result wins
+ * (deny > ask > none); pieces are never joined. A command with several
+ * pieces is also read whole, so a variable, alias or PATH set before a body
+ * that runs still reaches it. Throws NestingTooDeep. */
+function classifyCommand(command) {
+  const pieces = executedPieces(command);
+  const results = pieces.map((piece) => classify(piece.text));
+  if (pieces.length > 1) results.push(classify(command));
+  const merged = { seen: false, unsafe: false, dynamic: false, exclusive: true };
+  for (const result of results) {
+    merged.seen ||= result.seen;
+    if (result.unsafe) {
+      merged.unsafe = true;
+      merged.dynamic ||= result.dynamic;
+    }
+    if (result.exclusive === false) merged.exclusive = false;
+  }
+  if (merged.unsafe) merged.exclusive = false;
+  return merged;
 }
 
 // Literal named Discord CLI, optional global flags (argparse also accepts their
@@ -1330,9 +1426,15 @@ function run(rawInput) {
 
     let result;
     try {
-      result = classify(command);
-    } catch {
-      return askDecision || rawInput;
+      result = classifyCommand(command);
+    } catch (err) {
+      // Nesting past the heredoc scanner's limit cannot be read: a command
+      // that names wacli asks rather than passing unread.
+      if (err instanceof NestingTooDeep && /\bwacli\b/.test(command)) {
+        result = { seen: true, unsafe: true, dynamic: false };
+      } else {
+        return askDecision || rawInput;
+      }
     }
     if (result.unsafe && result.dynamic) {
       return deny(
@@ -1376,6 +1478,7 @@ if (require.main === module) {
 module.exports = {
   run,
   classify,
+  classifyCommand,
   lex,
   segments,
   commandShape,
