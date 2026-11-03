@@ -1,0 +1,26 @@
+[
+ {
+  "cycle": "17",
+  "releaseDate": "2024-09-26",
+  "eol": "2029-11-08",
+  "latest": "17.11",
+  "latestReleaseDate": "2026-08-10",
+  "lts": false
+ },
+ {
+  "cycle": "15",
+  "releaseDate": "2022-10-13",
+  "eol": "2027-11-11",
+  "latest": "15.19",
+  "latestReleaseDate": "2026-08-10",
+  "lts": false
+ },
+ {
+  "cycle": "13",
+  "releaseDate": "2020-09-24",
+  "eol": "2025-11-13",
+  "latest": "13.23",
+  "latestReleaseDate": "2025-11-10",
+  "lts": false
+ }
+]
