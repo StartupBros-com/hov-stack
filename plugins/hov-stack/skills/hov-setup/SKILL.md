@@ -127,6 +127,8 @@ Ready means `"ok": true`. If `wsl-cdp` is not found, try `~/.local/bin/wsl-cdp d
 
 **Card:** Turns a click-through of your product into a polished video, adding the cursor, clicks and captions, and checks the result. Free to use; before commercial use, check the licence of Remotion, the video library it builds on. You install a few free video tools. Recording live uses wsl-cdp's browser, so it works best on Windows with WSL.
 
+**Before its card:** run `pnpm --version`. On pnpm 11 or later, its install stops partway (issue #377). Add one sentence to the card saying it can't finish installing on this computer yet and a fix is coming, and don't recommend it.
+
 Check:
 
 ```bash
@@ -136,7 +138,7 @@ pnpm --dir "<install-path>" narrated:smoke
 Ready means exit 0. This test run builds a short sample clip, renders it and reads it back with OCR. A missing ffmpeg, ffprobe, tesseract or Chrome counts as a failure, not a skip.
 
 1. The video tools: `node --version` (its skill asks for node 24; its package.json allows 20 or later), `pnpm --version`, `ffmpeg -version`, `ffprobe -version` and `tesseract --version`. On macOS, run `brew install ffmpeg tesseract` after a yes (ffprobe comes with ffmpeg). On Debian or Ubuntu the user runs `sudo apt install ffmpeg tesseract-ocr` in a separate terminal window. It also needs Chrome or Chromium: set `REMOTION_BROWSER_EXECUTABLE` on the check command if the browser is not at `/usr/bin/google-chrome`, `/usr/bin/chromium` or `/snap/bin/chromium` (on macOS, `/Applications/Google Chrome.app/Contents/MacOS/Google Chrome`).
-2. The plugin ships without its Node packages. Install them with `pnpm install --dir "<install-path>"`. A plugin update moves it to a new `installPath`, so repeat this after each update. With pnpm 10 or later this can stop with `ERR_PNPM_IGNORED_BUILDS` (issue #377). Then tell the user plainly that this version of product-video can't finish installing on its own yet and a fix is coming, and offer to skip it for now. Don't change pnpm's settings to get past it.
+2. The plugin ships without its Node packages. Install them with `pnpm install --dir "<install-path>"`. A plugin update moves it to a new `installPath`, so repeat this after each update. With pnpm 11 this stops with `ERR_PNPM_IGNORED_BUILDS` (issue #377). Then tell the user plainly that this version of product-video can't finish installing on its own yet and a fix is coming, and offer to skip it for now. Don't change pnpm's settings, or approve a package's build script, to get past it.
 3. Run the check.
 
 ### token-eater
