@@ -33,6 +33,8 @@ async function assertBlocked(command) {
   const reason = reasonOf(res);
   assert.match(reason, /paired bounded character spans/i);
   assert.match(reason, /`rg -F`[^.]*literal anchors/i);
+  assert.match(reason, /rerun the same search with `rg`/i);
+  assert.doesNotMatch(reason, /swapping grep engines/i);
   assert.match(reason, /bounded (?:section|extraction)[^.]*anchors in stages/i);
   assert.match(reason, /`ast-grep`[^.]*only[^.]*structural/i);
 }
@@ -44,6 +46,7 @@ async function assertPatternFileBlocked(command) {
   const reason = reasonOf(res);
   assert.match(reason, /regex pattern file/i);
   assert.match(reason, /`rg -F`[^.]*literal anchors/i);
+  assert.match(reason, /rerun the same search with `rg`/i);
   assert.match(reason, /bounded (?:section|extraction)[^.]*anchors in stages/i);
   assert.match(reason, /`ast-grep`[^.]*only[^.]*structural/i);
 }
@@ -81,7 +84,7 @@ test('blocks the incident pattern and the 900 threshold boundary', async () => {
   for (const command of [
     "grep -E '.{0,120}(StartupBros|Will Mitchell).{0,160}' page.html",
     "ugrep -E '.{0,60}anchor.{0,70}' page.html",
-    "rg '.{0,30}anchor.{0,30}' page.html",
+    "ugrep '.{0,30}anchor.{0,30}' page.html",
     "grep -E '[^x]{0,40}anchor[^y]{0,40}' page.html",
   ]) {
     await assertBlocked(command);
@@ -91,17 +94,38 @@ test('blocks the incident pattern and the 900 threshold boundary', async () => {
   assertQuietPassThrough(await runHook(HOOK, payload));
 });
 
-test('ripgrep multiline -U is a flag, not an option that consumes the pattern', async () => {
-  await assertBlocked("rg -U '.{0,256}anchor.{0,256}' page.html");
+test('-U is a flag, not an option that consumes the pattern', async () => {
+  await assertBlocked("ugrep -U '.{0,256}anchor.{0,256}' page.html");
 });
 
 test('blocks issue 74143 paired bounded character classes', async () => {
   for (const command of [
     "ugrep -G -io -C 2 -E '[^{};]{0,60}(StartupBros|Will Mitchell)[^{};]{0,70}' page.html",
-    "rg '[A-Za-z0-9_]{0,64}anchor[[:space:]]{0,64}' page.html",
+    "ugrep '[A-Za-z0-9_]{0,64}anchor[[:space:]]{0,64}' page.html",
   ]) {
     await assertBlocked(command);
   }
+});
+
+// ripgrep is out of scope (header): Claude Code's shim shadows only find and
+// grep, and upstream #74143 reports rg unaffected. Every shape the guard
+// denies or bounds for grep passes through untouched for rg and ripgrep.
+test('rg and ripgrep pass through: the embedded ugrep shim never reaches them', async () => {
+  for (const command of [
+    "rg '.{0,30}anchor.{0,30}' page.html",
+    "rg -U '.{0,256}anchor.{0,256}' page.html",
+    "rg '[A-Za-z0-9_]{0,64}anchor[[:space:]]{0,64}' page.html",
+    "sudo env LC_ALL=C /opt/tools/rg --regexp='.{0,400}x.{0,400}' .",
+    "nice -n 5 ripgrep -E '[\\s\\S]{0,300}x[\\s\\S]{0,300}' file",
+    'rg --file patterns.txt file',
+    'rg "$pattern" file',
+    'rg "${prefix}.{0,40}z.{0,40}" f',
+    "rg --fixed-strings --pcre2 --regexp '.{0,1000}x.{0,1000}' file",
+  ]) {
+    assertQuietPassThrough(await runHook(HOOK, bash(command)));
+  }
+  // A grep in the same call is still judged.
+  await assertBlocked("rg -F anchor f; grep -E '.{0,60}x.{0,60}' f");
 });
 
 test('blocks BRE spans without ever executing the supplied command', async () => {
@@ -113,7 +137,7 @@ test('parses exact and open-ended ERE/BRE repeats on one-character atoms', async
     "grep -E '.{30}anchor.{30}' page.html",
     "grep -E 'a{30}anchorZ{30}' page.html",
     String.raw`grep '.\{30\}anchor.\{30\}' page.html`,
-    String.raw`rg '\s{30}anchor\w{30}' page.html`,
+    String.raw`ugrep '\s{30}anchor\w{30}' page.html`,
     String.raw`grep -E '\.{30}anchor\-{30}' page.html`,
     "grep -E '.{1,}anchor.{1,}' page.html",
     String.raw`grep '.\{1,\}anchor.\{1,\}' page.html`,
@@ -125,12 +149,12 @@ test('parses exact and open-ended ERE/BRE repeats on one-character atoms', async
 test('blocks explicit regexp options, pipelines, wrappers, and grep-family basenames', async () => {
   for (const command of [
     "curl -s https://example.test | command ugrep -E -e '.{0,512}x.{0,512}'",
-    "sudo env LC_ALL=C /opt/tools/rg --regexp='.{0,400}x.{0,400}' .",
-    "nice -n 5 ripgrep -E '[\\s\\S]{0,300}x[\\s\\S]{0,300}' file",
+    "sudo env LC_ALL=C /opt/tools/ugrep --regexp='.{0,400}x.{0,400}' .",
+    "nice -n 5 /usr/local/bin/egrep '[\\s\\S]{0,300}x[\\s\\S]{0,300}' file",
     "pcregrep --regexp '.{0,700}x.{0,100}' file",
     "ug -E '.{0,100000000000000000000}x.{0,100000000000000000000}' file",
     "2>grep.err ugrep -E '.{30}x.{30}' file",
-    ">grep.out rg '.{30}x.{30}' file",
+    ">grep.out ugrep '.{30}x.{30}' file",
   ]) {
     await assertBlocked(command);
   }
@@ -138,17 +162,17 @@ test('blocks explicit regexp options, pipelines, wrappers, and grep-family basen
 
 test('rewrites opaque expanded regex operands under a bound instead of refusing', async () => {
   for (const command of [
-    'rg "$pattern" file',
+    'ugrep "$pattern" file',
     'grep -E ${pattern} file',
-    'rg --regexp="$pattern" file',
+    'ugrep --regexp="$pattern" file',
     'grep -e "$pattern" file',
   ]) {
     await assertOpaquePatternRewritten(command);
   }
 
   for (const command of [
-    'rg -F "$pattern" file',
-    "rg '$pattern' file",
+    'ugrep -F "$pattern" file',
+    "ugrep '$pattern' file",
   ]) {
     const payload = bash(command);
     assertQuietPassThrough(await runHook(HOOK, payload));
@@ -185,8 +209,8 @@ test('reads a dollar as live only where Bash expands it, whatever backslashes pr
     String.raw`grep -n 'left=\$(git -C "\$wt" rev-list' f`,
     String.raw`grep 'a\$b' f`,
     String.raw`grep "a\\\$b" f`,
-    String.raw`rg 'fresh_pushpr_out=\$(HOME=' f`,
-    String.raw`rg -n 'case "\$out"' f`,
+    String.raw`grep 'fresh_pushpr_out=\$(HOME=' f`,
+    String.raw`grep -n 'case "\$out"' f`,
     String.raw`grep -E "end$"tail f`,
     String.raw`grep $'a\tb' f`,
   ]) {
@@ -222,9 +246,9 @@ test('decodes ANSI-C quoted patterns before the span check', async () => {
 
 test('does not inspect replace values or filenames as regex operands', async () => {
   for (const command of [
-    "rg --replace '.{30}x.{30}' anchor file",
-    "rg --replace='.{30}x.{30}' anchor file",
-    "rg anchor '.{30}x.{30}'",
+    "ugrep --replace '.{30}x.{30}' anchor file",
+    "ugrep --replace='.{30}x.{30}' anchor file",
+    "ugrep anchor '.{30}x.{30}'",
     "grep -E anchor '.{30}x.{30}'",
   ]) {
     const payload = bash(command);
@@ -274,7 +298,7 @@ test('scans attached, separate, clustered, and permuted regexp options', async (
     "grep -E -e'.{30}x.{30}' file",
     "grep -Ee'.{30}x.{30}' file",
     "grep file -E --regexp='.{30}x.{30}'",
-    "rg --iglob '*.js' '.{30}x.{30}' src",
+    "ugrep --iglob '*.js' '.{30}x.{30}' src",
   ]) {
     await assertBlocked(command);
   }
@@ -286,7 +310,7 @@ test('scans attached, separate, clustered, and permuted regexp options', async (
 test('denies regex pattern files unless the invocation is fixed-string-only', async () => {
   for (const command of [
     'grep -f patterns.txt file',
-    'rg --file patterns.txt file',
+    'ugrep --file patterns.txt file',
     'grep -F -E --file=patterns.txt file',
   ]) {
     await assertPatternFileBlocked(command);
@@ -294,7 +318,7 @@ test('denies regex pattern files unless the invocation is fixed-string-only', as
 
   for (const command of [
     'grep -F -f patterns.txt file',
-    'rg --fixed-strings --file=patterns.txt file',
+    'ugrep --fixed-strings --file=patterns.txt file',
   ]) {
     const payload = bash(command);
     assertQuietPassThrough(await runHook(HOOK, payload));
@@ -304,20 +328,20 @@ test('denies regex pattern files unless the invocation is fixed-string-only', as
 test('fixed-string mode is safe unless a contradictory regex mode is also present', async () => {
   for (const command of [
     "grep -F '.{0,1000}x.{0,1000}' file",
-    "rg --fixed-strings '.{0,1000}x.{0,1000}' file",
+    "ugrep --fixed-strings '.{0,1000}x.{0,1000}' file",
   ]) {
     const payload = bash(command);
     assertQuietPassThrough(await runHook(HOOK, payload));
   }
 
   await assertBlocked("grep -F -E '.{0,1000}x.{0,1000}' file");
-  await assertBlocked("rg --fixed-strings --pcre2 --regexp '.{0,1000}x.{0,1000}' file");
+  await assertBlocked("ugrep --fixed-strings --perl-regexp --regexp '.{0,1000}x.{0,1000}' file");
 });
 
 test('allows ordinary regexes, one bounded span, and paired spans below threshold', async () => {
   for (const command of [
     "grep -E 'StartupBros|Will Mitchell' page.html",
-    'rg "anchor$" page.html',
+    'ugrep "anchor$" page.html',
     "grep -E '.{0,1000}anchor' page.html",
     "grep -E '.{0,29}anchor.{0,29}' page.html",
     String.raw`grep '.\{0,10\}anchor.\{0,20\}' page.html`,
@@ -400,10 +424,10 @@ test('the CPU bound kills a runaway foreground command and a backgrounded one it
 test('pattern-file and paired-span denials are unchanged by the rewrite branch', async () => {
   await assertBlocked("grep -E '.{0,60}x.{0,60}' f");
   await assertPatternFileBlocked('grep -f pats.txt f');
-  await assertPatternFileBlocked('rg --file=pats.txt f');
+  await assertPatternFileBlocked('ugrep --file=pats.txt f');
   // An expansion does not launder a literal expensive pair into the rewrite.
   await assertBlocked('grep -E "$x.{0,60}y.{0,60}" f');
-  await assertBlocked('rg "${prefix}.{0,40}z.{0,40}" f');
+  await assertBlocked('ugrep "${prefix}.{0,40}z.{0,40}" f');
 });
 
 test('a bound written into the command is baked into the prefix, and the environment outranks it', async () => {
@@ -716,8 +740,8 @@ test('#1859 Pro round 1 P1: a stripped heredoc opener inside a double-quoted bas
 // The finding's own case: the quoted script's heredocs sat inside a word the
 // outer scan did not read, so the script is scanned as fresh text and an odd
 // quote in its body hides nothing.
-test('#1859 Pro round 1 P1: a quoted bash -c script with an odd quote in a heredoc body still shows the rg after it', async () => {
-  await assertBlocked(`bash -c 'cat <<EOF\nsay "hi\nEOF\nrg -e "[a-z]{1,30}[a-z]{1,30}" f'`);
+test('#1859 Pro round 1 P1: a quoted bash -c script with an odd quote in a heredoc body still shows the grep after it', async () => {
+  await assertBlocked(`bash -c 'cat <<EOF\nsay "hi\nEOF\ngrep -E -e "[a-z]{1,30}[a-z]{1,30}" f'`);
   await assertBlocked(`sh -c "cat <<EOF\nit's\nEOF\n${SPAN_GREP}"`);
   // A single-quoted script's `$( )` runs in the inner shell and is left in.
   await assertBlocked(`bash -c 'echo $(cat <<EOF\nsay "hi\nEOF\n); ${SPAN_GREP}'`);

@@ -2,11 +2,24 @@
 /**
  * PreToolUse Hook: grep bounded-repeat cost guard
  *
- * Claude Code can shadow `grep` with an embedded ugrep binary. Some paired
- * bounded single-character regex repeats make affected ugrep builds grow
- * without bound on large inputs. This guard stops the high-cost command shape
- * before Bash starts it. It is deliberately engine-agnostic so swapping `grep` for `ugrep`,
- * `rg`, or another grep-family binary cannot turn a retry into another OOM.
+ * Claude Code can shadow `grep` with an embedded ugrep binary (the shell
+ * snapshot's "Shadow find/grep with embedded bfs/ugrep" block, still present
+ * in 2.1.317). Some paired bounded single-character regex repeats make
+ * affected ugrep builds grow without bound on large inputs (upstream #74143).
+ * This guard stops the high-cost command shape before Bash starts it, for the
+ * names that shim answers to and their grep-family kin: grep, egrep, ugrep,
+ * ug and pcregrep.
+ *
+ * ripgrep is out of scope, and a denial says so, so `rg` is the retry. The
+ * shim never routes `rg` through ugrep (it shadows only find and grep; when
+ * no rg is installed the snapshot aliases `rg` to Claude Code's bundled
+ * ripgrep), and #74143 reports GNU grep and rg unaffected. The guard denied
+ * rg anyway until 2026-11-03: 142 of 388 denials in the week before were rg.
+ *
+ * The grep half is defense in depth. claude-env.sh, sourced before every Bash
+ * call through CLAUDE_ENV_FILE, runs `unset -f grep find`, so on a harness
+ * host `grep` is the system binary. A hook cannot observe whether that file
+ * ran in the shell that will execute the command, so the grep rules stay.
  *
  * Three shapes are handled:
  *   - paired bounded spans with an upper-bound product >= COST_THRESHOLD: DENY.
@@ -121,13 +134,12 @@ const { isCodexSpend } = require('../lib/codex-spend');
 // Paired 30-character spans are the lowest reviewed unsafe boundary. Keep the
 // comparison inclusive so 30x30 is denied while 29x29 remains available.
 const COST_THRESHOLD = 900n;
+// No rg or ripgrep: see the header. Both pass through this guard untouched.
 const GREP_FAMILY = new Set([
   'grep',
   'egrep',
   'ugrep',
   'ug',
-  'rg',
-  'ripgrep',
   'pcregrep',
 ]);
 
@@ -607,7 +619,7 @@ function grepPatterns(tokens, commandIndex, end, engineOverride = null) {
   let patternFile = false;
   let options = true;
   let syntax = ['grep'].includes(engine) ? 'bre'
-    : ['egrep', 'rg', 'ripgrep', 'pcregrep'].includes(engine) ? 'ere'
+    : ['egrep', 'pcregrep'].includes(engine) ? 'ere'
       : 'both';
 
   for (let i = commandIndex + 1; i < end; i += 1) {
@@ -1053,9 +1065,10 @@ function findDangerousInvocation(command) {
 }
 
 const SAFE_ALTERNATIVES =
-  'Use `rg -F` with literal anchors. For HTML/PDF, extract a bounded section, ' +
-  'then search literal anchors in stages. Use `ast-grep` only for structural ' +
-  'source-code queries. Do not retry by swapping grep engines.';
+  'Use `rg -F` with literal anchors, or rerun the same search with `rg`: ' +
+  'ripgrep is not affected and this guard does not inspect it. For HTML/PDF, ' +
+  'extract a bounded section, then search literal anchors in stages. Use ' +
+  '`ast-grep` only for structural source-code queries.';
 
 // The CPU bound is the time bound: on Claude Code 2.1.x a foreground call
 // that reaches the Bash tool's timeout is moved to the background, not
