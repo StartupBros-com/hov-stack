@@ -721,3 +721,35 @@ test('registered hook asks on any Resend command, never denies, when the Resend 
     assert.doesNotMatch(run(command), /"deny"|"block"|"ask"/, command);
   }
 });
+
+test('a quote the lexer cannot pair no longer hides a brace-expanded Resend send', async () => {
+  const commands = [
+    'echo "it\'s"; resend-cli emails {send,list} --from \'a@b.c\' --confirm-send',
+    "echo $'a\\'b'; resend-cli emails {send,list} --from 'a@b.c' --confirm-send",
+    "echo \\'; resend-cli emails {send,list} --from 'a@b.c' --confirm-send",
+    'echo "it\'s"; resend-cli emails se{nd,nd} --from \'a@b.c\' --confirm-send',
+    // Comments and heredoc bodies with an apostrophe, then a brace-expanded send.
+    "echo hi # it's\nresend-cli emails {send,list} --from 'a@b.c' --confirm-send",
+    "cat <<EOF >/dev/null\nit's\nEOF\nresend-cli emails se{nd,nd} --from 'a@b.c' --confirm-send",
+    // The plain shapes asked already and keep asking.
+    "echo hi # it's\nresend-cli emails send --from 'a@b.c' --confirm-send",
+    "cat <<EOF >/dev/null\nit's\nEOF\nresend-cli emails send --from 'a@b.c' --confirm-send",
+    "bash <<'EOF'\nresend-cli emails send --from 'a@b.c' --confirm-send\nEOF",
+  ];
+  for (const command of commands) assert.strictEqual(decision(command), 'ask', command);
+  for (const command of commands.slice(0, 4)) {
+    await ask(command);
+    await ask(command, INTEGRATED);
+  }
+  // Single-quoted text inside one line is still not executed.
+  for (const command of [
+    "echo 'resend-cli emails {send,list} --confirm-send'",
+    "echo $'a\\'b'; resend-cli emails list --json",
+  ]) assert.strictEqual(decision(command), null, command);
+});
+
+test('a command nested past the heredoc scanner limit that names the Resend CLI asks', () => {
+  const nested = `# c\necho ${'$('.repeat(70)}echo hi${')'.repeat(70)}; resend-cli emails list`;
+  assert.strictEqual(decision(nested), 'ask');
+  assert.strictEqual(decision(`# c\necho ${'$('.repeat(70)}echo hi${')'.repeat(70)}`), null);
+});

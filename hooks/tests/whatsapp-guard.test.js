@@ -564,3 +564,67 @@ test('preserves malformed and unsupported tool inputs', async () => {
   const missing = { tool_name: 'Bash', tool_input: {} };
   assertQuietPassThrough(await runHook(HOOK, missing));
 });
+
+test('inspection of wacli as data passes even when another segment expands a variable', async () => {
+  // The shell-expanded-values deny is read from the segment that runs wacli,
+  // not from a `$` anywhere in the script. A heredoc body written to a file,
+  // `command -v`, `ls`, `rg` and the other inspection commands only name it.
+  for (const command of [
+    "cat > /tmp/x/report.md <<'EOF'\n# report\nwe checked wacli --version and $HOME it's\nEOF",
+    "cd /tmp/x && cat > drv.js <<'EOF'\nconst H = process.env.HOME + '/hooks'; // wacli $X it's\nEOF\nnode drv.js",
+    "cd /tmp; which -a pnpm node; echo $PATH | tr ':' '\\n' | head -20; echo $PNPM_HOME; command -v wacli codex; ls -la ~",
+    'ls $HOME/.local/bin | head; ls ~/.local/state/wacli 2>&1 | head',
+    "cd /tmp/x; D=/tmp/y\nrg -n -i -F wacli skills/a/SKILL.md | cut -c1-260; rg -n -F access $D --glob '!memory/**'",
+    'command -V wacli; echo $HOME',
+    'command -pv wacli; echo $HOME',
+    'type wacli; echo $HOME',
+    'which wacli; echo $HOME',
+    'stat /tmp/x/wacli; echo $HOME',
+    'test -x /tmp/x/wacli; echo $HOME',
+    '[ -x /tmp/x/wacli ] && echo $HOME',
+  ]) await assertPass(command);
+});
+
+test('commands that run wacli stay gated next to the inspection exemptions', async () => {
+  for (const command of [
+    'wacli send text --to 123 --message hi',
+    'command wacli send text --to 123 --message hi',
+    'xargs wacli send text --to 123 --message hi',
+    'env wacli send text --to 123 --message hi',
+    'sudo wacli send text --to 123 --message hi',
+    'exec wacli send text --to 123 --message hi',
+    'nice wacli send text --to 123 --message hi',
+    'timeout 5 wacli send text --to 123 --message hi',
+    'command -v wacli; wacli send text --to 123 --message hi',
+    // A `$` in an inspection segment no longer turns the send into a deny.
+    'echo $HOME; wacli send text --to 123 --message hi',
+    // A comment or a heredoc body holding an apostrophe cannot desync the
+    // lexer and hide the send on the next line.
+    "echo hi # it's\nwacli send text --to 123 --message hi",
+    "cat <<EOF >/dev/null\nit's\nEOF\nwacli send text --to 123 --message hi",
+    // A heredoc body that runs stays gated, as does a script written to a
+    // file and executed later in the same call.
+    "bash <<'EOF'\nwacli send text --to 123 --message hi\nEOF",
+    "cat > s.sh <<'EOF'\nwacli send text --to 123 --message hi\nEOF\nbash s.sh",
+    "cat <<'EOF' | bash\nwacli send text --to 123 --message hi\nEOF",
+  ]) await assertAsk(command);
+
+  for (const command of [
+    'W=wacli; $W send text --to 123 --message hi',
+    'wacli send text --to $N --message hi',
+    'echo $HOME; wacli send text --to $N --message hi',
+    "echo hi # it's\nwacli send text --to $N --message hi",
+    // The ANSI-C literal keeps its deny (the test above pins it): it is not
+    // read as inspection data.
+    "echo $'a\\'b'; wacli send text --to 123 --message hi",
+    // Taint set before a heredoc split still reaches the body that runs.
+    "W=wacli\nbash <<EOF\n$W send text --to 123 --message hi\nEOF",
+    "alias w=$(printf wacli)\nbash <<'EOF'\nw send text --to 123 --message hi\nEOF",
+    "export PATH=$HOME/bin:$PATH\nbash <<'EOF'\nwacli send text --to 123 --message hi\nEOF",
+  ]) await assertDenied(command);
+});
+
+test('a command nested past the heredoc scanner limit that names wacli asks', async () => {
+  const nested = `# c\necho ${'$('.repeat(70)}echo hi${')'.repeat(70)}; wacli send text --to 123 --message hi`;
+  await assertAsk(nested);
+});
