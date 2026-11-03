@@ -844,7 +844,50 @@ printf '%s\n' "require('./cycle-a');" >"$HOOKWIRE_HOME/.claude/hooks/PreToolUse/
 : >"$HOOKWIRE_HOME/.claude/hooks/agent-scoped/fence.js"
 write_agent "$HOOKWIRE_HOME" fenced "$HOOKWIRE_HOME/.claude/hooks/agent-scoped/fence.js"
 write_agent "$HOOKWIRE_HOME" unfenced "$HOOKWIRE_HOME/.claude/hooks/agent-scoped/gone.js"
+# Two more live paths (#355). papercut@hov runs its vendored copies of
+# papercut-log, read-ceiling-chunk and structured-output-unwrap from its own
+# hooks/hooks.json, so settings.json never names them, and
+# scripts/lib/wf-pin-lex.js loads PreToolUse/fanout-admission.js as a library
+# for section 23. On 2026-11-03 those four were four of section 8's five orphan
+# WARNs on wm, all false. PLANTED NEGATIVES: a disabled plugin's hooks.json and a
+# require() from a script's test vouch for nothing.
+HOOKWIRE_PLUG=$HOOKWIRE_HOME/.claude/plugins/cache/mk/plug/1.0.0
+HOOKWIRE_OFF=$HOOKWIRE_HOME/.claude/plugins/cache/mk/off/1.0.0
+mkdir -p "$HOOKWIRE_PLUG/hooks" "$HOOKWIRE_OFF/hooks" \
+  "$HOOKWIRE_HOME/.claude/scripts/lib" "$HOOKWIRE_HOME/.claude/scripts/tests"
+: >"$HOOKWIRE_HOME/.claude/hooks/PreToolUse/plugin-guard.js"
+: >"$HOOKWIRE_HOME/.claude/hooks/PreToolUse/off-plugin-guard.js"
+: >"$HOOKWIRE_HOME/.claude/hooks/PreToolUse/lib-guard.js"
+: >"$HOOKWIRE_HOME/.claude/hooks/PreToolUse/test-only-guard.js"
+printf '%s\n' '{"hooks":{"PreToolUse":[{"matcher":"Read","hooks":[{"type":"command","command":"node \"${CLAUDE_PLUGIN_ROOT}/hooks/plugin-guard.js\""}]}]}}' \
+  >"$HOOKWIRE_PLUG/hooks/hooks.json"
+printf '%s\n' '{"hooks":{"PreToolUse":[{"matcher":"Read","hooks":[{"type":"command","command":"node \"${CLAUDE_PLUGIN_ROOT}/hooks/off-plugin-guard.js\""}]}]}}' \
+  >"$HOOKWIRE_OFF/hooks/hooks.json"
+python3 - "$HOOKWIRE_HOME" <<'PY'
+import json, sys
+home = sys.argv[1]
+cache = f"{home}/.claude/plugins/cache/mk"
+registry = {"version": 2, "plugins": {
+    "plug@mk": [{"scope": "user", "installPath": f"{cache}/plug/1.0.0", "version": "1.0.0"}],
+    "off@mk": [{"scope": "user", "installPath": f"{cache}/off/1.0.0", "version": "1.0.0"}]}}
+with open(f"{home}/.claude/plugins/installed_plugins.json", "w", encoding="utf-8") as handle:
+    json.dump(registry, handle)
+path = f"{home}/.claude/settings.json"
+with open(path, encoding="utf-8") as handle:
+    settings = json.load(handle)
+settings["enabledPlugins"] = {"plug@mk": True, "off@mk": False}
+with open(path, "w", encoding="utf-8") as handle:
+    json.dump(settings, handle)
+PY
+printf '%s\n' "module.exports = require('../../hooks/PreToolUse/lib-guard.js');" \
+  >"$HOOKWIRE_HOME/.claude/scripts/lib/user.js"
+printf '%s\n' "require('../../hooks/PreToolUse/test-only-guard.js');" \
+  >"$HOOKWIRE_HOME/.claude/scripts/tests/user.test.js"
 HOOKWIRE_OUT=$(run_doctor "$HOOKWIRE_HOME" "$EMPTY_HARNESS" 1)
+omits "$HOOKWIRE_OUT" "(orphan?): $HOOKWIRE_HOME/.claude/hooks/PreToolUse/plugin-guard.js" "B8 an enabled plugin's hooks.json wires a hook"
+contains "$HOOKWIRE_OUT" "(orphan?): $HOOKWIRE_HOME/.claude/hooks/PreToolUse/off-plugin-guard.js" "B8 a disabled plugin's hooks.json does not"
+omits "$HOOKWIRE_OUT" "(orphan?): $HOOKWIRE_HOME/.claude/hooks/PreToolUse/lib-guard.js" "B8 a script's require() wires a hook"
+contains "$HOOKWIRE_OUT" "(orphan?): $HOOKWIRE_HOME/.claude/hooks/PreToolUse/test-only-guard.js" "B8 a script test's require() does not"
 omits "$HOOKWIRE_OUT" "(orphan?): $HOOKWIRE_HOME/.claude/hooks/agent-scoped/fence.js" "B8 agent-frontmatter hook is wired"
 omits "$HOOKWIRE_OUT" "(orphan?): $HOOKWIRE_HOME/.claude/hooks/PreToolUse/sibling-guard.js" "B8 sibling-required hook is wired"
 contains "$HOOKWIRE_OUT" "(orphan?): $HOOKWIRE_HOME/.claude/hooks/PreToolUse/stray-guard.js" "B8 unreached hook still named"
