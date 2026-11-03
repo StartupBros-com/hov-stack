@@ -24,9 +24,10 @@
 
 const path = require('node:path');
 const {
-  segments, commandShape, shellPayload, lex,
+  segments, commandShape, shellPayload, lex, withoutSingleQuotedLiterals,
 } = require('./whatsapp-guard');
 const { ask } = require('../lib/pretooluse-decision');
+const { executedPieces, NestingTooDeep } = require('../lib/heredoc-scan');
 const { writeHookOutput } = require('../lib/hook-output');
 
 // Keep equal to COMMANDS and ALIASES in bin/resend_cli.py (cross-checked
@@ -683,7 +684,9 @@ function classify(inputScript, depth = 0, inheritedNames = new Map()) {
   // The lexer splits an unquoted r=$(command -v resend-cli) into several
   // words, and ${r} into separate segments, so a substitution-held CLI path
   // and its use are matched in the raw text. Single-quoted text never runs.
-  const unquoted = script.replace(/'[^'\n]*'/g, "''");
+  // A quote left open on its line stays visible, so an apostrophe in a
+  // comment, heredoc body or "..." span cannot pair with a later quote.
+  const unquoted = withoutSingleQuotedLiterals(script, { withinLine: true });
   if (BRACE_RE.test(unquoted.replace(/"[^"\n]*"/g, '""'))) return true;
   for (const match of unquoted.matchAll(SUBSTITUTED_ASSIGNMENT)) {
     if (!aliases.has(match[1])) aliases.set(match[1], []);
@@ -791,7 +794,18 @@ function evaluate(event) {
   if (typeof command !== 'string') return null;
   if (command.length > MAX_READ && NAME_RE.test(command)) return ask(UNREAD);
   let writes;
-  try { writes = literalWrite(command) || classify(command); } catch { writes = literalWrite(command) || WRITE_RE.test(command); }
+  try {
+    // Heredoc bodies and comments out of the shell text, each runnable body
+    // its own piece; a command with several pieces is also read whole so an
+    // alias set before a body that runs still reaches it.
+    const pieces = executedPieces(command);
+    writes = literalWrite(command) || pieces.some((piece) => classify(piece.text))
+      || (pieces.length > 1 && classify(command));
+  } catch (err) {
+    // Nesting past the scanner's limit cannot be read: naming the CLI asks.
+    writes = literalWrite(command) || (err instanceof NestingTooDeep && NAME_RE.test(command))
+      || WRITE_RE.test(command);
+  }
   if (!writes) return null;
   return ask(
     'This Resend CLI call sends email, writes or deletes Resend data (or its command path cannot be read statically). ' +

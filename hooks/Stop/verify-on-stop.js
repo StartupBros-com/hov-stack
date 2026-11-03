@@ -27,7 +27,9 @@
  * the verify command covers. Session scope is derived without extra state:
  * dirty files count only when their mtime is at or after the session start
  * (read from the transcript's first timestamp), and commits only when made
- * since session start (git log --since). Read-only and docs-only sessions
+ * since session start (git log --since) and not already on the default
+ * remote branch, so other sessions' merged work that a pull or a launchpad
+ * fast-forward brings into HEAD is not blamed on this one. Read-only and docs-only sessions
  * therefore stop cleanly instead of tripping over pre-existing repo debt, and
  * sessions launched in a parked, dirty checkout are not blamed for weeks-old
  * local drift. Detection is conservative: any uncertainty (no git repo, git
@@ -41,7 +43,8 @@
  * exists but node_modules does not, the gate blocks with the exact install
  * command instead of running a verify that can only fail environmentally. The
  * verify command itself runs with CI=1 so package managers never stall on TTY
- * prompts inside the fix loop.
+ * prompts inside the fix loop, and with mise's shims dir appended to PATH so a
+ * hook process launched without mise activation still finds bun and pnpm.
  *
  * Loop safety: a `stop_hook_active` Stop never runs either gate or accesses
  * their state, even with loop-guard off. A new false Stop evaluates anew.
@@ -294,7 +297,13 @@ function relevantChanges(cwd, kind, startMs) {
   try {
     if (startMs != null) {
       const iso = new Date(startMs - SLACK_MS).toISOString();
-      const out = git(cwd, `log --since=${JSON.stringify(iso)} --name-only --pretty=format: -n 500 HEAD`);
+      // A pull or a launchpad fast-forward brings other sessions' merged
+      // commits into HEAD with committer dates inside this session's window;
+      // anything already on the default remote branch is not this session's
+      // unlanded work.
+      const base = defaultRemoteRef(cwd);
+      const range = base ? `${base}..HEAD` : 'HEAD';
+      const out = git(cwd, `log --since=${JSON.stringify(iso)} --name-only --pretty=format: -n 500 ${range}`);
       for (const f of out.split('\n')) {
         const t = f.trim();
         if (t && isRelevant(t, kind)) found.push(t);
@@ -342,6 +351,20 @@ function run(rawInput) {
   } catch {
     return rawInput;
   }
+}
+
+// A hook process launched without mise activation (a daemon, a background
+// launcher) has no bun or pnpm on PATH, so `bun run typecheck` fails with
+// "bun: not found" though the typecheck passes. Appending mise's shims dir
+// fills only that gap: a tool PATH already resolves keeps its resolution.
+function withMiseShims(envPath) {
+  const dataDir =
+    process.env.MISE_DATA_DIR ||
+    path.join(process.env.XDG_DATA_HOME || path.join(os.homedir(), '.local', 'share'), 'mise');
+  const shims = path.join(dataDir, 'shims');
+  const parts = String(envPath || '').split(path.delimiter).filter(Boolean);
+  if (parts.includes(shims) || !fs.existsSync(shims)) return envPath;
+  return [...parts, shims].join(path.delimiter);
 }
 
 function clipOutput(out) {
@@ -418,7 +441,7 @@ function verifyGate(input) {
       timeout: TIMEOUT_MS,
       stdio: ['ignore', 'pipe', 'pipe'],
       encoding: 'utf8',
-      env: { ...process.env, CI: '1', GIT_OPTIONAL_LOCKS: '0' },
+      env: { ...process.env, PATH: withMiseShims(process.env.PATH), CI: '1', GIT_OPTIONAL_LOCKS: '0' },
     });
     // Passed, allow stop.
     return null;

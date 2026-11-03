@@ -441,3 +441,34 @@ test('registered hook asks, never denies, when the Discord classifier cannot loa
   assert.strictEqual(JSON.parse(run('discord-cli api POST /channels/1/messages --confirm-write')).hookSpecificOutput.permissionDecision, 'ask');
   assert.doesNotMatch(run('discord-cli api GET /channels/1'), /permissionDecision/);
 });
+
+test('a comment or heredoc body holding an apostrophe does not hide the Discord write after it', async () => {
+  const commands = [
+    "echo hi # it's\ndiscord-cli send 1 --content-file f",
+    "cat <<EOF >/dev/null\nit's\nEOF\ndiscord-cli send 1 --content-file f",
+    "echo hi # it's\ndiscord-cli --json delete 1 2",
+    "cat <<EOF >/dev/null\nit's\nEOF\ndiscord-cli edit 1 2 --content-file f",
+    "echo $'a\\'b'; discord-cli send 1 --content-file f",
+    // A heredoc that runs, and a file written then executed, stay gated.
+    "bash <<'EOF'\ndiscord-cli send 1 --content-file f\nEOF",
+    "cat > /tmp/x/s.sh <<'EOF'\ndiscord-cli send 1 --content-file f\nEOF\nbash /tmp/x/s.sh",
+  ];
+  for (const command of commands) {
+    assert.strictEqual(JSON.parse(evaluate(bash(command))).hookSpecificOutput.permissionDecision, 'ask', command);
+  }
+  for (const command of commands.slice(0, 2)) {
+    await ask(command);
+    await ask(command, INTEGRATED);
+  }
+  for (const command of [
+    "echo hi # it's\ndiscord-cli channels",
+    "cat <<EOF >/dev/null\nit's\nEOF\ndiscord-cli channels",
+    "cat > /tmp/x/f <<'EOF'\nsee discord-cli send 1 it's $HOME\nEOF",
+  ]) assert.strictEqual(evaluate(bash(command)), null, command);
+});
+
+test('a command nested past the heredoc scanner limit that names the Discord CLI asks', () => {
+  const nested = `# c\necho ${'$('.repeat(70)}echo hi${')'.repeat(70)}; discord-cli channels`;
+  assert.strictEqual(JSON.parse(evaluate(bash(nested))).hookSpecificOutput.permissionDecision, 'ask');
+  assert.strictEqual(evaluate(bash(`# c\necho ${'$('.repeat(70)}echo hi${')'.repeat(70)}`)), null);
+});

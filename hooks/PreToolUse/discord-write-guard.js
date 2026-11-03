@@ -18,6 +18,7 @@ const {
   DISCORD_WRITE_TAIL: WRITE_TAIL, DISCORD_WRITE_RE: WRITE_RE,
 } = require('./whatsapp-guard');
 const { ask } = require('../lib/pretooluse-decision');
+const { executedPieces, NestingTooDeep } = require('../lib/heredoc-scan');
 const { writeHookOutput } = require('../lib/hook-output');
 
 // Keep equal to WRITES in bin/discord_cli.py (cross-checked by the test).
@@ -421,7 +422,16 @@ function evaluate(event) {
   const command = event.tool_input?.command;
   if (typeof command !== 'string') return null;
   let writes;
-  try { writes = classify(command); } catch { writes = WRITE_RE.test(command); }
+  try {
+    // Heredoc bodies and comments out of the shell text, each runnable body
+    // its own piece; a command with several pieces is also read whole so an
+    // alias set before a body that runs still reaches it.
+    const pieces = executedPieces(command);
+    writes = pieces.some((piece) => classify(piece.text)) || (pieces.length > 1 && classify(command));
+  } catch (err) {
+    // Nesting past the scanner's limit cannot be read: naming the CLI asks.
+    writes = (err instanceof NestingTooDeep && /\bdiscord[-_]cli\b/.test(command)) || WRITE_RE.test(command);
+  }
   if (!writes) return null;
   return ask(
     'This Discord CLI call writes to Discord (a message send, edit, or delete, or a non-GET api call), or its verb or method cannot be read statically. ' +
