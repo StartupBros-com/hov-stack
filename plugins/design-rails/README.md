@@ -9,7 +9,7 @@ lints the one you wrote. **design-rails runs the whole loop against your actual
 codebase** — and keeps it true after you leave.
 
 ```
-pnpm dlx "github:StartupBros-com/hov-stack#design-rails--v0.13.1&path:/plugins/design-rails" posture .
+pnpm dlx "github:StartupBros-com/hov-stack#design-rails--v0.14.0&path:/plugins/design-rails" posture .
 ```
 
 ```
@@ -21,7 +21,7 @@ apps/web
   ✓ enforced  CI runs the scanner with budgets
 ```
 
-Six verbs, one loop:
+Seven verbs, one loop:
 
 | Verb | What it does |
 | --- | --- |
@@ -29,6 +29,7 @@ Six verbs, one loop:
 | `scan` | Measures drift — raw color literals, one-off Tailwind values, raw palette utilities, missing scales, near-duplicate colors, unresolved tokens — and reads what your theme files *declare* (content-detected theme files, `oklch()`, dark-mode systems, alias resolution). Per-detector CI budgets: `--fail-on=color=2354,palette=3116`. |
 | `propose` | Authors a [Google-spec DESIGN.md](https://github.com/google-labs-code/design.md) + DTCG tokens **from your own code** — declared tokens win by name, residual literals fill gaps weighted by shipped use. Refuses to blend a multi-app workspace into one system nobody owns. |
 | `decide` | Renders open taste decisions (is that purple your brand or a chart library's default?) as visual HTML pages — options side by side on your real canvas — and records your choice. |
+| `render` | Loads a page in headless Chrome and measures what the browser actually paints: text contrast after alpha and opacity (WCAG 1.4.3), targets under 24px (WCAG 2.5.8, spacing exception included), text cut off by an `overflow: hidden` box, and sideways scrolling (WCAG 1.4.10). Same `--json` / `--fail-on` gate as `scan`. |
 | `tighten` | The one-way ratchet: lowers CI budgets to current actuals after each cleanup, and refuses to absorb an increase. Budgets can be **region-scoped** (`apps/web:color=120`) so each monorepo app ratchets on its own timeline. |
 | `bump` | The one sanctioned budget raise — `bump <key>=<n> <ci-file> --reason="…"`. Refuses without a reason, refuses a non-increase, refuses a target below the measured actual — and writes the reason as a dated comment above the budget line, so `git blame` answers "why did this go up" forever. |
 
@@ -74,7 +75,7 @@ Run it pinned from GitHub — the bare `design-rails` name is unclaimed on npm,
 so an unpinned `npx design-rails` is a supply-chain bet, not an install:
 
 ```bash
-alias design-rails='pnpm dlx "github:StartupBros-com/hov-stack#design-rails--v0.13.1&path:/plugins/design-rails"'
+alias design-rails='pnpm dlx "github:StartupBros-com/hov-stack#design-rails--v0.14.0&path:/plugins/design-rails"'
 
 # 1. Where do you stand?
 design-rails posture .
@@ -98,6 +99,10 @@ design-rails tighten .github/workflows/design.yml
 
 # 6. A budget goes UP exactly one way (new vendored surface, nothing else):
 design-rails bump color=2600 .github/workflows/design.yml --reason="vendored charting kit"
+
+# 7. Check what the browser paints (needs a Chrome; CHROME_PATH or --chrome=):
+design-rails render http://localhost:3000 --fail-on=0
+design-rails render dist/index.html --viewport=390x844 --json
 ```
 
 ## Multi-brand apps

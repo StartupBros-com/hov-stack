@@ -5,14 +5,15 @@ description: >-
   to check design-system posture, measure touch-target sizes, animation timing,
   or type-scale hierarchy, author a DESIGN.md from an existing codebase, settle
   open design decisions from rendered option pages, wire an app's agent
-  instructions to its DESIGN.md, migrate colour literals onto tokens, or
-  tighten drift budgets in CI.
+  instructions to its DESIGN.md, migrate colour literals onto tokens,
+  tighten drift budgets in CI, or check a rendered page for low-contrast
+  text, undersized targets, clipped text or sideways scrolling.
 allowed-tools: Bash, Read, Grep, Glob
 ---
 
 # design-rails
 
-One loop, six verbs. The scripts live in `../../src/` relative to this skill
+One loop, seven verbs. The scripts live in `../../src/` relative to this skill
 (or run `pnpm dlx "github:StartupBros-com/hov-stack#design-rails--vX.Y.Z&path:/plugins/design-rails" <verb>`
 pinned to a release — the bare npm name is unclaimed, so never `npx design-rails`).
 
@@ -88,6 +89,18 @@ role matcher can read (`--color-hov`).
    sanctioned raise is `--bump=<key>=<n> --reason="…"` (new vendored surface
    landing, and nothing else); hand-edited increases belong in their own
    reviewed PR.
+7. **Check what the browser paints.** `scan` reads source; `node src/render.mjs
+   <url|page.html>` loads the page in headless Chrome (default viewports
+   1440x900 and 390x844) and measures the laid-out result: `text-contrast`
+   (WCAG 1.4.3, with text alpha, background alpha and ancestor opacity
+   composited), `target-size` (WCAG 2.5.8's 24px floor with its spacing,
+   inline and native-control exceptions), `text-clipped` (text cut by an
+   overflow-hidden box, on either axis) and `page-overflow-x` (WCAG
+   1.4.10). Ellipsis and line-clamp truncation, spaced small targets and
+   text over images or gradients are advisories, not findings. Same
+   `--json` and `--fail-on=<n>` gate as `scan`. It needs a Chrome
+   (`--chrome=<path>` or `CHROME_PATH`); a clean run covers four rules on
+   the pages and viewports given and is not a WCAG conformance claim.
 
 ## Verification
 
