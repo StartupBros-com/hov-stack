@@ -137,6 +137,9 @@ class DeepResearchTests(unittest.TestCase):
                 SKILLS_DIR=str(skills),
                 CODEX_SKILLS_DIR=str(codex),
                 CODEX_SKILLS_LIST=str(harness / "codex-skills.txt"),
+                # No host patches either: the copy has no lib/overlay.sh to find them,
+                # and an overlay named in the inherited environment must not reach in.
+                SKILLS_HOST_PATCHES_DIR="",
             )
 
             def run(mode: str) -> subprocess.CompletedProcess[str]:
