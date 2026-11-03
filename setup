@@ -111,8 +111,11 @@ fi
 rows=()
 not_ok=0
 failed=0
+# Each step's last state (st_<step>), for the plain-language summary under the status block.
+st_claude="" st_overlay="" st_links="" st_dcg="" st_settings="" st_marketplace="" st_plugins=""
 row() {  # row <step> <state> <detail>
   rows+=("$(printf '  %-12s %-8s %s' "$1" "$2" "$3")")
+  printf -v "st_$1" '%s' "$2"
   case "$2" in ok|off) ;; *) not_ok=$((not_ok + 1)) ;; esac
   [ "$2" != failed ] || failed=1
 }
@@ -610,6 +613,43 @@ fi
 echo "hov-stack: status"
 printf '%s\n' "${rows[@]}"
 echo "  left alone on purpose: memory, projects/, credentials, settings.local.json, shell rc files."
-echo "hov-stack: done in $(( $(date +%s) - T0 ))s. Start a new Claude Code session; ./setup --check shows what is in place."
-echo "  Then type /hov-setup in that session for the plugins that need a login or a choice (pro-gate, wsl-cdp, token-eater, product-video, sign-it)."
+echo "hov-stack: done in $(( $(date +%s) - T0 ))s. ./setup --check shows what is in place."
+# The status block above in plain words, for someone who has never set up Claude Code tools,
+# then the one next step. A first-time user read the rows alone as jargon (U26, 2026-11-03).
+echo
+echo "What you have now:"
+have_any=0
+if [ "$st_links" = ok ]; then
+  echo "  - The rules and safety checks every new Claude Code session loads, linked from this folder."
+  have_any=1
+fi
+if [ "$st_dcg" = ok ]; then
+  echo "  - dcg, which stops a command that would wipe files or git history before it runs."
+  have_any=1
+fi
+if [ "$st_plugins" = ok ]; then
+  names=""
+  for i in "${!defaults[@]}"; do
+    if [ "$i" -eq 0 ]; then names=${defaults[0]}
+    elif [ "$i" -eq $(( ${#defaults[@]} - 1 )) ]; then names="$names and ${defaults[$i]}"
+    else names="$names, ${defaults[$i]}"; fi
+  done
+  echo "  - The plugins setup installs for everyone: $names. /hov-setup shows what each does."
+  have_any=1
+fi
+[ "$have_any" -eq 1 ] || echo "  - Nothing yet: the rows above say what stopped each step."
+if [ "$not_ok" -eq 1 ]; then
+  echo "  1 step above is not finished; its row says how to finish it, then run ./setup again."
+elif [ "$not_ok" -gt 1 ]; then
+  echo "  $not_ok steps above are not finished; each row says how to finish it, then run ./setup again."
+fi
+echo
+if [ "$st_claude" = ok ]; then
+  echo "Next: open a new Claude Code session (it reads the rules and checks only when it starts)"
+  echo "  and type /hov-setup. It explains the optional plugins in plain words and sets up the"
+  echo "  ones you pick, all in that one session."
+else
+  echo "Next: get Claude Code working (the claude row above says how) and run ./setup again."
+  echo "  Then open Claude Code and type /hov-setup for the optional plugins."
+fi
 exit "$failed"

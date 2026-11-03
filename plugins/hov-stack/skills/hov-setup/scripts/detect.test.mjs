@@ -5,12 +5,14 @@ import { dirname, join } from "node:path";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { PLUGINS } from "./detect.mjs";
+import { EXTRAS, PLUGINS } from "./detect.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const detectPath = join(here, "detect.mjs");
 const skillText = readFileSync(join(here, "..", "SKILL.md"), "utf8");
-const ORDER = ["pro-gate", "wsl-cdp", "token-eater", "product-video", "sign-it"];
+const ORDER = ["sign-it", "wsl-cdp", "product-video", "token-eater", "pro-gate"];
+const EXTRA_ORDER = ["harness-vet", "rent-check", "harness-optimizer"];
+const ALL = [...ORDER, ...EXTRA_ORDER];
 
 // A fake `claude` that logs each call and answers the two list commands from files.
 const FAKE_CLAUDE = `#!/bin/sh
@@ -73,15 +75,53 @@ const user = (name, extra = {}) => ({
   ...extra,
 });
 
-test("with every plugin absent, lists the five in walkthrough order with their install lines", () => {
+test("with every plugin absent, lists the five guided plugins and then the three extras, with their install lines", () => {
   withFake({}, (dir) => {
     const r = detect(dir);
     assert.equal(r.status, 0, r.stderr);
     const lines = r.stdout.split("\n").filter((l) => l.startsWith("  "));
-    assert.deepEqual(lines, ORDER.map((p) => `  ${p}: absent. Install: claude plugin install ${p}@hov --scope user`));
+    assert.deepEqual(lines, ALL.map((p) => `  ${p}: absent. Install: claude plugin install ${p}@hov --scope user`));
+    assert.equal(r.stdout.includes("also installed"), false);
     const rep = report(dir);
     assert.equal(rep.marketplace.added, true);
-    assert.deepEqual(rep.plugins.map((p) => [p.name, p.state]), ORDER.map((p) => [p, "absent"]));
+    assert.deepEqual(rep.plugins.map((p) => [p.name, p.state]), ALL.map((p) => [p, "absent"]));
+    assert.deepEqual(rep.alsoInstalled, []);
+  });
+});
+
+test("each entry names its group: the five guided plugins, then the extras", () => {
+  withFake({}, (dir) => {
+    const rep = report(dir);
+    assert.deepEqual(
+      rep.plugins.map((p) => [p.name, p.group]),
+      [...ORDER.map((p) => [p, "guided"]), ...EXTRA_ORDER.map((p) => [p, "extra"])],
+    );
+  });
+});
+
+test("alsoInstalled lists the other hov plugins at user scope, with what they do and how to start them", () => {
+  const plugins = [
+    user("papercut", { version: "0.1.23" }),
+    user("memory-dream", { enabled: false }),
+    user("brand-new"),
+    user("sign-it"),
+    user("skill-tuner", { scope: "project" }),
+    { ...user("design-rails"), id: "design-rails@elsewhere" },
+  ];
+  withFake({ plugins }, (dir) => {
+    const rep = report(dir);
+    assert.deepEqual(
+      rep.alsoInstalled.map((p) => [p.name, p.version, p.enabled, p.start]),
+      [
+        ["papercut", "0.1.23", true, "/papercut:papercut"],
+        ["memory-dream", "1.2.3", false, "/memory-dream:dream"],
+        ["brand-new", "1.2.3", true, null],
+      ],
+    );
+    assert.match(rep.alsoInstalled[0].what, /tools trip Claude up/);
+    assert.equal(rep.alsoInstalled[2].what, null);
+    assert.equal(row(rep, "sign-it").state, "installed");
+    assert.match(detect(dir).stdout, /^also installed: papercut 0\.1\.23, memory-dream 1\.2\.3 \(disabled\), brand-new 1\.2\.3$/m);
   });
 });
 
@@ -91,7 +131,9 @@ test("an installed pro-gate gets no install line and reports its version and pat
     assert.equal(r.status, 0, r.stderr);
     assert.ok(r.stdout.includes("  pro-gate: installed 0.65.2\n"), r.stdout);
     assert.equal(r.stdout.includes("install pro-gate@hov"), false);
-    for (const p of ORDER.slice(1)) assert.ok(r.stdout.includes(`claude plugin install ${p}@hov --scope user`), p);
+    for (const p of ALL.filter((n) => n !== "pro-gate")) {
+      assert.ok(r.stdout.includes(`claude plugin install ${p}@hov --scope user`), p);
+    }
     const pg = row(report(dir), "pro-gate");
     assert.deepEqual(
       [pg.state, pg.version, pg.installPath, pg.next],
@@ -199,7 +241,37 @@ function sections(text) {
 
 test("SKILL.md has one section per plugin, in the detector's order", () => {
   assert.deepEqual(PLUGINS.map((p) => p.name), ORDER);
-  assert.deepEqual([...sections(skillText).keys()], ORDER);
+  assert.deepEqual(EXTRAS.map((p) => p.name), EXTRA_ORDER);
+  assert.deepEqual([...sections(skillText).keys()], ALL);
+});
+
+// A first-time user was told to start a new session and type /hov-setup again after the
+// install (U26, 2026-11-03). A plugin installed mid-session loads with /reload-plugins.
+test("SKILL.md finishes in one session: /reload-plugins, never a restart or a second /hov-setup", () => {
+  assert.ok(skillText.includes("`/reload-plugins`"), "no /reload-plugins step");
+  assert.doesNotMatch(skillText, /start a new (Claude Code )?session/i);
+  assert.doesNotMatch(skillText, /\b(restart|relaunch) (Claude Code|the session|your session)\b(?! or to type)/i);
+});
+
+// Through `!`, a bare `gh auth login` printed its help and logged nothing in; the web flow
+// showed its one-time code live (U26, 2026-11-03).
+test("SKILL.md's GitHub login line uses the web flow, which works through `!`", () => {
+  const lines = skillText.split("\n").filter((l) => /^!\s*gh auth login\b/.test(l.trim()));
+  assert.ok(lines.length > 0, "no `! gh auth login` line");
+  for (const l of lines) assert.match(l, /--web\b/, l);
+  assert.doesNotMatch(skillText, /`gh auth login` in their own terminal/);
+});
+
+// The card is what the user reads first. It says what the plugin does, costs and needs, in
+// plain words; the words below were in the run that a first-time user called jargon.
+test("each plugin section opens with a card in plain words", () => {
+  const jargon = /\b(doctor|runtime|smoke|blocking|pinned|scope|exit code|dependenc(y|ies)|CLI)\b/i;
+  for (const [name, body] of sections(skillText)) {
+    const card = body.split("\n").find((l) => l.startsWith("**Card:**"));
+    assert.ok(card, `${name} has no card`);
+    assert.ok(body.indexOf(card) < body.indexOf("Check"), `${name}: the card comes after its check`);
+    assert.doesNotMatch(card, jargon, `${name}'s card uses a word a first-time user called jargon`);
+  }
 });
 
 test("SKILL.md states the credential rule before Step 1, naming where a credential never goes", () => {

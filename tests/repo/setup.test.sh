@@ -641,6 +641,26 @@ grep -q -E '^  marketplace +ok +added from StartupBros-com/hov-stack$' "$WORK/ru
 grep -q -x -E "  plugins +ok +installed: $(default_names | tr '\n' ' ' | sed 's/ $//')" "$WORK/run-fake.log" || fail "the plugins row does not name each default plugin installed"
 grep -q -F 'select hov, then Enable auto-update' "$WORK/run-fake.log" || fail "the auto-update note is missing"
 ok "the marketplace and plugins rows name what was added, and the auto-update note is shown"
+# The ending in plain words (U26, 2026-11-03): what is in place, then one next step. A first
+# run had told the user to start a session for /hov-setup and then, from it, another.
+grep -q -x -F 'What you have now:' "$WORK/run-fake.log" || fail "the ending does not say what is in place"
+grep -q -x -F '  - The rules and safety checks every new Claude Code session loads, linked from this folder.' "$WORK/run-fake.log" \
+  || fail "the ending does not name the linked rules"
+plain_names=$(default_names | awk 'NR == 1 { s = $0; next } { a[NR] = $0; n = NR }
+  END { for (i = 2; i < n; i++) s = s ", " a[i]; if (n) s = s " and " a[n]; print s }')
+grep -q -x -F "  - The plugins setup installs for everyone: $plain_names. /hov-setup shows what each does." "$WORK/run-fake.log" \
+  || { tail -n 12 "$WORK/run-fake.log"; fail "the ending does not name the default plugins ($plain_names) in plain words"; }
+! grep -q -F 'dcg, which stops' "$WORK/run-fake.log" || fail "a --no-dcg run claims dcg is in place"
+grep -q -x -F 'Next: open a new Claude Code session (it reads the rules and checks only when it starts)' "$WORK/run-fake.log" \
+  || fail "the ending does not give the one next step"
+! grep -q -E 'steps? above (is|are) not finished' "$WORK/run-fake.log" || fail "a run with every step in place says some are not finished"
+! grep -q -i -F '/hov-setup again' "$WORK/run-fake.log" || fail "the ending asks for a second /hov-setup"
+ok "the ending says in plain words what is in place and gives one next step, /hov-setup in a new session"
+grep -q -x -F 'Next: get Claude Code working (the claude row above says how) and run ./setup again.' "$WORK/run1.log" \
+  || { tail -n 12 "$WORK/run1.log"; fail "with no claude, the ending does not say to get Claude Code working first"; }
+grep -q -E '^  [0-9]+ steps above are not finished; each row says how to finish it, then run \./setup again\.$' "$WORK/run1.log" \
+  || fail "with steps skipped, the ending does not say so"
+ok "with no claude on PATH, the ending says to get Claude Code working before /hov-setup"
 fake_setup "$FK" "$HF" "$WORK/run-fake2.log" --no-dcg || { cat "$WORK/run-fake2.log"; fail "a rerun with a fake claude exited non-zero"; }
 [ "$(calls_of "$FK" 'plugin marketplace add StartupBros-com/hov-stack')" = 1 ] || fail "a rerun added the marketplace again"
 [ "$(grep -c '^plugin install ' "$FK/calls")" = "$(default_names | wc -l | tr -d ' ')" ] || fail "a rerun installed a plugin again"

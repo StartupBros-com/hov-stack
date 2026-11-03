@@ -384,8 +384,14 @@ The machine was a Mac mini on macOS 15.7.7 arm64 with git 2.39.5, node 26 and Ho
   - The installer installed cleanly.
   - Without minisign it skipped with exit 3.
   - With a failing `chmod` it printed exactly one `dcg: error` line naming the command, and linked nothing.
+- **Logging in over ssh.** The author reached the Mac by ssh, as a stranger with a headless Mac would. In the scratch home, Claude Code's `/login` failed with "Couldn't save your login. If your Mac's keychain is locked, unlock it and log in again.": that home had no keychain of its own, and Claude Code had nowhere else to save the login. The workaround was a login keychain for the scratch home alone, with a random password that was never saved and no auto-lock. The real home's keychain stayed its default. After that, `/login` succeeded through claude.ai. A stranger who logs in at the Mac's own screen does not hit this.
+- **The guided `/hov-setup` skill, run by the author, at main 281770e.** It roughly worked, and it failed the bar for a first-time user. Issue #376 records the run.
+  - It installed the four plugins picked (`pro-gate`, `product-video`, `sign-it`, `token-eater`), then told the user to start a new session and type `/hov-setup` again.
+  - The second run ended in a five-row results table and a five-step list of commands for the user's own terminal. Afterwards no signature was saved for `sign-it`, the PDF and video tools `sign-it` and `product-video` call (poppler, qpdf, ffmpeg, tesseract) were not installed, and `pro-gate`'s runtime was absent.
+  - `product-video`'s install stopped on pnpm 11's `ERR_PNPM_IGNORED_BUILDS` and asked for an OK to run esbuild's build script (#377).
+  - The author's three findings: the restart and second run; `harness-vet`, `rent-check` and `harness-optimizer` were never offered; and the run slid into words a first-time user reads as jargon.
+  - Measured on the Mac afterwards, in the same scratch home: a plugin installed mid-session loaded with `/reload-plugins` ("Reloaded: 14 plugins", and its slash command was then offered), with no restart. `! gh auth login --web --hostname github.com --git-protocol https` showed gh's one-time code and URL live in the session; a bare `! gh auth login` printed its help and logged nothing in.
 - **Not exercised.**
-  - The guided `/hov-setup` skill, which needs a logged-in Claude Code session on the clean machine.
   - Linux was not run as a clean machine here; CI runs `tests/repo/setup.test.sh` on Ubuntu on every PR.
 - **Follow-up work scheduled.** The old-name fallback removal is #373, and the cutover solution docs are #374. Deleting the U21 rehearsal repos waits on the author's go.
 
