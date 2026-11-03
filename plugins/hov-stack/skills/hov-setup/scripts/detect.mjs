@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 /*
-  hov-setup detector: which of the five guided-setup plugins are installed from the hov
-  marketplace, in walkthrough order, and the next step for each.
+  hov-setup detector: which of the optional plugins on the hov marketplace are installed, in
+  walkthrough order, the next step for each, and which other hov plugins ./setup already
+  installed (for the closing tour).
 
   Read-only. It runs `claude plugin marketplace list --json` and `claude plugin list --json`
   and nothing else. A plugin counts only when it is installed at user scope, the rule
@@ -21,14 +22,33 @@ import { fileURLToPath } from "node:url";
 
 export const MARKETPLACE = "hov";
 
-// Walkthrough order: wsl-cdp before product-video, whose live capture uses its browser.
+// The guided plugins: each needs a login, a password or Windows prompt, a paid plan or a
+// choice. Walkthrough order: the quickest win first, wsl-cdp before product-video (whose live
+// recording uses its browser), and pro-gate, which has the most steps, last.
 export const PLUGINS = [
-  { name: "pro-gate", what: "a final pull-request review by the Pro model on your ChatGPT plan" },
-  { name: "wsl-cdp", what: "lets a WSL2 session drive your logged-in Windows browser", wslOnly: true },
-  { name: "token-eater", what: "spends a subscription's idle credits on checked cleanup pull requests" },
-  { name: "product-video", what: "records a product tour in a real browser and renders a checked MP4" },
-  { name: "sign-it", what: "signs a PDF or Word document with your own saved signature" },
+  { name: "sign-it", what: "signs PDFs and Word documents with your own saved signature" },
+  { name: "wsl-cdp", what: "lets Claude in WSL2 use your logged-in Windows browser", wslOnly: true },
+  { name: "product-video", what: "turns a click-through of your product into a captioned video" },
+  { name: "token-eater", what: "spends spare AI credits on code cleanup you review before it lands" },
+  { name: "pro-gate", what: "a last review of your code changes by ChatGPT's Pro model" },
 ];
+
+// Extras for people who tune their own Claude Code setup: free, nothing to set up.
+export const EXTRAS = [
+  { name: "harness-vet", what: "checks someone else's skill, plugin or tool before you add it" },
+  { name: "rent-check", what: "shows which always-loaded instructions earn their cost, and what to cut" },
+  { name: "harness-optimizer", what: "digs into a setup problem that keeps coming back and proposes fixes" },
+];
+
+// What ./setup installs (lib/default-plugins.txt) and the skill pack, for the closing tour.
+// A hov plugin not named here is still listed, with `what` and `start` null.
+export const KNOWN = {
+  papercut: { what: "notices when tools trip Claude up and ranks the repeat offenders", start: "/papercut:papercut" },
+  "skill-tuner": { what: "tells you whether a change to your instructions for Claude helped", start: "/skill-tuner:tune" },
+  "memory-dream": { what: "tidies Claude's memory notes, with your OK on every change", start: "/memory-dream:dream" },
+  "design-rails": { what: "keeps Claude on your app's design system", start: "/design-rails:design-rails" },
+  "hov-stack": { what: "the hov-stack skill pack", start: null },
+};
 
 const NOT_WSL = "WSL2 only; on macOS or native Windows, use the Claude in Chrome extension";
 
@@ -64,13 +84,18 @@ export function detect() {
   const marketplaces = readClaudeJson(["plugin", "marketplace", "list", "--json"]);
   const installed = readClaudeJson(["plugin", "list", "--json"]);
   const wsl = onWsl();
-  const plugins = PLUGINS.map(({ name, what, wslOnly }) => {
+  const offered = [
+    ...PLUGINS.map((p) => ({ ...p, group: "guided" })),
+    ...EXTRAS.map((p) => ({ ...p, group: "extra" })),
+  ];
+  const plugins = offered.map(({ name, what, group, wslOnly }) => {
     const id = `${name}@${MARKETPLACE}`;
     const rows = installed.filter((r) => r && r.id === id);
     const user = rows.find((r) => r.scope === "user");
     const row = {
       name,
       what,
+      group,
       state: "absent",
       version: user ? user.version || null : null,
       installPath: user ? user.installPath || null : null,
@@ -89,10 +114,21 @@ export function detect() {
     }
     return row;
   });
+  const offeredNames = new Set(offered.map((p) => p.name));
+  const suffix = `@${MARKETPLACE}`;
+  const alsoInstalled = installed
+    .filter((r) => r && typeof r.id === "string" && r.id.endsWith(suffix) && r.scope === "user")
+    .filter((r) => !offeredNames.has(r.id.slice(0, -suffix.length)))
+    .map((r) => {
+      const name = r.id.slice(0, -suffix.length);
+      const known = KNOWN[name] || { what: null, start: null };
+      return { name, version: r.version || null, enabled: r.enabled !== false, what: known.what, start: known.start };
+    });
   return {
     marketplace: { name: MARKETPLACE, added: marketplaces.some((m) => m && m.name === MARKETPLACE) },
     wsl,
     plugins,
+    alsoInstalled,
   };
 }
 
@@ -113,6 +149,12 @@ function text(report) {
     else if (p.state === "disabled") lines.push(`  ${p.name}: installed${ver} but disabled. Enable: ${p.next}`);
     else if (p.state === "not-applicable") lines.push(`  ${p.name}: not applicable here: ${p.next}`);
     else lines.push(`  ${p.name}: absent${scopes ? ` (installed at ${scopes} scope only, which does not count)` : ""}. Install: ${p.next}`);
+  }
+  if (report.alsoInstalled.length) {
+    const names = report.alsoInstalled.map(
+      (p) => `${p.name}${p.version ? ` ${p.version}` : ""}${p.enabled ? "" : " (disabled)"}`,
+    );
+    lines.push(`also installed: ${names.join(", ")}`);
   }
   return lines.join("\n");
 }
