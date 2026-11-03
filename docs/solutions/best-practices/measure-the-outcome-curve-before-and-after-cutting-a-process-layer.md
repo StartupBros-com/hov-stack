@@ -39,9 +39,10 @@ path:
 - **Oct 4:** the owner fleet (pr-handoff, pr-owner, pr-owner-recover).
 
 Each layer was argued for by what it catches. Nothing measured what the product repo
-actually shipped. On 2026-10-17 a read-only "harness pipeline map" did. It is archived as
-`experiments/harness-teardown-2026-10/baseline-map-2026-10-17.txt`. Its curve, which
-the kit's scripts reproduced on 2026-10-18:
+actually shipped. On 2026-10-17 a read-only "harness pipeline map" did. It was archived in
+dotfiles as `claude/experiments/harness-teardown-2026-10/baseline-map-2026-10-17.txt`,
+deleted with the rest of that kit on 2026-11-03 (dotfiles commit `4f377209` last changed
+it). Its curve, which the kit's scripts reproduced on 2026-10-18:
 
 | Week of | Merged | Median h | p90 h |
 |---|---|---|---|
@@ -90,8 +91,10 @@ The teardown that followed, 2026-10-17/18:
    - product share;
    - median and p90 open-to-merge hours.
 
-   GitHub's search REST endpoint gives all of it read-only. The scripts are
-   `merge-rate.py`, `latency.py` and `pr-mix.py` in `experiments/harness-teardown-2026-10/`.
+   GitHub's search REST endpoint gives all of it read-only. The scripts were
+   `merge-rate.py`, `latency.py` and `pr-mix.py`, in the same kit. `latency.py` and
+   `pr-mix.py` read at most three pages of 100 results a week and said nothing when a
+   week had more, so check each week's `total_count` before trusting its tail.
    Compare whole weeks. A partial week has to say it is partial: the map's Oct 12 row was 59
    merges taken partway through Oct 17, and the whole week was 97.
 
@@ -130,9 +133,8 @@ The teardown that followed, 2026-10-17/18:
    "inconclusive". Product share overlaps across the two bands (0.59-0.84 against
    0.59-0.79), so it is reported but not decided on.
 
-   For this teardown, run the commands in the kit's README on or after 2026-11-02 with
-   `--end 2026-11-01`. **The verdict is pending as of this writing. Nothing schedules the
-   re-run.**
+   For this teardown the re-run happened on 2026-11-03, with `--end 2026-11-01`, only
+   because the operator asked: nothing scheduled it. Its verdict is under Examples.
 
 6. **Expect the backlog to drain through the first post-cut weeks.** Of the 50 PRs merged on
    Oct 17, 13 had been open 223 to 289 h. Old PRs merging push up p90 and max without saying
@@ -209,16 +211,31 @@ merges and a rise in latency. The verdict table kept Pro as a single review, sin
 the tier with named catches. #1862 then took the other tiers off the default path. Ten
 reversible moves followed, each a PR or a documented command, each on the operator's word.
 
-**The re-run (pending).** From `experiments/harness-teardown-2026-10/`:
+**The re-run (2026-11-03).** The kit's three curve scripts, run with `--end 2026-11-01`
+over the two whole weeks after the teardown, read against the bands its README fixed
+before the run:
 
-```bash
-python3 -I merge-rate.py --end 2026-11-01
-python3 -I latency.py --end 2026-11-01
-python3 -I pr-mix.py --end 2026-11-01
-```
+| Week of | Merged | Opened | Median h | p90 h | Product share |
+|---|---|---|---|---|---|
+| Oct 19 | 322 | 330 | 0.4 | not trusted | 0.77 (230 of the 300 read) |
+| Oct 26 | 129 | 152 | 0.5 | 4.1 | 0.62 (80 of 129) |
 
-Compare the Oct 19 and Oct 26 rows with the bands in the README, then add the verdict to
-this doc.
+The bands: before the ladder, 158-240 merged a week with a median of 0.9-2.2 h; under the
+ladder and owner fleet, 97-144 merged with a median of 2.9-14.5 h.
+
+- **Latency recovered.** Both medians are below the pre-ladder band.
+- **Merges are inconclusive.** Oct 19 is above the pre-ladder band and Oct 26 is inside
+  the ladder band, which the rule calls in between. Merges tracked PRs opened in both
+  weeks (322 of 330, then 129 of 152), so the count follows demand, and the curve cannot
+  separate the harness from how much work was asked for.
+- **Oct 19's p90 is not trusted.** The latency script saw 300 of that week's 322 merges.
+  The missing 22 can move p90, and can move the median only within the first hour, since
+  242 of the 322 merged within an hour.
+- **Product share** is inside the overlap of both bands, so it is reported, not decided on.
+
+Decision: keep the teardown. Restoring a retired layer needs a named catch, and the curve
+names none. The measurement was not extended, since nobody named who would use an
+extension, and the kit was deleted under its own condition.
 
 ## Related
 
@@ -228,7 +245,8 @@ this doc.
   the product repo.
 - `docs/solutions/best-practices/stop-adversarial-review-loops-on-measured-prevalence-not-a-clean-round.md`:
   the same keep-only-what-is-measured stance, applied to one review loop.
-- `experiments/harness-teardown-2026-10/README.md`: the baseline table, the bands,
-  the re-run commands and the kit's deletion condition.
+- dotfiles commit `4f377209`, `claude/experiments/harness-teardown-2026-10/README.md`:
+  the baseline table, the bands, the re-run commands and the kit's deletion condition,
+  met on 2026-11-03.
 - `CLAUDE.md`, Honest Work: a process artifact must name its consumer, the feature
   it gates, its defect class and its deletion condition. The kit's README carries all four.
