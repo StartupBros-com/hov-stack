@@ -2,7 +2,11 @@
 # skills-localize.sh keeps these uninstalled: if `jsm install-all` / auto-update
 # re-adds one, the next `apply` re-trashes it. One skill name per line; # comments ok.
 #
-# Format: <skill-name>    # reason (audited YYYY-MM-DD)
+# Format: <skill-name> [replaced-by=<plugin>@<marketplace>]    # reason (audited YYYY-MM-DD)
+#
+# replaced-by= names the plugin that now ships the skill. apply holds the retirement
+# (a DRIFT line, the skill left in place) until Claude Code's installed_plugins.json
+# records that plugin at user scope, so a host never ends up with neither (#358).
 #
 # NOTE: the BASE name of every `-local` fork belongs here too — otherwise
 # `jsm install-all` resurrects the pristine upstream original *alongside* the
@@ -76,14 +80,14 @@ ubs        # retired 2026-09-21 after a 4-round vet (docs/vets/2026-09-20-ubs-ha
 
 # dotfiles#1320 (2026-09-23): the local memory-dream and memory-eval forks were
 # retired in favor of the memory-dream@hov plugin; keep their deployed copies trashed.
-memory-dream
-memory-eval
+memory-dream replaced-by=memory-dream@hov
+memory-eval replaced-by=memory-dream@hov
 
 # 2026-10-19 (staging-repo issue 8): the local harness-vet, rent-check and sign-it copies were
 # retired in favor of their hov plugins (harness-vet@hov, rent-check@hov, sign-it@hov).
 # The local changes went upstream first: harness-vet#20, rent-check#14, sign-it#16.
 # Keep their deployed copies trashed. papercut stays in the skill pack: it is the vendor
 # source that scripts/papercut-vendor.py turns into the papercut@hov package.
-harness-vet
-rent-check
-sign-it
+harness-vet replaced-by=harness-vet@hov
+rent-check replaced-by=rent-check@hov
+sign-it replaced-by=sign-it@hov

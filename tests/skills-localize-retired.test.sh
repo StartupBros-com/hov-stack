@@ -22,7 +22,7 @@ SELF=$(readlink -f "${BASH_SOURCE[0]}")
 SCRIPT=$(cd -P "$(dirname "$SELF")/.." && pwd)/scripts/skills-localize.sh
 [ -f "$SCRIPT" ] || { echo "FAIL: cannot find skills-localize.sh at $SCRIPT"; exit 1; }
 
-for fn_name in valid_skill_name reject_name retire_one enforce_retired; do
+for fn_name in valid_skill_name reject_name plugin_installed retire_one enforce_retired; do
   fn=$(sed -n "/^${fn_name}() {/,/^}/p" "$SCRIPT")
   [ -n "$fn" ] || { echo "FAIL: ${fn_name}() not found in $SCRIPT"; exit 1; }
   eval "$fn"
@@ -32,6 +32,7 @@ note() { notes="$notes"$'\n'"$*"; }
 ts() { echo 20260101000000; }
 jsm() { return 1; }          # command -v finds it; `jsm list` yields nothing -> .trash fallback
 drift=0; errors=0
+INSTALLED_PLUGINS=/nonexistent/installed_plugins.json   # sections 1-7 use no replaced-by= entries
 
 T=$(mktemp -d /tmp/skills-localize-retired.XXXXXX)
 trap 'rm -rf "$T" 2>/dev/null || true' EXIT
@@ -101,6 +102,93 @@ check "rejection moves nothing"                          "[ \$(trash_count) -eq 
 RETIRED="$T/does-not-exist.txt"; notes=""
 enforce_retired; rc=$?
 check "missing retired-skills.txt is a silent no-op"     "[ $rc -eq 0 ] && [ -z \"\$notes\" ]"
+
+# 8. replaced-by= (#358): a retirement whose replacement plugin is not installed at user
+#    scope is held — DRIFT in every mode, the skill left in place — and proceeds once the
+#    plugin is installed. Bad fields are ERRORs that touch nothing.
+R="$T/r"; SKILLS="$R/skills"; TRASH="$SKILLS/.trash"; RETIRED="$R/retired-skills.txt"
+INSTALLED_PLUGINS="$R/installed_plugins.json"
+for s in held-skill freed-skill proj-skill typo-skill bad-repl dup-skill; do
+  mkdir -p "$SKILLS/$s"; echo "---" > "$SKILLS/$s/SKILL.md"
+done
+printf '%s\n' \
+  'held-skill replaced-by=held-plugin@hov   # plugin not installed' \
+  '  freed-skill   replaced-by=freed-plugin@hov' \
+  'proj-skill replaced-by=proj-plugin@hov' \
+  'typo-skill replced-by=typo-plugin@hov' \
+  'bad-repl replaced-by=no-marketplace' \
+  'dup-skill replaced-by=a@hov replaced-by=b@hov' > "$RETIRED"
+printf '%s\n' '{"version": 2, "plugins": {' \
+  '  "freed-plugin@hov": [{"scope": "user", "installPath": "/x", "version": "1.0.0"}],' \
+  '  "proj-plugin@hov":  [{"scope": "project", "projectPath": "/some/repo", "installPath": "/y", "version": "1.0.0"}]' \
+  '}}' > "$INSTALLED_PLUGINS"
+present() { [ -f "$SKILLS/$1/SKILL.md" ]; }
+untouched_bad() { present typo-skill && present bad-repl && present dup-skill; }
+
+MODE=check; DRY=0; drift=0; errors=0; notes=""
+enforce_retired
+check "replaced-by check: held skill is DRIFT naming the missing plugin" "[[ \$notes == *\"DRIFT: retired skill 'held-skill' is held\"*\"held-plugin@hov is not installed at user scope\"* ]]"
+check "replaced-by check: held DRIFT says how to install it"  "[[ \$notes == *\"claude plugin install held-plugin@hov --scope user\"* ]]"
+check "replaced-by check: installed replacement reports the usual DRIFT" "[[ \$notes == *\"DRIFT: retired skill 'freed-skill' is present\"* ]]"
+check "replaced-by check: a project-scoped install still holds" "[[ \$notes == *\"'proj-skill' is held\"* ]]"
+check "replaced-by check: unknown field is an ERROR"           "[[ \$notes == *\"entry 'typo-skill' has an unknown field 'replced-by=typo-plugin@hov'\"* ]]"
+check "replaced-by check: replacement without @ is an ERROR"  "[[ \$notes == *\"entry 'bad-repl' has a malformed 'replaced-by=no-marketplace'\"* ]]"
+check "replaced-by check: two replaced-by= is an ERROR"       "[[ \$notes == *\"entry 'dup-skill' names more than one replaced-by=\"* ]]"
+check "replaced-by check: sets drift"                         "[ \$drift -eq 1 ]"
+check "replaced-by check: moves nothing"                      "[ ! -e $TRASH ] && present held-skill && present freed-skill && present proj-skill"
+
+MODE=apply; DRY=1; drift=0; errors=0; notes=""
+enforce_retired
+check "replaced-by dry run: announces the held skill as held" "[[ \$notes == *\"'held-skill' is held\"* ]] && [[ \$notes != *'would retire: held-skill'* ]]"
+check "replaced-by dry run: would retire the freed skill"     "[[ \$notes == *'would retire: freed-skill'* ]]"
+check "replaced-by dry run: moves nothing"                    "[ ! -e $TRASH ]"
+
+MODE=apply; DRY=0; drift=0; errors=0; notes=""
+enforce_retired
+check "replaced-by apply: held skill stays in place"          "present held-skill"
+check "replaced-by apply: held note names the plugin"         "[[ \$notes == *\"'held-skill' is held\"*\"held-plugin@hov\"* ]]"
+check "replaced-by apply: project-scoped replacement holds"   "present proj-skill"
+check "replaced-by apply: installed replacement retires as today" "! present freed-skill && ls -1 $TRASH | grep -q '^freed-skill-localize-'"
+check "replaced-by apply: bad entries are left alone"         "untouched_bad"
+check "replaced-by apply: bad entries set errors"             "[ \$errors -eq 1 ]"
+check "replaced-by apply: only the freed skill was archived"  "[ \$(trash_count) -eq 1 ]"
+
+# Installing the plugin releases the hold on the next apply.
+printf '%s\n' '{"version": 2, "plugins": {' \
+  '  "freed-plugin@hov": [{"scope": "user"}],' \
+  '  "held-plugin@hov":  [{"scope": "project", "projectPath": "/r"}, {"scope": "user"}],' \
+  '  "proj-plugin@hov":  [{"scope": "project", "projectPath": "/some/repo"}]' \
+  '}}' > "$INSTALLED_PLUGINS"
+MODE=apply; DRY=0; drift=0; errors=0; notes=""
+enforce_retired
+check "replaced-by apply: once installed at user scope, the held skill retires" "! present held-skill && ls -1 $TRASH | grep -q '^held-skill-localize-'"
+check "replaced-by apply: a project-only plugin still holds" "present proj-skill"
+
+# An unreadable or missing record holds rather than guessing.
+printf '%s\n' 'proj-skill replaced-by=proj-plugin@hov' > "$RETIRED"
+printf '%s' '{"version": 2, "plugins": ' > "$INSTALLED_PLUGINS"     # truncated JSON
+MODE=apply; DRY=0; drift=0; errors=0; notes=""
+enforce_retired
+check "replaced-by: malformed installed_plugins.json holds"  "present proj-skill && [[ \$notes == *'could not be read'* ]]"
+INSTALLED_PLUGINS="$R/absent.json"; notes=""
+enforce_retired
+check "replaced-by: missing installed_plugins.json holds"    "present proj-skill && [[ \$notes == *'is not installed at user scope'* ]]"
+INSTALLED_PLUGINS="$R/installed_plugins.json"
+printf '%s' '{"version": 2, "plugins": {"proj-plugin@hov": [{"scope": "user"}]}}' > "$INSTALLED_PLUGINS"
+# shellcheck disable=SC2123  # emptying PATH in a subshell is the point: jq must not be found
+( PATH=/nonexistent; plugin_installed proj-plugin@hov ); rc=$?
+check "replaced-by: no jq means unconfirmed (rc 2), not installed" "[ $rc -eq 2 ]"
+plugin_installed proj-plugin@hov; rc=$?
+check "replaced-by: a user-scope install is confirmed (rc 0)" "[ $rc -eq 0 ]"
+
+# 9. Every line of the repository's real retired-skills.txt parses: no ERROR in check
+#    mode against an empty tree, so a format change cannot break a live entry.
+SKILLS="$T/empty-skills"; TRASH="$SKILLS/.trash"; mkdir -p "$SKILLS"
+RETIRED="$(cd -P "$(dirname "$SELF")/.." && pwd)/retired-skills.txt"
+MODE=check; DRY=0; drift=0; errors=0; notes=""
+enforce_retired
+check "the real retired-skills.txt parses without an ERROR"  "[ \$errors -eq 0 ] && [[ \$notes != *ERROR* ]]"
+check "the real retired-skills.txt names harness-vet's replacement" "grep -qE '^harness-vet[[:space:]]+replaced-by=harness-vet@hov' \"$RETIRED\""
 
 echo "skills-localize-retired: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]

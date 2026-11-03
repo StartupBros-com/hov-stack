@@ -11,7 +11,11 @@
 #     • the local layer stays applied over kept jsm skills (LOCAL LAYER below)
 #
 # SOURCES OF TRUTH (version-controlled in this repository, except the host's patches)
-#   retired-skills.txt           one skill name per line (# comments ok) → kept uninstalled
+#   retired-skills.txt           one skill name per line (# comments ok) → kept uninstalled.
+#                                 `<name> replaced-by=<plugin>@<marketplace>` holds the
+#                                 retirement (DRIFT, skill left in place) until
+#                                 installed_plugins.json records that plugin at user scope,
+#                                 so retiring never leaves a host with neither (#358)
 #   plugins/hov-stack/skills/<name>/  full local (non-jsm) skills → deployed into ~/.claude/skills/
 #   skills-patches/<name>/<rel>   content overlays, 3-way merged onto the installed jsm skill
 #   skills-patches/<name>/.base/  the upstream files each overlay was written against, plus
@@ -108,6 +112,9 @@ HERE=$(cd -P "$(dirname "$SELF")/.." && pwd) || { echo "skills-localize: cannot 
 SKILLS="${SKILLS_DIR:-$HOME/.claude/skills}"
 TRASH="$SKILLS/.trash"
 RETIRED="$HERE/retired-skills.txt"
+# Claude Code's record of installed plugins, read for replaced-by= entries. Overridable
+# so tests can point at a fixture.
+INSTALLED_PLUGINS="${SKILLS_INSTALLED_PLUGINS:-$HOME/.claude/plugins/installed_plugins.json}"
 # Overridable so tests can point at fixture trees instead of this repo's real
 # plugins/hov-stack/skills/, codex-skills.txt, overlays, notes and saved layer state.
 LOCAL="${SKILLS_LOCAL_DIR:-$HERE/plugins/hov-stack/skills}"
@@ -204,11 +211,41 @@ reject_name() {
 
 # Prefer jsm's own uninstall (keeps jsm.db consistent + archives to .trash); fall
 # back to a manual move so the tool still works offline or if jsm is absent.
+# plugin_installed <name@marketplace> → 0 when installed_plugins.json records the plugin at
+# user or managed scope, so its skills load in every session; 1 when it does not (a
+# project-scoped install loads in one project only); 2 when the record cannot be read (no
+# jq, malformed JSON). retire_one holds the retirement on anything but 0.
+plugin_installed() {
+  local out
+  [ -f "$INSTALLED_PLUGINS" ] || return 1
+  command -v jq >/dev/null 2>&1 || return 2
+  out=$(jq -r --arg p "$1" '(.plugins[$p] // []) | map(select(.scope == "user" or .scope == "managed")) | length' \
+    "$INSTALLED_PLUGINS" 2>/dev/null) || return 2
+  case "$out" in
+    0)          return 1 ;;
+    ''|*[!0-9]*) return 2 ;;
+    *)          return 0 ;;
+  esac
+}
+
+# retire_one <name> [<plugin>@<marketplace>] — the second argument is the entry's
+# replaced-by= plugin. While that plugin is not installed, the skill stays and the hold
+# is DRIFT in every mode, so harness-doctor's `check` surfaces it (#358).
 retire_one() {
-  local name="$1"; local dir="$SKILLS/$name"
+  local name="$1" replacement="${2:-}"; local dir="$SKILLS/$name"
   [ -n "$name" ] || return 0                      # never operate on an empty name
   valid_skill_name "$name" || { reject_name "$name" "retired-skills.txt"; return 0; }
   [ -e "$dir" ] || return 0                       # already gone → idempotent no-op
+  if [ -n "$replacement" ]; then
+    local rc=0 why
+    plugin_installed "$replacement" || rc=$?
+    if [ "$rc" -ne 0 ]; then
+      why="its replacement plugin $replacement is not installed at user scope"
+      [ "$rc" -eq 2 ] && why="$INSTALLED_PLUGINS could not be read (jq missing or malformed JSON), so its replacement plugin $replacement is unconfirmed"
+      note "DRIFT: retired skill '$name' is held in ~/.claude/skills: $why. Run 'claude plugin install $replacement --scope user'; the next apply then retires it"
+      drift=1; return 0
+    fi
+  fi
   if [ "$MODE" = check ]; then
     note "DRIFT: retired skill '$name' is present in ~/.claude/skills (jsm re-added it?)"; drift=1; return 0
   fi
@@ -223,11 +260,37 @@ retire_one() {
   else note "ERROR: could not retire '$name'"; errors=1; fi
 }
 
+# Each line is `<name> [replaced-by=<plugin>@<marketplace>]`, # comments allowed. Any
+# other field, or a malformed replacement, is an ERROR and the entry is left alone: a
+# typo must never retire a skill under looser rules than the line meant.
 enforce_retired() {
   [ -f "$RETIRED" ] || return 0
+  local line name rest tok replacement
+  local -a fields
   while IFS= read -r line; do
-    line="${line%%#*}"; line="${line//[[:space:]]/}"
-    [ -n "$line" ] && retire_one "$line"
+    line="${line%%#*}"
+    name=""; rest=""
+    read -r name rest <<<"$line"
+    [ -n "$name" ] || continue
+    replacement=""
+    fields=()
+    read -r -a fields <<<"$rest"
+    for tok in ${fields[@]+"${fields[@]}"}; do
+      case "$tok" in
+        replaced-by=*)
+          [ -z "$replacement" ] || {
+            note "ERROR: retired-skills.txt entry '$name' names more than one replaced-by= — refusing to touch it"
+            errors=1; drift=1; continue 2; }
+          replacement="${tok#replaced-by=}"
+          [[ "$replacement" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*@[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || {
+            note "ERROR: retired-skills.txt entry '$name' has a malformed '$tok' (want replaced-by=<plugin>@<marketplace>) — refusing to touch it"
+            errors=1; drift=1; continue 2; } ;;
+        *)
+          note "ERROR: retired-skills.txt entry '$name' has an unknown field '$tok' — refusing to touch it"
+          errors=1; drift=1; continue 2 ;;
+      esac
+    done
+    retire_one "$name" "$replacement"
   done < "$RETIRED"
 }
 
