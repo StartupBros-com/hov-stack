@@ -1,0 +1,47 @@
+lockfileVersion: 5.4
+
+specifiers:
+  '@ctrl/tinycolor': 4.1.1
+  react-dom: 18.2.0
+  thing: github:acme/thing#0123456789abcdef0123456789abcdef01234567
+
+dependencies:
+  '@ctrl/tinycolor': 4.1.1
+  react-dom: 18.2.0_react@18.2.0
+  thing: github.com/acme/thing/0123456789abcdef0123456789abcdef01234567
+
+packages:
+
+  /@ctrl/tinycolor/4.1.1:
+    resolution: {integrity: sha512-AAAA}
+    engines: {node: '>=14'}
+    dev: false
+
+  /loose-envify/1.4.0:
+    resolution: {integrity: sha512-CCCC}
+    hasBin: true
+    dependencies:
+      js-tokens: 4.0.0
+    dev: false
+
+  /react-dom/18.2.0_react@18.2.0:
+    resolution: {integrity: sha512-BBBB}
+    peerDependencies:
+      react: ^18.2.0
+    dependencies:
+      loose-envify: 1.4.0
+      react: 18.2.0
+    dev: false
+
+  /react/18.2.0:
+    resolution: {integrity: sha512-DDDD}
+    engines: {node: '>=0.10.0'}
+    dependencies:
+      loose-envify: 1.4.0
+    dev: false
+
+  github.com/acme/thing/0123456789abcdef0123456789abcdef01234567:
+    resolution: {tarball: https://codeload.github.com/acme/thing/tar.gz/0123456789abcdef0123456789abcdef01234567}
+    name: thing
+    version: 1.0.0
+    dev: false

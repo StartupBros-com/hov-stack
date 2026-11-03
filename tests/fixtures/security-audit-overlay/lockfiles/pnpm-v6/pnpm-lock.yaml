@@ -1,0 +1,39 @@
+lockfileVersion: '6.0'
+
+settings:
+  autoInstallPeers: true
+  excludeLinksFromLockfile: false
+
+dependencies:
+  '@ctrl/tinycolor':
+    specifier: 4.1.1
+    version: 4.1.1
+  react-dom:
+    specifier: 18.2.0
+    version: 18.2.0(react@18.2.0)
+
+packages:
+
+  /@ctrl/tinycolor@4.1.1:
+    resolution: {integrity: sha512-AAAA}
+    engines: {node: '>=14'}
+    dev: false
+
+  /loose-envify@1.4.0:
+    resolution: {integrity: sha512-CCCC}
+    hasBin: true
+    dev: false
+
+  /react-dom@18.2.0(react@18.2.0):
+    resolution: {integrity: sha512-BBBB}
+    peerDependencies:
+      react: ^18.2.0
+    dependencies:
+      loose-envify: 1.4.0
+      react: 18.2.0
+    dev: false
+
+  /react@18.2.0:
+    resolution: {integrity: sha512-DDDD}
+    engines: {node: '>=0.10.0'}
+    dev: false

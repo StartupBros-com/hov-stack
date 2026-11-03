@@ -1,0 +1,66 @@
+lockfileVersion: '9.0'
+
+settings:
+  autoInstallPeers: true
+  excludeLinksFromLockfile: false
+
+importers:
+
+  .:
+    dependencies:
+      '@ctrl/tinycolor':
+        specifier: 4.1.1
+        version: 4.1.1
+      react-dom:
+        specifier: 18.2.0
+        version: 18.2.0(react@18.2.0)
+      thing:
+        specifier: github:acme/thing#0123456789abcdef0123456789abcdef01234567
+        version: https://codeload.github.com/acme/thing/tar.gz/0123456789abcdef0123456789abcdef01234567
+
+packages:
+
+  '@ctrl/tinycolor@4.1.1':
+    resolution: {integrity: sha512-AAAA}
+    engines: {node: '>=14'}
+
+  js-tokens@4.0.0:
+    resolution: {integrity: sha512-EEEE}
+
+  loose-envify@1.4.0:
+    resolution: {integrity: sha512-CCCC}
+    hasBin: true
+
+  react-dom@18.2.0:
+    resolution: {integrity: sha512-BBBB}
+    peerDependencies:
+      react: ^18.2.0
+
+  react@18.2.0:
+    resolution: {integrity: sha512-DDDD}
+    engines: {node: '>=0.10.0'}
+
+  thing@https://codeload.github.com/acme/thing/tar.gz/0123456789abcdef0123456789abcdef01234567:
+    resolution: {tarball: https://codeload.github.com/acme/thing/tar.gz/0123456789abcdef0123456789abcdef01234567}
+    version: 1.0.0
+
+snapshots:
+
+  '@ctrl/tinycolor@4.1.1': {}
+
+  js-tokens@4.0.0: {}
+
+  loose-envify@1.4.0:
+    dependencies:
+      js-tokens: 4.0.0
+
+  react-dom@18.2.0(react@18.2.0):
+    dependencies:
+      loose-envify: 1.4.0
+      react: 18.2.0
+
+  react@18.2.0:
+    dependencies:
+      loose-envify: 1.4.0
+
+  thing@https://codeload.github.com/acme/thing/tar.gz/0123456789abcdef0123456789abcdef01234567: {}
