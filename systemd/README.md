@@ -58,7 +58,7 @@ These carry a `# TEMPLATE:` header at the top that lists the lines to change. "N
 | `reclaim-sweep` | `OnCalendar=Fri *-*-* 02:05:00` | nothing | Ships plan-only |
 | `tools-auto-update` | `OnCalendar=*-*-* 03:45:00` | nothing | The tool set (xf, csctf, ru) lives in `tool-update.sh`, not the unit |
 | `jsm-auto-update` drop-ins and timer | `OnCalendar=*-*-* 03:00:00` | nothing | Drop-ins for jsm's own `jsm-auto-update.service`; install that first |
-| `mcp-servers-update` | `OnCalendar=Sun *-*-* 04:00:00` | 15: `Environment=EXPECTED_ORIGIN=<owner>/<repo>` | Uncomment and set it. `update-mcp-servers.sh` refuses any other origin and, unset, exits 2 before touching git |
+| `mcp-servers-update` | `OnCalendar=Sun *-*-* 04:00:00` | nothing | Set `HOV_MCP_EXPECTED_ORIGIN=<owner>/<repo>` in the overlay's `env` file instead: `sync.sh install` overwrites the unit, so a value set there would not last. `update-mcp-servers.sh` reads it through `lib/overlay.sh` (an exported `EXPECTED_ORIGIN` wins for one run), refuses any other origin and, unset, exits 2 before touching git |
 | `harness-unit-failure-alert@` | none (started by `OnFailure=`) | 14: `DISCORD_WEBHOOK_URL` requirement | See the pager section |
 | `docker-containers.slice` (system) | none | 27, 28: `MemoryHigh=12G`, `MemorySwapMax=6G` | Sized for the author's machine. Needs `"cgroup-parent"` in `/etc/docker/daemon.json` |
 | `zram-swap.service` (system) | none | 30, 42, 49: `$HOME/.claude/scripts/zram-swap.sh`; `ZRAM_SIZE=4G` | `%h` would resolve to `/root` in a system unit, so the installed copy needs absolute paths: `sync.sh install` renders `$HOME/.claude/` to your harness home; by hand, substitute it |

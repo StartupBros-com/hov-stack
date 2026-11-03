@@ -8,33 +8,32 @@
 # It has two halves. sync.sh's UNITS_FOREIGN="..." line names the units of public
 # repositories. A host's own units (a private repository's timers) are named in
 # <overlay>/foreign-units instead, one per line, so the public tree never carries them;
-# a # after optional leading whitespace starts a comment line. The overlay is
-# $HOV_STACK_OVERLAY, else $XDG_CONFIG_HOME/hov-stack when that is absolute, else
-# ~/.config/hov-stack, the resolution setup uses. A relative overlay is ignored.
+# a # after optional leading whitespace starts a comment line. overlay_dir
+# (lib/overlay.sh) finds the overlay; a relative overlay is ignored.
 #
 # All three readers go through these functions, so the overlay half cannot be seen by
 # one of them and missed by another.
 
+# Resolved through any symlink, so a fixture that links this file alone still finds
+# its sibling.
+# shellcheck source=lib/overlay.sh
+. "$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")/overlay.sh"
+
 # foreign_units_with_overlay LIST: print LIST with the overlay's unit names appended.
 foreign_units_with_overlay() {
-  local list=$1 xdg=${XDG_CONFIG_HOME:-} dir line content
-  case $xdg in /*) ;; *) xdg=$HOME/.config ;; esac
-  dir=${HOV_STACK_OVERLAY:-$xdg/hov-stack}
-  case $dir in
-    /*)
-      if [ -f "$dir/foreign-units" ]; then
-        while IFS= read -r line || [ -n "$line" ]; do
-          content=${line#"${line%%[![:space:]]*}"}
-          case $content in
-            ''|'#'*) continue ;;
-          esac
-          case $line in
-            *[!A-Za-z0-9@._-]*) printf 'foreign-units: malformed unit name: %s\n' "$line" >&2 ;;
-            *) list="$list $line" ;;
-          esac
-        done < "$dir/foreign-units"
-      fi ;;
-  esac
+  local list=$1 dir line content
+  if dir=$(overlay_dir) && [ -f "$dir/foreign-units" ]; then
+    while IFS= read -r line || [ -n "$line" ]; do
+      content=${line#"${line%%[![:space:]]*}"}
+      case $content in
+        ''|'#'*) continue ;;
+      esac
+      case $line in
+        *[!A-Za-z0-9@._-]*) printf 'foreign-units: malformed unit name: %s\n' "$line" >&2 ;;
+        *) list="$list $line" ;;
+      esac
+    done < "$dir/foreign-units"
+  fi
   printf '%s\n' "$list"
 }
 

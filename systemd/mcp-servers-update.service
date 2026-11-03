@@ -1,6 +1,7 @@
 # TEMPLATE: Weekly update of the host MCP server checkout (runs update-mcp-servers.sh).
-# Replace before enabling:
-#   line 15: uncomment and set Environment=EXPECTED_ORIGIN=<owner>/<repo>, the GitHub origin the checkout must match.
+# Nothing to replace in this file. Before enabling, set HOV_MCP_EXPECTED_ORIGIN=<owner>/<repo>,
+# the GitHub origin the checkout must match, in the overlay's env file: `sync.sh install`
+# copies this file over the live one, so a value set here is lost at the next install.
 # See systemd/README.md.
 
 [Unit]
@@ -11,8 +12,6 @@ OnFailure=harness-unit-failure-alert@%n.service
 Type=oneshot
 TimeoutStartSec=35m
 Environment=PATH=%h/.local/bin:%h/.local/share/mise/shims:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-# Set the origin the checkout must match (update-mcp-servers.sh refuses any other):
-# Environment=EXPECTED_ORIGIN=<owner>/<repo>
 # No network-online.target exists in the user manager, so
 # readiness is this bounded probe of github.com, the host
 # update-mcp-servers.sh asks first (git fetch origin). The leading - keeps
