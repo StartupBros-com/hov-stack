@@ -14,9 +14,12 @@
 //
 // Fires once per guard process, at module load, before any guard logic runs.
 // This is the ONLY integration point needed: every first-party PreToolUse guard
-// already requires this module, and loop-guard.js (matcher `*`, opt-in checked
-// inside the function) therefore beats on every tool call regardless of whether
-// it is armed — making it a universal canary for "did the seam dispatch".
+// already requires this module. loop-guard.js (matcher `*`, opt-in checked inside
+// the function) used to beat on every tool call whether or not it was armed, as a
+// universal canary. Since #369 the launcher (hooks/bin/node-hook) skips its node
+// start unless CLAUDE_LOOP_GUARD=1, so an unarmed session beats only through the
+// tools another guard covers (Bash, EnterWorktree; settings-guard is gated too, pass 4); the
+// checker (scripts/hook-seam-check.py BEAT_COVERED_TOOLS) compares only those.
 //
 // It must be here rather than in setDenyContext(): loop-guard calls that only
 // after its opt-in early-return, and git-guard only once a command parses as

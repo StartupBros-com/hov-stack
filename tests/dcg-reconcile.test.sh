@@ -119,9 +119,12 @@ jq -e '[.. | objects | (.command? // "") | select(startswith("$HOME/"))] | lengt
 # and never behind the user's own entry. Its canonical target must exist under
 # the harness home for the reconcile to run at all. The guard is registered in
 # the template's spelling, which the hook runner's shell expands.
-GREP_COST_COMMAND='node "$HOME/.claude/hooks/PreToolUse/grep-cost-guard.js"'
-mkdir -p "$HOME/.claude/hooks/PreToolUse"
+GREP_COST_COMMAND='"$HOME/.claude/hooks/bin/node-hook" "$HOME/.claude/hooks/PreToolUse/grep-cost-guard.js"'
+mkdir -p "$HOME/.claude/hooks/PreToolUse" "$HOME/.claude/hooks/bin"
 cp "$HERE/hooks/PreToolUse/grep-cost-guard.js" "$HOME/.claude/hooks/PreToolUse/grep-cost-guard.js"
+# The registered command runs through the launcher, and reconcile refuses to
+# register a command whose launcher is absent.
+cp "$HERE/hooks/bin/node-hook" "$HOME/.claude/hooks/bin/node-hook"
 "$SYNC" reconcile-grep-cost-guard >"$TMP/grep.out" 2>&1 || fail "reconcile-grep-cost-guard failed on a live file carrying both dcg spellings: $(cat "$TMP/grep.out")"
 jq -e --arg cmd "$RESOLVED" --arg guard "$GREP_COST_COMMAND" '
   [.hooks.PreToolUse[].hooks[]? | .command] as $cmds

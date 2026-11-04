@@ -8,7 +8,22 @@
  * is not human approval, so the ask holds under bypassPermissions. Renamed
  * copies, python -c, shells outside SHELLS, exec -a, brace-expanded verbs,
  * script files read from stdin, and raw API clients remain outside this
- * classifier.
+ * classifier. So do these shapes:
+ * - past four nested shell layers only the literal CLI name followed by a
+ *   verb matches, so python -m discord_cli or a variable-held CLI that deep
+ *   passes;
+ * - an opaque variable as the command word or the shell's script ($CLI
+ *   delete, bash -c "$SCRIPT", bash <<< "$SCRIPT"), unless the same command
+ *   assigns it from the named CLI;
+ * - builtin as a wrapper (builtin eval, builtin source);
+ * - a shell that xargs or env -S starts, or one started inside bash -c, fed
+ *   the write on stdin or by a here-string;
+ * - unquoted words piped into a shell (echo discord-cli delete 1 2 | bash;
+ *   the quoted form asks), and |& into a shell;
+ * - a pipe or here-string into a group or compound command ({ bash; },
+ *   while ... done <<< ...).
+ * This is a floor for an agent's ordinary direct, wrapped or nested call, not
+ * a sandbox against a command built to get past it.
  */
 'use strict';
 
