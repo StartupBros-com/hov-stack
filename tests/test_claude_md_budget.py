@@ -80,6 +80,13 @@ def dated_citation_offenders(text: str) -> list[int]:
 # dropped: no measurement supported it. Old-vs-new behavior runs:
 # scripts/shape-audit/ablation (README, Sweep 4).
 #
+# Raised 2026-11-04 for the "Run it now; don't wait for a schedule" Autonomy
+# bullet and two clarifying edits (the ungated-effects pause now names
+# schedule edits, not starting a unit; "verify by Y" only when Y can't run
+# now). The operator typed a run-it-now nudge about 21 times in 17 sessions
+# over the prior 60 days (evidence: harness/run-it-now.md). CLAUDE.md went
+# from 15,262 to 15,769 bytes (+507); ceil(15,769 * 1.02) = 16,085.
+#
 # CLAUDE.md only, deliberately. The memory index (MEMORY.md) is the other
 # always-loaded file, but its committed copy under memory/ is a mirror
 # that `sync.sh memory-push` overwrites from the live store, so summing it
@@ -88,7 +95,7 @@ def dated_citation_offenders(text: str) -> list[int]:
 # index was already 557 bytes past the mirrored size on the day this shipped).
 # The index has its own byte cap in scripts/memory-audit.py, which runs
 # against the live store; this test does not duplicate it.
-CEILING_BYTES = 15_434
+CEILING_BYTES = 16_085
 
 
 class ClaudeMdDatedCitationTests(unittest.TestCase):

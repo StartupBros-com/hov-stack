@@ -121,6 +121,7 @@ Fix sessions retain `CLAUDE_LOOP_GUARD=1`; its authority fence is a command-text
 - Committed API keys in a private repository's `.mcp.json` stay unless the repository's trust boundary changes, such as publication or outside read access.
 - Workflow tool stays UNLISTED (2026-08-07): interactive sessions keep the review prompt (the only pre-spend gate on the most expensive tool call); don't-ask automation keeps auto-deny-with-fallback. Escape hatches, only for a live need: (1) per-repo grant, adding `Workflow` to that repo's `.claude/settings.json` allow; (2) if grants get frequent, a PreToolUse spend-threshold hook (auto-allow small scripts, ask above a size/budget bound). Re-open trigger: the `/denial-triage` digest showing the veto rate collapsing or automation refusals climbing.
 - [Drive, don't defer merges](harness/drive-dont-defer-merges.md) — merge own safe, gate-green PRs; don't hand routine merges back.
+- [Run it now](harness/run-it-now.md) — verify timer, cron, queue and scheduled-workflow jobs by hand in their safe form instead of waiting: effect classes, the `XDG_RUNTIME_DIR` fix, recipes, and the waits that stay correct.
 
 ## Playbooks
 
