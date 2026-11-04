@@ -178,8 +178,9 @@ docker_adoption_health() {
   )
 
   # Inspect the declared unit source, not live systemd state. sync.sh check owns
-  # installed-copy drift and harness-weekly owns timer health; enabling or
-  # changing the deletion-capable timer is deliberately outside this doctor.
+  # installed-copy drift and hygiene-posture drift (lib/hygiene-posture.sh: the
+  # overlay's declared timers and drop-ins); enabling or changing the
+  # deletion-capable timer is deliberately outside this doctor.
   if [ ! -r "$service" ]; then
     warn "docker hygiene strict-service wiring unavailable: service unit unreadable at $service"
   else

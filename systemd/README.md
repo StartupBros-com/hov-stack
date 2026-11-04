@@ -95,6 +95,22 @@ Environment=RECLAIM_SWEEP_APPLY=1
 Environment=DRY_RUN=0
 ```
 
+A drop-in made with `systemctl --user edit` is yours to maintain, and `sync.sh install` never touches it. To have install apply a posture for you, and keep it across reinstalls, declare it in the overlay's `hygiene-posture` file (`~/.config/hov-stack/hygiene-posture`, or under `$XDG_CONFIG_HOME` or `$HOV_STACK_OVERLAY`). One setting per line, `<unit-stem> [KEY=value]`; blank lines and `#` comment lines are skipped:
+
+```
+wt-sweep DRY_RUN=0
+wt-sweep OnCalendar=Thu *-*-* 01:15:00
+reclaim-sweep RECLAIM_SWEEP_APPLY=1
+pkg-cache-prune
+```
+
+- Stems: `wt-sweep` (keys `DRY_RUN`, `PUSH`), `reclaim-sweep` (`RECLAIM_SWEEP_APPLY`), `docker-hygiene` (`DRY_RUN`, `STOP_ORPHANS`, `REAP_VOLUMES`) and `pkg-cache-prune` (`DRY_RUN`). Each also takes `OnCalendar`. Environment values are `0` or `1`.
+- A stem on any line is declared, and install enables its `.timer`, a bare stem line included. A timer you did not declare is left as it is; install never disables one.
+- Install writes `50-hygiene-posture.conf` under `<stem>.service.d/` (the `Environment=` lines) and `<stem>.timer.d/` (`OnCalendar`), and removes one when its stem or setting leaves the file. Delete that file's lines, not the drop-in.
+- The file is checked whole. An unknown stem, an unknown key (`DRYRUN` is an error), a value other than `0` or `1`, a bad `OnCalendar` or a repeated key makes the file invalid: install applies none of it, says so, and exits non-zero after finishing the rest, and `sync.sh check` reports the drift.
+- `sync.sh check` also reports a missing or differing drop-in, one no longer declared, and a declared timer that is not enabled.
+- An `override.conf` from `systemctl --user edit` sorts after `50-` and still wins.
+
 Run each script once by hand in its default mode first and read what it plans to remove. `STOP_ORPHANS=1` stops Supabase stacks that have no `supabase/config.toml` and no live process; `REAP_VOLUMES=1` removes their database volumes.
 
 ## Tests
