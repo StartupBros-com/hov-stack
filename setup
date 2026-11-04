@@ -47,6 +47,9 @@
 #        env            NAME=value lines that claude-env.sh exports before each Bash call.
 #   5. With Claude Code 2.1.76 or later on PATH (older releases refuse the hov manifest),
 #      adds the hov marketplace and installs the plugins lib/default-plugins.txt names.
+#      Then it turns on auto-update for the hov marketplace when settings.json is setup's
+#      own unedited seed (step 3's exception), so those plugins get new versions by
+#      themselves; for a settings.json you made it only says whether auto-update is on.
 #      --check reads what Claude Code reports installed; it writes no record of its own.
 #   6. Never reads or writes memory, projects/, credentials, or anything outside the config
 #      dir, ~/.hov-stack-backups, ~/.local (dcg) and this checkout, apart from reading the
@@ -170,15 +173,16 @@ dcg_hook_fix() {  # dcg_hook_fix <dcg_hooked status>
 # first run's settings.json and its seed. The seed never sets these keys.
 CLAUDE_WRITES='["enabledPlugins","extraKnownMarketplaces"]'
 
-# untouched_seed <settings.json>: 0 when the file holds the seed this run would write with dcg
-# absent, plus at most the keys Claude Code writes (CLAUDE_WRITES), in any key order. The seed
+# untouched_seed <settings.json> [dcg path]: 0 when the file holds the seed this run would write
+# with that dcg path (none: dcg absent), plus at most the keys Claude Code writes
+# (CLAUDE_WRITES), in any key order. The seed
 # is a pure function of the template, the config dir, HOME and the overlay, so a match is a
 # settings.json an earlier run seeded and nobody has edited since; any other change, one
 # value or one list entry, makes it the user's file.
 untouched_seed() {
   local tmp rc=1
   tmp=$(mktemp -d "${TMPDIR:-/tmp}/hov-stack-seed.XXXXXX") || return 1
-  if node "$HOV_STACK/lib/settings-seed.js" "$HOV_STACK/settings.json" "$tmp/seed.json" "$CFG" "$HOME" "" "$overlay_settings" > /dev/null 2>&1 \
+  if node "$HOV_STACK/lib/settings-seed.js" "$HOV_STACK/settings.json" "$tmp/seed.json" "$CFG" "$HOME" "${2:-}" "$overlay_settings" > /dev/null 2>&1 \
     && node -e '
       const fs = require("fs");
       let live, seed;
@@ -409,6 +413,7 @@ overlay_row() {  # overlay_row check|run
   fi
 }
 seed_ok=0
+au_on=0
 # The overlay's settings.json the seed merges, read by the seed and by untouched_seed alike.
 overlay_settings=
 if overlay_usable && [ -f "$OVERLAY/settings.json" ]; then overlay_settings=$OVERLAY/settings.json; fi
@@ -605,8 +610,26 @@ else
     else
       row plugins ok "${defaults[*]} were already installed"
     fi
-    echo "  Plugins from $MARKETPLACE stay at these versions until you turn on auto-update: in Claude Code"
-    echo "  run /plugin, open Marketplaces, select $MARKETPLACE, then Enable auto-update."
+    # Claude Code leaves auto-update off for a marketplace from another publisher, and every
+    # 'marketplace add' drops the setting, so it is set again after the add (#395). Only in
+    # setup's own unedited seed (with this run's dcg hook, or the one written before dcg was
+    # installed): the README promises to leave a settings.json you have alone, so for yours
+    # setup only reports, and /hov-setup asks before turning it on. No status row, so
+    # --check and the exit status do not change.
+    au_helper=$HOV_STACK/plugins/hov-stack/skills/hov-setup/scripts/autoupdate.mjs
+    au_rc=0
+    if untouched_seed "$CFG/settings.json" "$dcg_path" \
+      || { [ -n "$dcg_path" ] && untouched_seed "$CFG/settings.json"; }; then
+      au_out=$(node "$au_helper" --config-dir "$CFG" --no-backup "$MARKETPLACE" 2>&1) || au_rc=$?
+      printf '%s\n' "$au_out" | sed 's/^/  /'
+    else
+      au_out=$(node "$au_helper" --config-dir "$CFG" --check "$MARKETPLACE" 2>&1) || au_rc=$?
+      printf '%s\n' "$au_out" | sed 's/^/  /'
+      if [ "$au_rc" -eq 3 ]; then
+        echo "  setup does not change a settings.json you already have; /hov-setup asks before it does."
+      fi
+    fi
+    if [ "$au_rc" -eq 0 ]; then au_on=1; fi
   fi
 fi
 
@@ -636,6 +659,9 @@ if [ "$st_plugins" = ok ]; then
   done
   echo "  - The plugins setup installs for everyone: $names. /hov-setup shows what each does."
   have_any=1
+fi
+if [ "$au_on" = 1 ]; then
+  echo "  - Auto-update for the $MARKETPLACE plugins: Claude Code fetches their new versions by itself."
 fi
 [ "$have_any" -eq 1 ] || echo "  - Nothing yet: the rows above say what stopped each step."
 if [ "$not_ok" -eq 1 ]; then

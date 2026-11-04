@@ -37,12 +37,22 @@ const fakeTool = (name) => `#!/bin/sh\n: > "$FAKE_DIR/ran-${name}"\n`;
 
 // pathBins sit in a directory that is on PATH; extraBins in the extra directory the detector
 // also searches (HOV_SETUP_EXTRA_BIN_DIRS), which is not on PATH. No real tool is visible.
+// cfg is the Claude Code config dir every run gets (CLAUDE_CONFIG_DIR), so no test reads this
+// machine's own settings; settings and known become its settings.json and
+// plugins/known_marketplaces.json (an object as JSON, a string as is, undefined as no file).
 function withFake(
-  { marketplaces = [{ name: "hov" }], plugins = [], wsl = true, fail = false, raw, pathBins = [], extraBins = [] } = {},
+  {
+    marketplaces = [{ name: "hov" }], plugins = [], wsl = true, fail = false, raw, pathBins = [], extraBins = [],
+    settings, known,
+  } = {},
   run,
 ) {
   const dir = mkdtempSync(join(tmpdir(), "hov-setup-"));
   try {
+    mkdirSync(join(dir, "cfg", "plugins"), { recursive: true });
+    for (const [p, v] of [[join(dir, "cfg", "settings.json"), settings], [join(dir, "cfg", "plugins", "known_marketplaces.json"), known]]) {
+      if (v !== undefined) writeFileSync(p, typeof v === "string" ? v : JSON.stringify(v, null, 2) + "\n");
+    }
     writeFileSync(join(dir, "claude"), FAKE_CLAUDE);
     chmodSync(join(dir, "claude"), 0o755);
     writeFileSync(join(dir, "marketplaces.json"), JSON.stringify(marketplaces));
@@ -82,6 +92,7 @@ function detectAt(script, dir, env, ...args) {
       HOV_SETUP_PROC_VERSION: join(dir, "proc-version"),
       HOV_SETUP_EXTRA_BIN_DIRS: join(dir, "xbin"),
       HOV_SETUP_PLATFORM: "linux-x86_64",
+      CLAUDE_CONFIG_DIR: join(dir, "cfg"),
       ...env,
     },
   });
@@ -118,7 +129,10 @@ test("with everything absent, lists every offer and helper with the line to run"
       ),
       lines.join("\n"),
     );
-    assert.equal(lines.length, ALL.length + HELPERS.length);
+    // One row per offer and helper, plus hov's auto-update line. The fake's config dir is empty,
+    // so Claude Code lists hov while neither file names it.
+    assert.equal(lines.length, ALL.length + HELPERS.length + 1);
+    assert.equal(lines.filter((l) => l.startsWith("  auto-update for hov: could not tell: neither ")).length, 1, lines.join("\n"));
     assert.equal(r.stdout.includes("also installed"), false);
     const rep = report(dir);
     assert.equal(rep.marketplace.added, true);
@@ -568,4 +582,121 @@ test("offers.json has a valid shape", () => {
     assert.ok(h.bin, `${h.name}: no bin`);
     for (const k of Object.keys(h.install)) assert.ok(PLATFORMS.includes(k), `${h.name}: install key ${k}`);
   }
+});
+
+// Auto-update (#395): where each marketplace stands, read from the config dir's files.
+const HOV_SRC = { source: "github", repo: "StartupBros-com/hov-stack" };
+const knownOf = (source, extra = {}) => ({ source, installLocation: "/m", lastUpdated: "2026-11-04T00:00:00.000Z", ...extra });
+const turnOn = (name) => `node "${join(here, "autoupdate.mjs")}" ${name}`;
+
+test("reports hov's auto-update: off after a plain add, with the line that turns it on", () => {
+  const files = { settings: { extraKnownMarketplaces: { hov: { source: HOV_SRC } } }, known: { hov: knownOf(HOV_SRC) } };
+  withFake(files, (dir) => {
+    const rep = report(dir);
+    assert.deepEqual(rep.marketplace.autoUpdate, { state: "off", where: "default", problem: null, next: turnOn("hov") });
+    assert.deepEqual(rep.updatesOff, []);
+    const r = detect(dir);
+    assert.ok(r.stdout.split("\n").includes(`  auto-update for hov: off. Turn on: ${turnOn("hov")}`), r.stdout);
+  });
+});
+
+test("the line it gives turns auto-update on, and the next detector run says so", () => {
+  const files = { settings: { extraKnownMarketplaces: { hov: { source: HOV_SRC } } }, known: { hov: knownOf(HOV_SRC) } };
+  withFake(files, (dir) => {
+    const next = report(dir).marketplace.autoUpdate.next;
+    const [, script, name] = /^node "([^"]+)" (\S+)$/.exec(next);
+    const r = spawnSync(process.execPath, [script, "--no-backup", name], {
+      encoding: "utf8",
+      env: { PATH: process.env.PATH, HOME: dir, CLAUDE_CONFIG_DIR: join(dir, "cfg") },
+    });
+    assert.equal(r.status, 0, r.stdout + r.stderr);
+    const rep = report(dir);
+    assert.deepEqual(rep.marketplace.autoUpdate, { state: "on", where: "settings.json", problem: null, next: null });
+    assert.ok(detect(dir).stdout.split("\n").includes("  auto-update for hov: on"));
+  });
+});
+
+test("a false someone set reads as turned-off, with nothing to run", () => {
+  for (const files of [
+    { settings: { extraKnownMarketplaces: { hov: { source: HOV_SRC, autoUpdate: false } } }, known: { hov: knownOf(HOV_SRC, { autoUpdate: true }) } },
+    { settings: { extraKnownMarketplaces: { hov: { source: HOV_SRC } } }, known: { hov: knownOf(HOV_SRC, { autoUpdate: false }) } },
+  ]) {
+    withFake(files, (dir) => {
+      const a = report(dir).marketplace.autoUpdate;
+      assert.equal(a.state, "turned-off");
+      assert.equal(a.next, null);
+      assert.ok(detect(dir).stdout.includes("  auto-update for hov: off, switched off by someone, so left alone"));
+    });
+  }
+});
+
+test("a settings.json that does not parse makes auto-update unknown, and the rest of the report still runs", () => {
+  withFake({ settings: "{ nope", known: { hov: knownOf(HOV_SRC) } }, (dir) => {
+    const rep = report(dir);
+    assert.equal(rep.marketplace.autoUpdate.state, "unknown");
+    assert.match(rep.marketplace.autoUpdate.problem, /settings\.json does not parse as JSON$/);
+    assert.equal(rep.marketplace.autoUpdate.next, null);
+    assert.equal(rep.plugins.length, ALL.length);
+  });
+});
+
+test("another publisher's plugin carries its marketplace's auto-update, by the name it is added under", () => {
+  const codex = { source: "github", repo: "openai/codex-plugin-cc" };
+  // Not added yet: the line to run after marketplaceAdd names the marketplace's own name.
+  withFake({}, (dir) => {
+    const r = row(report(dir), "codex");
+    assert.ok(r.marketplaceAdd);
+    assert.deepEqual(r.autoUpdate, { state: "not-added", where: null, problem: null, next: turnOn("openai-codex") });
+  });
+  // Added under another name, with auto-update on there.
+  withFake(
+    {
+      marketplaces: [{ name: "hov" }, { name: "my-codex", source: "github", repo: "openai/codex-plugin-cc" }],
+      settings: { extraKnownMarketplaces: { "my-codex": { source: codex, autoUpdate: true } } },
+      known: { "my-codex": knownOf(codex) },
+    },
+    (dir) => {
+      const r = row(report(dir), "codex");
+      assert.equal(r.marketplaceAdd, null);
+      assert.equal(r.id, "codex@my-codex");
+      assert.deepEqual(r.autoUpdate, { state: "on", where: "settings.json", problem: null, next: null });
+    },
+  );
+});
+
+test("names a switch that stops every plugin update, from the environment or settings.json", () => {
+  withFake({ settings: { env: { DISABLE_UPDATES: "1" } } }, (dir) => {
+    assert.deepEqual(report(dir).updatesOff, [{ name: "DISABLE_UPDATES", where: "settings.json" }]);
+    assert.deepEqual(report(dir, { DISABLE_AUTOUPDATER: "1" }).updatesOff, [
+      { name: "DISABLE_AUTOUPDATER", where: "environment" },
+      { name: "DISABLE_UPDATES", where: "settings.json" },
+    ]);
+    assert.deepEqual(report(dir, { FORCE_AUTOUPDATE_PLUGINS: "1" }).updatesOff, []);
+    assert.ok(detect(dir).stdout.includes("  note: DISABLE_UPDATES is set (settings.json), which stops Claude Code updating any plugin"));
+  });
+});
+
+test("a marketplace Claude Code lists but these files do not, or that settings.json lacks, gets no line to run", () => {
+  // Listed, in neither file: added from somewhere else.
+  withFake({}, (dir) => {
+    const a = report(dir).marketplace.autoUpdate;
+    assert.equal(a.state, "unknown");
+    assert.equal(a.next, null);
+    assert.match(a.problem, /nor .*known_marketplaces\.json lists hov, so it was added some other way/);
+  });
+  // In known_marketplaces.json only: off by default, but the helper has no entry to set.
+  withFake({ known: { hov: knownOf(HOV_SRC) } }, (dir) => {
+    const a = report(dir).marketplace.autoUpdate;
+    assert.equal(a.state, "off");
+    assert.equal(a.next, null);
+    assert.match(a.problem, /settings\.json has no entry for hov, so it was added some other way\. To turn auto-update on: \/plugin, Marketplaces, hov, Enable auto-update\.$/);
+    assert.ok(detect(dir).stdout.includes(`  auto-update for hov: off. ${a.problem}`));
+  });
+  // Another publisher's marketplace listed under its own name, in neither file.
+  withFake({ marketplaces: [{ name: "hov" }, { name: "openai-codex", source: "github", repo: "openai/codex-plugin-cc" }] }, (dir) => {
+    const r = row(report(dir), "codex");
+    assert.equal(r.marketplaceAdd, null);
+    assert.equal(r.autoUpdate.state, "unknown");
+    assert.equal(r.autoUpdate.next, null);
+  });
 });

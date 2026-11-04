@@ -12,7 +12,7 @@
 #
 #   4. (hov-stack#394) A session drives a worktree from a transcript filed under
 #      another project: the one it launched from, after EnterWorktree, `git -C` or
-#      `cd`. 31 pushbot worktrees were of this kind on 2026-11-03.
+#      `cd`. In one repo, 31 worktrees were of this kind on 2026-11-03.
 #
 #   Each fix has a planted negative: a done job, a reused pid and an old transcript
 #   must NOT hold a worktree (or nothing would ever be swept); nor may a tool result

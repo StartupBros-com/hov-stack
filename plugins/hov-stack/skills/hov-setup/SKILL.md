@@ -47,11 +47,20 @@ It reads `claude plugin marketplace list --json` and `claude plugin list --json`
 
 `helpers` lists those helper programs the same way (today just uv). `platform` names this computer's system, and `alsoInstalled` lists the other hov plugins already installed, each with `name`, `version`, `enabled`, `what` and `start` (the command that starts it).
 
+`marketplace.autoUpdate` says whether Claude Code fetches new versions of the hov plugins by itself. Its `state` is `on`; `off`, Claude Code's default for another publisher's list; `turned-off`, when someone switched it off; `not-added`; or `unknown`. `where` names where that comes from, `problem` says why when it can't be read or set here, and `next` is the line that turns it on (`scripts/autoupdate.mjs`), or null. Each `other-plugin` has an `autoUpdate` of the same shape for its publisher's list. `updatesOff` names each setting that stops Claude Code updating any plugin at all, with `name` and `where`.
+
 - A non-zero exit means `claude` could not be read. Tell the user in one sentence and stop. It does not mean nothing is installed.
 - `marketplace.added` is false: say that setup's first stage didn't finish adding the hov plugins, and ask them to run `./setup` again in their hov-stack folder, then type `/hov-setup` here. Stop.
 - If `$ARGUMENTS` names one entry, work on that one only.
 
 Don't show the detector's output. Open with two or three sentences: setup is done, and there is more they can add, each needing a choice, a login or a paid plan. Say you'll ask what they want Claude to help with, then show what fits. If nothing is `absent` or `disabled`, go straight to Step 4.
+
+Before that question, settle auto-update for the hov plugins:
+
+- `marketplace.autoUpdate.state` is `off` and `next` is set: ask one yes/no question, whether the hov plugins should update themselves. Say it changes one setting in their `settings.json`, and a copy of the old file is kept. On a yes, run `next` and relay its one line. On a no, leave it.
+- `off` with `next` null, or `unknown`: relay `problem` in one sentence, and change nothing.
+- `turned-off`: someone chose that, so leave it and say nothing.
+- `updatesOff` is not empty: say in one sentence which setting stops Claude Code updating any plugin, so auto-update does nothing until it is removed. Don't change it.
 
 ## Step 2: choose
 
@@ -65,6 +74,8 @@ Then, for each group they picked, show a card for each `absent` entry in it, tak
 
 Recommend from what the user has told you in this conversation. The CLAUDE.md and rules this session loaded came with hov-stack, so they say nothing about the user: never read them as a sign of what the user knows or does. With nothing else to go on, recommend sign-it in the everyday group and gh in the code group, and nothing in the tuning group. Recommend pro-gate only to someone who already pays for ChatGPT Pro, codex only to someone with a ChatGPT plan, and jeffreys-skills only to someone who says they want to pay for it. Some go together: token-eater and pro-gate need gh, so when someone picks either without gh, say gh comes with it. Tell them they can type `/hov-setup` again any time to add the rest.
 
+On the card of an `other-plugin` whose `autoUpdate.next` is set, add one line: installing it also turns on auto-update for its publisher's list, so it stays current. The user's OK to install covers that.
+
 For a `disabled` entry, ask before running its `next` line.
 
 ## Step 3: install, and keep going
@@ -72,7 +83,7 @@ For a `disabled` entry, ask before running its `next` line.
 Install each picked plugin now:
 
 - A `plugin`: run its `next` line, `claude plugin install <name>@hov --scope user`.
-- An `other-plugin`: if its `marketplaceAdd` is set, say in one line that it comes from its publisher's own plugin list, which you are adding to Claude Code first, and run `marketplaceAdd`. Then run its `next` line.
+- An `other-plugin`: if its `marketplaceAdd` is set, say in one line that it comes from its publisher's own plugin list, which you are adding to Claude Code first, and run `marketplaceAdd`. Then, if its `autoUpdate.next` is set, run that; when it exits 1, relay its one-line reason and go on. Then run its `next` line.
 
 Say so in one line, and again when it's done. Programs (`tool` and `paid-skills`) install in their own sections in Step 4, after any helper they need. Then go straight on to Step 4: its checks work right away. Only a plugin's own slash commands need the plugin loaded into this window. Just before the first step that needs one, ask the user to type `/reload-plugins`, and say what it does: "Type /reload-plugins so this window picks up what we just installed. It takes a second." One reload loads every plugin installed so far. If it says plugins are not loaded yet and mentions `--force`, ask them to type `/reload-plugins --force`.
 
@@ -388,4 +399,5 @@ Run Step 1's detector again. Then wrap up in a few short lines, with no table:
 - What's ready now, each with how to start it ("sign-it: type /sign-it:sign-it and give it a PDF").
 - Anything skipped or still waiting, and the one thing left for the user, if any.
 - What setup already gave them: each `alsoInstalled` plugin with its `what` and `start`, and the skill pack's slash commands. Typing `/` lists them all. Three to try first: `/bro` re-explains Claude's last answer in plain words, `/eli5 <topic>` explains any topic simply with a picture, and `/deep-research <question>` digs into a question across many sources.
+- Whether the plugins update themselves, from the detector's `marketplace.autoUpdate`, in one line: "The hov plugins update themselves", or that they stay at these versions and what it said to do.
 - They can type `/hov-setup` again any time to add the rest.

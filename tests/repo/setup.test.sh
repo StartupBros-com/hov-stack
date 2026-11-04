@@ -28,6 +28,10 @@
 #     neither; a CLI below the floor, or offline, is reported and the run goes on; --check is
 #     green after a full run, names a default plugin removed since and a rerun installs only
 #     that one, and names each missing step after a partial run, changing nothing
+#   - auto-update (#395): the fake claude writes what Claude Code writes on an add and an
+#     install; setup then turns auto-update on for hov in its own unedited seed and says
+#     how to turn it off, a rerun leaves it on and writes nothing, and a settings.json of
+#     the user's own keeps no autoUpdate key while setup says /hov-setup asks first
 #   - the private overlay (U16, #65): settings.json merges into the seed (its keys win, lists
 #     add without repeats across spellings, a null removes, its dcg hooks follow the template's
 #     rule, another kind of value is refused with no seed); CLAUDE.md is imported from rules/
@@ -430,7 +434,8 @@ SU=$HU/.claude/settings.json
 [ "$(dcg_hooks "$SU")" = 0 ] || fail "a run without dcg seeded a dcg hook"
 # What Claude Code did to the seed during that first run's plugin step, as OBSERVED on the
 # Mac: it added the two plugin keys and rewrote the file in its own key order. That is
-# still setup's unedited seed. (This harness's fake claude writes nothing to settings.json.)
+# still setup's unedited seed. (Written by hand here; the fake claude below writes the same
+# keys on its own add and install.)
 claude_writes() {  # claude_writes <settings.json>
   node -e '
     const fs = require("fs"), s = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
@@ -590,7 +595,28 @@ case "$*" in
     fi ;;
   'plugin marketplace add '*)
     if [ -f "$F/offline" ]; then echo "fake claude: could not reach github.com" >&2; exit 1; fi
-    printf '%s\n' "$F/mkt" > "$F/marketplace" ;;
+    printf '%s\n' "$F/mkt" > "$F/marketplace"
+    # What Claude Code 2.1.318 writes on an add (OBSERVED for #395): the marketplace's entry
+    # in settings.json, replaced whole, so an autoUpdate set before is dropped; and its record
+    # in plugins/known_marketplaces.json.
+    node -e '
+      const fs = require("fs"), path = require("path");
+      const [cfg, repo] = process.argv.slice(1);
+      const source = { source: "github", repo };
+      const sp = path.join(cfg, "settings.json");
+      let s = {};
+      try { if (fs.existsSync(sp)) s = JSON.parse(fs.readFileSync(sp, "utf8")); } catch { s = null; }
+      if (s) {
+        s.extraKnownMarketplaces = { ...(s.extraKnownMarketplaces || {}), hov: { source } };
+        fs.writeFileSync(sp, JSON.stringify(s, null, 2) + "\n");
+      }
+      const kp = path.join(cfg, "plugins", "known_marketplaces.json");
+      let k = {};
+      if (fs.existsSync(kp)) k = JSON.parse(fs.readFileSync(kp, "utf8"));
+      k.hov = { source, installLocation: path.join(cfg, "plugins", "marketplaces", "hov"), lastUpdated: new Date().toISOString() };
+      fs.mkdirSync(path.dirname(kp), { recursive: true });
+      fs.writeFileSync(kp, JSON.stringify(k, null, 2) + "\n");
+    ' "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" "$4" ;;
   'plugin list --json')
     sep=
     printf '['
@@ -603,7 +629,15 @@ case "$*" in
     if [ -f "$F/offline" ]; then echo "fake claude: could not reach github.com" >&2; exit 1; fi
     v=$(awk -v p="${3%@hov}" '$1 == p { print $2 }' "$F/versions")
     [ -n "$v" ] || { echo "fake claude: hov has no plugin $3" >&2; exit 1; }
-    printf '%s %s user\n' "$3" "$v" >> "$F/plugins" ;;
+    printf '%s %s user\n' "$3" "$v" >> "$F/plugins"
+    # Claude Code also enables the plugin in settings.json.
+    node -e '
+      const fs = require("fs"), sp = require("path").join(process.argv[1], "settings.json");
+      let s = {};
+      try { if (fs.existsSync(sp)) s = JSON.parse(fs.readFileSync(sp, "utf8")); } catch { process.exit(0); }
+      s.enabledPlugins = { ...(s.enabledPlugins || {}), [process.argv[2]]: true };
+      fs.writeFileSync(sp, JSON.stringify(s, null, 2) + "\n");
+    ' "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" "$3" ;;
   *) echo "fake claude: unexpected call: $*" >&2; exit 64 ;;
 esac
 EOF
@@ -639,8 +673,19 @@ done < <(default_names)
 ok "a fake claude was asked to add hov once and to install each of the $(default_names | wc -l | tr -d ' ') default plugins once, at user scope"
 grep -q -E '^  marketplace +ok +added from StartupBros-com/hov-stack$' "$WORK/run-fake.log" || fail "no 'marketplace ok' row"
 grep -q -x -E "  plugins +ok +installed: $(default_names | tr '\n' ' ' | sed 's/ $//')" "$WORK/run-fake.log" || fail "the plugins row does not name each default plugin installed"
-grep -q -F 'select hov, then Enable auto-update' "$WORK/run-fake.log" || fail "the auto-update note is missing"
-ok "the marketplace and plugins rows name what was added, and the auto-update note is shown"
+grep -q -x -F "  hov: auto-update turned on in $HF/.claude/settings.json. To turn it off, set \"autoUpdate\" to false under extraKnownMarketplaces.hov there." "$WORK/run-fake.log" \
+  || { cat "$WORK/run-fake.log"; fail "setup did not say it turned auto-update on for hov and how to turn it off"; }
+au_of() {  # au_of <settings.json>: hov's autoUpdate value, or 'none'
+  node -e '
+    const s = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+    const e = s.extraKnownMarketplaces && s.extraKnownMarketplaces.hov;
+    process.stdout.write(e && "autoUpdate" in e ? String(e.autoUpdate) : "none");
+  ' "$1"
+}
+[ "$(au_of "$HF/.claude/settings.json")" = true ] || { cat "$HF/.claude/settings.json"; fail "setup's own seed did not get autoUpdate true for hov"; }
+grep -q -x -F '  - Auto-update for the hov plugins: Claude Code fetches their new versions by itself.' "$WORK/run-fake.log" \
+  || { tail -n 12 "$WORK/run-fake.log"; fail "the ending does not say the hov plugins update themselves"; }
+ok "the marketplace and plugins rows name what was added, and setup turns auto-update on in its own seed"
 # The ending in plain words (U26, 2026-11-03): what is in place, then one next step. A first
 # run had told the user to start a session for /hov-setup and then, from it, another.
 grep -q -x -F 'What you have now:' "$WORK/run-fake.log" || fail "the ending does not say what is in place"
@@ -666,7 +711,36 @@ fake_setup "$FK" "$HF" "$WORK/run-fake2.log" --no-dcg || { cat "$WORK/run-fake2.
 [ "$(grep -c '^plugin install ' "$FK/calls")" = "$(default_names | wc -l | tr -d ' ')" ] || fail "a rerun installed a plugin again"
 grep -q -E '^  plugins +ok +.* were already installed$' "$WORK/run-fake2.log" || fail "a rerun did not report the plugins already installed"
 [ ! -e "$HF/.hov-stack-backups" ] || fail "a run on a fresh HOME moved something to a backup"
-ok "a rerun adds and installs nothing, says the plugins were already installed, and moves nothing"
+grep -q -x -F "  hov: auto-update is on, set in $HF/.claude/settings.json" "$WORK/run-fake2.log" \
+  || { cat "$WORK/run-fake2.log"; fail "a rerun did not say auto-update is on"; }
+ok "a rerun adds and installs nothing, says the plugins were already installed and auto-update is on, and moves nothing"
+# A settings.json of the user's own: the README promises setup leaves it alone, so auto-update
+# stays as Claude Code left it and setup says /hov-setup asks first.
+FKO=$WORK/fake-own
+new_fake "$FKO" 2.1.310
+HOWN=$WORK/home-own
+mkdir -p "$HOWN/.claude"
+printf '{\n  "theme": "dark"\n}\n' > "$HOWN/.claude/settings.json"
+fake_setup "$FKO" "$HOWN" "$WORK/run-own.log" --no-dcg || { cat "$WORK/run-own.log"; fail "setup with a settings.json of the user's own exited non-zero"; }
+[ "$(au_of "$HOWN/.claude/settings.json")" = none ] || { cat "$HOWN/.claude/settings.json"; fail "setup set auto-update in a settings.json of the user's own"; }
+node -e 'process.exit(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).theme === "dark" ? 0 : 1)' "$HOWN/.claude/settings.json" \
+  || fail "the user's own setting is gone"
+grep -q -x -F "  hov: auto-update is off, Claude Code's default for a marketplace from another publisher" "$WORK/run-own.log" \
+  || { cat "$WORK/run-own.log"; fail "setup did not report auto-update off for a settings.json of the user's own"; }
+grep -q -x -F '  setup does not change a settings.json you already have; /hov-setup asks before it does.' "$WORK/run-own.log" \
+  || fail "setup did not say /hov-setup asks before turning auto-update on"
+! grep -q -F 'Auto-update for the hov plugins' "$WORK/run-own.log" || fail "the ending claims auto-update is on when it was left off"
+[ ! -e "$HOWN/.hov-stack-backups" ] || fail "a settings.json of the user's own was backed up"
+ok "a settings.json of the user's own gets no autoUpdate key, and setup says /hov-setup asks first"
+# With dcg found, the seed carries dcg's hook, and that is still setup's own seed.
+FKD=$WORK/fake-dcg
+new_fake "$FKD" 2.1.310
+HFD=$WORK/home-fake-dcg
+PATH=$WORK/dcg-bin:$PATH fake_setup "$FKD" "$HFD" "$WORK/run-fake-dcg.log" --no-dcg \
+  || { cat "$WORK/run-fake-dcg.log"; fail "setup with a fake claude and dcg found exited non-zero"; }
+[ "$(dcg_hooks "$HFD/.claude/settings.json")" != 0 ] || fail "with dcg found, the seed has no dcg hook, so this case tests nothing"
+[ "$(au_of "$HFD/.claude/settings.json")" = true ] || { cat "$WORK/run-fake-dcg.log"; fail "setup's own seed with dcg's hook did not get auto-update turned on"; }
+ok "with dcg found, setup's own seed (dcg's hook in it) gets auto-update turned on too"
 tree_state() { ls -lAR "$1" | sha256sum; }  # -A: '..' would carry $WORK's mtime
 tree_before=$(tree_state "$HF")
 calls_before=$(wc -l < "$FK/calls")
@@ -783,6 +857,14 @@ node -e '
   const g = structuredClone(got), b = structuredClone(base);
   delete g.model; g.autoCompactWindow = b.autoCompactWindow; delete g.env.MY_OVERLAY_DIR; g.env.API_TIMEOUT_MS = b.env.API_TIMEOUT_MS;
   g.permissions.allow.pop(); g.hooks.Stop.pop(); delete b.sandbox;
+  // The two keys Claude Code writes (by the fake claude add and installs) do not come from the overlay:
+  // they hold what those wrote, plus the auto-update setup turns on in its own seed (#395).
+  const hovEntry = { hov: { source: { source: "github", repo: "StartupBros-com/hov-stack" }, autoUpdate: true } };
+  want(JSON.stringify(canon(g.extraKnownMarketplaces)) === JSON.stringify(canon(hovEntry)),
+    "extraKnownMarketplaces is not the entry the add wrote, with auto-update turned on");
+  const enabled = Object.entries(g.enabledPlugins || {});
+  want(enabled.length > 0 && enabled.every(([id, on]) => id.endsWith("@hov") && on === true), "enabledPlugins is not what the installs wrote");
+  delete g.extraKnownMarketplaces; delete g.enabledPlugins;
   want(JSON.stringify(canon(g)) === JSON.stringify(canon(b)), "the overlay changed something it does not name");
   if (bad.length) { console.log(bad.join("\n")); process.exit(1); }
 ' "$WORK/seed-ov-base.json" "$HO/.claude/settings.json" "$HO/.claude" "$HO" || fail "the overlay seed is wrong (above)"
