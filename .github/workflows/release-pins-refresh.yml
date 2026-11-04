@@ -1,0 +1,238 @@
+name: Release pins refresh
+
+# Keep the program versions that hov-setup installs (gh, uv, cass, jsm in the table
+# of plugins/hov-stack/skills/hov-setup/scripts/install-release.sh) current without
+# a human typing a version and a checksum. Each day this verifies that the table on
+# main still matches its downloads, moves each tool to its newest release that has
+# passed the cooldown, and opens a pull request for the change.
+#
+# Verify first: a red run means a pinned download vanished or changed upstream, which
+# breaks ./setup for everyone, so it is worth a page before any refresh is considered.
+#
+# Refresh (release/scripts/release-pins.sh): per tool the candidate is the newest
+# stable release at least HOV_PIN_MIN_AGE_DAYS old (repository variable, default 3),
+# so a bad release has days to be yanked before a pin follows it. A pin never moves
+# backwards. Every platform row is rebuilt from the publisher's own checksum file, the
+# archive is checked for the members install-release.sh extracts, and gh and uv
+# archives must also pass `gh attestation verify`. Anything short of all of that fails
+# the whole run and changes nothing: it is all or nothing.
+#
+# Two jobs, because GitHub grants permissions and secrets per job and a hosted runner
+# gives every step sudo: any program a job runs can read every token that job holds.
+# `refresh` is the only job that downloads and runs a program (verify runs each pinned
+# tool, refresh runs jsm's own update check), so it holds a read-only token and no
+# secret, and hands `land` nothing but the new table rows. `land` holds the bot's key and
+# runs no downloaded program: it checks out the default branch itself (a commit named
+# by the first job could be any fetchable commit) and `release-pins.sh apply` refuses
+# any row refresh could not have written: a url off the release template, members off
+# the template, a malformed sha256, a backwards move, a row changed without a version
+# move, a missing, extra or reordered row. If main's table moves between the two jobs,
+# apply goes red for that run and the next run starts from the new table. The pins PR's
+# own CI re-verifies the new table against its downloads (validate.yml, Pinned sources).
+#
+# The PR is opened as the StartupBros HOV Marketplace Bot App (HOV_MARKETPLACE_APP_ID +
+# HOV_MARKETPLACE_APP_PRIVATE_KEY, contents and pull-request write on THIS repository
+# only), the same identity repin-reconcile uses, because the organization forbids
+# GITHUB_TOKEN from creating pull requests. Before anything else release/scripts/
+# repin-land.sh proves the PR is the bot's, from this repository, changes only
+# install-release.sh and carries exactly the refresh's output.
+#
+# Auto-merge is OFF by default, because install-release.sh runs on every customer
+# machine. The code-owner-review ruleset exempts the marketplace bot whatever its PR
+# changes, and an auto-merge the bot requests merges as the bot, so a requested
+# auto-merge would skip the owner's review. With auto-merge off, the PR waits until
+# the owner merges it. Setting the repository variable HOV_PINS_AUTO_MERGE=true makes
+# repin-land.sh request auto-merge after its proof, and the PR then lands without the
+# owner. Turning the variable off again makes the next run cancel a request the bot
+# made on the open PR; a request a person made stays. The require-ci ruleset has no bypass, so GitHub still waits for every
+# required check. That includes Pinned sources' re-verify of the new table only while
+# the repository variable HOV_SOURCES_PUBLIC is true: the job is skipped otherwise,
+# and a skipped job counts as a passed check.
+#
+# This workflow never bumps plugins/hov-stack/VERSION. A VERSION bump is a release,
+# and a release announces to customers; people on a checkout get the new table
+# through ./setup --update, and the next intentional release carries it to the rest.
+
+on:
+  schedule:
+    # Once a day, off :00 and :30 where every scheduled job on GitHub piles up.
+    - cron: '17 5 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-pins-refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    outputs:
+      rows: ${{ steps.refresh.outputs.rows }}
+    steps:
+      - name: Check out main
+        uses: actions/checkout@ac593985615ec2ede58e132d2e21d2b1cbd6127c
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+
+      - name: Verify the pinned table against its downloads
+        run: ./release/scripts/release-pins.sh verify
+
+      - name: Refresh the pins to current releases
+        id: refresh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PLAN_FILE: ${{ runner.temp }}/pins-plan.tsv
+          ROWS_FILE: ${{ runner.temp }}/pins-rows.txt
+          HOV_PIN_MIN_AGE_DAYS: ${{ vars.HOV_PIN_MIN_AGE_DAYS || '3' }}
+          INSTALL_RELEASE: plugins/hov-stack/skills/hov-setup/scripts/install-release.sh
+        run: |
+          set -euo pipefail
+          ./release/scripts/release-pins.sh refresh
+          # One line of base64, so no row can end the output early or add another output.
+          if [ -s "$PLAN_FILE" ]; then
+            echo "rows=$(base64 -w0 < "$ROWS_FILE")" >> "$GITHUB_OUTPUT"
+          fi
+
+  land:
+    needs: refresh
+    runs-on: ubuntu-24.04
+    environment: release
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      # The default branch, never a commit the refresh job names: that job runs downloaded
+      # programs, so all it can hand over is rows, and apply checks those against this table.
+      - name: Check out main
+        uses: actions/checkout@ac593985615ec2ede58e132d2e21d2b1cbd6127c
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+
+      - name: Apply the refreshed rows to the table
+        id: apply
+        env:
+          ROWS_B64: ${{ needs.refresh.outputs.rows }}
+          PLAN_FILE: ${{ runner.temp }}/pins-plan.tsv
+          INSTALL_RELEASE: plugins/hov-stack/skills/hov-setup/scripts/install-release.sh
+        run: |
+          set -euo pipefail
+          : > "$PLAN_FILE"
+          if [ -n "$ROWS_B64" ]; then
+            printf '%s' "$ROWS_B64" | base64 -d > "$RUNNER_TEMP/pins-rows.txt"
+            ./release/scripts/release-pins.sh apply "$RUNNER_TEMP/pins-rows.txt"
+          fi
+          if [ -s "$PLAN_FILE" ]; then
+            echo "drift=true" >> "$GITHUB_OUTPUT"
+            # Content-addressed branch name: the same rows on the same main always
+            # produce the same branch, so a second run finds the PR already open and
+            # opens nothing. Main's sha is in the key because the required checks demand
+            # an up-to-date branch: once main moves, the old PR can never merge, so the
+            # next run opens a fresh one and repin-land.sh closes the old. The new table's
+            # blob is in it too: a publisher that replaces a release's assets at the same
+            # version changes the rows but not the plan, and the old branch would then fail
+            # repin-land.sh's blob proof on every run instead of being superseded.
+            blob="$(git hash-object "$INSTALL_RELEASE")"
+            key="$( { cat "$PLAN_FILE"; git rev-parse HEAD; printf '%s\n' "$blob"; } | sha256sum | cut -c1-12)"
+            echo "key=$key" >> "$GITHUB_OUTPUT"
+            echo "blob=$blob" >> "$GITHUB_OUTPUT"
+          else
+            echo "drift=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Decide whether the marketplace bot is available to open and land the PR
+        id: bot_identity
+        env:
+          HOV_MARKETPLACE_APP_ID: ${{ secrets.HOV_MARKETPLACE_APP_ID }}
+          HOV_MARKETPLACE_APP_PRIVATE_KEY: ${{ secrets.HOV_MARKETPLACE_APP_PRIVATE_KEY }}
+        run: |
+          if [ -n "$HOV_MARKETPLACE_APP_ID" ] && [ -n "$HOV_MARKETPLACE_APP_PRIVATE_KEY" ]; then
+            echo "have_bot=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "have_bot=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::marketplace bot secrets are not visible; a pins branch will be pushed but the PR must be opened and merged by hand (GITHUB_TOKEN may not create pull requests in this organization)."
+          fi
+
+      # Minted on every run, drift or not: with no drift it closes pins PRs main already covers.
+      - name: Mint a marketplace-bot token for this repository
+        if: steps.bot_identity.outputs.have_bot == 'true'
+        id: bot
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.HOV_MARKETPLACE_APP_ID }}
+          private-key: ${{ secrets.HOV_MARKETPLACE_APP_PRIVATE_KEY }}
+
+      - name: Open the pins PR
+        if: steps.apply.outputs.drift == 'true'
+        env:
+          GH_TOKEN: ${{ steps.bot.outputs.token || github.token }}
+          HAVE_BOT: ${{ steps.bot_identity.outputs.have_bot }}
+          AUTO_MERGE: ${{ vars.HOV_PINS_AUTO_MERGE == 'true' && 'true' || 'false' }}
+          PLAN_FILE: ${{ runner.temp }}/pins-plan.tsv
+          INSTALL_RELEASE: plugins/hov-stack/skills/hov-setup/scripts/install-release.sh
+          BRANCH: pins/auto-${{ steps.apply.outputs.key }}
+        run: |
+          set -euo pipefail
+          # Idempotence keys on an OPEN PR, not on the branch: a push that succeeded while the
+          # PR create failed must not leave the drift silently unopened forever.
+          open_pr="$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number // empty')"
+          if [ -n "$open_pr" ]; then
+            echo "::notice::PR #$open_pr is already open for this exact drift; nothing to open."
+            exit 0
+          fi
+          branch_exists=false
+          if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
+            branch_exists=true
+            echo "branch $BRANCH exists without an open PR; reusing it"
+          fi
+
+          {
+            printf 'Opened by the release pins refresh. Each program below moves to its newest release past the cooldown, or (when from and to match) gains the platform rows it was missing. Every checksum was rebuilt from the publisher and verified (attestations for gh and uv).\n\n'
+            printf '| tool | from | to | platforms |\n|---|---|---|---|\n'
+            while IFS=$'\t' read -r tool from to platforms; do
+              [ -n "$tool" ] || continue
+              printf '| %s | %s | %s | %s |\n' "$tool" "$from" "$to" "$platforms"
+            done < "$PLAN_FILE"
+            printf '\nThis PR does not bump plugins/hov-stack/VERSION; checkout users get the table through ./setup --update.\n'
+            printf '\nRe-running the refresh with the same rows on the same main is a no-op: the branch name is derived from both.\n'
+            if [ "$AUTO_MERGE" = true ]; then
+              printf '\nAuto-merge is requested once the required checks pass (HOV_PINS_AUTO_MERGE is true).\n'
+            else
+              printf '\nAuto-merge is off (HOV_PINS_AUTO_MERGE is not true): this PR waits for the owner to merge it.\n'
+            fi
+          } > "$RUNNER_TEMP/pr-body.md"
+
+          if [ "$branch_exists" = false ]; then
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git checkout -b "$BRANCH"
+            git add "$INSTALL_RELEASE"
+            git commit -m 'chore(hov-setup): move install-release pins to current releases'
+            git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "$BRANCH"
+          fi
+          if [ "$HAVE_BOT" != true ]; then
+            echo "::warning::branch $BRANCH is pushed but no bot identity is available to open the PR; open it by hand: gh pr create --repo $GITHUB_REPOSITORY --base main --head $BRANCH"
+            exit 0
+          fi
+          gh pr create --base main --head "$BRANCH" \
+            --title 'chore(hov-setup): move install-release pins to current releases' \
+            --body-file "$RUNNER_TEMP/pr-body.md"
+
+      - name: Prove the pins PR and close superseded ones
+        if: steps.bot_identity.outputs.have_bot == 'true'
+        env:
+          GH_TOKEN: ${{ steps.bot.outputs.token }}
+          REPO: ${{ github.repository }}
+          BOT_SLUG: ${{ steps.bot.outputs.app-slug }}
+          DESIRED_BRANCH: ${{ steps.apply.outputs.drift == 'true' && format('pins/auto-{0}', steps.apply.outputs.key) || '' }}
+          EXPECTED_BLOB: ${{ steps.apply.outputs.blob }}
+          LAND_PATH: plugins/hov-stack/skills/hov-setup/scripts/install-release.sh
+          BRANCH_PREFIX: pins/auto-
+          REQUEST_AUTO_MERGE: ${{ vars.HOV_PINS_AUTO_MERGE == 'true' && 'true' || 'false' }}
+        run: ./release/scripts/repin-land.sh

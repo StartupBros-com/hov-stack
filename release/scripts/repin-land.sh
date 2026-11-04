@@ -16,25 +16,42 @@ set -euo pipefail
 # already matches every release. Left open, it either stalls (the required checks
 # demand an up-to-date branch) or, rebased by hand, would pin an older release.
 #
+# The same proof and close loop serve any bot-opened, single-file PR family. LAND_PATH
+# names the one file the PR may change, BRANCH_PREFIX the family's branch prefix, and
+# REQUEST_AUTO_MERGE=false runs the proof but leaves the merge to the owner, cancelling
+# an auto-merge request a bot made on the PR (one a person made stays). Each family
+# closes only PRs under its own prefix, so a pins run never closes a repin PR and the
+# reverse.
+#
 # Usage (from the reconcile workflow, with the marketplace bot's token):
 #   DESIRED_BRANCH=repin/auto-<key> EXPECTED_BLOB=<blob sha> release/scripts/repin-land.sh
 #   DESIRED_BRANCH= release/scripts/repin-land.sh   # no drift: close every open repin PR
+#   LAND_PATH=<file> BRANCH_PREFIX=<prefix> REQUEST_AUTO_MERGE=false \
+#     DESIRED_BRANCH=<prefix><key> EXPECTED_BLOB=<blob sha> release/scripts/repin-land.sh
 #
 # Env:
 #   REPO            owner/name of this repository (default: $GITHUB_REPOSITORY)
 #   BOT_SLUG        the marketplace bot App's slug (create-github-app-token's app-slug)
 #   DESIRED_BRANCH  head branch of this run's repin PR; empty when there is no drift
 #   EXPECTED_BLOB   git blob sha of the reconciler's manifest (needed with DESIRED_BRANCH)
+#   LAND_PATH       the one file the PR may change (default .claude-plugin/marketplace.json)
+#   BRANCH_PREFIX   head-branch prefix of this PR family (default repin/auto-)
+#   REQUEST_AUTO_MERGE  true (default) requests auto-merge after the proof; false only
+#                   proves the PR, cancels an auto-merge request a bot made on it, and
+#                   leaves it waiting for the owner to merge it
 #   ONLY_PLUGIN     set for a targeted run: its PR covers one plugin, so nothing is closed
 #   GH_TOKEN        the marketplace bot's token
 #
 # Exit codes:
-#   0  the PR is queued for auto-merge (or already was), and superseded PRs are closed
-#   1  a read failure, or this run's PR is not provably the reconciler's output
+#   0  the PR is queued for auto-merge (or already was, or REQUEST_AUTO_MERGE=false), and superseded PRs are closed
+#   1  a read failure, this run's PR is not provably the reconciler's output, or a bot's
+#      auto-merge request could not be cancelled with REQUEST_AUTO_MERGE=false
 
 fail() { printf 'error: %s\n' "$*" >&2; exit 1; }
 
-MANIFEST_PATH='.claude-plugin/marketplace.json'
+LAND_PATH="${LAND_PATH:-.claude-plugin/marketplace.json}"
+BRANCH_PREFIX="${BRANCH_PREFIX:-repin/auto-}"
+REQUEST_AUTO_MERGE="${REQUEST_AUTO_MERGE:-true}"
 REPO="${REPO:-${GITHUB_REPOSITORY:-}}"
 BOT_SLUG="${BOT_SLUG:-}"
 DESIRED_BRANCH="${DESIRED_BRANCH:-}"
@@ -43,6 +60,8 @@ ONLY_PLUGIN="${ONLY_PLUGIN:-}"
 
 [ -n "$REPO" ] || fail 'REPO is not set'
 [ -n "$BOT_SLUG" ] || fail 'BOT_SLUG is not set'
+case "$REQUEST_AUTO_MERGE" in true|false) ;; *) fail "REQUEST_AUTO_MERGE must be true or false, not '$REQUEST_AUTO_MERGE'" ;; esac
+[ -n "$BRANCH_PREFIX" ] || fail 'BRANCH_PREFIX is empty'
 
 # Open repin PRs the bot opened from this repository. Same-named branches on a fork
 # or PRs by anyone else are not ours to merge or close. gh reports an App author as
@@ -51,8 +70,8 @@ ONLY_PLUGIN="${ONLY_PLUGIN:-}"
 open_prs="$(gh pr list --repo "$REPO" --state open --limit 100 \
     --json number,headRefName,headRefOid,author,isCrossRepository,autoMergeRequest 2>/dev/null)" \
   || fail "could not list open pull requests in $REPO"
-repins="$(jq -c --arg slug "$BOT_SLUG" '
-    [ .[] | select((.headRefName | startswith("repin/auto-"))
+repins="$(jq -c --arg slug "$BOT_SLUG" --arg prefix "$BRANCH_PREFIX" '
+    [ .[] | select((.headRefName | startswith($prefix))
                    and (.author.login == "app/\($slug)" or .author.login == "\($slug)[bot]")
                    and .isCrossRepository == false) ]' <<<"$open_prs")" \
   || fail "could not parse the open pull requests of $REPO"
@@ -67,14 +86,36 @@ if [ -n "$DESIRED_BRANCH" ]; then
 
   files="$(gh pr view "$desired_pr" --repo "$REPO" --json files --jq '[.files[].path] | join(",")' 2>/dev/null)" \
     || fail "could not read the files of #$desired_pr"
-  [ "$files" = "$MANIFEST_PATH" ] \
-    || fail "#$desired_pr changes more than $MANIFEST_PATH ($files); not requesting auto-merge"
-  blob="$(gh api "repos/$REPO/contents/$MANIFEST_PATH?ref=$head" --jq '.sha' 2>/dev/null)" \
-    || fail "could not read $MANIFEST_PATH at ${head:0:12}"
+  [ "$files" = "$LAND_PATH" ] \
+    || fail "#$desired_pr changes more than $LAND_PATH ($files); not requesting auto-merge"
+  blob="$(gh api "repos/$REPO/contents/$LAND_PATH?ref=$head" --jq '.sha' 2>/dev/null)" \
+    || fail "could not read $LAND_PATH at ${head:0:12}"
   [ "$blob" = "$EXPECTED_BLOB" ] \
     || fail "#$desired_pr head ${head:0:12} carries manifest $blob, not the reconciler's $EXPECTED_BLOB"
 
-  if [ "$(jq -r '.autoMergeRequest != null' <<<"$pr")" = true ]; then
+  if [ "$REQUEST_AUTO_MERGE" != true ]; then
+    # A request an earlier run made (with auto-merge on then) still merges the PR as the
+    # bot once the checks pass, so a run with it off cancels that request. A request a
+    # person enabled is that person's merge and stays. A request whose requester GitHub
+    # did not report is treated as the bot's.
+    requester="$(jq -r 'if .autoMergeRequest == null then "none"
+                        elif .autoMergeRequest.enabledBy.is_bot == false then "person"
+                        else "bot" end' <<<"$pr")"
+    case "$requester" in
+      bot)
+        gh pr merge "$desired_pr" --repo "$REPO" --disable-auto \
+          || fail "could not cancel the auto-merge request on #$desired_pr; it would merge as the bot"
+        printf '#%s: auto-merge is off for this run; cancelled the request an earlier run made, so the PR waits for the owner to merge it\n' "$desired_pr"
+        ;;
+      person)
+        printf '#%s: auto-merge is off for this run; leaving the auto-merge %s requested\n' \
+          "$desired_pr" "$(jq -r '.autoMergeRequest.enabledBy.login' <<<"$pr")"
+        ;;
+      *)
+        printf '#%s: auto-merge is off for this run; the PR waits for the owner to merge it\n' "$desired_pr"
+        ;;
+    esac
+  elif [ "$(jq -r '.autoMergeRequest != null' <<<"$pr")" = true ]; then
     printf '#%s already has auto-merge requested\n' "$desired_pr"
   else
     gh pr merge "$desired_pr" --repo "$REPO" --auto --squash --match-head-commit "$head" \
