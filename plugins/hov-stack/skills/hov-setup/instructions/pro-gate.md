@@ -1,0 +1,1 @@
+- One `/pro-gate` review runs only when the diff touches billing, auth, migrations or CI (`.github/`, runner or workflow config): fix its P0 and P1 findings, push, no second round.

@@ -394,7 +394,13 @@ Ready means `jsm whoami` shows them signed in with an active subscription.
 
 ## Finish
 
-Run Step 1's detector again. Then wrap up in a few short lines, with no table:
+Run Step 1's detector again. Refresh Claude's tool instructions with the same config dir (`$CLAUDE_CONFIG_DIR`, else `~/.claude`):
+
+```bash
+node "<skill-dir>/scripts/instructions.mjs" --json
+```
+
+Use the absolute skill path as in Step 1. When its `state` is `ok`, say in one plain line which tools Claude now has instructions for (its `tools` list), or that none of the installed tools needs any. Otherwise tell the user its `reason` in plain words; the file stays as it was. If `leftOut` names a tool, say why it got no line (its `why`). For a program that is not on PATH, that is the PATH change in Step 4's "Programs" paragraph; for codex, it is the Codex program `/codex:setup` installs. The next `/hov-setup` or `./setup` adds its line once that is done. Then wrap up in a few short lines, with no table:
 
 - What's ready now, each with how to start it ("sign-it: type /sign-it:sign-it and give it a PDF").
 - Anything skipped or still waiting, and the one thing left for the user, if any.
