@@ -18,6 +18,10 @@
 #   no remote configured ..................... bundle --all as backup, leave worktree in place
 #   recently active / under /tmp or .claude/jobs ..... SKIP (a live job owns it)
 #   any live process has its cwd inside ...... SKIP (/proc scan — mtime alone is not liveness)
+#   a Claude Code job/session holds it ....... SKIP (lib/wt_session_hold.py; a done job only warns)
+#   before ANY removal ........................ copy ignored .claude/deliverables/ files to the
+#                                               main checkout; a detached HEAD on the preserve
+#                                               path is pinned at refs/heads/recovered/... first
 #
 # Branches are NEVER force-deleted while they hold >=2 unpushed commits.
 # Removing a worktree never deletes commits — the branch persists in the repo.
@@ -47,6 +51,10 @@ LIB="${WT_SWEEP_LIB:-$(dirname "$(readlink -f "$0")")/lib}"
 # unshipped count would read empty, i.e. 0, and the clean path force-removes.
 # shellcheck source=SCRIPTDIR/lib/wt-anchor.sh
 . "$LIB/wt-anchor.sh" 2>/dev/null || { echo "wt-sweep: cannot load $LIB/wt-anchor.sh" >&2; exit 1; }
+# Session holds, ignored-deliverable rescue and detached-HEAD pins (hov-stack#384).
+# Missing lib = refuse to run: every removal below depends on it.
+# shellcheck source=SCRIPTDIR/lib/wt-preserve.sh
+. "$LIB/wt-preserve.sh" 2>/dev/null || { echo "wt-sweep: cannot load $LIB/wt-preserve.sh" >&2; exit 1; }
 # Merge-anchored closeout (issue #589). A squash-merged branch whose remote ref
 # GitHub auto-deleted has commits reachable from no durable ref, so `unp` below
 # counts already-shipped work as unique and this sweep preserves it forever --
@@ -59,7 +67,7 @@ LIB="${WT_SWEEP_LIB:-$(dirname "$(readlink -f "$0")")/lib}"
 WT_DONE="${WT_DONE_BIN:-$(dirname "$(readlink -f "$0")")/wt-done.sh}"
 STAMP="$(date +%Y%m%d)"; AGE_ALIVE_DAYS=14; BEHIND_STALE=150
 now=$(date +%s); declare -A seen
-n_rm=0; n_keep=0; n_drop=0; n_bundle=0; n_skip=0; n_leave=0; n_route=0; n_anchor=0
+n_rm=0; n_keep=0; n_drop=0; n_bundle=0; n_skip=0; n_leave=0; n_route=0; n_anchor=0; n_resume=0
 HERE="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 # shellcheck source=SCRIPTDIR/lib/pr-owner-state.sh
 . "$HERE/lib/pr-owner-state.sh" || { echo 'wt-sweep: cannot load PR-owner state contract' >&2; exit 1; }
@@ -190,6 +198,15 @@ alive(){ python3 "${LIB:?}/proc_liveness.py" --quiet -- "$1" >/dev/null 2>&1
   case $? in 0) return 0;; 1) return 1;;
     *) echo "      !! proc_liveness unavailable — treating as live: $1" >&2; return 0;; esac; }
 # ALIVE_END
+# Every removal goes through here. `worktree remove` deletes gitignored files with or
+# without --force, and .claude/deliverables/ is ignored, so those are copied out first;
+# a copy that fails or does not verify keeps the worktree (hov-stack#384).
+remove_wt(){ # $1 repo  $2 worktree
+  if ! wt_rescue_deliverables "$1" "$2" "$DRY_RUN" "$STAMP"; then
+    echo "      => SKIP (ignored deliverables could not be copied out; nothing removed)"
+    n_skip=$((n_skip+1)); return 1
+  fi
+  run "git -C '$1' worktree remove --force '$2'"; }
 def_of(){ local r="$1" d
   d=$(git -C "$r" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null|sed 's@^origin/@@')
   [ -z "$d" ] && for c in main master; do git -C "$r" rev-parse --verify -q "origin/$c">/dev/null 2>&1 && { d=$c;break;}; done
@@ -246,6 +263,10 @@ for dir in ${_candidates[@]+"${_candidates[@]}"}; do
     mt=$(stat -c %Y "$wt" 2>/dev/null||echo 0); if (( (now-mt)/60 < ACTIVE_MIN )); then echo "  ~ skip (active <${ACTIVE_MIN}m): $(basename "$wt")"; n_skip=$((n_skip+1)); continue; fi
     if alive "$wt"; then echo "  ~ skip (held by live process): $(basename "$wt")"; n_skip=$((n_skip+1)); continue; fi
     if pr_owner_worktree_owned "$wt"; then echo "  ~ skip (PR owner): $(basename "$wt")"; n_skip=$((n_skip+1)); continue; fi
+    # A session idling in a worktree it entered shows up in neither check above
+    # (hov-stack#384: a working job lost its worktree on 2026-11-03).
+    if hold=$(wt_session_hold "$wt"); then echo "  ~ skip (Claude session: $hold): $(basename "$wt")"; n_skip=$((n_skip+1)); continue; fi
+    if [ -n "$hold" ]; then printf '%s\n' "$hold" | sed 's/^/  ~ /'; n_resume=$((n_resume+1)); fi
     base=$(basename "$wt"); bf="${base//\//_}"
     br=$(git -C "$wt" symbolic-ref --short HEAD 2>/dev/null||echo ""); det=0; [ -z "$br" ]&&det=1
     porc=$(git -C "$wt" status --porcelain 2>/dev/null)
@@ -301,7 +322,7 @@ for dir in ${_candidates[@]+"${_candidates[@]}"}; do
            [ -n "$(git -C "$wt" status --porcelain 2>/dev/null)" ]; }; then
         echo "      => SKIP (worktree changed after wt-done's proof; nothing removed)"; n_skip=$((n_skip+1)); continue
       fi
-      if run "git -C '$repo' worktree remove --force '$wt'"; then
+      if remove_wt "$repo" "$wt"; then
         n_rm=$((n_rm+1))
         # Head-proof branches sit on no durable ref by construction, so `branch -d` would
         # refuse; -D is authorised by GitHub naming this exact tip as the commit it merged.
@@ -328,7 +349,7 @@ for dir in ${_candidates[@]+"${_candidates[@]}"}; do
       fi
       if run "mkdir -p '$arch'" && run "git -C '$wt' bundle create '$arch/$bf.bundle' HEAD $ssha"; then
         echo "      => DROP (abandoned; bundled to $arch/$bf.bundle)"; n_bundle=$((n_bundle+1))
-        if run "git -C '$repo' worktree remove --force '$wt'"; then
+        if remove_wt "$repo" "$wt"; then
           n_rm=$((n_rm+1))
           [ $det = 0 ] && [ "$br" != "$def" ] && run "git -C '$repo' branch -D '$br'" && n_drop=$((n_drop+1))
         fi
@@ -342,8 +363,13 @@ for dir in ${_candidates[@]+"${_candidates[@]}"}; do
           echo "      => SKIP (WIP commit failed — nothing removed)"; n_skip=$((n_skip+1)); continue
         fi
       fi
+      # A detached HEAD has no branch to keep: without a ref, the WIP commit and any
+      # unshipped commits go with the worktree's reflog (hov-stack#384).
+      if [ $det = 1 ] && ! wt_pin_detached "$repo" "$wt" "$STAMP" "$DRY_RUN"; then
+        echo "      => SKIP (detached HEAD could not be pinned — nothing removed)"; n_skip=$((n_skip+1)); continue
+      fi
       [ $PUSH = 1 ] && [ $det = 0 ] && run "git -C '$wt' push -u origin '$br'"
-      run "git -C '$repo' worktree remove --force '$wt'" && { n_rm=$((n_rm+1)); n_keep=$((n_keep+1)); }
+      remove_wt "$repo" "$wt" && { n_rm=$((n_rm+1)); n_keep=$((n_keep+1)); }
     fi
   done
   # Anchors of the branches this pass just dropped. A DRY_RUN plan cannot list
@@ -375,7 +401,7 @@ done < <(wt_roots | while IFS= read -r r; do ls -d "$r"/*__*_workspace 2>/dev/nu
 
 echo; echo "===== wt-sweep $([ $DRY_RUN = 1 ]&&echo '(DRY RUN)') ====="
 printf 'scope: %d repos under %s\n' "${#_candidates[@]}" "$(wt_roots | paste -sd' ' -)"
-printf 'removed:%d  preserved-local:%d  dropped:%d  bundled:%d  kept-in-place:%d  skipped-active:%d  stale-workspaces:%d  skipped-route:%d  anchors-pruned:%d\n' \
-  "$n_rm" "$n_keep" "$n_drop" "$n_bundle" "$n_leave" "$n_skip" "$n_ws" "$n_route" "$n_anchor"
+printf 'removed:%d  preserved-local:%d  dropped:%d  bundled:%d  kept-in-place:%d  skipped-active:%d  stale-workspaces:%d  skipped-route:%d  anchors-pruned:%d  resumable-warned:%d\n' \
+  "$n_rm" "$n_keep" "$n_drop" "$n_bundle" "$n_leave" "$n_skip" "$n_ws" "$n_route" "$n_anchor" "$n_resume"
 [ $DRY_RUN = 1 ] && echo "(dry run — re-run with DRY_RUN=0 to apply)"
 exit 0

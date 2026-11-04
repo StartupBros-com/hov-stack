@@ -27,6 +27,7 @@ SCRIPT="$HERE/../scripts/wt-done.sh"
 [ -f "$SCRIPT" ] || { echo "FAIL: cannot find $SCRIPT"; exit 1; }
 
 TMP="$(mktemp -d)"
+export WT_CLAUDE_HOME="$TMP/claude-home"  # the session check (hov-stack#384) never reads the real ~/.claude
 trap 'rm -rf "$TMP"' EXIT
 
 # `gh` stub: wt-done funnels every GitHub read through one function that prints
@@ -941,6 +942,7 @@ INSTALLED="$TMP/installed/scripts"
 mkdir -p "$INSTALLED/lib"
 cp "$SCRIPT" "$INSTALLED/wt-done.sh"
 cp "$HERE/../scripts/lib/wt-anchor.sh" "$INSTALLED/lib/wt-anchor.sh"
+cp "$HERE/../scripts/lib/wt-preserve.sh" "$HERE/../scripts/lib/wt_session_hold.py" "$INSTALLED/lib/"
 export REAL_FRESHEN="$HERE/../scripts/launchpad-freshen.sh"
 export FRESHEN_CALLS="$TMP/freshen.calls" STUB_SYSTEMCTL_CALLS="$TMP/ordinary.systemctl"
 cat >"$INSTALLED/launchpad-freshen.sh" <<'STUB'
@@ -1178,6 +1180,59 @@ LD_GD=$(realpath "$TMP/lockdry/repo/.git/worktrees/wt")
 out=$(DRY_RUN=1 bash "$SCRIPT" "$TMP/lockdry/wt" 2>&1)
 has "dry run: plans the rm" "$out" "would: rm $LD_GD/index.lock ("
 [ -e "$LD_GD/index.lock" ] && ok "dry run: lock untouched" || no "dry run: lock untouched"
+
+# ---- what a removal must not lose (hov-stack#384) ---------------------------------
+# `worktree remove` deletes gitignored files even without --force; .claude/deliverables/
+# is ignored on the operator's machine (here via the shared info/exclude, which leaves
+# the tracked tree, and so the merge proof, as every case above has it).
+
+# --- 49. an ignored deliverable is copied out before the worktree goes ------------
+S=$(mkfix deliv); export STUB_GH_OUT="7 $S"
+printf '.claude/deliverables/\n' >>"$TMP/deliv/repo/.git/info/exclude"
+mkdir -p "$TMP/deliv/wt/.claude/deliverables/seo"
+printf 'the only copy\n' >"$TMP/deliv/wt/.claude/deliverables/seo/report.html"
+out=$(DRY_RUN=0 bash "$SCRIPT" "$TMP/deliv/wt" 2>&1); rc=$?
+chk "deliverable: closeout exits 0" 0 "$rc"
+has "deliverable: reports the copy" "$out" "ok: copied 1 ignored deliverable file(s) to $TMP/deliv/repo/.claude/deliverables/from-worktrees/wt"
+[ -d "$TMP/deliv/wt" ] && no "deliverable: worktree removed" || ok "deliverable: worktree removed"
+grep -qx 'the only copy' "$TMP/deliv/repo/.claude/deliverables/from-worktrees/wt/seo/report.html" 2>/dev/null \
+  && ok "deliverable: the copy survived the removal" || no "deliverable: the copy survived the removal"
+
+# --- 50. PLANTED NEGATIVE: a copy that cannot be made keeps the worktree ----------
+S=$(mkfix delivfail); export STUB_GH_OUT="7 $S"
+printf '.claude/deliverables/\n' >>"$TMP/delivfail/repo/.git/info/exclude"
+mkdir -p "$TMP/delivfail/repo/.claude/deliverables" "$TMP/delivfail/wt/.claude/deliverables"
+: >"$TMP/delivfail/repo/.claude/deliverables/from-worktrees"   # a file where the dir must go
+printf 'must survive\n' >"$TMP/delivfail/wt/.claude/deliverables/report.md"
+out=$(DRY_RUN=0 bash "$SCRIPT" "$TMP/delivfail/wt" 2>&1); rc=$?
+chk "failed copy: closeout exits 1" 1 "$rc"
+has "failed copy: says why" "$out" "REFUSE (ignored deliverables could not be copied out; worktree kept)"
+grep -qx 'must survive' "$TMP/delivfail/wt/.claude/deliverables/report.md" 2>/dev/null \
+  && ok "failed copy: worktree and deliverable kept" || no "failed copy: worktree and deliverable kept"
+git -C "$TMP/delivfail/repo" rev-parse --verify -q refs/heads/feat >/dev/null \
+  && ok "failed copy: branch kept" || no "failed copy: branch kept"
+
+# --- 51. PLANTED NEGATIVE: a Claude session holding the worktree refuses an outside run
+S=$(mkfix held); export STUB_GH_OUT="7 $S"
+mkdir -p "$TMP/h-held/jobs/j1"
+printf '{"state":"working","name":"idle ideation","cwd":"%s","worktreePath":"%s"}\n' \
+  "$TMP/held/repo" "$TMP/held/wt" >"$TMP/h-held/jobs/j1/state.json"
+before=$(git -C "$TMP/held/wt" rev-parse HEAD)
+out=$(WT_CLAUDE_HOME="$TMP/h-held" DRY_RUN=0 bash "$SCRIPT" "$TMP/held/wt" 2>&1); rc=$?
+chk "session hold: exits 1" 1 "$rc"
+has "session hold: names the job" "$out" 'REFUSE (a Claude session holds this worktree: job j1 "idle ideation" is working)'
+[ -d "$TMP/held/wt" ] && ok "session hold: worktree kept" || no "session hold: worktree kept"
+chk "session hold: refused before the pointer moved" "$before" "$(git -C "$TMP/held/wt" rev-parse HEAD)"
+
+# --- 52. from inside, the holding session is the caller and is not refused --------
+S=$(mkfix heldin); export STUB_GH_OUT="7 $S"
+mkdir -p "$TMP/h-heldin/jobs/j1"
+printf '{"state":"working","name":"me","cwd":"%s","worktreePath":"%s"}\n' \
+  "$TMP/heldin/repo" "$TMP/heldin/wt" >"$TMP/h-heldin/jobs/j1/state.json"
+out=$(cd "$TMP/heldin/wt" && WT_CLAUDE_HOME="$TMP/h-heldin" DRY_RUN=0 bash "$SCRIPT" 2>&1); rc=$?
+chk "inside, held by itself: exits 0" 0 "$rc"
+has "inside, held by itself: still reconciles" "$out" "safe to close"
+hasnot "inside, held by itself: no session refusal" "$out" "a Claude session holds"
 
 echo
 echo "wt-done: $pass passed, $fail failed"

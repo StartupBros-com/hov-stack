@@ -4,6 +4,7 @@
 set -euo pipefail
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 TMP=$(mktemp -d)
+export WT_CLAUDE_HOME="$TMP/claude-home"  # the session check (hov-stack#384) never reads the real ~/.claude
 trap 'rm -rf "$TMP"' EXIT
 export HOME="$TMP/home" REPO_ROUTE_HOST_ID=maintenance-test
 mkdir -p "$HOME" "$TMP/sites" "$TMP/bin"
