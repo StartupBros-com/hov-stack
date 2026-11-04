@@ -1,0 +1,184 @@
+{
+  "about": "Everything /hov-setup offers, in walkthrough order. detect.mjs reads it to report what is installed, and scripts/check-readme-counts.py reads it to keep the README's plugin lists true. Each name has a section of the same name in SKILL.md, in this order. kind: plugin (on the hov marketplace), other-plugin (on another publisher's marketplace), tool (a program on PATH), paid-skills (a paid skill set and its manager program). helpers are programs an offer needs (named in its needs list) that are not offered on their own. In install, <skill-dir> is the directory holding SKILL.md and <uv> is the uv program the detector found.",
+  "marketplace": "hov",
+  "groups": [
+    { "key": "everyday", "label": "Everyday work: documents, research and marketing" },
+    { "key": "code", "label": "Working on code" },
+    { "key": "tuning", "label": "Tuning your own Claude setup" }
+  ],
+  "helpers": [
+    {
+      "name": "uv",
+      "publisher": "Astral",
+      "what": "installs Python programs, and Python itself, without touching the system's own copy",
+      "bin": "uv",
+      "install": {
+        "darwin-arm64": "bash \"<skill-dir>/scripts/install-release.sh\" uv",
+        "linux-x86_64": "bash \"<skill-dir>/scripts/install-release.sh\" uv",
+        "linux-aarch64": "bash \"<skill-dir>/scripts/install-release.sh\" uv"
+      }
+    }
+  ],
+  "offers": [
+    {
+      "name": "sign-it",
+      "kind": "plugin",
+      "group": "everyday",
+      "publisher": "hov-stack",
+      "what": "signs PDFs and Word documents with your own saved signature"
+    },
+    {
+      "name": "last30days",
+      "kind": "other-plugin",
+      "group": "everyday",
+      "publisher": "Matt Van Horn",
+      "what": "researches what people said about any topic in the last 30 days, across Reddit, X, YouTube and more",
+      "plugin": "last30days",
+      "marketplace": { "name": "last30days-skill", "github": "mvanhorn/last30days-skill" }
+    },
+    {
+      "name": "synthetic-panel",
+      "kind": "tool",
+      "group": "everyday",
+      "publisher": "StartupBros",
+      "what": "ranks your headlines, offers or product ideas by how a simulated customer panel reacts",
+      "bin": "synthetic-panel",
+      "needs": ["uv"],
+      "install": {
+        "darwin-arm64": "<uv> tool install git+https://github.com/StartupBros-com/synthetic-panel@v0.1.0",
+        "linux-x86_64": "<uv> tool install --torch-backend cpu git+https://github.com/StartupBros-com/synthetic-panel@v0.1.0",
+        "linux-aarch64": "<uv> tool install --torch-backend cpu git+https://github.com/StartupBros-com/synthetic-panel@v0.1.0"
+      }
+    },
+    {
+      "name": "gh",
+      "kind": "tool",
+      "group": "code",
+      "publisher": "GitHub",
+      "what": "lets Claude work with your GitHub projects: pull requests, issues and reviews",
+      "bin": "gh",
+      "install": {
+        "darwin-arm64": "bash \"<skill-dir>/scripts/install-release.sh\" gh",
+        "linux-x86_64": "bash \"<skill-dir>/scripts/install-release.sh\" gh",
+        "linux-aarch64": "bash \"<skill-dir>/scripts/install-release.sh\" gh"
+      }
+    },
+    {
+      "name": "ast-grep",
+      "kind": "tool",
+      "group": "code",
+      "publisher": "Herrington Darkholme",
+      "what": "finds and rewrites code by its shape, not just its text",
+      "bin": "ast-grep",
+      "needs": ["uv"],
+      "install": {
+        "darwin-arm64": "<uv> tool install ast-grep-cli",
+        "linux-x86_64": "<uv> tool install ast-grep-cli",
+        "linux-aarch64": "<uv> tool install ast-grep-cli"
+      }
+    },
+    {
+      "name": "compound-engineering",
+      "kind": "other-plugin",
+      "group": "code",
+      "publisher": "Every",
+      "what": "plans, builds and reviews code changes step by step, and saves what each one taught",
+      "plugin": "compound-engineering",
+      "marketplace": { "name": "compound-engineering-plugin", "github": "EveryInc/compound-engineering-plugin" }
+    },
+    {
+      "name": "codex",
+      "kind": "other-plugin",
+      "group": "code",
+      "publisher": "OpenAI",
+      "what": "hands a coding task or a second-opinion review to OpenAI's Codex from inside Claude",
+      "plugin": "codex",
+      "marketplace": { "name": "openai-codex", "github": "openai/codex-plugin-cc" }
+    },
+    {
+      "name": "wsl-cdp",
+      "kind": "plugin",
+      "group": "code",
+      "publisher": "hov-stack",
+      "what": "lets Claude in WSL2 use your logged-in Windows browser",
+      "wslOnly": true
+    },
+    {
+      "name": "product-video",
+      "kind": "plugin",
+      "group": "everyday",
+      "publisher": "hov-stack",
+      "what": "turns a click-through of your product into a captioned video"
+    },
+    {
+      "name": "token-eater",
+      "kind": "plugin",
+      "group": "code",
+      "publisher": "hov-stack",
+      "what": "spends spare AI credits on code cleanup you review before it lands"
+    },
+    {
+      "name": "pro-gate",
+      "kind": "plugin",
+      "group": "code",
+      "publisher": "hov-stack",
+      "what": "a last review of your code changes by ChatGPT's Pro model"
+    },
+    {
+      "name": "harness-vet",
+      "kind": "plugin",
+      "group": "tuning",
+      "publisher": "hov-stack",
+      "what": "checks someone else's skill, plugin or tool before you add it"
+    },
+    {
+      "name": "rent-check",
+      "kind": "plugin",
+      "group": "tuning",
+      "publisher": "hov-stack",
+      "what": "shows which always-loaded instructions earn their cost, and what to cut"
+    },
+    {
+      "name": "harness-optimizer",
+      "kind": "plugin",
+      "group": "tuning",
+      "publisher": "hov-stack",
+      "what": "digs into a setup problem that keeps coming back and proposes fixes"
+    },
+    {
+      "name": "skill-creator",
+      "kind": "other-plugin",
+      "group": "tuning",
+      "publisher": "Anthropic",
+      "what": "helps you write your own skills for Claude, then tests whether they work",
+      "plugin": "skill-creator",
+      "marketplace": { "name": "claude-plugins-official", "github": "anthropics/claude-plugins-official" }
+    },
+    {
+      "name": "cass",
+      "kind": "tool",
+      "group": "tuning",
+      "publisher": "Jeffrey Emanuel",
+      "what": "searches everything you and Claude said in past sessions",
+      "bin": "cass",
+      "install": {
+        "darwin-arm64": "bash \"<skill-dir>/scripts/install-release.sh\" cass",
+        "linux-x86_64": "bash \"<skill-dir>/scripts/install-release.sh\" cass",
+        "linux-aarch64": "bash \"<skill-dir>/scripts/install-release.sh\" cass"
+      }
+    },
+    {
+      "name": "jeffreys-skills",
+      "kind": "paid-skills",
+      "group": "code",
+      "publisher": "Jeffrey Emanuel",
+      "what": "a paid library of ready-made skills for coding with AI, with a program that installs and updates them",
+      "bin": "jsm",
+      "install": {
+        "darwin-arm64": "bash \"<skill-dir>/scripts/install-release.sh\" jsm",
+        "linux-x86_64": "bash \"<skill-dir>/scripts/install-release.sh\" jsm",
+        "linux-aarch64": "bash \"<skill-dir>/scripts/install-release.sh\" jsm"
+      }
+    }
+  ]
+}
