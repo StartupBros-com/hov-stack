@@ -628,3 +628,29 @@ test('a command nested past the heredoc scanner limit that names wacli asks', as
   const nested = `# c\necho ${'$('.repeat(70)}echo hi${')'.repeat(70)}; wacli send text --to 123 --message hi`;
   await assertAsk(nested);
 });
+
+// #369 pass 7: node:crypto costs ~5 ms CPU to load and only the executable hash check needs it.
+// A payload that never reaches that check must not load it; one that does must (and still allow).
+test('node:crypto loads only when the wacli executable is hashed', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'whatsapp-guard-crypto.'));
+  fixtureRoots.push(dir);
+  const preload = path.join(dir, 'probe.js');
+  fs.writeFileSync(
+    preload,
+    "process.on('exit', () => require('fs').writeFileSync(process.env.PROBE_OUT, String(process.moduleLoadList.includes('NativeModule crypto'))));\n"
+  );
+  let n = 0;
+  const probe = async (command) => {
+    const out = path.join(dir, `out-${n++}`);
+    const r = await runHook(HOOK, bash(command), {
+      env: { ...HOOK_ENV, NODE_OPTIONS: `--require ${preload}`, PROBE_OUT: out },
+    });
+    assert.strictEqual(r.code, 0, r.stderr);
+    return { loaded: fs.readFileSync(out, 'utf8'), stdout: r.stdout };
+  };
+  assert.deepStrictEqual(await probe('ls -la'), { loaded: 'false', stdout: '' });
+  assert.strictEqual((await probe('git status --short')).loaded, 'false');
+  const read = await probe(`wacli --store ${STORE} --read-only --json store stats`);
+  assert.strictEqual(read.loaded, 'true');
+  assert.match(read.stdout, /"permissionDecision":"allow"/);
+});

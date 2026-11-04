@@ -1,0 +1,196 @@
+#!/bin/sh
+# node-hook: run a first-party hook script on the first non-shim `node` on PATH.
+#
+#   "$HOME/.claude/hooks/bin/node-hook" "$HOME/.claude/hooks/<Event>/<hook>.js" [args...]
+#
+# Why: a version-manager shim (mise, asdf) is a launcher that resolves the real
+# node per call. On a WSL host whose PATH ends in dozens of /mnt/c entries the
+# mise shim spends ~100-140 ms walking them before it execs node, on EVERY hook
+# of EVERY tool call (`node -e ''`: 199 ms via the shim, 28 ms direct). This
+# launcher walks PATH in the shell, takes the first `node` that is not inside a
+# shim dir, and execs it. Measured in the 2026-11-03 hook-floor profile (#369).
+#
+# Contract (hooks/tests/hook-launcher-golden.test.js holds every registered hook
+# to it): exec, so stdin, stdout, stderr, exit code, argv, cwd and env reach
+# node untouched. No pipe, no wrapper process, nothing written. One exception:
+# the stdin gates below hand node its buffered stdin through a pipe,
+# with the shell left as node's parent and node's exit code passed through.
+# Variables named `_hn_*` belong to this launcher; an inherited one is reset
+# before use, so nothing in the caller's env can steer a hook's stdin.
+#
+# Bounded: only `[ -f ]` / `[ -x ]` on PATH entries, never a /mnt/* entry (a
+# drvfs lookup costs ~2 ms each), never anything outside PATH except the pass 5 gate's one
+# `[ -f ]` / `[ -r ]` on the hooks dir's own auto-format.js. When no non-shim
+# node is found the last step is the literal command the hook ran before this
+# launcher existed, `exec node "$@"`, so a PATH shape this does not understand
+# behaves exactly as it did.
+#
+# Skipped as shims: mise (*/mise/shims) and asdf (*/.asdf/shims, */asdf/shims);
+# both resolve per call through a launcher that reads project tool-version
+# files, which is the cost being removed. Other `shims` dirs (nodenv, rbenv) are
+# not guessed at: they are not measured here.
+#
+# Env gate (#369, pass 2): hooks/PreToolUse/loop-guard.js is registered with matcher `*`
+# (every tool call) and, unless env CLAUDE_LOOP_GUARD is exactly `1`, its run() returns
+# its input untouched at its first statement (loop-guard.js: `if (process.env.CLAUDE_LOOP_GUARD
+# !== '1') return rawInput;`), the entry point reads stdin to EOF and writeHookOutput()
+# prints nothing, exit 0. So the launcher skips the ~30 ms node start for that one script
+# when the same predicate is false: it drains stdin (as the JS does) and exits 0.
+#   - `[ "$X" = 1 ]` is the shell spelling of `process.env.X !== '1'` negated: both are exact
+#     string equality (unset, empty, `0`, `true`, ` 1`, `1 ` and `01` all skip in both).
+#   - Only the `case` pattern below costs anything on every other hook: a builtin string
+#     match, no process, no syscall.
+#   - hooks/tests/hook-launcher-golden.test.js and node-hook.test.js tie the literal here
+#     to the JS (drift test) and prove old == new for every env spelling.
+# The one thing the skip drops is the seam heartbeat that module load used to write;
+# scripts/hook-seam-check.py pairs beats only against tools some other guard covers.
+#
+# Stdin gate (#369, pass 4): hooks/PreToolUse/settings-guard.js (matcher Edit|Write|MultiEdit, the
+# only node hook in that phase) is the same shape. run() returns its input untouched unless the
+# DECODED tool_input.file_path has a basename in GUARDED = {settings.json, settings.local.json,
+# managed-settings.json}; only then does it ask(). Its modules' one load-time effect is the seam
+# beat (hooks/lib/pretooluse-decision.js require of seam-heartbeat), which the skip drops (below).
+# Every GUARDED name contains the common substring `settings.`, so the launcher skips node unless
+# stdin contains `settings.` or one of `\u002`, `\u006`, `\u007`: the escape prefixes of every
+# character of `settings.` (. U+002E; e g i n U+0065..U+006E; s t U+0073..U+0074). Any other
+# escape (\n, \u001b) cannot yield those characters, and a producer may write any character as
+# \uXXXX, so soundness does not depend on the encoder. A decoded `settings.` is either all raw
+# bytes (so the literal is in stdin) or has an escaped character (so a prefix is). `\/` and the
+# other short escapes cannot yield any of those characters; path.basename is posix, so
+# `a\settings.json` is one non-guarded name, and it still reaches node (the gate only needs the
+# necessary condition).
+# The launcher reads stdin whole before deciding. When node is needed it gets the same bytes back:
+# `tr '\0' '\1'` swaps NUL (which dash would silently drop; a raw NUL and a raw \001 are both a
+# JSON.parse error, so the outcome is the same), and the `x` sentinel keeps the trailing newlines
+# `$(...)` would strip. The pass 5 arm below uses the same buffering.
+# Tied to GUARDED by hooks/tests/node-hook.test.js (drift test).
+#
+# Stdin gate (#369, pass 5): the only seed PostToolUse hook on Edit|Write|MultiEdit is
+#   run-with-flags.js "post:edit:format" "PostToolUse/auto-format.js" "standard,strict"
+# (settings.json). After the flag check, auto-format.js run() does anything only when the DECODED
+# tool_input.file_path matches /\.(ts|tsx|js|jsx)$/ (JS `$` is end of input only, so `x.js\n` fails);
+# every other input returns untouched and prints nothing, exit 0, empty stderr. The launcher skips
+# node unless stdin contains one of `.js"`, `.jsx"`, `.ts"`, `.tsx"` or `\u002`, `\u006`, `\u007`.
+#   - NOT a bare `.js`: every real payload carries "transcript_path":"...<uuid>.jsonl", which holds
+#     `.js`, so a bare-substring gate never skips.
+#   - Why the quote form is necessary: file_path ends with one of those four endings, so its closing
+#     JSON quote follows the final s or x. An inner quote is always `\"`, and `s`/`x` are neither hex
+#     digits nor escape letters, so a literal `"` right after them closes the string. If any ending
+#     character is escaped instead, the escape is `\u00XY` with X in 2 (.), 6 (j), 7 (t s x): the same
+#     three prefixes as pass 4. An array file_path (String() joins it) still ends in a string
+#     closed by a quote. Duplicate keys: any `.js"` anywhere already sends the payload to node.
+#   - Measured over 7 days of real Edit/Write tool inputs: ~90% skip. The 1 MiB read cap only
+#     truncates, and a prefix of the bytes cannot hold a match the whole lacks.
+# Scope of the arm, all required, else node runs exactly as before: $2 = post:edit:format and
+# $3 = PostToolUse/auto-format.js (so `pre:git-guard` etc. are untouched); CLAUDE_PLUGIN_ROOT is
+# empty or unset (otherwise run-with-flags.js loads a different script from that root; a
+# whitespace-only value runs node, conservatively); and ${1%/*}/PostToolUse/auto-format.js is a
+# readable file (otherwise run-with-flags.js prints "Script not found" to stderr). $4 (profiles),
+# HOOK_PROFILE and HOOK_DISABLED do not matter: hook-flags.js only chooses between exit 0 and running
+# run(), and both are silent for a payload this gate skips. Same buffering as the settings-guard arm. No seam beat is
+# lost: none of the modules on this path writes one.
+# Assumption, as in pass 4: ${1%/*}/PostToolUse/auto-format.js is this repo's file. A foreign
+# run-with-flags.js + auto-format.js pair elsewhere, or run-with-flags.js symlinked as a single file out of its
+# directory, is outside the registered configuration and is not made byte-identical.
+# Tied to the JS by hooks/tests/node-hook.test.js (drift test).
+#
+# Stdin gate (#369, pass 6a): hooks/PreToolUse/codex-quota-guard.js (matcher Bash, registered
+# directly). run() parses stdin and returns it untouched (writeHookOutput prints nothing, exit 0,
+# empty stderr) unless tool_input.command is a string for which isCodexSpend(command, {quoteAware})
+# is true; the first statement after the parse is that return, and nothing with an effect (env,
+# auth file, network, state) runs before it. isCodexSpend (hooks/lib/codex-spend.js) is built from
+# CODEX_SPEND = /\bcodex\s+(?:exec|e|review|mcp-server|app-server)\b|codex-companion|app-server-broker/i,
+# WRAPPER_INVOKE (needs codex-companion or app-server-broker) and a -c recursion into SUBSTRINGS of the
+# raw command (match[1] / match[2], never unquoted or unescaped). stripQuoted only blanks characters.
+# So a true result needs the DECODED command to contain `codex` or `app-server-broker`, case-
+# insensitively (the regexes carry /i and no /u: canonicalisation never maps a non-ASCII character
+# onto an ASCII one, so only ASCII case variants count). The launcher skips node unless stdin holds
+# one of them in any ASCII case, or one of `\u002`, `\u004`, `\u005`, `\u006`, `\u007`: the JSON
+# escape prefixes of every character of either literal in either case (- U+002D; A-O U+0041..U+004F;
+# P-Z U+0050..U+005A; a-o U+0061..U+006F; p-z U+0070..U+007A), so soundness does not depend on the
+# encoder. The bracket classes `[Cc]` are the shell spelling of the case fold. Same buffering as
+# the settings-guard arm. Tied to CODEX_SPEND by hooks/tests/node-hook.test.js (drift test).
+# What the skip drops: the seam heartbeat module load wrote (codex-quota-guard requires
+# lib/pretooluse-decision). Bash stays covered by the guards that always start.
+#
+# Stdin gate (#369, pass 6b): hooks/PreToolUse/runner-guard.js (matcher Bash, registered directly).
+# run() parses stdin and returns it untouched (writeHookOutput prints nothing, process.exit(0), empty
+# stderr) unless tool_input.command, with backslash-newline replaced by a SPACE (never removed, so the
+# fold cannot join two fragments), matches PROCESS_GROUP_KILL (/\b(?:\/\S*\/)?kill\s+.../) or
+# RUNNER_CTL (/\bsystemctl\s+.../). Both are case-sensitive, flagless regexes over the raw decoded
+# command, so a true result needs the decoded command to contain `kill` or `systemctl` verbatim. The
+# only code before that test is setDenyContext (sets a variable; writes only on a deny). The launcher
+# skips node unless stdin holds `kill` or `systemctl`, or one of `\u006`, `\u007`: the JSON escape
+# prefixes of every character of either literal (k i l = U+006B/69/6C; s y t e m c = U+0073/79/74/65/6D/63).
+# Tied to the regex sources by hooks/tests/node-hook.test.js (drift test). What the skip drops: the seam
+# heartbeat module load wrote (runner-guard requires lib/pretooluse-decision). Bash stays covered by the
+# guards that always start.
+#
+# What the skip drops: the seam heartbeat settings-guard.js wrote on every Edit/Write/MultiEdit.
+# After pass 2 it was the only beat source for those tools, so scripts/hook-seam-check.py
+# BEAT_COVERED_TOOLS is now {Bash, EnterWorktree}. Evidence in that file's header.
+#
+# `_hn_stdin` is set only by those arms; clear any inherited value so an exported
+# `_hn_stdin` can never pipe `_hn_buf` into another hook in place of its stdin.
+_hn_stdin=
+case $1 in
+  */PreToolUse/loop-guard.js)
+    if [ "$CLAUDE_LOOP_GUARD" != 1 ]; then
+      command exec cat >/dev/null 2>&1
+      exit 0
+    fi
+    ;;
+  */PreToolUse/settings-guard.js)
+    _hn_buf=$(tr '\0' '\1'; echo x)
+    _hn_buf=${_hn_buf%x}
+    case $_hn_buf in
+      *'settings.'* | *'\u002'* | *'\u006'* | *'\u007'*) _hn_stdin=1 ;;
+      *) exit 0 ;;
+    esac
+    ;;
+  */PreToolUse/codex-quota-guard.js)
+    _hn_buf=$(tr '\0' '\1'; echo x)
+    _hn_buf=${_hn_buf%x}
+    case $_hn_buf in
+      *[Cc][Oo][Dd][Ee][Xx]* | *[Aa][Pp][Pp]-[Ss][Ee][Rr][Vv][Ee][Rr]-[Bb][Rr][Oo][Kk][Ee][Rr]* | *'\u002'* | *'\u004'* | *'\u005'* | *'\u006'* | *'\u007'*) _hn_stdin=1 ;;
+      *) exit 0 ;;
+    esac
+    ;;
+  */PreToolUse/runner-guard.js)
+    _hn_buf=$(tr '\0' '\1'; echo x)
+    _hn_buf=${_hn_buf%x}
+    case $_hn_buf in
+      *'kill'* | *'systemctl'* | *'\u006'* | *'\u007'*) _hn_stdin=1 ;;
+      *) exit 0 ;;
+    esac
+    ;;
+  */run-with-flags.js)
+    if [ "$2" = post:edit:format ] && [ "$3" = PostToolUse/auto-format.js ] && [ -z "$CLAUDE_PLUGIN_ROOT" ] && [ -f "${1%/*}/PostToolUse/auto-format.js" ] && [ -r "${1%/*}/PostToolUse/auto-format.js" ]; then
+      _hn_buf=$(tr '\0' '\1'; echo x)
+      _hn_buf=${_hn_buf%x}
+      case $_hn_buf in
+        *'.js"'* | *'.jsx"'* | *'.ts"'* | *'.tsx"'* | *'\u002'* | *'\u006'* | *'\u007'*) _hn_stdin=1 ;;
+        *) exit 0 ;;
+      esac
+    fi
+    ;;
+esac
+# `set -f`: the unquoted $PATH split below must not glob-expand an entry holding
+# `*`, `?` or `[` into other directories, which the shell's own command lookup
+# never does. Nothing after it relies on globbing ("$@" is quoted).
+set -f
+_hn_ifs=$IFS
+IFS=:
+for _hn_d in $PATH; do
+  case $_hn_d in
+    '' | /mnt/* | */mise/shims | */mise/shims/ | */.asdf/shims | */.asdf/shims/ | */asdf/shims | */asdf/shims/) continue ;;
+  esac
+  if [ -f "$_hn_d/node" ] && [ -x "$_hn_d/node" ]; then
+    IFS=$_hn_ifs
+    [ -z "$_hn_stdin" ] || { printf '%s' "$_hn_buf" | "$_hn_d/node" "$@"; exit $?; }
+    exec "$_hn_d/node" "$@"
+  fi
+done
+IFS=$_hn_ifs
+[ -z "$_hn_stdin" ] || { printf '%s' "$_hn_buf" | node "$@"; exit $?; }
+exec node "$@"

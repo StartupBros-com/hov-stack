@@ -35,7 +35,7 @@ def iso(epoch: float) -> str:
 DEFAULT_CWD = "/home/user/SITES/repo"
 
 
-def tool_call_record(epoch: float, cwd: str = DEFAULT_CWD) -> str:
+def tool_call_record(epoch: float, cwd: str = DEFAULT_CWD, tool: str = "Bash") -> str:
     return json.dumps(
         {
             "type": "assistant",
@@ -44,7 +44,7 @@ def tool_call_record(epoch: float, cwd: str = DEFAULT_CWD) -> str:
             "message": {
                 "id": "msg_1",
                 "model": "claude-opus-5",
-                "content": [{"type": "tool_use", "name": "Bash", "input": {"command": "ls"}}],
+                "content": [{"type": "tool_use", "name": tool, "input": {"command": "ls"}}],
             },
         }
     )
@@ -408,6 +408,115 @@ class UnknownStateTests(SeamCheckBase):
         self.assertEqual(result["stale"], [])
         self.assertEqual(len(result["unknown"]), 1)
         self.assertIsNone(result["unknown"][0]["last_beat"])
+
+
+class SeamCoverageTests(SeamCheckBase):
+    """#369: the launcher no longer starts node for loop-guard (matcher `*`) unless
+    CLAUDE_LOOP_GUARD=1, nor for settings-guard (Edit|Write|MultiEdit) unless stdin can name a
+    settings file, nor for the Bash guards codex-quota-guard (unless stdin can spell a Codex
+    spend) and runner-guard (unless stdin holds `kill` or `systemctl`), so only tools a guard
+    that always starts covers are paired against beats."""
+
+    @staticmethod
+    def covered_tools(settings, gated):
+        """Tools witnessed by a node-hook guard the launcher always starts (matcher names, no wildcard)."""
+        import re
+
+        covered: set[str] = set()
+        for group in settings["hooks"]["PreToolUse"]:
+            for h in group["hooks"]:
+                cmd = h["command"]
+                if "node-hook" not in cmd or any(f"/{g}" in cmd for g in gated):
+                    continue  # dcg and other non-node guards never beat; the gated ones may be skipped
+                matcher = group.get("matcher") or ""
+                if "*" in matcher:
+                    raise AssertionError(f"a wildcard guard besides loop-guard changes the model: {cmd}")
+                covered |= set(re.split(r"\|", matcher))
+        return covered
+
+    def test_covered_set_is_exactly_what_other_node_guards_register_for(self):
+        import re
+
+        settings = json.loads((CLAUDE / "settings.json").read_text(encoding="utf8"))
+        launcher = (CLAUDE / "hooks" / "bin" / "node-hook").read_text(encoding="utf8")
+        # PreToolUse scripts the launcher can skip: one `*/PreToolUse/<name>.js)` case arm each.
+        gated = set(re.findall(r"^  \*/PreToolUse/([\w-]+\.js)\)$", launcher, re.M))
+        self.assertEqual(gated, {"loop-guard.js", "settings-guard.js", "codex-quota-guard.js", "runner-guard.js"})
+        covered = self.covered_tools(settings, gated)
+        self.assertEqual(set(HSC.BEAT_COVERED_TOOLS), covered)
+
+    def test_bash_stays_covered_while_a_guard_that_always_starts_is_registered(self):
+        """Bash must keep at least one node-hook guard the launcher never skips (grep-cost-guard,
+        heavy-job-admission, whatsapp-guard, git-guard, shape-rewrite), else its beat disappears."""
+        import re
+
+        settings = json.loads((CLAUDE / "settings.json").read_text(encoding="utf8"))
+        launcher = (CLAUDE / "hooks" / "bin" / "node-hook").read_text(encoding="utf8")
+        gated = set(re.findall(r"^  \*/PreToolUse/([\w-]+\.js)\)$", launcher, re.M))
+        always = []
+        for group in settings["hooks"]["PreToolUse"]:
+            if "Bash" not in (group.get("matcher") or "").split("|"):
+                continue
+            for h in group["hooks"]:
+                cmd = h["command"]
+                if "node-hook" in cmd and not any(f"/{g}" in cmd for g in gated):
+                    always.append(cmd)
+        self.assertGreaterEqual(len(always), 3, always)
+        self.assertIn("Bash", self.covered_tools(settings, gated))
+
+    def test_planted_negative_gating_every_bash_guard_drops_bash_from_the_covered_set(self):
+        """If every Bash node-hook guard were gated, the derivation must stop reporting Bash as covered
+        (and test_covered_set_is_exactly_what_other_node_guards_register_for then fails)."""
+        import re
+
+        settings = json.loads((CLAUDE / "settings.json").read_text(encoding="utf8"))
+        every = set()
+        for group in settings["hooks"]["PreToolUse"]:
+            if "Bash" not in (group.get("matcher") or "").split("|"):
+                continue
+            for h in group["hooks"]:
+                m = re.search(r"/([\w-]+\.js)\"", h["command"])
+                if "node-hook" in h["command"] and m:
+                    every.add(m.group(1))
+        self.assertIn("grep-cost-guard.js", every)
+        self.assertNotIn("Bash", self.covered_tools(settings, every | {"loop-guard.js", "settings-guard.js", "codex-quota-guard.js", "runner-guard.js"}))
+        self.assertNotEqual(set(HSC.BEAT_COVERED_TOOLS), self.covered_tools(settings, every | {"loop-guard.js", "settings-guard.js", "codex-quota-guard.js", "runner-guard.js"}))
+
+    def test_planted_negative_stale_seam_still_flagged_on_covered_tool(self):
+        now = time.time()
+        for tool in sorted(HSC.BEAT_COVERED_TOOLS):
+            with self.subTest(tool=tool):
+                for f in list(self.projects.glob("*")):
+                    import shutil
+
+                    shutil.rmtree(f)
+                self.write_session("-home-user-repo", [tool_call_record(now - 10, tool=tool)], mtime=now - 10)
+                self.write_beat(DEFAULT_CWD, now - 900)
+                self.assertEqual(len(self.scan()["stale"]), 1)
+
+    def test_calls_to_tools_without_another_guard_are_not_evidence(self):
+        """A session reading/grepping/tasking for >grace with a beat from an earlier Bash call
+        is healthy: those tools produce no beat in a normal session, by design."""
+        now = time.time()
+        for tool in ("Read", "Grep", "Glob", "TaskUpdate", "Agent", "Skill", "WebFetch", "mcp__x__get_users_me", "PowerShell", "Edit", "Write", "MultiEdit"):
+            with self.subTest(tool=tool):
+                for f in list(self.projects.glob("*")):
+                    import shutil
+
+                    shutil.rmtree(f)
+                self.write_session("-home-user-repo", [tool_call_record(now - 10, tool=tool)], mtime=now - 10)
+                self.write_beat(DEFAULT_CWD, now - 900)
+                result = self.scan()
+                self.assertEqual(result["stale"], [])
+                self.assertEqual(result["unknown"], [])  # no covered call at all: not examined, not unknown
+                self.assertEqual(result["healthy"], 0)
+
+    def test_covered_call_after_uncovered_ones_is_still_measured_against_the_beat(self):
+        now = time.time()
+        recs = [tool_call_record(now - 400, tool="Read"), tool_call_record(now - 5, tool="Bash")]
+        self.write_session("-home-user-repo", recs, mtime=now - 5)
+        self.write_beat(DEFAULT_CWD, now - 900)
+        self.assertEqual(len(self.scan()["stale"]), 1)
 
 
 class QuietSessionTests(SeamCheckBase):

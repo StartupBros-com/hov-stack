@@ -362,6 +362,49 @@ while IFS= read -r cmd; do
 done < "$WORK/cmds"
 ok "$n_cmds hook commands run on a clean HOME (no missing module or file)"
 
+# The `{}` run above does not start node for a gated hook: loop-guard skips unless
+# CLAUDE_LOOP_GUARD=1 (env gate), settings-guard and auto-format skip unless stdin holds one of
+# their literals or a JSON \uXXXX escape prefix of them (hooks/bin/node-hook). A missing module in
+# those hooks would pass unseen. So run every command again ARMED: CLAUDE_LOOP_GUARD=1 and a
+# payload that opens every stdin gate (it holds \u002 and \u006, valid JSON, no file_path), with a
+# counting `node` first on PATH, and require that every node hook really started node. A future
+# gate this payload does not open turns this red instead of silently dropping the module check.
+bs=$(printf '\134')
+armed_payload="{\"a\":\"${bs}u0020${bs}u0061\"}"
+[ "$(node -e 'process.stdout.write(JSON.parse(require("fs").readFileSync(0, "utf8")).a)' <<<"$armed_payload")" = " a" ] \
+  || fail "the armed payload is not the JSON it should be: $armed_payload"
+real_node=$(command -v node)
+mkdir -p "$WORK/countbin"
+printf '#!/bin/sh\necho start >> "%s"\nexec "%s" "$@"\n' "$WORK/node-starts" "$real_node" > "$WORK/countbin/node"
+chmod +x "$WORK/countbin/node"
+: > "$WORK/node-starts"
+n_armed=0
+n_armed_node=0
+unstarted=
+while IFS= read -r cmd; do
+  n_armed=$((n_armed + 1))
+  starts_before=$(wc -l < "$WORK/node-starts")
+  set +e
+  out=$(cd "$HOME" && printf '%s' "$armed_payload" | PATH="$WORK/countbin:$PATH" CLAUDE_LOOP_GUARD=1 timeout 120 bash -c "$cmd" 2>&1)
+  rc=$?
+  set -e
+  if grep -q -E "Cannot find module|ENOENT|No such file" <<<"$out"; then
+    fail "hook command broke on a clean HOME when armed: $cmd :: $out"
+  fi
+  case $cmd in
+    *hooks/bin/node-hook* | "node "*)
+      n_armed_node=$((n_armed_node + 1))
+      starts_after=$(wc -l < "$WORK/node-starts")
+      [ "$starts_after" -gt "$starts_before" ] || unstarted="$unstarted"$'\n'"  $cmd"
+      ;;
+  esac
+  echo "    armed rc=$rc  ${cmd:0:100}"
+done < "$WORK/cmds"
+[ -z "$unstarted" ] \
+  || fail "node hook(s) never started node on the armed payload (a gate the payload does not open hides its module check):$unstarted"
+[ "$n_armed_node" -ge 1 ] || fail "armed run found no node hook command"
+ok "$n_armed_node of $n_armed hook commands are node hooks; each started node on the armed payload with no missing module or file"
+
 # Second run against a settings.json the user customized: it must survive byte-for-byte,
 # with the seed written beside it, and nothing moved to a backup.
 printf '{\n  "permissions": {"allow": ["Bash(echo theirs)"]},\n  "theirOwnKey": true\n}\n' > "$S"

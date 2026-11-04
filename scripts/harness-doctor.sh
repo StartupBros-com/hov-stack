@@ -645,6 +645,14 @@ else
       -e 's|.*"\(\$HOME/[^"]*\)".*|\1|p')
     [ -n "$_hookreg_target" ] || case $_hookreg_cmd in /*) _hookreg_target=${_hookreg_cmd%% *} ;; esac
     case $_hookreg_target in '$HOME'/*) _hookreg_target=$HOME${_hookreg_target#'$HOME'} ;; esac
+    # A command run through hooks/bin/node-hook (hook-floor #369) needs the
+    # launcher as well as the script: a missing launcher exits 127, which Claude
+    # Code treats as non-blocking, so the guard would be silently off.
+    _hookreg_launcher=$(printf '%s' "$_hookreg_cmd" | sed -n 's|^"\([^"]*/hooks/bin/node-hook\)" .*|\1|p')
+    case $_hookreg_launcher in '$HOME'/*) _hookreg_launcher=$HOME${_hookreg_launcher#'$HOME'} ;; esac
+    if [ -n "$_hookreg_launcher" ] && [ ! -x "$_hookreg_launcher" ]; then
+      warn "hook launcher missing or not executable, so every hook run through it fails: $_hookreg_launcher"
+    fi
     # A command naming no absolute path (a bare PATH lookup) is out of scope
     # here rather than a defect; it is counted and named in the ok line below,
     # so a drift toward unresolvable commands stays visible.

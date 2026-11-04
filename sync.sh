@@ -55,6 +55,11 @@
 #                     Add/update the global heavy-job gate after grep guard.
 #   sync.sh reconcile-whatsapp-guard
 #                     Add/update the WhatsApp effect gate after resource guards.
+#   sync.sh reconcile-node-launcher
+#                     Move live first-party `node "<home>/hooks/..."` hook commands onto
+#                     hooks/bin/node-hook (skips the version-manager shim). Backs up
+#                     first, idempotent, refuses while the launcher is missing;
+#                     install runs it before the per-hook verbs.
 #   sync.sh reconcile-runtime-env
 #                     Merge portable runtime policy: the durable memory/env-file keys,
 #                     the background-shell pressure-reap opt-out
@@ -343,13 +348,13 @@ PUSH_TRACKING_PR_HOOK_COMMAND='node "$HOME/.claude/hooks/run-with-flags.js" "pos
 # reconcile_worktree_claim_advisory_hook can strip the registration from a live
 # settings.json that still carries it.
 WORKTREE_CLAIM_ADVISORY_HOOK_COMMAND='node "$HOME/.claude/hooks/PostToolUse/worktree-claim-advisory.js"'
-SKILL_MENTION_HOOK_COMMAND='node "$HOME/.claude/hooks/UserPromptSubmit/skill-mention-resolver.js"'
-GREP_COST_GUARD_HOOK_COMMAND='node "$HOME/.claude/hooks/PreToolUse/grep-cost-guard.js"'
-HEAVY_JOB_ADMISSION_HOOK_COMMAND='node "$HOME/.claude/hooks/PreToolUse/heavy-job-admission.js"'
+SKILL_MENTION_HOOK_COMMAND='"$HOME/.claude/hooks/bin/node-hook" "$HOME/.claude/hooks/UserPromptSubmit/skill-mention-resolver.js"'
+GREP_COST_GUARD_HOOK_COMMAND='"$HOME/.claude/hooks/bin/node-hook" "$HOME/.claude/hooks/PreToolUse/grep-cost-guard.js"'
+HEAVY_JOB_ADMISSION_HOOK_COMMAND='"$HOME/.claude/hooks/bin/node-hook" "$HOME/.claude/hooks/PreToolUse/heavy-job-admission.js"'
 STRUCTURED_OUTPUT_UNWRAP_HOOK_COMMAND='node "$HOME/.claude/hooks/PreToolUse/structured-output-unwrap.js"'
 READ_CEILING_CHUNK_HOOK_COMMAND='node "$HOME/.claude/hooks/PreToolUse/read-ceiling-chunk.js"'
-SHAPE_REWRITE_HOOK_COMMAND='node "$HOME/.claude/hooks/PreToolUse/shape-rewrite.js"'
-RUNNER_GUARD_HOOK_COMMAND='node "$HOME/.claude/hooks/PreToolUse/runner-guard.js"'
+SHAPE_REWRITE_HOOK_COMMAND='"$HOME/.claude/hooks/bin/node-hook" "$HOME/.claude/hooks/PreToolUse/shape-rewrite.js"'
+RUNNER_GUARD_HOOK_COMMAND='"$HOME/.claude/hooks/bin/node-hook" "$HOME/.claude/hooks/PreToolUse/runner-guard.js"'
 # Retired registrations, kept so install removes them from live settings.
 HANDOFF_COMPLIANCE_HOOK_COMMAND='node "$HOME/.claude/hooks/PreToolUse/handoff-compliance.js"'
 # dotfiles#1282's context fence (retired in harness teardown move 5, 2026-10-18).
@@ -357,13 +362,13 @@ CONTEXT_FENCE_HOOK_COMMAND='node "$HOME/.claude/hooks/PreToolUse/context-fence.j
 CONTEXT_FENCE_HANDOFF_HOOK_COMMAND='node "$HOME/.claude/hooks/Stop/context-fence-handoff.js"'
 COMPACT_COMPLIANCE_HOOK_COMMAND='node "$HOME/.claude/hooks/PostCompact/compact-compliance-counter.js"'
 FANOUT_ADMISSION_HOOK_COMMAND='node "$HOME/.claude/hooks/PreToolUse/fanout-admission.js"'
-WHATSAPP_GUARD_HOOK_COMMAND='node "$HOME/.claude/hooks/PreToolUse/whatsapp-guard.js"'
-CODEX_QUOTA_HOOK_COMMAND=${CODEX_QUOTA_HOOK_COMMAND:-'node "$HOME/.claude/hooks/PreToolUse/codex-quota-guard.js"'}
+WHATSAPP_GUARD_HOOK_COMMAND='"$HOME/.claude/hooks/bin/node-hook" "$HOME/.claude/hooks/PreToolUse/whatsapp-guard.js"'
+CODEX_QUOTA_HOOK_COMMAND=${CODEX_QUOTA_HOOK_COMMAND:-'"$HOME/.claude/hooks/bin/node-hook" "$HOME/.claude/hooks/PreToolUse/codex-quota-guard.js"'}
 CODEX_LEGACY_PRE_HOOK_COMMAND='node "$HOME/.claude/hooks/PreToolUse/codex-doghouse-guard.js"'
 CODEX_LEGACY_POST_HOOK_COMMAND='node "$HOME/.claude/hooks/PostToolUse/codex-doghouse-trip.js"'
 # Versioned policy is portable and linked; host authority deliberately is not.
 # ~/.local/state/claude/repo-routes.json is created only by repo-route.py bootstrap.
-REPO_ROUTE_HOOK_COMMAND=${REPO_ROUTE_HOOK_COMMAND:-'node "$HOME/.claude/hooks/PreToolUse/canonical-worktree-route-guard.js"'}
+REPO_ROUTE_HOOK_COMMAND=${REPO_ROUTE_HOOK_COMMAND:-'"$HOME/.claude/hooks/bin/node-hook" "$HOME/.claude/hooks/PreToolUse/canonical-worktree-route-guard.js"'}
 MODE=${1:-check}
 
 # Defensive tripwire: this repo is an explicit allowlist copier (never a
@@ -568,6 +573,21 @@ memory_push() {
   fi
 }
 
+# First-party node hooks run through hooks/bin/node-hook (hook-floor #369): it execs
+# the first non-shim node on PATH instead of paying the version-manager shim's
+# 100-140 ms per hook. A hook command therefore has two spellings, the launcher
+# form and the bare `node "<script>"` form older live files carry. This prints the
+# other spelling of a canonical-home command (nothing for any other command), so an
+# anchor or a retirement matches a live file on either side of the migration.
+NODE_HOOK_LAUNCHER_REF='"$HOME/.claude/hooks/bin/node-hook" '
+hook_command_other_form() {
+  local cmd=$1
+  case $cmd in
+    "$NODE_HOOK_LAUNCHER_REF"*) printf 'node %s' "${cmd#"$NODE_HOOK_LAUNCHER_REF"}" ;;
+    'node "$HOME/.claude/hooks/'*) printf '%s%s' "$NODE_HOOK_LAUNCHER_REF" "${cmd#node }" ;;
+  esac
+}
+
 # settings.json is intentionally not symlinked because Claude rewrites it.
 # Reconcile only a single named standalone hook group so live-only/runtime-owned
 # fields and every other hook survive. The canonical group is read from the repo
@@ -699,6 +719,7 @@ plugin_dir_missing_manifest() {
 
 reconcile_hook_group() {
   local label=$1 event=$2 cmd=$3 after_cmd=${4:-}
+  local after_alt
   local live=$H/settings.json canonical=${5:-$HERE/settings.json} canonical_group
   local extra_dead=${6:-[]}
   local tmp backup mode target checked_target require_target
@@ -723,6 +744,17 @@ reconcile_hook_group() {
     echo "  if this hook is still on an unmerged branch, merge it and pull the main checkout first" >&2
     return 1
   fi
+  # The launcher is a second file the command needs; a missing one fails every
+  # event with 127 (non-blocking, so silently unguarded), exactly the failure the
+  # target check above exists to prevent.
+  case $cmd in
+    "$NODE_HOOK_LAUNCHER_REF"*)
+      if [ ! -x "$H/hooks/bin/node-hook" ]; then
+        echo "$label reconcile: launcher $H/hooks/bin/node-hook is missing or not executable (registering $label would fail on every event); live settings were not changed" >&2
+        echo "  merge the launcher change and pull the main checkout first" >&2
+        return 1
+      fi ;;
+  esac
   command -v jq >/dev/null 2>&1 || {
     echo "$label reconcile requires jq; settings.json was not changed" >&2
     return 1
@@ -745,6 +777,7 @@ reconcile_hook_group() {
     return 1
   }
 
+  after_alt=$(hook_command_other_form "$after_cmd")
   mkdir -p "$H" || return 1
   if [ ! -e "$live" ]; then
     command install -m 0600 "$canonical" "$live" || {
@@ -812,7 +845,7 @@ reconcile_hook_group() {
   fi
 
   tmp=$(mktemp "$H/.settings.json.hook.XXXXXX") || return 1
-  if ! jq --arg event "$event" --arg cmd "$cmd" --arg after "$after_cmd" --argjson canonical "$canonical_group" --argjson dead "$dead_twins" '
+  if ! jq --arg event "$event" --arg cmd "$cmd" --arg after "$after_cmd" --arg after_alt "$after_alt" --argjson canonical "$canonical_group" --argjson dead "$dead_twins" '
     .hooks = (.hooks // {})
     | ([
             (.hooks[$event] // [])[]
@@ -827,7 +860,7 @@ reconcile_hook_group() {
         else
           ([
             range(0; ($groups | length)) as $i
-            | select(any($groups[$i].hooks[]?; .type == "command" and .command == $after))
+            | select(any($groups[$i].hooks[]?; .type == "command" and (.command == $after or ($after_alt != "" and .command == $after_alt))))
             | $i
           ] | if length > 0 then .[0] else null end) as $anchor
           | if $anchor == null then [$canonical] + $groups
@@ -1221,6 +1254,85 @@ reconcile_context_fence_hook() {
   retire_hook_commands "context-fence" \
     "$CONTEXT_FENCE_HOOK_COMMAND" "$CONTEXT_FENCE_HANDOFF_HOOK_COMMAND" \
     "$COMPACT_COMPLIANCE_HOOK_COMMAND" "$HANDOFF_COMPLIANCE_HOOK_COMMAND"
+}
+
+# Node launcher migration (hook-floor #369). settings.json is volatile, so the seed's
+# switch to hooks/bin/node-hook never reaches a configured machine on its own, and
+# the per-hook verbs above only carry the hooks they name (run-with-flags, the Stop
+# and session hooks, and every other first-party command have none). This rewrites
+# each live first-party `node "<harness home>/hooks/<script>"` command, in place and
+# in the same event order, to `"<harness home>/hooks/bin/node-hook" "<...script>"`:
+# the spelling already in use ($HOME template, this harness home, or this machine's
+# home) is kept. Nothing else is touched (dcg, plugin hooks, python hooks, the
+# statusline, every other key). Idempotent: a command already on the launcher does
+# not match, so a second run changes nothing and writes no backup. Backup-first.
+# Refuses while the launcher is absent, because a registration whose launcher is
+# missing fails every event with 127, which Claude Code treats as non-blocking.
+reconcile_node_launcher_hooks() {
+  local live=$H/settings.json tmp backup mode before after
+  guard_no_credentials || return 1
+  command -v jq >/dev/null 2>&1 || {
+    echo "node-launcher reconcile requires jq; settings.json was not changed" >&2
+    return 1
+  }
+  if [ ! -e "$live" ]; then
+    echo "  node-launcher: no live settings.json yet (install seeds the launcher form)"
+    return 0
+  fi
+  [ -f "$live" ] && [ ! -L "$live" ] && jq -e . "$live" >/dev/null 2>&1 || {
+    echo "node-launcher reconcile: live settings.json is missing, symlinked, not a regular file, or invalid; it was not changed" >&2
+    return 1
+  }
+  if [ ! -x "$H/hooks/bin/node-hook" ]; then
+    echo "node-launcher reconcile: launcher $H/hooks/bin/node-hook is missing or not executable; live settings were not changed" >&2
+    echo "  merge the launcher change and pull the main checkout first" >&2
+    return 1
+  fi
+  tmp=$(mktemp "$H/.settings.json.nodehook.XXXXXX") || return 1
+  if ! jq --arg h "$H" --arg home "$HOME" '
+    def prefixes: ["$HOME/.claude", $h, ($home + "/.claude")] | unique;
+    def conv:
+      if type != "string" then .
+      else . as $c
+        | (prefixes | map(. as $x | select($c | startswith("node \"" + $x + "/hooks/"))) | .[0]) as $p
+        | if $p == null then $c
+          else ($c | ltrimstr("node \"" + $p + "/hooks/")) as $rest
+            | if ($rest | startswith("bin/node-hook")) then $c
+              else "\"" + $p + "/hooks/bin/node-hook\" \"" + $p + "/hooks/" + $rest end
+          end
+      end;
+    if (.hooks | type) != "object" then .
+    else .hooks |= with_entries(.value |= (
+      if type != "array" then .
+      else map(if (.hooks | type) == "array"
+               then .hooks |= map(if type == "object" and has("command") then .command |= conv else . end)
+               else . end)
+      end))
+    end
+  ' "$live" >"$tmp"; then
+    rm -f "$tmp"
+    echo "node-launcher reconcile failed; live settings.json was not changed" >&2
+    return 1
+  fi
+  if cmp -s <(jq -S . "$live") <(jq -S . "$tmp"); then
+    rm -f "$tmp"
+    echo "  node-launcher hooks already reconciled"
+    return 0
+  fi
+  before=$(jq '[.hooks[]?[]?.hooks[]?.command // empty | select(contains("hooks/bin/node-hook"))] | length' "$live")
+  after=$(jq '[.hooks[]?[]?.hooks[]?.command // empty | select(contains("hooks/bin/node-hook"))] | length' "$tmp")
+  mkdir -p "$H/backups" || { rm -f "$tmp"; return 1; }
+  backup=$(mktemp -d "$H/backups/hook-launcher-$(date +%Y%m%d-%H%M%S)-XXXXXX") || {
+    rm -f "$tmp"; return 1;
+  }
+  cp -a "$live" "$backup/settings.json" || { rm -f "$tmp"; return 1; }
+  mode=$(stat -c '%a' "$live" 2>/dev/null || echo 600)
+  if ! chmod "$mode" "$tmp" || ! mv -f "$tmp" "$live"; then
+    rm -f "$tmp"
+    echo "node-launcher reconcile: atomic settings replacement failed; backup remains at $backup/settings.json" >&2
+    return 1
+  fi
+  echo "  moved $((after - before)) first-party hook command(s) onto hooks/bin/node-hook; previous settings backed up to $backup/settings.json"
 }
 
 # A model-initiated EnterPlanMode call drops a session out of bypass
@@ -1640,7 +1752,14 @@ retire_hook_commands() {
   # A retired command is named in the template's spelling; a live file written
   # before the tracked file became a $HOME template carries it rendered with
   # this harness home or this machine's home. Every spelling is retired.
-  retired=$(printf '%s\n' "$@" | jq -Rsc --arg h "$H" --arg home "$HOME" '
+  local c other
+  local -a all=()
+  for c in "$@"; do
+    all+=("$c")
+    other=$(hook_command_other_form "$c")
+    [ -z "$other" ] || all+=("$other")
+  done
+  retired=$(printf '%s\n' "${all[@]}" | jq -Rsc --arg h "$H" --arg home "$HOME" '
     split("\n")[:-1]
     | map(., gsub("\\$HOME/\\.claude/"; $h + "/"), gsub("\\$HOME/"; $home + "/"))
     | unique
@@ -2149,6 +2268,11 @@ install() {
   if [ "${CLAUDE_SYNC_SKIP_HOOK_RECONCILE:-0}" = 1 ]; then
     echo "  skipped hook reconcile (CLAUDE_SYNC_SKIP_HOOK_RECONCILE=1)"
   else
+    # First, so every per-hook verb below finds its anchors and twins already in
+    # the launcher spelling. install runs it (unlike an opt-in verb) because the
+    # seed alone never reaches a configured host and most first-party hooks have no
+    # per-hook verb; leaving it manual would strand them on the shim path forever.
+    reconcile_node_launcher_hooks || return 1
     reconcile_dcg_hook || return 1
     reconcile_whatsapp_guard_hook || return 1
     reconcile_memory_hook || return 1
@@ -2700,6 +2824,7 @@ case "$MODE" in
   reconcile-codex-quota-hook) reconcile_codex_quota_hook ;;
   reconcile-repo-route-hook) reconcile_repo_route_hook ;;
   reconcile-context-fence) reconcile_context_fence_hook ;;
+  reconcile-node-launcher) reconcile_node_launcher_hooks ;;
   reconcile-fanout-admission) reconcile_fanout_admission_hook ;;
   reconcile-docker-init)
     if [ "$#" -ne 1 ]; then
