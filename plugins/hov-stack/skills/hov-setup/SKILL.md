@@ -131,7 +131,7 @@ Ready means the detector reports it `installed` and a Python 3.12 or later is on
 
 ### synthetic-panel
 
-**Card:** Tells you which of your headlines, offers, email subjects or product ideas a simulated panel of your customers likes best. Claude writes each simulated customer's reaction, and synthetic-panel scores them on this computer, with no account or key. Free and open source, from StartupBros. It ranks your options against each other; it does not predict sales. The download is large: about 1.3 GB on Linux, plus about 90 MB the first time it scores. Good for marketers testing copy.
+**Card:** Tells you which of your headlines, offers, email subjects or product ideas a simulated panel of your customers likes best. Claude writes each simulated customer's reaction, and synthetic-panel scores them on this computer, with no account or key. Free and open source, from StartupBros. It ranks your options against each other; it does not predict sales. The download is large: about 1.1 GB on a Mac and 1.3 GB on Linux, plus about 90 MB the first time it scores. Good for marketers testing copy.
 
 Check:
 
