@@ -10,14 +10,21 @@
 #   3. On a detached HEAD the preserve path committed the WIP to no ref, so the
 #      commit went with the worktree's reflog.
 #
+#   4. (hov-stack#394) A session drives a worktree from a transcript filed under
+#      another project: the one it launched from, after EnterWorktree, `git -C` or
+#      `cd`. 31 pushbot worktrees were of this kind on 2026-11-03.
+#
 #   Each fix has a planted negative: a done job, a reused pid and an old transcript
-#   must NOT hold a worktree (or nothing would ever be swept); a copy that cannot be
-#   made, a pin that cannot be written, and a missing helper must keep it.
+#   must NOT hold a worktree (or nothing would ever be swept); nor may a tool result
+#   or the text a tool writes that names it, or an ended session's transcript; a
+#   copy that cannot be made, a pin that cannot be written, and a missing helper
+#   must keep it.
 #
 #   Hermetic: bare origin + repo + worktrees under mktemp; the Claude home is a
-#   fake directory (WT_CLAUDE_HOME); the repo-route resolver is stubbed to a
-#   verified empty scan; ROOT points at the fixture. Never touches the operator's
-#   tree, remotes, ~/.claude, or gh.
+#   fake directory (WT_CLAUDE_HOME) and the transcript index cache a temp one
+#   (WT_HOLD_CACHE_DIR); the repo-route resolver is stubbed to a verified empty
+#   scan; ROOT points at the fixture. Never touches the operator's tree, remotes,
+#   ~/.claude, ~/.cache, or gh.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -67,7 +74,7 @@ mkfix(){
 slug(){ printf '%s' "$1" | sed 's/[^A-Za-z0-9]/-/g'; }
 starttime(){ python3 -c 'import sys; print(open(f"/proc/{sys.argv[1]}/stat").read().rsplit(")", 1)[1].split()[19])' "$1"; }
 sweep(){ # $1 root  $2 DRY_RUN  $3 claude home  [$4 ACTIVE_MIN]  [$5 lib dir]
-  DRY_RUN="$2" ROOT="$1" WT_CLAUDE_HOME="$3" WT_DONE_BIN="$TMP/no-wt-done" \
+  DRY_RUN="$2" ROOT="$1" WT_CLAUDE_HOME="$3" WT_HOLD_CACHE_DIR="$TMP/hold-cache" WT_DONE_BIN="$TMP/no-wt-done" \
     REPO_ROUTE_RESOLVER="$TMP/scan-ok.py" WT_SWEEP_ALLOW_TMP=1 ACTIVE_MIN="${4:-0}" PUSH=0 \
     WT_SWEEP_LIB="${5:-$HERE/../scripts/lib}" bash "$SCRIPT" 2>&1
 }
@@ -227,6 +234,136 @@ kept "pin collision: worktree kept" "$WT"
 has "pin collision: says why" "$out" "SKIP (detached HEAD could not be pinned — nothing removed)"
 [ "$(git -C "$TMP/detcol/repo" rev-parse "$REF")" = "$(git -C "$TMP/detcol/repo" rev-parse main)" ] \
   && ok "pin collision: existing ref not overwritten" || no "pin collision: existing ref not overwritten"
+
+# ===== hov-stack#394: transcripts filed under another project ======================
+# Transcript records as Claude Code writes them: every record carries `cwd`; a tool
+# call is an assistant record with a tool_use block; its result comes back in a
+# user record.
+rec(){ printf '{"type":"user","cwd":"%s","message":{"role":"user","content":"go"}}\n' "$1"; }
+call(){ printf '{"type":"assistant","cwd":"%s","message":{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"%s","input":%s}]}}\n' "$1" "$2" "$3"; }
+result(){ printf '{"type":"user","cwd":"%s","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"%s"}]}}\n' "$1" "$2"; }
+
+# --- 16. a blocked job that entered the worktree holds it (its cwd followed) ------
+mkfix entered
+H="$TMP/h-entered"; WT="$TMP/entered/repo-wt"; T="$H/projects/-launch/s16.jsonl"
+mkdir -p "$H/jobs/j16" "$(dirname "$T")"
+printf '{"state":"blocked","name":"entered","sessionId":"s16","cwd":"%s","linkScanPath":"%s"}\n' \
+  "$TMP/entered/repo" "$T" >"$H/jobs/j16/state.json"
+{ rec "$TMP/entered/repo"; rec "$WT"; } >"$T"; touch -d '-1 day' "$T"
+out=$(sweep "$TMP/entered" 0 "$H")
+kept "entered from elsewhere: worktree kept" "$WT"
+has "entered from elsewhere: skip names the job, transcript and path" "$out" \
+  "job j16 \"entered\" is blocked; its transcript $T names $WT"
+
+# --- 17. a live session driving it with `git -C` holds it -------------------------
+mkfix gitc
+H="$TMP/h-gitc"; WT="$TMP/gitc/repo-wt"; T="$H/projects/-elsewhere/s17.jsonl"
+mkdir -p "$H/sessions" "$(dirname "$T")"
+printf '{"pid":%s,"procStart":"%s","sessionId":"s17","cwd":"%s","name":"driver"}\n' "$$" "$(starttime $$)" "$TMP" >"$H/sessions/$$.json"
+call "$TMP" Bash "{\"command\":\"git -C $WT status --short\"}" >"$T"; touch -d '-1 day' "$T"
+out=$(sweep "$TMP/gitc" 0 "$H")
+kept "git -C from a live session: worktree kept" "$WT"
+has "git -C from a live session: skip names the session" "$out" "session pid $$ \"driver\" is live; its transcript $T names $WT"
+
+# --- 18. a workflow agent's recent edit holds it, whichever session it belongs to -
+mkfix wfagent
+H="$TMP/h-wfagent"; WT="$TMP/wfagent/repo-wt"; T="$H/projects/-elsewhere/s18/subagents/workflows/wf_1/agent-1.jsonl"
+mkdir -p "$(dirname "$T")"
+call "$TMP" Edit "{\"file_path\":\"$WT/base.txt\",\"old_string\":\"a\",\"new_string\":\"b\"}" >"$T"
+touch -d '-1 day' "$WT"   # the top-dir mtime gate must not be what keeps it
+out=$(sweep "$TMP/wfagent" 0 "$H" 120)
+kept "recent workflow agent edit: worktree kept" "$WT"
+has "recent workflow agent edit: skip names the path" "$out" "a transcript written 0m ago; its transcript $T names $WT/base.txt"
+
+# --- 19. PLANTED NEGATIVE: a result or written text naming it holds nothing ------
+mkfix mention
+H="$TMP/h-mention"; WT="$TMP/mention/repo-wt"; T="$H/projects/-elsewhere/s19.jsonl"
+mkdir -p "$H/jobs/j19" "$(dirname "$T")"
+printf '{"state":"blocked","name":"inventory","sessionId":"s19","cwd":"%s","linkScanPath":"%s"}\n' "$TMP" "$T" >"$H/jobs/j19/state.json"
+{ call "$TMP" Bash '{"command":"git worktree list"}'
+  result "$TMP" "worktree $WT"
+  call "$TMP" Write "{\"file_path\":\"$TMP/list.txt\",\"content\":\"$WT\"}"
+  call "$TMP" Edit "{\"file_path\":\"$TMP/list.txt\",\"old_string\":\"$WT\",\"new_string\":\"x\"}"
+  call "$TMP" Read "{\"file_path\":\"$WT-other/x\"}"   # shares the prefix, not the directory
+  call "$TMP" Bash "{\"command\":\"ls $WT-other\"}"
+} >"$T"
+out=$(sweep "$TMP/mention" 0 "$H")
+gone "mentioned only in a result, written text or a sibling path: worktree removed" "$WT"
+
+# --- 20. PLANTED NEGATIVE: an ended session's old transcript holds nothing -------
+mkfix ended
+H="$TMP/h-ended"; WT="$TMP/ended/repo-wt"; T="$H/projects/-elsewhere/s20.jsonl"
+mkdir -p "$H/sessions" "$(dirname "$T")"
+printf '{"pid":%s,"procStart":"1","sessionId":"s20","cwd":"%s","name":"gone"}\n' "$$" "$TMP" >"$H/sessions/$$.json"
+rec "$WT" >"$T"; touch -d '-1 day' "$T" "$WT"
+out=$(sweep "$TMP/ended" 0 "$H" 120)
+gone "ended session: worktree removed" "$WT"
+
+# The helper itself, without a sweep around it: the caller's exclusion and the cache.
+HELPER="$HERE/../scripts/lib/wt_session_hold.py"
+hold(){ # $1 claude home  $2 cache dir, then helper args
+  local h="$1" c="$2"; shift 2
+  python3 "$HELPER" --claude-home "$h" --cache-dir "$c" --active-min 0 "$@"
+}
+
+# --- 21. the caller's own session never holds, its workflow agents included ------
+H="$TMP/h-self"; WT="$TMP/self/repo-wt"; T="$H/projects/-elsewhere/s21.jsonl"
+mkdir -p "$H/jobs/j21" "$H/projects/-elsewhere/s21/subagents/workflows/wf_2"
+printf '{"state":"working","name":"closer","sessionId":"s21","cwd":"%s","linkScanPath":"%s"}\n' "$TMP" "$T" >"$H/jobs/j21/state.json"
+rec "$WT" >"$T"
+call "$TMP" Read "{\"file_path\":\"$WT/a\"}" >"$H/projects/-elsewhere/s21/subagents/workflows/wf_2/agent-1.jsonl"
+hold "$H" "$TMP/hold-cache" "$WT" >/dev/null; rc=$?
+[ "$rc" = 0 ] && ok "another caller: held" || no "another caller: held (rc $rc)"
+hold "$H" "$TMP/hold-cache" --exclude-session s21 "$WT" >/dev/null; rc=$?
+[ "$rc" = 1 ] && ok "the caller's own session: not held" || no "the caller's own session: not held (rc $rc)"
+out=$( . "$HERE/../scripts/lib/wt-preserve.sh"
+       WT_CLAUDE_HOME="$H" WT_HOLD_CACHE_DIR="$TMP/hold-cache" ACTIVE_MIN=120 wt_session_hold "$WT" ); rc=$?
+[ "$rc" = 0 ] && ok "wt-preserve, no exclusion: held by the recent transcripts" \
+  || no "wt-preserve, no exclusion: held by the recent transcripts (rc $rc: $out)"
+out=$( . "$HERE/../scripts/lib/wt-preserve.sh"
+       WT_CLAUDE_HOME="$H" WT_HOLD_CACHE_DIR="$TMP/hold-cache" ACTIVE_MIN=120 wt_session_hold "$WT" s21 ); rc=$?
+[ "$rc" = 1 ] && ok "wt-preserve passes the exclusion (recent transcripts too)" \
+  || no "wt-preserve passes the exclusion (rc $rc: $out)"
+
+# --- 22. the cache reads only appended bytes, and a replaced file from the start --
+H="$TMP/h-cache"; WT="$TMP/cache/repo-wt"; T="$H/projects/-elsewhere/s22.jsonl"; C="$TMP/cache-22"
+mkdir -p "$H/jobs/j22" "$(dirname "$T")"
+printf '{"state":"blocked","name":"grower","sessionId":"s22","cwd":"%s","linkScanPath":"%s"}\n' "$TMP" "$T" >"$H/jobs/j22/state.json"
+rec "$TMP/cachE/repo-wt/q" >"$T"   # one letter off: not inside the worktree
+hold "$H" "$C" "$WT" >/dev/null; rc=$?
+[ "$rc" = 1 ] && ok "cache: first read, not held" || no "cache: first read, not held (rc $rc)"
+[ -n "$(ls "$C" 2>/dev/null)" ] && ok "cache: written" || no "cache: written"
+# Same size, same inode: the letter becomes the worktree's. Only a re-read could see it.
+python3 -c 'import sys; f=open(sys.argv[1],"r+b"); b=f.read(); f.seek(0); f.write(b.replace(b"/cachE/", b"/cache/"))' "$T"
+hold "$H" "$C" "$WT" >/dev/null; rc=$?
+[ "$rc" = 1 ] && ok "cache: bytes already read are not read again" || no "cache: bytes already read are not read again (rc $rc)"
+call "$TMP" Bash "{\"command\":\"cd $WT/sub && make\"}" >>"$T"
+out=$(hold "$H" "$C" "$WT"); rc=$?
+[ "$rc" = 0 ] && ok "cache: an appended line is read" || no "cache: an appended line is read (rc $rc)"
+has "cache: the hit is the appended path, not the rewritten one" "$out" "names $WT/sub"
+cp "$T" "$T.new" && mv "$T.new" "$T"   # a new inode
+out=$(hold "$H" "$C" "$WT"); rc=$?
+has "cache: a replaced transcript is read from the start" "$out" "names $WT/q"
+
+# --- 23. a line still being written counts now and is read again when complete --
+H="$TMP/h-partial"; WT="$TMP/partial/repo-wt"; T="$H/projects/-elsewhere/s23.jsonl"; C="$TMP/cache-23"
+mkdir -p "$H/jobs/j23" "$(dirname "$T")"
+printf '{"state":"working","name":"writer","sessionId":"s23","cwd":"%s","linkScanPath":"%s"}\n' "$TMP" "$T" >"$H/jobs/j23/state.json"
+rec "$TMP" >"$T"; first=$(wc -c <"$T")
+rec "$WT" | tr -d '\n' >>"$T"
+hold "$H" "$C" "$WT" >/dev/null; rc=$?
+[ "$rc" = 0 ] && ok "partial line: held now" || no "partial line: held now (rc $rc)"
+off=$(python3 -c 'import json,sys,glob; d=json.load(open(glob.glob(sys.argv[1]+"/*.json")[0])); print(d["entries"][sys.argv[2]]["offset"])' "$C" "$T")
+[ "$off" = "$first" ] && ok "partial line: cached only up to the last newline" || no "partial line: cached offset $off, want $first"
+printf '\n' >>"$T"
+hold "$H" "$C" "$WT" >/dev/null; rc=$?
+[ "$rc" = 0 ] && ok "partial line: held once complete" || no "partial line: held once complete (rc $rc)"
+
+# --- 24. a cache that cannot be written costs time, never the answer ------------
+: >"$TMP/not-a-dir"
+err=$(hold "$H" "$TMP/not-a-dir/cache" "$WT" 2>&1 >/dev/null); rc=$?
+[ "$rc" = 0 ] && ok "unwritable cache: still held" || no "unwritable cache: still held (rc $rc)"
+has "unwritable cache: says so" "$err" "cache not saved"
 
 echo
 echo "wt-sweep-preserve: $pass passed, $fail failed"

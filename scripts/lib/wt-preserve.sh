@@ -15,11 +15,13 @@
 WT_PRESERVE_DIR="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
 
 # Prints why a Claude Code session holds worktree $1 and returns 0, or prints any
-# `resumable:` notes and returns 1. A check that cannot answer reads as held,
-# like alive(): erring that way only defers a removal.
+# `resumable:` notes and returns 1. $2, when set, is a session id that never counts
+# as a holder (wt-done passes its caller's). A check that cannot answer reads as
+# held, like alive(): erring that way only defers a removal.
 wt_session_hold() {
   local out rc
-  out=$(python3 "$WT_PRESERVE_DIR/wt_session_hold.py" --active-min "${ACTIVE_MIN:-120}" -- "$1"); rc=$?
+  out=$(python3 "$WT_PRESERVE_DIR/wt_session_hold.py" --active-min "${ACTIVE_MIN:-120}" \
+    --exclude-session "${2:-}" -- "$1"); rc=$?
   case $rc in
     0) printf '%s' "$out"; return 0 ;;
     1) printf '%s' "$out"; return 1 ;;

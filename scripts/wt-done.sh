@@ -364,10 +364,11 @@ close_one() {
   # Run from outside, this moves the worktree's branch and then removes it, so a
   # session idling there would lose its ground (hov-stack#384). Checked before any
   # mutation. From inside, the caller is the session that holds it, and nothing is
-  # removed anyway.
+  # removed anyway. The caller's own session never counts: its transcript names
+  # the worktree it is closing out (hov-stack#394).
   local hold
   if ! run_from_inside "$wt"; then
-    if hold=$(wt_session_hold "$wt"); then
+    if hold=$(wt_session_hold "$wt" "${CLAUDE_CODE_SESSION_ID:-}"); then
       echo "      => REFUSE (a Claude session holds this worktree: $hold)"
       return 1
     fi
