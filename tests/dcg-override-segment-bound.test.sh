@@ -23,7 +23,11 @@
 # pass with these overrides deleted. The cases under "denied only by these
 # overrides" must also flip to ALLOW in a copy of config.toml with exactly the
 # five override lines removed; that planted negative is what ties them to the
-# overrides.
+# overrides. The built-ins grow: 0.15.3 also denies `chmod -fR`, `chown -hR`
+# and a trailing `-R` on /home itself (#248), so those forms are proven on a
+# /home subpath instead; 0.16.0 also denies a +refspec push after a redirect,
+# so the two redirect push cases check their planted negative only below 0.16.0,
+# where these overrides are still their only guard.
 #
 # HOOK MODE, NOT `dcg explain`. The windows rule is semantic-only (its regex is
 # `\b\B`): `dcg explain` never runs it, so only the hook entrypoint shows it.
@@ -174,20 +178,21 @@ want DENY "chmod -R on quoted bare /"           'chmod -R 777 "/"'
 want DENY "chained after cd"                    "cd /tmp && chmod -R 777 /home"
 want DENY "chained before echo"                 "chmod -R 777 /home && echo done"
 want DENY "chown -R on /home"                   "chown -R nobody /home"
-want DENY "chown -R on bare /"                  "chown -R nobody:nogroup /"
+want DENY "R not first in a chown cluster"      "chown -hR nobody /home"
+want DENY "chown -R on bare /"                "chown -R nobody:nogroup /"
 want DENY "chown --recursive, quoted /home"     "chown --recursive nobody '/home'"
 want DENY "trailing -R before ;"                "chmod 700 /home -R;"
 want DENY "trailing -R inside a subshell"       "(chmod 700 /home -R)"
 want DENY "redirect 2>&1 before /home (a built-in also denies)" "chmod -R 755 2>&1 /home"
 
 # --- denied only by these overrides (planted negative below) ----------------
-# None of these is denied by a dcg 0.15.2 built-in rule. A quoted, substituted
-# or escaped `;`, `&` or `|`, a redirect or a line continuation stays inside
-# the one command.
+# None of these is denied by a dcg 0.15.3 or 0.16.0 built-in rule (checked
+# with both binaries). A quoted, substituted or escaped `;`, `&` or `|`, a
+# redirect or a line continuation stays inside the one command.
 OVERRIDE_ONLY=(
-  "chown -hR nobody /home"
-  "chmod -fR 700 /home"
-  "chmod 700 /home -R"
+  "chown -hR nobody /home/user/x"
+  "chmod -fR 700 /home/user/x"
+  "chmod 700 /home/user/x -R"
   "chmod -R 755 /home/user/x"
   "chown -R nobody /home/user/x"
   'chmod -R 755 "a;b" /home/user/x'
@@ -199,12 +204,16 @@ OVERRIDE_ONLY=(
   "git -c user.name='a;b' push origin +main"
   'git push origin "a;b" +main'
   'git push "ssh://h/a?x=1&y=2" +main'
-  "git push origin 2>&1 +main"
   'git -C "a;b" push origin +main'
   'git push $(git remote | head -1) +main'
+)
+# A redirect between push and +refspec: only these overrides deny it below
+# 0.16.0 (the pinned floor is 0.15.3), and a 0.16.0 built-in denies it too.
+REDIRECT_PUSH=(
+  "git push origin 2>&1 +main"
   "git push &>/tmp/push.log origin +main"
 )
-for c in "${OVERRIDE_ONLY[@]}"; do
+for c in "${OVERRIDE_ONLY[@]}" "${REDIRECT_PUSH[@]}"; do
   want DENY "override denies: ${c//$'\n'/<NL>}" "$c"
 done
 # PLANTED NEGATIVE: config.toml minus exactly the five override lines. Every
@@ -217,6 +226,16 @@ removed=$(( $(wc -l < "$CFG") - $(wc -l < "$SANDBOX/no-overrides.toml") ))
 for c in "${OVERRIDE_ONLY[@]}"; do
   want ALLOW "no built-in rule denies: ${c//$'\n'/<NL>}" "$c" "$SANDBOX/no-overrides.toml"
 done
+DCG_VER=$(dcg --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+if [ -z "$DCG_VER" ]; then
+  bad "cannot read dcg --version, so the redirect push planted negative cannot be scoped"
+elif [ "$(printf '%s\n0.16.0\n' "$DCG_VER" | sort -V | head -1)" != 0.16.0 ]; then
+  for c in "${REDIRECT_PUSH[@]}"; do
+    want ALLOW "no built-in rule denies below 0.16.0: $c" "$c" "$SANDBOX/no-overrides.toml"
+  done
+else
+  echo "note: dcg $DCG_VER's built-in git rule also denies the ${#REDIRECT_PUSH[@]} redirect push cases, so their planted negative runs only below 0.16.0" >&2
+fi
 
 # --- observed false positives: now allowed ----------------------------------
 # Each of these is DENY under the first patterns (checked when this suite was
