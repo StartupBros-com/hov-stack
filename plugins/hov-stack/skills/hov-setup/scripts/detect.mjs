@@ -7,7 +7,9 @@
   with its manager program, and the helper programs some of those need.
 
   Read-only. It runs `claude plugin marketplace list --json` and `claude plugin list --json`
-  and no other program: a tool is found by looking for an executable file of its name in the
+  and no other program, and reads settings.json and plugins/known_marketplaces.json in the
+  Claude Code config dir ($CLAUDE_CONFIG_DIR, else ~/.claude) for each marketplace's
+  auto-update setting, the way autoupdate.mjs beside it does: a tool is found by looking for an executable file of its name in the
   PATH directories and a few usual install directories, never by running it. A plugin counts
   only when it is installed at user scope, the rule ./setup uses; a project-scope copy is named
   in `otherScopes` and does not count. A plugin from another publisher's marketplace is found
@@ -31,10 +33,12 @@ import { homedir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { configDir, readFiles, stateOf, updatesOffBy } from "./autoupdate.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 // The skill directory: the one holding SKILL.md, the parent of the scripts directory.
 const SKILL_DIR = dirname(here);
+const AUTOUPDATE = join(here, "autoupdate.mjs");
 
 const data = JSON.parse(readFileSync(new URL("./offers.json", import.meta.url), "utf8"));
 
@@ -170,6 +174,25 @@ function sourceMatches(m, github) {
   return false;
 }
 
+// Where auto-update stands for one marketplace (autoupdate.mjs has the states), and the line
+// that turns it on: run it after adding the marketplace, or now when it is off by default.
+// added is whether Claude Code lists the marketplace. next is offered only where the helper
+// can act: an entry in this settings.json for it to set.
+function autoUpdateOf(name, files, added) {
+  const s = stateOf(name, files);
+  const out = { state: s.state, where: s.where, problem: s.problem, next: null };
+  if (s.state === "not-added" && added) {
+    // Listed, yet neither file here names it: it came from a project's or an organization's settings.
+    out.state = "unknown";
+    out.problem = `neither ${files.settingsPath} nor ${files.knownPath} lists ${name}, so it was added some other way, such as a project's settings`;
+  } else if (s.state === "not-added" || (s.state === "off" && s.declared)) {
+    out.next = `node "${AUTOUPDATE}" ${name}`;
+  } else if (s.state === "off") {
+    out.problem = `${files.settingsPath} has no entry for ${name}, so it was added some other way. To turn auto-update on: /plugin, Marketplaces, ${name}, Enable auto-update.`;
+  }
+  return out;
+}
+
 function fill(line, uvPath) {
   return line.split("<skill-dir>").join(SKILL_DIR).split("<uv>").join(uvPath);
 }
@@ -202,6 +225,7 @@ export function detect() {
   const wsl = onWsl();
   const platform = platformName();
   const search = searchDirs();
+  const files = readFiles(configDir());
 
   // <uv> in an install line is the uv the detector found, else plain `uv`.
   const uvHelper = HELPERS.find((h) => h.name === "uv");
@@ -232,14 +256,16 @@ export function detect() {
         if (sourceMatches(m, o.marketplace.github) && typeof m.name === "string" && !matched.includes(m.name)) matched.push(m.name);
       }
       let id;
+      let mname;
       let marketplaceAdd = null;
       if (matched.length) {
         const hit = matched.find((n) => installed.some((r) => r && r.id === `${o.plugin}@${n}` && r.scope === "user"));
-        id = `${o.plugin}@${hit ?? matched[0]}`;
+        mname = hit ?? matched[0];
       } else {
-        id = `${o.plugin}@${o.marketplace.name}`;
+        mname = o.marketplace.name;
         marketplaceAdd = `claude plugin marketplace add ${o.marketplace.github}`;
       }
+      id = `${o.plugin}@${mname}`;
       const s = pluginState(id, installed, o.wslOnly, wsl);
       return {
         ...head,
@@ -250,6 +276,7 @@ export function detect() {
         otherScopes: s.otherScopes,
         id,
         marketplaceAdd,
+        autoUpdate: autoUpdateOf(mname, files, matched.length > 0),
       };
     }
     // tool and paid-skills
@@ -271,8 +298,14 @@ export function detect() {
       const known = KNOWN[name] || { what: null, start: null };
       return { name, version: r.version || null, enabled: r.enabled !== false, what: known.what, start: known.start };
     });
+  const added = marketplaces.some((m) => m && m.name === MARKETPLACE);
   return {
-    marketplace: { name: MARKETPLACE, added: marketplaces.some((m) => m && m.name === MARKETPLACE) },
+    marketplace: {
+      name: MARKETPLACE,
+      added,
+      autoUpdate: autoUpdateOf(MARKETPLACE, files, added),
+    },
+    updatesOff: updatesOffBy(process.env, files),
     platform,
     wsl,
     plugins,
@@ -296,6 +329,14 @@ function line(p) {
   return `  ${p.name}: absent${only}. Install: ${p.next}`;
 }
 
+function autoUpdateLine(a) {
+  const head = `  auto-update for ${MARKETPLACE}:`;
+  if (a.state === "on") return `${head} on`;
+  if (a.state === "turned-off") return `${head} off, switched off by someone, so left alone`;
+  if (a.state === "off") return a.next ? `${head} off. Turn on: ${a.next}` : `${head} off. ${a.problem}`;
+  return `${head} could not tell: ${a.problem}`;
+}
+
 function text(report) {
   const lines = [];
   if (report.marketplace.added) {
@@ -305,6 +346,10 @@ function text(report) {
       `hov-setup: the ${MARKETPLACE} marketplace is not added, so none of the install lines below work yet.`,
       "  Re-run ./setup from your hov-stack checkout (it adds the marketplace), then run this again.",
     );
+  }
+  if (report.marketplace.added) lines.push(autoUpdateLine(report.marketplace.autoUpdate));
+  for (const off of report.updatesOff) {
+    lines.push(`  note: ${off.name} is set (${off.where}), which stops Claude Code updating any plugin`);
   }
   for (const p of report.plugins) lines.push(line(p));
   for (const h of report.helpers) lines.push(line({ ...h, kind: "helper" }));

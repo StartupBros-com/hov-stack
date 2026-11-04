@@ -6,6 +6,34 @@
 #   ./setup --no-dcg   the same, without downloading or installing dcg
 #   ./setup --check    change nothing: print each step's state, exit 1 if any is not in place
 #                      (add --no-dcg to leave dcg out of the check)
+#   ./setup --update   bring hov-stack and what it installed up to date, then run every step
+#                      below. Not with --check (exit 2). In order:
+#                        - fast-forwards this checkout with `git fetch` and `git merge --ff-only`
+#                          of its upstream, then runs the NEW setup for the rest. It never
+#                          stashes, resets or rebases: no git work tree, a detached HEAD, no
+#                          upstream, commits of yours the upstream lacks, a fetch that fails, or
+#                          local changes the fast-forward would overwrite each leave the checkout
+#                          as it is, print one row with the fix, and the rest still runs.
+#                        - after the steps below, refreshes the hov marketplace and the
+#                          marketplaces of the other publishers' plugins hov-stack offers that
+#                          you have added (never the others), and updates the plugins from
+#                          those catalogs that hov-stack offers and you have installed. It never
+#                          passes -y or --accept-command: if Claude Code refuses an update,
+#                          its line is shown and the rest goes on.
+#                        - updates gh, uv, cass and jsm with hov-setup's install-release.sh
+#                          --update, only where hov-stack installed them and the file is
+#                          unchanged since (its record is under ~/.local/state/hov-stack),
+#                          and never to an older version; one you installed some other way,
+#                          or one that updated itself (jsm, cass upgrade), is left alone.
+#                        - runs `uv tool upgrade` for the uv tools hov-stack offers that you
+#                          have installed, never installing one you lack; the git-tag offer is
+#                          re-installed at its current tag only when uv's own record says it was
+#                          installed from that offer's repository at an older tag (a newer tag,
+#                          a branch or a commit you chose stays).
+#                        - prints the `jsm upgrade` line when jsm is on PATH; it is your paid
+#                          account's skills, so setup does not run it.
+#                      Claude Code itself, the codex CLI and anything installed some other way
+#                      are not touched.
 #
 # Each step is reported ok, skipped with the command to run later, or failed:
 #   1. Symlinks the harness into $CLAUDE_CONFIG_DIR (default ~/.claude):
@@ -47,16 +75,25 @@
 #        env            NAME=value lines that claude-env.sh exports before each Bash call.
 #   5. With Claude Code 2.1.76 or later on PATH (older releases refuse the hov manifest),
 #      adds the hov marketplace and installs the plugins lib/default-plugins.txt names.
+#      Then it turns on auto-update for the hov marketplace when settings.json is setup's
+#      own unedited seed (step 3's exception), so those plugins get new versions by
+#      themselves; for a settings.json you made it only says whether auto-update is on.
 #      --check reads what Claude Code reports installed; it writes no record of its own.
 #   6. Never reads or writes memory, projects/, credentials, or anything outside the config
-#      dir, ~/.hov-stack-backups, ~/.local (dcg) and this checkout, apart from reading the
-#      overlay. No sudo. Only dcg's download and the claude plugin commands use the network.
+#      dir, ~/.hov-stack-backups, ~/.local (dcg; with --update also the install records
+#      under ~/.local/state/hov-stack and gh, uv, cass and jsm in ~/.local/bin) and this
+#      checkout (its git state, with --update), apart from reading the overlay. No sudo.
+#      Only dcg's download and the claude plugin commands use the network; with --update
+#      also git fetch, the program downloads of install-release.sh and uv.
 #
 # Exit status: 0 when every step is in place or was skipped with its fix printed; 1 when
 # git or node is missing, dcg's verification refused an artifact, a link or the overlay's
 # import could not be made, no seed could be written (an overlay settings.json that is not
 # a JSON object, or gives a setting another kind of value than the template's), or --check
-# found a step not in place; 2 for an unknown option.
+# found a step not in place; 2 for an unknown option, or --update with --check. With
+# --update a program whose install-release.sh run fails (download, checksum or its own
+# --version check) also makes it 1; a refused pull, a program left alone and a command that
+# needs the network and could not reach it are rows with their fix, not failures.
 # Re-running is a no-op. To undo: remove the symlinks it lists and restore the backup dir.
 set -euo pipefail
 
@@ -86,14 +123,26 @@ usage() { awk 'NR == 1 { next } /^#/ { sub(/^# ?/, ""); print; next } { exit }' 
 
 check=0
 no_dcg=0
+update=0
+# The arguments as given, so --update can run the new setup with the same ones. The id in
+# HOV_STACK_UPDATE_FROM is the checkout --update left; it is read once and removed from the
+# environment so nothing setup runs inherits it.
+orig_args=("$@")
+update_from=${HOV_STACK_UPDATE_FROM:-}
+unset HOV_STACK_UPDATE_FROM
 for arg in "$@"; do
   case "$arg" in
     -h|--help) usage; exit 0 ;;
     --check) check=1 ;;
     --no-dcg) no_dcg=1 ;;
-    *) echo "setup: unknown option $arg (--no-dcg, --check, --help)" >&2; exit 2 ;;
+    --update) update=1 ;;
+    *) echo "setup: unknown option $arg (--no-dcg, --check, --update, --help)" >&2; exit 2 ;;
   esac
 done
+if [ "$update" = 1 ] && [ "$check" = 1 ]; then
+  echo "setup: --update changes things and --check changes nothing; use one of them" >&2
+  exit 2
+fi
 
 missing=()
 for c in git node; do command -v "$c" >/dev/null 2>&1 || missing+=("$c"); done
@@ -113,12 +162,85 @@ not_ok=0
 failed=0
 # Each step's last state (st_<step>), for the plain-language summary under the status block.
 st_claude="" st_overlay="" st_links="" st_dcg="" st_settings="" st_marketplace="" st_plugins=""
+row_uncounted=0
 row() {  # row <step> <state> <detail>
   rows+=("$(printf '  %-12s %-8s %s' "$1" "$2" "$3")")
   printf -v "st_$1" '%s' "$2"
-  case "$2" in ok|off) ;; *) not_ok=$((not_ok + 1)) ;; esac
+  case "$2" in ok|off) ;; *) [ "$row_uncounted" = 1 ] || not_ok=$((not_ok + 1)) ;; esac
   [ "$2" != failed ] || failed=1
 }
+# An --update row. A skip there is a choice (a program left alone, a pull refused, no network),
+# not a step ./setup is waiting to finish, so it stays out of the "steps not finished" count.
+urow() { row_uncounted=1; row "$@"; row_uncounted=0; }
+
+# --update, first: fast-forward this checkout, then run the new setup. Nothing has been
+# changed yet, so exec-ing into the new file loses nothing; the old process printed no row.
+# Every refusal is one row with its fix, and the run goes on with the checkout as it is.
+git_in() { git -C "$HOV_STACK" "$@"; }
+update_checkout() {
+  local top head old new branch up remote out ahead behind first
+  top=$(git_in rev-parse --show-toplevel 2>/dev/null) || top=
+  if [ -z "$top" ] || [ "$(cd "$top" && pwd -P)" != "$HOV_STACK" ]; then
+    urow checkout skipped "$HOV_STACK is not the top of a git checkout, so there is nothing to pull: clone https://github.com/$MARKETPLACE_SOURCE and run ./setup --update from the clone"
+    return 0
+  fi
+  head=$(git_in rev-parse HEAD 2>/dev/null) || head=
+  if [ -z "$head" ]; then
+    urow checkout skipped "$HOV_STACK has no commits, so there is nothing to pull"
+    return 0
+  fi
+  # The previous run's hand-off: honoured only for a full commit id that is an ancestor of
+  # HEAD and not HEAD itself, so a stray variable can never skip the pull.
+  old=$update_from
+  if [ -n "$old" ] && [ "${#old}" -eq 40 ]; then
+    case "$old" in *[!0-9a-f]*) old= ;; esac
+  else
+    old=
+  fi
+  if [ -n "$old" ] && [ "$old" != "$head" ] && git_in merge-base --is-ancestor "$old" HEAD >/dev/null 2>&1; then
+    echo "hov-stack: ${old:0:7} -> ${head:0:7}"
+    urow checkout ok "updated ${old:0:7} -> ${head:0:7}"
+    return 0
+  fi
+  branch=$(git_in symbolic-ref -q --short HEAD 2>/dev/null) || branch=
+  if [ -z "$branch" ]; then
+    urow checkout skipped "HEAD is detached, so there is no branch to pull: git -C $HOV_STACK switch <your branch>, then re-run ./setup --update"
+    return 0
+  fi
+  up=$(git_in rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null) || up=
+  if [ -z "$up" ]; then
+    urow checkout skipped "$branch has no upstream branch to pull from: git -C $HOV_STACK branch --set-upstream-to=origin/$branch, then re-run ./setup --update"
+    return 0
+  fi
+  remote=$(git_in config --get "branch.$branch.remote" 2>/dev/null) || remote=.
+  echo "hov-stack: fetching $up"
+  if ! GIT_TERMINAL_PROMPT=0 git_in fetch --quiet "$remote"; then
+    urow checkout skipped "could not fetch $remote (offline?): re-run ./setup --update when online"
+    return 0
+  fi
+  if git_in merge-base --is-ancestor '@{u}' HEAD >/dev/null 2>&1; then
+    ahead=$(git_in rev-list --count '@{u}..HEAD' 2>/dev/null) || ahead=0
+    if [ "$ahead" = 0 ]; then urow checkout ok "up to date at ${head:0:7}"
+    else urow checkout ok "up to date at ${head:0:7} ($ahead commits of yours are not on $up; nothing to pull)"
+    fi
+    return 0
+  fi
+  if ! git_in merge-base --is-ancestor HEAD '@{u}' >/dev/null 2>&1; then
+    ahead=$(git_in rev-list --count '@{u}..HEAD' 2>/dev/null) || ahead="?"
+    behind=$(git_in rev-list --count 'HEAD..@{u}' 2>/dev/null) || behind="?"
+    urow checkout skipped "$branch has $ahead commits $up lacks and $up has $behind you lack, so it cannot fast-forward; setup never rebases or resets: rebase or merge in $HOV_STACK yourself, then re-run ./setup --update"
+    return 0
+  fi
+  if ! out=$(git_in -c merge.autostash=false merge --ff-only '@{u}' 2>&1); then
+    first=$(printf '%s\n' "$out" | grep -m1 '^error:') || first=${out%%$'\n'*}
+    urow checkout skipped "git would not fast-forward $branch to $up (${first#error: }): commit or move those changes, then re-run ./setup --update"
+    return 0
+  fi
+  new=$(git_in rev-parse HEAD)
+  echo "hov-stack: checkout moved ${head:0:7} -> ${new:0:7}; running the new setup"
+  exec env HOV_STACK_UPDATE_FROM="$head" bash "$HOV_STACK/setup" ${orig_args[@]+"${orig_args[@]}"}
+}
+if [ "$update" = 1 ]; then update_checkout; fi
 
 version_ge() {  # version_ge A B: dotted version A is B or later
   local IFS=. i x y
@@ -170,15 +292,16 @@ dcg_hook_fix() {  # dcg_hook_fix <dcg_hooked status>
 # first run's settings.json and its seed. The seed never sets these keys.
 CLAUDE_WRITES='["enabledPlugins","extraKnownMarketplaces"]'
 
-# untouched_seed <settings.json>: 0 when the file holds the seed this run would write with dcg
-# absent, plus at most the keys Claude Code writes (CLAUDE_WRITES), in any key order. The seed
+# untouched_seed <settings.json> [dcg path]: 0 when the file holds the seed this run would write
+# with that dcg path (none: dcg absent), plus at most the keys Claude Code writes
+# (CLAUDE_WRITES), in any key order. The seed
 # is a pure function of the template, the config dir, HOME and the overlay, so a match is a
 # settings.json an earlier run seeded and nobody has edited since; any other change, one
 # value or one list entry, makes it the user's file.
 untouched_seed() {
   local tmp rc=1
   tmp=$(mktemp -d "${TMPDIR:-/tmp}/hov-stack-seed.XXXXXX") || return 1
-  if node "$HOV_STACK/lib/settings-seed.js" "$HOV_STACK/settings.json" "$tmp/seed.json" "$CFG" "$HOME" "" "$overlay_settings" > /dev/null 2>&1 \
+  if node "$HOV_STACK/lib/settings-seed.js" "$HOV_STACK/settings.json" "$tmp/seed.json" "$CFG" "$HOME" "${2:-}" "$overlay_settings" > /dev/null 2>&1 \
     && node -e '
       const fs = require("fs");
       let live, seed;
@@ -300,6 +423,204 @@ installed_plugins() {
 }
 version_of() { printf '%s\n' "$2" | awk -v p="$1" '$1 == p { print $2; exit }'; }  # <plugin> <list>
 
+# --update, after the steps below. What to refresh and update, from the same two commands
+# the steps read (`claude plugin marketplace list --json`, `claude plugin list --json`) and
+# offers.json: "M <marketplace>" for hov and for each other-plugin offer whose marketplace
+# Claude Code lists as added (found by its GitHub repository, the way detect.mjs does, not by
+# the name the user gave it), and "P <id>" for each user-scope plugin hov-stack offers (the
+# hov offers, the default plugins, the other-plugin offers) that is installed. Nothing else:
+# not the user's other marketplaces, not their other plugins.
+OFFERS_JSON=$HOV_STACK/plugins/hov-stack/skills/hov-setup/scripts/offers.json
+INSTALL_RELEASE=$HOV_STACK/plugins/hov-stack/skills/hov-setup/scripts/install-release.sh
+JS_UPDATE_PLAN='
+const fs = require("fs");
+const [offersPath, mjson, pjson, hov, defs] = process.argv.slice(1);
+const offers = JSON.parse(fs.readFileSync(offersPath, "utf8")).offers;
+const markets = JSON.parse(mjson).filter((m) => m && typeof m.name === "string");
+const user = new Set(JSON.parse(pjson).filter((r) => r && r.scope === "user").map((r) => r.id));
+const same = (m, github) => {
+  const want = github.toLowerCase();
+  if (typeof m.repo === "string" && m.repo.toLowerCase() === want) return true;
+  if (typeof m.url !== "string") return false;
+  return m.url.toLowerCase().replace(/\/+$/, "").replace(/\.git$/, "").replace(/\/+$/, "") === "https://github.com/" + want;
+};
+const ms = [], ps = [];
+const add = (a, x) => { if (!a.includes(x)) a.push(x); };
+if (markets.some((m) => m.name === hov)) {
+  add(ms, hov);
+  const names = offers.filter((o) => o.kind === "plugin").map((o) => o.name).concat(defs.split(" ").filter(Boolean));
+  for (const n of names) if (user.has(n + "@" + hov)) add(ps, n + "@" + hov);
+}
+for (const o of offers) {
+  if (o.kind !== "other-plugin") continue;
+  const named = markets.filter((m) => same(m, o.marketplace.github)).map((m) => m.name);
+  if (!named.length) continue;
+  const hit = named.find((n) => user.has(o.plugin + "@" + n));
+  add(ms, hit || named[0]);
+  if (hit) add(ps, o.plugin + "@" + hit);
+}
+for (const m of ms) console.log("M " + m);
+for (const p of ps) console.log("P " + p);'
+# The uv tools hov-stack offers: offers.json tools whose install line for this platform is
+# `<uv> tool install ...`. One tab-separated line each: tool name (the last word, or for a git
+# offer the repository's name), git repository URL or -, tag or -, the line after `<uv> `.
+JS_UV_OFFERS='
+const fs = require("fs");
+const platform = process.env.HOV_SETUP_PLATFORM || (
+  process.platform === "darwin" && process.arch === "arm64" ? "darwin-arm64" :
+  process.platform === "linux" && process.arch === "x64" ? "linux-x86_64" :
+  process.platform === "linux" && process.arch === "arm64" ? "linux-aarch64" : process.platform + "-" + process.arch);
+const head = "<uv> tool install ";
+for (const o of JSON.parse(fs.readFileSync(process.argv[1], "utf8")).offers) {
+  const line = o.install && o.install[platform];
+  if (o.kind !== "tool" || typeof line !== "string" || !line.startsWith(head)) continue;
+  const rest = line.slice("<uv> ".length);
+  const g = /git\+(https:\/\/\S+?)@(\S+)$/.exec(line);
+  if (g) console.log([g[1].split("/").pop(), g[1], g[2], rest].join("\t"));
+  else console.log([line.split(" ").pop(), "-", "-", rest].join("\t"));
+}'
+# What uv recorded for an installed tool (uv-receipt.toml), against the offer's repository and
+# tag: current (at the tag), older-tag (an x.y.z tag older than it), other-rev (any other
+# revision: a newer tag, a branch, a commit, or none) or other-source. uv writes the revision
+# into the git URL's query, as in git = "https://github.com/o/r?rev=v0.1.0"; a separate
+# rev or tag field is read too.
+JS_UV_RECEIPT='
+let text = "";
+try { text = require("fs").readFileSync(process.argv[1], "utf8"); } catch { console.log("other-source"); process.exit(0); }
+const norm = (u) => u.toLowerCase().replace(/^git\+/, "").replace(/\/+$/, "").replace(/\.git$/, "");
+const g = /git\s*=\s*"([^"]+)"/.exec(text);
+if (!g) { console.log("other-source"); process.exit(0); }
+const [base, query = ""] = g[1].split("#")[0].split("?");
+if (norm(base) !== norm(process.argv[2])) { console.log("other-source"); process.exit(0); }
+const q = new URLSearchParams(query);
+let ref = q.get("rev") || q.get("tag") || q.get("branch") || "";
+if (!ref) { const r = /(?:rev|tag)\s*=\s*"([^"]+)"/.exec(text); if (r) ref = r[1]; }
+const want = process.argv[3];
+if (ref === want) { console.log("current"); process.exit(0); }
+const ver = (s) => { const m = /^v?(\d+)\.(\d+)\.(\d+)$/.exec(s); return m ? m.slice(1).map(Number) : null; };
+const a = ver(ref), b = ver(want);
+console.log(a && b && (a[0] - b[0] || a[1] - b[1] || a[2] - b[2]) < 0 ? "older-tag" : "other-rev");'
+
+update_plugins() {  # marketplaces and plugins; needs the hov marketplace listed
+  local mjson pjson plan line name id m_ok=0 m_fail=0 p_ok=0 p_fail=0 out marks="" plugs="" detail
+  echo "hov-stack: refreshing the marketplaces hov-stack offers plugins from"
+  if ! mjson=$(claude plugin marketplace list --json) || ! pjson=$(claude plugin list --json); then
+    urow refresh skipped "could not read what Claude Code lists: re-run ./setup --update"
+    return 0
+  fi
+  if ! plan=$(node -e "$JS_UPDATE_PLAN" "$OFFERS_JSON" "$mjson" "$pjson" "$MARKETPLACE" "${defaults[*]}"); then
+    urow refresh failed "could not work out which marketplaces and plugins to update from $OFFERS_JSON"
+    return 0
+  fi
+  while IFS= read -r line; do
+    case "$line" in
+      'M '*) marks="$marks ${line#M }" ;;
+      'P '*) plugs="$plugs ${line#P }" ;;
+    esac
+  done <<EOF
+$plan
+EOF
+  # Only these names: the bare `claude plugin marketplace update` would refresh every
+  # marketplace the user has. No -y and no --accept-command: they would approve, for the user,
+  # a command a marketplace declares; a refusal is shown and the run goes on.
+  for name in $marks; do
+    if out=$(claude plugin marketplace update "$name" 2>&1 < /dev/null); then m_ok=$((m_ok + 1)); else m_fail=$((m_fail + 1)); fi
+    [ -z "$out" ] || printf '%s\n' "$out" | sed 's/^/  /'
+  done
+  [ -z "$plugs" ] || echo "hov-stack: updating the plugins hov-stack offers that you have installed"
+  for id in $plugs; do
+    if out=$(claude plugin update "$id" --scope user 2>&1 < /dev/null); then p_ok=$((p_ok + 1)); else p_fail=$((p_fail + 1)); fi
+    [ -z "$out" ] || printf '%s\n' "$out" | sed 's/^/  /'
+  done
+  detail="refreshed $m_ok marketplaces, updated $p_ok plugins"
+  if [ $((m_fail + p_fail)) -gt 0 ]; then
+    urow refresh skipped "$detail; $m_fail marketplace and $p_fail plugin commands did not finish (their lines are above; offline? re-run ./setup --update)"
+  else
+    urow refresh ok "$detail"
+  fi
+  if [ "$p_ok" -gt 0 ]; then echo "hov-stack: Claude Code sessions started from now on load the new plugin versions."; fi
+}
+
+update_programs() {  # gh, uv, cass, jsm through install-release.sh --update
+  local t rc out first
+  echo "hov-stack: updating gh, uv, cass and jsm where hov-stack installed them"
+  for t in gh uv cass jsm; do
+    rc=0
+    out=$(bash "$INSTALL_RELEASE" "$t" --update 2>&1 < /dev/null) || rc=$?
+    first=${out%%$'\n'*}
+    [ -z "$out" ] || printf '%s\n' "$out" | sed 's/^/  /'
+    case "$rc" in
+      0) urow "$t" ok "$first" ;;
+      3|5) urow "$t" skipped "$first" ;;
+      *) urow "$t" failed "install-release.sh $t --update exited $rc: $first" ;;
+    esac
+  done
+}
+
+find_uv() {  # the uv the detector would find: PATH, then the usual install directories
+  local d
+  if command -v uv >/dev/null 2>&1; then command -v uv; return 0; fi
+  for d in "$HOME/.local/bin" /opt/homebrew/bin /usr/local/bin; do
+    if [ -f "$d/uv" ] && [ -x "$d/uv" ]; then echo "$d/uv"; return 0; fi
+  done
+}
+
+update_uv_tools() {  # uv tool upgrade for the uv tools hov-stack offers that are installed
+  local uv listed offered tdir name repo tag args state out notes="" fails=0 seen=0 inst
+  uv=$(find_uv)
+  if [ -z "$uv" ]; then
+    urow uvtools skipped "uv is not installed here, so there are no uv tools to update"
+    return 0
+  fi
+  echo "hov-stack: upgrading the uv tools hov-stack offers that you have installed"
+  listed=$("$uv" tool list 2>/dev/null < /dev/null) || listed=
+  tdir=$("$uv" tool dir 2>/dev/null < /dev/null) || tdir=
+  if ! offered=$(node -e "$JS_UV_OFFERS" "$OFFERS_JSON"); then
+    urow uvtools failed "could not read the uv tools offered in $OFFERS_JSON"
+    return 0
+  fi
+  while IFS=$'\t' read -r name repo tag args; do
+    [ -n "$name" ] || continue
+    printf '%s\n' "$listed" | awk -v n="$name" '$1 == n { f = 1 } END { exit !f }' || continue
+    seen=$((seen + 1))
+    # Keeps the tool's own source and any pin the user set; moves an unpinned PyPI tool on.
+    if out=$("$uv" tool upgrade "$name" 2>&1 < /dev/null); then notes="$notes; $name upgraded"; else fails=$((fails + 1)); notes="$notes; $name not upgraded (see above)"; fi
+    [ -z "$out" ] || printf '%s\n' "$out" | sed "s/^/  $name: /"
+    [ "$repo" != - ] || continue
+    # A git-tag offer follows its tag only when uv's record says the tool came from the
+    # offer's repository at an older tag: the offer's own line over another source silently
+    # switches it, and over a newer tag, a branch or a commit undoes the user's choice.
+    state=$(node -e "$JS_UV_RECEIPT" "$tdir/$name/uv-receipt.toml" "$repo" "$tag")
+    case "$state" in
+      current) notes="$notes; $name is at $tag" ;;
+      other-rev)
+        echo "  $name: uv's record says it was installed from $repo at a revision other than an older tag, so it stays there"
+        notes="$notes; $name left at the revision you chose"
+        ;;
+      older-tag)
+        echo "hov-stack: $name was installed from $repo at an older tag; installing $tag"
+        inst=()
+        read -r -a inst <<<"$args"
+        if out=$("$uv" "${inst[@]}" 2>&1 < /dev/null); then notes="$notes; $name moved to $tag"; else fails=$((fails + 1)); notes="$notes; $name not moved to $tag (see above)"; fi
+        [ -z "$out" ] || printf '%s\n' "$out" | sed "s/^/  $name: /"
+        ;;
+      *)
+        echo "  $name: uv's record says it was installed from somewhere other than $repo, so it stays on that source"
+        notes="$notes; $name left on the source you installed it from"
+        ;;
+    esac
+  done <<EOF
+$offered
+EOF
+  if [ "$seen" -eq 0 ]; then
+    urow uvtools ok "none of the uv tools hov-stack offers is installed; nothing to upgrade"
+  elif [ "$fails" -gt 0 ]; then
+    urow uvtools skipped "${notes#; } (offline? re-run ./setup --update)"
+  else
+    urow uvtools ok "${notes#; }"
+  fi
+}
+
 # The overlay's CLAUDE.md is imported by a two-line file setup writes, not by a link to it:
 # the header tells whoever opens it which file to edit, and Claude Code documents @ imports
 # in a rules file, not a rules file that is a symlink. An import whose file is gone is
@@ -409,6 +730,8 @@ overlay_row() {  # overlay_row check|run
   fi
 }
 seed_ok=0
+au_on=0
+plugins_ready=0  # the hov marketplace is added and its plugins were read (--update refreshes only then)
 # The overlay's settings.json the seed merges, read by the seed and by untouched_seed alike.
 overlay_settings=
 if overlay_usable && [ -f "$OVERLAY/settings.json" ]; then overlay_settings=$OVERLAY/settings.json; fi
@@ -583,6 +906,7 @@ else
   if [ "$add_rc" -ne 0 ] || [ "$mk_rc" -ne 0 ]; then
     row plugins skipped "needs the $MARKETPLACE marketplace"
   else
+    plugins_ready=1
     p_rc=0
     have=$(installed_plugins) || p_rc=$?
     not_added=""
@@ -605,8 +929,40 @@ else
     else
       row plugins ok "${defaults[*]} were already installed"
     fi
-    echo "  Plugins from $MARKETPLACE stay at these versions until you turn on auto-update: in Claude Code"
-    echo "  run /plugin, open Marketplaces, select $MARKETPLACE, then Enable auto-update."
+    # Claude Code leaves auto-update off for a marketplace from another publisher, and every
+    # 'marketplace add' drops the setting, so it is set again after the add (#395). Only in
+    # setup's own unedited seed (with this run's dcg hook, or the one written before dcg was
+    # installed): the README promises to leave a settings.json you have alone, so for yours
+    # setup only reports, and /hov-setup asks before turning it on. No status row, so
+    # --check and the exit status do not change.
+    au_helper=$HOV_STACK/plugins/hov-stack/skills/hov-setup/scripts/autoupdate.mjs
+    au_rc=0
+    if untouched_seed "$CFG/settings.json" "$dcg_path" \
+      || { [ -n "$dcg_path" ] && untouched_seed "$CFG/settings.json"; }; then
+      au_out=$(node "$au_helper" --config-dir "$CFG" --no-backup "$MARKETPLACE" 2>&1) || au_rc=$?
+      printf '%s\n' "$au_out" | sed 's/^/  /'
+    else
+      au_out=$(node "$au_helper" --config-dir "$CFG" --check "$MARKETPLACE" 2>&1) || au_rc=$?
+      printf '%s\n' "$au_out" | sed 's/^/  /'
+      if [ "$au_rc" -eq 3 ]; then
+        echo "  setup does not change a settings.json you already have; /hov-setup asks before it does."
+      fi
+    fi
+    if [ "$au_rc" -eq 0 ]; then au_on=1; fi
+  fi
+fi
+
+if [ "$update" = 1 ]; then
+  if [ "$plugins_ready" = 1 ]; then
+    update_plugins
+  else
+    urow refresh skipped "needs Claude Code $CLAUDE_FLOOR or later and the $MARKETPLACE marketplace; then re-run ./setup --update"
+  fi
+  update_programs
+  update_uv_tools
+  # jsm's skills are the user's paid account: setup names the command and leaves it to them.
+  if command -v jsm >/dev/null 2>&1; then
+    echo "hov-stack: jsm's skills are not updated here. To update them, run: jsm upgrade"
   fi
 fi
 
@@ -636,6 +992,9 @@ if [ "$st_plugins" = ok ]; then
   done
   echo "  - The plugins setup installs for everyone: $names. /hov-setup shows what each does."
   have_any=1
+fi
+if [ "$au_on" = 1 ]; then
+  echo "  - Auto-update for the $MARKETPLACE plugins: Claude Code fetches their new versions by itself."
 fi
 [ "$have_any" -eq 1 ] || echo "  - Nothing yet: the rows above say what stopped each step."
 if [ "$not_ok" -eq 1 ]; then

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # backup-harness.sh: keep the live Claude memory offsite-safe (recovery for a WSL disk loss).
 #
-# WHY: `sync.sh push` mirrors ~/.claude/projects/*/memory into this repo but does NOT commit or push,
+# WHY: `sync.sh memory-push` mirrors ~/.claude/projects/*/memory into this repo but does NOT commit or push,
 # so the git-backed copy silently drifts stale between manual pushes (a disk loss then loses the
 # delta: the exact "memory is not recoverable" gap). This refreshes the mirror, commits ONLY the
 # memory tree, and pushes it. Idempotent + fail-loud; meant to run on a daily timer
@@ -99,7 +99,9 @@ if [ "$push_rc" -ne 0 ]; then
 fi
 tail -n 1 "$PUSH_LOG" | sed 's/^/backup-harness: /'
 rm -f "$PUSH_LOG"
-git -C "$WORKTREE" add -A -- memory
+# -f because .gitignore ignores /memory/ in every checkout (#346): without it new notes
+# are refused as ignored, git exits 1 and nothing is staged.
+git -C "$WORKTREE" add -A -f -- memory
 if git show-ref --verify --quiet "refs/remotes/origin/$BRANCH" && \
    git -C "$WORKTREE" diff --cached --quiet "origin/$BRANCH" -- memory && \
    git diff --quiet "origin/$BRANCH" origin/main -- . ':!memory'; then

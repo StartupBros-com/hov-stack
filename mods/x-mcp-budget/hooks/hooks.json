@@ -1,0 +1,4 @@
+{
+  "description": "x-mcp-budget: caps max_results on X MCP list, search and timeline calls, prices what each X MCP call returns, and refuses X MCP calls once the UTC day's estimate reaches the budget",
+  "modules": ["./register.ts"]
+}

@@ -14,7 +14,7 @@ cd ~/hov-stack && ./setup                     # symlinks the harness into ~/.cla
 | CLAUDE.md, hooks/, scripts/, bin/, commands/, agents/               | repo root           | **symlinked** into `~/.claude`, edits are git-visible instantly                                                                            |
 | settings.json, keybindings.json                                     | repo root           | **copied** (Claude Code rewrites these; symlinks would break), refresh with `sync.sh push`                                                 |
 | Skills: the pack and the ones that run this checkout's scripts      | `plugins/hov-stack/skills/`, `skills-stack/` | one **symlink** per skill into `~/.claude/skills` by `./setup`, except a skill a default plugin provides     |
-| Per-project memory                                                  | `memory/<project>/` | copied via `sync.sh push`; absent from this copy until a push creates it                                                                  |
+| Per-project memory                                                  | `memory/<project>/` | opt-in: copied by `sync.sh memory-push`; git-ignored                                                                                      |
 | Systemd units and timers                                            | `systemd/`          | copied and enabled by hand; see `systemd/README.md` for what each one does, which lines to edit, and the plan-only defaults                |
 | Two cron-ownership-gated timers (mcp-servers-update, skills-update) | `systemd/`          | copied on install; admitted on the workstation one job at a time only when the matching cron owner is absent; never admitted on satellites |
 | Windows break-glass stubs                                           | `windows-stub/`     | reference copies of `/mnt/c/Users/<user>/.claude` stubs                                                                                    |
@@ -125,8 +125,10 @@ new Claude Code session.
 
 ## Project memory audit and sync
 
-The live source is `~/.claude/projects/<project-key>/memory/`. The tracked mirror is
-`memory/<project-key>/`, absent from this copy until a push creates it. Project keys stay flat and are discovered from direct
+The live source is `~/.claude/projects/<project-key>/memory/`. The mirror is
+`memory/<project-key>/`, opt-in and git-ignored (#346). It exists only once
+`sync.sh memory-push` creates it or `CLAUDE_MEMORY_MIRROR_ROOT` names one; until then
+`sync.sh push` copies no memory and `sync.sh check` prints `SKIP: memory`. Project keys stay flat and are discovered from direct
 `*/memory` directories. The mirror is a reviewed backup, not a second live store.
 
 Run the dependency-free, read-only auditor before syncing (commands in this section run from the hov-stack checkout root, the directory `./setup` ran from):
@@ -137,15 +139,15 @@ python3 scripts/memory-audit.py --format json --as-of 2026-07-15
 bash sync.sh memory-preview
 bash sync.sh memory-push
 
-git diff -- memory
-# Inspect every change, then commit and push manually.
+# memory/ is git-ignored: review the copy, then commit it only to a private clone
+# (scripts/backup-harness.sh does that with `git add -f`).
 ```
 
 `memory-preview` and `memory-check` exit 1 when live memory has something the mirror
 does not — a file to copy, or a live symlink that blocks the push.
 `memory-push` always prints a preview first, then copies live files without deleting
-mirror-only projects or files. General `sync.sh push` uses the same non-destructive
-memory copy. There is deliberately no prune command. Review `KEEP mirror-only` paths
+mirror-only projects or files. Once a mirror exists, general `sync.sh push` uses the same
+non-destructive memory copy. There is deliberately no prune command. Review `KEEP mirror-only` paths
 and remove them manually only after deciding they should not remain restorable.
 
 `KEEP mirror-only` is printed but is **not** drift, and does not affect the exit code.

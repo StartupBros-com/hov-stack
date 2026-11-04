@@ -1,0 +1,27 @@
+{
+  "name": "x-mcp-budget",
+  "version": "0.1.0",
+  "description": "Caps what Claude's X (Twitter) MCP reads cost. List, search and timeline calls ask for at most 10 results, every post and user returned is priced and counted once per UTC day, and once the day's estimate reaches the budget further X MCP calls are refused until midnight UTC.",
+  "author": {
+    "name": "StartupBros / House of Vibe",
+    "url": "https://houseofvibe.ai"
+  },
+  "license": "MIT",
+  "keywords": ["house-of-vibe", "claude-code", "mod", "x", "twitter", "mcp", "budget", "spend"],
+  "userConfig": {
+    "dailyUsd": {
+      "type": "number",
+      "title": "Daily X MCP budget (USD)",
+      "description": "Once today's estimated X MCP spend (UTC day, every session on this machine) reaches this, further X MCP calls are refused until 00:00 UTC. 0 refuses every X MCP call. Default 1.",
+      "required": false,
+      "default": 1
+    },
+    "maxResults": {
+      "type": "number",
+      "title": "Results per X MCP page",
+      "description": "The most results a list, search or timeline call may ask for; a call that names no max_results gets this. At least 10, the lowest every X MCP tool accepts. Default 10.",
+      "required": false,
+      "default": 10
+    }
+  }
+}
