@@ -841,7 +841,7 @@ addSg('escaped tool_name (Ed\\u0069t) asks', 'ask', false, `${SG_HEAD},"tool_nam
 addSg('escaped key name (file\\u005fpath) with a plain value asks', 'ask', false, `${SG_HEAD},"tool_name":"Edit","tool_input":{"file\\u005fpath":"/a/settings.json"}}`);
 addSg('duplicate file_path key, guarded one last (JSON.parse keeps the last) asks', 'ask', false, `${SG_HEAD},"tool_name":"Edit","tool_input":{"file_path":"/a/b.js","file_path":"/a/settings.json"}}`);
 addSg('duplicate file_path key, guarded one first quiet', 'quiet', false, `${SG_HEAD},"tool_name":"Edit","tool_input":{"file_path":"/a/settings.json","file_path":"/a/b.js"}}`);
-addSg('non-ASCII directory, guarded name asks', 'ask', false, JSON.stringify({ tool_name: 'Edit', tool_input: { file_path: '/home/h\u00e9llo/\u2603/settings.json' } }));
+addSg('non-ASCII directory, guarded name asks', 'ask', false, JSON.stringify({ tool_name: 'Edit', tool_input: { file_path: '/a/h\u00e9llo/\u2603/settings.json' } }));
 addSg('trailing newlines (3), guarded path asks', 'ask', false, `${sgRaw('Edit', '/a/settings.json', SG_BODY.Edit)}\n\n\n`);
 addSg('leading and trailing whitespace, guarded path asks', 'ask', false, `\n  ${sgRaw('Edit', '/a/settings.json', SG_BODY.Edit)} \t\n`);
 addSg('200 KB Write content, guarded path asks', 'ask', false, sgRaw('Write', '/a/settings.json', `,"content":"${'y'.repeat(200 * 1024)}"`));
@@ -882,7 +882,7 @@ addSg('JSON.stringify spelling, unrelated file: quiet', 'quiet', true, JSON.stri
 addSg('escaped spelling that is not the literal (\\u0020 in a name): quiet', 'quiet', false, sgRaw('Edit', '/a/b\\u0020c.js', SG_BODY.Edit));
 addSg('ANSI escape (\\u001b) in the content, unrelated file: quiet', 'quiet', true, sgRaw('Write', '/a/b.js', ',"content":"\\u001b[31mred\\u001b[0m"'));
 addSg('short escapes (\\n \\t \\" \\\\) only, unrelated file: quiet', 'quiet', true, sgRaw('Write', '/a/b.js', ',"content":"l1\\nl2\\t\\"q\\" \\\\ end"'));
-addSg('non-ASCII, unrelated file: quiet', 'quiet', true, JSON.stringify({ tool_name: 'Edit', tool_input: { file_path: '/home/h\u00e9llo/\u2603/x.js' } }));
+addSg('non-ASCII, unrelated file: quiet', 'quiet', true, JSON.stringify({ tool_name: 'Edit', tool_input: { file_path: '/a/h\u00e9llo/\u2603/x.js' } }));
 addSg('trailing newlines (3), unrelated file: quiet', 'quiet', true, `${sgRaw('Edit', '/a/b.js', SG_BODY.Edit)}\n\n\n`);
 addSg('200 KB Write content, unrelated file: quiet', 'quiet', true, sgRaw('Write', '/a/b.js', `,"content":"${'y'.repeat(200 * 1024)}"`));
 
