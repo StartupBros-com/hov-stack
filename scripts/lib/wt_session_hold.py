@@ -17,6 +17,11 @@ Claude Code itself records, under the Claude home directory:
 The slug is the worktree path with every character outside [A-Za-z0-9] replaced
 by `-`, which is how Claude Code names transcript project directories.
 
+Not seen: a session that works in a worktree only from elsewhere (`git -C`, or a
+`cd` recorded inside a transcript filed under another project). No record above
+names that worktree, so the caller's mtime gate and process scan are its only
+cover.
+
 Exit 0: held; one line on stdout names the holder.
 Exit 1: not held; stdout may carry `resumable:` lines naming finished jobs whose
         transcripts live under this worktree (a resume would find it gone).
