@@ -28,6 +28,7 @@ SCRIPT="$HERE/../scripts/wt-done.sh"
 
 TMP="$(mktemp -d)"
 export WT_CLAUDE_HOME="$TMP/claude-home"  # the session check (hov-stack#384) never reads the real ~/.claude
+export WT_HOLD_CACHE_DIR="$TMP/hold-cache"  # nor writes its transcript index to the real ~/.cache (#394)
 trap 'rm -rf "$TMP"' EXIT
 
 # `gh` stub: wt-done funnels every GitHub read through one function that prints
@@ -1233,6 +1234,27 @@ out=$(cd "$TMP/heldin/wt" && WT_CLAUDE_HOME="$TMP/h-heldin" DRY_RUN=0 bash "$SCR
 chk "inside, held by itself: exits 0" 0 "$rc"
 has "inside, held by itself: still reconciles" "$out" "safe to close"
 hasnot "inside, held by itself: no session refusal" "$out" "a Claude session holds"
+
+# --- 53. from outside, a transcript filed elsewhere that drives the worktree
+#         refuses another session's run, and never the caller's own (#394) --------
+S=$(mkfix heldfar); export STUB_GH_OUT="7 $S"
+H="$TMP/h-heldfar"; T="$H/projects/-launch/sid-a.jsonl"
+mkdir -p "$H/jobs/j1" "$(dirname "$T")"
+printf '{"state":"working","name":"entered","sessionId":"sid-a","cwd":"%s","linkScanPath":"%s"}\n' \
+  "$TMP/heldfar/repo" "$T" >"$H/jobs/j1/state.json"
+printf '{"type":"user","cwd":"%s","message":{"role":"user","content":"go"}}\n' "$TMP/heldfar/wt" >"$T"
+before=$(git -C "$TMP/heldfar/wt" rev-parse HEAD)
+out=$(CLAUDE_CODE_SESSION_ID=sid-b WT_CLAUDE_HOME="$H" WT_HOLD_CACHE_DIR="$TMP/hold-cache" \
+  DRY_RUN=0 bash "$SCRIPT" --reconcile-only "$TMP/heldfar/wt" 2>&1); rc=$?
+chk "transcript elsewhere, another caller: exits 1" 1 "$rc"
+has "transcript elsewhere, another caller: names the transcript" "$out" \
+  "job j1 \"entered\" is working; its transcript $T names $TMP/heldfar/wt"
+chk "transcript elsewhere, another caller: pointer unmoved" "$before" "$(git -C "$TMP/heldfar/wt" rev-parse HEAD)"
+out=$(CLAUDE_CODE_SESSION_ID=sid-a WT_CLAUDE_HOME="$H" WT_HOLD_CACHE_DIR="$TMP/hold-cache" \
+  DRY_RUN=0 bash "$SCRIPT" --reconcile-only "$TMP/heldfar/wt" 2>&1); rc=$?
+chk "transcript elsewhere, the caller's own: exits 0" 0 "$rc"
+hasnot "transcript elsewhere, the caller's own: no session refusal" "$out" "a Claude session holds"
+chk "transcript elsewhere, the caller's own: pointer moved" "$S" "$(git -C "$TMP/heldfar/wt" rev-parse HEAD)"
 
 echo
 echo "wt-done: $pass passed, $fail failed"
