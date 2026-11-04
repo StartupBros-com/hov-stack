@@ -27,6 +27,9 @@ export GIT_OPTIONAL_LOCKS=0
 # left the fixture-steered suites reading the real checkout (#15).
 # CLAUDE_HARNESS_REPO, CLAUDE_MEMORY_MIRROR_ROOT and CLAUDE_MANAGED_SETTINGS_REF
 # still override their individual defaults.
+# Recorded before 10c fills DOTFILES_REPO in: only a caller-named dotfiles
+# checkout gets 10c's home-manifest check (#355).
+HD_DOTFILES_REPO_NAMED=${DOTFILES_REPO:+1}
 HD_ROOT=${DOTFILES_REPO:-$(cd "$(dirname "$(readlink -f -- "${BASH_SOURCE[0]}")")/.." && pwd -P)}
 
 WARNS=0
@@ -923,8 +926,14 @@ w0=$WARNS
 # missing repo source (both loops), unaccounted top-level entries, LIVE
 # hand-made links nothing declares, the windows/.wslconfig copy, and the
 # ~/.gitconfig include.path splice.
+# lib/manifest.sh describes the dotfiles home layout (rc files, ~/.local/bin,
+# ~/.config links), which a hov-stack checkout neither installs nor checks, so
+# on a stack host every line it printed was a false warning (#355). It runs
+# only when the caller names the dotfiles checkout in DOTFILES_REPO.
 DOTFILES_REPO=${DOTFILES_REPO:-$HD_ROOT}
-if [ ! -f "$DOTFILES_REPO/lib/check.sh" ]; then
+if [ -z "$HD_DOTFILES_REPO_NAMED" ]; then
+  ok "not applicable: the home manifest belongs to a dotfiles checkout; DOTFILES_REPO=<that checkout> runs it"
+elif [ ! -f "$DOTFILES_REPO/lib/check.sh" ]; then
   ok "dotfiles manifest checker not present yet (merge dotfiles#210, then dotup)"
 else
   # shellcheck source=/dev/null

@@ -16,6 +16,12 @@ REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 DOCTOR=$REPO/scripts/harness-doctor.sh
 TMP=$(mktemp -d /tmp/vacuity-batch2-doctor.XXXXXX)
 trap 'rm -rf "$TMP"' EXIT
+# The doctor runs under a fixture HOME. From a cwd inside the operator's home
+# (any checkout or worktree), mise's node shim walks up to the operator's
+# ~/.config/mise config, looks its trust up under the fixture HOME, and fails:
+# "Config files in .../conf.d/dotfiles.toml are not trusted". Every node step
+# then dies and 95 assertions fail for a reason unrelated to the doctor.
+cd "$TMP" || exit 1
 
 pass=0 fail=0
 ok() { pass=$((pass + 1)); }
@@ -297,7 +303,7 @@ run_doctor() {
   DISPATCHER_CONFIG="${DISPATCHER_CONFIG:-$TMP/dispatcher-quiet.env}" \
   CLAUDE_CODEX_MODELS_CACHE="" CLAUDE_INSTALLED_PLUGINS="" \
   CLAUDE_CM_AUDITOR="${CLAUDE_CM_AUDITOR:-}" CLAUDE_CM_TIMEOUT="${CLAUDE_CM_TIMEOUT:-}" \
-    bash "$DOCTOR" 2>&1
+    ${DOCTOR_UNSET_DOTFILES_REPO:+env -u DOTFILES_REPO} bash "${DOCTOR_UNDER_TEST:-$DOCTOR}" 2>&1
 }
 
 # B4's producer contract: the child discloses comparisons from its actual
@@ -1727,6 +1733,32 @@ contains "$CM_AUDITOR_EXIT_OUT" "cross-model catalog auditor exited 3: auditor b
   "B33 round 4: a failing auditor's WARN quotes its stderr"
 
 unset CLAUDE_CODEX_MODELS_CACHE CLAUDE_INSTALLED_PLUGINS
+
+# Section 10c (#355): the dotfiles home-manifest check runs only when the
+# caller names a dotfiles checkout in DOTFILES_REPO. The stub manifest_check
+# plants one drift line. Named, it must reach a WARN. Unset (a hov-stack host,
+# where the checkout the doctor runs from is the stack, not dotfiles), it must
+# not run: the copy of the doctor in the fixture's scripts/ keeps HD_ROOT on the
+# fixture, so the previous code would have run the stub and warned.
+TENC_HOME=$(make_home tenc 0 0)
+mkdir -p "$TENC_HOME/dotfiles/lib"
+cat >"$TENC_HOME/dotfiles/lib/check.sh" <<'STUB'
+manifest_check() { echo "planted manifest drift for $1"; }
+STUB
+cp "$DOCTOR" "$TENC_HOME/dotfiles/scripts/harness-doctor.sh"
+cp -R "$REPO/scripts/lib" "$TENC_HOME/dotfiles/scripts/lib"
+tenc_section() { awk '/^== 10c\./{p=1; next} /^== 10d\./{p=0} p'; }
+TENC_NAMED=$(run_doctor "$TENC_HOME" "$EMPTY_HARNESS" 1 | tenc_section)
+contains "$TENC_NAMED" "WARN: planted manifest drift for $TENC_HOME/dotfiles" \
+  "10c runs manifest_check when DOTFILES_REPO names the dotfiles checkout"
+TENC_UNNAMED=$(DOCTOR_UNSET_DOTFILES_REPO=1 \
+  DOCTOR_UNDER_TEST="$TENC_HOME/dotfiles/scripts/harness-doctor.sh" \
+  run_doctor "$TENC_HOME" "$EMPTY_HARNESS" 1 | tenc_section)
+contains "$TENC_UNNAMED" "ok: not applicable: the home manifest belongs to a dotfiles checkout" \
+  "10c says not applicable when DOTFILES_REPO is unset"
+omits "$TENC_UNNAMED" "planted manifest drift" \
+  "10c planted negative: with DOTFILES_REPO unset, manifest_check never runs"
+omits "$TENC_UNNAMED" "WARN:" "10c with DOTFILES_REPO unset emits no warning"
 
 if [ "$fail" -ne 0 ]; then
   echo "FAILED — harness-doctor vacuity: $pass passed, $fail failed" >&2
