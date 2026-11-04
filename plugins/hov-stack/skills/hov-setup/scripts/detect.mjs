@@ -108,7 +108,7 @@ function platformName() {
 
 // Where to look for a program: the PATH directories in order, then the usual install
 // directories, with no repeats.
-function searchDirs() {
+export function searchDirs() {
   const pathDirs = (process.env.PATH || "").split(delimiter).filter(Boolean);
   const extraEnv = process.env.HOV_SETUP_EXTRA_BIN_DIRS;
   const extra =
@@ -131,7 +131,7 @@ function isExecutableFile(p) {
 
 // Finds `bin` without running it: the first candidate directory holding an executable regular
 // file of that name.
-function findBin(bin, search) {
+export function findBin(bin, search) {
   for (const d of search.dirs) {
     const p = join(d, bin);
     if (isExecutableFile(p)) return { path: p, onPath: search.onPath.has(d) };

@@ -79,8 +79,10 @@
 #      own unedited seed (step 3's exception), so those plugins get new versions by
 #      themselves; for a settings.json you made it only says whether auto-update is on.
 #      --check reads what Claude Code reports installed; it writes no record of its own.
-#      Regenerates rules/hov-stack-tools.md from live installed offers and their instruction
-#      files. Only setup's own regular file is replaced or removed; symlinks and user files stay.
+#      Then it regenerates rules/hov-stack-tools.md: a line for each installed gh, ast-grep,
+#      codex, pro-gate and cass whose program is on PATH. Only setup's own regular file is
+#      replaced or removed; into a rules/ that is a symlink it writes nothing and names the
+#      lines to add there, and it leaves a symlink or a file of yours at that path alone.
 #   6. Never reads or writes memory, projects/, credentials, or anything outside the config
 #      dir, ~/.hov-stack-backups, ~/.local (dcg; with --update also the install records
 #      under ~/.local/state/hov-stack and gh, uv, cass and jsm in ~/.local/bin) and this
@@ -623,6 +625,26 @@ EOF
   fi
 }
 
+# Claude's tool instructions: rules/hov-stack-tools.md holds a line for each installed tool
+# that has one in plugins/hov-stack/skills/hov-setup/instructions/, so Claude is never told to
+# use a tool this user lacks. instructions.mjs writes it (it reads the installed plugins through
+# claude) and prints "<state>: <reason>"; the state is the row's. Each refusal names its fix.
+instructions_row() {  # instructions_row [--check]
+  local out rc=0 state
+  if ! claude_usable; then
+    row instructions skipped "needs Claude Code $CLAUDE_FLOOR or later on PATH, to read the installed plugins"
+    return 0
+  fi
+  out=$(node "$HOV_STACK/plugins/hov-stack/skills/hov-setup/scripts/instructions.mjs" --config-dir "$CFG" "$@" 2>&1) || rc=$?
+  out=${out//$'\n'/ }
+  state=${out%%: *}
+  case "$rc:$state" in
+    0:ok | 3:missing | 3:stale | 1:blocked) out=${out#*: } ;;
+    *) state=blocked ;;
+  esac
+  row instructions "$state" "$out"
+}
+
 # The overlay's CLAUDE.md is imported by a two-line file setup writes, not by a link to it:
 # the header tells whoever opens it which file to edit, and Claude Code documents @ imports
 # in a rules file, not a rules file that is a symlink. An import whose file is gone is
@@ -630,24 +652,6 @@ EOF
 # quietly: --check names a dangling import, and a rerun takes it away. Nothing is written
 # through a rules/ that is a symlink: it leads into another tree, often one that is shared,
 # and the import names a path in this HOME.
-instructions_row() {  # instructions_row [--check]
-  local out rc=0 state
-  if ! claude_usable; then
-    row instructions blocked "rules/hov-stack-tools.md left unchanged: needs Claude Code $CLAUDE_FLOOR or later on PATH"
-    return 0
-  fi
-  if ! command -v node >/dev/null 2>&1; then
-    row instructions blocked "rules/hov-stack-tools.md left unchanged: needs node on PATH"
-    return 0
-  fi
-  out=$(node "$HOV_STACK/plugins/hov-stack/skills/hov-setup/scripts/instructions.mjs" --config-dir "$CFG" "$@" 2>&1) || rc=$?
-  case "$rc" in
-    0) state=ok ;;
-    3) case "$out" in *': missing:'*) state=missing ;; *) state=stale ;; esac ;;
-    *) state=blocked ;;
-  esac
-  row instructions "$state" "$out"
-}
 overlay_usable() { case $OVERLAY in /*) return 0 ;; *) return 1 ;; esac; }
 overlay_rule_target() {  # the path setup's own rules file imports; fails when the file is not setup's
   [ -f "$OVERLAY_RULE" ] && [ ! -L "$OVERLAY_RULE" ] || return 1

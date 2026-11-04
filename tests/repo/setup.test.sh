@@ -28,8 +28,9 @@
 #     neither; a CLI below the floor, or offline, is reported and the run goes on; --check is
 #     green after a full run, names a default plugin removed since and a rerun installs only
 #     that one, and names each missing step after a partial run, changing nothing
-#   - tool instructions (#420): installed tools contribute rules, reruns move nothing,
-#     and --check reports stale after removal without writing
+#   - tool instructions (#420): a tool on PATH gets its line in rules/hov-stack-tools.md,
+#     a rerun moves nothing, a refresh drops a removed tool's line, and --check reports
+#     stale and missing without writing
 #   - auto-update (#395): the fake claude writes what Claude Code writes on an add and an
 #     install; setup then turns auto-update on for hov in its own unedited seed and says
 #     how to turn it off, a rerun leaves it on and writes nothing, and a settings.json of
@@ -729,24 +730,35 @@ HF=$WORK/home-fake
 mkdir -p "$WORK/tool-bin"
 printf '#!/bin/sh\nexit 0\n' > "$WORK/tool-bin/cass"
 chmod +x "$WORK/tool-bin/cass"
-export HOV_SETUP_EXTRA_BIN_DIRS=$WORK/tool-bin
-fake_setup "$FK" "$HF" "$WORK/run-fake.log" --no-dcg || { cat "$WORK/run-fake.log"; fail "setup with a fake claude exited non-zero"; }
+# cass on PATH, and no extra install dirs, for these runs only: a tool off PATH gets no line.
+tools_setup() { HOV_SETUP_EXTRA_BIN_DIRS='' PATH=$WORK/tool-bin:$PATH fake_setup "$@"; }
+tools_setup "$FK" "$HF" "$WORK/run-fake.log" --no-dcg || { cat "$WORK/run-fake.log"; fail "setup with a fake claude exited non-zero"; }
 TOOLS=$HF/.claude/rules/hov-stack-tools.md
 [ -f "$TOOLS" ] && [ ! -L "$TOOLS" ] || fail "no regular generated tool rules file"
 grep -q -F 'Search past agent sessions with' "$TOOLS" || fail "installed cass has no instruction"
+grep -q -E '^  instructions +ok +rules/hov-stack-tools.md updated; mentions .*cass' "$WORK/run-fake.log" || fail "the instructions row does not say the file was written for cass"
 tools_before=$(sha256sum < "$TOOLS")
 tools_mtime=$(stat -c %y "$TOOLS")
-fake_setup "$FK" "$HF" "$WORK/tools-rerun.log" --no-dcg
+tools_setup "$FK" "$HF" "$WORK/tools-rerun.log" --no-dcg || fail "tool rules rerun exited non-zero"
 ! grep -q 'backed up' "$WORK/tools-rerun.log" || fail "tool rules rerun moved something"
 [ "$(sha256sum < "$TOOLS")" = "$tools_before" ] && [ "$(stat -c %y "$TOOLS")" = "$tools_mtime" ] || fail "tool rules rerun changed bytes or mtime"
-fake_setup "$FK" "$HF" "$WORK/tools-check.log" --check --no-dcg || fail "tool rules check is not green"
+tools_setup "$FK" "$HF" "$WORK/tools-check.log" --check --no-dcg || fail "tool rules check is not green"
 rm "$WORK/tool-bin/cass"
-rc=0; fake_setup "$FK" "$HF" "$WORK/tools-stale.log" --check --no-dcg || rc=$?
+rc=0; tools_setup "$FK" "$HF" "$WORK/tools-stale.log" --check --no-dcg || rc=$?
 [ "$rc" = 1 ] || fail "removed tool did not fail check"
-grep -q -E '^  instructions +stale .*hov-stack-tools.md' "$WORK/tools-stale.log" || fail "check did not name stale tool rules"
+grep -q -E '^  instructions +stale +rules/hov-stack-tools.md ' "$WORK/tools-stale.log" || fail "check did not name stale tool rules"
 [ "$(sha256sum < "$TOOLS")" = "$tools_before" ] && [ "$(stat -c %y "$TOOLS")" = "$tools_mtime" ] || fail "stale check wrote tool rules"
-fake_setup "$FK" "$HF" "$WORK/tools-refresh.log" --no-dcg
-ok "tool rules follow installed tools, reruns move nothing, and check reports stale without writing"
+tools_setup "$FK" "$HF" "$WORK/tools-refresh.log" --no-dcg || fail "tool rules refresh exited non-zero"
+! grep -q -F 'Search past agent sessions with' "$TOOLS" 2>/dev/null || fail "the refresh kept the removed tool's line"
+printf '#!/bin/sh\nexit 0\n' > "$WORK/tool-bin/cass"
+chmod +x "$WORK/tool-bin/cass"
+rm -f "$TOOLS"
+rc=0; tools_setup "$FK" "$HF" "$WORK/tools-missing.log" --check --no-dcg || rc=$?
+[ "$rc" = 1 ] || fail "a missing tool rules file did not fail check"
+grep -q -E '^  instructions +missing +rules/hov-stack-tools.md is not written yet' "$WORK/tools-missing.log" || fail "check did not name the missing tool rules"
+[ ! -e "$TOOLS" ] || fail "the missing check wrote tool rules"
+rm "$WORK/tool-bin/cass"
+ok "tool rules follow installed tools, reruns move nothing, and check reports stale and missing without writing"
 sed 's/^/    | /' "$WORK/run-fake.log"
 [ "$(calls_of "$FK" 'plugin marketplace add StartupBros-com/hov-stack')" = 1 ] || { cat "$FK/calls"; fail "the hov marketplace was not added exactly once"; }
 while read -r p; do
