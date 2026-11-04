@@ -231,6 +231,23 @@ if grep -E 'worktree (prune|remove)' "$TMP/git.log" >/dev/null; then
   echo "FAIL: authority-missing sweep reached prune/removal" >&2; exit 1
 fi
 grep -q 'repo-route authority/collision guard; skipped before prune/removal' "$TMP/sweep-unregistered.out"
+
+# The skip names its fix. A declared route with no authority state on this host makes a
+# DRY_RUN=1 sweep print the bootstrap command (route, canonical path, mode), print the
+# stderr warning, and still exit 0 so OnFailure= does not page every week.
+canonical_top=$(cd "$TMP/sites/canonical" && pwd -P)
+independent_top=$(cd "$TMP/sites/independent" && pwd -P)
+sweep_hint_status=0
+PATH="$TMP/bin:$PATH" ROOT="$TMP/sites" DRY_RUN=1 "$HERE/scripts/wt-sweep.sh" \
+  >"$TMP/sweep-hint.out" 2>"$TMP/sweep-hint.err" || sweep_hint_status=$?
+[ "$sweep_hint_status" -eq 0 ] || { echo "FAIL: authority-missing sweep exited $sweep_hint_status" >&2; exit 1; }
+for top in "$canonical_top" "$independent_top"; do
+  grep -Fxq "    route r is declared in the route policy but has no authority recorded on this host; if this is its only clone, record it with: python3 $R bootstrap --route r --canonical-path $top --mode warn" "$TMP/sweep-hint.out" || {
+    echo "FAIL: authority-missing sweep printed no bootstrap hint for $top:" >&2; cat "$TMP/sweep-hint.out" >&2; exit 1; }
+done
+grep -Fxq 'WARN wt-sweep: 2 repo(s) skipped by the repo-route guard; the ### lines above name each fix' "$TMP/sweep-hint.err" || {
+  echo "FAIL: authority-missing sweep printed no stderr warning:" >&2; cat "$TMP/sweep-hint.err" >&2; exit 1; }
+grep -q 'repo-route authority/collision guard; skipped before prune/removal' "$TMP/sweep-hint.out"
 : >"$TMP/git.log"
 PATH="$TMP/bin:$PATH" FRESHEN_FETCH_TIMEOUT=1 "$HERE/scripts/launchpad-freshen.sh" \
   --repo "$TMP/sites/canonical" >"$TMP/freshen-unregistered.out" 2>&1 || true

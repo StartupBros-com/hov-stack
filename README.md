@@ -115,6 +115,7 @@ These are not part of this repository. `/hov-setup` offers each one with its pub
 - The private overlay. Values the tree cannot carry live in `~/.config/hov-stack/` (or `$XDG_CONFIG_HOME/hov-stack/`, or `$HOV_STACK_OVERLAY`). `./setup` and `claude-env.sh` count only an absolute overlay path: a relative `$HOV_STACK_OVERLAY` is reported and read by nothing, and a relative `$XDG_CONFIG_HOME` is ignored. The scripts read:
   - `private-tokens`, the public-safety scan's fixed-string layer;
   - `foreign-units`, one externally owned unit stem per line, excluded from sync's undeclared-unit findings (blank lines and `#` comments ignored);
+  - `hygiene-posture`, the hygiene timers this host runs and their settings (deletion on, schedule), one `<unit-stem> [KEY=value]` per line; `sync.sh install` applies it and `sync.sh check` reports drift (`systemd/README.md`);
   - `memory-filename-allowlist.txt`, the memory audit's reviewed-name list (the tracked copy ships no entries);
   - `supabase-projects.json` and `migration-targets.json`, whose shapes `config/*.example.json` show;
   - `repo-routes.json`, which replaces the tracked placeholder.

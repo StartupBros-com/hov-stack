@@ -306,6 +306,10 @@ UNITS_FOREIGN="check-fleet-drift voxtype"
 # shellcheck source=lib/foreign-units.sh
 . "$HERE/lib/foreign-units.sh"
 UNITS_FOREIGN=$(foreign_units_with_overlay "$UNITS_FOREIGN")
+# A host's hygiene-timer posture (deletion on, schedule, which timers run) comes from
+# <overlay>/hygiene-posture; install applies it as drop-ins and check reports drift.
+# shellcheck source=lib/hygiene-posture.sh
+. "$HERE/lib/hygiene-posture.sh"
 
 # Root-owned system units (systemd-system/ -> $SYSTEM_SYS), NOT --user units —
 # see the header comment. Deliberately never enabled/started by `install`; see
@@ -2208,8 +2212,67 @@ reconcile_role_timers() {
   return 0
 }
 
+# Apply <overlay>/hygiene-posture (lib/hygiene-posture.sh) as drop-ins under the user unit
+# directory. Sets HYGIENE_POSTURE_ROWS and HYGIENE_POSTURE_DECLARED for the enable step.
+# An invalid file returns 1 having touched no drop-in; an overlay path that is not
+# absolute returns 0 having touched none and declared nothing. Only ever writes or removes files
+# named $HYGIENE_POSTURE_DROPIN: a hand-written override.conf is the operator's.
+apply_hygiene_posture() {
+  local file rows stem kind dir dest want
+  HYGIENE_POSTURE_DECLARED=""
+  if ! declare -F hygiene_posture_load >/dev/null; then
+    echo "  ERROR: lib/hygiene-posture.sh is not loaded; no hygiene posture applied" >&2
+    return 1
+  fi
+  # As in ./setup, a relative overlay path is reported and read by nothing. The posture is
+  # then unknown, not empty: the drop-ins stay as they are and no hygiene timer is enabled.
+  if ! file=$(hygiene_posture_file 2>/dev/null); then
+    echo "  WARN the overlay path is not absolute (HOV_STACK_OVERLAY or HOME); hygiene posture not read, its drop-ins left as they are" >&2
+    return 0
+  fi
+  if ! rows=$(hygiene_posture_load); then
+    echo "  ERROR: $file is invalid; no hygiene posture applied (fix the file and re-run install)" >&2
+    return 1
+  fi
+  HYGIENE_POSTURE_ROWS=$rows
+  HYGIENE_POSTURE_DECLARED=$(hygiene_posture_declared | tr '\n' ' ')
+  HYGIENE_POSTURE_DECLARED=${HYGIENE_POSTURE_DECLARED% }
+  for stem in $HYGIENE_POSTURE_STEMS; do
+    for kind in service timer; do
+      dir=$SYS/$stem.$kind.d
+      dest=$dir/$HYGIENE_POSTURE_DROPIN
+      want=$(hygiene_posture_render "$stem" "$kind")
+      if [ -n "$want" ]; then
+        if [ -f "$dest" ] && [ "$(cat -- "$dest")" = "$want" ]; then
+          continue
+        fi
+        # mv onto a directory would move the drop-in inside it and report success.
+        if [ -d "$dest" ]; then
+          echo "  ERROR: $dest is a directory; hygiene posture drop-in not written" >&2
+          return 1
+        fi
+        if ! mkdir -p "$dir" \
+           || ! printf '%s\n' "$want" >"$dest.tmp.$$" \
+           || ! mv -f "$dest.tmp.$$" "$dest"; then
+          rm -f "$dest.tmp.$$"
+          echo "  ERROR: could not write hygiene posture drop-in $dest" >&2
+          return 1
+        fi
+        echo "  hygiene posture: wrote $dest"
+      elif [ -e "$dest" ] || [ -L "$dest" ]; then
+        if ! rm -f -- "$dest"; then
+          echo "  ERROR: could not remove stale hygiene posture drop-in $dest" >&2
+          return 1
+        fi
+        rmdir "$dir" 2>/dev/null || true
+        echo "  hygiene posture: removed $dest (no longer declared)"
+      fi
+    done
+  done
+}
+
 install() {
-  local ts backup="" papercut_failed=0
+  local ts backup="" papercut_failed=0 posture_failed=0 posture_ok=0
   # install seeds settings and changes other live artifacts before the runtime
   # reconciler runs, so validate this canonical policy before any of those writes.
   validate_canonical_compact_window || return 1
@@ -2376,6 +2439,9 @@ install() {
       return 1
     fi
   done
+  # Host-declared hygiene posture (lib/hygiene-posture.sh). An invalid file is reported
+  # and fails the install at the end, after everything unrelated has been updated.
+  if apply_hygiene_posture; then posture_ok=1; else posture_failed=1; fi
   # System-level units (root-owned, privileged setup — see SYSTEM_UNITS above).
   # Same deploy pattern as the managed lock: sudo install, graceful no-sudo
   # fallback that prints the manual command. Deliberately NOT enabled/started
@@ -2419,6 +2485,10 @@ install() {
   # they've read the PR that introduced it. Enable them by hand per the OPERATOR
   # ACTIVATION CHECKLIST in dotfiles PR "wsl-hygiene-timers" — this is a loud,
   # documented omission, not the silent-gap failure mode described above.
+  # The one way install enables them is the host's own declaration: a stem named in
+  # <overlay>/hygiene-posture (lib/hygiene-posture.sh) is enabled after the role
+  # reconcile below, with the posture it declares written as drop-ins. No file, no
+  # change: a host that never declared a posture keeps every hygiene timer as it is.
   #
   # OPT-IN — backup-harness.timer is not in the workstation set either. It pushes
   # live memory to a branch of the checkout's origin, and scripts/backup-harness.sh
@@ -2458,10 +2528,29 @@ install() {
   esac
 
   reconcile_role_timers "$_role" "$_enable" || return 1
+  if [ "$posture_ok" = 1 ] && [ -n "$HYGIENE_POSTURE_DECLARED" ]; then
+    if systemctl --user show-environment >/dev/null 2>&1; then
+      _posture_timers=""
+      for _stem in $HYGIENE_POSTURE_DECLARED; do _posture_timers="$_posture_timers $_stem.timer"; done
+      # shellcheck disable=SC2086 # one word per timer is the point
+      if systemctl --user enable --now $_posture_timers; then
+        echo "  hygiene timers enabled from overlay posture: $HYGIENE_POSTURE_DECLARED"
+      else
+        echo "  ERROR: could not enable the hygiene timers the overlay posture declares: $HYGIENE_POSTURE_DECLARED" >&2
+        posture_failed=1
+      fi
+    else
+      echo "  WARN systemd user manager unavailable; hygiene timers declared in the overlay posture not enabled: $HYGIENE_POSTURE_DECLARED" >&2
+    fi
+  fi
   [ -n "$backup" ] && echo "  originals backed up to $backup"
   if [ "$papercut_failed" = 1 ]; then
     echo "install finished everything else, but FAILED to install $PAPERCUT_PLUGIN_ID: $PAPERCUT_INSTALL_ERROR" >&2
     echo "  The settings.json copies of its three hooks were left in place. Fix the cause above, then re-run sync.sh install." >&2
+    return 1
+  fi
+  if [ "$posture_failed" = 1 ]; then
+    echo "install finished everything else, but the hygiene posture from the overlay was not applied in full (see above); fix it and re-run sync.sh install." >&2
     return 1
   fi
   echo "install done. Restore separately: credentials (claude login), skills (jsm sync), plugins (claude plugin — enabledPlugins already in settings.json)."
@@ -2678,6 +2767,46 @@ check() {
       echo "DRIFT: systemd/$u differs (sync.sh push)"; drift=1
     fi
   done
+
+  # Host-declared hygiene posture (lib/hygiene-posture.sh): the overlay's declaration
+  # against the drop-ins and timers install should have left. No file and no generated
+  # drop-in prints nothing. The timer-enabled half needs the user manager; without one
+  # the SKIP line below already says so, and no second line is invented here.
+  # A tree without lib/hygiene-posture.sh (a minimal fixture copy of sync.sh) already
+  # printed the failed source above; it has no posture to compare.
+  if ! declare -F hygiene_posture_load >/dev/null; then
+    :
+  elif ! _posture_file=$(hygiene_posture_file 2>/dev/null); then
+    echo "DRIFT: hygiene posture: the overlay path is not absolute (HOV_STACK_OVERLAY or HOME), so the posture was not read"; drift=1
+  elif ! _posture_rows=$(hygiene_posture_load); then
+    echo "DRIFT: hygiene posture: $_posture_file is invalid (see errors above)"; drift=1
+  else
+    # shellcheck disable=SC2034 # read by hygiene_posture_render (lib/hygiene-posture.sh)
+    HYGIENE_POSTURE_ROWS=$_posture_rows
+    for _stem in $HYGIENE_POSTURE_STEMS; do
+      for _kind in service timer; do
+        _dest=$SYS/$_stem.$_kind.d/$HYGIENE_POSTURE_DROPIN
+        _want=$(hygiene_posture_render "$_stem" "$_kind")
+        if [ -n "$_want" ]; then
+          if [ ! -f "$_dest" ]; then
+            echo "DRIFT: hygiene posture: $_dest is not installed (sync.sh install)"; drift=1
+          elif [ "$(cat -- "$_dest")" != "$_want" ]; then
+            echo "DRIFT: hygiene posture: $_dest differs from the overlay declaration (sync.sh install)"; drift=1
+          fi
+        elif [ -e "$_dest" ] || [ -L "$_dest" ]; then
+          echo "DRIFT: hygiene posture: $_dest is no longer declared (sync.sh install removes it)"; drift=1
+        fi
+      done
+    done
+    if systemctl --user show -p Version >/dev/null 2>&1; then
+      for _stem in $(hygiene_posture_declared); do
+        systemctl --user is-enabled "$_stem.timer" >/dev/null 2>&1 || {
+          echo "DRIFT: hygiene posture: $_stem.timer is declared but not enabled (sync.sh install)"; drift=1
+        }
+      done
+    fi
+    unset HYGIENE_POSTURE_ROWS
+  fi
 
   # The INVERSE of the loop above, and the reason it exists: that one proves
   # every DECLARED unit is live. Nothing proved every LIVE unit is declared.
