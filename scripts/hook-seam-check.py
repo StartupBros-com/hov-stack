@@ -9,8 +9,9 @@ Ceremony Test (HARNESS.md, Doctrine -> Evidence regime):
                merge or mutates state; a nonzero count is a prompt to restart
                the named session.
   defect       OBSERVED, two of them: (1) Claude Code caches hooks at session
-               start and its settings.json watcher misses the ad daemon's
-               atomic rename, so a guard that blocked at 10:00 can stop blocking
+               start and its settings.json watcher can miss the ad daemon's
+               atomic rename (it caught one rename on 2.1.318, hov-stack#414
+               item 6), so a guard that blocked at 10:00 can stop blocking
                at 13:00 in the same session; (2) anthropics/claude-code#84302 --
                a PreToolUse hook killed past its timeout makes the CLI ALLOW the
                gated tool, and dcg + git-guard both run on the inherited 600s
@@ -21,8 +22,9 @@ Ceremony Test (HARNESS.md, Doctrine -> Evidence regime):
 
 WHY
 ---
-Claude Code caches hooks at session start and its settings.json watcher misses an
-atomic-rename replacement (the ad daemon does this sub-second), so a guard that
+Claude Code caches hooks at session start and its settings.json watcher can miss
+an atomic-rename replacement (the ad daemon does this sub-second; one rename on
+2.1.318 was caught, hov-stack#414 item 6), so a guard that
 blocked earlier can stop blocking later in the SAME session — documented in
 HARNESS.md with "restart the session" as the only mitigation and no detector.
 anthropics/claude-code#84302 (open) adds a second path: a KILLED PreToolUse hook

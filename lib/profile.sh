@@ -15,11 +15,34 @@
 # Resolved from THIS FILE's own location, not from $HOME/dotfiles. A hermetic
 # tree, a worktree, or any checkout that is not the canonical clone would
 # otherwise read a table belonging to a different tree — or none — and the role
-# would silently resolve wrong. $DOTFILES and an explicit DOTFILES_ROLE_FILE
+# would silently resolve wrong. An explicit DOTFILES_ROLE_FILE, then $DOTFILES,
 # still override, in that order, for callers that genuinely mean elsewhere.
+#
+# A tree that carries no table (the public repository carries none; docs/layout.md)
+# falls back to <overlay>/hosts.tsv (lib/overlay.sh), the host's own copy of the
+# fleet table. The tree's own table comes first, so a hermetic fixture keeps the
+# table it wrote. When neither is readable, DOTFILES_ROLE_FILE names the overlay
+# copy, so a refusal points at the one place a switched host may add its row.
 _profile_self_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+# The overlay library is the sibling found through any symlink, as lib/foreign-units.sh
+# finds it. A fixture that copies this file alone keeps the chain without the overlay.
+_profile_overlay_lib=$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")/overlay.sh
+if [ -r "$_profile_overlay_lib" ]; then
+  # shellcheck source=lib/overlay.sh
+  . "$_profile_overlay_lib"
+fi
+unset _profile_overlay_lib
 DOTFILES_ROLE_FILE=${DOTFILES_ROLE_FILE:-${DOTFILES:+$DOTFILES/hosts.tsv}}
-DOTFILES_ROLE_FILE=${DOTFILES_ROLE_FILE:-$_profile_self_dir/../hosts.tsv}
+if [ -z "$DOTFILES_ROLE_FILE" ]; then
+  if [ -r "$_profile_self_dir/../hosts.tsv" ]; then
+    DOTFILES_ROLE_FILE=$_profile_self_dir/../hosts.tsv
+  elif command -v overlay_dir >/dev/null 2>&1 && _profile_overlay=$(overlay_dir); then
+    DOTFILES_ROLE_FILE=$_profile_overlay/hosts.tsv
+  else
+    DOTFILES_ROLE_FILE=$_profile_self_dir/../hosts.tsv
+  fi
+  unset _profile_overlay
+fi
 
 # profile_role [hostname] -> prints the role, or nothing and returns 1.
 #

@@ -250,7 +250,10 @@ DOTFILES_UNLINKED=(
   hosts.tsv        # host -> role table. Read in place by lib/profile.sh; links
                    # nowhere. Deliberately NOT a $HOME dotfile: a machine that
                    # declared its own role locally would be config nothing owns,
-                   # the class this manifest exists to make detectable.
+                   # the class this manifest exists to make detectable. A tree
+                   # that carries none (the public one) falls back to the
+                   # overlay's copy of the fleet table, which the operator owns,
+                   # and sync.sh check reports a live tree with neither.
   lib
   setup            # the public installer: links the harness tree into ~/.claude; run by hand
 )
