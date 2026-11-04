@@ -96,6 +96,7 @@ case "$*" in
   'rev-parse --git-common-dir') echo "$FAKE_SWEEP_ROOT/repo/.git" ;;
   'worktree list --porcelain') printf 'worktree %s/repo\n\nworktree %s/worktree\n' "$FAKE_SWEEP_ROOT" "$FAKE_SWEEP_ROOT" ;;
   'worktree prune'|'for-each-ref '*) : ;;
+  'ls-files -z --others --ignored --exclude-standard -- .claude/deliverables') : ;;  # no ignored deliverables
   'symbolic-ref --short refs/remotes/origin/HEAD') echo origin/main ;;
   'symbolic-ref --short HEAD') echo fixture-branch ;;
   remote) echo origin ;;

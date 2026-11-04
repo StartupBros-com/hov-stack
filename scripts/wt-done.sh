@@ -99,6 +99,11 @@ _lib="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/lib/wt-anchor.sh"
 _unlock="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/wt-unlock.sh"
 # shellcheck source=SCRIPTDIR/lib/wt-anchor.sh
 . "$_lib" 2>/dev/null || { echo "wt-done: cannot load $_lib" >&2; exit 1; }
+# Session holds and the ignored-deliverable rescue (hov-stack#384), shared with
+# wt-sweep.sh. Missing lib = refuse to run: the outside-run removal depends on it.
+_plib="$(dirname "$_lib")/wt-preserve.sh"
+# shellcheck source=SCRIPTDIR/lib/wt-preserve.sh
+. "$_plib" 2>/dev/null || { echo "wt-done: cannot load $_plib" >&2; exit 1; }
 RECONCILE_ONLY=0
 ALL=0
 REPO_ARG=""
@@ -354,6 +359,19 @@ close_one() {
   if [ -n "$porc" ]; then
     echo "      => REFUSE (worktree has local changes; wt-done never discards)"
     return 1
+  fi
+
+  # Run from outside, this moves the worktree's branch and then removes it, so a
+  # session idling there would lose its ground (hov-stack#384). Checked before any
+  # mutation. From inside, the caller is the session that holds it, and nothing is
+  # removed anyway.
+  local hold
+  if ! run_from_inside "$wt"; then
+    if hold=$(wt_session_hold "$wt"); then
+      echo "      => REFUSE (a Claude session holds this worktree: $hold)"
+      return 1
+    fi
+    [ -n "$hold" ] && printf '%s\n' "$hold" | sed 's/^/      ~ /'
   fi
 
   # A lock left by a killed git probe (a 0-byte index.lock, a ref lock) would
@@ -663,13 +681,18 @@ activate_reconciled() {
   activate "$repo" "$mc"
 }
 
-remove_worktree() {
-  local repo="$1" wt="$2" br="$3" def="$4" proof="${5:-}" tip="${6:-}" here inside=0
+run_from_inside() {
+  local here
   here=$(realpath -m "$PWD" 2>/dev/null)
   case "$here" in
-    "$(realpath -m "$wt" 2>/dev/null)"|"$(realpath -m "$wt" 2>/dev/null)"/*) inside=1 ;;
+    "$(realpath -m "$1" 2>/dev/null)"|"$(realpath -m "$1" 2>/dev/null)"/*) return 0 ;;
   esac
-  if [ "$inside" = 1 ]; then
+  return 1
+}
+
+remove_worktree() {
+  local repo="$1" wt="$2" br="$3" def="$4" proof="${5:-}" tip="${6:-}"
+  if run_from_inside "$wt"; then
     # Under proof A/C the pointer was deliberately NOT moved. With the pr-merged anchor
     # in place Agent View / `claude rm` can close the worktree; if the anchor could not
     # be written (offline) they still refuse on their unpushed-commit count, and
@@ -689,6 +712,12 @@ remove_worktree() {
       echo "      => safe to close (running from inside; not removing the ground underfoot)"
     fi
     return 0
+  fi
+  # `worktree remove` deletes gitignored files even without --force, and
+  # .claude/deliverables/ is ignored: copy those out first (hov-stack#384).
+  if ! wt_rescue_deliverables "$repo" "$wt" "$DRY_RUN" "$(date +%Y%m%d)"; then
+    echo "      => REFUSE (ignored deliverables could not be copied out; worktree kept)"
+    return 1
   fi
   run "git -C '$repo' worktree remove '$wt'" || return 1
   # Plain -d, never -D. It succeeds only if git independently agrees the branch
