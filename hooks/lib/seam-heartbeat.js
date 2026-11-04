@@ -38,9 +38,15 @@
  * Every first-party PreToolUse guard already requires ../lib/pretooluse-decision,
  * which requires this module at load. loop-guard.js is registered with matcher
  * `*` and checks its CLAUDE_LOOP_GUARD opt-in INSIDE the function, after the
- * module-level require — so its process starts, and this beat fires, on every
- * single tool call whether or not the guard is armed. That makes it a universal
- * canary for "did the seam dispatch at all", which is precisely the question.
+ * module-level require — so its process used to start, and this beat to fire, on
+ * every single tool call whether or not the guard was armed. #369 changed that:
+ * hooks/bin/node-hook skips loop-guard's node start unless CLAUDE_LOOP_GUARD is
+ * exactly `1`, so an unarmed session beats only on tools another first-party
+ * guard covers (Bash, EnterWorktree; the same launcher also skips settings-guard
+ * unless stdin can name a settings file, pass 4), and
+ * scripts/hook-seam-check.py (BEAT_COVERED_TOOLS) only compares those. The seam
+ * is still witnessed by every Bash/EnterWorktree call; a session that makes none for
+ * longer than the grace window is no longer checked.
  * Hooking setDenyContext() instead would NOT work: loop-guard calls it after the
  * opt-in early-return, and git-guard calls it only once a command parses as git.
  *

@@ -600,7 +600,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$HOME/.claude/hooks/run-with-flags.js\" \"post:edit:format\" \"PostToolUse/auto-format.js\" \"standard,strict\"",
+            "command": "\"$HOME/.claude/hooks/bin/node-hook\" \"$HOME/.claude/hooks/run-with-flags.js\" \"post:edit:format\" \"PostToolUse/auto-format.js\" \"standard,strict\"",
             "timeout": 30
           }
         ]
@@ -612,7 +612,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$HOME/.claude/hooks/PreToolUse/canonical-worktree-route-guard.js\"",
+            "command": "\"$HOME/.claude/hooks/bin/node-hook\" \"$HOME/.claude/hooks/PreToolUse/canonical-worktree-route-guard.js\"",
             "timeout": 10
           }
         ]
@@ -622,7 +622,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$HOME/.claude/hooks/PreToolUse/codex-quota-guard.js\"",
+            "command": "\"$HOME/.claude/hooks/bin/node-hook\" \"$HOME/.claude/hooks/PreToolUse/codex-quota-guard.js\"",
             "timeout": 10
           }
         ]
@@ -641,7 +641,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$HOME/.claude/hooks/PreToolUse/grep-cost-guard.js\""
+            "command": "\"$HOME/.claude/hooks/bin/node-hook\" \"$HOME/.claude/hooks/PreToolUse/grep-cost-guard.js\""
           }
         ]
       },
@@ -650,7 +650,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$HOME/.claude/hooks/PreToolUse/heavy-job-admission.js\""
+            "command": "\"$HOME/.claude/hooks/bin/node-hook\" \"$HOME/.claude/hooks/PreToolUse/heavy-job-admission.js\""
           }
         ]
       },
@@ -659,7 +659,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$HOME/.claude/hooks/PreToolUse/whatsapp-guard.js\"",
+            "command": "\"$HOME/.claude/hooks/bin/node-hook\" \"$HOME/.claude/hooks/PreToolUse/whatsapp-guard.js\"",
             "timeout": 5
           }
         ]
@@ -669,7 +669,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$HOME/.claude/hooks/run-with-flags.js\" \"pre:git-guard\" \"PreToolUse/git-guard.js\" \"standard,strict\""
+            "command": "\"$HOME/.claude/hooks/bin/node-hook\" \"$HOME/.claude/hooks/run-with-flags.js\" \"pre:git-guard\" \"PreToolUse/git-guard.js\" \"standard,strict\""
           }
         ]
       },
@@ -678,7 +678,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$HOME/.claude/hooks/PreToolUse/runner-guard.js\"",
+            "command": "\"$HOME/.claude/hooks/bin/node-hook\" \"$HOME/.claude/hooks/PreToolUse/runner-guard.js\"",
             "timeout": 5
           }
         ]
@@ -688,7 +688,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$HOME/.claude/hooks/PreToolUse/shape-rewrite.js\"",
+            "command": "\"$HOME/.claude/hooks/bin/node-hook\" \"$HOME/.claude/hooks/PreToolUse/shape-rewrite.js\"",
             "timeout": 5
           }
         ]
@@ -698,7 +698,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$HOME/.claude/hooks/PreToolUse/loop-guard.js\"",
+            "command": "\"$HOME/.claude/hooks/bin/node-hook\" \"$HOME/.claude/hooks/PreToolUse/loop-guard.js\"",
             "timeout": 5
           }
         ]
@@ -708,7 +708,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$HOME/.claude/hooks/PreToolUse/settings-guard.js\"",
+            "command": "\"$HOME/.claude/hooks/bin/node-hook\" \"$HOME/.claude/hooks/PreToolUse/settings-guard.js\"",
             "timeout": 5
           }
         ]
@@ -719,7 +719,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$HOME/.claude/hooks/PreCompact/compact-preserve.js\"",
+            "command": "\"$HOME/.claude/hooks/bin/node-hook\" \"$HOME/.claude/hooks/PreCompact/compact-preserve.js\"",
             "timeout": 10
           }
         ]
@@ -730,7 +730,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$HOME/.claude/hooks/plugin-auto-update.js\""
+            "command": "\"$HOME/.claude/hooks/bin/node-hook\" \"$HOME/.claude/hooks/plugin-auto-update.js\""
           }
         ]
       },
@@ -739,7 +739,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$HOME/.claude/hooks/SessionStart/launchpad-advisory.js\"",
+            "command": "\"$HOME/.claude/hooks/bin/node-hook\" \"$HOME/.claude/hooks/SessionStart/launchpad-advisory.js\"",
             "timeout": 10
           }
         ]
@@ -751,7 +751,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$HOME/.claude/hooks/Stop/verify-on-stop.js\"",
+            "command": "\"$HOME/.claude/hooks/bin/node-hook\" \"$HOME/.claude/hooks/Stop/verify-on-stop.js\"",
             "timeout": 190
           }
         ]
@@ -762,7 +762,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"$HOME/.claude/hooks/UserPromptSubmit/skill-mention-resolver.js\"",
+            "command": "\"$HOME/.claude/hooks/bin/node-hook\" \"$HOME/.claude/hooks/UserPromptSubmit/skill-mention-resolver.js\"",
             "timeout": 5
           }
         ]
