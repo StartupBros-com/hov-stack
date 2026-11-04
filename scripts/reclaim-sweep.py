@@ -33,6 +33,13 @@ DESIGN
   argv (shared check in lib/proc_liveness.py, issue #378): a 22 GB directory that
   some process still holds is not residue, it is live state.
 
+  The operator's keep list is asked before anything else: a path one of its
+  patterns names, a path under one, or a directory above one is never a
+  candidate, whatever a rule or a floor says. It lives in the private overlay
+  (<overlay>/reclaim-sweep-keep; systemd/README.md gives the format). An
+  unreadable or invalid list refuses the whole run, plan included: a list that
+  cannot be read cannot say what it protects.
+
 Usage:
   reclaim-sweep.py              # plan only (default)
   reclaim-sweep.py --apply      # actually remove
@@ -280,7 +287,8 @@ def _beyond_keep(rule, dated: list):
         yield path, displaced.get(path, mtime)
 
 
-def plan(now: float, snap) -> list[dict]:
+def plan(now: float, snap, keep: Optional[KeepList] = None) -> list[dict]:
+    keep = load_keep_list() if keep is None else keep
     out = []
     # A path two globs match is the first rule's: planned twice, its second
     # removal would fail on a file already gone.
@@ -307,8 +315,10 @@ def plan(now: float, snap) -> list[dict]:
                 continue
             if not is_safe_target(path):
                 continue
-            holder = snap.holder(path)
-            skip = f"held by a live process ({holder.signal}, pid {holder.pid})" if holder else None
+            skip = keep.keeper(path)
+            if not skip:
+                holder = snap.holder(path)
+                skip = f"held by a live process ({holder.signal}, pid {holder.pid})" if holder else None
             if not skip and any(c == path or c.startswith(path + "/") for c in cited):
                 skip = "cited by a memory note"
             out.append({
@@ -488,6 +498,76 @@ BULK_MIN_BYTES = 1024 ** 2
 MEMORY_ROOT = f"{HOME}/.claude/projects"
 # What ends a cited path: whitespace, quotes, brackets, and shell or Markdown punctuation.
 CITED_PATH_CHARS = r"[^\s'\"`()\[\]<>,;|*${}]"
+
+
+def _keep_list_path() -> str:
+    """<overlay>/reclaim-sweep-keep, the overlay resolved the way setup and
+    lib/overlay.sh resolve it: $HOV_STACK_OVERLAY, else $XDG_CONFIG_HOME/hov-stack
+    when that is absolute, else ~/.config/hov-stack. A relative overlay comes back
+    relative, and load_keep_list() refuses it: overlay.sh ignores one, but a list
+    that protects things must not go quiet on a typo."""
+    xdg = os.environ.get("XDG_CONFIG_HOME") or ""
+    if not os.path.isabs(xdg):
+        xdg = os.path.join(HOME, ".config")
+    overlay = os.environ.get("HOV_STACK_OVERLAY") or os.path.join(xdg, "hov-stack")
+    return os.path.join(overlay, "reclaim-sweep-keep")
+
+
+# The operator's keep list; see load_keep_list().
+KEEP_LIST_PATH = _keep_list_path()
+KEEP_REASON = "on the keep list"
+
+
+class KeepList(NamedTuple):
+    path: str
+    read: bool            # the file existed and was read
+    patterns: tuple       # (pattern as written, its path segments)
+    error: Optional[str]  # set when unreadable or invalid; then every path is kept
+
+    def keeper(self, path: str) -> Optional[str]:
+        """Why the list keeps `path`, or None. A pattern keeps what it matches,
+        everything under that, and every directory above it: removing a parent
+        removes the child. Matching is per segment, so `*` never crosses a /."""
+        if self.error:
+            return "keep list unreadable"
+        segs = [s for s in os.path.normpath(path).split("/") if s]
+        for written, pat in self.patterns:
+            if all(fnmatch.fnmatchcase(s, p) for s, p in zip(segs, pat)):
+                return f"{KEEP_REASON}: {written}"
+        return None
+
+
+def load_keep_list(path: Optional[str] = None) -> KeepList:
+    """Read the keep list: one absolute glob per line (a leading ~/ is $HOME),
+    blank lines and # comment lines skipped. No file is an empty list. A file
+    that cannot be read, a broken symlink at it or at the overlay directory, a
+    relative pattern, or a . or .. segment is an error, never an empty list."""
+    path = KEEP_LIST_PATH if path is None else path
+    if not os.path.isabs(path):
+        return KeepList(path, False, (), "the overlay directory is not an absolute path")
+    try:
+        with open(path, encoding="utf-8") as fh:
+            text = fh.read()
+    except FileNotFoundError:
+        parent = os.path.dirname(path)
+        if os.path.lexists(path) or (os.path.lexists(parent) and not os.path.isdir(parent)):
+            return KeepList(path, False, (), "it or the overlay directory is a broken symlink")
+        return KeepList(path, False, (), None)
+    except (OSError, UnicodeDecodeError) as e:
+        return KeepList(path, False, (), f"cannot read it: {e}")
+    patterns = []
+    for n, line in enumerate(text.splitlines(), 1):
+        written = line.strip()
+        if not written or written.startswith("#"):
+            continue
+        expanded = HOME + written[1:] if written == "~" or written.startswith("~/") else written
+        if not expanded.startswith("/"):
+            return KeepList(path, True, (), f"line {n}: {written!r} is not an absolute or ~/ path")
+        segs = [s for s in expanded.split("/") if s]
+        if any(s in (".", "..") for s in segs):
+            return KeepList(path, True, (), f"line {n}: {written!r} has a . or .. segment")
+        patterns.append((written, tuple(segs)))
+    return KeepList(path, True, tuple(patterns), None)
 
 DOCKER = "docker"
 DOCKER_TIMEOUT_S = 30
@@ -1227,8 +1307,10 @@ class ScratchPlan(NamedTuple):
 
 
 def plan_scratch(now: float, snap, job_floor_h: float, tmp_floor_h: float,
-                 budget_s: float = PLAN_BUDGET_S, uid: Optional[int] = None) -> ScratchPlan:
+                 budget_s: float = PLAN_BUDGET_S, uid: Optional[int] = None,
+                 keep: Optional[KeepList] = None) -> ScratchPlan:
     uid = os.getuid() if uid is None else uid
+    keep = load_keep_list() if keep is None else keep
     deadline = time.monotonic() + budget_s
     items: list = []
     kept: Counter = Counter()
@@ -1311,6 +1393,10 @@ def plan_scratch(now: float, snap, job_floor_h: float, tmp_floor_h: float,
         scans, fresh = [], False
         for name in children:
             path = os.path.join(tmp, name)
+            listed = keep.keeper(path)
+            if listed:
+                kept[listed] += 1
+                continue
             scan = scan_tree(path, job_cutoff, uid)
             if scan.veto:
                 kept[scan.veto] += 1
@@ -1367,6 +1453,11 @@ def plan_scratch(now: float, snap, job_floor_h: float, tmp_floor_h: float,
     def consider(path, name, st, held, dev, session=None):
         why = None
         if st is None:
+            return
+        # The list first, so its count covers every entry it names, fresh ones too.
+        listed = keep.keeper(path)
+        if listed:
+            kept[listed] += 1
             return
         if stat.S_ISLNK(st.st_mode):
             why = "symlink"
@@ -1616,6 +1707,13 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
 
     now = args.now if args.now is not None else time.time()
+    # A keep list that cannot be read cannot say what it protects: refuse both
+    # modes, as for an answerless liveness scan below.
+    keep = load_keep_list()
+    if keep.error:
+        print(f"reclaim-sweep: keep list {keep.path}: {keep.error} — refusing to plan or apply",
+              file=sys.stderr)
+        return 1
     # An answerless liveness scan must abort BOTH modes, not degrade to
     # "nothing is held": an apply would delete live state, and a plan would
     # print a lie that later graduates to an apply. Fail closed (issue #378).
@@ -1630,13 +1728,13 @@ def main(argv: list[str] | None = None) -> int:
         print("reclaim-sweep: liveness scan saw no processes — refusing to plan or apply",
               file=sys.stderr)
         return 1
-    items = plan(now, snap)
+    items = plan(now, snap, keep)
     actionable = [i for i in items if not i["skip"]]
     skipped = [i for i in items if i["skip"]]
 
     free = free_bytes() if args.free_gb is None else int(args.free_gb * GB)
     level, job_h, tmp_h = pressure(free)
-    scratch = plan_scratch(now, snap, job_h, tmp_h)
+    scratch = plan_scratch(now, snap, job_h, tmp_h, keep=keep)
     actionable += scratch.items
     total = sum(i["bytes"] for i in actionable)
 
@@ -1675,6 +1773,8 @@ def main(argv: list[str] | None = None) -> int:
             "actionable": [_public(i) for i in actionable], "skipped": skipped,
             "total_bytes": total, "removed": removed, "failed": failed,
             "applied": args.apply, "freed_bytes": freed,
+            "keep_list": {"path": keep.path, "read": keep.read,
+                          "patterns": [w for w, _ in keep.patterns]},
             "scratch": {
                 "pressure": level, "free_bytes": free, "free_measured": args.free_gb is None,
                 "floors_h": {"job": job_h, "tmp": tmp_h},
@@ -1714,6 +1814,10 @@ def main(argv: list[str] | None = None) -> int:
         ev = scratch.evidence
         print(f"  scratch evidence: docker {ev['docker']}; {ev['memory notes read']} memory note(s) read, "
               f"{ev['memory notes unreadable']} unreadable; git: {ev['git']}")
+        if keep.read:
+            print(f"  keep list: {len(keep.patterns)} pattern(s) read from {keep.path}")
+        else:
+            print(f"  keep list: none ({keep.path} does not exist)")
         if scratch.unexamined:
             print(f"  scratch unexamined: {scratch.unexamined} entr(ies) left for the next run "
                   f"(plan budget {PLAN_BUDGET_S}s spent)")
