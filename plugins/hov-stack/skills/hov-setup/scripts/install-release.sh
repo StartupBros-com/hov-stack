@@ -10,13 +10,21 @@
 #                 user says yes.
 #   gate        — the sha256 pinned in this file, computed from the downloaded bytes on
 #                 2026-11-03 and matching each maker's published checksum, fail-closed;
-#                 plus a post-install `--version` check that removes what this run
-#                 installed if it fails.
+#                 plus a `--version` check on the staged copy, run before anything is
+#                 renamed into place, so a failed check leaves the previous copy untouched.
 #   defect      — vendor installers fail open or edit shell startup files. tool-update.sh's
 #                 header records four that skip verification; jsm's installer appends a PATH
 #                 line to the shell's startup file by default; brew is absent on a fresh Mac.
 #   delete-when — every one of these makers ships an installer that verifies and never
 #                 edits startup files, or hov-stack stops offering them.
+#
+# The install record (receipt) is not ceremony: --update branches on it.
+#   consumer    — `install-release.sh <tool> --update` (run by `./setup --update`).
+#   gate        — --update touches a program only when every file in the record is still
+#                 present and still has the recorded sha256.
+#   defect      — replacing a copy the user put in ~/.local/bin some other way (uv's, cass's
+#                 and jsm's own installers also install there) or edited by hand.
+#   delete-when — this script is retired, or --update stops existing.
 #
 # Why this is not scripts/tool-update.sh: that script needs gh (this one installs gh), keeps
 # its table test-only and its tool list is the author's own machine, and it leaves cass out on
@@ -24,11 +32,21 @@
 # release, which is what the table below pins.
 #
 # Usage:  install-release.sh <tool> [--force]     tool: gh | uv | cass | jsm
-# Exit:   0 installed; 1 download, checksum, extract, install or --version check failed
-#         (nothing this run installed is left behind); 2 bad usage; 3 unknown tool, or no
-#         release for this platform; 4 a target file already exists (nothing changed;
-#         --force replaces it)
+#         install-release.sh <tool> --update      (not with --force: usage error)
+# Exit:   0 installed (or, with --update, already current or updated); 1 download,
+#         checksum, extract, install or --version check failed (the previous copy, if any,
+#         and its record, stays or is put back); 2 bad usage; 3 unknown tool, or no release
+#         for this platform;
+#         4 a target file already exists (nothing changed; --force replaces it);
+#         5 --update left the tool alone (nothing changed): not installed here, no install
+#         record, a recorded file was removed or changed since this script installed it, or
+#         the recorded version is newer than the pin (a pin never moves backwards)
+# Record: each successful install writes ~/.local/state/hov-stack/install-release/<tool>
+#         (version=, platform=, one `file=<abs path> <sha256>` line per installed file).
+#         --update replaces a tool only when every recorded file still matches its sha256.
 # Env:    HOV_SETUP_BIN_DIR        destination directory (default ~/.local/bin)
+#         HOV_SETUP_STATE_DIR      test-only: directory holding the install records
+#                                  (default ~/.local/state/hov-stack/install-release)
 #         HOV_SETUP_PLATFORM       test-only: darwin-arm64 | linux-x86_64 | linux-aarch64
 #         HOV_SETUP_RELEASE_TABLE  test-only: replaces the table below. Production never
 #                                  sets it; a table swappable from the environment is a place
@@ -60,7 +78,7 @@ jsm|0.3.46|darwin-arm64|https://jeffreys-skills.md/api/v1/downloads/jsm/v0.3.46/
 '}
 
 usage() {
-  echo "usage: install-release.sh <tool> [--force]   (tool: gh | uv | cass | jsm)" >&2
+  echo "usage: install-release.sh <tool> [--force | --update]   (tool: gh | uv | cass | jsm)" >&2
   exit 2
 }
 
@@ -68,14 +86,17 @@ fail() { echo "install-release: $*" >&2; exit 1; }
 
 tool=""
 force=0
+update=0
 for arg in "$@"; do
   case $arg in
     --force) force=1 ;;
+    --update) update=1 ;;
     -*) usage ;;
     *) [ -z "$tool" ] || usage; tool=$arg ;;
   esac
 done
 [ -n "$tool" ] || usage
+[ "$update" -eq 0 ] || [ "$force" -eq 0 ] || usage
 
 # --- platform -----------------------------------------------------------------
 if [ -n "${HOV_SETUP_PLATFORM:-}" ]; then
@@ -97,13 +118,14 @@ platforms=""
 row_url=""
 row_sha=""
 row_members=""
-while IFS="|" read -r t _ p u s m; do
+row_version=""
+while IFS="|" read -r t v p u s m; do
   [ -n "$t" ] || continue
   [ "$t" = "$tool" ] || continue
   tool_known=1
   platforms="${platforms:+$platforms, }$p"
   if [ "$p" = "$platform" ]; then
-    row_url=$u; row_sha=$s; row_members=$m
+    row_version=$v; row_url=$u; row_sha=$s; row_members=$m
   fi
 done <<EOF
 $TABLE
@@ -119,23 +141,9 @@ if [ -z "$row_url" ]; then
 fi
 
 dest=${HOV_SETUP_BIN_DIR:-$HOME/.local/bin}
-
-# member list, one path per line; each installs under its basename
-members=$(printf '%s' "$row_members" | tr ',' '\n')
-first_base=""
-while IFS= read -r m; do
-  [ -n "$m" ] || continue
-  [ -n "$first_base" ] || first_base=$(basename "$m")
-  if [ -e "$dest/$(basename "$m")" ] || [ -L "$dest/$(basename "$m")" ]; then
-    if [ "$force" -eq 0 ]; then
-      echo "install-release: $dest/$(basename "$m") already exists; nothing changed (--force replaces it)" >&2
-      exit 4
-    fi
-  fi
-done <<EOF
-$members
-EOF
-[ -n "$first_base" ] || fail "table row for $tool/$platform lists no members"
+if [ -d "$dest" ]; then dest=$(cd "$dest" && pwd) || fail "cannot enter $dest"; fi   # absolute, to match the record
+state_dir=${HOV_SETUP_STATE_DIR:-$HOME/.local/state/hov-stack/install-release}
+receipt="$state_dir/$tool"
 
 # --- helpers --------------------------------------------------------------------
 if command -v sha256sum >/dev/null 2>&1; then
@@ -146,20 +154,142 @@ else
   fail "neither sha256sum nor shasum is available; cannot verify the download"
 fi
 
+# version_newer A B: dotted version A (digits and dots, optional leading v) is later than B.
+# Anything else is not newer, so an unreadable record never blocks an update.
+version_newer() {
+  local a=${1#v} b=${2#v} x y
+  case "$a" in "" | *[!0-9.]*) return 1 ;; esac
+  case "$b" in "" | *[!0-9.]*) return 1 ;; esac
+  while [ -n "$a" ] || [ -n "$b" ]; do
+    x=${a%%.*} y=${b%%.*}
+    case $a in *.*) a=${a#*.} ;; *) a="" ;; esac
+    case $b in *.*) b=${b#*.} ;; *) b="" ;; esac
+    # strip leading zeros so the comparison stays decimal
+    x=${x#"${x%%[!0]*}"} y=${y#"${y%%[!0]*}"}
+    x=${x:-0} y=${y:-0}
+    if [ "${#x}" -ne "${#y}" ]; then [ "${#x}" -gt "${#y}" ]; return; fi
+    if [ "$x" != "$y" ]; then [ "$x" \> "$y" ]; return; fi
+  done
+  return 1
+}
+
+# member list, one path per line; each installs under its basename
+members=$(printf '%s' "$row_members" | tr ',' '\n')
+first_base=""
+while IFS= read -r m; do
+  [ -n "$m" ] || continue
+  [ -n "$first_base" ] || first_base=$(basename "$m")
+done <<EOF
+$members
+EOF
+[ -n "$first_base" ] || fail "table row for $tool/$platform lists no members"
+
+# --- --update: decide from the install record whether this tool is ours to touch -----
+old_version=""
+if [ "$update" -eq 1 ]; then
+  left_alone() { echo "$1" ; exit 5; }
+  if [ ! -f "$receipt" ]; then
+    while IFS= read -r m; do
+      [ -n "$m" ] || continue
+      b=$(basename "$m")
+      if [ -e "$dest/$b" ] || [ -L "$dest/$b" ]; then
+        left_alone "$tool: $dest/$b has no hov-stack install record (an install from before records, or another installer); nothing changed. To have hov-stack manage it: install-release.sh $tool --force"
+      fi
+    done <<EOF
+$members
+EOF
+    left_alone "$tool: not installed here; nothing to update"
+  fi
+  while IFS= read -r line; do
+    case $line in
+      version=*) old_version=${line#version=} ;;
+      file=*)
+        rest=${line#file=}
+        rpath=${rest% *}
+        rsha=${rest##* }
+        if [ ! -e "$rpath" ] && [ ! -L "$rpath" ]; then
+          left_alone "$tool: $rpath was removed since hov-stack installed it; nothing changed (install-release.sh $tool --force reinstalls it)"
+        fi
+        if [ -L "$rpath" ] || [ ! -f "$rpath" ]; then
+          left_alone "$tool: $rpath is no longer the file hov-stack installed (now a symlink or not a regular file); nothing changed (install-release.sh $tool --force replaces it)"
+        fi
+        if [ "$(sha_of "$rpath")" != "$rsha" ]; then
+          # jsm and cass can replace themselves; say so, or every self-update reads as tampering.
+          case $tool in
+            jsm) left_alone "$tool: $rpath changed since hov-stack installed it, most likely by jsm's own auto-update; nothing changed (jsm update updates it; install-release.sh jsm --force puts the pinned copy back)" ;;
+            cass) left_alone "$tool: $rpath changed since hov-stack installed it, possibly by cass upgrade; nothing changed (cass upgrade updates it; install-release.sh cass --force puts the pinned copy back)" ;;
+            *) left_alone "$tool: $rpath changed since hov-stack installed it; nothing changed (install-release.sh $tool --force replaces it)" ;;
+          esac
+        fi
+        ;;
+    esac
+  done < "$receipt"
+  [ -n "$old_version" ] || left_alone "$tool: the hov-stack install record $receipt has no version; nothing changed (install-release.sh $tool --force reinstalls it)"
+  # never move backwards: a checkout older than the one that installed the tool pins less
+  if version_newer "$old_version" "$row_version"; then
+    left_alone "$tool: $old_version is newer than the $row_version this checkout pins; nothing changed"
+  fi
+  # a member this release adds must not silently replace a file the record does not cover
+  while IFS= read -r m; do
+    [ -n "$m" ] || continue
+    b=$(basename "$m")
+    if { [ -e "$dest/$b" ] || [ -L "$dest/$b" ]; } && ! grep -qF -- "file=$dest/$b " "$receipt"; then
+      left_alone "$tool: $dest/$b is not in hov-stack's install record; nothing changed (install-release.sh $tool --force replaces it)"
+    fi
+  done <<EOF
+$members
+EOF
+  if [ "$old_version" = "$row_version" ]; then
+    echo "$tool: $row_version, current"
+    exit 0
+  fi
+  force=1
+fi
+
+while IFS= read -r m; do
+  [ -n "$m" ] || continue
+  if [ -e "$dest/$(basename "$m")" ] || [ -L "$dest/$(basename "$m")" ]; then
+    if [ "$force" -eq 0 ]; then
+      echo "install-release: $dest/$(basename "$m") already exists; nothing changed (--force replaces it)" >&2
+      exit 4
+    fi
+  fi
+done <<EOF
+$members
+EOF
+
+
+
 work=$(mktemp -d)
-installed=""   # newline-separated absolute paths this run put in place
+stage=""       # staging directory inside dest; removed on every exit path
+installed=""   # newline-separated absolute paths this run moved into place
+displaced=""   # newline-separated basenames whose previous copy waits in $stage/<name>.prev
 done_ok=0      # set to 1 only once the install has succeeded
 tmpnames=""    # newline-separated temp files not yet moved into place
 # shellcheck disable=SC2329  # invoked by the EXIT trap
 cleanup() {
   local f
-  # A failed run leaves nothing it installed: an earlier member of a multi-member install
-  # must not survive a later member's failure. done_ok is set only on the success path.
+  # A failed run leaves nothing it moved into place: an earlier member of a multi-member
+  # install must not survive a later member's failure, and a copy it moved aside to make
+  # room (--force, --update) goes back. done_ok is set only on success.
   if [ "$done_ok" -eq 0 ]; then
     while IFS= read -r f; do
       [ -n "$f" ] && rm -f -- "$f"
     done <<EOF
 $installed
+EOF
+    while IFS= read -r f; do
+      [ -n "$f" ] || continue
+      mv -f "$stage/$f.prev" "$dest/$f" || echo "install-release: could not put the previous $f back; it is at $stage/$f.prev" >&2
+    done <<EOF
+$displaced
+EOF
+    # keep the stage directory when a previous copy is still in it
+    while IFS= read -r f; do
+      [ -n "$f" ] || continue
+      if [ -e "$stage/$f.prev" ] || [ -L "$stage/$f.prev" ]; then stage=""; break; fi
+    done <<EOF
+$displaced
 EOF
   fi
   while IFS= read -r f; do
@@ -167,6 +297,7 @@ EOF
   done <<EOF
 $tmpnames
 EOF
+  [ -z "$stage" ] || rm -rf "$stage"
   rm -rf "$work"
 }
 trap cleanup EXIT
@@ -202,24 +333,10 @@ done <<EOF
 $members
 EOF
 
-# --- install: temp name in dest, then rename into place ------------------------------
-mkdir -p "$dest"
-dest=$(cd "$dest" && pwd) || fail "cannot enter $dest"   # absolute, so installed: lines are
-while IFS= read -r m; do
-  [ -n "$m" ] || continue
-  b=$(basename "$m")
-  tmpf="$dest/.$b.hov-setup.$$"
-  tmpnames="$tmpf"
-  install -m 0755 "$work/x/$m" "$tmpf" || fail "could not write $tmpf"
-  mv -f "$tmpf" "$dest/$b" || fail "could not move $b into $dest"
-  tmpnames=""
-  installed="${installed:+$installed
-}$dest/$b"
-done <<EOF
-$members
-EOF
-
-# --- post-install check ------------------------------------------------------------------
+# --- stage, check, then swap -------------------------------------------------------------
+# Every member is staged under its real basename in a directory inside dest (same filesystem,
+# so the final rename is atomic). --version runs on the staged first member; only a passing
+# check renames anything into place, so a failed check leaves the previous copy untouched.
 run_version() {
   if command -v timeout >/dev/null 2>&1; then
     timeout 30 "$1" --version
@@ -230,16 +347,65 @@ run_version() {
   fi
 }
 
-if ! run_version "$dest/$first_base" >/dev/null 2>&1; then
-  # Remove what this run installed. Nothing is restored: with --force the previous file was
-  # already replaced by the rename above, so a failed check leaves the tool absent, not old.
-  while IFS= read -r f; do
-    [ -n "$f" ] && rm -f -- "$f"
-  done <<EOF
-$installed
+mkdir -p "$dest"
+dest=$(cd "$dest" && pwd) || fail "cannot enter $dest"   # absolute, so installed: lines are
+stage="$dest/.hov-setup.$$"
+mkdir -p "$stage" || fail "could not create $stage"
+while IFS= read -r m; do
+  [ -n "$m" ] || continue
+  b=$(basename "$m")
+  install -m 0755 "$work/x/$m" "$stage/$b" || fail "could not write $stage/$b"
+done <<EOF
+$members
 EOF
-  echo "install-release: $dest/$first_base --version failed; removed what this run installed" >&2
+
+if ! run_version "$stage/$first_base" >/dev/null 2>&1; then
+  echo "install-release: $first_base --version failed; nothing changed" >&2
   exit 1
+fi
+
+# The install record is written from the staged copies before anything moves, and renamed
+# into place last (atomic: temp file, then rename), so a run that fails at any point leaves
+# the previous record next to the previous copy.
+mkdir -p "$state_dir" || fail "could not create $state_dir"
+rtmp="$state_dir/.$tool.$$"
+tmpnames="$rtmp"
+{
+  echo "version=$row_version"
+  echo "platform=$platform"
+  while IFS= read -r m; do
+    [ -n "$m" ] || continue
+    b=$(basename "$m")
+    echo "file=$dest/$b $(sha_of "$stage/$b")"
+  done <<EOF
+$members
+EOF
+} > "$rtmp" || fail "could not write $rtmp"
+
+# The swap: each previous copy moves aside into the stage directory (same filesystem), then
+# the new one moves in. A failure puts every previous copy back (cleanup).
+while IFS= read -r m; do
+  [ -n "$m" ] || continue
+  b=$(basename "$m")
+  if [ -e "$dest/$b" ] || [ -L "$dest/$b" ]; then
+    mv -f "$dest/$b" "$stage/$b.prev" || fail "could not move the previous $b aside"
+    displaced="${displaced:+$displaced
+}$b"
+  fi
+  mv -f "$stage/$b" "$dest/$b" || fail "could not move $b into $dest"
+  installed="${installed:+$installed
+}$dest/$b"
+done <<EOF
+$members
+EOF
+
+mv -f "$rtmp" "$receipt" || fail "could not write $receipt"
+tmpnames=""
+done_ok=1   # from here on the new copy and its record stand; nothing is rolled back
+
+if [ "$update" -eq 1 ]; then
+  echo "$tool: $old_version -> $row_version"
+  exit 0
 fi
 
 while IFS= read -r f; do
@@ -260,5 +426,4 @@ if [ "$on_path" = yes ]; then
 else
   echo "on PATH: no ($dest is not on PATH)"
 fi
-done_ok=1
 exit 0
