@@ -140,6 +140,27 @@ function jsProjectFx() {
   return fx;
 }
 
+// A fixture wacli (symlink -> regular file under /tmp, what whatsapp-guard's test mode accepts) so
+// a read-only call reaches the executable hash check, the one place whatsapp-guard needs node:crypto
+// (loaded lazily since #369 pass 7). `bad` pins a sha that does not match: the call must ask.
+function waFx({ bad = false } = {}) {
+  const fx = plainFx();
+  const target = path.join(fx.root, 'lib', 'wacli', 'v0.17.1', 'wacli');
+  const live = path.join(fx.root, 'bin', 'wacli');
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  fs.mkdirSync(path.dirname(live), { recursive: true });
+  const body = '#!/usr/bin/env bash\necho fixture wacli\n';
+  fs.writeFileSync(target, body, { mode: 0o755 });
+  fs.symlinkSync(target, live);
+  fx.live = live;
+  fx.waEnv = {
+    WACLI_GUARD_TEST_MODE: '1',
+    WACLI_GUARD_TEST_ROOT: fx.root,
+    WACLI_GUARD_TEST_SHA256: bad ? '0'.repeat(64) : require('node:crypto').createHash('sha256').update(body).digest('hex'),
+  };
+  return fx;
+}
+
 // ---------------------------------------------------------------------------
 // The corpus
 // ---------------------------------------------------------------------------
@@ -182,6 +203,8 @@ const WA = 'PreToolUse/whatsapp-guard.js';
 add(WA, 'whatsapp: wacli send needs a decision', 'ask', { payload: () => bash('wacli send text --to 15551234567 --message hi') });
 add(WA, 'whatsapp: ls allowed', 'quiet', { payload: () => bash('ls -la') });
 add(WA, 'whatsapp: unrelated Read ignored', 'quiet', { payload: () => ({ tool_name: 'Read', tool_input: { file_path: '/etc/hostname' } }) });
+add(WA, 'whatsapp: verified executable, read-only call allowed (reaches the lazy sha256 check)', 'allow', { fx: () => waFx(), env: (fx) => fx.waEnv, payload: (fx, home) => bash(`${fx.live} --store ${home}/.local/state/wacli --read-only --json chats list --limit 10`, { cwd: fx.cwd }) });
+add(WA, 'whatsapp: executable hash mismatch, read-only call asks', 'ask', { fx: () => waFx({ bad: true }), env: (fx) => fx.waEnv, payload: (fx, home) => bash(`${fx.live} --store ${home}/.local/state/wacli --read-only --json chats list --limit 10`, { cwd: fx.cwd }) });
 
 const RG = 'PreToolUse/runner-guard.js';
 add(RG, 'runner-guard: systemctl restart runner denied', 'deny', { payload: () => bash(`sudo systemctl restart ${UNIT}`) });

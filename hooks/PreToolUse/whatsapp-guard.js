@@ -25,7 +25,6 @@
 
 'use strict';
 
-const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -128,6 +127,9 @@ function executableConfig() {
 }
 
 function sha256File(file) {
+  // Lazy: node:crypto costs ~5 ms CPU to load and only the wacli executable check below
+  // needs it; every other Bash call pays that for nothing (#369, pass 7).
+  const crypto = require('node:crypto');
   return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 }
 
