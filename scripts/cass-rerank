@@ -21,7 +21,9 @@ Usage:
                       [--no-dedupe] [--model NAME] [--json] [--require-rerank]
 
 Env: CASS_RERANK_ENDPOINT (required, no default: the base URL of the gateway rerank lane),
-     CASS_RERANK_MODEL, CASS_RERANK_API_KEY (else ~/.config/cass-rerank/key).
+     CASS_RERANK_MODEL, CASS_RERANK_API_KEY (else ~/.config/cass-rerank/key),
+     CASS_SEARCH_TIMEOUT_MS (lexical search deadline in ms, passed to cass as --timeout;
+     default 300000).
 Never run bare `cass` in an agent context — it launches a blocking TUI.
 """
 import argparse
@@ -36,6 +38,14 @@ CASS = os.environ.get("CASS_BIN", os.path.expanduser("~/.local/bin/cass"))
 ENDPOINT = os.environ.get("CASS_RERANK_ENDPOINT", "")
 DEFAULT_MODEL = os.environ.get("CASS_RERANK_MODEL", "local-rerank")
 KEY_FILE = os.path.expanduser("~/.config/cass-rerank/key")
+# cass 0.10.0 reads the whole lexical index from disk before each search when the index
+# is larger than the page cache: 98.4 s for one query at 6.1M docs (2026-11-04). Its own
+# fallback budget (CASS_SEARCH_BUDGET_MS, 120 s) then returns 0 hits marked timed_out, and
+# the old fixed 45 s cap here failed every search. Passing --timeout gives the search a
+# deadline it can finish inside; the subprocess cap sits past it so cass can exit cleanly
+# and report its own budget.
+DEFAULT_SEARCH_TIMEOUT_MS = 300000
+SUBPROCESS_GRACE_S = 30
 
 
 def api_key():
@@ -62,17 +72,35 @@ def fail(stage, error, as_json):
     return 1
 
 
+def search_timeout_ms():
+    """CASS_SEARCH_TIMEOUT_MS when set (cass's own variable), else the default."""
+    raw = os.environ.get("CASS_SEARCH_TIMEOUT_MS", "").strip()
+    if not raw:
+        return DEFAULT_SEARCH_TIMEOUT_MS
+    try:
+        ms = int(raw)
+    except ValueError:
+        ms = 0
+    if ms <= 0:
+        raise ValueError("CASS_SEARCH_TIMEOUT_MS must be a positive whole number of "
+                         f"milliseconds, got {diagnostic(raw)[:40]!r}")
+    return ms
+
+
 def cass_search(query, n):
     env = os.environ.copy()
     env["CASS_AUTO_REFRESH"] = "0"
+    timeout_ms = search_timeout_ms()
+    cap_s = timeout_ms / 1000 + SUBPROCESS_GRACE_S
     try:
         p = subprocess.run(
             [CASS, "search", query, "--robot", "--no-maintenance",
-             "--limit", str(n), "--mode", "lexical"],
-            capture_output=True, text=True, timeout=45, env=env,
+             "--limit", str(n), "--mode", "lexical", "--timeout", str(timeout_ms)],
+            capture_output=True, text=True, timeout=cap_s, env=env,
         )
     except subprocess.TimeoutExpired as e:
-        raise RuntimeError("cass search timed out after 45 seconds") from e
+        raise RuntimeError(f"cass search did not exit within {cap_s:g} seconds "
+                           f"(--timeout {timeout_ms} ms plus {SUBPROCESS_GRACE_S} s)") from e
     except OSError as e:
         raise RuntimeError(f"cannot run cass search (check CASS_BIN): {diagnostic(e)}") from e
     if p.returncode != 0:
