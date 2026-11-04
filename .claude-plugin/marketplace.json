@@ -305,7 +305,7 @@
         "rows": [
           "\u26a1 **45 skills in one install** \u00b7 design review, writing, research, verification and agent workflows",
           "\ud83c\udfa8 **Review and polish, not just generate** \u00b7 interface, accessibility, color, layout and writing passes that catch what you would miss",
-          "\ud83d\udee1\ufe0f **Skills, not a takeover** \u00b7 the pack changes no settings or hooks; the full harness is a separate ./setup"
+          "\ud83d\udee1\ufe0f **Skills, not a takeover** \u00b7 installing it changes no settings or hooks; /hov-setup runs only when typed and asks before each change; the full harness is a separate ./setup"
         ],
         "run": "Then run `/hov-stack:interface-review` on your next UI change"
       }
