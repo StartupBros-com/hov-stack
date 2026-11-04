@@ -12,6 +12,7 @@ its own repository and a card in the House of Vibe marketplace.
 | [read-ceiling-pager](read-ceiling-pager/) | A Read whose explicit window would exceed the token cap is clamped to the lines that fit, and the result says which lines came back and where to continue; a Read the engine refuses anyway gets a retry window from the engine's own numbers that the read-ceiling-chunk hook admits after a first refusal |
 | [lookout](lookout/) | Every six main-thread model steps, one tool-less fork of the session (served from the prompt cache) is asked whether there is something you should know and might miss; a yes shows above the prompt until `ok` or two prompts on. No model call while nothing draws the session. `/lookout` for status and cost, `now`, `off`, `on`. Written from scratch as a host-compatible take on Claude Code's built-in you-should-know, which does not load behind the gateway |
 | [reminder-diet](reminder-diet/) | Leaves out an engine task reminder that repeats, word for word, the last one the same loop was sent; the first, and any reminder whose task list changed, still goes through, and the comparison starts over after a compaction or `/clear` |
+| [x-mcp-budget](x-mcp-budget/) | Caps what the X (Twitter) MCP's reads cost: list, search and timeline calls ask for at most 10 results, each post and user returned is priced once per UTC day in a ledger every session on the machine shares, and once the day reaches the budget (default $1) further X MCP calls are refused until 00:00 UTC, naming the free oEmbed route for a single post |
 
 Each house mod's README carries its `hooks:` and `calls:` lines as printed by
 `claude plugin validate`, its options, and its limits. `IDEAS.md` is the ranked
@@ -29,7 +30,7 @@ claude --plugin-dir ~/.claude/mods/loop-breaker --plugin-dir ~/.claude/mods/inst
 
 For every session, `CLAUDE_CODE_PLUGIN_DIRS` in `settings.json` `env` names the
 folders joined by `:` (absolute paths; the engine expands a leading `~`). The
-harness wires five of them this way, all but install-preflight: `sync.sh install`
+harness wires six of them this way, all but install-preflight: `sync.sh install`
 links this folder at `~/.claude/mods` (a `STABLE_DIRS` entry, like `hooks`),
 the canonical `settings.json` names them as
 `~/.claude/mods/<mod>`, and `reconcile-runtime-env` writes that list
@@ -99,6 +100,20 @@ correct flag on a failed migration buried in a log (figures in its README). Each
 check reads the whole conversation from the prompt cache, so it sends none while
 nothing draws the session; `/lookout` shows what this session's checks cost, and
 `/lookout off` stops them in later sessions too.
+
+x-mcp-budget was wired on 2026-11-04 by operator decision, against a measured
+defect: agent sessions reading X through the hosted X MCP were most of the X
+developer account's pay-per-use spend. Most of the posts they were billed for
+came from search, timeline and quote-list pages at the tools' default page size,
+in ad-hoc research rather than any scheduled job. The account's spend limit is
+shared by every app on it, so that research could also stop the account's
+production X readers. Before wiring, a live headless session with the mod loaded
+had a 100-result search lowered to 10, priced a real single-post read into the
+ledger, and was refused an X MCP call at a $0 budget. How it is judged is the
+account's daily X MCP spend in the X developer console, against the 30 days
+before. As with the other mods, the operator's verdict from real use decides. A
+budget that keeps refusing useful research is raised under `pluginConfigs`, not
+worked around.
 
 harness-optimizer loaded from this folder between 2026-10-18 and 2026-10-22 as a
 link to an in-tree copy of the plugin. It now ships on its own from the House of

@@ -24,7 +24,7 @@
     "WACLI_STORE_DIR": "$HOME/.local/state/wacli",
     "CASS_AUTO_REFRESH": "0",
     "CLAUDE_CODE_FILE_READ_MAX_OUTPUT_TOKENS": "50000",
-    "CLAUDE_CODE_PLUGIN_DIRS": "$HOME/.claude/mods/loop-breaker:$HOME/.claude/mods/agent-radar:$HOME/.claude/mods/read-ceiling-pager:$HOME/.claude/mods/reminder-diet:$HOME/.claude/mods/lookout"
+    "CLAUDE_CODE_PLUGIN_DIRS": "$HOME/.claude/mods/loop-breaker:$HOME/.claude/mods/agent-radar:$HOME/.claude/mods/read-ceiling-pager:$HOME/.claude/mods/reminder-diet:$HOME/.claude/mods/lookout:$HOME/.claude/mods/x-mcp-budget"
   },
   "attribution": {
     "commit": "",
