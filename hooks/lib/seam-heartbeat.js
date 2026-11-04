@@ -9,8 +9,9 @@
  *                every path is wrapped so a broken beat can never stop a guard
  *                from enforcing.
  *   defect       OBSERVED: guards stop dispatching mid-session (hook cache +
- *                atomic-rename watcher miss), and a killed PreToolUse hook fails
- *                OPEN (anthropics/claude-code#84302). Neither is self-reporting.
+ *                a watcher that can miss an atomic rename), and a killed
+ *                PreToolUse hook fails OPEN (anthropics/claude-code#84302).
+ *                Neither is self-reporting.
  *   delete-when  Claude Code ships a native hook-liveness signal, OR #84302
  *                closes and killed hooks fail closed. Retire with
  *                scripts/hook-seam-check.py; neither is useful alone.
@@ -18,8 +19,10 @@
  * WHY THIS EXISTS
  * ---------------
  * Claude Code caches hooks at session start, and its settings.json file-watcher
- * misses an atomic-rename replacement (the ad daemon does exactly that,
- * sub-second). So a guard that blocked at 10:00 can silently stop blocking at
+ * can miss an atomic-rename replacement (suspected for the ad daemon's sub-second
+ * rewrites and not refuted; a single `mv -f` on 2.1.318 did reach running
+ * sessions, hov-stack#414 item 6). So a
+ * guard that blocked at 10:00 can silently stop blocking at
  * 13:00 in the SAME session — documented in HARNESS.md, with "restart the
  * session" as the only known mitigation and no detector. Upstream
  * anthropics/claude-code#84302 adds a second route to the same end state: a

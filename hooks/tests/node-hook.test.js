@@ -157,7 +157,7 @@ test('gate drift: the launcher skips exactly when loop-guard.js returns at its f
   // The entry point drains stdin and writes only a changed result (the no-op prints nothing).
   assert.ok(js.includes("process.stdin.on('end', () => writeHookOutput(run(data), data));"));
   // Shell: same variable, same literal, inverted comparison, same script name.
-  const g = sh.match(/case \$1 in\n  \*\/PreToolUse\/loop-guard\.js\)\n    if \[ "\$CLAUDE_LOOP_GUARD" != ([^ ]+) \]; then\n      command exec cat >\/dev\/null 2>&1\n      exit 0\n/);
+  const g = sh.match(/case \$_hn_arm in\n  \*\/PreToolUse\/loop-guard\.js\)\n    if \[ "\$CLAUDE_LOOP_GUARD" != ([^ ]+) \] && command -v cat >\/dev\/null 2>&1; then\n      command exec cat >\/dev\/null 2>&1\n      exit 0\n/);
   assert.ok(g, 'launcher gate block not found in its expected shape');
   assert.strictEqual(g[1], m[1], 'launcher literal differs from the JS literal');
   assert.strictEqual(m[1], '1');
@@ -253,7 +253,7 @@ test('settings-guard gate drift: the launcher skips only when run() cannot reach
   // prefixes of every character of it.
   const literal = commonSubstring(guarded);
   assert.strictEqual(literal, 'settings.');
-  const arm = sh.match(/ {2}\*\/PreToolUse\/settings-guard\.js\)\n {4}_hn_buf=\$\(tr '\\0' '\\1'; echo x\)\n {4}_hn_buf=\$\{_hn_buf%x\}\n {4}case \$_hn_buf in\n {6}(.*)\) _hn_stdin=1 ;;\n {6}\*\) exit 0 ;;\n {4}esac\n {4};;\n/);
+  const arm = sh.match(/ {2}\*\/PreToolUse\/settings-guard\.js\)\n {4}if _hn_read; then\n {6}case \$_hn_buf in\n {8}(.*)\) _hn_stdin=1 ;;\n {8}\*\) exit 0 ;;\n {6}esac\n {4}fi\n {4};;\n/);
   assert.ok(arm, 'launcher settings-guard arm not found in its expected shape');
   const pats = arm[1].split(' | ').map((p) => p.replace(/^\*'/, '').replace(/'\*$/, ''));
   const wanted = new Set(literal.split('').map((c) => `\\u00${c.charCodeAt(0).toString(16).padStart(2, '0')[0]}`));
@@ -306,7 +306,7 @@ test('settings-guard gate: path-exact, skips without node, hands node every byte
 const AUTO_FORMAT_JS = path.resolve(__dirname, '..', 'PostToolUse', 'auto-format.js');
 const RUN_WITH_FLAGS_JS = path.resolve(__dirname, '..', 'run-with-flags.js');
 const HOOKS_LIB = path.resolve(__dirname, '..', 'lib');
-const AF_ARM_RE = / {2}\*\/run-with-flags\.js\)\n {4}if \[ "\$2" = (\S+) \] && \[ "\$3" = (\S+) \] && \[ -z "\$CLAUDE_PLUGIN_ROOT" \] && \[ -f "\$\{1%\/\*\}\/(\S+)" \] && \[ -r "\$\{1%\/\*\}\/(\S+)" \]; then\n {6}_hn_buf=\$\(tr '\\0' '\\1'; echo x\)\n {6}_hn_buf=\$\{_hn_buf%x\}\n {6}case \$_hn_buf in\n {8}(.*)\) _hn_stdin=1 ;;\n {8}\*\) exit 0 ;;\n {6}esac\n {4}fi\n {4};;\n/;
+const AF_ARM_RE = / {2}\*\/run-with-flags\.js\)\n {4}if \[ "\$2" = (\S+) \] && \[ "\$3" = (\S+) \] && \[ -z "\$CLAUDE_PLUGIN_ROOT" \] && \[ -f "\$\{1%\/\*\}\/(\S+)" \] && \[ -r "\$\{1%\/\*\}\/(\S+)" \] && _hn_read; then\n {6}case \$_hn_buf in\n {8}(.*)\) _hn_stdin=1 ;;\n {8}\*\) exit 0 ;;\n {6}esac\n {4}fi\n {4};;\n/;
 
 function afArm() {
   const arm = fs.readFileSync(LAUNCHER, 'utf8').match(AF_ARM_RE);
@@ -462,7 +462,7 @@ test('auto-format gate: argv-exact, skips without node, hands node every byte ot
 
 const CODEX_GUARD_JS = path.resolve(__dirname, '..', 'PreToolUse', 'codex-quota-guard.js');
 const CODEX_SPEND_JS = path.resolve(__dirname, '..', 'lib', 'codex-spend.js');
-const CQ_ARM_RE = / {2}\*\/PreToolUse\/codex-quota-guard\.js\)\n {4}_hn_buf=\$\(tr '\\0' '\\1'; echo x\)\n {4}_hn_buf=\$\{_hn_buf%x\}\n {4}case \$_hn_buf in\n {6}(.*)\) _hn_stdin=1 ;;\n {6}\*\) exit 0 ;;\n {4}esac\n {4};;\n/;
+const CQ_ARM_RE = / {2}\*\/PreToolUse\/codex-quota-guard\.js\)\n {4}if _hn_read; then\n {6}case \$_hn_buf in\n {8}(.*)\) _hn_stdin=1 ;;\n {8}\*\) exit 0 ;;\n {6}esac\n {4}fi\n {4};;\n/;
 const bracketed = (lit) => lit.split('').map((c) => (/[a-z]/i.test(c) ? `[${c.toUpperCase()}${c.toLowerCase()}]` : c)).join('');
 
 function cqArm() {
@@ -603,7 +603,7 @@ test('codex-quota-guard gate: path-exact, skips without node, hands node every b
 // ---------------------------------------------------------------------------
 
 const RUNNER_GUARD_JS = path.resolve(__dirname, '..', 'PreToolUse', 'runner-guard.js');
-const RG_ARM_RE = / {2}\*\/PreToolUse\/runner-guard\.js\)\n {4}_hn_buf=\$\(tr '\\0' '\\1'; echo x\)\n {4}_hn_buf=\$\{_hn_buf%x\}\n {4}case \$_hn_buf in\n {6}(.*)\) _hn_stdin=1 ;;\n {6}\*\) exit 0 ;;\n {4}esac\n {4};;\n/;
+const RG_ARM_RE = / {2}\*\/PreToolUse\/runner-guard\.js\)\n {4}if _hn_read; then\n {6}case \$_hn_buf in\n {8}(.*)\) _hn_stdin=1 ;;\n {8}\*\) exit 0 ;;\n {6}esac\n {4}fi\n {4};;\n/;
 
 function rgArm() {
   const arm = fs.readFileSync(LAUNCHER, 'utf8').match(RG_ARM_RE);
@@ -741,4 +741,118 @@ test('runner-guard gate: path-exact, skips without node, hands node every byte o
       assert.strictEqual(run(other, '{"c":"ls"}').stdout, '[{"c":"ls"}x]', other);
     }
   } finally { rmTmp(base); }
+});
+
+// ---------------------------------------------------------------------------
+// Fail open (#414 items 1 and 3): a gate runs only when it can read stdin and finds its tool;
+// otherwise node starts on the untouched stdin, the command the hook ran before the launcher.
+// Every case runs under /bin/sh and under `bash --posix` (/bin/sh on Arch), and every spawn has a
+// timeout: before the fix, bash with fd 0 closed put the `$(...)` pipe on fd 0, tr read its own
+// output, and the hook hung until Claude Code killed it.
+// ---------------------------------------------------------------------------
+
+const BASH = ['/usr/bin/bash', '/bin/bash'].find((b) => fs.existsSync(b));
+const SHELLS = [['/bin/sh'], ...(BASH ? [[BASH, '--posix']] : [])];
+const TR = ['/usr/bin/tr', '/bin/tr'].find((b) => fs.existsSync(b));
+// Fake nodes. Absolute paths only: the PATH under test may hold no cat.
+const NODE_FD0 = '#!/bin/sh\nif { true 3<&0; } 2>/dev/null; then s=open; else s=closed; fi\necho "$s:$*"\n';
+const NODE_ECHO = '#!/bin/sh\nprintf \'ran:%s\\n\' "$*"\nexec /bin/cat\n';
+
+/** Every gated registration, each with a payload its gate skips when the gate can run. */
+function gatedArms(base) {
+  const hooks = path.join(base, 'hooks');
+  fs.mkdirSync(path.join(hooks, 'PostToolUse'), { recursive: true });
+  fs.writeFileSync(path.join(hooks, 'PostToolUse', 'auto-format.js'), '');
+  const ls = '{"tool_input":{"command":"ls"}}\n';
+  return [
+    ['loop-guard (unarmed)', [`${hooks}/PreToolUse/loop-guard.js`], ls],
+    ['settings-guard', [`${hooks}/PreToolUse/settings-guard.js`], '{"tool_input":{"file_path":"/a/b.js"}}\n'],
+    ['codex-quota-guard', [`${hooks}/PreToolUse/codex-quota-guard.js`], ls],
+    ['runner-guard', [`${hooks}/PreToolUse/runner-guard.js`], ls],
+    ['auto-format', [`${hooks}/run-with-flags.js`, 'post:edit:format', 'PostToolUse/auto-format.js', 'standard,strict'], '{"tool_input":{"file_path":"/a/b.md"}}\n'],
+  ];
+}
+
+function foWorld(fakeNode, ...extraPath) {
+  const base = mkTmp('node-hook-fo-');
+  const dir = path.join(base, 'real');
+  fs.mkdirSync(dir);
+  fs.writeFileSync(path.join(dir, 'node'), fakeNode, { mode: 0o755 });
+  const env = { ...buildEnv(), PATH: [dir, ...extraPath].join(':') };
+  delete env.CLAUDE_LOOP_GUARD;
+  delete env.CLAUDE_PLUGIN_ROOT;
+  return { base, dir, env, arms: gatedArms(base) };
+}
+
+const foRun = (sh, args, env, input) => spawnSync(sh[0], [...sh.slice(1), LAUNCHER, ...args], { env, input, timeout: 10000 });
+const foSeen = (r) => [r.status, r.signal, String(r.stdout), String(r.stderr)];
+/** Every mismatch, not just the first, so a red run names each arm and shell that broke. */
+const foCheck = (bad, label, got, want) => { if (JSON.stringify(got) !== JSON.stringify(want)) bad.push(`${label}: got ${JSON.stringify(got)} want ${JSON.stringify(want)}`); };
+
+test('fail open, control: in every shell, with stdin open and tr and cat on PATH, every gate skips its payload', () => {
+  assert.ok(TR, 'no tr on this host');
+  const w = foWorld(NODE_ECHO, '/usr/bin', '/bin');
+  try {
+    const bad = [];
+    for (const sh of SHELLS) {
+      for (const [name, args, payload] of w.arms) foCheck(bad, `${sh.join(' ')} ${name}`, foSeen(foRun(sh, args, w.env, payload)), [0, null, '', '']);
+    }
+    assert.deepStrictEqual(bad, []);
+  } finally { rmTmp(w.base); }
+});
+
+test('fail open: with fd 0 closed no gate runs; node starts with fd 0 still closed, exit 0, empty stderr, no hang (every shell)', () => {
+  const w = foWorld(NODE_FD0, '/usr/bin', '/bin');
+  try {
+    // `exec "$@" <&-` closes fd 0 for the command it runs: proven on the fake node itself first.
+    const closed = (argv, env) => spawnSync('/bin/sh', ['-c', 'exec "$@" <&-', 'closer', ...argv], { env, timeout: 10000 });
+    assert.deepStrictEqual(foSeen(closed([path.join(w.dir, 'node'), 'probe'], w.env)), [0, null, 'closed:probe\n', '']);
+    const bad = [];
+    for (const sh of SHELLS) {
+      for (const [name, args] of w.arms) {
+        for (const env of [w.env, { ...w.env, CLAUDE_LOOP_GUARD: '1' }]) {
+          foCheck(bad, `${sh.join(' ')} ${name} CLAUDE_LOOP_GUARD=${env.CLAUDE_LOOP_GUARD}`, foSeen(closed([...sh, LAUNCHER, ...args], env)), [0, null, `closed:${args.join(' ')}\n`, '']);
+        }
+      }
+    }
+    assert.deepStrictEqual(bad, []);
+  } finally { rmTmp(w.base); }
+});
+
+test('fail open: with neither tr nor cat on PATH every gate starts node, which gets every byte (every shell)', () => {
+  const w = foWorld(NODE_ECHO);
+  try {
+    const bad = [];
+    for (const sh of SHELLS) {
+      for (const [name, args, payload] of w.arms) {
+        for (const input of [payload, '{"a":"\u0000\u0001 settings. kill codex .ts\\""}\n\n\n', '']) {
+          const r = foRun(sh, args, w.env, Buffer.from(input, 'utf8'));
+          // Bytes compared as hex so a NUL that became \001 cannot hide in a string compare.
+          const want = Buffer.concat([Buffer.from(`ran:${args.join(' ')}\n`), Buffer.from(input, 'utf8')]).toString('hex');
+          foCheck(bad, `${sh.join(' ')} ${name} ${JSON.stringify(input)}`, [r.status, r.signal, r.stdout ? r.stdout.toString('hex') : null, String(r.stderr)], [0, null, want, '']);
+        }
+      }
+    }
+    assert.deepStrictEqual(bad, []);
+  } finally { rmTmp(w.base); }
+});
+
+test('fail open: each gate falls open only for its own missing tool (tr present, cat missing)', () => {
+  assert.ok(TR, 'no tr on this host');
+  const w = foWorld(NODE_ECHO);
+  const trOnly = path.join(w.base, 'tr-only');
+  fs.mkdirSync(trOnly);
+  fs.symlinkSync(TR, path.join(trOnly, 'tr'));
+  const env = { ...w.env, PATH: `${w.dir}:${trOnly}` };
+  try {
+    const bad = [];
+    for (const sh of SHELLS) {
+      for (const [name, args, payload] of w.arms) {
+        // loop-guard drains with cat, so without cat it starts node; the tr gates still skip.
+        const want = name.startsWith('loop-guard') ? `ran:${args.join(' ')}\n${payload}` : '';
+        foCheck(bad, `${sh.join(' ')} ${name}`, foSeen(foRun(sh, args, env, payload)), [0, null, want, '']);
+      }
+    }
+    assert.deepStrictEqual(bad, []);
+  } finally { rmTmp(w.base); }
 });

@@ -15,8 +15,25 @@
 # node untouched. No pipe, no wrapper process, nothing written. One exception:
 # the stdin gates below hand node its buffered stdin through a pipe,
 # with the shell left as node's parent and node's exit code passed through.
+# That pipe leaves no orphan when a hook times out: Claude Code 2.1.318 starts
+# each hook as its own process group, and a timed-out `printf x | sleep` hook
+# left no `sleep` behind (measured 2026-11-04, #414 item 2). A caller that
+# signalled only this shell's pid would leave node running; Claude Code does not.
 # Variables named `_hn_*` belong to this launcher; an inherited one is reset
 # before use, so nothing in the caller's env can steer a hook's stdin.
+#
+# Fail open (#414 items 1 and 3): a gate runs only when it can read stdin and
+# finds the tool it uses. Otherwise node starts ungated, which is exactly the
+# command the hook ran before this launcher existed.
+#   - fd 0 closed: no gate runs. The probe comes before any `$(...)` because
+#     bash (/bin/sh on Arch) then puts the command-substitution pipe on the free
+#     fd 0, so tr reads its own output pipe and the hook hangs to its timeout.
+#   - tr missing or failing: `_hn_read` is false and the stdin-gate arm falls
+#     through (the `x` sentinel is written only after tr succeeds). A read error
+#     part-way through stdin is not recovered: node gets what is left (the old
+#     launcher skipped node there; either way the hook never sees the whole payload).
+#   - cat missing: the loop-guard arm falls through, since `command exec` of a
+#     missing command exits the shell with 127 in dash and bash alike.
 #
 # Bounded: only `[ -f ]` / `[ -x ]` on PATH entries, never a /mnt/* entry (a
 # drvfs lookup costs ~2 ms each), never anything outside PATH except the pass 5 gate's one
@@ -35,7 +52,8 @@
 # its input untouched at its first statement (loop-guard.js: `if (process.env.CLAUDE_LOOP_GUARD
 # !== '1') return rawInput;`), the entry point reads stdin to EOF and writeHookOutput()
 # prints nothing, exit 0. So the launcher skips the ~30 ms node start for that one script
-# when the same predicate is false: it drains stdin (as the JS does) and exits 0.
+# when the same predicate is false: it drains stdin (as the JS does) and exits 0, provided
+# fd 0 is open and cat is on PATH (Fail open, above).
 #   - `[ "$X" = 1 ]` is the shell spelling of `process.env.X !== '1'` negated: both are exact
 #     string equality (unset, empty, `0`, `true`, ` 1`, `1 ` and `01` all skip in both).
 #   - Only the `case` pattern below costs anything on every other hook: a builtin string
@@ -59,10 +77,10 @@
 # other short escapes cannot yield any of those characters; path.basename is posix, so
 # `a\settings.json` is one non-guarded name, and it still reaches node (the gate only needs the
 # necessary condition).
-# The launcher reads stdin whole before deciding. When node is needed it gets the same bytes back:
-# `tr '\0' '\1'` swaps NUL (which dash would silently drop; a raw NUL and a raw \001 are both a
-# JSON.parse error, so the outcome is the same), and the `x` sentinel keeps the trailing newlines
-# `$(...)` would strip. The pass 5 arm below uses the same buffering.
+# The launcher reads stdin whole (`_hn_read`) before deciding. When node is needed it gets the same
+# bytes back: `tr '\0' '\1'` swaps NUL (which dash would silently drop; a raw NUL and a raw \001 are
+# both a JSON.parse error, so the outcome is the same), and the `x` sentinel keeps the trailing
+# newlines `$(...)` would strip. The pass 5 arm below uses the same buffering.
 # Tied to GUARDED by hooks/tests/node-hook.test.js (drift test).
 #
 # Stdin gate (#369, pass 5): the only seed PostToolUse hook on Edit|Write|MultiEdit is
@@ -133,41 +151,47 @@
 # `_hn_stdin` is set only by those arms; clear any inherited value so an exported
 # `_hn_stdin` can never pipe `_hn_buf` into another hook in place of its stdin.
 _hn_stdin=
-case $1 in
+# Buffer stdin whole into _hn_buf; false (nothing buffered) when tr is missing or fails.
+_hn_read() {
+  _hn_buf=$(tr '\0' '\1' 2>/dev/null && echo x) || return
+  _hn_buf=${_hn_buf%x}
+}
+# fd 0 closed: match no arm, so node starts ungated (Fail open, above).
+_hn_arm=$1
+{ true 3<&0; } 2>/dev/null || _hn_arm=
+case $_hn_arm in
   */PreToolUse/loop-guard.js)
-    if [ "$CLAUDE_LOOP_GUARD" != 1 ]; then
+    if [ "$CLAUDE_LOOP_GUARD" != 1 ] && command -v cat >/dev/null 2>&1; then
       command exec cat >/dev/null 2>&1
       exit 0
     fi
     ;;
   */PreToolUse/settings-guard.js)
-    _hn_buf=$(tr '\0' '\1'; echo x)
-    _hn_buf=${_hn_buf%x}
-    case $_hn_buf in
-      *'settings.'* | *'\u002'* | *'\u006'* | *'\u007'*) _hn_stdin=1 ;;
-      *) exit 0 ;;
-    esac
+    if _hn_read; then
+      case $_hn_buf in
+        *'settings.'* | *'\u002'* | *'\u006'* | *'\u007'*) _hn_stdin=1 ;;
+        *) exit 0 ;;
+      esac
+    fi
     ;;
   */PreToolUse/codex-quota-guard.js)
-    _hn_buf=$(tr '\0' '\1'; echo x)
-    _hn_buf=${_hn_buf%x}
-    case $_hn_buf in
-      *[Cc][Oo][Dd][Ee][Xx]* | *[Aa][Pp][Pp]-[Ss][Ee][Rr][Vv][Ee][Rr]-[Bb][Rr][Oo][Kk][Ee][Rr]* | *'\u002'* | *'\u004'* | *'\u005'* | *'\u006'* | *'\u007'*) _hn_stdin=1 ;;
-      *) exit 0 ;;
-    esac
+    if _hn_read; then
+      case $_hn_buf in
+        *[Cc][Oo][Dd][Ee][Xx]* | *[Aa][Pp][Pp]-[Ss][Ee][Rr][Vv][Ee][Rr]-[Bb][Rr][Oo][Kk][Ee][Rr]* | *'\u002'* | *'\u004'* | *'\u005'* | *'\u006'* | *'\u007'*) _hn_stdin=1 ;;
+        *) exit 0 ;;
+      esac
+    fi
     ;;
   */PreToolUse/runner-guard.js)
-    _hn_buf=$(tr '\0' '\1'; echo x)
-    _hn_buf=${_hn_buf%x}
-    case $_hn_buf in
-      *'kill'* | *'systemctl'* | *'\u006'* | *'\u007'*) _hn_stdin=1 ;;
-      *) exit 0 ;;
-    esac
+    if _hn_read; then
+      case $_hn_buf in
+        *'kill'* | *'systemctl'* | *'\u006'* | *'\u007'*) _hn_stdin=1 ;;
+        *) exit 0 ;;
+      esac
+    fi
     ;;
   */run-with-flags.js)
-    if [ "$2" = post:edit:format ] && [ "$3" = PostToolUse/auto-format.js ] && [ -z "$CLAUDE_PLUGIN_ROOT" ] && [ -f "${1%/*}/PostToolUse/auto-format.js" ] && [ -r "${1%/*}/PostToolUse/auto-format.js" ]; then
-      _hn_buf=$(tr '\0' '\1'; echo x)
-      _hn_buf=${_hn_buf%x}
+    if [ "$2" = post:edit:format ] && [ "$3" = PostToolUse/auto-format.js ] && [ -z "$CLAUDE_PLUGIN_ROOT" ] && [ -f "${1%/*}/PostToolUse/auto-format.js" ] && [ -r "${1%/*}/PostToolUse/auto-format.js" ] && _hn_read; then
       case $_hn_buf in
         *'.js"'* | *'.jsx"'* | *'.ts"'* | *'.tsx"'* | *'\u002'* | *'\u006'* | *'\u007'*) _hn_stdin=1 ;;
         *) exit 0 ;;
