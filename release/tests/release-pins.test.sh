@@ -29,7 +29,7 @@ pass() { printf 'ok - %s\n' "$1"; PASS=$((PASS + 1)); }
 die() { printf 'not ok - %s\n' "$1" >&2; [ -z "${OUT:-}" ] || printf '%s\n' "$OUT" >&2; exit 1; }
 expect_rc() { [ "$RC" -eq "$1" ] || die "$2 (exit $RC, wanted $1)"; }
 expect_out() { grep -qF -- "$1" <<<"$OUT" || die "$2 (output lacks: $1)"; }
-expect_no_out() { ! printf '%s\n' "$OUT" | grep -qF -- "$1" || die "$2 (output has: $1)"; }
+expect_no_out() { ! grep -qF -- "$1" <<<"$OUT" || die "$2 (output has: $1)"; }
 expect_same() { cmp -s "$1" "$2" || die "$3"; }
 
 TAB="$(printf '\t')"
