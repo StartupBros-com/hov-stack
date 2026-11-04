@@ -2821,6 +2821,34 @@ if [ "$push_removal_status" -eq 0 ]; then ok; else bad "sync.sh push exited $pus
 if [ "$push_removal_canary" = "copied by push" ]; then ok; else bad "sync.sh push did not rewrite the canonical settings.json from the live copy (the removed-key branch was never reached):"$'\n'"$(cat "$TMP/push-removal.out")"; fi
 if [ "$push_removal_has_key" = false ]; then ok; else bad "sync.sh push resurrected env.CLAUDE_CODE_PLUGIN_DIRS into a canonical copy that dropped it (push status $push_removal_status):"$'\n'"$(cat "$TMP/push-removal.out")"; fi
 
+# -- memory mirror is opt-in (#346) --------------------------------------------
+# A named mirror is the positive arm: the push above had CLAUDE_MEMORY_MIRROR_ROOT
+# set and must have copied the live note into it. With the variable unset and no
+# <checkout>/memory, push must copy nothing into the checkout (an untracked dir
+# of a public repository) and check must say SKIP rather than report drift. The
+# same live note is offered in every arm, so on the pre-#346 code the unset arms
+# create $REPO/memory and print the drift line.
+echo "=== memory mirror opt-in ===" >&2
+if [ -f "$push_memory_mirror/smoke/MEMORY.md" ]; then ok; else bad "push with CLAUDE_MEMORY_MIRROR_ROOT named did not copy live memory into it:"$'\n'"$(cat "$TMP/push-removal.out")"; fi
+if [ ! -e "$REPO/memory" ]; then ok; else bad "fixture precondition: $REPO/memory exists before the opt-out push"; fi
+cp "$REPO/settings.json" "$TMP/settings-canonical.before-optout"
+cp "$CLAUDE_HOME/settings.json" "$TMP/settings-live.before-optout"
+env -u CLAUDE_MEMORY_MIRROR_ROOT CLAUDE_MEMORY_LIVE_ROOT="$push_memory_live" \
+  "$SYNC" push >"$TMP/push-optout.out" 2>&1; push_optout_status=$?
+cp "$TMP/settings-canonical.before-optout" "$REPO/settings.json"
+cp "$TMP/settings-live.before-optout" "$CLAUDE_HOME/settings.json"
+if [ "$push_optout_status" -eq 0 ]; then ok; else bad "sync.sh push with no mirror exited $push_optout_status:"$'\n'"$(cat "$TMP/push-optout.out")"; fi
+if [ ! -e "$REPO/memory" ]; then ok; else bad "sync.sh push with no mirror named copied live memory into the checkout:"$'\n'"$(find "$REPO/memory" | head -5)"; fi
+if grep -q 'memory not copied: no mirror at' "$TMP/push-optout.out"; then ok; else bad "sync.sh push with no mirror did not say it copied no memory:"$'\n'"$(cat "$TMP/push-optout.out")"; fi
+optout_check=$(env -u CLAUDE_MEMORY_MIRROR_ROOT CLAUDE_MEMORY_LIVE_ROOT="$push_memory_live" "$SYNC" check 2>&1)
+if grep -q 'DRIFT: memory differs' <<<"$optout_check"; then bad "sync.sh check with no mirror reported memory drift:"$'\n'"$optout_check"; else ok; fi
+if grep -q 'SKIP: memory — no mirror at' <<<"$optout_check"; then ok; else bad "sync.sh check with no mirror did not print its memory SKIP line:"$'\n'"$optout_check"; fi
+if [ ! -e "$REPO/memory" ]; then ok; else bad "sync.sh check with no mirror created $REPO/memory"; fi
+# A named but empty mirror still opts in, so the same live note is drift.
+mkdir -p "$TMP/optin-empty-mirror"
+optin_check=$(CLAUDE_MEMORY_LIVE_ROOT="$push_memory_live" CLAUDE_MEMORY_MIRROR_ROOT="$TMP/optin-empty-mirror" "$SYNC" check 2>&1)
+if grep -q 'DRIFT: memory differs' <<<"$optin_check"; then ok; else bad "sync.sh check with a named empty mirror did not report the uncopied note as drift:"$'\n'"$optin_check"; fi
+
 # -- hook-target guard: real reconcile refuses an absent canonical hook --------
 # Planted negative for the 2026-08-18 incident: a hook registered from an
 # unmerged branch pointed at a file that did not exist in the MAIN checkout

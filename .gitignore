@@ -14,3 +14,7 @@ __pycache__/
 
 # Compound Engineering skill scratch; durable CE artifacts live under docs/.
 .context/compound-engineering/
+
+# Private project memory. `sync.sh memory-push` mirrors it here only on request
+# (#346); scripts/backup-harness.sh stages it with `add -f` for a private clone.
+/memory/
