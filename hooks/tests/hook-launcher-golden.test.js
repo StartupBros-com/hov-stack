@@ -166,7 +166,7 @@ add(REWRITE_ID, 'git-guard: non-Bash tool ignored', 'quiet', { fx: gitRepo, payl
 
 const GC = 'PreToolUse/grep-cost-guard.js';
 add(GC, 'grep-cost: paired bounded spans denied', 'deny', { payload: () => bash("grep -E '.{0,120}(StartupBros|Will Mitchell).{0,160}' page.html") });
-add(GC, 'grep-cost: rg paired spans denied', 'deny', { payload: () => bash("rg '.{0,30}anchor.{0,30}' page.html") });
+add(GC, 'grep-cost: rg paired spans allowed (#378: the ugrep shim never reaches rg)', 'quiet', { payload: () => bash("rg '.{0,30}anchor.{0,30}' page.html") });
 add(GC, 'grep-cost: opaque pattern file denied', 'deny', { payload: () => bash('grep -f patterns.txt page.html') });
 add(GC, 'grep-cost: opaque $var pattern rewritten behind ulimit', 'rewrite', { payload: () => bash('grep "$PAT" page.html') });
 add(GC, 'grep-cost: plain grep allowed', 'quiet', { payload: () => bash('grep -n foo page.html') });
