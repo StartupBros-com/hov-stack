@@ -394,7 +394,13 @@ Ready means `jsm whoami` shows them signed in with an active subscription.
 
 ## Finish
 
-Run Step 1's detector again. Then wrap up in a few short lines, with no table:
+Run Step 1's detector again. Refresh Claude's tool instructions with the same config dir (`$CLAUDE_CONFIG_DIR`, else `~/.claude`):
+
+```bash
+node "<skill-dir>/scripts/instructions.mjs" --json
+```
+
+Use the absolute skill path as in Step 1. If it fails, say why; the existing instructions stay as they were. On success, say in one plain line which tools its `tools` list now mentions, or that no installed tools need instruction lines. Then wrap up in a few short lines, with no table:
 
 - What's ready now, each with how to start it ("sign-it: type /sign-it:sign-it and give it a PDF").
 - Anything skipped or still waiting, and the one thing left for the user, if any.

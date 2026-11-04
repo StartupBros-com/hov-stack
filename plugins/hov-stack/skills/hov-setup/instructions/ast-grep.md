@@ -1,0 +1,1 @@
+- Structural code search or rewrite: `ast-grep` before line-based grep/sed.

@@ -1,0 +1,1 @@
+- Search past agent sessions with `cass` before redoing work.

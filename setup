@@ -79,6 +79,8 @@
 #      own unedited seed (step 3's exception), so those plugins get new versions by
 #      themselves; for a settings.json you made it only says whether auto-update is on.
 #      --check reads what Claude Code reports installed; it writes no record of its own.
+#      Regenerates rules/hov-stack-tools.md from live installed offers and their instruction
+#      files. Only setup's own regular file is replaced or removed; symlinks and user files stay.
 #   6. Never reads or writes memory, projects/, credentials, or anything outside the config
 #      dir, ~/.hov-stack-backups, ~/.local (dcg; with --update also the install records
 #      under ~/.local/state/hov-stack and gh, uv, cass and jsm in ~/.local/bin) and this
@@ -628,6 +630,24 @@ EOF
 # quietly: --check names a dangling import, and a rerun takes it away. Nothing is written
 # through a rules/ that is a symlink: it leads into another tree, often one that is shared,
 # and the import names a path in this HOME.
+instructions_row() {  # instructions_row [--check]
+  local out rc=0 state
+  if ! claude_usable; then
+    row instructions blocked "rules/hov-stack-tools.md left unchanged: needs Claude Code $CLAUDE_FLOOR or later on PATH"
+    return 0
+  fi
+  if ! command -v node >/dev/null 2>&1; then
+    row instructions blocked "rules/hov-stack-tools.md left unchanged: needs node on PATH"
+    return 0
+  fi
+  out=$(node "$HOV_STACK/plugins/hov-stack/skills/hov-setup/scripts/instructions.mjs" --config-dir "$CFG" "$@" 2>&1) || rc=$?
+  case "$rc" in
+    0) state=ok ;;
+    3) case "$out" in *': missing:'*) state=missing ;; *) state=stale ;; esac ;;
+    *) state=blocked ;;
+  esac
+  row instructions "$state" "$out"
+}
 overlay_usable() { case $OVERLAY in /*) return 0 ;; *) return 1 ;; esac; }
 overlay_rule_target() {  # the path setup's own rules file imports; fails when the file is not setup's
   [ -f "$OVERLAY_RULE" ] && [ ! -L "$OVERLAY_RULE" ] || return 1
@@ -785,6 +805,7 @@ if [ "$check" = 1 ]; then
     row plugins skipped "needs Claude Code $CLAUDE_FLOOR or later on PATH"
   fi
 
+  instructions_row --check
   printf '%s\n' "${rows[@]}"
   if [ "$not_ok" -eq 0 ]; then
     echo "hov-stack --check: every step is in place."
@@ -966,6 +987,7 @@ if [ "$update" = 1 ]; then
   fi
 fi
 
+instructions_row
 echo "hov-stack: status"
 printf '%s\n' "${rows[@]}"
 echo "  left alone on purpose: memory, projects/, credentials, settings.local.json, shell rc files."

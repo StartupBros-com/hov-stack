@@ -28,6 +28,8 @@
 #     neither; a CLI below the floor, or offline, is reported and the run goes on; --check is
 #     green after a full run, names a default plugin removed since and a rerun installs only
 #     that one, and names each missing step after a partial run, changing nothing
+#   - tool instructions (#420): installed tools contribute rules, reruns move nothing,
+#     and --check reports stale after removal without writing
 #   - auto-update (#395): the fake claude writes what Claude Code writes on an add and an
 #     install; setup then turns auto-update on for hov in its own unedited seed and says
 #     how to turn it off, a rerun leaves it on and writes nothing, and a settings.json of
@@ -724,7 +726,27 @@ new_fake "$FK" 2.1.310
   || fail "the fake hov marketplace does not serve exactly lib/default-plugins.txt's plugins; update new_fake"
 cp "$ROOT/lib/default-plugin-skills.txt" "$copy/lib/default-plugin-skills.txt"
 HF=$WORK/home-fake
+mkdir -p "$WORK/tool-bin"
+printf '#!/bin/sh\nexit 0\n' > "$WORK/tool-bin/cass"
+chmod +x "$WORK/tool-bin/cass"
+export HOV_SETUP_EXTRA_BIN_DIRS=$WORK/tool-bin
 fake_setup "$FK" "$HF" "$WORK/run-fake.log" --no-dcg || { cat "$WORK/run-fake.log"; fail "setup with a fake claude exited non-zero"; }
+TOOLS=$HF/.claude/rules/hov-stack-tools.md
+[ -f "$TOOLS" ] && [ ! -L "$TOOLS" ] || fail "no regular generated tool rules file"
+grep -q -F 'Search past agent sessions with' "$TOOLS" || fail "installed cass has no instruction"
+tools_before=$(sha256sum < "$TOOLS")
+tools_mtime=$(stat -c %y "$TOOLS")
+fake_setup "$FK" "$HF" "$WORK/tools-rerun.log" --no-dcg
+! grep -q 'backed up' "$WORK/tools-rerun.log" || fail "tool rules rerun moved something"
+[ "$(sha256sum < "$TOOLS")" = "$tools_before" ] && [ "$(stat -c %y "$TOOLS")" = "$tools_mtime" ] || fail "tool rules rerun changed bytes or mtime"
+fake_setup "$FK" "$HF" "$WORK/tools-check.log" --check --no-dcg || fail "tool rules check is not green"
+rm "$WORK/tool-bin/cass"
+rc=0; fake_setup "$FK" "$HF" "$WORK/tools-stale.log" --check --no-dcg || rc=$?
+[ "$rc" = 1 ] || fail "removed tool did not fail check"
+grep -q -E '^  instructions +stale .*hov-stack-tools.md' "$WORK/tools-stale.log" || fail "check did not name stale tool rules"
+[ "$(sha256sum < "$TOOLS")" = "$tools_before" ] && [ "$(stat -c %y "$TOOLS")" = "$tools_mtime" ] || fail "stale check wrote tool rules"
+fake_setup "$FK" "$HF" "$WORK/tools-refresh.log" --no-dcg
+ok "tool rules follow installed tools, reruns move nothing, and check reports stale without writing"
 sed 's/^/    | /' "$WORK/run-fake.log"
 [ "$(calls_of "$FK" 'plugin marketplace add StartupBros-com/hov-stack')" = 1 ] || { cat "$FK/calls"; fail "the hov marketplace was not added exactly once"; }
 while read -r p; do
