@@ -371,7 +371,9 @@ CODEX_QUOTA_HOOK_COMMAND=${CODEX_QUOTA_HOOK_COMMAND:-'"$HOME/.claude/hooks/bin/n
 CODEX_LEGACY_PRE_HOOK_COMMAND='node "$HOME/.claude/hooks/PreToolUse/codex-doghouse-guard.js"'
 CODEX_LEGACY_POST_HOOK_COMMAND='node "$HOME/.claude/hooks/PostToolUse/codex-doghouse-trip.js"'
 # Versioned policy is portable and linked; host authority deliberately is not.
-# ~/.local/state/claude/repo-routes.json is created only by repo-route.py bootstrap.
+# The host's route record (repo-route.py state_path(): $REPO_ROUTE_STATE, else
+# $XDG_STATE_HOME/repo-routes.json, default ~/.local/state/repo-routes.json) is created
+# only by repo-route.py bootstrap.
 REPO_ROUTE_HOOK_COMMAND=${REPO_ROUTE_HOOK_COMMAND:-'"$HOME/.claude/hooks/bin/node-hook" "$HOME/.claude/hooks/PreToolUse/canonical-worktree-route-guard.js"'}
 MODE=${1:-check}
 
