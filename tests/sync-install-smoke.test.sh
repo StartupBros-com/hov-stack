@@ -776,6 +776,73 @@ else
   echo "  got: $(jq -c '.modelSettings["claude-fable-5-1"]' "$merge_models_home/settings.json" 2>/dev/null)" >&2
 fi
 
+# check()'s canonical side is lib/settings-seed.js with every key kept and the
+# private overlay merged, and both sides are normalized: `$HOME/` rendered in
+# hook commands and permission rules, hook groups sorted, empty events dropped.
+# Each tolerance has a planted negative beside it, so normalization cannot be
+# hiding a real difference.
+sn_home=$TMP/settings-normal-home
+mkdir -p "$sn_home"
+ln -s "$REPO/claude-env.sh" "$sn_home/claude-env.sh"
+ln -s "$REPO/mods" "$sn_home/mods"
+sn_out=$(CLAUDE_HOME="$sn_home" "$SYNC" reconcile-runtime-env 2>&1) || bad "settings-normal fixture: reconcile-runtime-env failed:"$'\n'"$sn_out"
+cp "$sn_home/settings.json" "$TMP/settings-normal-base.json"
+sn_reset() { cp "$TMP/settings-normal-base.json" "$sn_home/settings.json"; }
+sn_edit() { jq "$@" "$sn_home/settings.json" > "$sn_home/settings.json.tmp" && mv "$sn_home/settings.json.tmp" "$sn_home/settings.json"; }
+# The settings line of `sync.sh check`, with the overlay directory given (an
+# absent one means no overlay).
+sn_check() { CLAUDE_HOME="$sn_home" HOV_STACK_OVERLAY="${1:-$TMP/settings-normal-no-overlay}" "$SYNC" check 2>&1 | grep -F 'settings.json' || true; }
+sn_expect_clean() {
+  local line; line=$(sn_check "${2:-}")
+  case "$line" in *"DRIFT: settings.json"*) bad "$1 was reported as settings DRIFT: $line" ;; *) ok ;; esac
+}
+sn_expect_drift() {
+  local line; line=$(sn_check "${3:-}")
+  case "$line" in *"DRIFT: settings.json differs"*" in: "*"$2"*) ok ;; *) bad "$1 was not reported as settings DRIFT naming $2: ${line:-<no settings line>}" ;; esac
+}
+sn_expect_clean "a freshly reconciled live file"
+# A rule the overlay adds, spelled with the template's `$HOME/`.
+sn_ov=$TMP/settings-normal-overlay
+mkdir -p "$sn_ov"
+printf '%s\n' '{"permissions":{"allow":["Bash($HOME/planted/bin/tool:*)"]}}' > "$sn_ov/settings.json"
+sn_expect_drift "an overlay allow rule missing from live" permissions "$sn_ov"
+sn_edit --arg rule "Bash($HOME/planted/bin/tool:*)" '.permissions.allow += [$rule]'
+sn_expect_clean "the overlay rule in live, rendered as setup writes it" "$sn_ov"
+sn_reset
+sn_edit '.permissions.allow += ["Bash($HOME/planted/bin/tool:*)"]'
+sn_expect_clean "the overlay rule in live, in the template spelling sync.sh install copies" "$sn_ov"
+sn_reset
+# Hook order and spelling: groups run in parallel, and `$HOME/.claude` in a
+# command is the config dir.
+sn_edit '.hooks.PreToolUse |= reverse'
+sn_expect_clean "reversed PreToolUse hook groups"
+sn_reset
+if jq -e '.hooks.PreToolUse[0].hooks[0].command | contains("$HOME/.claude")' "$sn_home/settings.json" >/dev/null; then ok; else bad "settings-normal fixture: the first PreToolUse command no longer carries \$HOME/.claude, so the rendering case below tests nothing"; fi
+sn_edit --arg cfg "$sn_home" '(.hooks.PreToolUse[0].hooks[0].command) |= (split("$HOME/.claude") | join($cfg))'
+sn_expect_clean "a hook command with \$HOME/.claude rendered to the config dir"
+sn_reset
+if jq -e '.hooks | has("Notification") | not' "$sn_home/settings.json" >/dev/null; then ok; else bad "settings-normal fixture: live already has a Notification event, so the empty-event case below tests nothing"; fi
+sn_edit '.hooks.Notification = []'
+sn_expect_clean "an event with an empty hook list"
+sn_reset
+# PLANTED NEGATIVES: a different hook, a changed key the seed's allow-list
+# leaves out (so the canonical side must keep every key), and an overlay
+# that cannot be merged.
+sn_edit '(.hooks.PreToolUse[0].hooks[0].command) |= . + " --planted"'
+sn_expect_drift "a changed hook command" hooks
+sn_reset
+sn_edit '.advisorModel = "planted-model"'
+sn_expect_drift "a changed live advisorModel" advisorModel
+sn_reset
+sn_bad_ov=$TMP/settings-normal-bad-overlay
+mkdir -p "$sn_bad_ov"
+printf '[]\n' > "$sn_bad_ov/settings.json"
+sn_line=$(sn_check "$sn_bad_ov")
+case "$sn_line" in
+  *"DRIFT: settings.json canonical copy could not be built with the overlay"*) ok ;;
+  *) bad "an overlay that is not a JSON object did not stop the comparison: ${sn_line:-<no settings line>}" ;;
+esac
+
 # A CLAUDE_CODE_PLUGIN_DIRS entry whose folder has no plugin manifest must fail
 # closed before anything is written: the engine would log a failed load in
 # every session, and nothing else would say why. Only the manifest is moved

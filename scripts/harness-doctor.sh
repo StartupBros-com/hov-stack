@@ -1079,19 +1079,18 @@ if [ -f "$_puc" ] && command -v jq >/dev/null 2>&1; then
   [ "$WARNS" -eq "$w0" ] && ok "plugin-update hook bridges recorded no errors (cache fresh)"
 fi
 
-echo "== 11. settings.json security keys match dotfiles copy =="
+echo "== 11. settings.json security policy holds in both copies =="
 w0=$WARNS
 LIVE_SETTINGS=$HOME/.claude/settings.json
 REPO_SETTINGS=$HD_ROOT/settings.json
 if [ -f "$LIVE_SETTINGS" ] && [ -f "$REPO_SETTINGS" ]; then
-  # statusLine/spinnerVerbs are ad-daemon-owned and churn constantly; model is
-  # operator-selected per work-type (Fable/Opus) and toggles freely, so it is not
-  # compared here; everything security-relevant must match the last reviewed copy.
+  # Whether live matches the repo is check 10's settings DRIFT line, which names
+  # each top-level key that differs. That comparison renders `$HOME/`, merges
+  # the private overlay and resolves the dcg path, as setup does; the raw
+  # per-key comparison that stood here did none of that, so on a host with an
+  # overlay it warned on every run. This check keeps the policy that must hold
+  # in each copy on its own.
   if command -v jq >/dev/null 2>&1; then
-    for k in permissions hooks env enabledPlugins skillOverrides; do
-      a=$(jq -S ".$k" "$LIVE_SETTINGS" 2>/dev/null); b=$(jq -S ".$k" "$REPO_SETTINGS" 2>/dev/null)
-      [ "$a" = "$b" ] || warn "settings.json .$k drifted from dotfiles copy — review then sync.sh push (unexplained drift: suspect the statusline ad daemon, see HARNESS.md)"
-    done
     # Commit/PR attribution must stay off through the CURRENT keys. includeCoAuthoredBy
     # is deprecated since Claude Code 2.0.62 and merely tolerated; a release that drops
     # it would silently re-enable `Co-Authored-By: Claude ...` on every commit. Scale of
@@ -1115,7 +1114,7 @@ if [ -f "$LIVE_SETTINGS" ] && [ -f "$REPO_SETTINGS" ]; then
   fi
   check_permission_mode_policy "$LIVE_SETTINGS" "live settings" 1
   check_permission_mode_policy "$REPO_SETTINGS" "tracked settings" 1
-  [ "$WARNS" -eq "$w0" ] && ok "security-relevant settings keys and permission-mode policy match dotfiles"
+  [ "$WARNS" -eq "$w0" ] && ok "attribution, EnterPlanMode deny and permission-mode policy hold in live and tracked settings"
 else
   ok "check skipped (settings copies missing)"
 fi
