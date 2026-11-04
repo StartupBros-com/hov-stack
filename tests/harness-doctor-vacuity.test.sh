@@ -319,6 +319,10 @@ mkdir -p \
   "$TMP/sync-corpus/system-system"
 cp "$REPO/sync.sh" "$SYNC_FIX/sync.sh"
 cp "$REPO/scripts/lib/floor-assert.sh" "$SYNC_FIX/scripts/lib/floor-assert.sh"
+# check builds settings.json's canonical side with the seed builder; without it
+# the populated control reads as drift ("canonical copy could not be built").
+mkdir -p "$SYNC_FIX/lib"
+cp "$REPO/lib/settings-seed.js" "$SYNC_FIX/lib/settings-seed.js"
 SYNC_EMPTY_OUT=$(HOME="$SYNC_HOME" \
   CLAUDE_HOME="$SYNC_HOME/.claude" \
   CLAUDE_MEMORY_LIVE_ROOT="$SYNC_HOME/.claude/projects" \

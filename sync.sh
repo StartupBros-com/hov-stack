@@ -2735,7 +2735,11 @@ check() {
         echo "DRIFT: $f was not compared (no scratch directory for the projection)"; drift=1; continue; }
       if ! settings_seed_err=$(SETTINGS_SEED_ALL_KEYS=1 node "$HERE/lib/settings-seed.js" "$HERE/$f" \
              "$settings_tmp/canonical.json" "$H" "$HOME" "$DCG_COMMAND" "$settings_overlay" 2>&1 >/dev/null); then
-        echo "DRIFT: $f canonical copy could not be built${settings_overlay:+ with the overlay $settings_overlay}: $(printf '%s\n' "$settings_seed_err" | tail -1)"
+        # The builder's own refusal is one line; an uncaught node error ends in a
+        # "Node.js vN" banner, so name its Error line instead.
+        settings_seed_why=$(printf '%s\n' "$settings_seed_err" | grep -m1 -E '^(settings-seed: |[A-Za-z]*Error: )') \
+          || settings_seed_why=$(printf '%s\n' "$settings_seed_err" | tail -1)
+        echo "DRIFT: $f canonical copy could not be built${settings_overlay:+ with the overlay $settings_overlay}: $settings_seed_why"
         drift=1; rm -rf "$settings_tmp"; continue
       fi
       settings_live_ok=1 settings_canonical_ok=1

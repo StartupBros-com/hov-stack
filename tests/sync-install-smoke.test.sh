@@ -839,8 +839,8 @@ mkdir -p "$sn_bad_ov"
 printf '[]\n' > "$sn_bad_ov/settings.json"
 sn_line=$(sn_check "$sn_bad_ov")
 case "$sn_line" in
-  *"DRIFT: settings.json canonical copy could not be built with the overlay"*) ok ;;
-  *) bad "an overlay that is not a JSON object did not stop the comparison: ${sn_line:-<no settings line>}" ;;
+  *"DRIFT: settings.json canonical copy could not be built with the overlay"*"is not a JSON object"*) ok ;;
+  *) bad "an overlay that is not a JSON object did not stop the comparison with the builder's reason: ${sn_line:-<no settings line>}" ;;
 esac
 
 # A CLAUDE_CODE_PLUGIN_DIRS entry whose folder has no plugin manifest must fail
