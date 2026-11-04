@@ -27,13 +27,14 @@ cat > "$TMP/bin/gh" <<'STUBGH'
 #!/usr/bin/env bash
 set -e
 cmd="$1 $2"; shift 2
-jqexpr='' num='' head=''
+jqexpr='' num='' head='' disable=''
 case "$cmd" in 'pr view'|'pr merge'|'pr close') num="$1"; shift ;; esac
 path=''
 while [ $# -gt 0 ]; do
   case "$1" in
     --jq) jqexpr="$2"; shift 2 ;;
     --match-head-commit) head="$2"; shift 2 ;;
+    --disable-auto) disable=1; shift ;;
     --repo|--json|--state|--limit|--comment) shift 2 ;;
     -*) shift ;;
     *) path="$1"; shift ;;
@@ -49,7 +50,13 @@ case "$cmd" in
     printf '{"sha":"%s"}\n' "$(cat "$FIX/blob")" | emit ;;
   'api repos/acme/market/contents/tools/pins.sh?ref='*)
     printf '{"sha":"%s"}\n' "$(cat "$FIX/pins-blob")" | emit ;;
-  'pr merge') printf 'merge %s %s\n' "$num" "$head" >> "$CALLS" ;;
+  'pr merge')
+    if [ -n "$disable" ]; then
+      [ ! -e "$FIX/disable-fails" ] || { printf 'HTTP 502\n' >&2; exit 1; }
+      printf 'disable-auto %s\n' "$num" >> "$CALLS"
+    else
+      printf 'merge %s %s\n' "$num" "$head" >> "$CALLS"
+    fi ;;
   'pr close') printf 'close %s\n' "$num" >> "$CALLS" ;;
   *) printf 'unexpected gh: %s\n' "$cmd" >&2; exit 1 ;;
 esac
@@ -64,11 +71,18 @@ HEAD_SHA=cccccccccccccccccccccccccccccccccccccccc
 BLOB=dddddddddddddddddddddddddddddddddddddddd
 
 # One open PR per row: number, head branch, author, cross-repo, auto-merge already on.
-pr() { # $1 number $2 branch $3 author $4 cross $5 automerge(true|false)
-  jq -n --argjson n "$1" --arg b "$2" --arg a "$3" --argjson x "$4" --argjson m "$5" --arg h "$HEAD_SHA" \
+# The auto-merge request's enabledBy has the shape `gh pr list --json autoMergeRequest`
+# returned for a request a person enabled (#406): {"login": ..., "is_bot": false, ...}.
+pr() { # $1 number $2 branch $3 author $4 cross $5 automerge(false|true=bot-requested|person|unknown)
+  jq -n --argjson n "$1" --arg b "$2" --arg a "$3" --argjson x "$4" --arg m "$5" --arg h "$HEAD_SHA" \
+    --arg slug "$SLUG" \
     '{number: $n, headRefName: $b, headRefOid: $h,
       author: {login: $a, is_bot: ($a | startswith("app/") or endswith("[bot]"))},
-      isCrossRepository: $x, autoMergeRequest: (if $m then {mergeMethod: "SQUASH"} else null end)}'
+      isCrossRepository: $x,
+      autoMergeRequest: (if $m == "false" then null
+        elif $m == "person" then {mergeMethod: "SQUASH", enabledBy: {login: "owner", is_bot: false}}
+        elif $m == "unknown" then {mergeMethod: "SQUASH"}
+        else {mergeMethod: "SQUASH", enabledBy: {login: $slug, is_bot: true}} end)}'
 }
 
 # The usual world: #10 is this run's PR, #9 an older bot repin, and #8 a fork PR, #7 a
@@ -167,9 +181,9 @@ pass 'a failed PR list exits nonzero and touches nothing'
 PINS=tools/pins.sh
 PINS_BLOB=ffffffffffffffffffffffffffffffffffffffff
 printf '%s\n' "$PINS_BLOB" > "$FIX/pins-blob"
-mixed_prs() {
+mixed_prs() { # $1 = #20's auto-merge request (as pr's $5), default none
   {
-    pr 20 pins/auto-new "$BOT" false false
+    pr 20 pins/auto-new "$BOT" false "${1:-false}"
     pr 19 pins/auto-old "$BOT" false false
     pr 10 repin/auto-new "$BOT" false false
     pr 9 repin/auto-old "$BOT" false false
@@ -231,5 +245,45 @@ if run_pins REQUEST_AUTO_MERGE=maybe DESIRED_BRANCH=pins/auto-new EXPECTED_BLOB=
   die 'a non-boolean REQUEST_AUTO_MERGE was accepted'
 fi
 pass 'REQUEST_AUTO_MERGE=false still proves the PR, requests no merge and prunes its own prefix'
+
+# REQUEST_AUTO_MERGE=false after a run that had it on: the bot's pending request would still
+# merge the PR as the bot, so it is cancelled; one a person made is left alone; a request with
+# no reported requester counts as the bot's; a failed cancel fails the run.
+mixed_prs true
+run_pins REQUEST_AUTO_MERGE=false DESIRED_BRANCH=pins/auto-new EXPECTED_BLOB="$PINS_BLOB" \
+  || die "cancelling a bot's auto-merge failed: $(cat "$TMP/err")"
+grep -qx 'disable-auto 20' "$CALLS" || die "the bot's auto-merge request on #20 was not cancelled: $(cat "$CALLS")"
+if grep -q '^merge' "$CALLS"; then die 'auto-merge was requested while cancelling'; fi
+grep -q 'cancelled the request an earlier run made, so the PR waits for the owner to merge it' "$TMP/out" \
+  || die "the cancel was not reported: $(cat "$TMP/out")"
+pass "REQUEST_AUTO_MERGE=false cancels an auto-merge request the bot made on an earlier run"
+
+mixed_prs unknown
+run_pins REQUEST_AUTO_MERGE=false DESIRED_BRANCH=pins/auto-new EXPECTED_BLOB="$PINS_BLOB" \
+  || die "cancelling an unattributed auto-merge failed: $(cat "$TMP/err")"
+grep -qx 'disable-auto 20' "$CALLS" || die "a request with no reported requester was left: $(cat "$CALLS")"
+pass 'a request whose requester GitHub did not report is cancelled as the bot one'
+
+mixed_prs person
+run_pins REQUEST_AUTO_MERGE=false DESIRED_BRANCH=pins/auto-new EXPECTED_BLOB="$PINS_BLOB" \
+  || die "a person's auto-merge request broke the run: $(cat "$TMP/err")"
+if grep -q -e '^disable-auto' -e '^merge' "$CALLS"; then die "a person's auto-merge request was touched: $(cat "$CALLS")"; fi
+grep -q 'leaving the auto-merge owner requested' "$TMP/out" || die "the kept request was not reported: $(cat "$TMP/out")"
+pass 'an auto-merge request a person made stays'
+
+mixed_prs true
+: > "$FIX/disable-fails"
+if run_pins REQUEST_AUTO_MERGE=false DESIRED_BRANCH=pins/auto-new EXPECTED_BLOB="$PINS_BLOB"; then
+  die 'a failed cancel of the bot auto-merge exited 0'
+fi
+grep -q 'could not cancel the auto-merge request on #20' "$TMP/err" || die "the failed cancel was not named: $(cat "$TMP/err")"
+if grep -q '^close' "$CALLS"; then die 'a failed cancel still closed PRs'; fi
+rm "$FIX/disable-fails"
+pass 'a failed cancel fails the run before anything is closed'
+
+mixed_prs true
+run_pins DESIRED_BRANCH=pins/auto-new EXPECTED_BLOB="$PINS_BLOB" || die "an auto-merge-on rerun failed: $(cat "$TMP/err")"
+if grep -q -e '^disable-auto' -e '^merge' "$CALLS"; then die "an auto-merge-on rerun changed the request: $(cat "$CALLS")"; fi
+pass 'with auto-merge on, an existing request is kept and not requested again'
 
 printf '%s repin land checks passed\n' "$PASS"

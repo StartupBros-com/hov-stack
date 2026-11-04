@@ -107,6 +107,54 @@ jq -e --arg main '${{ github.event.repository.default_branch }}' '
   "$TMP/release-pins-refresh.yml.json" >/dev/null || die 'pins refresh job split'
 pass 'pins refresh: downloaded programs run only in a read-only job with no secret; the land job applies rows to the default branch it checked out'
 
+# The land job's branch key, run as the workflow writes it: the same rows on the same main
+# repeat the key (a rerun opens nothing), and rows that differ only in their bytes (a
+# publisher replaced a release's assets at the same version) change it, or the old branch
+# would fail repin-land.sh's blob proof on every run. The blob output is the new table's.
+jq -r '.jobs.land.steps[] | select(.id == "apply") | .run' "$TMP/release-pins-refresh.yml.json" >"$TMP/apply-step.sh"
+[ -s "$TMP/apply-step.sh" ] || die 'no apply step in the land job'
+SB="$TMP/apply-sandbox"
+INSTALLER=plugins/hov-stack/skills/hov-setup/scripts/install-release.sh
+mkdir -p "$SB/release/scripts" "$SB/${INSTALLER%/*}"
+printf 'table v1\n' >"$SB/$INSTALLER"
+# apply as the step uses it: the rows become the table, and PLAN_FILE gets the plan, which
+# names versions only, so both row sets below produce the same plan.
+cat >"$SB/release/scripts/release-pins.sh" <<'FAKEAPPLY'
+#!/usr/bin/env bash
+set -euo pipefail
+[ "$1" = apply ] || exit 2
+cp "$2" "$INSTALL_RELEASE"
+printf 'gh\t2.1.0\t2.2.0\tlinux-x86_64\n' >"$PLAN_FILE"
+FAKEAPPLY
+chmod +x "$SB/release/scripts/release-pins.sh"
+# The scratch repository must not inherit the caller's: a git hook exports GIT_INDEX_FILE
+# (and the exec-bit mutant below sets it), and these commands would then write the scratch
+# tree into that index.
+GIT_REPO_VARS=(GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_COMMON_DIR)
+sbgit() { env "${GIT_REPO_VARS[@]/#/-u}" git -C "$SB" "$@"; }
+sbgit init -q
+sbgit add -A
+sbgit -c user.name=t -c user.email=t@example.invalid commit -qm base
+apply_key() { # $1 = rows; prints "<key> <blob>"
+  printf '%s\n' "$1" >"$TMP/rows"
+  sbgit checkout -q -- "$INSTALLER"
+  : >"$TMP/apply-out"
+  ( unset "${GIT_REPO_VARS[@]}"
+    cd "$SB" && ROWS_B64="$(base64 <"$TMP/rows" | tr -d '\n')" PLAN_FILE="$TMP/plan" \
+      INSTALL_RELEASE="$INSTALLER" RUNNER_TEMP="$TMP" GITHUB_OUTPUT="$TMP/apply-out" \
+      bash "$TMP/apply-step.sh" ) >/dev/null || die 'the apply step failed in the sandbox'
+  grep -qx 'drift=true' "$TMP/apply-out" || die 'the apply step saw no drift'
+  printf '%s %s\n' "$(sed -n 's/^key=//p' "$TMP/apply-out")" "$(sed -n 's/^blob=//p' "$TMP/apply-out")"
+}
+first="$(apply_key 'table v2 sha256 aaaa')"
+again="$(apply_key 'table v2 sha256 aaaa')"
+replaced="$(apply_key 'table v2 sha256 bbbb')"
+[ -n "${first%% *}" ] && [ -n "${first#* }" ] || die "the apply step wrote no key or blob: $first"
+[ "$first" = "$again" ] || die "the same rows on the same main gave two keys: $first / $again"
+[ "${first%% *}" != "${replaced%% *}" ] || die "rows that differ only in bytes kept the key ${first%% *}"
+[ "${replaced#* }" = "$(sbgit hash-object "$INSTALLER")" ] || die 'the blob output is not the new table'
+pass 'pins branch key: the same rows on the same main repeat it; replaced bytes at the same version change it'
+
 # A script a workflow runs as ./release/scripts/X needs its exec bit in git, or the step
 # fails with "Permission denied" on the first scheduled run.
 grep -ohE '(run: |^[[:space:]]+)\./release/scripts/[A-Za-z0-9_.-]+' .github/workflows/*.yml | sed 's#.*\./##' | sort -u >"$TMP/run-scripts"

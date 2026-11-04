@@ -18,9 +18,10 @@ set -euo pipefail
 #
 # The same proof and close loop serve any bot-opened, single-file PR family. LAND_PATH
 # names the one file the PR may change, BRANCH_PREFIX the family's branch prefix, and
-# REQUEST_AUTO_MERGE=false runs the proof but leaves the merge to the owner. Each
-# family closes only PRs under its own prefix, so a pins run never closes a repin PR
-# and the reverse.
+# REQUEST_AUTO_MERGE=false runs the proof but leaves the merge to the owner, cancelling
+# an auto-merge request a bot made on the PR (one a person made stays). Each family
+# closes only PRs under its own prefix, so a pins run never closes a repin PR and the
+# reverse.
 #
 # Usage (from the reconcile workflow, with the marketplace bot's token):
 #   DESIRED_BRANCH=repin/auto-<key> EXPECTED_BLOB=<blob sha> release/scripts/repin-land.sh
@@ -36,13 +37,15 @@ set -euo pipefail
 #   LAND_PATH       the one file the PR may change (default .claude-plugin/marketplace.json)
 #   BRANCH_PREFIX   head-branch prefix of this PR family (default repin/auto-)
 #   REQUEST_AUTO_MERGE  true (default) requests auto-merge after the proof; false only
-#                   proves the PR and leaves it waiting for the owner to merge it
+#                   proves the PR, cancels an auto-merge request a bot made on it, and
+#                   leaves it waiting for the owner to merge it
 #   ONLY_PLUGIN     set for a targeted run: its PR covers one plugin, so nothing is closed
 #   GH_TOKEN        the marketplace bot's token
 #
 # Exit codes:
 #   0  the PR is queued for auto-merge (or already was, or REQUEST_AUTO_MERGE=false), and superseded PRs are closed
-#   1  a read failure, or this run's PR is not provably the reconciler's output
+#   1  a read failure, this run's PR is not provably the reconciler's output, or a bot's
+#      auto-merge request could not be cancelled with REQUEST_AUTO_MERGE=false
 
 fail() { printf 'error: %s\n' "$*" >&2; exit 1; }
 
@@ -91,7 +94,27 @@ if [ -n "$DESIRED_BRANCH" ]; then
     || fail "#$desired_pr head ${head:0:12} carries manifest $blob, not the reconciler's $EXPECTED_BLOB"
 
   if [ "$REQUEST_AUTO_MERGE" != true ]; then
-    printf '#%s: auto-merge is off for this run; the PR waits for the owner to merge it\n' "$desired_pr"
+    # A request an earlier run made (with auto-merge on then) still merges the PR as the
+    # bot once the checks pass, so a run with it off cancels that request. A request a
+    # person enabled is that person's merge and stays. A request whose requester GitHub
+    # did not report is treated as the bot's.
+    requester="$(jq -r 'if .autoMergeRequest == null then "none"
+                        elif .autoMergeRequest.enabledBy.is_bot == false then "person"
+                        else "bot" end' <<<"$pr")"
+    case "$requester" in
+      bot)
+        gh pr merge "$desired_pr" --repo "$REPO" --disable-auto \
+          || fail "could not cancel the auto-merge request on #$desired_pr; it would merge as the bot"
+        printf '#%s: auto-merge is off for this run; cancelled the request an earlier run made, so the PR waits for the owner to merge it\n' "$desired_pr"
+        ;;
+      person)
+        printf '#%s: auto-merge is off for this run; leaving the auto-merge %s requested\n' \
+          "$desired_pr" "$(jq -r '.autoMergeRequest.enabledBy.login' <<<"$pr")"
+        ;;
+      *)
+        printf '#%s: auto-merge is off for this run; the PR waits for the owner to merge it\n' "$desired_pr"
+        ;;
+    esac
   elif [ "$(jq -r '.autoMergeRequest != null' <<<"$pr")" = true ]; then
     printf '#%s already has auto-merge requested\n' "$desired_pr"
   else

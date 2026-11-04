@@ -43,7 +43,8 @@ name: Release pins refresh
 # auto-merge would skip the owner's review. With auto-merge off, the PR waits until
 # the owner merges it. Setting the repository variable HOV_PINS_AUTO_MERGE=true makes
 # repin-land.sh request auto-merge after its proof, and the PR then lands without the
-# owner. The require-ci ruleset has no bypass, so GitHub still waits for every
+# owner. Turning the variable off again makes the next run cancel a request the bot
+# made on the open PR; a request a person made stays. The require-ci ruleset has no bypass, so GitHub still waits for every
 # required check. That includes Pinned sources' re-verify of the new table only while
 # the repository variable HOV_SOURCES_PUBLIC is true: the job is skipped otherwise,
 # and a skipped job counts as a passed check.
@@ -129,14 +130,18 @@ jobs:
           fi
           if [ -s "$PLAN_FILE" ]; then
             echo "drift=true" >> "$GITHUB_OUTPUT"
-            # Content-addressed branch name: the same drift on the same main always
-            # produces the same branch, so a second run finds the PR already open and
+            # Content-addressed branch name: the same rows on the same main always
+            # produce the same branch, so a second run finds the PR already open and
             # opens nothing. Main's sha is in the key because the required checks demand
             # an up-to-date branch: once main moves, the old PR can never merge, so the
-            # next run opens a fresh one and repin-land.sh closes the old.
-            key="$( { cat "$PLAN_FILE"; git rev-parse HEAD; } | sha256sum | cut -c1-12)"
+            # next run opens a fresh one and repin-land.sh closes the old. The new table's
+            # blob is in it too: a publisher that replaces a release's assets at the same
+            # version changes the rows but not the plan, and the old branch would then fail
+            # repin-land.sh's blob proof on every run instead of being superseded.
+            blob="$(git hash-object "$INSTALL_RELEASE")"
+            key="$( { cat "$PLAN_FILE"; git rev-parse HEAD; printf '%s\n' "$blob"; } | sha256sum | cut -c1-12)"
             echo "key=$key" >> "$GITHUB_OUTPUT"
-            echo "blob=$(git hash-object "$INSTALL_RELEASE")" >> "$GITHUB_OUTPUT"
+            echo "blob=$blob" >> "$GITHUB_OUTPUT"
           else
             echo "drift=false" >> "$GITHUB_OUTPUT"
           fi
@@ -195,7 +200,7 @@ jobs:
               printf '| %s | %s | %s | %s |\n' "$tool" "$from" "$to" "$platforms"
             done < "$PLAN_FILE"
             printf '\nThis PR does not bump plugins/hov-stack/VERSION; checkout users get the table through ./setup --update.\n'
-            printf '\nRe-running the refresh on this same drift and main is a no-op: the branch name is derived from both.\n'
+            printf '\nRe-running the refresh with the same rows on the same main is a no-op: the branch name is derived from both.\n'
             if [ "$AUTO_MERGE" = true ]; then
               printf '\nAuto-merge is requested once the required checks pass (HOV_PINS_AUTO_MERGE is true).\n'
             else
