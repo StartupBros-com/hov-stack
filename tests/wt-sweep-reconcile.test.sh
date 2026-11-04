@@ -30,6 +30,7 @@ SCRIPT="$HERE/../scripts/wt-sweep.sh"
 [ -f "$SCRIPT" ] || { echo "FAIL: cannot find $SCRIPT"; exit 1; }
 
 TMP="$(mktemp -d)"
+export WT_CLAUDE_HOME="$TMP/claude-home"  # the session check (hov-stack#384) never reads the real ~/.claude
 trap 'rm -rf "$TMP"' EXIT
 
 export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@example.invalid
