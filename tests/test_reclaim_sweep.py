@@ -2351,6 +2351,15 @@ class KeepListTests(_FixtureTree):
                 os.symlink(os.path.join(self.tmp.name, "moved"), link)
             return os.path.join(link, "reclaim-sweep-keep")
 
+        def dangling_ancestor():
+            # A directory above the overlay is a link whose target moved.
+            base = os.path.join(self.tmp.name, "above")
+            link = os.path.join(base, "config")
+            if not os.path.lexists(link):
+                os.makedirs(base, exist_ok=True)
+                os.symlink(os.path.join(self.tmp.name, "moved-config"), link)
+            return os.path.join(link, "hov-stack", "reclaim-sweep-keep")
+
         cases = {
             "a relative pattern": lambda: file_with(b"srv/build-*\n"),
             "a .. segment": lambda: file_with(b"/srv/build-1/..\n"),
@@ -2359,6 +2368,7 @@ class KeepListTests(_FixtureTree):
             "a directory": directory,
             "a broken symlink": dangling_file,
             "a broken overlay symlink": dangling_overlay,
+            "a broken symlink above the overlay": dangling_ancestor,
             "a relative overlay": lambda: os.path.join("hov-stack", "reclaim-sweep-keep"),
         }
         for label, make in cases.items():
@@ -2382,6 +2392,68 @@ class KeepListTests(_FixtureTree):
             with self.subTest(path):
                 self.assertEqual(keep.keeper(path) == "on the keep list: /srv/cache/build-*/out", kept)
                 self.assertEqual(keep.keeper(path) is None, not kept)
+
+    def test_a_missing_overlay_under_a_real_directory_is_no_list(self):
+        for parts in (("no-overlay",), ("no-config", "hov-stack")):
+            with self.subTest(parts):
+                keep = R.load_keep_list(os.path.join(self.tmp.name, *parts, "reclaim-sweep-keep"))
+                self.assertEqual((keep.read, keep.patterns, keep.error), (False, (), None))
+
+    def test_only_star_is_a_wildcard(self):
+        # A directory literally named [slug] (a dynamic route) or backup? must be
+        # kept by the line that spells it, not read as a character class.
+        keep = self._write("/srv/app/[slug]", "/srv/backup?", "/srv/[a]*")
+        for path, why in (("/srv/app/[slug]", "/srv/app/[slug]"),
+                          ("/srv/app/[slug]/page", "/srv/app/[slug]"),
+                          ("/srv/app/s", None),
+                          ("/srv/backup?", "/srv/backup?"),
+                          ("/srv/backup1", None),
+                          ("/srv/[a]bc", "/srv/[a]*"),
+                          ("/srv/abc", None)):
+            with self.subTest(path):
+                self.assertEqual(keep.keeper(path), why and f"on the keep list: {why}")
+
+    def test_a_pattern_below_a_scratch_entry_keeps_the_entry(self):
+        self._entry(self.root, "build-x", "inner", "keepme")
+        self._entry(self.root, "build-y")
+        pattern = os.path.join(self.root, "build-x", "inner", "keepme")
+        keep = self._write(pattern)
+        with _roots([self.root], self.jobs):
+            plan = R.plan_scratch(time.time() + self.FAR, _NO_HOLDERS, 72, 168, keep=keep)
+        self.assertEqual([os.path.basename(i["path"]) for i in plan.items], ["build-y"])
+        self.assertEqual(plan.kept.get(f"on the keep list: {pattern}"), 1)
+
+    def test_the_list_answers_before_a_live_holder_does(self):
+        d = tempfile.mkdtemp(dir=self.tmp.name)
+        for name in ("one.db.bak-1", "two.db.bak-2"):
+            Path(d, name).write_text("x")
+            _age(os.path.join(d, name), 90 * DAY)
+        self._entry(self.root, "build-cache-1")
+        listed = (os.path.join(d, "one.db.bak-1"), os.path.join(self.root, "build-cache-1"))
+        keep = self._write(*listed)
+        holds = _HoldsNames("one.db.bak-1", "two.db.bak-2", "build-cache-1")
+        with _patched(RULES=[R.Rule("t", f"{d}/*.bak-*", min_age_days=14)]):
+            items = R.plan(time.time(), holds, keep)
+        skips = {os.path.basename(i["path"]): i["skip"] for i in items}
+        self.assertEqual(skips["one.db.bak-1"], f"on the keep list: {listed[0]}")
+        self.assertTrue(skips["two.db.bak-2"].startswith("held by a live process"), skips)
+        with _roots([self.root], self.jobs):
+            plan = R.plan_scratch(time.time() + self.FAR, holds, 72, 168, keep=keep)
+        self.assertEqual((plan.items, plan.kept.get(f"on the keep list: {listed[1]}")), ([], 1))
+
+    def test_the_residue_planner_given_no_list_reads_the_overlays_and_fails_closed(self):
+        d = tempfile.mkdtemp(dir=self.tmp.name)
+        Path(d, "one.db.bak-1").write_text("x")
+        _age(os.path.join(d, "one.db.bak-1"), 90 * DAY)
+        for label, text, reason in (
+                ("valid", f"{d}/one.db.bak-*\n", f"on the keep list: {d}/one.db.bak-*"),
+                ("invalid", "srv/relative\n", "keep list unreadable")):
+            with self.subTest(label):
+                Path(self.list_path).write_text(text)
+                with _patched(KEEP_LIST_PATH=self.list_path,
+                              RULES=[R.Rule("t", f"{d}/*.bak-*", min_age_days=14)]):
+                    items = R.plan(time.time(), _NO_HOLDERS)
+                self.assertEqual([i["skip"] for i in items], [reason])
 
     def test_listed_scratch_is_kept_fresh_or_idle_and_counted_per_pattern(self):
         for name in ("build-cache-1", "build-cache-2", "other-scratch"):
@@ -2453,14 +2525,16 @@ class KeepListTests(_FixtureTree):
             "three.db.bak-3": f"on the keep list: {d}/three.db.bak-3/inner",
         })
 
-    def test_an_invalid_list_refuses_even_apply(self):
+    def test_an_invalid_list_refuses_plan_and_apply(self):
         victim = self._entry(self.root, "two-days-idle")
         Path(self.list_path).write_text("# fine\nsrv/relative\n")
-        rc, out, err = self._main("--apply")
-        self.assertEqual(rc, 1)
-        self.assertIn("line 2: 'srv/relative' is not an absolute or ~/ path — refusing to plan or apply", err)
-        self.assertEqual(out, "")
-        self.assertTrue(os.path.isdir(victim), "refusal must remove nothing")
+        for argv in ((), ("--json",), ("--apply",)):
+            with self.subTest(argv):
+                rc, out, err = self._main(*argv)
+                self.assertEqual(rc, 1)
+                self.assertIn("line 2: 'srv/relative' is not an absolute or ~/ path — refusing to plan or apply", err)
+                self.assertEqual(out, "")
+                self.assertTrue(os.path.isdir(victim), "refusal must remove nothing")
 
     def test_apply_leaves_what_the_list_names_and_reports_the_list(self):
         kept = self._entry(self.root, "build-cache-1")

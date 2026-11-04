@@ -527,7 +527,9 @@ class KeepList(NamedTuple):
     def keeper(self, path: str) -> Optional[str]:
         """Why the list keeps `path`, or None. A pattern keeps what it matches,
         everything under that, and every directory above it: removing a parent
-        removes the child. Matching is per segment, so `*` never crosses a /."""
+        removes the child. Matching is per segment, so `*` never crosses a /, and
+        `*` is the only wildcard: load_keep_list() makes every other character,
+        ? and [ included, match itself."""
         if self.error:
             return "keep list unreadable"
         segs = [s for s in os.path.normpath(path).split("/") if s]
@@ -537,11 +539,20 @@ class KeepList(NamedTuple):
         return None
 
 
+def _only_star_is_wild(segment: str) -> str:
+    """`segment` as an fnmatch pattern in which only * is a wildcard: a name the
+    operator spells with ? or [ (a dynamic-route directory, a dated backup?) must
+    keep that name, not a character class that misses it."""
+    return "".join({"[": "[[]", "?": "[?]"}.get(c, c) for c in segment)
+
+
 def load_keep_list(path: Optional[str] = None) -> KeepList:
     """Read the keep list: one absolute glob per line (a leading ~/ is $HOME),
-    blank lines and # comment lines skipped. No file is an empty list. A file
-    that cannot be read, a broken symlink at it or at the overlay directory, a
-    relative pattern, or a . or .. segment is an error, never an empty list."""
+    blank lines and # comment lines skipped; * is the only wildcard. No file is
+    an empty list, but only when the nearest existing directory above it is a
+    real directory. A file that cannot be read, a broken symlink at it, at the
+    overlay directory or anywhere above, a relative pattern, or a . or ..
+    segment is an error, never an empty list."""
     path = KEEP_LIST_PATH if path is None else path
     if not os.path.isabs(path):
         return KeepList(path, False, (), "the overlay directory is not an absolute path")
@@ -549,9 +560,15 @@ def load_keep_list(path: Optional[str] = None) -> KeepList:
         with open(path, encoding="utf-8") as fh:
             text = fh.read()
     except FileNotFoundError:
-        parent = os.path.dirname(path)
-        if os.path.lexists(path) or (os.path.lexists(parent) and not os.path.isdir(parent)):
-            return KeepList(path, False, (), "it or the overlay directory is a broken symlink")
+        if os.path.lexists(path):
+            return KeepList(path, False, (), "it is a broken symlink")
+        # A broken link above the file hides the list rather than removing it:
+        # walk up to the first entry that exists and ask whether it is a directory.
+        above = os.path.dirname(path)
+        while not os.path.lexists(above):
+            above = os.path.dirname(above)
+        if not os.path.isdir(above):
+            return KeepList(path, False, (), f"{above}, above it, is a broken symlink")
         return KeepList(path, False, (), None)
     except (OSError, UnicodeDecodeError) as e:
         return KeepList(path, False, (), f"cannot read it: {e}")
@@ -566,7 +583,7 @@ def load_keep_list(path: Optional[str] = None) -> KeepList:
         segs = [s for s in expanded.split("/") if s]
         if any(s in (".", "..") for s in segs):
             return KeepList(path, True, (), f"line {n}: {written!r} has a . or .. segment")
-        patterns.append((written, tuple(segs)))
+        patterns.append((written, tuple(_only_star_is_wild(s) for s in segs)))
     return KeepList(path, True, tuple(patterns), None)
 
 DOCKER = "docker"

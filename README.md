@@ -119,9 +119,10 @@ These are not part of this repository. `/hov-setup` offers each one with its pub
   - `hygiene-posture`, the hygiene timers this host runs and their settings (deletion on, schedule), one `<unit-stem> [KEY=value]` per line; `sync.sh install` applies it and `sync.sh check` reports drift (`systemd/README.md`);
   - `memory-filename-allowlist.txt`, the memory audit's reviewed-name list (the tracked copy ships no entries);
   - `supabase-projects.json` and `migration-targets.json`, whose shapes `config/*.example.json` show;
-  - `repo-routes.json`, which replaces the tracked placeholder.
+  - `repo-routes.json`, which replaces the tracked placeholder;
+  - `reclaim-sweep-keep`, paths `reclaim-sweep` never removes, one absolute glob per line (`systemd/README.md`). Without it there is no keep list; one that cannot be read or parsed makes the sweep refuse to plan or apply.
 
-  Without one of those, its consumer fails closed and names it. `./setup` also reads these, each optional, and does nothing without them:
+  Without one of the others, its consumer fails closed and names it. `./setup` also reads these, each optional, and does nothing without them:
   - `settings.json`, merged into the seed setup writes. Its keys win, its lists add to the template's without repeats, a `null` removes a key, and a hook of its that runs dcg is left out when dcg is not installed, as the template's is. It never changes a `settings.json` you already have. One that gives a setting another kind of value than the template's, such as a string where the template has an object, gets no seed written, and the run exits 1.
   - `CLAUDE.md`, imported in every project by the `rules/hov-stack-overlay.md` setup writes in the config dir. Into a `rules/` that is a symlink setup writes nothing, and names the line to add there yourself.
   - `env`, `NAME=value` lines that `claude-env.sh` exports before each Bash call.
