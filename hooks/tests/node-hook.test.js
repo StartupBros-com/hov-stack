@@ -194,69 +194,6 @@ test('the launcher never stats /mnt entries (a drvfs lookup is ~2 ms each)', () 
   assert.ok(src.indexOf('/mnt/*') !== -1 && src.indexOf('/mnt/*') < src.indexOf('[ -f "$_hn_d/node" ]'));
 });
 
-// ---------------------------------------------------------------------------
-// pr-record stdin gate: the launcher literals must be the JS predicate (#369 pass 3)
-// ---------------------------------------------------------------------------
-
-const PR_RECORD_JS = path.resolve(__dirname, '..', 'PostToolUse', 'pr-record.js');
-
-test('pr-record gate drift: the launcher skips only when run() returns at its first condition after the parse', () => {
-  const js = fs.readFileSync(PR_RECORD_JS, 'utf8');
-  const sh = fs.readFileSync(LAUNCHER, 'utf8');
-  // JS: the early return is the first statement after parse/cmd, with nothing in between.
-  const m = js.match(/function run\(rawInput\) \{\n  try \{\n    const input = JSON\.parse\(rawInput\);\n    const cmd = \(input\.tool_input && input\.tool_input\.command\) \|\| '';\n    if \(!cmd\.includes\('([^']*)'\)\) return rawInput;\n/);
-  assert.ok(m, 'pr-record.js run() no longer opens parse -> cmd -> includes() early return: the launcher gate is invalid, remove or re-derive it');
-  const literal = m[1];
-  assert.strictEqual(literal, 'gh pr create');
-  // Entry: stdin accumulated up to the cap, then run() output through the quiet writer.
-  assert.ok(js.includes('if (data.length < 1024 * 1024) data += c;'));
-  assert.ok(js.includes('writeHookOutput(run(data), data);'));
-  // Top-level requires: a new one is a new load-time surface to re-audit before the gate stays valid.
-  assert.deepStrictEqual(js.match(/^const .* = require\('[^']+'\);$/gm).map((l) => l.match(/require\('([^']+)'\)/)[1]),
-    ['fs', 'os', 'path', 'child_process', 'perf_hooks', '../lib/hook-output.js', '../lib/session-prs.js']);
-
-  // Shell: the arm is path-exact and holds exactly the literal plus the \u00XY escape prefixes of
-  // every character of it (U+0020 -> \u002, U+0061..U+0074 -> \u006 / \u007).
-  const arm = sh.match(/ {2}\*\/PostToolUse\/pr-record\.js\)\n {4}_hn_buf=\$\(tr '\\0' '\\1'; echo x\)\n {4}_hn_buf=\$\{_hn_buf%x\}\n {4}case \$_hn_buf in\n {6}(.*)\) _hn_stdin=1 ;;\n {6}\*\) exit 0 ;;\n {4}esac\n {4};;\n/);
-  assert.ok(arm, 'launcher pr-record arm not found in its expected shape');
-  const pats = arm[1].split(' | ').map((p) => p.replace(/^\*'/, '').replace(/'\*$/, ''));
-  const wanted = new Set(literal.split('').map((c) => `\\u00${c.charCodeAt(0).toString(16).padStart(2, '0')[0]}`));
-  assert.deepStrictEqual(pats, [literal, ...[...wanted].sort()]);
-  assert.deepStrictEqual([...wanted].sort(), ['\\u002', '\\u006', '\\u007']);
-  // Both exec sites hand node the buffered bytes when the gate did not skip.
-  assert.strictEqual((sh.match(/\[ -z "\$_hn_stdin" \] \|\| \{ printf '%s' "\$_hn_buf" \| /g) || []).length, 2);
-});
-
-test('pr-record gate: the seed registers pr-record through the launcher as the only PostToolUse hook on Bash', () => {
-  const settings = JSON.parse(fs.readFileSync(path.resolve(__dirname, '..', '..', 'settings.json'), 'utf8'));
-  const onBash = [];
-  for (const g of settings.hooks.PostToolUse) {
-    if (!g.matcher || g.matcher === '*' || g.matcher.split('|').includes('Bash')) for (const h of g.hooks) onBash.push(h.command);
-  }
-  assert.deepStrictEqual(onBash, ['"$HOME/.claude/hooks/bin/node-hook" "$HOME/.claude/hooks/PostToolUse/pr-record.js"']);
-});
-
-test('pr-record gate: the arm is path-exact, skips without node, and hands node every byte otherwise', () => {
-  const base = mkTmp('node-hook-prgate-');
-  try {
-    const dir = path.join(base, 'real');
-    fs.mkdirSync(dir);
-    // A fake node that echoes its stdin exactly (trailing newlines kept through an `x` sentinel).
-    fs.writeFileSync(path.join(dir, 'node'), '#!/bin/sh\nprintf "[%s]" "$(cat; echo x)"\n', { mode: 0o755 });
-    const env = { ...buildEnv(), PATH: `${dir}:/usr/bin:/bin` };
-    const run = (script, input) => spawnSync('/bin/sh', [LAUNCHER, script], { env, input, encoding: 'utf8' });
-    const hook = '/x/PostToolUse/pr-record.js';
-    assert.strictEqual(run(hook, '{"c":"ls"}\n').stdout, '');
-    assert.strictEqual(run(hook, '{"c":"ls"}\n').status, 0);
-    assert.strictEqual(run(hook, '{"c":"gh pr create"}\n\n\n').stdout, '[{"c":"gh pr create"}\n\n\nx]');
-    assert.strictEqual(run(hook, '{"c":"gh\\u0020pr"}').stdout, '[{"c":"gh\\u0020pr"}x]');
-    assert.strictEqual(run(hook, '{"c":"\\u001b[0m"}').stdout, '');
-    for (const other of ['/x/PostToolUse/pr-record.json', '/x/PreToolUse/pr-record.js', 'pr-record.js', '/x/PostToolUse/not-pr-record.js']) {
-      assert.strictEqual(run(other, '{"c":"ls"}').stdout, '[{"c":"ls"}x]', other);
-    }
-  } finally { rmTmp(base); }
-});
-
 test('an inherited _hn_stdin / _hn_buf in the caller env never replaces another hook\'s stdin', () => {
   const base = mkTmp('node-hook-envleak-');
   try {
@@ -264,14 +201,14 @@ test('an inherited _hn_stdin / _hn_buf in the caller env never replaces another 
     fs.mkdirSync(dir);
     fs.writeFileSync(path.join(dir, 'node'), '#!/bin/sh\nprintf "[%s]" "$(cat; echo x)"\n', { mode: 0o755 });
     const env = { ...buildEnv(), PATH: `${dir}:/usr/bin:/bin`, _hn_stdin: '1', _hn_buf: 'EVIL' };
-    for (const script of ['/x/PreToolUse/git-guard.js', '/x/PostToolUse/not-pr-record.js']) {
+    for (const script of ['/x/PreToolUse/git-guard.js', '/x/PreToolUse/not-settings-guard.js']) {
       const r = spawnSync('/bin/sh', [LAUNCHER, script], { env, input: '{"a":1}', encoding: 'utf8' });
       assert.strictEqual(r.stdout, '[{"a":1}x]', script);
     }
     // The gated hook still skips a no-literal payload and still hands node the real bytes otherwise.
-    const hook = '/x/PostToolUse/pr-record.js';
+    const hook = '/x/PreToolUse/settings-guard.js';
     assert.strictEqual(spawnSync('/bin/sh', [LAUNCHER, hook], { env, input: '{"c":"ls"}', encoding: 'utf8' }).stdout, '');
-    assert.strictEqual(spawnSync('/bin/sh', [LAUNCHER, hook], { env, input: '{"c":"gh pr create"}', encoding: 'utf8' }).stdout, '[{"c":"gh pr create"}x]');
+    assert.strictEqual(spawnSync('/bin/sh', [LAUNCHER, hook], { env, input: '{"c":"settings.json"}', encoding: 'utf8' }).stdout, '[{"c":"settings.json"}x]');
   } finally { rmTmp(base); }
 });
 
@@ -516,7 +453,5 @@ test('auto-format gate: argv-exact, skips without node, hands node every byte ot
     if (process.getuid && process.getuid() !== 0) assert.strictEqual(run(reg, md).stdout, `[${md}x]`, 'unreadable script: node runs');
     fs.chmodSync(script, 0o644);
     assert.strictEqual(run(reg, md).stdout, '');
-    // The pass-3 arm is untouched.
-    assert.strictEqual(run(['/x/PostToolUse/pr-record.js'], '{"c":"ls"}').stdout, '');
   } finally { rmTmp(base); }
 });

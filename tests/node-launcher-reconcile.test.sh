@@ -156,8 +156,15 @@ out=$(run "$home" reconcile-node-launcher 2>&1); status=$?
 [ "$status" -ne 0 ] && ok || bad "no launcher: reconcile-node-launcher should exit non-zero"
 cmp -s "$TMP/nl-before.json" "$home/.claude/settings.json" && ok || bad "no launcher: settings.json changed"
 case $out in *"launcher"*"missing"*) ok ;; *) bad "no launcher: refusal should name the missing launcher: $out" ;; esac
-out=$(run "$home" reconcile-pr-record-hook 2>&1); status=$?
+# A per-hook verb that registers a launcher-form command refuses too. The hook script exists, so
+# only the missing launcher can be the reason (the target check runs first and would refuse
+# for a different cause). reconcile-pr-record-hook is a retire verb now and registers nothing.
+mkdir -p "$home/.claude/hooks/PreToolUse"
+: >"$home/.claude/hooks/PreToolUse/shape-rewrite.js"
+out=$(run "$home" reconcile-shape-rewrite 2>&1); status=$?
 [ "$status" -ne 0 ] && ok || bad "no launcher: a per-hook verb must refuse to register an unrunnable launcher command"
+case $out in *"launcher"*"missing"*) ok ;; *) bad "no launcher: the per-hook refusal should name the missing launcher: $out" ;; esac
+cmp -s "$TMP/nl-before.json" "$home/.claude/settings.json" && ok || bad "no launcher: a per-hook verb changed settings.json"
 
 # No live settings.json: nothing to migrate, not an error.
 home=$TMP/empty-home
