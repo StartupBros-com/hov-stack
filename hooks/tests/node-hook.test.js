@@ -598,3 +598,147 @@ test('codex-quota-guard gate: path-exact, skips without node, hands node every b
   } finally { rmTmp(base); }
 });
 
+// ---------------------------------------------------------------------------
+// runner-guard stdin gate: the launcher literals must be derived from RUNNER_CTL / PROCESS_GROUP_KILL (#369 pass 6b)
+// ---------------------------------------------------------------------------
+
+const RUNNER_GUARD_JS = path.resolve(__dirname, '..', 'PreToolUse', 'runner-guard.js');
+const RG_ARM_RE = / {2}\*\/PreToolUse\/runner-guard\.js\)\n {4}_hn_buf=\$\(tr '\\0' '\\1'; echo x\)\n {4}_hn_buf=\$\{_hn_buf%x\}\n {4}case \$_hn_buf in\n {6}(.*)\) _hn_stdin=1 ;;\n {6}\*\) exit 0 ;;\n {4}esac\n {4};;\n/;
+
+function rgArm() {
+  const arm = fs.readFileSync(LAUNCHER, 'utf8').match(RG_ARM_RE);
+  assert.ok(arm, 'launcher runner-guard arm not found in its expected shape');
+  return arm[1].split(' | ').map((p) => p.replace(/^\*'/, '').replace(/'\*$/, ''));
+}
+
+/** The two regexes, taken from the guard's own module (runner-guard.js exports only run()). */
+function rgRegexes() {
+  const Module = require('node:module');
+  const src = fs.readFileSync(RUNNER_GUARD_JS, 'utf8');
+  const m = new Module(RUNNER_GUARD_JS);
+  m.filename = RUNNER_GUARD_JS;
+  m.paths = Module._nodeModulePaths(path.dirname(RUNNER_GUARD_JS));
+  m._compile(`${src}\nmodule.exports.__t = { RUNNER_CTL, PROCESS_GROUP_KILL };`, RUNNER_GUARD_JS);
+  return m.exports.__t;
+}
+
+/** Top-level `|` split of a regex source (outside groups, classes and escapes). */
+function topLevelAlternatives(source) {
+  const out = [];
+  let depth = 0; let inClass = false; let cur = '';
+  for (let i = 0; i < source.length; i += 1) {
+    const ch = source[i];
+    if (ch === '\\') { cur += ch + source[i + 1]; i += 1; continue; }
+    if (inClass) { if (ch === ']') inClass = false; cur += ch; continue; }
+    if (ch === '[') inClass = true;
+    else if (ch === '(') depth += 1;
+    else if (ch === ')') depth -= 1;
+    else if (ch === '|' && depth === 0) { out.push(cur); cur = ''; continue; }
+    cur += ch;
+  }
+  out.push(cur);
+  return out;
+}
+
+test('runner-guard gate drift: the launcher literals are what the two regexes need, and nothing reaches an effect before them', () => {
+  const js = fs.readFileSync(RUNNER_GUARD_JS, 'utf8');
+  const sh = fs.readFileSync(LAUNCHER, 'utf8');
+  const { RUNNER_CTL, PROCESS_GROUP_KILL } = rgRegexes();
+  // Both are flagless (case-sensitive), single top-level alternative, and open with a mandatory literal.
+  assert.strictEqual(RUNNER_CTL.flags, '');
+  assert.strictEqual(PROCESS_GROUP_KILL.flags, '');
+  assert.strictEqual(topLevelAlternatives(RUNNER_CTL.source).length, 1);
+  assert.strictEqual(topLevelAlternatives(PROCESS_GROUP_KILL.source).length, 1);
+  assert.ok(RUNNER_CTL.source.startsWith('\\bsystemctl\\s+'), RUNNER_CTL.source.slice(0, 40));
+  assert.ok(PROCESS_GROUP_KILL.source.startsWith('\\b(?:\\/\\S*\\/)?kill\\s+'), PROCESS_GROUP_KILL.source.slice(0, 40));
+  const literals = ['systemctl', 'kill'];
+  // JS: parse -> tool_name -> command -> setDenyContext (a setter) -> fold (spaces only) -> the two exec calls; every
+  // allow( / deny( / process.env read sits after them.
+  const body = js.slice(js.indexOf('function run(rawInput) {'));
+  const head = body.slice(0, body.indexOf('const groupKill = PROCESS_GROUP_KILL.exec(folded);'));
+  assert.ok(head.startsWith("function run(rawInput) {\n  try {\n    const input = JSON.parse(rawInput);\n    if (input.tool_name !== 'Bash') return rawInput;\n    const command = input.tool_input?.command;\n    if (typeof command !== 'string') return rawInput;\n"),
+    'runner-guard.js run() no longer opens parse -> Bash -> command: the launcher gate is invalid, remove or re-derive it');
+  assert.ok(head.includes("    const folded = command.replace(/\\\\\\r?\\n/g, ' ');\n\n"), 'the fold replaces backslash-newline with a SPACE (never removes characters)');
+  assert.ok(!/\b(allow|deny|process\.env|writeHookOutput|fs\.|require)\b/.test(head.replace(/^\s*\/\/.*$/gm, '').replace(/setDenyContext\(\{[\s\S]*?\}\);/, '')), 'only setDenyContext sits before the regex tests');
+  assert.ok(body.indexOf('const hit = RUNNER_CTL.exec(folded);\n    if (!hit) return rawInput;') > body.indexOf('const groupKill = PROCESS_GROUP_KILL.exec(folded);'));
+  const afterTests = body.slice(body.indexOf('const hit = RUNNER_CTL.exec(folded);'));
+  assert.ok(body.indexOf('return allow(') > body.indexOf('const groupKill ='), 'allow( only after the exec');
+  assert.ok(body.indexOf('return deny(') > body.indexOf('const groupKill ='), 'deny( only after the exec');
+  assert.ok(afterTests.length > 0);
+  // Entry: stdin to the 1 MiB cap, run() output through the quiet writer, exit 0.
+  assert.ok(js.includes('if (data.length < 1024 * 1024) data += chunk;'));
+  assert.ok(js.includes('writeHookOutput(run(data), data);\n    process.exit(0);'));
+  // Load-time surface: these requires and no others.
+  assert.deepStrictEqual(js.match(/^const .* = require\('[^']+'\);$/gm).map((l) => l.match(/require\('([^']+)'\)/)[1]),
+    ['../lib/pretooluse-decision', '../lib/hook-output']);
+  // Shell: exactly the two literals plus the \u00XY prefixes of every character of either.
+  const pats = rgArm();
+  const wanted = new Set(literals.join('').split('').map((c) => `\\u00${c.charCodeAt(0).toString(16).padStart(2, '0')[0]}`));
+  assert.deepStrictEqual([...wanted].sort(), ['\\u006', '\\u007']);
+  assert.deepStrictEqual(pats, ['kill', 'systemctl', ...[...wanted].sort()]);
+  assert.strictEqual((sh.match(/\[ -z "\$_hn_stdin" \] \|\| \{ printf '%s' "\$_hn_buf" \| /g) || []).length, 2);
+});
+
+test('runner-guard gate: the predicate never skips a payload whose DECODED, folded command either regex accepts (randomised spellings)', () => {
+  const pats = rgArm();
+  const { RUNNER_CTL, PROCESS_GROUP_KILL } = rgRegexes();
+  let seed = 777;
+  const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+  const unit = 'actions.runner.StartupBros-com.runner-01.service';
+  const cmds = [
+    `sudo systemctl restart ${unit}`, `ssh h 'sudo systemctl stop ${unit}'`, `systemctl status ${unit}`, 'sudo systemctl restart nginx', `systemctl --user kill -s KILL ${unit}`,
+    `systemctl \\\nrestart ${unit}`, `systemctl restart buildkite-agent@2`, 'systemctl try-restart gitlab-runner.service', 'kill -9 -1226368', 'kill -9 1226368', '/bin/kill -s KILL -- -42',
+    'kill -TERM -77', 'kill \\\n-9 -5', 'killall node', 'pkill -f x', 'echo kill', 'Kill -9 -1', 'SYSTEMCTL restart x', 'systemctl\\\nstatus', 'ls', 'echo hello', 'sys temctl', 'kil l',
+    'ALLOW_RUNNER_CTL=1 systemctl restart ' + unit, 'ALLOW_PROCESS_GROUP_KILL=1 kill -9 -3',
+  ];
+  const spell = (s) => {
+    let out = '';
+    for (const ch of s) {
+      const enc = JSON.stringify(ch).slice(1, -1);
+      if (rnd() < 0.03 && ch.charCodeAt(0) < 0x10000) { const h = ch.charCodeAt(0).toString(16).padStart(4, '0'); out += `\\u${rnd() < 0.5 ? h : h.toUpperCase()}`; } else out += enc;
+    }
+    assert.strictEqual(JSON.parse(`"${out}"`), s);
+    return out;
+  };
+  let acts = 0; let skipped = 0;
+  for (let i = 0; i < 6000; i += 1) {
+    const command = cmds[Math.floor(rnd() * cmds.length)];
+    const raw = `{"session_id":"s","transcript_path":"/h/.claude/projects/x/abc.jsonl","tool_name":"Bash","tool_input":{"command":"${spell(command)}","description":"${spell(rnd() < 0.3 ? 'unrelated' : '')}"}}`;
+    const decoded = JSON.parse(raw).tool_input.command;
+    const folded = decoded.replace(/\\\r?\n/g, ' ');
+    const hit = PROCESS_GROUP_KILL.test(folded) || RUNNER_CTL.test(folded);
+    const runs = pats.some((p) => raw.includes(p));
+    if (hit) acts += 1;
+    if (!runs) skipped += 1;
+    if (hit) assert.ok(runs, `skipped a payload a regex accepts: ${raw}`);
+  }
+  assert.ok(acts > 1000 && skipped > 300, `degenerate sample: ${acts} act, ${skipped} skip`);
+});
+
+test('runner-guard gate: path-exact, skips without node, hands node every byte otherwise', () => {
+  const base = mkTmp('node-hook-rggate-');
+  try {
+    const dir = path.join(base, 'real');
+    fs.mkdirSync(dir);
+    fs.writeFileSync(path.join(dir, 'node'), '#!/bin/sh\nprintf "[%s]" "$(cat; echo x)"\n', { mode: 0o755 });
+    const env = { ...buildEnv(), PATH: `${dir}:/usr/bin:/bin` };
+    const run = (script, input) => spawnSync('/bin/sh', [LAUNCHER, script], { env, input, encoding: 'utf8' });
+    const hook = '/x/PreToolUse/runner-guard.js';
+    assert.strictEqual(run(hook, '{"tool_input":{"command":"ls"}}\n').stdout, '');
+    assert.strictEqual(run(hook, '{"tool_input":{"command":"ls"}}\n').status, 0);
+    for (const raw of ['{"c":"sudo systemctl restart x"}\n\n\n', '{"c":"kill -9 -5"}', '{"c":"/bin/kill -9 -5"}', '{"c":"killall x"}', '{"d":"systemctl"}']) {
+      assert.strictEqual(run(hook, raw).stdout, `[${raw}x]`, raw);
+    }
+    for (const esc of ['\\u006bill -9 -5', 'ki\\u006cl -9 -5', '\\u0073ystemctl restart x', 'systemct\\u006c stop y', 'sy\\u0073temctl', 'syst\\u0065mctl']) {
+      const raw = `{"c":"${esc}"}`;
+      assert.strictEqual(run(hook, raw).stdout, `[${raw}x]`, esc);
+    }
+    // Case matters: the regexes are case-sensitive, so KILL / SYSTEMCTL cannot act and are skipped.
+    assert.strictEqual(run(hook, '{"c":"KILL -9 -5 SYSTEMCTL restart x Kill"}').stdout, '');
+    assert.strictEqual(run(hook, '{"p":"\\u001b[0m \\u000a \\u0009 \\u0020 \\u003a"}').stdout, '');
+    assert.strictEqual(run(hook, '{"c":"kil l","d":"system ctl","e":"sytemctl"}').stdout, '');
+    for (const other of ['/x/PreToolUse/runner-guard.json', '/x/PostToolUse/runner-guard.js', 'runner-guard.js', '/x/PreToolUse/not-runner-guard.js']) {
+      assert.strictEqual(run(other, '{"c":"ls"}').stdout, '[{"c":"ls"}x]', other);
+    }
+  } finally { rmTmp(base); }
+});

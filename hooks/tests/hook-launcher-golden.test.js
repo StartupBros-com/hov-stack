@@ -1334,7 +1334,7 @@ test('PLANTED NEGATIVE 20: dropping the script-exists check is red nowhere in th
 });
 
 // ---------------------------------------------------------------------------
-// Bash-guard stdin gate (pass 6a): codex-quota-guard. Reference = the OLD registered form
+// Bash-guard stdin gates (pass 6): codex-quota-guard and runner-guard. Reference = the OLD registered form
 // (`node <guard>.js` through the mise shim). Compared on stdout, exit code, stderr and every file under the
 // sandboxed HOME. A gate may skip node only when the raw stdin cannot decode to a command the guard acts on;
 // the ONE observable the skip drops is the seam beat the guard's module load wrote. A case declares `skips`
@@ -1658,3 +1658,177 @@ test('PLANTED NEGATIVE CQ-12: a gate that skips everything is red on every decis
   cqSec.planted(t, 'always-skipping gate', cqMutate(["*'__never__'*"]), (spec) => BG_DECISIVE.has(spec.expect), 60);
 });
 
+// ---------------------------------------------------------------------------
+// runner-guard (pass 6b): same model as the codex-quota-guard section above
+// ---------------------------------------------------------------------------
+
+const RGG = 'PreToolUse/runner-guard.js';
+const RG_CASES = [];
+const addRg = (name, expect, skips, payload, extra = {}) => RG_CASES.push({ name, expect, skips, payload, ...extra });
+const RG_UNIT = 'actions.runner.StartupBros-com.runner-01.service';
+
+// 1. Every trigger the guard's own tests use: deny.
+const RG_DENY = [
+  ...['restart', 'stop', 'kill', 'start'].map((v) => `sudo systemctl ${v} ${RG_UNIT}`),
+  `ssh runner-01 'sudo systemctl restart ${RG_UNIT}'`, `ssh gh-runner-acme-evals-01 "systemctl stop ${RG_UNIT}"`, `ssh runner-01 'sudo systemctl kill -s SIGKILL ${RG_UNIT}'`,
+  ...['buildkite-agent', 'buildkite-agent.service', 'buildkite-agent@1.service', 'gitlab-runner', 'gitlab-runner.service'].flatMap((u) => [`sudo systemctl restart ${u}`, `ssh runner-01 'sudo systemctl restart ${u}'`]),
+  'sudo kill -9 -1226368', 'kill -TERM -4242', "ssh runner-01 'sudo kill -9 -1226368'",
+  'kill -s SIGKILL -1226368', 'kill -s 9 -1226368', 'kill -n 9 -1226368', 'kill -q 100 -9 -1226368', 'kill -9 -- -1226368', 'kill -s KILL -- -1226368', 'kill --signal KILL -1226368', "ssh runner-01 'sudo kill -s KILL -1226368'",
+  `sudo systemctl try-restart ${RG_UNIT}`, `sudo systemctl reload-or-restart ${RG_UNIT}`, `ssh runner-01 'sudo systemctl try-restart ${RG_UNIT}'`,
+  `ssh runner-01 'sudo systemctl restart \\\n  ${RG_UNIT}'`, 'sudo kill -9 \\\n  -1226368', '/usr/bin/kill -9 -55', 'ls; kill -HUP -3 && echo done',
+];
+RG_DENY.forEach((c) => addRg(`deny: ${JSON.stringify(c)}`, 'deny', false, bashRaw(c)));
+addRg('deny: JSON.stringify spelling (no session head)', 'deny', false, JSON.stringify({ tool_name: 'Bash', tool_input: { command: 'kill -9 -1226368' } }));
+addRg('deny: pretty-printed JSON', 'deny', false, JSON.stringify({ tool_name: 'Bash', tool_input: { command: `sudo systemctl restart ${RG_UNIT}` }, session_id: 's' }, null, 2));
+addRg('deny: escaped slashes in the command', 'deny', false, bashRawBody('\\/usr\\/bin\\/kill -9 -55'));
+addRg('deny: non-ASCII elsewhere in the command', 'deny', false, bashRaw('echo héllo ☃; kill -9 -55'));
+addRg('deny: trailing newlines (3)', 'deny', false, `${bashRaw('kill -9 -55')}\n\n\n`);
+addRg('deny: leading and trailing whitespace', 'deny', false, `\n  ${bashRaw('kill -9 -55')} \t\n`);
+addRg('deny: 200 KB of other command text before the trigger', 'deny', false, bashRaw(`echo ${'y'.repeat(200 * 1024)}; kill -9 -55`));
+addRg('deny: payload just under the 1 MiB cap', 'deny', false, (() => {
+  const head = bashRaw('kill -9 -55;');
+  return bashRaw(`kill -9 -55;${'y'.repeat(bgMiB - 64 - head.length)}`);
+})());
+addRg('deny: complete JSON then 1.5 MiB of whitespace (valid inside the cap)', 'deny', false, `${bashRaw('kill -9 -55')}${' '.repeat(bgMiB + bgMiB / 2)}`);
+
+// 2. The escapes (allow) and decisions that are not deny.
+addRg('allow: inline ALLOW_PROCESS_GROUP_KILL=1', 'allow', false, bashRaw("ssh runner-01 'ALLOW_PROCESS_GROUP_KILL=1 sudo kill -9 -1226368'"));
+addRg('allow: inline ALLOW_RUNNER_CTL=1', 'allow', false, bashRaw(`ssh runner-01 'ALLOW_RUNNER_CTL=1 sudo systemctl restart ${RG_UNIT}'`));
+addRg('allow: ALLOW_RUNNER_CTL=1 in the environment', 'allow', false, bashRaw(`sudo systemctl restart ${RG_UNIT}`), { env: { ALLOW_RUNNER_CTL: '1' } });
+addRg('allow: ALLOW_PROCESS_GROUP_KILL=1 in the environment', 'allow', false, bashRaw('kill -9 -77'), { env: { ALLOW_PROCESS_GROUP_KILL: '1' } });
+addRg('deny: ALLOW_RUNNER_CTL=0 in the environment does not escape', 'deny', false, bashRaw(`sudo systemctl restart ${RG_UNIT}`), { env: { ALLOW_RUNNER_CTL: '0' } });
+
+// 3. Contains a trigger but does not act (node must run, answer is quiet).
+for (const c of [
+  `systemctl status ${RG_UNIT}`, `systemctl show ${RG_UNIT} -p KillMode`, "ssh runner-01 'systemctl list-units --type=service | grep actions.runner'", "ssh runner-01 'sudo systemctl daemon-reload'",
+  `ssh runner-01 'sudo systemctl set-property --runtime ${RG_UNIT} CPUQuota=300%'`, 'sudo systemctl restart nginx', 'sudo systemctl restart postgresql', "ssh proxmox 'systemctl restart pveproxy'",
+  'sudo systemctl restart datadog-agent', 'sudo systemctl restart test-runner.service', 'sudo systemctl restart buildkite-agent-metrics.service', 'sudo systemctl restart gitlab-runner-exporter.service',
+  'sudo systemctl restart notgitlab-runner', 'sudo systemctl restart gitlab-runnerish', 'sudo systemctl restart my.buildkite-agent-shim', `systemctl restart nginx; echo ${RG_UNIT}`,
+  'kill -9 1226368', 'kill 1234', 'kill -s KILL 1226368', 'kill -n 9 1226368', 'kill -HUP 1234 5678', 'killall node', 'pkill -f x', 'echo kill', 'echo systemctl', 'git log --grep=kill', 'ls killer/',
+]) addRg(`literal present, no act: ${JSON.stringify(c)}`, 'quiet', false, bashRaw(c));
+addRg('description-only literal (command ls)', 'quiet', false, bashRaw('ls -la', { desc: 'kill the old runner via systemctl' }));
+addRg('literal only in cwd', 'quiet', false, bashRaw('ls', { head: BASH_HEAD.replace('"cwd":"/tmp/golden"', '"cwd":"/home/u/SITES/killer"') }));
+addRg('literal only in the transcript path', 'quiet', false, bashRaw('ls', { head: BASH_HEAD.replace('golden-bg-0001.jsonl', 'systemctl-session.jsonl') }));
+addRg('non-Bash tool carrying a kill command: quiet', 'quiet', false, bashRaw('kill -9 -55', { tool: 'Edit' }));
+addRg('no tool_name, kill command: quiet', 'quiet', false, '{"tool_input":{"command":"kill -9 -55"}}');
+addRg('command is an array holding a trigger: quiet', 'quiet', false, '{"tool_name":"Bash","tool_input":{"command":["kill -9 -55"]}}');
+addRg('command is a number: quiet', 'quiet', true, '{"tool_name":"Bash","tool_input":{"command":42}}');
+addRg('tool_input missing, no literal: quiet', 'quiet', true, '{"tool_name":"Bash"}');
+addRg('duplicate command key, trigger last (JSON.parse keeps the last) denies', 'deny', false, `${BASH_HEAD},"tool_name":"Bash","tool_input":{"command":"ls","command":"kill -9 -55"}}`);
+addRg('duplicate command key, trigger first: quiet', 'quiet', false, `${BASH_HEAD},"tool_name":"Bash","tool_input":{"command":"kill -9 -55","command":"ls"}}`);
+
+// 4. Escaped spellings: every character of each trigger, then all of them, both hex cases.
+const RG_K = 'kill -9 -1226368';
+RG_K.split('').forEach((c, i) => {
+  if (i < 4) addRg(`escaped char ${i} (${c}) of "${RG_K}" denies`, 'deny', false, bashRawBody(bgEscapeAt(RG_K, i)));
+});
+addRg('every character of "kill -9 -1226368" escaped denies', 'deny', false, bashRawBody(bgEscapeAll(RG_K)));
+addRg('every character of "kill -9 -1226368" escaped, uppercase hex denies', 'deny', false, bashRawBody(bgEscapeAll(RG_K, true)));
+const RG_S = `sudo systemctl restart ${RG_UNIT}`;
+for (let i = 5; i < 14; i += 1) addRg(`escaped char ${i} (${RG_S[i]}) of the systemctl command denies`, 'deny', false, bashRawBody(bgEscapeAt(RG_S, i)));
+addRg('every character of the systemctl command escaped denies', 'deny', false, bashRawBody(bgEscapeAll(RG_S)));
+addRg('every character of the systemctl command escaped, uppercase hex denies', 'deny', false, bashRawBody(bgEscapeAll(RG_S, true)));
+addRg('every character of the whole ssh-wrapped command escaped denies', 'deny', false, bashRawBody(bgEscapeAll(`ssh runner-01 'sudo systemctl stop ${RG_UNIT}'`)));
+addRg('only-escape: k (\\u006b) of kill denies', 'deny', false, bashRawBody('\\u006bill -9 -55'));
+addRg('only-escape: l (\\u006c) of kill denies', 'deny', false, bashRawBody('kil\\u006c -9 -55'));
+addRg('only-escape: s (\\u0073) of systemctl denies', 'deny', false, bashRawBody(`sudo \\u0073ystemctl restart ${RG_UNIT}`));
+addRg('only-escape: y (\\u0079) of systemctl denies', 'deny', false, bashRawBody(`sudo s\\u0079stemctl restart ${RG_UNIT}`));
+addRg('only-escape: c (\\u0063) of systemctl denies', 'deny', false, bashRawBody(`sudo systemct\\u006c restart ${RG_UNIT}`));
+addRg('escape of the space after kill (\\u0020) denies', 'deny', false, bashRawBody('kill\\u0020-9 -55'));
+addRg('escape of a tab after systemctl (\\u0009) denies', 'deny', false, bashRawBody(`systemctl\\u0009restart ${RG_UNIT}`));
+addRg('escaped newline-continuation (\\u005c\\u000a) between kill flags (folded to a space) denies', 'deny', false, bashRawBody('kill \\u005c\\u000a-9 -55'));
+addRg('escaped key name (comm\\u0061nd) with a plain value denies', 'deny', false, `${BASH_HEAD},"tool_name":"Bash","tool_input":{"comm\\u0061nd":"kill -9 -55"}}`);
+addRg('escaped tool_name with a plain command denies', 'deny', false, `${BASH_HEAD},"tool_name":"B\\u0061sh","tool_input":{"command":"kill -9 -55"}}`);
+// Fold: backslash-newline becomes a SPACE, so it cannot join two fragments of a trigger.
+addRg('fold cannot join: kil\\<newline>l -9 -55 (no `kill` byte sequence anywhere): quiet', 'quiet', true, bashRaw('kil\\\nl -9 -55'));
+addRg('fold cannot join: system\\<newline>ctl restart UNIT: quiet', 'quiet', true, bashRaw(`system\\\nctl restart ${RG_UNIT}`));
+addRg('quote splitting: sys\'\'temctl restart UNIT (regex works on the raw text): quiet', 'quiet', true, bashRaw(`sudo sys''temctl restart ${RG_UNIT}`));
+addRg('quote splitting: ki""ll -9 -55: quiet', 'quiet', true, bashRaw('ki""ll -9 -55'));
+
+// 5. Case: both regexes are case-sensitive, so these cannot act and carry no literal.
+addRg('KILL -9 -55 (uppercase): quiet', 'quiet', true, bashRaw('KILL -9 -55'));
+addRg('Kill -9 -55 (capitalised): quiet', 'quiet', true, bashRaw('Kill -9 -55'));
+addRg('SYSTEMCTL restart UNIT (uppercase): quiet', 'quiet', true, bashRaw(`SYSTEMCTL restart ${RG_UNIT}`));
+addRg('Systemctl restart UNIT (capitalised): quiet', 'quiet', true, bashRaw(`Systemctl restart ${RG_UNIT}`));
+
+// 6. No trigger anywhere: the gate must skip node (quiet, exit 0, empty stderr).
+for (const c of ['ls -la', 'echo hello', 'git status', 'pnpm test', 'gh pr view 5', 'rg --no-config -n foo hooks/', 'cat package.json', 'kil l -9 -5', 'sys temctl restart', 'sytemctl restart x', 'journalctl -u ' + RG_UNIT + ' -n 50', 'ps -ef --forest', 'systemd-cgls', 'ssh runner-01 uptime', 'docker ps']) {
+  addRg(`no trigger: ${c}`, 'quiet', true, bashRaw(c));
+}
+addRg('no trigger, real-shape head with description', 'quiet', true, bashRaw('pnpm build', { desc: 'Build the workspace' }));
+addRg('no trigger, JSON.stringify spelling', 'quiet', true, JSON.stringify({ session_id: 'golden-bg-0003', cwd: '/tmp/golden', tool_name: 'Bash', tool_input: { command: 'ls' } }));
+addRg('no trigger, pretty-printed', 'quiet', true, JSON.stringify({ tool_name: 'Bash', tool_input: { command: 'ls' } }, null, 2));
+addRg('ANSI escape (\\u001b) in the command: quiet', 'quiet', true, bashRawBody('printf \\u001b[31mred\\u001b[0m'));
+addRg('short escapes (\\n \\t \\" \\\\) only: quiet', 'quiet', true, bashRawBody('echo l1\\nl2\\t\\"q\\" \\\\ end'));
+addRg('escape that is not a trigger char (\\u0000-\\u001f): quiet', 'quiet', true, bashRawBody('echo \\u0007\\u0008\\u000b\\u001f'));
+addRg('non-ASCII, no trigger: quiet', 'quiet', true, JSON.stringify({ tool_name: 'Bash', tool_input: { command: 'echo héllo ☃ \u{1F600}' } }));
+addRg('trailing newlines (3), no trigger: quiet', 'quiet', true, `${bashRaw('ls')}\n\n\n`);
+addRg('200 KB command, no trigger: quiet', 'quiet', true, bashRaw(`echo ${'y'.repeat(200 * 1024)}`));
+addRg('Read of a file, no trigger: quiet', 'quiet', true, '{"tool_name":"Read","tool_input":{"file_path":"/a/b.js"}}');
+
+// 7. Malformed and degenerate stdin.
+addRg('malformed JSON, no literal: quiet', 'quiet', true, '{not json');
+addRg('malformed JSON, with a trigger: quiet', 'quiet', false, '{"tool_name":"Bash","tool_input":{"command":"kill -9 -55"');
+addRg('empty stdin: quiet', 'quiet', true, '');
+addRg('only a newline: quiet', 'quiet', true, '\n');
+addRg('JSON null: quiet (run() throws on input.tool_name and passes through)', 'quiet', true, 'null');
+addRg('JSON array: quiet', 'quiet', true, '[]');
+addRg('JSON string holding a trigger: quiet', 'quiet', false, '"kill -9 -55"');
+addRg('raw NUL byte inside a trigger command (invalid JSON): quiet', 'quiet', false, '{"tool_name":"Bash","tool_input":{"command":"kill -9 -55\u0000"}}');
+addRg('raw NUL byte, no trigger (invalid JSON): quiet', 'quiet', true, '{"tool_name":"Bash","tool_input":{"command":"ls\u0000"}}');
+addRg('raw \\001 byte, no trigger (invalid JSON): quiet', 'quiet', true, '{"tool_name":"Bash","tool_input":{"command":"ls\u0001"}}');
+
+// 8. Over the 1 MiB accumulate cap.
+const rgBig = 'y'.repeat(2 * bgMiB);
+addRg('2 MiB command, no trigger: quiet', 'quiet', true, bashRaw(`echo ${rgBig}`));
+addRg('2 MiB command, trigger BEFORE the cap (truncated, invalid JSON): quiet', 'quiet', false, `{"tool_name":"Bash","tool_input":{"command":"kill -9 -55; echo ${rgBig}"},"cwd":"/tmp/golden"}`);
+addRg('2 MiB command, trigger AFTER the cap (node never sees it): quiet', 'quiet', false, `{"tool_name":"Bash","tool_input":{"command":"echo ${rgBig}; kill -9 -55"}}`);
+addRg('2 MiB, literal only in the tail, plain command: quiet', 'quiet', false, `{"tool_name":"Bash","tool_input":{"command":"echo ${rgBig}"},"note":"systemctl"}`);
+
+const rgSec = bashGateSection({ hook: RGG, label: 'runner-guard', cases: RG_CASES });
+bashGateTests(rgSec, { minCases: 150, minDecisive: 70, minSkips: 25, decisive: BG_DECISIVE });
+
+const RG_ARM_LINE_RE = /( {2}\*\/PreToolUse\/runner-guard\.js\)\n[\s\S]*? {4}case \$_hn_buf in\n {6})(.*)(\) _hn_stdin=1 ;;)/;
+const RG_PATS = ["*'kill'*", "*'systemctl'*", "*'\\u006'*", "*'\\u007'*"];
+const rgPatHit = (p, raw) => raw.includes(p.replace(/^\*'/, '').replace(/'\*$/, ''));
+const rgMutate = (pats) => (s) => s.replace(RG_ARM_LINE_RE, (m, a, b, c) => `${a}${pats.join(' | ')}${c}`);
+
+test('runner-guard gate: the launcher carries exactly the four expected patterns', () => {
+  assert.deepStrictEqual(LAUNCHER_SRC.match(RG_ARM_LINE_RE)[2].split(' | '), RG_PATS);
+});
+
+RG_PATS.forEach((pat, idx) => {
+  test(`PLANTED NEGATIVE RG-${idx + 1}: dropping the pattern ${pat} is red on every case that only that pattern lets through`, (t) => {
+    const rest = RG_PATS.filter((p) => p !== pat);
+    rgSec.planted(t, `without ${pat}`, rgMutate(rest),
+      (spec) => spec.expect !== 'quiet' && rgPatHit(pat, spec.raw) && !rest.some((p) => rgPatHit(p, spec.raw)), 1);
+  });
+});
+
+test('PLANTED NEGATIVE RG-5: a gate with the plain literals only (no \\u escape prefixes) is red on every escaped-spelling case', (t) => {
+  rgSec.planted(t, 'no escape prefixes', rgMutate(RG_PATS.slice(0, 2)),
+    (spec) => spec.expect !== 'quiet' && !rgPatHit(RG_PATS[0], spec.raw) && !rgPatHit(RG_PATS[1], spec.raw), 15);
+});
+
+test('PLANTED NEGATIVE RG-6: a gate that drops stdin before node is red on every decisive case', (t) => {
+  rgSec.planted(t, 'dropping gate', (s) => s.split('printf \'%s\' "$_hn_buf" |').join('printf \'\' |'),
+    (spec) => BG_DECISIVE.has(spec.expect) && !spec.skips, 70);
+});
+
+test('PLANTED NEGATIVE RG-10: a gate that truncates stdin to 40 bytes before node is red on every decisive case', (t) => {
+  rgSec.planted(t, 'truncating gate', (s) => s.split('printf \'%s\' "$_hn_buf" |').join('printf \'%.40s\' "$_hn_buf" |'),
+    (spec) => BG_DECISIVE.has(spec.expect) && !spec.skips, 70);
+});
+
+test('PLANTED NEGATIVE RG-7: a gate that never skips cannot hide behind the seam exclusion (skip cases must see 0 beats)', (t) => {
+  rgSec.planted(t, 'never-skipping gate', rgMutate(['*']), (spec) => spec.skips, 25);
+});
+
+test('PLANTED NEGATIVE RG-8: a gate that skips everything is red on every decisive case', (t) => {
+  rgSec.planted(t, 'always-skipping gate', rgMutate(["*'__never__'*"]), (spec) => BG_DECISIVE.has(spec.expect), 70);
+});
+
+test('PLANTED NEGATIVE RG-9: a gate that tests only `systemctl` and `kill` after a space is red on `/usr/bin/kill` and `;kill` spellings', (t) => {
+  rgSec.planted(t, 'space-prefixed gate', rgMutate(["*' kill'*", "*' systemctl'*", ...RG_PATS.slice(2)]),
+    (spec) => spec.expect !== 'quiet' && (spec.raw.includes('kill') || spec.raw.includes('systemctl')) && !spec.raw.includes(' kill') && !spec.raw.includes(' systemctl') && !RG_PATS.slice(2).some((p) => rgPatHit(p, spec.raw)), 1);
+});

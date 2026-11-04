@@ -113,6 +113,19 @@
 # What the skip drops: the seam heartbeat module load wrote (codex-quota-guard requires
 # lib/pretooluse-decision). Bash stays covered by the guards that always start.
 #
+# Stdin gate (#369, pass 6b): hooks/PreToolUse/runner-guard.js (matcher Bash, registered directly).
+# run() parses stdin and returns it untouched (writeHookOutput prints nothing, process.exit(0), empty
+# stderr) unless tool_input.command, with backslash-newline replaced by a SPACE (never removed, so the
+# fold cannot join two fragments), matches PROCESS_GROUP_KILL (/\b(?:\/\S*\/)?kill\s+.../) or
+# RUNNER_CTL (/\bsystemctl\s+.../). Both are case-sensitive, flagless regexes over the raw decoded
+# command, so a true result needs the decoded command to contain `kill` or `systemctl` verbatim. The
+# only code before that test is setDenyContext (sets a variable; writes only on a deny). The launcher
+# skips node unless stdin holds `kill` or `systemctl`, or one of `\u006`, `\u007`: the JSON escape
+# prefixes of every character of either literal (k i l = U+006B/69/6C; s y t e m c = U+0073/79/74/65/6D/63).
+# Tied to the regex sources by hooks/tests/node-hook.test.js (drift test). What the skip drops: the seam
+# heartbeat module load wrote (runner-guard requires lib/pretooluse-decision). Bash stays covered by the
+# guards that always start.
+#
 # What the skip drops: the seam heartbeat settings-guard.js wrote on every Edit/Write/MultiEdit.
 # After pass 2 it was the only beat source for those tools, so scripts/hook-seam-check.py
 # BEAT_COVERED_TOOLS is now {Bash, EnterWorktree}. Evidence in that file's header.
@@ -140,6 +153,14 @@ case $1 in
     _hn_buf=${_hn_buf%x}
     case $_hn_buf in
       *[Cc][Oo][Dd][Ee][Xx]* | *[Aa][Pp][Pp]-[Ss][Ee][Rr][Vv][Ee][Rr]-[Bb][Rr][Oo][Kk][Ee][Rr]* | *'\u002'* | *'\u004'* | *'\u005'* | *'\u006'* | *'\u007'*) _hn_stdin=1 ;;
+      *) exit 0 ;;
+    esac
+    ;;
+  */PreToolUse/runner-guard.js)
+    _hn_buf=$(tr '\0' '\1'; echo x)
+    _hn_buf=${_hn_buf%x}
+    case $_hn_buf in
+      *'kill'* | *'systemctl'* | *'\u006'* | *'\u007'*) _hn_stdin=1 ;;
       *) exit 0 ;;
     esac
     ;;
