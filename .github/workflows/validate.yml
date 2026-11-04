@@ -70,6 +70,7 @@ jobs:
           release/tests/publish-staged.test.sh
           release/tests/check-release-notes.test.sh
           release/tests/root-workflows.test.sh
+          release/tests/release-pins.test.sh
       - name: Test pinned CI tool provisioning without network access
         run: bash ./release/tests/provision-ci-tools.test.sh
       - name: Validate marketplace without network access
@@ -127,8 +128,10 @@ jobs:
         run: bash ./release/tests/check-release-notes.test.sh
       - name: Run root workflows tests
         run: bash ./release/tests/root-workflows.test.sh
+      - name: Run release pins tests
+        run: bash ./release/tests/release-pins.test.sh
       - name: Lint root workflows
-        run: actionlint -config-file .github/actionlint.yaml .github/workflows/plugins-ci.yml .github/workflows/auto-release.yml .github/workflows/release.yml .github/workflows/publish-staged-release.yml .github/workflows/release-train.yml
+        run: actionlint -config-file .github/actionlint.yaml .github/workflows/plugins-ci.yml .github/workflows/auto-release.yml .github/workflows/release.yml .github/workflows/publish-staged-release.yml .github/workflows/release-train.yml .github/workflows/release-pins-refresh.yml
 
   public-pr-syntax:
     name: Public PR data check
@@ -161,3 +164,7 @@ jobs:
         env:
           BASE_REF: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
         run: ./release/scripts/validate-marketplace.sh full
+      - name: Verify install-release pins against their downloads
+        env:
+          BASE_REF: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+        run: ./release/scripts/release-pins.sh verify --if-changed-since "$BASE_REF"

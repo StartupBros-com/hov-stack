@@ -47,6 +47,8 @@ case "$cmd" in
   'pr view') emit < "$FIX/files-$num.json" ;;
   'api repos/acme/market/contents/.claude-plugin/marketplace.json?ref='*)
     printf '{"sha":"%s"}\n' "$(cat "$FIX/blob")" | emit ;;
+  'api repos/acme/market/contents/tools/pins.sh?ref='*)
+    printf '{"sha":"%s"}\n' "$(cat "$FIX/pins-blob")" | emit ;;
   'pr merge') printf 'merge %s %s\n' "$num" "$head" >> "$CALLS" ;;
   'pr close') printf 'close %s\n' "$num" >> "$CALLS" ;;
   *) printf 'unexpected gh: %s\n' "$cmd" >&2; exit 1 ;;
@@ -160,5 +162,74 @@ if run_land DESIRED_BRANCH= ; then die 'a failed PR list was treated as success'
 [ ! -s "$CALLS" ] || die 'a failed PR list still closed or merged something'
 grep -q 'could not list open pull requests' "$TMP/err" || die 'the list failure was not named'
 pass 'a failed PR list exits nonzero and touches nothing'
+
+# --- the pins family: LAND_PATH, BRANCH_PREFIX and REQUEST_AUTO_MERGE ----------
+PINS=tools/pins.sh
+PINS_BLOB=ffffffffffffffffffffffffffffffffffffffff
+printf '%s\n' "$PINS_BLOB" > "$FIX/pins-blob"
+mixed_prs() {
+  {
+    pr 20 pins/auto-new "$BOT" false false
+    pr 19 pins/auto-old "$BOT" false false
+    pr 10 repin/auto-new "$BOT" false false
+    pr 9 repin/auto-old "$BOT" false false
+  } | jq -s . > "$FIX/prs.json"
+}
+printf '{"files":[{"path":"%s"}]}\n' "$PINS" > "$FIX/files-20.json"
+run_pins() { run_land LAND_PATH="$PINS" BRANCH_PREFIX=pins/auto- "$@"; }
+
+mixed_prs
+run_pins DESIRED_BRANCH=pins/auto-new EXPECTED_BLOB="$PINS_BLOB" || die "landing a pins PR failed: $(cat "$TMP/err")"
+grep -qx "merge 20 $HEAD_SHA" "$CALLS" || die "auto-merge was not requested on the pins PR: $(cat "$CALLS")"
+[ "$(grep '^close' "$CALLS")" = 'close 19' ] \
+  || die "a pins run should close only #19, got: $(grep '^close' "$CALLS" || true)"
+pass 'a pins run proves LAND_PATH, lands its PR and closes only pins/auto- PRs, never a repin PR'
+
+mixed_prs
+run_land DESIRED_BRANCH=repin/auto-new EXPECTED_BLOB="$BLOB" || die "a repin run beside pins PRs failed: $(cat "$TMP/err")"
+[ "$(grep '^close' "$CALLS")" = 'close 9' ] \
+  || die "a repin run should close only #9, got: $(grep '^close' "$CALLS" || true)"
+pass 'a default run beside open pins PRs closes only repin/auto- PRs'
+
+mixed_prs
+run_pins DESIRED_BRANCH= || die 'a no-drift pins run failed'
+[ "$(grep '^close' "$CALLS" | sort | tr '\n' ' ')" = 'close 19 close 20 ' ] \
+  || die "a no-drift pins run should close #20 and #19, got: $(cat "$CALLS")"
+pass 'with no drift, a pins run closes every pins PR and no repin PR'
+
+# the proof uses LAND_PATH: a PR touching the manifest instead is refused, and so is a wrong blob
+mixed_prs
+printf '{"files":[{"path":".claude-plugin/marketplace.json"}]}\n' > "$FIX/files-20.json"
+if run_pins DESIRED_BRANCH=pins/auto-new EXPECTED_BLOB="$PINS_BLOB"; then die 'a pins PR changing the manifest was landed'; fi
+[ ! -s "$CALLS" ] || die "a wrong-file pins PR triggered: $(cat "$CALLS")"
+grep -q 'changes more than tools/pins.sh' "$TMP/err" || die 'the LAND_PATH was not named in the refusal'
+printf '{"files":[{"path":"%s"}]}\n' "$PINS" > "$FIX/files-20.json"
+if run_pins DESIRED_BRANCH=pins/auto-new EXPECTED_BLOB="$BLOB"; then die 'a pins PR with a different blob was landed'; fi
+[ ! -s "$CALLS" ] || die "a wrong-blob pins PR triggered: $(cat "$CALLS")"
+pass 'the pins proof reads LAND_PATH: another file or another blob is refused'
+
+# a PR with the default prefix is not selectable by a pins run, and the reverse
+if run_pins DESIRED_BRANCH=repin/auto-new EXPECTED_BLOB="$PINS_BLOB"; then die 'a pins run landed a repin PR'; fi
+[ ! -s "$CALLS" ] || die "a pins run touched a repin PR: $(cat "$CALLS")"
+if run_land DESIRED_BRANCH=pins/auto-new EXPECTED_BLOB="$PINS_BLOB"; then die 'a repin run landed a pins PR'; fi
+[ ! -s "$CALLS" ] || die "a repin run touched a pins PR: $(cat "$CALLS")"
+pass 'a pins run cannot land a repin PR and a repin run cannot land a pins PR'
+
+# REQUEST_AUTO_MERGE=false: same proof, no merge, one line saying why, own prefix still pruned
+mixed_prs
+run_pins REQUEST_AUTO_MERGE=false DESIRED_BRANCH=pins/auto-new EXPECTED_BLOB="$PINS_BLOB" \
+  || die "a no-auto-merge run failed: $(cat "$TMP/err")"
+if grep -q '^merge' "$CALLS"; then die 'auto-merge was requested with REQUEST_AUTO_MERGE=false'; fi
+{ [ "$(grep -c 'auto-merge is off' "$TMP/out")" = 1 ] && grep -q "waits for the owner to merge it" "$TMP/out"; } \
+  || die "REQUEST_AUTO_MERGE=false did not say so once: $(cat "$TMP/out")"
+[ "$(grep '^close' "$CALLS")" = 'close 19' ] || die "a no-auto-merge run should still close #19, got: $(cat "$CALLS")"
+if run_pins REQUEST_AUTO_MERGE=false DESIRED_BRANCH=pins/auto-new EXPECTED_BLOB="$BLOB"; then
+  die 'REQUEST_AUTO_MERGE=false skipped the proof'
+fi
+grep -q "not the reconciler's" "$TMP/err" || die 'the proof did not fail on a wrong blob with auto-merge off'
+if run_pins REQUEST_AUTO_MERGE=maybe DESIRED_BRANCH=pins/auto-new EXPECTED_BLOB="$PINS_BLOB"; then
+  die 'a non-boolean REQUEST_AUTO_MERGE was accepted'
+fi
+pass 'REQUEST_AUTO_MERGE=false still proves the PR, requests no merge and prunes its own prefix'
 
 printf '%s repin land checks passed\n' "$PASS"

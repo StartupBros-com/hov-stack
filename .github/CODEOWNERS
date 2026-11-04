@@ -1,6 +1,11 @@
 # Code-owner review for release machinery, the manifest, every VERSION, the setup
-# entrypoint, hooks and the skill pack. The author is the only code owner; the
-# marketplace bot's manifest-only repin PRs are exempted by a ruleset bypass.
+# entrypoint, hooks and the skill pack. The author is the only code owner. The
+# code-owner-review ruleset exempts the marketplace bot whatever its PR changes, so
+# an auto-merge the bot requests (it merges as the bot) skips the author's review:
+# its manifest-only repin PRs always request one, its install-release pin PRs only
+# while the repository variable HOV_PINS_AUTO_MERGE is true, and otherwise wait for
+# the author to merge them. The require-ci ruleset has no bypass, so every bot PR
+# still needs every required check.
 /.github/            @StartupBros
 /release/            @StartupBros
 /.claude-plugin/     @StartupBros
