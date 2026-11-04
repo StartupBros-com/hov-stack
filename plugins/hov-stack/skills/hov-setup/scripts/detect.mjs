@@ -1,12 +1,18 @@
 #!/usr/bin/env node
 /*
-  hov-setup detector: which of the optional plugins on the hov marketplace are installed, in
-  walkthrough order, the next step for each, and which other hov plugins ./setup already
-  installed (for the closing tour).
+  hov-setup detector: which of the things /hov-setup offers are installed, in walkthrough
+  order, the next step for each, and which other hov plugins ./setup already installed (for the
+  closing tour). What is offered lives in offers.json beside this file: plugins on the hov
+  marketplace, plugins on another publisher's marketplace, programs on PATH, a paid skill set
+  with its manager program, and the helper programs some of those need.
 
   Read-only. It runs `claude plugin marketplace list --json` and `claude plugin list --json`
-  and nothing else. A plugin counts only when it is installed at user scope, the rule
-  ./setup uses; a project-scope copy is named in `otherScopes` and does not count.
+  and no other program: a tool is found by looking for an executable file of its name in the
+  PATH directories and a few usual install directories, never by running it. A plugin counts
+  only when it is installed at user scope, the rule ./setup uses; a project-scope copy is named
+  in `otherScopes` and does not count. A plugin from another publisher's marketplace is found
+  by where its marketplace comes from (its GitHub repository), not by the name the user gave
+  that marketplace.
 
   Usage:
     node detect.mjs [--json]
@@ -14,31 +20,37 @@
   Exit: 0 report printed; 1 a claude read failed (its error is passed through, and nothing
   is reported as absent); 2 bad usage.
 
-  HOV_SETUP_PROC_VERSION names the file read to tell WSL2 apart (default /proc/version).
+  Test-only environment overrides:
+    HOV_SETUP_PROC_VERSION     the file read to tell WSL2 apart (default /proc/version).
+    HOV_SETUP_PLATFORM         the platform name, e.g. linux-x86_64 (default: from the machine).
+    HOV_SETUP_EXTRA_BIN_DIRS   a ':'-separated list that replaces the extra directories searched
+                               after PATH (default ~/.local/bin, /opt/homebrew/bin, /usr/local/bin).
 */
-import { readFileSync, realpathSync } from "node:fs";
+import { accessSync, constants, readFileSync, realpathSync, statSync } from "node:fs";
+import { homedir } from "node:os";
+import { delimiter, dirname, join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
-export const MARKETPLACE = "hov";
+const here = dirname(fileURLToPath(import.meta.url));
+// The skill directory: the one holding SKILL.md, the parent of the scripts directory.
+const SKILL_DIR = dirname(here);
 
-// The guided plugins: each needs a login, a password or Windows prompt, a paid plan or a
-// choice. Walkthrough order: the quickest win first, wsl-cdp before product-video (whose live
-// recording uses its browser), and pro-gate, which has the most steps, last.
-export const PLUGINS = [
-  { name: "sign-it", what: "signs PDFs and Word documents with your own saved signature" },
-  { name: "wsl-cdp", what: "lets Claude in WSL2 use your logged-in Windows browser", wslOnly: true },
-  { name: "product-video", what: "turns a click-through of your product into a captioned video" },
-  { name: "token-eater", what: "spends spare AI credits on code cleanup you review before it lands" },
-  { name: "pro-gate", what: "a last review of your code changes by ChatGPT's Pro model" },
-];
+const data = JSON.parse(readFileSync(new URL("./offers.json", import.meta.url), "utf8"));
 
-// Extras for people who tune their own Claude Code setup: free, nothing to set up.
-export const EXTRAS = [
-  { name: "harness-vet", what: "checks someone else's skill, plugin or tool before you add it" },
-  { name: "rent-check", what: "shows which always-loaded instructions earn their cost, and what to cut" },
-  { name: "harness-optimizer", what: "digs into a setup problem that keeps coming back and proposes fixes" },
-];
+export const MARKETPLACE = data.marketplace;
+export const GROUPS = data.groups;
+export const OFFERS = data.offers;
+export const HELPERS = data.helpers;
+
+// The hov plugins that need a login, a paid plan or a choice, in walkthrough order, and the
+// free tuning plugins. Derived from offers.json so nothing that imports them breaks.
+export const PLUGINS = OFFERS.filter((o) => o.kind === "plugin" && o.group !== "tuning").map(
+  ({ name, what, wslOnly }) => (wslOnly ? { name, what, wslOnly } : { name, what }),
+);
+export const EXTRAS = OFFERS.filter((o) => o.kind === "plugin" && o.group === "tuning").map(
+  ({ name, what, wslOnly }) => (wslOnly ? { name, what, wslOnly } : { name, what }),
+);
 
 // What ./setup installs (lib/default-plugins.txt) and the skill pack, for the closing tour.
 // A hov plugin not named here is still listed, with `what` and `start` null.
@@ -80,41 +92,176 @@ function onWsl() {
   }
 }
 
+function platformName() {
+  const override = process.env.HOV_SETUP_PLATFORM;
+  if (override) return override;
+  const { platform, arch } = process;
+  if (platform === "darwin" && arch === "arm64") return "darwin-arm64";
+  if (platform === "linux" && arch === "x64") return "linux-x86_64";
+  if (platform === "linux" && arch === "arm64") return "linux-aarch64";
+  return `${platform}-${arch}`;
+}
+
+// Where to look for a program: the PATH directories in order, then the usual install
+// directories, with no repeats.
+function searchDirs() {
+  const pathDirs = (process.env.PATH || "").split(delimiter).filter(Boolean);
+  const extraEnv = process.env.HOV_SETUP_EXTRA_BIN_DIRS;
+  const extra =
+    extraEnv !== undefined
+      ? extraEnv.split(":").filter(Boolean)
+      : [join(homedir(), ".local", "bin"), "/opt/homebrew/bin", "/usr/local/bin"];
+  const dirs = [...new Set([...pathDirs, ...extra])];
+  return { dirs, onPath: new Set(pathDirs) };
+}
+
+function isExecutableFile(p) {
+  try {
+    if (!statSync(p).isFile()) return false;
+    accessSync(p, constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// Finds `bin` without running it: the first candidate directory holding an executable regular
+// file of that name.
+function findBin(bin, search) {
+  for (const d of search.dirs) {
+    const p = join(d, bin);
+    if (isExecutableFile(p)) return { path: p, onPath: search.onPath.has(d) };
+  }
+  return { path: null, onPath: false };
+}
+
+// The user-scope row for `id` decides the state; rows at other scopes are named but do not count.
+function pluginState(id, installed, wslOnly, wsl) {
+  const rows = installed.filter((r) => r && r.id === id);
+  const user = rows.find((r) => r.scope === "user");
+  const out = {
+    state: "absent",
+    version: user ? user.version || null : null,
+    installPath: user ? user.installPath || null : null,
+    otherScopes: rows.filter((r) => r.scope !== "user").map((r) => r.scope),
+    next: `claude plugin install ${id} --scope user`,
+  };
+  if (wslOnly && !wsl) {
+    out.state = "not-applicable";
+    out.next = NOT_WSL;
+  } else if (user && user.enabled === false) {
+    out.state = "disabled";
+    out.next = `claude plugin enable ${id} --scope user`;
+  } else if (user) {
+    out.state = "installed";
+    out.next = null;
+  }
+  return out;
+}
+
+function sourceMatches(m, github) {
+  if (!m) return false;
+  const want = github.toLowerCase();
+  if (typeof m.repo === "string" && m.repo.toLowerCase() === want) return true;
+  if (typeof m.url === "string") {
+    const url = m.url.toLowerCase().replace(/\/+$/, "").replace(/\.git$/, "").replace(/\/+$/, "");
+    return url === `https://github.com/${want}`;
+  }
+  return false;
+}
+
+function fill(line, uvPath) {
+  return line.split("<skill-dir>").join(SKILL_DIR).split("<uv>").join(uvPath);
+}
+
+// Shared by tools, paid-skills and helpers: where the program is and what to run if it is not.
+function toolFields(o, platform, search, uvPath) {
+  const keys = Object.keys(o.install);
+  if (!keys.includes(platform)) {
+    return {
+      bin: o.bin,
+      path: null,
+      onPath: false,
+      state: "not-applicable",
+      next: `only offered on ${keys.join(", ")}`,
+    };
+  }
+  const found = findBin(o.bin, search);
+  return {
+    bin: o.bin,
+    path: found.path,
+    onPath: found.onPath,
+    state: found.path ? "installed" : "absent",
+    next: found.path ? null : fill(o.install[platform], uvPath),
+  };
+}
+
 export function detect() {
   const marketplaces = readClaudeJson(["plugin", "marketplace", "list", "--json"]);
   const installed = readClaudeJson(["plugin", "list", "--json"]);
   const wsl = onWsl();
-  const offered = [
-    ...PLUGINS.map((p) => ({ ...p, group: "guided" })),
-    ...EXTRAS.map((p) => ({ ...p, group: "extra" })),
-  ];
-  const plugins = offered.map(({ name, what, group, wslOnly }) => {
-    const id = `${name}@${MARKETPLACE}`;
-    const rows = installed.filter((r) => r && r.id === id);
-    const user = rows.find((r) => r.scope === "user");
-    const row = {
-      name,
-      what,
-      group,
-      state: "absent",
-      version: user ? user.version || null : null,
-      installPath: user ? user.installPath || null : null,
-      otherScopes: rows.filter((r) => r.scope !== "user").map((r) => r.scope),
-      next: `claude plugin install ${id} --scope user`,
-    };
-    if (wslOnly && !wsl) {
-      row.state = "not-applicable";
-      row.next = NOT_WSL;
-    } else if (user && user.enabled === false) {
-      row.state = "disabled";
-      row.next = `claude plugin enable ${id} --scope user`;
-    } else if (user) {
-      row.state = "installed";
-      row.next = null;
-    }
-    return row;
+  const platform = platformName();
+  const search = searchDirs();
+
+  // <uv> in an install line is the uv the detector found, else plain `uv`.
+  const uvHelper = HELPERS.find((h) => h.name === "uv");
+  const uvFound = uvHelper ? findBin(uvHelper.bin, search) : { path: null };
+  const uvPath = uvFound.path || "uv";
+  const helpers = HELPERS.map((h) => {
+    const f = toolFields(h, platform, search, uvPath);
+    return { name: h.name, publisher: h.publisher, what: h.what, bin: f.bin, path: f.path, onPath: f.onPath, state: f.state, next: f.next };
   });
-  const offeredNames = new Set(offered.map((p) => p.name));
+
+  const plugins = OFFERS.map((o) => {
+    const head = { name: o.name, kind: o.kind, group: o.group, publisher: o.publisher, what: o.what };
+    if (o.kind === "plugin") {
+      const id = `${o.name}@${MARKETPLACE}`;
+      const s = pluginState(id, installed, o.wslOnly, wsl);
+      return {
+        ...head,
+        state: s.state,
+        next: s.next,
+        version: s.version,
+        installPath: s.installPath,
+        otherScopes: s.otherScopes,
+      };
+    }
+    if (o.kind === "other-plugin") {
+      const matched = [];
+      for (const m of marketplaces) {
+        if (sourceMatches(m, o.marketplace.github) && typeof m.name === "string" && !matched.includes(m.name)) matched.push(m.name);
+      }
+      let id;
+      let marketplaceAdd = null;
+      if (matched.length) {
+        const hit = matched.find((n) => installed.some((r) => r && r.id === `${o.plugin}@${n}` && r.scope === "user"));
+        id = `${o.plugin}@${hit ?? matched[0]}`;
+      } else {
+        id = `${o.plugin}@${o.marketplace.name}`;
+        marketplaceAdd = `claude plugin marketplace add ${o.marketplace.github}`;
+      }
+      const s = pluginState(id, installed, o.wslOnly, wsl);
+      return {
+        ...head,
+        state: s.state,
+        next: s.next,
+        version: s.version,
+        installPath: s.installPath,
+        otherScopes: s.otherScopes,
+        id,
+        marketplaceAdd,
+      };
+    }
+    // tool and paid-skills
+    const f = toolFields(o, platform, search, uvPath);
+    const needs = (o.needs || []).map((n) => {
+      const h = helpers.find((x) => x.name === n);
+      return { name: n, path: h ? h.path : null, onPath: h ? h.onPath : false, next: h ? h.next : null };
+    });
+    return { ...head, state: f.state, next: f.next, bin: f.bin, path: f.path, onPath: f.onPath, needs };
+  });
+
+  const offeredNames = new Set(OFFERS.map((p) => p.name));
   const suffix = `@${MARKETPLACE}`;
   const alsoInstalled = installed
     .filter((r) => r && typeof r.id === "string" && r.id.endsWith(suffix) && r.scope === "user")
@@ -126,10 +273,27 @@ export function detect() {
     });
   return {
     marketplace: { name: MARKETPLACE, added: marketplaces.some((m) => m && m.name === MARKETPLACE) },
+    platform,
     wsl,
     plugins,
+    helpers,
     alsoInstalled,
   };
+}
+
+function line(p) {
+  const isPlugin = p.kind === "plugin" || p.kind === "other-plugin";
+  const ver = isPlugin && p.version ? ` ${p.version}` : "";
+  const scopes = isPlugin ? p.otherScopes.join(", ") : "";
+  if (p.state === "installed") {
+    if (isPlugin) return `  ${p.name}: installed${ver}${scopes ? ` (also at ${scopes} scope)` : ""}`;
+    return `  ${p.name}: installed (${p.path})${p.onPath ? "" : ". Not on PATH"}`;
+  }
+  if (p.state === "disabled") return `  ${p.name}: installed${ver} but disabled. Enable: ${p.next}`;
+  if (p.state === "not-applicable") return `  ${p.name}: not applicable here: ${p.next}`;
+  const only = scopes ? ` (installed at ${scopes} scope only, which does not count)` : "";
+  if (p.marketplaceAdd) return `  ${p.name}: absent${only}. Add its marketplace first: ${p.marketplaceAdd}. Then install: ${p.next}`;
+  return `  ${p.name}: absent${only}. Install: ${p.next}`;
 }
 
 function text(report) {
@@ -142,14 +306,8 @@ function text(report) {
       "  Re-run ./setup from your hov-stack checkout (it adds the marketplace), then run this again.",
     );
   }
-  for (const p of report.plugins) {
-    const ver = p.version ? ` ${p.version}` : "";
-    const scopes = p.otherScopes.join(", ");
-    if (p.state === "installed") lines.push(`  ${p.name}: installed${ver}${scopes ? ` (also at ${scopes} scope)` : ""}`);
-    else if (p.state === "disabled") lines.push(`  ${p.name}: installed${ver} but disabled. Enable: ${p.next}`);
-    else if (p.state === "not-applicable") lines.push(`  ${p.name}: not applicable here: ${p.next}`);
-    else lines.push(`  ${p.name}: absent${scopes ? ` (installed at ${scopes} scope only, which does not count)` : ""}. Install: ${p.next}`);
-  }
+  for (const p of report.plugins) lines.push(line(p));
+  for (const h of report.helpers) lines.push(line({ ...h, kind: "helper" }));
   if (report.alsoInstalled.length) {
     const names = report.alsoInstalled.map(
       (p) => `${p.name}${p.version ? ` ${p.version}` : ""}${p.enabled ? "" : " (disabled)"}`,

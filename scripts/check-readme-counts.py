@@ -20,7 +20,10 @@ Legs, each reported by name:
 - repositories: the only repository under the author's two GitHub owners, in any case,
   that the README, CONTRIBUTING.md and SECURITY.md name is StartupBros-com/hov-stack.
 - plugin groups: the plugins section lists lib/default-plugins.txt under "Installed
-  by ./setup" and /hov-setup's list under its own heading, in their order.
+  by ./setup", and offers.json's guided plugins and its tuning plugins under their own
+  headings, in their order.
+- more offers: the "More that /hov-setup offers" section lists, in order, every offer in
+  offers.json that is not a plugin, with its publisher.
 - plugin list: with a manifest, the plugin bullets are the manifest's plugins,
   leaving out the hov-stack pack's own entry. Without one this leg is reported as
   not run, never as passed.
@@ -51,6 +54,9 @@ COUNTED_SECTIONS = ("What's here", "What's not here")
 PLUGINS_SECTION = "The plugins"
 SETUP_GROUP = "Installed by `./setup`"
 GUIDED_GROUP = "Set up through `/hov-setup`"
+TUNING_GROUP = "Offered by `/hov-setup`, with nothing to set up"
+MORE_OFFERS_SECTION = "More that `/hov-setup` offers"
+OFFERS = Path("plugins/hov-stack/skills/hov-setup/scripts/offers.json")
 HOOKS_BULLET = "- `hooks/`"
 # Paths those sections name that ./setup creates at install time, outside the tree.
 INSTALL_TIME_PATHS = {
@@ -134,14 +140,24 @@ def listed(path: Path) -> list[str]:
             if line.strip() and not line.lstrip().startswith("#")]
 
 
-def guided_plugins(detect: Path) -> list[str]:
-    """The names in detect.mjs's PLUGINS array, in order."""
-    text = detect.read_text(encoding="utf-8")
-    _, found, rest = text.partition("export const PLUGINS = [")
-    if not found:
-        raise ValueError(f"{detect}: no PLUGINS array")
-    body = rest.partition("];")[0]
-    return re.findall(r'\bname: "([a-z0-9-]+)"', body)
+def offer_facts(offers: Path) -> dict:
+    """What offers.json (the /hov-setup contract) says the README must list.
+
+    guided_plugins: plugins that need setup, in order. tuning_plugins: plugins with
+    nothing to set up. more_offers: (name, publisher) of every offer that is not a plugin.
+    """
+    data = json.loads(offers.read_text(encoding="utf-8"))
+    rows = data.get("offers") if isinstance(data, dict) else None
+    if not isinstance(rows, list) or not all(isinstance(r, dict) for r in rows):
+        raise ValueError(f"{offers}: no 'offers' list")
+    try:
+        return {
+            "guided_plugins": [r["name"] for r in rows if r["kind"] == "plugin" and r["group"] != "tuning"],
+            "tuning_plugins": [r["name"] for r in rows if r["kind"] == "plugin" and r["group"] == "tuning"],
+            "more_offers": [(r["name"], r["publisher"]) for r in rows if r["kind"] != "plugin"],
+        }
+    except KeyError as exc:
+        raise ValueError(f"{offers}: an offer has no {exc.args[0]!r}") from exc
 
 
 def tree_facts(root: Path) -> dict:
@@ -169,7 +185,7 @@ def tree_facts(root: Path) -> dict:
         "xfail": skips.count("xfail"),
         "skip": skips.count("skip"),
         "default_plugins": listed(root / "lib/default-plugins.txt"),
-        "guided_plugins": guided_plugins(root / "plugins/hov-stack/skills/hov-setup/scripts/detect.mjs"),
+        **offer_facts(root / OFFERS),
     }
 
 
@@ -340,13 +356,30 @@ def check_plugin_groups(readme: str, facts: dict) -> list[str]:
     if not groups:
         return [f"plugin groups: no '### ' groups under '## {PLUGINS_SECTION}'"]
     for title, expected, source in ((SETUP_GROUP, facts["default_plugins"], "lib/default-plugins.txt"),
-                                    (GUIDED_GROUP, facts["guided_plugins"], "detect.mjs PLUGINS")):
+                                    (GUIDED_GROUP, facts["guided_plugins"], "offers.json"),
+                                    (TUNING_GROUP, facts["tuning_plugins"], "offers.json")):
         if groups.get(title) != expected:
             problems.append(f"plugin groups: {title!r} lists {groups.get(title)}; {source} gives {expected}")
     names = [name for group in groups.values() for name in group]
     for name in sorted({n for n in names if names.count(n) > 1}):
         problems.append(f"plugin groups: {name!r} is listed more than once")
     return problems
+
+
+def check_more_offers(readme: str, facts: dict) -> list[str]:
+    section = sections(readme).get(MORE_OFFERS_SECTION)
+    if section is None:
+        return [f"more offers: no '## {MORE_OFFERS_SECTION}' section; offers.json has "
+                f"{len(facts['more_offers'])} offers that are not plugins"]
+    found = re.findall(r"^- `([a-z0-9-]+)` \(([^)]+)\):", section, flags=re.M)
+    expected = facts["more_offers"]
+    for i in range(max(len(found), len(expected))):
+        have = found[i] if i < len(found) else None
+        want = expected[i] if i < len(expected) else None
+        if have != want:
+            return [f"more offers: bullet {i + 1} of '{MORE_OFFERS_SECTION}' is {have}; offers.json "
+                    f"gives {want} (name, publisher)"]
+    return []
 
 
 def check_plugin_list(readme: str, manifest: dict) -> list[str]:
@@ -372,7 +405,8 @@ def check(docs: dict[str, str], root: Path, manifest: dict | None) -> tuple[list
     facts = tree_facts(root)
     problems = (check_counts(readme, facts) + check_unchecked_numbers(readme, facts)
                 + check_paths(readme, root) + check_hooks(readme, facts)
-                + check_repositories(docs) + check_plugin_groups(readme, facts))
+                + check_repositories(docs) + check_plugin_groups(readme, facts)
+                + check_more_offers(readme, facts))
     not_run = []
     if manifest is None:
         not_run.append(f"plugin list: not run, {MANIFEST} is absent from this tree")
@@ -403,7 +437,7 @@ def main() -> int:
         print(problem, file=sys.stderr)
     if problems:
         return 1
-    print("README counts, paths, hooks, repositories and plugin groups match the tree")
+    print("README counts, paths, hooks, repositories, plugin groups and more offers match the tree")
     return 0
 
 

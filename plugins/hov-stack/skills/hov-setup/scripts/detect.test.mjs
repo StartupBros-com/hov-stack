@@ -1,31 +1,46 @@
 import assert from "node:assert/strict";
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { EXTRAS, PLUGINS } from "./detect.mjs";
+import { EXTRAS, GROUPS, HELPERS, OFFERS, PLUGINS } from "./detect.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const detectPath = join(here, "detect.mjs");
-const skillText = readFileSync(join(here, "..", "SKILL.md"), "utf8");
+const skillDir = join(here, "..");
+const skillText = readFileSync(join(skillDir, "SKILL.md"), "utf8");
+const offersJson = JSON.parse(readFileSync(join(here, "offers.json"), "utf8"));
 const ORDER = ["sign-it", "wsl-cdp", "product-video", "token-eater", "pro-gate"];
 const EXTRA_ORDER = ["harness-vet", "rent-check", "harness-optimizer"];
-const ALL = [...ORDER, ...EXTRA_ORDER];
+const HOV_ALL = [...ORDER, ...EXTRA_ORDER];
+const ALL = offersJson.offers.map((o) => o.name);
+const PLATFORMS = ["darwin-arm64", "linux-x86_64", "linux-aarch64"];
 
-// A fake `claude` that logs each call and answers the two list commands from files.
+// A fake `claude` that logs each call and answers the two list commands from files. It uses
+// /bin/cat because the tests give it a PATH that holds no system directories.
 const FAKE_CLAUDE = `#!/bin/sh
 printf '%s\\n' "$*" >> "$FAKE_DIR/calls"
 if [ -f "$FAKE_DIR/fail" ]; then echo "claude: not logged in" >&2; exit 7; fi
 case "$*" in
-  "plugin marketplace list --json") cat "$FAKE_DIR/marketplaces.json" ;;
-  "plugin list --json") cat "$FAKE_DIR/plugins.json" ;;
+  "plugin marketplace list --json") /bin/cat "$FAKE_DIR/marketplaces.json" ;;
+  "plugin list --json") /bin/cat "$FAKE_DIR/plugins.json" ;;
   *) echo "unexpected: $*" >&2; exit 64 ;;
 esac
 `;
 
-function withFake({ marketplaces = [{ name: "hov" }], plugins = [], wsl = true, fail = false, raw } = {}, run) {
+// A fake tool binary: running it leaves a marker file, so a test can prove nothing ran it.
+const fakeTool = (name) => `#!/bin/sh\n: > "$FAKE_DIR/ran-${name}"\n`;
+
+// pathBins sit in a directory that is on PATH; extraBins in the extra directory the detector
+// also searches (HOV_SETUP_EXTRA_BIN_DIRS), which is not on PATH. No real tool is visible.
+function withFake(
+  { marketplaces = [{ name: "hov" }], plugins = [], wsl = true, fail = false, raw, pathBins = [], extraBins = [] } = {},
+  run,
+) {
   const dir = mkdtempSync(join(tmpdir(), "hov-setup-"));
   try {
     writeFileSync(join(dir, "claude"), FAKE_CLAUDE);
@@ -37,6 +52,13 @@ function withFake({ marketplaces = [{ name: "hov" }], plugins = [], wsl = true, 
       wsl ? "Linux version 6.6.0-microsoft-standard-WSL2\n" : "Linux version 6.8.0-generic\n",
     );
     if (fail) writeFileSync(join(dir, "fail"), "");
+    for (const [sub, names] of [["pbin", pathBins], ["xbin", extraBins]]) {
+      mkdirSync(join(dir, sub));
+      for (const n of names) {
+        writeFileSync(join(dir, sub, n), fakeTool(n));
+        chmodSync(join(dir, sub, n), 0o755);
+      }
+    }
     return run(dir);
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -44,23 +66,29 @@ function withFake({ marketplaces = [{ name: "hov" }], plugins = [], wsl = true, 
 }
 
 function detect(dir, ...args) {
-  return detectAt(detectPath, dir, ...args);
+  return detectAt(detectPath, dir, {}, ...args);
 }
 
-function detectAt(script, dir, ...args) {
+function detectEnv(dir, env, ...args) {
+  return detectAt(detectPath, dir, env, ...args);
+}
+
+function detectAt(script, dir, env, ...args) {
   return spawnSync(process.execPath, [script, ...args], {
     encoding: "utf8",
     env: {
-      ...process.env,
-      PATH: `${dir}:${process.env.PATH}`,
+      PATH: `${dir}:${join(dir, "pbin")}`,
       FAKE_DIR: dir,
       HOV_SETUP_PROC_VERSION: join(dir, "proc-version"),
+      HOV_SETUP_EXTRA_BIN_DIRS: join(dir, "xbin"),
+      HOV_SETUP_PLATFORM: "linux-x86_64",
+      ...env,
     },
   });
 }
 
-function report(dir) {
-  const r = detect(dir, "--json");
+function report(dir, env = {}) {
+  const r = detectEnv(dir, env, "--json");
   assert.equal(r.status, 0, r.stderr);
   return JSON.parse(r.stdout);
 }
@@ -75,12 +103,22 @@ const user = (name, extra = {}) => ({
   ...extra,
 });
 
-test("with every plugin absent, lists the five guided plugins and then the three extras, with their install lines", () => {
+test("with everything absent, lists every offer and helper with the line to run", () => {
   withFake({}, (dir) => {
     const r = detect(dir);
     assert.equal(r.status, 0, r.stderr);
     const lines = r.stdout.split("\n").filter((l) => l.startsWith("  "));
-    assert.deepEqual(lines, ALL.map((p) => `  ${p}: absent. Install: claude plugin install ${p}@hov --scope user`));
+    for (const p of HOV_ALL) {
+      const want = `  ${p}: absent. Install: claude plugin install ${p}@hov --scope user`;
+      assert.ok(lines.includes(want), want);
+    }
+    assert.ok(
+      lines.includes(
+        "  last30days: absent. Add its marketplace first: claude plugin marketplace add mvanhorn/last30days-skill. Then install: claude plugin install last30days@last30days-skill --scope user",
+      ),
+      lines.join("\n"),
+    );
+    assert.equal(lines.length, ALL.length + HELPERS.length);
     assert.equal(r.stdout.includes("also installed"), false);
     const rep = report(dir);
     assert.equal(rep.marketplace.added, true);
@@ -89,14 +127,11 @@ test("with every plugin absent, lists the five guided plugins and then the three
   });
 });
 
-test("each entry names its group: the five guided plugins, then the extras", () => {
-  withFake({}, (dir) => {
-    const rep = report(dir);
-    assert.deepEqual(
-      rep.plugins.map((p) => [p.name, p.group]),
-      [...ORDER.map((p) => [p, "guided"]), ...EXTRA_ORDER.map((p) => [p, "extra"])],
-    );
-  });
+test("the derived exports keep their old shape: PLUGINS the five guided hov plugins, EXTRAS the three tuning ones", () => {
+  assert.deepEqual(PLUGINS.map((p) => p.name), ORDER);
+  assert.deepEqual(EXTRAS.map((p) => p.name), EXTRA_ORDER);
+  assert.deepEqual(Object.keys(PLUGINS[0]), ["name", "what"]);
+  assert.deepEqual(PLUGINS.filter((p) => p.wslOnly).map((p) => p.name), ["wsl-cdp"]);
 });
 
 test("alsoInstalled lists the other hov plugins at user scope, with what they do and how to start them", () => {
@@ -131,7 +166,7 @@ test("an installed pro-gate gets no install line and reports its version and pat
     assert.equal(r.status, 0, r.stderr);
     assert.ok(r.stdout.includes("  pro-gate: installed 0.65.2\n"), r.stdout);
     assert.equal(r.stdout.includes("install pro-gate@hov"), false);
-    for (const p of ALL.filter((n) => n !== "pro-gate")) {
+    for (const p of HOV_ALL.filter((n) => n !== "pro-gate")) {
       assert.ok(r.stdout.includes(`claude plugin install ${p}@hov --scope user`), p);
     }
     const pg = row(report(dir), "pro-gate");
@@ -215,7 +250,7 @@ test("run through a symlinked skill dir, the way ./setup links skills, it still 
   withFake({ plugins: [user("pro-gate")] }, (dir) => {
     const link = join(dir, "skill-link");
     symlinkSync(join(here, ".."), link, "dir");
-    const r = detectAt(join(link, "scripts", "detect.mjs"), dir, "--json");
+    const r = detectAt(join(link, "scripts", "detect.mjs"), dir, {}, "--json");
     assert.equal(r.status, 0, r.stderr);
     assert.equal(row(JSON.parse(r.stdout), "pro-gate").state, "installed");
   });
@@ -239,9 +274,8 @@ function sections(text) {
   return out;
 }
 
-test("SKILL.md has one section per plugin, in the detector's order", () => {
-  assert.deepEqual(PLUGINS.map((p) => p.name), ORDER);
-  assert.deepEqual(EXTRAS.map((p) => p.name), EXTRA_ORDER);
+test("SKILL.md has one section per offer, in offers.json order", () => {
+  assert.deepEqual(OFFERS.map((o) => o.name), ALL);
   assert.deepEqual([...sections(skillText).keys()], ALL);
 });
 
@@ -269,16 +303,33 @@ test("SKILL.md's GitHub login line uses the web flow, which works through `!`", 
   assert.doesNotMatch(skillText, /`gh auth login` in their own terminal/);
 });
 
-// The card is what the user reads first. It says what the plugin does, costs and needs, in
+// The card is what the user reads first. It says what the offer does, costs and needs, in
 // plain words; the words below were in the run that a first-time user called jargon.
-test("each plugin section opens with a card in plain words", () => {
+const cardOf = (body) => body.split("\n").find((l) => l.startsWith("**Card:**"));
+
+test("each offer section opens with a card in plain words", () => {
   const jargon = /\b(doctor|runtime|smoke|blocking|pinned|scope|exit code|dependenc(y|ies)|CLI)\b/i;
   for (const [name, body] of sections(skillText)) {
-    const card = body.split("\n").find((l) => l.startsWith("**Card:**"));
+    const card = cardOf(body);
     assert.ok(card, `${name} has no card`);
     assert.ok(body.indexOf(card) < body.indexOf("Check"), `${name}: the card comes after its check`);
     assert.doesNotMatch(card, jargon, `${name}'s card uses a word a first-time user called jargon`);
   }
+});
+
+test("a card names its publisher when it is not hov-stack, and cass and jeffreys-skills say what they must", () => {
+  const all = sections(skillText);
+  for (const o of OFFERS) {
+    const card = cardOf(all.get(o.name) ?? "");
+    assert.ok(card, `${o.name} has no card`);
+    if (o.publisher !== "hov-stack") assert.ok(card.includes(o.publisher), `${o.name}'s card does not name ${o.publisher}`);
+  }
+  const cass = cardOf(all.get("cass") ?? "");
+  assert.ok(cass && cass.includes("OpenAI"), "cass card does not say OpenAI");
+  assert.ok(cass.includes("Anthropic"), "cass card does not say Anthropic");
+  const js = cardOf(all.get("jeffreys-skills") ?? "");
+  assert.ok(js && js.includes("$20 a month"), "jeffreys-skills card does not give the price");
+  assert.ok(js.includes("never hands out"), "jeffreys-skills card does not say what it never hands out");
 });
 
 test("SKILL.md states the credential rule before Step 1, naming where a credential never goes", () => {
@@ -292,12 +343,229 @@ test("SKILL.md states the credential rule before Step 1, naming where a credenti
 
 test("SKILL.md puts the credential instruction before the first step of each plugin that needs one", () => {
   const all = sections(skillText);
-  for (const name of ["pro-gate", "wsl-cdp", "token-eater"]) {
+  for (const name of ["wsl-cdp", "token-eater", "pro-gate", "gh", "codex", "last30days", "jeffreys-skills"]) {
     const body = all.get(name);
+    assert.ok(body, `${name} has no section`);
     const cred = body.indexOf("**Credentials:**");
     const firstStep = body.search(/^1\. /m);
     assert.ok(cred >= 0, `${name} has no credential instruction`);
     assert.ok(firstStep >= 0, `${name} has no numbered steps`);
     assert.ok(cred < firstStep, `${name}: the credential instruction comes after step 1`);
+  }
+});
+
+// ---- the wider offer list: other publishers' plugins, programs, the paid skill set
+
+const CE = "compound-engineering";
+const CE_GIT = { name: "every-marketplace", source: "git", url: "https://github.com/EveryInc/compound-engineering-plugin.git" };
+const aliasUser = (extra = {}) => ({ ...user(CE, extra), id: `${CE}@every-marketplace` });
+
+test("rows follow offers.json order and carry each offer's kind, group and publisher; helpers are listed", () => {
+  withFake({}, (dir) => {
+    const rep = report(dir);
+    assert.deepEqual(
+      rep.plugins.map((p) => [p.name, p.kind, p.group, p.publisher, p.what]),
+      offersJson.offers.map((o) => [o.name, o.kind, o.group, o.publisher, o.what]),
+    );
+    assert.deepEqual(
+      rep.helpers.map((h) => [h.name, h.publisher, h.what, h.bin]),
+      offersJson.helpers.map((h) => [h.name, h.publisher, h.what, h.bin]),
+    );
+    assert.equal(rep.platform, "linux-x86_64");
+    assert.deepEqual(GROUPS, offersJson.groups);
+    assert.deepEqual(HELPERS, offersJson.helpers);
+  });
+});
+
+test("an other-plugin with no matching marketplace gets the marketplace line and offers.json's marketplace name", () => {
+  withFake({ marketplaces: [{ name: "hov" }, { name: "unrelated", source: "github", repo: "someone/else" }] }, (dir) => {
+    const ce = row(report(dir), CE);
+    assert.equal(ce.kind, "other-plugin");
+    assert.equal(ce.marketplaceAdd, "claude plugin marketplace add EveryInc/compound-engineering-plugin");
+    assert.equal(ce.id, `${CE}@compound-engineering-plugin`);
+    assert.equal(ce.next, `claude plugin install ${CE}@compound-engineering-plugin --scope user`);
+    assert.equal(ce.state, "absent");
+  });
+});
+
+test("a marketplace the user named differently is found by its source, and its installed plugin counts", () => {
+  withFake({ marketplaces: [{ name: "hov" }, CE_GIT], plugins: [aliasUser({ version: "3.4.5" })] }, (dir) => {
+    const ce = row(report(dir), CE);
+    assert.deepEqual(
+      [ce.state, ce.id, ce.marketplaceAdd, ce.version, ce.next],
+      ["installed", `${CE}@every-marketplace`, null, "3.4.5", null],
+    );
+    assert.match(detect(dir).stdout, /^  compound-engineering: installed 3\.4\.5$/m);
+  });
+});
+
+test("a github-source marketplace matches ignoring case; an absent plugin installs from the user's alias", () => {
+  const mk = { name: "mine", source: "github", repo: "everyinc/COMPOUND-engineering-plugin" };
+  withFake({ marketplaces: [{ name: "hov" }, mk] }, (dir) => {
+    const ce = row(report(dir), CE);
+    assert.deepEqual([ce.state, ce.id, ce.marketplaceAdd], ["absent", `${CE}@mine`, null]);
+    assert.equal(ce.next, `claude plugin install ${CE}@mine --scope user`);
+  });
+  const url = { name: "u", source: "git", url: "HTTPS://GitHub.com/EveryInc/Compound-Engineering-Plugin/" };
+  withFake({ marketplaces: [{ name: "hov" }, url] }, (dir) => {
+    assert.equal(row(report(dir), CE).id, `${CE}@u`);
+  });
+});
+
+test("with two matching marketplaces, the one holding the installed plugin is preferred", () => {
+  const first = { name: "first", source: "github", repo: "EveryInc/compound-engineering-plugin" };
+  withFake({ marketplaces: [{ name: "hov" }, first, CE_GIT], plugins: [aliasUser()] }, (dir) => {
+    assert.equal(row(report(dir), CE).id, `${CE}@every-marketplace`);
+  });
+  withFake({ marketplaces: [{ name: "hov" }, first, CE_GIT] }, (dir) => {
+    assert.equal(row(report(dir), CE).id, `${CE}@first`);
+  });
+});
+
+test("a disabled other-plugin is offered the enable line with the alias id; a project-scope copy does not count", () => {
+  withFake({ marketplaces: [{ name: "hov" }, CE_GIT], plugins: [aliasUser({ enabled: false })] }, (dir) => {
+    const ce = row(report(dir), CE);
+    assert.deepEqual([ce.state, ce.next], ["disabled", `claude plugin enable ${CE}@every-marketplace --scope user`]);
+    assert.match(
+      detect(dir).stdout,
+      /compound-engineering: installed 1\.2\.3 but disabled\. Enable: claude plugin enable compound-engineering@every-marketplace --scope user/,
+    );
+  });
+  withFake({ marketplaces: [{ name: "hov" }, CE_GIT], plugins: [aliasUser({ scope: "project" })] }, (dir) => {
+    const ce = row(report(dir), CE);
+    assert.deepEqual([ce.state, ce.otherScopes], ["absent", ["project"]]);
+  });
+});
+
+test("a tool on PATH is installed and on PATH; one only in an extra directory is installed but not on PATH", () => {
+  withFake({ pathBins: ["gh"], extraBins: ["cass"] }, (dir) => {
+    const rep = report(dir);
+    const gh = row(rep, "gh");
+    assert.deepEqual([gh.state, gh.path, gh.onPath, gh.next], ["installed", join(dir, "pbin", "gh"), true, null]);
+    const cass = row(rep, "cass");
+    assert.deepEqual([cass.state, cass.path, cass.onPath, cass.next], ["installed", join(dir, "xbin", "cass"), false, null]);
+    assert.match(detect(dir).stdout, /^  cass: installed \(.*cass\)\. Not on PATH$/m);
+  });
+});
+
+test("a file that is not executable, or is a directory, is not a tool", () => {
+  withFake({}, (dir) => {
+    writeFileSync(join(dir, "pbin", "gh"), "#!/bin/sh\n");
+    chmodSync(join(dir, "pbin", "gh"), 0o644);
+    mkdirSync(join(dir, "pbin", "cass"));
+    const rep = report(dir);
+    assert.equal(row(rep, "gh").state, "absent");
+    assert.equal(row(rep, "cass").state, "absent");
+  });
+});
+
+test("an absent tool's install line names the absolute skill directory and the installer", () => {
+  withFake({}, (dir) => {
+    const gh = row(report(dir), "gh");
+    assert.equal(gh.state, "absent");
+    assert.equal(gh.path, null);
+    assert.equal(gh.onPath, false);
+    assert.equal(gh.next, `bash "${skillDir}/scripts/install-release.sh" gh`);
+    assert.ok(gh.next.includes(`${skillDir}/scripts/install-release.sh" gh`));
+    assert.equal(gh.next.includes("<skill-dir>"), false);
+    assert.match(detect(dir).stdout, /^  gh: absent\. Install: bash "/m);
+  });
+});
+
+test("needs: with uv absent the install line says plain uv and carries uv's own install line", () => {
+  withFake({}, (dir) => {
+    const rep = report(dir);
+    const sp = row(rep, "synthetic-panel");
+    assert.ok(sp.next.startsWith("uv tool install"), sp.next);
+    assert.equal(sp.needs.length, 1);
+    assert.equal(sp.needs[0].name, "uv");
+    assert.equal(sp.needs[0].path, null);
+    assert.equal(sp.needs[0].onPath, false);
+    assert.equal(sp.needs[0].next, `bash "${skillDir}/scripts/install-release.sh" uv`);
+    assert.deepEqual(row(rep, "gh").needs, []);
+    assert.equal(rep.helpers[0].state, "absent");
+  });
+});
+
+test("needs: with uv present the install line uses uv's absolute path", () => {
+  withFake({ pathBins: ["uv"] }, (dir) => {
+    const rep = report(dir);
+    const uv = join(dir, "pbin", "uv");
+    const sp = row(rep, "synthetic-panel");
+    assert.ok(sp.next.startsWith(`${uv} tool install`), sp.next);
+    assert.ok(row(rep, "ast-grep").next.startsWith(`${uv} tool install ast-grep-cli`));
+    assert.deepEqual([sp.needs[0].path, sp.needs[0].onPath], [uv, true]);
+    assert.deepEqual([rep.helpers[0].state, rep.helpers[0].path], ["installed", uv]);
+  });
+});
+
+test("linux platforms install synthetic-panel with the CPU torch backend; macOS does not", () => {
+  withFake({}, (dir) => {
+    for (const platform of ["linux-x86_64", "linux-aarch64"]) {
+      const sp = row(report(dir, { HOV_SETUP_PLATFORM: platform }), "synthetic-panel");
+      assert.ok(sp.next.includes("--torch-backend cpu"), `${platform}: ${sp.next}`);
+    }
+    const mac = row(report(dir, { HOV_SETUP_PLATFORM: "darwin-arm64" }), "synthetic-panel");
+    assert.equal(mac.next.includes("--torch-backend"), false, mac.next);
+    assert.ok(mac.next.startsWith("uv tool install"));
+  });
+});
+
+test("an unsupported platform makes every tool, paid-skills row and helper not applicable; plugins are unaffected", () => {
+  withFake({ pathBins: ["gh"] }, (dir) => {
+    const env = { HOV_SETUP_PLATFORM: "darwin-x86_64" };
+    const rep = report(dir, env);
+    assert.equal(rep.platform, "darwin-x86_64");
+    const want = `only offered on ${PLATFORMS.join(", ")}`;
+    const programs = rep.plugins.filter((x) => x.kind === "tool" || x.kind === "paid-skills");
+    assert.equal(programs.length, 5);
+    for (const p of programs) assert.deepEqual([p.name, p.state, p.next, p.path], [p.name, "not-applicable", want, null]);
+    assert.deepEqual(rep.helpers.map((h) => [h.state, h.next]), [["not-applicable", want]]);
+    assert.equal(row(rep, "sign-it").state, "absent");
+    assert.equal(row(rep, CE).state, "absent");
+    const t = detectEnv(dir, env);
+    assert.match(t.stdout, /^  gh: not applicable here: only offered on darwin-arm64, linux-x86_64, linux-aarch64$/m);
+  });
+});
+
+test("it runs nothing but the two claude list commands, never a tool it finds", () => {
+  withFake({ pathBins: ["gh", "uv", "cass"], extraBins: ["jsm", "ast-grep", "synthetic-panel"] }, (dir) => {
+    const rep = report(dir);
+    for (const n of ["gh", "uv", "cass", "jeffreys-skills", "ast-grep", "synthetic-panel"]) {
+      const state = (row(rep, n) ?? rep.helpers.find((h) => h.name === n)).state;
+      assert.equal(state, "installed", n);
+    }
+    assert.deepEqual(readFileSync(join(dir, "calls"), "utf8").trim().split("\n"), [
+      "plugin marketplace list --json",
+      "plugin list --json",
+    ]);
+    assert.deepEqual(readdirSync(dir).filter((f) => f.startsWith("ran-")), []);
+  });
+});
+
+test("offers.json has a valid shape", () => {
+  const kinds = ["plugin", "other-plugin", "tool", "paid-skills"];
+  const groups = offersJson.groups.map((g) => g.key);
+  const names = [...offersJson.offers, ...offersJson.helpers].map((o) => o.name);
+  assert.equal(new Set(names).size, names.length, "names are not unique");
+  const helperNames = offersJson.helpers.map((h) => h.name);
+  for (const o of offersJson.offers) {
+    assert.ok(kinds.includes(o.kind), `${o.name}: kind ${o.kind}`);
+    assert.ok(groups.includes(o.group), `${o.name}: group ${o.group}`);
+    assert.ok(o.publisher && o.what, `${o.name}: publisher and what are required`);
+    if (o.kind === "plugin") assert.equal("install" in o, false, `${o.name}: a plugin has no install map`);
+    if (o.kind === "tool" || o.kind === "paid-skills") {
+      assert.ok(o.bin, `${o.name}: no bin`);
+      assert.ok(o.install && Object.keys(o.install).length, `${o.name}: no install`);
+    }
+    if (o.kind === "other-plugin") {
+      assert.ok(o.plugin, `${o.name}: no plugin`);
+      assert.ok(o.marketplace && o.marketplace.name && o.marketplace.github, `${o.name}: marketplace needs name and github`);
+    }
+    for (const n of o.needs ?? []) assert.ok(helperNames.includes(n), `${o.name} needs ${n}, which is not a helper`);
+  }
+  for (const h of [...offersJson.helpers, ...offersJson.offers.filter((o) => o.install)]) {
+    assert.ok(h.bin, `${h.name}: no bin`);
+    for (const k of Object.keys(h.install)) assert.ok(PLATFORMS.includes(k), `${h.name}: install key ${k}`);
   }
 });
