@@ -619,7 +619,7 @@ test('PLANTED NEGATIVE 2: a launcher that execs node but drops stdin is caught',
 // ---------------------------------------------------------------------------
 
 const LAUNCHER_SRC = fs.readFileSync(path.join(HOOKS, 'bin', 'node-hook'), 'utf8');
-const GATE_BLOCK_RE = /# Env gate[\s\S]*?\ncase \$1 in[\s\S]*?\nesac\n/;
+const GATE_BLOCK_RE = /# Env gate[\s\S]*?\ncase \$_hn_arm in[\s\S]*?\nesac\n/;
 const UNGATED_LAUNCHER = LAUNCHER_SRC.replace(GATE_BLOCK_RE, '');
 
 const lgPayload = (tool, input, extra = {}) => ({ session_id: 'golden-gate-01', tool_name: tool, tool_input: input, ...extra });
@@ -1630,7 +1630,7 @@ addCq('2 MiB, literal only in the tail, plain command: quiet', 'quiet', false, `
 const cqSec = bashGateSection({ hook: CQG, label: 'codex-quota-guard', cases: CQ_CASES, codex: true });
 bashGateTests(cqSec, { minCases: 140, minDecisive: 60, minSkips: 30, decisive: BG_DECISIVE });
 
-const CQ_ARM_LINE_RE = /( {2}\*\/PreToolUse\/codex-quota-guard\.js\)\n[\s\S]*? {4}case \$_hn_buf in\n {6})(.*)(\) _hn_stdin=1 ;;)/;
+const CQ_ARM_LINE_RE = /( {2}\*\/PreToolUse\/codex-quota-guard\.js\)\n[\s\S]*? {6}case \$_hn_buf in\n {8})(.*)(\) _hn_stdin=1 ;;)/;
 const CQ_PATS = ['*[Cc][Oo][Dd][Ee][Xx]*', '*[Aa][Pp][Pp]-[Ss][Ee][Rr][Vv][Ee][Rr]-[Bb][Rr][Oo][Kk][Ee][Rr]*', "*'\\u002'*", "*'\\u004'*", "*'\\u005'*", "*'\\u006'*", "*'\\u007'*"];
 const cqSrcPats = () => LAUNCHER_SRC.match(CQ_ARM_LINE_RE)[2].split(' | ');
 /** The shell predicate for one pattern against raw stdin (ASCII-only case fold; quoted patterns literal). */
@@ -1811,7 +1811,7 @@ addRg('2 MiB, literal only in the tail, plain command: quiet', 'quiet', false, `
 const rgSec = bashGateSection({ hook: RGG, label: 'runner-guard', cases: RG_CASES });
 bashGateTests(rgSec, { minCases: 150, minDecisive: 70, minSkips: 25, decisive: BG_DECISIVE });
 
-const RG_ARM_LINE_RE = /( {2}\*\/PreToolUse\/runner-guard\.js\)\n[\s\S]*? {4}case \$_hn_buf in\n {6})(.*)(\) _hn_stdin=1 ;;)/;
+const RG_ARM_LINE_RE = /( {2}\*\/PreToolUse\/runner-guard\.js\)\n[\s\S]*? {6}case \$_hn_buf in\n {8})(.*)(\) _hn_stdin=1 ;;)/;
 const RG_PATS = ["*'kill'*", "*'systemctl'*", "*'\\u006'*", "*'\\u007'*"];
 const rgPatHit = (p, raw) => raw.includes(p.replace(/^\*'/, '').replace(/'\*$/, ''));
 const rgMutate = (pats) => (s) => s.replace(RG_ARM_LINE_RE, (m, a, b, c) => `${a}${pats.join(' | ')}${c}`);
@@ -1854,4 +1854,75 @@ test('PLANTED NEGATIVE RG-8: a gate that skips everything is red on every decisi
 test('PLANTED NEGATIVE RG-9: a gate that tests only `systemctl` and `kill` after a space is red on `/usr/bin/kill` and `;kill` spellings', (t) => {
   rgSec.planted(t, 'space-prefixed gate', rgMutate(["*' kill'*", "*' systemctl'*", ...RG_PATS.slice(2)]),
     (spec) => spec.expect !== 'quiet' && (spec.raw.includes('kill') || spec.raw.includes('systemctl')) && !spec.raw.includes(' kill') && !spec.raw.includes(' systemctl') && !RG_PATS.slice(2).some((p) => rgPatHit(p, spec.raw)), 1);
+});
+
+// ---------------------------------------------------------------------------
+// Fail open (#414 items 1 and 3), real hooks and real node. With fd 0 closed, and with a PATH that
+// holds node but no tr or cat, no gate can run, so each gated registration must answer exactly as
+// its OLD form: stdout, exit code, signal, spawn error, stderr and every file under HOME, seam beat
+// included, and node must start once in both. node-hook.test.js covers the same two cases under
+// /bin/sh and `bash --posix` with a fake node; this section runs the launcher by its shebang, the
+// way Claude Code does.
+// ---------------------------------------------------------------------------
+
+const FO_CASES = [
+  { key: LG, name: 'loop-guard unarmed', payload: () => bash('gh pr merge 5'), nodeOnly: 'quiet' },
+  { key: LG, name: 'loop-guard armed', env: LOOP, payload: () => bash('gh pr merge 5'), nodeOnly: 'deny' },
+  { key: SGG, name: 'settings-guard on settings.json', payload: () => ({ session_id: 'golden-fo-01', tool_name: 'Edit', tool_input: { file_path: '/home/u/.claude/settings.json', old_string: 'a', new_string: 'b' } }), nodeOnly: 'ask' },
+  { key: SGG, name: 'settings-guard on another file', payload: () => ({ session_id: 'golden-fo-01', tool_name: 'Edit', tool_input: { file_path: '/repo/a.ts', old_string: 'a', new_string: 'b' } }), nodeOnly: 'quiet' },
+  { key: CQ, name: 'codex-quota-guard on ls', payload: () => bash('ls'), nodeOnly: 'quiet' },
+  { key: CQ, name: 'codex-quota-guard on codex exec, no auth', env: { CODEX_HOME: '/nonexistent-codex-home' }, payload: () => bash('codex exec "ship it"'), nodeOnly: 'quiet' },
+  { key: RG, name: 'runner-guard on a runner restart', payload: () => bash(`sudo systemctl restart ${UNIT}`), nodeOnly: 'deny' },
+  { key: RG, name: 'runner-guard on ls', payload: () => bash('ls'), nodeOnly: 'quiet' },
+  { key: AF, name: 'auto-format on a .ts write', payload: (fx) => ({ session_id: 'golden-fo-01', tool_name: 'Write', tool_input: { file_path: path.join(fx.cwd, 'zz.ts'), content: 'x' } }) },
+  { key: AF, name: 'auto-format on a .md write', payload: () => ({ session_id: 'golden-fo-01', tool_name: 'Write', tool_input: { file_path: '/a/b.md', content: 'x' } }), nodeOnly: 'quiet' },
+];
+
+/** mode 'closed': fd 0 closed, full PATH minus the shim. mode 'node-only': PATH is the counting node's dir alone. */
+function foCompare(mode) {
+  const hooks = seedHooks();
+  const w = makeWorld({ countNode: true });
+  // No shim dir on PATH in either mode, so OLD and NEW both start the counting wrapper.
+  const world = { ...w, path: mode === 'node-only' ? w.real : `${w.real}:${process.env.PATH || ''}` };
+  const wrap = (cmd) => (mode === 'closed' ? `exec <&-; ${cmd}` : cmd);
+  const out = [];
+  try {
+    for (const c of FO_CASES) {
+      const reg = commandFor(hooks, c.key);
+      const spec = { hook: c.key, env: c.env || {}, payload: mode === 'closed' ? () => '' : c.payload };
+      const fxOld = plainFx();
+      const fxNew = plainFx();
+      try {
+        const oldR = runOne(world, wrap(oldForm(reg.command)), spec, fxOld);
+        const newR = runOne(world, wrap(reg.command), spec, fxNew);
+        const diffs = [];
+        for (const k of ['stdout', 'status', 'signal', 'error', 'stderr']) if (oldR[k] !== newR[k]) diffs.push(`${k}: ${JSON.stringify(oldR[k])} vs ${JSON.stringify(newR[k])}`);
+        if (JSON.stringify(oldR.files) !== JSON.stringify(newR.files)) diffs.push(`files: ${JSON.stringify(Object.keys(oldR.files))} vs ${JSON.stringify(Object.keys(newR.files))}`);
+        if (oldR.nodeHits !== 1 || newR.nodeHits !== 1) diffs.push(`node starts old=${oldR.nodeHits} new=${newR.nodeHits} (want 1/1)`);
+        out.push({ c, oldR, newR, diffs, kind: kindOf(oldR) });
+      } finally { rmTmp(fxOld.root); rmTmp(fxNew.root); }
+    }
+  } finally { rmTmp(w.base); }
+  return out;
+}
+
+test('fail open: every gated registration has a case here, and nothing else does', () => {
+  const gated = [LG, SGG, CQ, RG, AF];
+  assert.deepStrictEqual([...new Set(FO_CASES.map((c) => c.key))].sort(), [...gated].sort());
+  for (const k of gated) commandFor(seedHooks(), k);
+});
+
+test('fail open: with fd 0 closed every gated registration answers as its OLD form, node starting once in both', (t) => {
+  const records = foCompare('closed');
+  assert.deepStrictEqual(records.filter((r) => r.diffs.length).map((r) => `${r.c.name}: ${r.diffs.join('; ')}`), []);
+  t.diagnostic(`closed stdin: ${records.length} cases, kinds ${JSON.stringify(records.map((r) => r.kind))}`);
+});
+
+test('fail open: with node but no tr or cat on PATH every gated registration answers as its OLD form, decisions kept', (t) => {
+  const records = foCompare('node-only');
+  assert.deepStrictEqual(records.filter((r) => r.diffs.length).map((r) => `${r.c.name}: ${r.diffs.join('; ')}`), []);
+  const pinned = records.filter((r) => r.c.nodeOnly && r.kind !== r.c.nodeOnly).map((r) => `${r.c.name}: expected ${r.c.nodeOnly}, OLD gave ${r.kind} (${r.oldR.stdout.slice(0, 120)} | ${r.oldR.stderr.slice(0, 120)})`);
+  assert.deepStrictEqual(pinned, []);
+  assert.ok(records.filter((r) => ['deny', 'ask'].includes(r.kind)).length >= 3, 'node-only corpus lost its decisive cases');
+  t.diagnostic(`node-only PATH: ${records.length} cases, kinds ${JSON.stringify(records.map((r) => r.kind))}`);
 });

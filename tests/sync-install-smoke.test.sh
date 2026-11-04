@@ -92,6 +92,9 @@ mkdir -p "$HOME"
 # The overlay is the fixture's own, so no install here reads a real host's overlay
 # files (foreign-units, hygiene-posture) through an inherited variable.
 unset XDG_CONFIG_HOME
+# Likewise the host route record: with these unset, repo-route.py keeps it under the
+# fixture's $HOME, never in a real host's state directory.
+unset XDG_STATE_HOME REPO_ROUTE_STATE
 HOV_STACK_OVERLAY=$TMP/overlay
 export HOV_STACK_OVERLAY
 mkdir -p "$HOV_STACK_OVERLAY"
@@ -2539,7 +2542,25 @@ if [ -L "$CLAUDE_HOME/config/repo-routes.json" ] \
 else
   bad "repo route policy was not linked from versioned config"
 fi
-if [ ! -e "$HOME/.local/state/claude/repo-routes.json" ]; then ok; else bad "install seeded host-local repo authority"; fi
+# Ask repo-route.py where it keeps the host route record rather than spelling the path out
+# here. The spelled-out path was the retired ~/.local/state/claude/repo-routes.json, where
+# nothing writes any more, so this check passed whatever install did. The retired path is
+# still checked, in case an old copy of the bootstrap writes there.
+route_state=$(python3 -I -c 'import importlib.util, sys
+spec = importlib.util.spec_from_file_location("repo_route", sys.argv[1])
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+print(mod.state_path())' "$REPO/scripts/repo-route.py") || route_state=""
+case "$route_state" in
+  "") bad "could not ask repo-route.py where it keeps the host route record" ;;
+  "$HOME"/*)
+    if [ -e "$route_state" ] || [ -e "$HOME/.local/state/claude/repo-routes.json" ]; then
+      bad "install seeded host-local repo authority"
+    else
+      ok
+    fi ;;
+  *) bad "repo-route.py keeps the host route record outside the fixture home: $route_state" ;;
+esac
 # The retired controller config must be preserved in exactly one backup.
 if [ ! -e "$retired_profile" ] \
    && [ "$(find "$CLAUDE_HOME/config" -maxdepth 1 -name "${retired_profile##*/}.pre-sync.*.bak" -type f | wc -l)" = 1 ]; then

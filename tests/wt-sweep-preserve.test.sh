@@ -9,6 +9,9 @@
 #      worktrees that `git status` called clean.
 #   3. On a detached HEAD the preserve path committed the WIP to no ref, so the
 #      commit went with the worktree's reflog.
+#   5. .context/ is gitignored where compound-engineering skills keep state meant to
+#      outlive a run, and the rescue copied only .claude/deliverables/, so that
+#      state went with the worktree too.
 #
 #   4. (hov-stack#394) A session drives a worktree from a transcript filed under
 #      another project: the one it launched from, after EnterWorktree, `git -C` or
@@ -55,6 +58,7 @@ chmod +x "$TMP/scan-ok.py"
 
 # ROOT=$TMP/$1 holding one repo (origin outside the root) whose .gitignore ignores
 # .claude/deliverables/, as ~/.gitignore_global does on the operator's machine, and
+# .context/, as a repo using compound-engineering does, and
 # one worktree $TMP/$1/repo-wt on branch $1 pushed to origin: clean and shipped,
 # so the sweep's clean path removes it unless something holds it.
 mkfix(){
@@ -64,7 +68,7 @@ mkfix(){
     git init --bare -q -b main "$TMP/$1-origin.git"
     git init -q -b main "$d/repo"
     git -C "$d/repo" remote add origin "$TMP/$1-origin.git"
-    printf '.claude/deliverables/\n' >"$d/repo/.gitignore"
+    printf '.claude/deliverables/\n.context/\n' >"$d/repo/.gitignore"
     echo base >"$d/repo/base.txt"; git -C "$d/repo" add -A; git -C "$d/repo" commit -qm base
     git -C "$d/repo" push -q -u origin main
     git -C "$d/repo" worktree add -q "$d/repo-wt" -b "$1" main
@@ -364,6 +368,37 @@ hold "$H" "$C" "$WT" >/dev/null; rc=$?
 err=$(hold "$H" "$TMP/not-a-dir/cache" "$WT" 2>&1 >/dev/null); rc=$?
 [ "$rc" = 0 ] && ok "unwritable cache: still held" || no "unwritable cache: still held (rc $rc)"
 has "unwritable cache: says so" "$err" "cache not saved"
+
+# --- 25. ignored .context/ state is copied out beside the deliverables ------------
+mkfix ctx
+WT="$TMP/ctx/repo-wt"; D="$TMP/ctx/repo/.claude/deliverables/from-worktrees/repo-wt"
+mkdir -p "$WT/.context/compound-engineering/ce-optimize/spec-a" "$WT/.claude/deliverables"
+printf 'iteration: 7\n' >"$WT/.context/compound-engineering/ce-optimize/spec-a/experiment-log.yaml"
+printf 'report\n' >"$WT/.claude/deliverables/report.md"
+[ -z "$(git -C "$WT" status --porcelain)" ] && ok "ctx fixture: status calls the worktree clean" || no "ctx fixture: status calls the worktree clean"
+out=$(sweep "$TMP/ctx" 1 "$EMPTY")
+has "ctx dry run: plans both copies" "$out" "would: copy 2 ignored deliverable file(s) to $D"
+[ -e "$D" ] && no "ctx dry run: copied nothing" || ok "ctx dry run: copied nothing"
+out=$(sweep "$TMP/ctx" 0 "$EMPTY")
+has "ctx apply: reports both copies" "$out" "ok: copied 2 ignored deliverable file(s) to $D"
+gone "ctx apply: worktree removed after the copy" "$WT"
+grep -qx 'iteration: 7' "$D/dot-context/compound-engineering/ce-optimize/spec-a/experiment-log.yaml" 2>/dev/null \
+  && ok "ctx apply: .context/ state survived under dot-context/" || no "ctx apply: .context/ state survived under dot-context/"
+grep -qx 'report' "$D/report.md" 2>/dev/null && ok "ctx apply: deliverable still lands at the top" || no "ctx apply: deliverable still lands at the top"
+[ -z "$(git -C "$TMP/ctx/repo" status --porcelain)" ] && ok "ctx apply: main checkout still clean" || no "ctx apply: main checkout still clean"
+
+# --- 26. PLANTED NEGATIVE: two rescued files on one path keep the worktree --------
+mkfix ctxcol
+WT="$TMP/ctxcol/repo-wt"; D="$TMP/ctxcol/repo/.claude/deliverables/from-worktrees/repo-wt"
+mkdir -p "$WT/.context" "$WT/.claude/deliverables/dot-context"
+printf 'skill state\n' >"$WT/.context/a.md"
+printf 'a deliverable\n' >"$WT/.claude/deliverables/dot-context/a.md"
+out=$(sweep "$TMP/ctxcol" 0 "$EMPTY")
+kept "path clash: worktree kept" "$WT"
+has "path clash: names the path" "$out" "two rescued files map to $D/dot-context/a.md; nothing overwritten"
+has "path clash: SKIP says why" "$out" "SKIP (ignored deliverables could not be copied out; nothing removed)"
+grep -qx 'skill state' "$WT/.context/a.md" && grep -qx 'a deliverable' "$WT/.claude/deliverables/dot-context/a.md" \
+  && ok "path clash: both originals in place" || no "path clash: both originals in place"
 
 echo
 echo "wt-sweep-preserve: $pass passed, $fail failed"

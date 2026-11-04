@@ -107,6 +107,51 @@ test("framework-injected and build-generated variables are not orphans", () => {
   });
 });
 
+test("Tailwind v4 default theme variables resolve, including nested transition fallbacks", () => {
+  withTempProject((root) => {
+    write(root, "src/button.css", `
+      .button {
+        transition-duration: var(--tw-duration, var(--default-transition-duration));
+        transition-timing-function: var(--tw-ease, var(--default-transition-timing-function));
+        font-family: var(--default-font-family);
+        font-feature-settings: var(--default-font-feature-settings);
+        font-variation-settings: var(--default-font-variation-settings);
+      }
+      .code {
+        font-family: var(--default-mono-font-family);
+        font-feature-settings: var(--default-mono-font-feature-settings);
+        font-variation-settings: var(--default-mono-font-variation-settings);
+      }
+    `);
+    const r = scan(root, "--only=orphan", "--fail-on=orphan=0");
+    assert.equal(r.findings.orphan.unresolved, 0);
+  });
+});
+
+test("custom and misspelled default variables remain orphans and fail the budget", () => {
+  withTempProject((root) => {
+    const names = [
+      "--default-brand-color",
+      "--default-transition-delay",
+      "--default-transition-duration-custom",
+      "--default-transition-timing-functions",
+      "--default-font-size",
+      "--default-font-family-custom",
+      "--default-mono-font-weight",
+      "--default-mono-font-variation-setting",
+    ];
+    write(root, "src/defaults.css", names.map((name) => `.x { color: var(${name}); }`).join("\n"));
+    const r = scan(root, "--only=orphan");
+    assert.equal(r.findings.orphan.unresolved, names.length);
+    assert.deepEqual(r.findings.orphan.top.map((finding) => finding.name).sort(), [...names].sort());
+    const result = spawnSync("node", [scriptPath, root, "--only=orphan", "--fail-on=orphan=0"], {
+      encoding: "utf8",
+    });
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /orphan 8 > 0/);
+  });
+});
+
 test("a dynamically constructed var name is not reported", () => {
   // `var(--color-${key})` can only be captured as its static prefix; reporting
   // the truncated name is always wrong.
