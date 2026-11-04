@@ -18,6 +18,7 @@ import importlib.util
 import json
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -162,6 +163,126 @@ class PlantedFailures(unittest.TestCase):
             with self.subTest(added=added):
                 readme = self.changed("each with a note of its upstream", f"each with a note of its upstream {added}")
                 self.assertNamed(problems({"README.md": readme}), "unchecked numbers", named)
+
+
+OFFERS_JSON = {
+    "offers": [
+        {"name": "alpha", "kind": "plugin", "group": "everyday", "publisher": "hov-stack"},
+        {"name": "beta", "kind": "other-plugin", "group": "code", "publisher": "Acme"},
+        {"name": "gamma", "kind": "tool", "group": "code", "publisher": "Globex"},
+        {"name": "delta", "kind": "plugin", "group": "tuning", "publisher": "hov-stack"},
+        {"name": "eps", "kind": "paid-skills", "group": "code", "publisher": "Initech"},
+        {"name": "zeta", "kind": "plugin", "group": "code", "publisher": "hov-stack"},
+    ],
+}
+
+
+def readme_with(more=(), tuning=("delta",), guided=("alpha", "zeta"), more_title=None):
+    """A small README holding the plugin groups and the more-offers section."""
+    title = more_title or counts.MORE_OFFERS_SECTION
+    lines = ["## The plugins", "", f"### {counts.SETUP_GROUP}", "",
+             f"### {counts.GUIDED_GROUP}", ""]
+    lines += [f"- `{name}`: x." for name in guided]
+    lines += ["", f"### {counts.TUNING_GROUP}", ""]
+    lines += [f"- `{name}`: x." for name in tuning]
+    lines += ["", f"## {title}", ""]
+    lines += [f"- `{name}` ({publisher}): x." for name, publisher in more]
+    return "\n".join(lines) + "\n"
+
+
+class OffersFacts(unittest.TestCase):
+    def facts(self, data=OFFERS_JSON):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "offers.json"
+            path.write_text(json.dumps(data), encoding="utf-8")
+            return counts.offer_facts(path)
+
+    def test_facts_come_from_offers_json(self):
+        facts = self.facts()
+        self.assertEqual(facts["guided_plugins"], ["alpha", "zeta"])
+        self.assertEqual(facts["tuning_plugins"], ["delta"])
+        self.assertEqual(facts["more_offers"], [("beta", "Acme"), ("gamma", "Globex"), ("eps", "Initech")])
+
+    def test_the_real_tree_reads_the_real_offers_json(self):
+        real = json.loads((CLAUDE / counts.OFFERS).read_text(encoding="utf-8"))["offers"]
+        self.assertEqual(FACTS["guided_plugins"], [o["name"] for o in real if o["kind"] == "plugin" and o["group"] != "tuning"])
+        self.assertEqual(FACTS["tuning_plugins"], [o["name"] for o in real if o["kind"] == "plugin" and o["group"] == "tuning"])
+        self.assertEqual(FACTS["more_offers"], [(o["name"], o["publisher"]) for o in real if o["kind"] != "plugin"])
+        self.assertTrue(FACTS["guided_plugins"] and FACTS["tuning_plugins"] and FACTS["more_offers"])
+
+    def test_a_malformed_offers_json_is_named(self):
+        with self.assertRaisesRegex(ValueError, "no 'offers' list"):
+            self.facts({"offers": None})
+        with self.assertRaisesRegex(ValueError, "no 'publisher'"):
+            self.facts({"offers": [{"name": "x", "kind": "tool", "group": "code"}]})
+
+
+class MoreOffers(unittest.TestCase):
+    MORE = (("beta", "Acme"), ("gamma", "Globex"), ("eps", "Initech"))
+
+    def run_leg(self, readme):
+        facts = {"more_offers": list(self.MORE)}
+        return counts.check_more_offers(readme, facts)
+
+    def test_a_matching_section_passes(self):
+        self.assertEqual(self.run_leg(readme_with(self.MORE)), [])
+
+    def test_a_missing_section_is_named(self):
+        found = self.run_leg(readme_with(self.MORE, more_title="Something else"))
+        self.assertEqual(len(found), 1)
+        self.assertIn("more offers: no '## More that `/hov-setup` offers' section", found[0])
+
+    def test_wrong_order_names_the_first_difference(self):
+        found = self.run_leg(readme_with((self.MORE[1], self.MORE[0], self.MORE[2])))
+        self.assertEqual(len(found), 1)
+        self.assertIn("more offers: bullet 1", found[0])
+        self.assertIn("('gamma', 'Globex')", found[0])
+        self.assertIn("('beta', 'Acme')", found[0])
+
+    def test_wrong_publisher_is_named(self):
+        found = self.run_leg(readme_with((self.MORE[0], ("gamma", "Hooli"), self.MORE[2])))
+        self.assertEqual(len(found), 1)
+        self.assertIn("bullet 2", found[0])
+        self.assertIn("('gamma', 'Hooli')", found[0])
+
+    def test_an_extra_bullet_is_named(self):
+        found = self.run_leg(readme_with(self.MORE + (("extra", "Umbrella"),)))
+        self.assertEqual(len(found), 1)
+        self.assertIn("bullet 4", found[0])
+        self.assertIn("('extra', 'Umbrella')", found[0])
+        self.assertIn("None", found[0])
+
+    def test_a_missing_bullet_is_named(self):
+        found = self.run_leg(readme_with(self.MORE[:2]))
+        self.assertEqual(len(found), 1)
+        self.assertIn("bullet 3", found[0])
+        self.assertIn("is None", found[0])
+
+    def test_check_runs_the_leg_on_the_real_readme(self):
+        # Holds before and after the README gains the section: either way the leg is wired in.
+        real = problems()
+        if "## More that `/hov-setup` offers" in README:
+            self.assertEqual([p for p in real if p.startswith("more offers")], [])
+        else:
+            self.assertTrue(any(p.startswith("more offers: no ") for p in real), real)
+
+
+class TuningGroup(unittest.TestCase):
+    FACTS = {"default_plugins": [], "guided_plugins": ["alpha", "zeta"], "tuning_plugins": ["delta"]}
+
+    def test_a_matching_tuning_group_passes(self):
+        self.assertEqual(counts.check_plugin_groups(readme_with(), self.FACTS), [])
+
+    def test_a_tuning_group_out_of_step_with_offers_json_fails(self):
+        found = counts.check_plugin_groups(readme_with(tuning=("delta", "stray")), self.FACTS)
+        self.assertEqual(len(found), 1)
+        self.assertIn(counts.TUNING_GROUP, found[0])
+        self.assertIn("offers.json gives ['delta']", found[0])
+
+    def test_the_guided_group_names_offers_json_as_its_source(self):
+        found = counts.check_plugin_groups(readme_with(guided=("alpha",)), self.FACTS)
+        self.assertEqual(len(found), 1)
+        self.assertIn("offers.json gives ['alpha', 'zeta']", found[0])
 
 
 if __name__ == "__main__":

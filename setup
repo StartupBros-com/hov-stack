@@ -646,10 +646,10 @@ fi
 echo
 if [ "$st_claude" = ok ]; then
   echo "Next: open a new Claude Code session (it reads the rules and checks only when it starts)"
-  echo "  and type /hov-setup. It explains the optional plugins in plain words and sets up the"
-  echo "  ones you pick, all in that one session."
+  echo "  and type /hov-setup. It explains, in plain words, the optional plugins and the other"
+  echo "  tools hov-stack works with, and sets up the ones you pick, all in that one session."
 else
   echo "Next: get Claude Code working (the claude row above says how) and run ./setup again."
-  echo "  Then open Claude Code and type /hov-setup for the optional plugins."
+  echo "  Then open Claude Code and type /hov-setup for the optional plugins and tools."
 fi
 exit "$failed"
