@@ -1404,7 +1404,7 @@ UPD_PATH=
 upd_run() {  # upd_run <checkout> <home> <claude state dir> <uv state dir> <log> [setup args]: the checkout's setup --update
   local c=$1 h=$2 f=$3 u=$4 log=$5
   shift 5
-  FAKE=$f FAKE_UV=$u HOME=$h HOV_SETUP_PLATFORM=linux-x86_64 HOV_SETUP_RELEASE_TABLE=$UPD_TABLE \
+  FAKE=$f FAKE_UV=$u HOME=$h HOV_SETUP_PLATFORM=${UPD_PLATFORM-linux-x86_64} HOV_SETUP_RELEASE_TABLE=$UPD_TABLE \
     PATH=${UPD_PATH:+$UPD_PATH:}$WORK/file-curl:$WORK/fake-bin:$PATH bash "$c/setup" --update --no-dcg "$@" > "$log" 2>&1
 }
 
@@ -1630,6 +1630,44 @@ UPD_TABLE=$T_NEW UPD_PATH=$WORK/uv-bin upd_run "$UP/clone-u" "$UP/home-u-old-fie
   || { cat "$WORK/upd-u-old-field.log"; fail "setup --update with uv's record 'old-field' exited non-zero"; }
 grep -q -x -F "$OFFER_LINE" "$UP/uv-u-old-field/calls" || { cat "$UP/uv-u-old-field/calls"; fail "an older tag in a separate rev field was not moved to the offer's tag"; }
 ok "the git-tag uv tool is re-installed only when uv's record names the offer's repository at an older tag; at its tag, at a newer tag, a branch or no revision, from another repository, or from PyPI it is left where it is, with the reason"
+
+# Intel/Rosetta: exercise the real setup --update path, not only the detector.
+# Only Node reports macOS; the installer still runs local Linux fixture binaries.
+mkdir -p "$WORK/mac-probe"
+cat > "$WORK/mac-probe/platform.mjs" <<'EOF'
+Object.defineProperty(process, "platform", { value: "darwin" });
+Object.defineProperty(process, "arch", { value: process.env.HOV_TEST_MAC_ARCH || "x64" });
+EOF
+cat > "$WORK/mac-probe/sysctl" <<'EOF'
+#!/usr/bin/env bash
+[ "$*" = '-n sysctl.proc_translated' ] || exit 2
+printf '%s\n' "${HOV_TEST_TRANSLATED:-0}"
+exit "${HOV_TEST_SYSCTL_RC:-0}"
+EOF
+chmod +x "$WORK/mac-probe/sysctl"
+for mac_case in intel rosetta failed malformed override arm64; do
+  translated=0; sysctl_rc=0; platform=; arch=x64; wants_panel=0
+  case "$mac_case" in
+    rosetta) translated=$' \n\t1 \n'; wants_panel=1 ;;
+    failed) translated=1; sysctl_rc=1 ;;
+    malformed) translated='1 extra' ;;
+    override) translated=1; platform=darwin-x86_64 ;;
+    arm64) arch=arm64; wants_panel=1 ;;
+  esac
+  f=$UP/fake-mac-$mac_case; u=$UP/uv-mac-$mac_case; log=$WORK/upd-mac-$mac_case.log
+  new_update_fake "$f"
+  new_uvstate "$u" same-rev
+  NODE_OPTIONS="--import=$WORK/mac-probe/platform.mjs" HOV_TEST_MAC_ARCH=$arch \
+    HOV_TEST_TRANSLATED=$translated HOV_TEST_SYSCTL_RC=$sysctl_rc UPD_PLATFORM=$platform \
+    UPD_TABLE=$T_NEW UPD_PATH=$WORK/mac-probe:$WORK/uv-bin \
+    upd_run "$UP/clone-a" "$UP/home-mac-$mac_case" "$f" "$u" "$log" \
+    || { cat "$log"; fail "setup --update for $mac_case exited non-zero"; }
+  want_uv='tool upgrade ast-grep-cli'
+  if [ "$wants_panel" = 1 ]; then want_uv=$(printf '%s\n' "$want_uv" 'tool upgrade synthetic-panel'); fi
+  got_uv=$(grep -v -x -E 'tool (list|dir)' "$u/calls" | LC_ALL=C sort) || true
+  [ "$got_uv" = "$want_uv" ] || { cat "$log" "$u/calls"; fail "$mac_case did not upgrade exactly its supported uv tools"; }
+  ok "setup --update for $mac_case upgrades exactly its supported uv tools"
+done
 
 export CLAUDE_CONFIG_DIR=$WORK/cfg
 bash "$ROOT/setup" > "$WORK/run3.log" 2>&1 || { cat "$WORK/run3.log"; fail "setup with CLAUDE_CONFIG_DIR exited non-zero"; }

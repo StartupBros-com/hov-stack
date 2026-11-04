@@ -97,7 +97,7 @@ function onWsl() {
   }
 }
 
-function platformName() {
+export function platformName() {
   const override = process.env.HOV_SETUP_PLATFORM;
   if (override) return override;
   const { platform, arch } = process;
