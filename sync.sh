@@ -2365,6 +2365,16 @@ check_checkout_freshness() {
   return 0
 }
 
+# live_tree_is_here: true when the live ~/.claude runs from this tree, i.e. one of its
+# stable directories is a symlink into it (the comparison check's link loop makes).
+live_tree_is_here() {
+  local d
+  for d in $STABLE_DIRS; do
+    [ -L "$H/$d" ] && [ "$(readlink -f "$H/$d")" = "$(readlink -f "$HERE/$d")" ] && return 0
+  done
+  return 1
+}
+
 check() {
   local drift=0 examined=0 canonical_env_file mapped_env_file _docker_policy_out
   guard_no_credentials || { echo "DRIFT: credential material tracked in the harness tree (see SECRET GUARD above)"; drift=1; }
@@ -2387,6 +2397,12 @@ check() {
         *) echo "DRIFT: unrecognised role '$_role' — install would enable NO timers while this check passed"; drift=1 ;;
       esac
     fi
+  elif live_tree_is_here; then
+    # But a tree the live ~/.claude runs from is no fixture. It is a switched host
+    # whose roster never came along (the public tree carries none), and every
+    # role-dependent verb refuses there while the gate above stays quiet.
+    echo "DRIFT: no host roster is readable (${DOTFILES_ROLE_FILE:-$HERE/hosts.tsv}); copy the fleet's hosts.tsv there — install, push and reconcile-runtime-env refuse until it exists"
+    drift=1
   fi
   if docker_init_role_selected; then
     examined=$((examined + 1))
