@@ -1365,6 +1365,37 @@ VALID_COMPACT_WINDOW_JQ='def valid_compact_window:
   if type == "number" then . == floor and . >= 100000 and . <= 1000000
   else false end;'
 
+# The drift projection's last step, on both sides: two spellings Claude Code
+# treats alike compare alike. A hook command runs through a shell, so its
+# `$HOME/` is rendered with lib/settings-seed.js's mapping ($HOME/.claude to the
+# config dir, then $HOME/ to the home). A permission rule's `$HOME/` is rendered
+# the same way for another reason: setup's seed writes the rendered rule and
+# `sync.sh install` copies the template's spelling, and settings-seed.js already
+# counts the two spellings as one entry. Env values are read literally and are
+# not rendered here. An event with no hooks is no event, and
+# hook groups and the hooks in a group are sorted: "When an event fires, its
+# matching hooks run in parallel" (code.claude.com/docs/en/hooks). Permission
+# lists are sorted too: rules are applied by kind (deny, then ask, then allow),
+# not by their position in a list.
+SETTINGS_NORMAL_JQ='def render_home($cfg; $home):
+  split("$HOME/.claude") | join($cfg) | split("$HOME/") | join($home + "/");
+def settings_normal($cfg; $home):
+  (if (.permissions | type) == "object"
+   then .permissions |= with_entries(if (.value | type) == "array"
+          then .value |= (map(if type == "string" then render_home($cfg; $home) else . end) | sort)
+          else . end)
+   else . end)
+  | (if (.hooks | type) == "object"
+     then .hooks |= (with_entries(select(.value != []))
+       | map_values(if type == "array"
+           then map(if type == "object" and (.hooks | type) == "array"
+                    then .hooks |= (map(if type == "object" and (.command | type) == "string"
+                                        then .command |= render_home($cfg; $home) else . end) | sort)
+                    else . end)
+                | sort
+           else . end))
+     else . end);'
+
 validate_canonical_compact_window() {
   if ! jq -e "$VALID_COMPACT_WINDOW_JQ"'.autoCompactWindow | valid_compact_window' "$HERE/settings.json" >/dev/null; then
     echo "runtime-env reconcile: canonical settings defenses are missing or invalid (autoCompactWindow must be an integer from 100000 to 1000000); live settings were not changed" >&2
@@ -2628,8 +2659,8 @@ check() {
         drift=1
       fi
       # statusLine/spinnerVerbs are owned by the statusline ad daemon and churn
-      # constantly — compare everything except its keys (doctor check 11 guards
-      # the security-relevant subset explicitly). Project the canonical env-file
+      # constantly — compare everything except its keys; the DRIFT line names
+      # each top-level key that differs. Project the canonical env-file
       # path through CLAUDE_HOME just as reconcile_runtime_env does so hermetic
       # and foreign-home installs compare against their actual live contract.
       canonical_env_file=$(jq -r '.env.CLAUDE_ENV_FILE // empty' "$HERE/$f")
@@ -2705,7 +2736,30 @@ check() {
         drift=1
       fi
       canonical_global_window=$(jq -c '.autoCompactWindow' "$HERE/$f")
-      cmp -s <(jq -S --argjson canonical_windows "$canonical_windows" --argjson canonical_global_window "$canonical_global_window" "$VALID_COMPACT_WINDOW_JQ"'
+      # The canonical side is what this host's live file should hold, built by
+      # the code setup seeds a machine with: lib/settings-seed.js renders every
+      # `$HOME/`, merges the private overlay (README, "The private overlay") and
+      # resolves the dcg hook to $DCG_COMMAND, the path reconcile_dcg_hook
+      # writes. SETTINGS_SEED_ALL_KEYS keeps the keys a seed leaves out.
+      # Compared raw instead, every overlay rule and every rendered path read
+      # as drift that no remedy could clear.
+      settings_overlay=""
+      if settings_ov_dir=$(overlay_dir) && [ -f "$settings_ov_dir/settings.json" ]; then
+        settings_overlay=$settings_ov_dir/settings.json
+      fi
+      settings_tmp=$(mktemp -d "${TMPDIR:-/tmp}/sync-check-settings.XXXXXX") || {
+        echo "DRIFT: $f was not compared (no scratch directory for the projection)"; drift=1; continue; }
+      if ! settings_seed_err=$(SETTINGS_SEED_ALL_KEYS=1 node "$HERE/lib/settings-seed.js" "$HERE/$f" \
+             "$settings_tmp/canonical.json" "$H" "$HOME" "$DCG_COMMAND" "$settings_overlay" 2>&1 >/dev/null); then
+        # The builder's own refusal is one line; an uncaught node error ends in a
+        # "Node.js vN" banner, so name its Error line instead.
+        settings_seed_why=$(printf '%s\n' "$settings_seed_err" | grep -m1 -E '^(settings-seed: |[A-Za-z]*Error: )') \
+          || settings_seed_why=$(printf '%s\n' "$settings_seed_err" | tail -1)
+        echo "DRIFT: $f canonical copy could not be built${settings_overlay:+ with the overlay $settings_overlay}: $settings_seed_why"
+        drift=1; rm -rf "$settings_tmp"; continue
+      fi
+      settings_live_ok=1 settings_canonical_ok=1
+      jq -S --arg cfg "$H" --arg home "$HOME" --argjson canonical_windows "$canonical_windows" --argjson canonical_global_window "$canonical_global_window" "$VALID_COMPACT_WINDOW_JQ$SETTINGS_NORMAL_JQ"'
                       del(.statusLine, .spinnerVerbs, .feedbackSurveyState, .model)
                       | if (.autoCompactWindow | valid_compact_window) then .autoCompactWindow = $canonical_global_window else . end
                       | if (.env | type) == "object" then .env |= (del(.ANTHROPIC_AUTH_TOKEN) | del(.ANTHROPIC_CUSTOM_HEADERS)) else . end
@@ -2713,8 +2767,9 @@ check() {
                         then .modelSettings = ((if (.modelSettings | type) == "object" then .modelSettings else {} end)
                                | with_entries(select(.key as $k | $canonical_windows | has($k)))
                                | with_entries(.value |= (if type == "object" then {autoCompactWindow: .autoCompactWindow} else {autoCompactWindow: .} end)))
-                        else del(.modelSettings) end' "$H/$f") \
-             <(jq -S --arg env_file "$mapped_env_file" --arg proxy_url "$proxy_base_url" --arg plugin_dirs "$mapped_plugin_dirs" --argjson canonical_windows "$canonical_windows" --arg home "$HOME" '
+                        else del(.modelSettings) end
+                      | settings_normal($cfg; $home)' "$H/$f" >"$settings_tmp/live.proj.json" 2>/dev/null || settings_live_ok=0
+      jq -S --arg env_file "$mapped_env_file" --arg proxy_url "$proxy_base_url" --arg plugin_dirs "$mapped_plugin_dirs" --argjson canonical_windows "$canonical_windows" --arg cfg "$H" --arg home "$HOME" "$SETTINGS_NORMAL_JQ"'
                del(.statusLine, .spinnerVerbs, .feedbackSurveyState, .model)
                | if ($canonical_windows | length) > 0
                  then .modelSettings = $canonical_windows
@@ -2728,12 +2783,29 @@ check() {
                | if ((.env | type) == "object") and (.env | has("ANTHROPIC_BASE_URL")) and ($proxy_url != "")
                  then .env.ANTHROPIC_BASE_URL = $proxy_url
                  else . end
-               | if (.env | type) == "object"
-                 then .env |= with_entries(.value |= (if type == "string" and startswith("$HOME/") then $home + .[5:] else . end))
-                 else . end
                | if (.env | type) == "object" then .env |= (del(.ANTHROPIC_AUTH_TOKEN) | del(.ANTHROPIC_CUSTOM_HEADERS)) else . end
-             ' "$HERE/$f") ||
-        { echo "DRIFT: $f differs from repo copy beyond ad-daemon-owned keys (sync.sh push)"; drift=1; }
+               | settings_normal($cfg; $home)
+             ' "$settings_tmp/canonical.json" >"$settings_tmp/canonical.proj.json" 2>/dev/null || settings_canonical_ok=0
+      if [ "$settings_live_ok" -eq 0 ] || [ "$settings_canonical_ok" -eq 0 ] ||
+         ! cmp -s "$settings_tmp/live.proj.json" "$settings_tmp/canonical.proj.json"; then
+        settings_keys=""
+        if [ "$settings_live_ok" -eq 0 ]; then
+          settings_keys=" (the live copy could not be projected; is it valid JSON?)"
+        elif [ "$settings_canonical_ok" -eq 0 ]; then
+          settings_keys=" (the canonical copy could not be projected)"
+        else
+          settings_keys=$(jq -rn --slurpfile a "$settings_tmp/live.proj.json" --slurpfile b "$settings_tmp/canonical.proj.json" '
+              ($a[0] // {}) as $l | ($b[0] // {}) as $c
+              | [($l | keys) + ($c | keys) | unique[] | select($l[.] != $c[.])] | " in: " + join(", ")' 2>/dev/null) || settings_keys=""
+        fi
+        # push copies the whole live file over the repo, overlay entries
+        # included, so it is the remedy only for a live-only entry that is
+        # public (docs/solutions/integration-issues/a-permissions-entry-added-
+        # to-the-tracked-settings-json-never-reaches-the-live-file.md).
+        echo "DRIFT: $f differs from repo copy beyond ad-daemon-owned keys$settings_keys (an entry only live has goes into settings.json, or the overlay when private; one only the repo has reaches live by a reviewed edit)"
+        drift=1
+      fi
+      rm -rf "$settings_tmp"
     else
       cmp -s "$H/$f" "$HERE/$f" ||
         { echo "DRIFT: $f differs from repo copy (sync.sh push)"; drift=1; }
