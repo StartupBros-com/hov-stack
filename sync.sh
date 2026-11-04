@@ -114,6 +114,17 @@ docker_init_role_selected() {
 H=${CLAUDE_HOME:-$HOME/.claude}
 MEMORY_LIVE_ROOT=${CLAUDE_MEMORY_LIVE_ROOT:-$H/projects}
 MEMORY_MIRROR_ROOT=${CLAUDE_MEMORY_MIRROR_ROOT:-$HERE/memory}
+# The mirror is opt-in (#346): push and check touch it only when it is named or
+# an explicit `sync.sh memory-push` has created the default one. Otherwise push
+# would copy private notes into this checkout, a public repository, and check
+# would report drift on every host that keeps no mirror. harness-doctor gates
+# its memory audit the same way.
+memory_mirror_opted_in() {
+  [ -n "${CLAUDE_MEMORY_MIRROR_ROOT:-}" ] || [ -d "$MEMORY_MIRROR_ROOT" ]
+}
+memory_mirror_absent_reason() {
+  echo "no mirror at $MEMORY_MIRROR_ROOT and CLAUDE_MEMORY_MIRROR_ROOT is unset (the mirror is opt-in; sync.sh memory-push creates it)"
+}
 MEMORY_AUDIT=$HERE/scripts/memory-audit.py
 CRON_OWNERSHIP_HELPER=$HERE/scripts/cron-ownership.py
 CRITICAL_SILENCE_TIMERS="mcp-servers-update.timer skills-update.timer"
@@ -1752,7 +1763,10 @@ push() {
   fi
   guard_no_credentials || exit 1
   guard_auto_mode_policy_for_push || return 1
-  mkdir -p "$HERE/memory" "$HERE/systemd" "$HERE/systemd-system" "$HERE/windows-stub"
+  # No "$HERE/memory" here: an existing mirror directory opts push and check into
+  # memory (#346), so creating it on every push would opt every host in.
+  # memory_push creates the mirror root itself when it runs.
+  mkdir -p "$HERE/systemd" "$HERE/systemd-system" "$HERE/windows-stub"
   for d in $STABLE_DIRS; do
     # Only copy while un-adopted; once symlinked, repo and live are the same files.
     [ -d "$H/$d" ] && [ ! -L "$H/$d" ] && rsync -a --delete "$H/$d/" "$HERE/$d/"
@@ -1796,7 +1810,11 @@ push() {
     fi
   done
   # Preview is always emitted before memory mutation. Copying is non-destructive.
-  memory_push || return $?
+  if memory_mirror_opted_in; then
+    memory_push || return $?
+  else
+    echo "  memory not copied: $(memory_mirror_absent_reason)"
+  fi
   for u in $UNITS; do
     mkdir -p "$(dirname "$HERE/systemd/$u")"          # $u may be "<unit>.d/<file>.conf"
     [ -f "$SYS/$u" ] && cp "$SYS/$u" "$HERE/systemd/$u"
@@ -2325,46 +2343,6 @@ install() {
   echo "install done. Restore separately: credentials (claude login), skills (jsm sync), plugins (claude plugin — enabledPlugins already in settings.json)."
 }
 
-# The checkout this harness is installed FROM is the one thing every other check
-# here trusts implicitly. Each comparison below asks "does the live tree match
-# the repo?"; not one of them asks "is the repo current?". Measured 2026-08-26
-# (dotfiles#479): the canonical checkout sat 25 commits behind origin/main while
-# both `sync.sh check` and harness-doctor reported in sync, because they were
-# comparing the live tree against that same stale checkout. Agreement between two
-# stale copies is not freshness, and merged harness work never went live.
-CANONICAL_ROOT=${CLAUDE_SYNC_CANONICAL_ROOT:-$HOME/dotfiles}
-
-# Echoes SKIP: lines only and returns 0. Nothing in this repo records when the
-# canonical checkout was last proven current (its update is a plain safe
-# fast-forward with no stamp), and `check` runs inside harness-doctor and has to
-# stay offline-safe and fast, so there is no comparison to make here. The skip is
-# printed, never silent: a skip nobody prints is indistinguishable from a check
-# that passed, which is exactly how the route guard shipped inert (#479 finding 9).
-#
-# FRESHNESS_EXAMINED is the number of comparisons actually made, which check()
-# folds into EXAMINED. A skip must contribute ZERO: the vacuity floor exists to
-# stop a check reporting "in sync" over an empty corpus, so a branch that compared
-# nothing while claiming a comparison is precisely the defect it guards
-# (tests/harness-doctor-vacuity.test.sh, B4).
-FRESHNESS_EXAMINED=0
-
-check_checkout_freshness() {
-  local here_root canonical_root
-  FRESHNESS_EXAMINED=0
-
-  here_root=$(readlink -f "$HERE" 2>/dev/null || echo "$HERE")
-  canonical_root=$(readlink -f "$CANONICAL_ROOT" 2>/dev/null || echo "$CANONICAL_ROOT")
-
-  # A worktree legitimately sits on its own branch, ahead of or behind the
-  # default, so a freshness verdict there would be pure noise.
-  if [ "$here_root" != "$canonical_root" ]; then
-    echo "SKIP: checkout freshness — this is $here_root, not the canonical $canonical_root"
-    return 0
-  fi
-  echo "SKIP: checkout freshness — $here_root records no proven-fresh stamp (its update is a plain fast-forward), so currency cannot be shown offline"
-  return 0
-}
-
 check() {
   local drift=0 examined=0 canonical_env_file mapped_env_file _docker_policy_out
   guard_no_credentials || { echo "DRIFT: credential material tracked in the harness tree (see SECRET GUARD above)"; drift=1; }
@@ -2545,8 +2523,12 @@ check() {
         echo "DRIFT: statusline-stack/local-statusline.mjs is not linked to the versioned renderer"; drift=1;
       }
   fi
-  memory_plan >/dev/null || { echo "DRIFT: memory differs (sync.sh memory-preview, then memory-push)"; drift=1; }
-  examined=$((examined + MEMORY_ITEMS_EXAMINED))
+  if memory_mirror_opted_in; then
+    memory_plan >/dev/null || { echo "DRIFT: memory differs (sync.sh memory-preview, then memory-push)"; drift=1; }
+    examined=$((examined + MEMORY_ITEMS_EXAMINED))
+  else
+    echo "SKIP: memory — $(memory_mirror_absent_reason)"
+  fi
   # A unit that is in the repo but MISSING from the live tree is drift too.
   #
   # The previous form compared only when BOTH files existed, so a unit added to
@@ -2687,8 +2669,6 @@ EOF_LIVE_UNITS
   if [ -n "$(git -C "$HERE" status --porcelain 2>/dev/null)" ]; then
     echo "DRIFT: uncommitted harness changes in the repo (commit + push them)"; drift=1
   fi
-  check_checkout_freshness || drift=1
-  examined=$((examined + FRESHNESS_EXAMINED))
   # Measured 2026-08-17: 3,387 actual comparisons (5 dirs, 3 files,
   # 3,351 memory paths, 27 user units, 1 system unit). The corpus is dynamic;
   # consumers floor only zero and disclose the measured count.
