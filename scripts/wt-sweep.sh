@@ -242,6 +242,28 @@ for dir in ${_candidates[@]+"${_candidates[@]}"}; do
   case "$ROUTE_SKIP_COMMON" in *"|$cdir|"*)
     echo "### $name (repo-route authority/collision guard; skipped before prune/removal)"
     n_route=$((n_route+1))
+    # Say how to fix the most common cause: a route the policy declares and this host
+    # never recorded an authority for. resolve reads state and never mutates git; any
+    # failure here prints nothing extra and changes nothing else.
+    _hint=$(python3 "$ROUTE_RESOLVER" resolve --repo "$repo" --format json 2>/dev/null | python3 -c '
+import json, sys
+try:
+    r = json.load(sys.stdin)
+    route, top = r.get("route"), r.get("top_level")
+    ok = (r.get("verified") is True and r.get("classification") == "unregistered"
+          and isinstance(route, str) and route and r.get("authority_registered") is False
+          and isinstance(top, str) and top)
+    if ok:
+        mode = r.get("mode")
+        print("%s\t%s\t%s" % (route, top, mode if isinstance(mode, str) and mode else "observe"))
+except Exception:
+    pass
+' 2>/dev/null) || _hint=""
+    if [ -n "$_hint" ]; then
+      IFS=$'\t' read -r _hr _ht _hm <<<"$_hint"
+      printf '    route %s is declared in the route policy but has no authority recorded on this host; if this is its only clone, record it with: python3 %q bootstrap --route %q --canonical-path %q --mode %q\n' \
+        "$_hr" "$ROUTE_RESOLVER" "$_hr" "$_ht" "$_hm"
+    fi
     continue ;;
   esac
   mapfile -t paths < <(git -C "$repo" worktree list --porcelain 2>/dev/null|awk '/^worktree /{print $2}')
@@ -404,4 +426,7 @@ printf 'scope: %d repos under %s\n' "${#_candidates[@]}" "$(wt_roots | paste -sd
 printf 'removed:%d  preserved-local:%d  dropped:%d  bundled:%d  kept-in-place:%d  skipped-active:%d  stale-workspaces:%d  skipped-route:%d  anchors-pruned:%d  resumable-warned:%d\n' \
   "$n_rm" "$n_keep" "$n_drop" "$n_bundle" "$n_leave" "$n_skip" "$n_ws" "$n_route" "$n_anchor" "$n_resume"
 [ $DRY_RUN = 1 ] && echo "(dry run — re-run with DRY_RUN=0 to apply)"
+# Exit status stays 0 (OnFailure= must not page weekly for a missing authority record),
+# but the skip must not be silent either: the journal's stderr is what an operator reads.
+(( n_route > 0 )) && echo "WARN wt-sweep: $n_route repo(s) skipped by the repo-route guard; the ### lines above name each fix" >&2
 exit 0

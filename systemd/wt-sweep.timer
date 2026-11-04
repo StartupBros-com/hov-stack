@@ -1,5 +1,5 @@
 [Unit]
-Description=Weekly git-worktree fleet sweep (observe-only until promoted)
+Description=Weekly git-worktree fleet sweep (plan-only as shipped; see systemd/README.md)
 
 [Timer]
 # Thu 01:15 — the harness's only quiet corridor, before the 03:00-05:30 nightly

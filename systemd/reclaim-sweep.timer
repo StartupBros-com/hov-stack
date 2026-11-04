@@ -3,7 +3,7 @@
 #   nothing; the defaults are generic.
 # See systemd/README.md.
 [Unit]
-Description=Weekly reclaim-sweep residue cleanup (plan-only until promoted)
+Description=Weekly reclaim-sweep residue cleanup (plan-only as shipped)
 
 [Timer]
 # Fri 02:05 — same quiet pre-03:00 corridor, a distinct weekday from

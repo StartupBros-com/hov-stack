@@ -89,6 +89,12 @@ mkdir -p "$CLAUDE_HOME/config"
 printf '%s\n' '{"retired":true}' >"$retired_profile"
 export HOME CLAUDE_HOME
 mkdir -p "$HOME"
+# The overlay is the fixture's own, so no install here reads a real host's overlay
+# files (foreign-units, hygiene-posture) through an inherited variable.
+unset XDG_CONFIG_HOME
+HOV_STACK_OVERLAY=$TMP/overlay
+export HOV_STACK_OVERLAY
+mkdir -p "$HOV_STACK_OVERLAY"
 
 export CLAUDE_SYNC_SKIP_HOOK_RECONCILE=1
 export CLAUDE_MEMORY_MIRROR_ROOT="$TMP/empty-mirror"
@@ -197,7 +203,9 @@ case "$command" in
     ;;
   show)
     # check() treats this as an explicit no-user-manager skip. install() uses
-    # show-environment above, so activation is still exercised.
+    # show-environment above, so activation is still exercised. The hygiene-posture
+    # section sets SYSTEMCTL_SHOW_REACHABLE=1 to give check() a reachable manager.
+    [ "${SYSTEMCTL_SHOW_REACHABLE:-0}" = 1 ] && exit 0
     exit 3
     ;;
   *)
@@ -2616,6 +2624,175 @@ if [ "$check_status" -eq 0 ]; then
 else
   bad "sync.sh check reported drift after a fresh install:"$'\n'"$check_out"
 fi
+
+# -- host-declared hygiene posture (#408) --------------------------------------
+# <overlay>/hygiene-posture is how a host keeps deletion on and its hygiene timers
+# enabled across `sync.sh install`. This section runs on the clean, fully installed
+# fixture above and puts the fixture back at its end. The overlay is the fixture's own
+# ($HOV_STACK_OVERLAY, set at the top); the shim systemctl is the only manager.
+echo "=== hygiene posture ===" >&2
+hp_sys=$HOME/.config/systemd/user
+hp_file=$HOV_STACK_OVERLAY/hygiene-posture
+hp_stems_re='(wt-sweep|reclaim-sweep|docker-hygiene|pkg-cache-prune)\.timer'
+hp_enabled_saved=$TMP/hp-enabled-timers.saved
+cp "$SYSTEMCTL_ENABLED_TIMERS" "$hp_enabled_saved"
+hp_log_mark() { wc -l <"$SYSTEMCTL_LOG"; }
+hp_log_since() { tail -n +"$(($1 + 1))" "$SYSTEMCTL_LOG"; }
+hp_dropins() { find "$hp_sys" -name 50-hygiene-posture.conf 2>/dev/null | sort; }
+hp_tree() { hp_dropins | while IFS= read -r f; do printf '%s %s\n' "$f" "$(sha256sum <"$f")"; done; }
+
+# a. No posture file: install writes no drop-in and enables no hygiene timer.
+[ ! -e "$hp_file" ] || bad "hygiene posture precondition: $hp_file exists"
+hp_mark=$(hp_log_mark)
+hp_none_out=$("$SYNC" install 2>&1); hp_none_status=$?
+if [ "$hp_none_status" -eq 0 ]; then ok; else bad "install with no hygiene-posture file exited $hp_none_status:"$'\n'"$hp_none_out"; fi
+if [ -z "$(hp_dropins)" ]; then ok; else bad "install with no hygiene-posture file wrote a posture drop-in: $(hp_dropins)"; fi
+if hp_log_since "$hp_mark" | grep -Eq "$hp_stems_re"; then
+  bad "install with no hygiene-posture file touched a hygiene timer: $(hp_log_since "$hp_mark" | grep -E "$hp_stems_re")"
+else ok; fi
+if grep -Eq "^$hp_stems_re\$" "$SYSTEMCTL_ENABLED_TIMERS"; then bad "install with no hygiene-posture file left a hygiene timer enabled"; else ok; fi
+if grep -q 'hygiene' <<<"$hp_none_out"; then bad "install with no hygiene-posture file said something about hygiene posture:"$'\n'"$hp_none_out"; else ok; fi
+hp_none_check=$(SYSTEMCTL_SHOW_REACHABLE=1 "$SYNC" check 2>&1)
+if grep -q 'hygiene posture' <<<"$hp_none_check"; then bad "check with no hygiene-posture file printed posture lines:"$'\n'"$hp_none_check"; else ok; fi
+
+# b. A declared posture: exact drop-ins, exactly those timers, a hand-written override untouched.
+mkdir -p "$hp_sys/wt-sweep.service.d"
+printf '[Service]\nEnvironment=PUSH=1\n' >"$hp_sys/wt-sweep.service.d/override.conf"
+cp "$hp_sys/wt-sweep.service.d/override.conf" "$TMP/hp-override.expected"
+printf '%s\n' \
+  '# smoke posture' \
+  'wt-sweep DRY_RUN=0' \
+  'wt-sweep OnCalendar=daily' \
+  'reclaim-sweep RECLAIM_SWEEP_APPLY=1' >"$hp_file"
+hp_mark=$(hp_log_mark)
+hp_decl_out=$("$SYNC" install 2>&1); hp_decl_status=$?
+if [ "$hp_decl_status" -eq 0 ]; then ok; else bad "install with a valid hygiene posture exited $hp_decl_status:"$'\n'"$hp_decl_out"; fi
+hp_header="# Written by sync.sh install from the overlay's hygiene-posture file.
+# Edit that file, not this one; install rewrites or removes this drop-in."
+hp_expect_dropin() {
+  local path=$1 expected=$2
+  if [ -f "$path" ] && [ "$(cat "$path")" = "$expected" ]; then ok; else bad "posture drop-in $path is not as declared:"$'\n'"$(cat "$path" 2>&1)"; fi
+}
+hp_expect_dropin "$hp_sys/wt-sweep.service.d/50-hygiene-posture.conf" "$hp_header
+[Service]
+Environment=DRY_RUN=0"
+hp_expect_dropin "$hp_sys/wt-sweep.timer.d/50-hygiene-posture.conf" "$hp_header
+[Timer]
+OnCalendar=
+OnCalendar=daily"
+hp_expect_dropin "$hp_sys/reclaim-sweep.service.d/50-hygiene-posture.conf" "$hp_header
+[Service]
+Environment=RECLAIM_SWEEP_APPLY=1"
+if [ "$(hp_dropins | wc -l)" -eq 3 ]; then ok; else bad "expected exactly three posture drop-ins:"$'\n'"$(hp_dropins)"; fi
+if [ "$(hp_log_since "$hp_mark" | grep -E "$hp_stems_re")" = "--user enable --now wt-sweep.timer reclaim-sweep.timer" ]; then
+  ok
+else
+  bad "install did not enable exactly wt-sweep.timer and reclaim-sweep.timer in one call:"$'\n'"$(hp_log_since "$hp_mark" | grep -E "$hp_stems_re")"
+fi
+if grep -Fxq wt-sweep.timer "$SYSTEMCTL_ENABLED_TIMERS" && grep -Fxq reclaim-sweep.timer "$SYSTEMCTL_ENABLED_TIMERS" \
+   && ! grep -Eq '^(docker-hygiene|pkg-cache-prune)\.timer$' "$SYSTEMCTL_ENABLED_TIMERS"; then
+  ok
+else
+  bad "enabled timers after a declared posture are not exactly the declared hygiene pair:"$'\n'"$(cat "$SYSTEMCTL_ENABLED_TIMERS")"
+fi
+if grep -Fq 'hygiene timers enabled from overlay posture: wt-sweep reclaim-sweep' <<<"$hp_decl_out"; then ok; else bad "install did not report the enabled hygiene timers:"$'\n'"$hp_decl_out"; fi
+if cmp -s "$hp_sys/wt-sweep.service.d/override.conf" "$TMP/hp-override.expected"; then ok; else bad "install changed a hand-written override.conf"; fi
+hp_decl_check=$(SYSTEMCTL_SHOW_REACHABLE=1 "$SYNC" check 2>&1)
+if grep -q 'hygiene posture' <<<"$hp_decl_check"; then bad "check reported hygiene posture drift right after install:"$'\n'"$hp_decl_check"; else ok; fi
+hp_again=$(hp_tree)
+"$SYNC" install >/dev/null 2>&1
+if [ "$hp_again" = "$(hp_tree)" ]; then ok; else bad "a second install changed the posture drop-ins"; fi
+
+# c. Drift: a deleted drop-in, a not-enabled declared timer.
+rm -f "$hp_sys/wt-sweep.service.d/50-hygiene-posture.conf"
+hp_gone_check=$(SYSTEMCTL_SHOW_REACHABLE=1 "$SYNC" check 2>&1)
+if grep -Fq "DRIFT: hygiene posture: $hp_sys/wt-sweep.service.d/50-hygiene-posture.conf is not installed (sync.sh install)" <<<"$hp_gone_check"; then ok; else bad "check did not report the deleted posture drop-in:"$'\n'"$hp_gone_check"; fi
+printf '[Service]\nEnvironment=DRY_RUN=1\n' >"$hp_sys/wt-sweep.service.d/50-hygiene-posture.conf"
+hp_diff_check=$(SYSTEMCTL_SHOW_REACHABLE=1 "$SYNC" check 2>&1)
+if grep -Fq "DRIFT: hygiene posture: $hp_sys/wt-sweep.service.d/50-hygiene-posture.conf differs from the overlay declaration (sync.sh install)" <<<"$hp_diff_check"; then ok; else bad "check did not report the edited posture drop-in:"$'\n'"$hp_diff_check"; fi
+"$SYNC" install >/dev/null 2>&1
+hp_expect_dropin "$hp_sys/wt-sweep.service.d/50-hygiene-posture.conf" "$hp_header
+[Service]
+Environment=DRY_RUN=0"
+grep -Fxv wt-sweep.timer "$SYSTEMCTL_ENABLED_TIMERS" >"$TMP/hp-enabled.next"; cp "$TMP/hp-enabled.next" "$SYSTEMCTL_ENABLED_TIMERS"
+hp_off_check=$(SYSTEMCTL_SHOW_REACHABLE=1 "$SYNC" check 2>&1)
+if grep -Fq 'DRIFT: hygiene posture: wt-sweep.timer is declared but not enabled (sync.sh install)' <<<"$hp_off_check"; then ok; else bad "check did not report a declared timer that is not enabled:"$'\n'"$hp_off_check"; fi
+if grep -Fq 'reclaim-sweep.timer is declared but not enabled' <<<"$hp_off_check"; then bad "check reported an enabled declared timer as not enabled"; else ok; fi
+hp_unreach_check=$("$SYNC" check 2>&1)
+if grep -Fq 'is declared but not enabled' <<<"$hp_unreach_check"; then bad "check judged timer state with no reachable user manager:"$'\n'"$hp_unreach_check"; else ok; fi
+"$SYNC" install >/dev/null 2>&1
+
+# d. Dropping a stem removes its generated drop-in and never disables its timer.
+printf '%s\n' 'wt-sweep DRY_RUN=0' 'wt-sweep OnCalendar=daily' >"$hp_file"
+hp_stale_check=$(SYSTEMCTL_SHOW_REACHABLE=1 "$SYNC" check 2>&1)
+if grep -Fq "DRIFT: hygiene posture: $hp_sys/reclaim-sweep.service.d/50-hygiene-posture.conf is no longer declared (sync.sh install removes it)" <<<"$hp_stale_check"; then ok; else bad "check did not report the no-longer-declared drop-in:"$'\n'"$hp_stale_check"; fi
+hp_mark=$(hp_log_mark)
+hp_drop_out=$("$SYNC" install 2>&1); hp_drop_status=$?
+if [ "$hp_drop_status" -eq 0 ]; then ok; else bad "install after dropping a stem exited $hp_drop_status:"$'\n'"$hp_drop_out"; fi
+if [ ! -e "$hp_sys/reclaim-sweep.service.d/50-hygiene-posture.conf" ]; then ok; else bad "install left the dropped stem's generated drop-in"; fi
+if [ -f "$hp_sys/wt-sweep.service.d/50-hygiene-posture.conf" ] && [ -f "$hp_sys/wt-sweep.timer.d/50-hygiene-posture.conf" ]; then ok; else bad "install removed a still-declared drop-in"; fi
+if hp_log_since "$hp_mark" | grep -E '(^| )(disable|stop)( |$)' | grep -Eq "$hp_stems_re"; then
+  bad "install disabled or stopped a hygiene timer:"$'\n'"$(hp_log_since "$hp_mark" | grep -E "$hp_stems_re")"
+else ok; fi
+if grep -Fxq reclaim-sweep.timer "$SYSTEMCTL_ENABLED_TIMERS"; then ok; else bad "the dropped stem's timer is no longer enabled"; fi
+if cmp -s "$hp_sys/wt-sweep.service.d/override.conf" "$TMP/hp-override.expected"; then ok; else bad "install changed a hand-written override.conf when removing a drop-in"; fi
+if grep -Fq 'hygiene posture: removed' <<<"$hp_drop_out"; then ok; else bad "install did not report removing the stale drop-in:"$'\n'"$hp_drop_out"; fi
+
+# e. An invalid file: nothing applied, nothing removed, nothing enabled, install red, check red.
+printf '%s\n' 'wt-sweep DRYRUN=0' >"$hp_file"
+grep -Fxv wt-sweep.timer "$SYSTEMCTL_ENABLED_TIMERS" >"$TMP/hp-enabled.next"; cp "$TMP/hp-enabled.next" "$SYSTEMCTL_ENABLED_TIMERS"
+hp_tree_before=$(hp_tree)
+hp_mark=$(hp_log_mark)
+hp_bad_out=$("$SYNC" install 2>&1); hp_bad_status=$?
+if [ "$hp_bad_status" -ne 0 ]; then ok; else bad "install with an invalid hygiene-posture file exited 0:"$'\n'"$hp_bad_out"; fi
+if grep -Fq "ERROR: $hp_file is invalid; no hygiene posture applied (fix the file and re-run install)" <<<"$hp_bad_out"; then ok; else bad "install did not print the invalid-posture error:"$'\n'"$hp_bad_out"; fi
+if grep -Fq 'hygiene-posture: unknown key for wt-sweep: wt-sweep DRYRUN=0' <<<"$hp_bad_out"; then ok; else bad "install did not print the line-level error:"$'\n'"$hp_bad_out"; fi
+if [ "$hp_tree_before" = "$(hp_tree)" ]; then ok; else bad "install with an invalid hygiene-posture file wrote or removed a posture drop-in"; fi
+if hp_log_since "$hp_mark" | grep -Eq "$hp_stems_re"; then bad "install with an invalid hygiene-posture file touched a hygiene timer"; else ok; fi
+if grep -Fq 'install done.' <<<"$hp_bad_out"; then bad "install with an invalid hygiene-posture file still reported success"; else ok; fi
+hp_bad_check=$(SYSTEMCTL_SHOW_REACHABLE=1 "$SYNC" check 2>&1)
+if grep -Fq "DRIFT: hygiene posture: $hp_file is invalid (see errors above)" <<<"$hp_bad_check"; then ok; else bad "check did not report the invalid posture file:"$'\n'"$hp_bad_check"; fi
+
+# f. An overlay path that is not absolute: the posture is unknown, not empty. Install
+#    warns and leaves the drop-ins as they are (as ./setup reads nothing there), the file
+#    at the relative path is never read, and check reports it.
+printf '%s\n' 'wt-sweep DRY_RUN=0' 'wt-sweep OnCalendar=daily' >"$hp_file"
+mkdir -p "$TMP/hp-relcwd/ovrel"
+printf '%s\n' 'pkg-cache-prune' >"$TMP/hp-relcwd/ovrel/hygiene-posture"
+hp_tree_before=$(hp_tree)
+if [ -n "$hp_tree_before" ]; then ok; else bad "hygiene posture precondition: no drop-ins installed before the relative-overlay case"; fi
+hp_mark=$(hp_log_mark)
+hp_rel_out=$(cd "$TMP/hp-relcwd" && HOV_STACK_OVERLAY=ovrel "$SYNC" install 2>&1); hp_rel_status=$?
+if [ "$hp_rel_status" -eq 0 ]; then ok; else bad "install with a relative overlay path exited $hp_rel_status:"$'\n'"$hp_rel_out"; fi
+if grep -Fq 'WARN the overlay path is not absolute (HOV_STACK_OVERLAY or HOME); hygiene posture not read, its drop-ins left as they are' <<<"$hp_rel_out"; then ok; else bad "install did not warn about the relative overlay path:"$'\n'"$hp_rel_out"; fi
+if [ "$hp_tree_before" = "$(hp_tree)" ]; then ok; else bad "install with a relative overlay path wrote or removed a posture drop-in"; fi
+if hp_log_since "$hp_mark" | grep -Eq "$hp_stems_re"; then bad "install with a relative overlay path touched a hygiene timer"; else ok; fi
+hp_rel_check=$(cd "$TMP/hp-relcwd" && HOV_STACK_OVERLAY=ovrel SYSTEMCTL_SHOW_REACHABLE=1 "$SYNC" check 2>&1)
+if grep -Fq 'DRIFT: hygiene posture: the overlay path is not absolute (HOV_STACK_OVERLAY or HOME), so the posture was not read' <<<"$hp_rel_check"; then ok; else bad "check did not report the relative overlay path:"$'\n'"$hp_rel_check"; fi
+rm -rf "$TMP/hp-relcwd"
+
+# g. A directory where a drop-in goes: install refuses it and fails, rather than moving the
+#    drop-in inside it and reporting it written.
+printf '%s\n' 'wt-sweep DRY_RUN=0' 'wt-sweep OnCalendar=daily' 'reclaim-sweep RECLAIM_SWEEP_APPLY=1' >"$hp_file"
+hp_dir=$hp_sys/reclaim-sweep.service.d/50-hygiene-posture.conf
+mkdir -p "$hp_dir"
+hp_mark=$(hp_log_mark)
+hp_dir_out=$("$SYNC" install 2>&1); hp_dir_status=$?
+if [ "$hp_dir_status" -ne 0 ]; then ok; else bad "install with a directory at a drop-in path exited 0:"$'\n'"$hp_dir_out"; fi
+if grep -Fq "ERROR: $hp_dir is a directory; hygiene posture drop-in not written" <<<"$hp_dir_out"; then ok; else bad "install did not report the directory at the drop-in path:"$'\n'"$hp_dir_out"; fi
+if [ -z "$(find "$hp_dir" -mindepth 1 2>/dev/null)" ]; then ok; else bad "install left files inside the directory at the drop-in path: $(find "$hp_dir" -mindepth 1)"; fi
+if grep -Fq 'hygiene posture: wrote '"$hp_dir" <<<"$hp_dir_out"; then bad "install reported writing the drop-in it could not write"; else ok; fi
+if hp_log_since "$hp_mark" | grep -Eq "$hp_stems_re"; then bad "install with a directory at a drop-in path enabled a hygiene timer"; else ok; fi
+if grep -Fq 'install done.' <<<"$hp_dir_out"; then bad "install with a directory at a drop-in path still reported success"; else ok; fi
+rmdir "$hp_dir" "$hp_sys/reclaim-sweep.service.d"
+
+# Put the fixture back: no file means install removes what it generated, and only that.
+rm -f "$hp_file"
+"$SYNC" install >/dev/null 2>&1 || bad "install did not recover once the hygiene-posture file was removed"
+if [ -z "$(hp_dropins)" ]; then ok; else bad "install left generated posture drop-ins after the file was removed: $(hp_dropins)"; fi
+if cmp -s "$hp_sys/wt-sweep.service.d/override.conf" "$TMP/hp-override.expected"; then ok; else bad "removing the posture touched a hand-written override.conf"; fi
+rm -rf "$hp_sys/wt-sweep.service.d"
+cp "$hp_enabled_saved" "$SYSTEMCTL_ENABLED_TIMERS"
 
 # -- native global fallback: actual install/reconcile/check interfaces -------
 if jq -e '.autoCompactWindow == 300000 and .autoCompactEnabled == true' "$fresh_runtime_home/settings.json" >/dev/null \
