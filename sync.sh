@@ -2214,12 +2214,22 @@ reconcile_role_timers() {
 
 # Apply <overlay>/hygiene-posture (lib/hygiene-posture.sh) as drop-ins under the user unit
 # directory. Sets HYGIENE_POSTURE_ROWS and HYGIENE_POSTURE_DECLARED for the enable step.
-# An invalid file returns 1 having touched no drop-in. Only ever writes or removes files
+# An invalid file returns 1 having touched no drop-in; an overlay path that is not
+# absolute returns 0 having touched none and declared nothing. Only ever writes or removes files
 # named $HYGIENE_POSTURE_DROPIN: a hand-written override.conf is the operator's.
 apply_hygiene_posture() {
   local file rows stem kind dir dest want
   HYGIENE_POSTURE_DECLARED=""
-  file=$(hygiene_posture_file 2>/dev/null) || file="<overlay>/hygiene-posture"
+  if ! declare -F hygiene_posture_load >/dev/null; then
+    echo "  ERROR: lib/hygiene-posture.sh is not loaded; no hygiene posture applied" >&2
+    return 1
+  fi
+  # As in ./setup, a relative overlay path is reported and read by nothing. The posture is
+  # then unknown, not empty: the drop-ins stay as they are and no hygiene timer is enabled.
+  if ! file=$(hygiene_posture_file 2>/dev/null); then
+    echo "  WARN the overlay path is not absolute (HOV_STACK_OVERLAY or HOME); hygiene posture not read, its drop-ins left as they are" >&2
+    return 0
+  fi
   if ! rows=$(hygiene_posture_load); then
     echo "  ERROR: $file is invalid; no hygiene posture applied (fix the file and re-run install)" >&2
     return 1
@@ -2235,6 +2245,11 @@ apply_hygiene_posture() {
       if [ -n "$want" ]; then
         if [ -f "$dest" ] && [ "$(cat -- "$dest")" = "$want" ]; then
           continue
+        fi
+        # mv onto a directory would move the drop-in inside it and report success.
+        if [ -d "$dest" ]; then
+          echo "  ERROR: $dest is a directory; hygiene posture drop-in not written" >&2
+          return 1
         fi
         if ! mkdir -p "$dir" \
            || ! printf '%s\n' "$want" >"$dest.tmp.$$" \
@@ -2759,12 +2774,14 @@ check() {
   # the SKIP line below already says so, and no second line is invented here.
   # A tree without lib/hygiene-posture.sh (a minimal fixture copy of sync.sh) already
   # printed the failed source above; it has no posture to compare.
-  _posture_file=$(hygiene_posture_file 2>/dev/null) || _posture_file="<overlay>/hygiene-posture"
   if ! declare -F hygiene_posture_load >/dev/null; then
     :
+  elif ! _posture_file=$(hygiene_posture_file 2>/dev/null); then
+    echo "DRIFT: hygiene posture: the overlay path is not absolute (HOV_STACK_OVERLAY or HOME), so the posture was not read"; drift=1
   elif ! _posture_rows=$(hygiene_posture_load); then
     echo "DRIFT: hygiene posture: $_posture_file is invalid (see errors above)"; drift=1
   else
+    # shellcheck disable=SC2034 # read by hygiene_posture_render (lib/hygiene-posture.sh)
     HYGIENE_POSTURE_ROWS=$_posture_rows
     for _stem in $HYGIENE_POSTURE_STEMS; do
       for _kind in service timer; do

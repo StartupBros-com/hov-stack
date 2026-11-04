@@ -198,17 +198,39 @@ for t in dirname readlink cat; do ln -s "$(command -v "$t")" "$NO_ANALYZE_BIN/$t
 expect_eq "without systemd-analyze the character check alone applies (rejected-by-systemd passes)" "0" "$rc"
 expect_eq "without systemd-analyze nothing was asked of it" "" "$(cat "$ANALYZE_LOG")"
 
-# -- a relative overlay is ignored ---------------------------------------------
+# -- a relative overlay is an error, not "nothing declared" --------------------
+# The file at the relative path is never read, and the answer is not empty-and-fine:
+# install would take an empty answer as "remove every generated drop-in".
 mkdir -p "$TMP/rel"
 printf '%s\n' 'wt-sweep DRY_RUN=0' >"$TMP/rel/hygiene-posture"
 (
   cd "$TMP" || exit 9
   HOV_STACK_OVERLAY=rel
   if hygiene_posture_file >/dev/null 2>&1; then exit 1; fi
-  [ -z "$(hygiene_posture_load 2>&1)" ] || exit 2
-  hygiene_posture_load >/dev/null 2>&1 || exit 3
+  if hygiene_posture_load >/dev/null 2>&1; then exit 2; fi
+  [ -z "$(hygiene_posture_load 2>/dev/null)" ] || exit 3
+  case $(hygiene_posture_load 2>&1 >/dev/null) in
+    *'overlay path is not absolute'*) ;;
+    *) exit 4 ;;
+  esac
+  if hygiene_posture_declared >/dev/null 2>&1; then exit 5; fi
 ); rc=$?
-expect_eq "relative overlay is ignored (no file, no rows, success)" "0" "$rc"
+expect_eq "relative overlay: load fails with no rows and names the cause; declared fails" "0" "$rc"
+
+# -- a NUL byte makes the file invalid ------------------------------------------
+# bash read drops NUL bytes, so without the check 'wt-sw<NUL>eep' parses as wt-sweep.
+for nul_case in 'wt-sw\000eep DRY_RUN=0\n' 'wt-sweep DRY_RUN=0\000\n' 'wt-sweep OnCalendar=daily\000'; do
+  # shellcheck disable=SC2059 # the case is a printf format on purpose: it carries \000
+  printf "$nul_case" >"$OVERLAY/hygiene-posture"
+  stdout=$(hygiene_posture_load 2>"$TMP/err"); rc=$?
+  expect_eq "NUL byte ($nul_case): load fails" "1" "$rc"
+  expect_eq "NUL byte ($nul_case): no rows" "" "$stdout"
+  case $(cat "$TMP/err") in
+    *'contains a NUL byte'*) ok ;;
+    *) bad "NUL byte ($nul_case): message missing: $(cat "$TMP/err")" ;;
+  esac
+done
+rm -f "$OVERLAY/hygiene-posture"
 
 if [ "$fail" -eq 0 ]; then
   echo "ok — hygiene-posture: $pass/$((pass + fail)) assertions passed"

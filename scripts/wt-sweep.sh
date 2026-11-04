@@ -261,7 +261,7 @@ except Exception:
 ' 2>/dev/null) || _hint=""
     if [ -n "$_hint" ]; then
       IFS=$'\t' read -r _hr _ht _hm <<<"$_hint"
-      printf '    route %s is declared in the route policy but has no authority recorded on this host; if this is its only clone, record it with: python3 %s bootstrap --route %s --canonical-path %s --mode %s\n' \
+      printf '    route %s is declared in the route policy but has no authority recorded on this host; if this is its only clone, record it with: python3 %q bootstrap --route %q --canonical-path %q --mode %q\n' \
         "$_hr" "$ROUTE_RESOLVER" "$_hr" "$_ht" "$_hm"
     fi
     continue ;;

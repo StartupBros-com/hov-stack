@@ -23,8 +23,9 @@
 #
 # The whole file is validated before anything is applied. An unknown stem or key (a
 # typo such as DRYRUN) is an error, because a silently ignored key is the failure this
-# file exists to remove. overlay_dir (lib/overlay.sh) finds the overlay; a relative
-# overlay is ignored.
+# file exists to remove. overlay_dir (lib/overlay.sh) finds the overlay. A relative
+# overlay path is an error here, not "nothing declared": the posture is unknown, and an
+# empty answer would let install remove the drop-ins the host did declare.
 
 # Resolved through any symlink, so a fixture that links this file alone still finds
 # its sibling.
@@ -60,12 +61,21 @@ hygiene_posture_keys() {
 # result is 1 with no rows: a file is applied whole or not at all.
 hygiene_posture_load() {
   local LC_ALL=C file line content stem rest key value bad=0 rows="" seen=$'\n' k allowed
-  file=$(hygiene_posture_file) || return 0
+  if ! file=$(hygiene_posture_file); then
+    printf 'hygiene-posture: the overlay path is not absolute (HOV_STACK_OVERLAY or HOME), so the posture file cannot be read\n' >&2
+    return 1
+  fi
   [ -e "$file" ] || [ -L "$file" ] || return 0
   # Present but unreadable (or not a regular file) is invalid, never "nothing declared":
   # an empty answer would let install remove the drop-ins the host did declare.
   if [ ! -f "$file" ] || [ ! -r "$file" ]; then
     printf 'hygiene-posture: cannot read the posture file: %s\n' "$file" >&2
+    return 1
+  fi
+  # read drops NUL bytes without a word, so a file holding one would be parsed as some
+  # other file. read -d '' succeeds only when it finds a NUL.
+  if IFS= read -r -d '' _ <"$file"; then
+    printf 'hygiene-posture: the posture file contains a NUL byte: %s\n' "$file" >&2
     return 1
   fi
   while IFS= read -r line || [ -n "$line" ]; do

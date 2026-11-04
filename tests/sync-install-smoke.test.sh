@@ -2753,6 +2753,39 @@ if grep -Fq 'install done.' <<<"$hp_bad_out"; then bad "install with an invalid 
 hp_bad_check=$(SYSTEMCTL_SHOW_REACHABLE=1 "$SYNC" check 2>&1)
 if grep -Fq "DRIFT: hygiene posture: $hp_file is invalid (see errors above)" <<<"$hp_bad_check"; then ok; else bad "check did not report the invalid posture file:"$'\n'"$hp_bad_check"; fi
 
+# f. An overlay path that is not absolute: the posture is unknown, not empty. Install
+#    warns and leaves the drop-ins as they are (as ./setup reads nothing there), the file
+#    at the relative path is never read, and check reports it.
+printf '%s\n' 'wt-sweep DRY_RUN=0' 'wt-sweep OnCalendar=daily' >"$hp_file"
+mkdir -p "$TMP/hp-relcwd/ovrel"
+printf '%s\n' 'pkg-cache-prune' >"$TMP/hp-relcwd/ovrel/hygiene-posture"
+hp_tree_before=$(hp_tree)
+if [ -n "$hp_tree_before" ]; then ok; else bad "hygiene posture precondition: no drop-ins installed before the relative-overlay case"; fi
+hp_mark=$(hp_log_mark)
+hp_rel_out=$(cd "$TMP/hp-relcwd" && HOV_STACK_OVERLAY=ovrel "$SYNC" install 2>&1); hp_rel_status=$?
+if [ "$hp_rel_status" -eq 0 ]; then ok; else bad "install with a relative overlay path exited $hp_rel_status:"$'\n'"$hp_rel_out"; fi
+if grep -Fq 'WARN the overlay path is not absolute (HOV_STACK_OVERLAY or HOME); hygiene posture not read, its drop-ins left as they are' <<<"$hp_rel_out"; then ok; else bad "install did not warn about the relative overlay path:"$'\n'"$hp_rel_out"; fi
+if [ "$hp_tree_before" = "$(hp_tree)" ]; then ok; else bad "install with a relative overlay path wrote or removed a posture drop-in"; fi
+if hp_log_since "$hp_mark" | grep -Eq "$hp_stems_re"; then bad "install with a relative overlay path touched a hygiene timer"; else ok; fi
+hp_rel_check=$(cd "$TMP/hp-relcwd" && HOV_STACK_OVERLAY=ovrel SYSTEMCTL_SHOW_REACHABLE=1 "$SYNC" check 2>&1)
+if grep -Fq 'DRIFT: hygiene posture: the overlay path is not absolute (HOV_STACK_OVERLAY or HOME), so the posture was not read' <<<"$hp_rel_check"; then ok; else bad "check did not report the relative overlay path:"$'\n'"$hp_rel_check"; fi
+rm -rf "$TMP/hp-relcwd"
+
+# g. A directory where a drop-in goes: install refuses it and fails, rather than moving the
+#    drop-in inside it and reporting it written.
+printf '%s\n' 'wt-sweep DRY_RUN=0' 'wt-sweep OnCalendar=daily' 'reclaim-sweep RECLAIM_SWEEP_APPLY=1' >"$hp_file"
+hp_dir=$hp_sys/reclaim-sweep.service.d/50-hygiene-posture.conf
+mkdir -p "$hp_dir"
+hp_mark=$(hp_log_mark)
+hp_dir_out=$("$SYNC" install 2>&1); hp_dir_status=$?
+if [ "$hp_dir_status" -ne 0 ]; then ok; else bad "install with a directory at a drop-in path exited 0:"$'\n'"$hp_dir_out"; fi
+if grep -Fq "ERROR: $hp_dir is a directory; hygiene posture drop-in not written" <<<"$hp_dir_out"; then ok; else bad "install did not report the directory at the drop-in path:"$'\n'"$hp_dir_out"; fi
+if [ -z "$(find "$hp_dir" -mindepth 1 2>/dev/null)" ]; then ok; else bad "install left files inside the directory at the drop-in path: $(find "$hp_dir" -mindepth 1)"; fi
+if grep -Fq 'hygiene posture: wrote '"$hp_dir" <<<"$hp_dir_out"; then bad "install reported writing the drop-in it could not write"; else ok; fi
+if hp_log_since "$hp_mark" | grep -Eq "$hp_stems_re"; then bad "install with a directory at a drop-in path enabled a hygiene timer"; else ok; fi
+if grep -Fq 'install done.' <<<"$hp_dir_out"; then bad "install with a directory at a drop-in path still reported success"; else ok; fi
+rmdir "$hp_dir" "$hp_sys/reclaim-sweep.service.d"
+
 # Put the fixture back: no file means install removes what it generated, and only that.
 rm -f "$hp_file"
 "$SYNC" install >/dev/null 2>&1 || bad "install did not recover once the hygiene-posture file was removed"
