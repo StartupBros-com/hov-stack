@@ -27,9 +27,10 @@ function isCodexSpend(cmd, { quoteAware = false } = {}) {
 
   // A real shell wrapper keeps its command inside quotes; inspect only the -c
   // payload rather than every quoted diagnostic string in echo/grep arguments.
-  SHELL_C.lastIndex = 0;
-  let match;
-  while ((match = SHELL_C.exec(source))) {
+  // matchAll walks a private copy of SHELL_C, so the recursive call cannot reset
+  // this walk's position. A shared lastIndex once re-found the first wrapper
+  // forever and hung the quota guard to its timeout (issue 391).
+  for (const match of source.matchAll(SHELL_C)) {
     if (isCodexSpend(match[1] || match[2] || '', { quoteAware: true })) return true;
   }
   return false;

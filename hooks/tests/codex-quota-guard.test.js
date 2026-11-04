@@ -3,7 +3,8 @@ const { test } = require('node:test');
 const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
-const { decisionOf, assertPreToolUseDeny, assertPassThrough, assertQuietPassThrough, runHook } = require('./lib/harness');
+const { spawnSync } = require('node:child_process');
+const { decisionOf, assertPreToolUseDeny, assertPassThrough, assertQuietPassThrough, runHook, buildEnv } = require('./lib/harness');
 const { run, evaluateUsage } = require('../PreToolUse/codex-quota-guard');
 const resolver = require('../lib/codex-model-resolver');
 
@@ -61,6 +62,59 @@ test('shell-wrapped and plugin Codex invocations still query quota', async () =>
     assert.strictEqual(result.calls.count, 1, command);
     assertPassThrough(result.res, result.input);
   }
+});
+
+// Issue 391: the shell-wrapper walk once looped forever. A synchronous loop would
+// freeze this test runner, so classify in a child with a hard kill limit: a hang
+// fails the assertion instead of stalling the suite.
+const SPEND_LIB = path.join(__dirname, '..', 'lib', 'codex-spend.js');
+const CLASSIFY = 'const { isCodexSpend } = require(process.argv[1]);'
+  + ' process.stdout.write(String(isCodexSpend(process.argv[2], { quoteAware: true })));';
+function classifyBounded(command) {
+  const r = spawnSync(process.execPath, ['-e', CLASSIFY, SPEND_LIB, command], {
+    encoding: 'utf8',
+    timeout: 10000,
+    killSignal: 'SIGKILL',
+  });
+  return { out: r.stdout, signal: r.signal, stderr: r.stderr };
+}
+
+test('issue 391: a non-codex shell wrapper classifies as no spend and returns', () => {
+  for (const command of [
+    'bash -c "echo hi"',
+    "sh -c 'echo hi'",
+    'cd /tmp && bash -c "ls"',
+    'bash -c "echo a" && zsh -c "echo b"',
+  ]) {
+    const r = classifyBounded(command);
+    assert.strictEqual(r.signal, null, `${command}: killed after 10 s, the wrapper walk did not return`);
+    assert.strictEqual(r.out, 'false', `${command}: ${r.stderr}`);
+  }
+});
+
+test('issue 391: a codex spend in a later shell wrapper is still found', () => {
+  for (const command of [
+    'bash -c "echo x"; bash -c "codex exec y"',
+    "sh -c 'ls' && sh -c 'codex review'",
+    'bash -c "echo hi; bash -c \'codex exec z\'"',
+  ]) {
+    const r = classifyBounded(command);
+    assert.strictEqual(r.signal, null, `${command}: killed after 10 s, the wrapper walk did not return`);
+    assert.strictEqual(r.out, 'true', `${command}: ${r.stderr}`);
+  }
+});
+
+test('issue 391: the spawned guard returns on a non-codex shell wrapper', () => {
+  const r = spawnSync(process.execPath, [path.join(__dirname, '..', 'PreToolUse', 'codex-quota-guard.js')], {
+    input: JSON.stringify(payload('bash -c "echo hi"')),
+    encoding: 'utf8',
+    timeout: 10000,
+    killSignal: 'SIGKILL',
+    env: buildEnv({ CODEX_HOME: '/nonexistent/codex-home' }),
+  });
+  assert.strictEqual(r.signal, null, 'guard killed after 10 s on bash -c "echo hi"');
+  assert.strictEqual(r.status, 0, r.stderr);
+  assert.strictEqual(decisionOf({ stdout: r.stdout }), null, r.stdout);
 });
 
 test('weekly 100% with allowed=true remains available (incident regression)', async () => {
