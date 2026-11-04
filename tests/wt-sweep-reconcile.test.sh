@@ -31,6 +31,7 @@ SCRIPT="$HERE/../scripts/wt-sweep.sh"
 
 TMP="$(mktemp -d)"
 export WT_CLAUDE_HOME="$TMP/claude-home"  # the session check (hov-stack#384) never reads the real ~/.claude
+export WT_HOLD_CACHE_DIR="$TMP/hold-cache"  # nor writes its transcript index to the real ~/.cache (#394)
 trap 'rm -rf "$TMP"' EXIT
 
 export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@example.invalid
