@@ -535,7 +535,7 @@ done
 [ "$_skill_dirs_scanned" -gt 0 ] || warn "skill-name collision check scanned zero skill directories under ~/.claude, ~/.agents and ~/.codex (vacuity)"
 [ "$WARNS" -eq "$w0" ] && ok "skills structurally sound and no skill shadows a built-in slash command ($_skill_dirs_scanned dirs)"
 
-echo "== 8. Hook files all wired: settings.json, agent frontmatter, or a registered sibling's require() =="
+echo "== 8. Hook files all wired: settings.json, agent frontmatter, an enabled plugin, a script, or a registered sibling's require() =="
 w0=$WARNS
 HOOKS_ROOT=$HOME/.claude/hooks
 # The `command:` lines of one agent definition's frontmatter (its hooks: block).
@@ -546,10 +546,38 @@ agent_hook_commands() {
 _agent_hook_cmds=$(for _agent in "$HOME"/.claude/agents/*.md; do
   [ -f "$_agent" ] && agent_hook_commands "$_agent"
 done)
+# The hook commands of every enabled, user-scope plugin's hooks/hooks.json.
+# papercut@hov runs papercut-log, read-ceiling-chunk and structured-output-unwrap
+# this way, from copies scripts/papercut-vendor.py builds out of these files
+# (harness-weekly's --verify-delivered keeps them equal), and sync.sh retires the
+# settings.json copies, so settings.json never names them on a plugin host.
+_hook_registry=${CLAUDE_INSTALLED_PLUGINS:-$HOME/.claude/plugins/installed_plugins.json}
+_plugin_hook_cmds=""
+if [ -r "$_hook_registry" ] && [ -r "$HOME/.claude/settings.json" ] && command -v jq >/dev/null 2>&1; then
+  _plugin_hook_cmds=$(jq -r --slurpfile s "$HOME/.claude/settings.json" '
+      (($s[0].enabledPlugins // {}) | with_entries(select(.value == true)) | keys) as $on
+      | (.plugins // {}) | to_entries[] | select(.key as $k | $on | index($k))
+      | .value[]? | select(.scope == "user") | .installPath // empty' "$_hook_registry" 2>/dev/null \
+    | while IFS= read -r _plugin_root; do
+        [ -r "$_plugin_root/hooks/hooks.json" ] \
+          && jq -r '.. | objects | .command? // empty | strings' "$_plugin_root/hooks/hooks.json" 2>/dev/null
+      done)
+fi
 hook_registered() {
   grep -qF "$1" "$HOME/.claude/settings.json" && return 0
   case $_agent_hook_cmds in *"$1"*) return 0 ;; esac
+  case $_plugin_hook_cmds in *"/$1"*) return 0 ;; esac
   return 1
+}
+# A hook module that a script outside tests/ loads as a library:
+# scripts/lib/wf-pin-lex.js loads PreToolUse/fanout-admission.js for section 23,
+# and scripts/papercut-backfill.js loads PostToolUseFailure/papercut-log.js. $1 is
+# the hook's path under the hooks root; the match is the require's literal tail.
+hook_required_by_script() {
+  local rel=$1 stem=${1%.*}
+  grep -rqsF --include='*.js' --exclude-dir=tests --exclude-dir=node_modules \
+    -e "/hooks/$rel')" -e "/hooks/$stem')" -e "/hooks/$rel\")" -e "/hooks/$stem\")" \
+    "$HOME/.claude/scripts/"
 }
 if [ ! -d "$HOOKS_ROOT" ] || [ ! -r "$HOOKS_ROOT" ]; then
   warn "hooks root missing, unreadable, or dangling: $HOOKS_ROOT"
@@ -559,9 +587,10 @@ else
   if [ "$_hook_find_status" -ne 0 ]; then
     warn "could not scan hooks root: $(printf '%s\n' "$_hook_files" | tail -1)"
   else
-    # Three live wiring paths: a settings.json registration, an agent's
-    # frontmatter hooks, or a require('./name') in a sibling that is itself
-    # registered (whatsapp-guard.js lazily loads discord-write-guard and
+    # Five live wiring paths: a settings.json registration, an agent's
+    # frontmatter hooks, an enabled plugin's hooks.json, a script's require(),
+    # or a require('./name') in a sibling that is itself registered
+    # (whatsapp-guard.js lazily loads discord-write-guard and
     # resend-write-guard). One hop only: those two require whatsapp-guard back,
     # so counting any requirer would let a require cycle vouch for itself and
     # hide the whole family once whatsapp-guard's registration was lost.
@@ -570,6 +599,7 @@ else
       _hook_base=$(basename "$f")
       _hook_stem=${_hook_base%.*}
       hook_registered "$_hook_base" && continue
+      hook_required_by_script "${f#"$HOOKS_ROOT"/}" && continue
       _hook_requirers=$(grep -lsF -e "require('./$_hook_stem')" -e "require('./$_hook_base')" \
         -e "require(\"./$_hook_stem\")" -e "require(\"./$_hook_base\")" "$(dirname "$f")"/*.js)
       _hook_wired=0
@@ -577,7 +607,7 @@ else
         [ -n "$_requirer" ] && hook_registered "$(basename "$_requirer")" && { _hook_wired=1; break; }
       done <<< "$_hook_requirers"
       [ "$_hook_wired" -eq 1 ] && continue
-      warn "hook file not referenced in settings.json, an agent's frontmatter, or a registered sibling's require() (orphan?): $f"
+      warn "hook file not referenced in settings.json, an agent's frontmatter, an enabled plugin's hooks.json, a script's require(), or a registered sibling's require() (orphan?): $f"
     done <<< "$_hook_files"
   fi
 fi
