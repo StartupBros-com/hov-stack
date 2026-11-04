@@ -184,9 +184,9 @@ The dominant measured form is asking the operator to review or merge a PR the se
 
 ### Valid exit
 
-A turn-end the completion predicate accepts: a `result:` whose claim matches observable state (PR merged, auto-merge armed, or a closing artifact filed), a `needs input:` backed by a filed `needs-human` escalation citing an exception-table category, or an explicit operator instruction to stop.
+A turn-end the session contract accepts: a `result:` whose claim matches observable state (PR merged, auto-merge armed, or a closing artifact filed), a `needs input:` backed by a filed `needs-human` escalation citing an exception-table category, or an explicit operator instruction to stop.
 
-Text alone is never a valid exit; the predicate checks state, not phrasing. For a merged harness change, "live" is a separate state from "merged": it is settled by the Activation receipt, not by the merge record.
+Text alone is never a valid exit; it is judged by state, not phrasing. For a merged harness change, "live" is a separate state from "merged": it is settled by the Activation receipt, not by the merge record.
 
 ### Closeout
 
