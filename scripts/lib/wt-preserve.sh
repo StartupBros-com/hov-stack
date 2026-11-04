@@ -4,9 +4,9 @@
 #
 # Three things a removal used to lose:
 #   - a Claude Code session idling in the worktree (no process shows it);
-#   - gitignored deliverables: `git status` never lists them, and `git worktree
-#     remove` deletes them with or without --force (git 2.43), so a worktree whose
-#     only unshipped work is a report reads as clean;
+#   - gitignored deliverables and skill state: `git status` never lists them, and
+#     `git worktree remove` deletes them with or without --force (git 2.43), so a
+#     worktree whose only unshipped work is a report reads as clean;
 #   - commits on a detached HEAD, which sit on no ref once the worktree's reflog
 #     goes with it.
 #
@@ -29,19 +29,23 @@ wt_session_hold() {
   esac
 }
 
-# Copies the gitignored files under .claude/deliverables/ of worktree $2 into the
-# main checkout $1, at .claude/deliverables/from-worktrees/<worktree name>/ (a
-# dated suffix if that exists already, so an earlier rescue is never overwritten),
-# and verifies each copy byte for byte. $3 is DRY_RUN, $4 the date stamp. Returns 0
-# when there is nothing to copy or every copy verified; otherwise the caller must
-# keep the worktree. Only .claude/deliverables/ is rescued: it is where the global
-# CLAUDE.md sends files the operator reads. Other ignored files (caches, builds,
-# node_modules) are regenerable and still go with the worktree.
+# Copies the gitignored files under .claude/deliverables/ and .context/ of worktree
+# $2 into the main checkout $1, at .claude/deliverables/from-worktrees/<worktree
+# name>/ (a dated suffix if that exists already, so an earlier rescue is never
+# overwritten), and verifies each copy byte for byte. A .context/ file lands under
+# dot-context/ there. $3 is DRY_RUN, $4 the date stamp. Returns 0 when there is
+# nothing to copy or every copy verified; otherwise the caller must keep the
+# worktree. Two places are rescued: .claude/deliverables/, where the global
+# CLAUDE.md sends files the operator reads, and .context/, where compound-
+# engineering skills keep state meant to outlive a run (experiment logs, specs,
+# digests), which their own docs say no commit, branch or push preserves. Other
+# ignored files (caches, builds, node_modules) are regenerable and still go with
+# the worktree.
 wt_rescue_deliverables() {
   local repo="$1" wt="$2" dry="$3" stamp="$4" list base root dest f rel n i
   local -a files
   list=$(mktemp) || return 1
-  if ! git -C "$wt" ls-files -z --others --ignored --exclude-standard -- .claude/deliverables >"$list" 2>/dev/null; then
+  if ! git -C "$wt" ls-files -z --others --ignored --exclude-standard -- .claude/deliverables .context >"$list" 2>/dev/null; then
     rm -f "$list"; echo "      !! cannot list ignored deliverables in $wt"; return 1
   fi
   mapfile -d '' -t files <"$list"; rm -f "$list"
@@ -63,7 +67,16 @@ wt_rescue_deliverables() {
     return 0
   fi
   for f in "${files[@]}"; do
-    rel="${f#.claude/deliverables/}"
+    case "$f" in
+      .context/*) rel="dot-context/${f#.context/}" ;;
+      *) rel="${f#.claude/deliverables/}" ;;
+    esac
+    # $dest was new when this rescue began, so a file already there is one this
+    # rescue copied (a deliverable under dot-context/ meeting a .context/ file).
+    if [ -e "$dest/$rel" ] || [ -L "$dest/$rel" ]; then
+      echo "      !! two rescued files map to $dest/$rel; nothing overwritten"
+      return 1
+    fi
     if ! mkdir -p "$(dirname "$dest/$rel")" || ! cp -p -- "$wt/$f" "$dest/$rel" || ! cmp -s -- "$wt/$f" "$dest/$rel"; then
       echo "      !! could not copy and verify $wt/$f into $dest"
       return 1
