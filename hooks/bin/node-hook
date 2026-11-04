@@ -94,6 +94,25 @@
 # directory, is outside the registered configuration and is not made byte-identical.
 # Tied to the JS by hooks/tests/node-hook.test.js (drift test).
 #
+# Stdin gate (#369, pass 6a): hooks/PreToolUse/codex-quota-guard.js (matcher Bash, registered
+# directly). run() parses stdin and returns it untouched (writeHookOutput prints nothing, exit 0,
+# empty stderr) unless tool_input.command is a string for which isCodexSpend(command, {quoteAware})
+# is true; the first statement after the parse is that return, and nothing with an effect (env,
+# auth file, network, state) runs before it. isCodexSpend (hooks/lib/codex-spend.js) is built from
+# CODEX_SPEND = /\bcodex\s+(?:exec|e|review|mcp-server|app-server)\b|codex-companion|app-server-broker/i,
+# WRAPPER_INVOKE (needs codex-companion or app-server-broker) and a -c recursion into SUBSTRINGS of the
+# raw command (match[1] / match[2], never unquoted or unescaped). stripQuoted only blanks characters.
+# So a true result needs the DECODED command to contain `codex` or `app-server-broker`, case-
+# insensitively (the regexes carry /i and no /u: canonicalisation never maps a non-ASCII character
+# onto an ASCII one, so only ASCII case variants count). The launcher skips node unless stdin holds
+# one of them in any ASCII case, or one of `\u002`, `\u004`, `\u005`, `\u006`, `\u007`: the JSON
+# escape prefixes of every character of either literal in either case (- U+002D; A-O U+0041..U+004F;
+# P-Z U+0050..U+005A; a-o U+0061..U+006F; p-z U+0070..U+007A), so soundness does not depend on the
+# encoder. The bracket classes `[Cc]` are the shell spelling of the case fold. Same buffering as
+# the settings-guard arm. Tied to CODEX_SPEND by hooks/tests/node-hook.test.js (drift test).
+# What the skip drops: the seam heartbeat module load wrote (codex-quota-guard requires
+# lib/pretooluse-decision). Bash stays covered by the guards that always start.
+#
 # What the skip drops: the seam heartbeat settings-guard.js wrote on every Edit/Write/MultiEdit.
 # After pass 2 it was the only beat source for those tools, so scripts/hook-seam-check.py
 # BEAT_COVERED_TOOLS is now {Bash, EnterWorktree}. Evidence in that file's header.
@@ -113,6 +132,14 @@ case $1 in
     _hn_buf=${_hn_buf%x}
     case $_hn_buf in
       *'settings.'* | *'\u002'* | *'\u006'* | *'\u007'*) _hn_stdin=1 ;;
+      *) exit 0 ;;
+    esac
+    ;;
+  */PreToolUse/codex-quota-guard.js)
+    _hn_buf=$(tr '\0' '\1'; echo x)
+    _hn_buf=${_hn_buf%x}
+    case $_hn_buf in
+      *[Cc][Oo][Dd][Ee][Xx]* | *[Aa][Pp][Pp]-[Ss][Ee][Rr][Vv][Ee][Rr]-[Bb][Rr][Oo][Kk][Ee][Rr]* | *'\u002'* | *'\u004'* | *'\u005'* | *'\u006'* | *'\u007'*) _hn_stdin=1 ;;
       *) exit 0 ;;
     esac
     ;;

@@ -413,7 +413,25 @@ class UnknownStateTests(SeamCheckBase):
 class SeamCoverageTests(SeamCheckBase):
     """#369: the launcher no longer starts node for loop-guard (matcher `*`) unless
     CLAUDE_LOOP_GUARD=1, nor for settings-guard (Edit|Write|MultiEdit) unless stdin can name a
-    settings file, so only tools a guard that always starts covers are paired against beats."""
+    settings file, nor for the Bash guard codex-quota-guard (unless stdin can spell a Codex
+    spend), so only tools a guard that always starts covers are paired against beats."""
+
+    @staticmethod
+    def covered_tools(settings, gated):
+        """Tools witnessed by a node-hook guard the launcher always starts (matcher names, no wildcard)."""
+        import re
+
+        covered: set[str] = set()
+        for group in settings["hooks"]["PreToolUse"]:
+            for h in group["hooks"]:
+                cmd = h["command"]
+                if "node-hook" not in cmd or any(f"/{g}" in cmd for g in gated):
+                    continue  # dcg and other non-node guards never beat; the gated ones may be skipped
+                matcher = group.get("matcher") or ""
+                if "*" in matcher:
+                    raise AssertionError(f"a wildcard guard besides loop-guard changes the model: {cmd}")
+                covered |= set(re.split(r"\|", matcher))
+        return covered
 
     def test_covered_set_is_exactly_what_other_node_guards_register_for(self):
         import re
@@ -422,17 +440,46 @@ class SeamCoverageTests(SeamCheckBase):
         launcher = (CLAUDE / "hooks" / "bin" / "node-hook").read_text(encoding="utf8")
         # PreToolUse scripts the launcher can skip: one `*/PreToolUse/<name>.js)` case arm each.
         gated = set(re.findall(r"^  \*/PreToolUse/([\w-]+\.js)\)$", launcher, re.M))
-        self.assertEqual(gated, {"loop-guard.js", "settings-guard.js"})
-        covered: set[str] = set()
+        self.assertEqual(gated, {"loop-guard.js", "settings-guard.js", "codex-quota-guard.js"})
+        covered = self.covered_tools(settings, gated)
+        self.assertEqual(set(HSC.BEAT_COVERED_TOOLS), covered)
+
+    def test_bash_stays_covered_while_a_guard_that_always_starts_is_registered(self):
+        """Bash must keep at least one node-hook guard the launcher never skips (grep-cost-guard,
+        heavy-job-admission, whatsapp-guard, git-guard, shape-rewrite), else its beat disappears."""
+        import re
+
+        settings = json.loads((CLAUDE / "settings.json").read_text(encoding="utf8"))
+        launcher = (CLAUDE / "hooks" / "bin" / "node-hook").read_text(encoding="utf8")
+        gated = set(re.findall(r"^  \*/PreToolUse/([\w-]+\.js)\)$", launcher, re.M))
+        always = []
         for group in settings["hooks"]["PreToolUse"]:
+            if "Bash" not in (group.get("matcher") or "").split("|"):
+                continue
             for h in group["hooks"]:
                 cmd = h["command"]
-                if "node-hook" not in cmd or any(f"/{g}" in cmd for g in gated):
-                    continue  # dcg and other non-node guards never beat; the gated ones may be skipped
-                matcher = group.get("matcher") or ""
-                self.assertNotIn("*", matcher, f"a wildcard guard besides loop-guard changes the model: {cmd}")
-                covered |= set(re.split(r"\|", matcher))
-        self.assertEqual(set(HSC.BEAT_COVERED_TOOLS), covered)
+                if "node-hook" in cmd and not any(f"/{g}" in cmd for g in gated):
+                    always.append(cmd)
+        self.assertGreaterEqual(len(always), 3, always)
+        self.assertIn("Bash", self.covered_tools(settings, gated))
+
+    def test_planted_negative_gating_every_bash_guard_drops_bash_from_the_covered_set(self):
+        """If every Bash node-hook guard were gated, the derivation must stop reporting Bash as covered
+        (and test_covered_set_is_exactly_what_other_node_guards_register_for then fails)."""
+        import re
+
+        settings = json.loads((CLAUDE / "settings.json").read_text(encoding="utf8"))
+        every = set()
+        for group in settings["hooks"]["PreToolUse"]:
+            if "Bash" not in (group.get("matcher") or "").split("|"):
+                continue
+            for h in group["hooks"]:
+                m = re.search(r"/([\w-]+\.js)\"", h["command"])
+                if "node-hook" in h["command"] and m:
+                    every.add(m.group(1))
+        self.assertIn("grep-cost-guard.js", every)
+        self.assertNotIn("Bash", self.covered_tools(settings, every | {"loop-guard.js", "settings-guard.js", "codex-quota-guard.js"}))
+        self.assertNotEqual(set(HSC.BEAT_COVERED_TOOLS), self.covered_tools(settings, every | {"loop-guard.js", "settings-guard.js", "codex-quota-guard.js"}))
 
     def test_planted_negative_stale_seam_still_flagged_on_covered_tool(self):
         now = time.time()

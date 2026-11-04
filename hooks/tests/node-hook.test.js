@@ -455,3 +455,146 @@ test('auto-format gate: argv-exact, skips without node, hands node every byte ot
     assert.strictEqual(run(reg, md).stdout, '');
   } finally { rmTmp(base); }
 });
+
+// ---------------------------------------------------------------------------
+// codex-quota-guard stdin gate: the launcher literals must be derived from CODEX_SPEND (#369 pass 6a)
+// ---------------------------------------------------------------------------
+
+const CODEX_GUARD_JS = path.resolve(__dirname, '..', 'PreToolUse', 'codex-quota-guard.js');
+const CODEX_SPEND_JS = path.resolve(__dirname, '..', 'lib', 'codex-spend.js');
+const CQ_ARM_RE = / {2}\*\/PreToolUse\/codex-quota-guard\.js\)\n {4}_hn_buf=\$\(tr '\\0' '\\1'; echo x\)\n {4}_hn_buf=\$\{_hn_buf%x\}\n {4}case \$_hn_buf in\n {6}(.*)\) _hn_stdin=1 ;;\n {6}\*\) exit 0 ;;\n {4}esac\n {4};;\n/;
+const bracketed = (lit) => lit.split('').map((c) => (/[a-z]/i.test(c) ? `[${c.toUpperCase()}${c.toLowerCase()}]` : c)).join('');
+
+function cqArm() {
+  const arm = fs.readFileSync(LAUNCHER, 'utf8').match(CQ_ARM_RE);
+  assert.ok(arm, 'launcher codex-quota-guard arm not found in its expected shape');
+  return arm[1].split(' | ').map((p) => p.replace(/^\*/, '').replace(/\*$/, ''));
+}
+
+/** The shell predicate: `case` patterns with `[xX]` classes are ASCII case-folded substring tests, quoted ones literal. */
+function cqRunsNode(pats, raw) {
+  return pats.some((p) => {
+    if (p.startsWith("'")) return raw.includes(p.slice(1, -1));
+    // Fold ASCII letters only (a shell bracket class `[kK]` never matches a non-ASCII character).
+    const fold = (s) => s.replace(/[A-Z]/g, (c) => c.toLowerCase());
+    return fold(raw).includes(fold(p.replace(/\[(.)(.)\]/g, "$1")));
+  });
+}
+
+test('codex-quota-guard gate drift: the launcher literals are what CODEX_SPEND needs, and nothing reaches an effect before the spend test', () => {
+  const js = fs.readFileSync(CODEX_GUARD_JS, 'utf8');
+  const lib = fs.readFileSync(CODEX_SPEND_JS, 'utf8');
+  // The regexes the proof rests on, byte for byte. A change to any of them voids the derivation below.
+  assert.ok(lib.includes("const CODEX_SPEND = /\\bcodex\\s+(?:exec|e|review|mcp-server|app-server)\\b|codex-companion|app-server-broker/i;"));
+  assert.ok(lib.includes("const SHELL_C = /(?:^|[;&|]\\s*)(?:bash|sh|zsh)\\b[^;&|]*?\\s-c\\s+(?:\"((?:[^\"\\\\]|\\\\.)*)\"|'((?:[^'\\\\]|\\\\.)*)')/gi;"));
+  assert.ok(lib.includes("const WRAPPER_INVOKE = /(?:^|[;&|]\\s*)(?:node|bun)\\s+(?:\"[^\"]*(?:codex-companion|app-server-broker)[^\"]*\"|'[^']*(?:codex-companion|app-server-broker)[^']*'|\\S*(?:codex-companion|app-server-broker)\\S*)/i;"));
+  assert.ok(lib.includes("String(s || '').replace(/\"(?:[^\"\\\\]|\\\\.)*\"|'(?:[^'\\\\]|\\\\.)*'/g, ' ');"), 'stripQuoted only blanks characters with a space');
+  assert.strictEqual(lib.match(/require\(/g), null, 'codex-spend.js requires nothing');
+  // The isCodexSpend body: a true result comes only from CODEX_SPEND on the blanked text, WRAPPER_INVOKE on the raw text, or
+  // the same function on a capture group of the raw text.
+  assert.ok(lib.includes('if (CODEX_SPEND.test(stripQuoted(source)) || WRAPPER_INVOKE.test(source)) return true;'));
+  assert.ok(lib.includes("if (isCodexSpend(match[1] || match[2] || '', { quoteAware: true })) return true;"));
+  assert.strictEqual((lib.match(/return true;/g) || []).length, 2);
+  assert.ok(lib.includes('if (!quoteAware) return CODEX_SPEND.test(source);'));
+  // Every alternative of the regex needs `codex` or `app-server-broker`.
+  const { CODEX_SPEND } = require(CODEX_SPEND_JS);
+  assert.strictEqual(CODEX_SPEND.flags, 'i', 'case-insensitive, no u flag: canonicalisation never maps a non-ASCII char onto ASCII');
+  const alts = CODEX_SPEND.source.split('|');
+  assert.deepStrictEqual(alts, ['\\bcodex\\s+(?:exec', 'e', 'review', 'mcp-server', 'app-server)\\b', 'codex-companion', 'app-server-broker']);
+  const literals = ['codex', 'app-server-broker'];
+  // JS: the first statement after the parse is the spend test; nothing with an effect runs before it.
+  const body = js.slice(js.indexOf('async function run(rawInput'));
+  assert.ok(body.startsWith("async function run(rawInput, dependencies = {}) {\n  let input;\n  try { input = JSON.parse(rawInput); } catch { return rawInput; }\n\n  const command = input && input.tool_input && input.tool_input.command;\n  if (typeof command !== 'string' || !isCodexSpend(command, { quoteAware: true })) return rawInput;\n"),
+    'codex-quota-guard.js run() no longer opens parse -> command -> isCodexSpend: the launcher gate is invalid, remove or re-derive it');
+  // Entry: stdin to the 1 MiB cap, run() output through the quiet writer.
+  assert.ok(js.includes('if (data.length < 1024 * 1024) data += chunk;'));
+  assert.ok(js.includes('.then((output) => writeHookOutput(output, data))'));
+  // Load-time surface: these requires and no others.
+  assert.deepStrictEqual(js.match(/^const .* = require\('[^']+'\);$/gm).map((l) => l.match(/require\('([^']+)'\)/)[1]),
+    ['../lib/pretooluse-decision', '../lib/codex-spend', '../lib/codex-model-resolver', '../lib/hook-output']);
+  // Shell: the arm holds exactly the case-folded literals plus the \u00XY prefixes of every character of either, in either case.
+  const pats = cqArm();
+  const wanted = new Set();
+  for (const lit of literals) for (const c of lit) for (const k of new Set([c.toLowerCase(), c.toUpperCase()])) wanted.add(`\\u00${k.charCodeAt(0).toString(16).padStart(2, '0')[0]}`);
+  assert.deepStrictEqual([...wanted].sort(), ['\\u002', '\\u004', '\\u005', '\\u006', '\\u007']);
+  assert.deepStrictEqual(pats, [...literals.map(bracketed), ...[...wanted].sort().map((w) => `'${w}'`)]);
+  assert.strictEqual((fs.readFileSync(LAUNCHER, 'utf8').match(/\[ -z "\$_hn_stdin" \] \|\| \{ printf '%s' "\$_hn_buf" \| /g) || []).length, 2);
+});
+
+test('codex-quota-guard gate: over the whole BMP only the ASCII letters themselves match the literals under /i without /u', () => {
+  const bad = [];
+  for (const lit of ['codex', 'app-server-broker']) {
+    for (const c of new Set(lit)) {
+      const re = new RegExp(c === '-' ? '\\-' : c, 'i');
+      for (let cp = 0; cp < 0x10000; cp += 1) {
+        if (cp >= 0xd800 && cp <= 0xdfff) continue;
+        const ch = String.fromCharCode(cp);
+        const expect = cp < 0x80 && (ch === c || ch === c.toUpperCase());
+        if (re.test(ch) !== expect) bad.push(`${cp.toString(16)} vs ${c}`);
+      }
+    }
+  }
+  assert.deepStrictEqual(bad, []);
+});
+
+test('codex-quota-guard gate: the predicate never skips a payload whose DECODED command isCodexSpend accepts (randomised spellings)', () => {
+  const pats = cqArm();
+  const { isCodexSpend } = require(CODEX_SPEND_JS);
+  let seed = 4242;
+  const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+  const cmds = [
+    'codex exec "ship it"', 'CODEX exec x', 'Codex E', 'codex review --base main', 'codex mcp-server', 'codex app-server', 'cod\\\nex exec', 'echo "x" | codex exec',
+    'echo "codex exec"', "grep 'codex exec' f", 'bash -c "codex exec x"', "sh -c 'codex e y'", 'zsh -c "node /p/app-server-broker.mjs serve"',
+    'node /p/codex-companion.mjs task', 'node "/p/codex-companion.mjs" review', 'bun x/App-Server-Broker.js', 'codex login', 'caam activate codex',
+    'ls', 'echo hello', 'cod ex', 'app-server', 'app-server-brok', "c''odex exec", 'ls "x"; codex  review', 'bash -c "ls; CoDeX   Review"',
+  ];
+  const spell = (s) => {
+    let out = '';
+    for (const ch of s) {
+      const enc = JSON.stringify(ch).slice(1, -1);
+      if (rnd() < 0.02 && ch.charCodeAt(0) < 0x10000) { const h = ch.charCodeAt(0).toString(16).padStart(4, '0'); out += `\\u${rnd() < 0.5 ? h : h.toUpperCase()}`; } else out += enc;
+    }
+    assert.strictEqual(JSON.parse(`"${out}"`), s);
+    return out;
+  };
+  let acts = 0; let skipped = 0;
+  for (let i = 0; i < 6000; i += 1) {
+    const command = cmds[Math.floor(rnd() * cmds.length)];
+    const raw = `{"session_id":"s","transcript_path":"/h/.claude/projects/x/abc.jsonl","tool_name":"Bash","tool_input":{"command":"${spell(command)}","description":"${spell(rnd() < 0.3 ? 'unrelated' : '')}"}}`;
+    const decoded = JSON.parse(raw).tool_input.command;
+    const hit = isCodexSpend(decoded, { quoteAware: true });
+    const runs = cqRunsNode(pats, raw);
+    if (hit) acts += 1;
+    if (!runs) skipped += 1;
+    if (hit) assert.ok(runs, `skipped a payload isCodexSpend accepts: ${raw}`);
+  }
+  assert.ok(acts > 1000 && skipped > 300, `degenerate sample: ${acts} act, ${skipped} skip`);
+});
+
+test('codex-quota-guard gate: path-exact, skips without node, hands node every byte otherwise, in any case', () => {
+  const base = mkTmp('node-hook-cqgate-');
+  try {
+    const dir = path.join(base, 'real');
+    fs.mkdirSync(dir);
+    fs.writeFileSync(path.join(dir, 'node'), '#!/bin/sh\nprintf "[%s]" "$(cat; echo x)"\n', { mode: 0o755 });
+    const env = { ...buildEnv(), PATH: `${dir}:/usr/bin:/bin` };
+    const run = (script, input) => spawnSync('/bin/sh', [LAUNCHER, script], { env, input, encoding: 'utf8' });
+    const hook = '/x/PreToolUse/codex-quota-guard.js';
+    assert.strictEqual(run(hook, '{"tool_input":{"command":"ls"}}\n').stdout, '');
+    assert.strictEqual(run(hook, '{"tool_input":{"command":"ls"}}\n').status, 0);
+    for (const spelling of ['codex exec x', 'CODEX exec x', 'CoDeX e', 'node /p/app-server-broker.mjs', 'APP-SERVER-BROKER', 'App-Server-Broker']) {
+      const raw = `{"tool_input":{"command":"${spelling}"}}\n\n\n`;
+      assert.strictEqual(run(hook, raw).stdout, `[${raw}x]`, spelling);
+    }
+    for (const esc of ['c\\u006fdex', 'c\\u004fdex', '\\u0043odex', 'a\\u0050p-server-broker', 'app\\u002dserver-broker', 'app-s\\u0065rver-broker']) {
+      const raw = `{"c":"${esc}"}`;
+      assert.strictEqual(run(hook, raw).stdout, `[${raw}x]`, esc);
+    }
+    assert.strictEqual(run(hook, '{"p":"\\u001b[0m \\u000a \\u0009 \\u001f"}').stdout, '');
+    assert.strictEqual(run(hook, '{"c":"cod ex","d":"app-server-brok","e":"cdex"}').stdout, '');
+    for (const other of ['/x/PreToolUse/codex-quota-guard.json', '/x/PostToolUse/codex-quota-guard.js', 'codex-quota-guard.js', '/x/PreToolUse/not-codex-quota-guard.js']) {
+      assert.strictEqual(run(other, '{"c":"ls"}').stdout, '[{"c":"ls"}x]', other);
+    }
+  } finally { rmTmp(base); }
+});
+

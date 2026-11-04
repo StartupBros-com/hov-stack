@@ -26,9 +26,9 @@
  * PATH, so the suite also proves the lever engaged: OLD goes through the shim, NEW does not.
  *
  * Not covered, on purpose: SessionStart plugin-auto-update.js (network; README "Not covered
- * yet") and the codex-quota-guard DENY path (needs a live usage fetch; the in-process
- * suite codex-quota-guard.test.js holds the decision logic). Both still run their
- * start-up path through the launcher via a pass-through case where one exists.
+ * yet"). The codex-quota-guard deny and rewrite paths are driven in the pass-6 section below
+ * through a preload that answers the usage endpoints (fixtures/mock-codex-usage.js); the
+ * in-process suite codex-quota-guard.test.js holds the decision logic.
  */
 const { test } = require('node:test');
 const assert = require('node:assert');
@@ -196,7 +196,7 @@ add(SR, 'shape-rewrite: reach outside roots untouched', 'quiet', { fx: worktreeF
 add(SR, 'shape-rewrite: SHAPE_REWRITE_DISABLE leaves it', 'quiet', { fx: worktreeFx, env: { SHAPE_REWRITE_DISABLE: '1' }, payload: (fx) => bash('echo $(date)', { cwd: fx.cwd, scratchpad_dir: fx.scratch }) });
 
 const CQ = 'PreToolUse/codex-quota-guard.js';
-add(CQ, 'codex-quota: non-codex command passes', 'quiet', { payload: () => bash('ls -la') });
+add(CQ, 'codex-quota: non-codex command passes', 'quiet', { skips: true, payload: () => bash('ls -la') });
 add(CQ, 'codex-quota: recovery command bypasses the query', 'quiet', { payload: () => bash('codex login') });
 add(CQ, 'codex-quota: no auth fails open', 'quiet', { env: { CODEX_HOME: '/nonexistent-codex-home' }, payload: () => bash('codex exec "ship it"') });
 
@@ -1332,3 +1332,329 @@ test('PLANTED NEGATIVE 20: dropping the script-exists check is red nowhere in th
     (s) => s.replace(' && [ -f "${1%/*}/PostToolUse/auto-format.js" ] && [ -r "${1%/*}/PostToolUse/auto-format.js" ]', ''), () => false);
   assert.deepStrictEqual(red.map((r) => r.spec.name), []);
 });
+
+// ---------------------------------------------------------------------------
+// Bash-guard stdin gate (pass 6a): codex-quota-guard. Reference = the OLD registered form
+// (`node <guard>.js` through the mise shim). Compared on stdout, exit code, stderr and every file under the
+// sandboxed HOME. A gate may skip node only when the raw stdin cannot decode to a command the guard acts on;
+// the ONE observable the skip drops is the seam beat the guard's module load wrote. A case declares `skips`
+// by hand from the payload (never derived from the launcher): then the OLD run must have left exactly one
+// beat and the NEW run none and started no node, everything else identical. Every other case must match
+// including the beat. codex-quota-guard is driven through a preload that answers the chatgpt.com endpoints
+// (hooks/tests/fixtures/mock-codex-usage.js), so exhausted, rewrite and healthy windows are all reachable.
+// ---------------------------------------------------------------------------
+
+const MOCK_CODEX = path.join(HOOKS, 'tests', 'fixtures', 'mock-codex-usage.js');
+const BASH_HEAD = '{"session_id":"golden-bg-0001","transcript_path":"/home/u/.claude/projects/-tmp/golden-bg-0001.jsonl","cwd":"/tmp/golden","permission_mode":"bypassPermissions","hook_event_name":"PreToolUse"';
+const bashRaw = (command, { desc, head = BASH_HEAD, tool = 'Bash' } = {}) => `${head},"tool_name":"${tool}","tool_input":{"command":${JSON.stringify(command)}${desc === undefined ? '' : `,"description":${JSON.stringify(desc)}`}}}`;
+/** Raw JSON text with `body` already JSON-escaped (so a test can choose its own \uXXXX spellings). */
+const bashRawBody = (body, head = BASH_HEAD) => `${head},"tool_name":"Bash","tool_input":{"command":"${body}"}}`;
+const bgUni = (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`;
+const bgUniUp = (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0').toUpperCase()}`;
+const bgEscapeAt = (s, i, up = false) => s.slice(0, i) + (up ? bgUniUp(s[i]) : bgUni(s[i])) + s.slice(i + 1);
+const bgEscapeAll = (s, up = false) => s.split('').map(up ? bgUniUp : bgUni).join('');
+
+/**
+ * One stdin-gate section. `cases`: {name, expect, skips, payload (raw text), mode?, noAuth?, env?}.
+ * Everything is compared against the OLD registered spelling run in the same hermetic world.
+ */
+function bashGateSection({ hook, label, cases, codex = false }) {
+  const withCodexWorld = (spec) => (codex
+    ? {
+      ...spec,
+      home: (home) => {
+        if (spec.noAuth) return;
+        fs.mkdirSync(path.join(home, '.codex'), { recursive: true });
+        fs.writeFileSync(path.join(home, '.codex', 'auth.json'), '{"tokens":{"access_token":"tok","account_id":"acct"}}');
+      },
+      env: (fx, home) => ({ NODE_OPTIONS: `--require ${MOCK_CODEX}`, MOCK_CODEX_USAGE: spec.mode || 'exhausted', CODEX_HOME: path.join(home, '.codex'), ...(spec.env || {}) }),
+    }
+    : { ...spec, env: spec.env || {} });
+  const full = cases.map((c) => ({ ...withCodexWorld(c), hook, raw: c.payload, payload: () => c.payload }));
+  const reg = () => commandFor(seedHooks(), hook);
+  const one = (world, command, spec) => {
+    const fx = plainFx();
+    try { return runOne(world, command, spec, fx); } finally { rmTmp(fx.root); }
+  };
+  let oldCache = null;
+  function compare(newWorld) {
+    if (!oldCache) {
+      const oldWorld = makeWorld();
+      oldCache = full.map((spec) => one(oldWorld, oldForm(reg().command), spec));
+      process.on('exit', () => rmTmp(oldWorld.base));
+    }
+    return full.map((spec, i) => {
+      const oldR = oldCache[i];
+      const newR = one(newWorld, reg().command, spec);
+      const diffs = [];
+      if (oldR.stdout !== newR.stdout) diffs.push('stdout');
+      if (oldR.status !== newR.status || oldR.signal !== newR.signal) diffs.push(`exit ${oldR.status}/${oldR.signal} vs ${newR.status}/${newR.signal}`);
+      if (oldR.error !== newR.error) diffs.push('spawn error');
+      if (oldR.stderr !== newR.stderr) diffs.push('stderr');
+      if (spec.skips) {
+        if (JSON.stringify(withoutSeam(oldR.files)) !== JSON.stringify(withoutSeam(newR.files))) diffs.push('files');
+        if (seamCount(oldR.files) !== 1 || seamCount(newR.files) !== 0) diffs.push(`seam beats old=${seamCount(oldR.files)} new=${seamCount(newR.files)} (want 1/0)`);
+      } else if (JSON.stringify(oldR.files) !== JSON.stringify(newR.files)) diffs.push('files');
+      return { spec, oldR, newR, diffs, kind: kindOf(oldR) };
+    });
+  }
+  let cur = null;
+  const current = () => {
+    if (!cur) {
+      const w = makeWorld();
+      cur = { w, records: compare(w) };
+      process.on('exit', () => rmTmp(w.base));
+    }
+    return cur;
+  };
+  /** Mutate the launcher, rerun the whole corpus against it, and require every case in `mustBeRed` to differ. */
+  function planted(t, name, mutate, mustBeRed, minMust = 1) {
+    const src = mutate(LAUNCHER_SRC);
+    assert.notStrictEqual(src, LAUNCHER_SRC, `${name}: mutation did not apply`);
+    const stub = makeWorld({ stubLauncher: src });
+    try {
+      const records = compare(stub);
+      const red = records.filter((r) => r.diffs.length);
+      const must = records.filter((r) => mustBeRed(r.spec));
+      const missed = must.filter((r) => !r.diffs.length).map((r) => r.spec.name);
+      t.diagnostic(`${label} ${name}: ${red.length}/${records.length} red (${must.length} required red, ${must.length - missed.length} were)`);
+      assert.deepStrictEqual(missed, [], `${name}: cases that must be red were green`);
+      assert.ok(must.length >= minMust && red.length >= must.length, `${name}: ${must.length} required (want >= ${minMust}), ${red.length} red`);
+      return { red, must };
+    } finally { rmTmp(stub.base); }
+  }
+  return { label, cases: full, compare, current, planted, oldRuns: () => { current(); return oldCache; } };
+}
+
+/** Assertions every gate section shares. */
+function bashGateTests(sec, { minCases, minDecisive, minSkips, decisive }) {
+  const L = sec.label;
+  test(`${L} gate: the OLD form pins the corpus (kind per case, one seam beat per run, exit 0, empty stderr)`, () => {
+    sec.current();
+    const runs = sec.oldRuns();
+    const bad = [];
+    sec.cases.forEach((spec, i) => {
+      const r = runs[i];
+      if (kindOf(r) !== spec.expect) bad.push(`${spec.name}: expected ${spec.expect}, OLD gave ${kindOf(r)} (${r.stdout.slice(0, 120)})`);
+      if (r.status !== 0 || r.stderr !== '') bad.push(`${spec.name}: OLD exit/stderr not clean: ${r.status} ${JSON.stringify(r.stderr.slice(0, 80))}`);
+      if (seamCount(r.files) !== 1) bad.push(`${spec.name}: OLD left ${seamCount(r.files)} seam beat(s), want 1`);
+    });
+    assert.deepStrictEqual(bad, []);
+    const dec = sec.cases.filter((c) => decisive.has(c.expect)).length;
+    const skips = sec.cases.filter((c) => c.skips).length;
+    assert.ok(sec.cases.length >= minCases && dec >= minDecisive && skips >= minSkips, `${L} corpus decayed: ${sec.cases.length} cases, ${dec} decisive, ${skips} skip`);
+    const names = sec.cases.map((c) => c.name);
+    assert.strictEqual(new Set(names).size, names.length, `${L} case names are unique`);
+  });
+
+  test(`${L} gate: OLD vs NEW identical stdout, exit, stderr and files; only the skipped path's seam beat differs`, (t) => {
+    const { records } = sec.current();
+    const bad = records.filter((r) => r.diffs.length).map((r) => `${r.spec.name}: ${r.diffs.join(', ')}`);
+    const kinds = {};
+    for (const r of records) kinds[r.kind] = (kinds[r.kind] || 0) + 1;
+    const skipped = records.filter((r) => r.spec.skips).length;
+    t.diagnostic(`${L} cases=${records.length} kinds=${JSON.stringify(kinds)} skipped(no node)=${skipped} node-run=${records.length - skipped}`);
+    assert.deepStrictEqual(bad, []);
+  });
+
+  test(`${L} gate: a skipped case starts no node at all (NEW never touches the shim, OLD does); decisive cases keep their answer`, () => {
+    const { records } = sec.current();
+    for (const x of records.filter((y) => y.spec.skips)) {
+      assert.ok(x.oldR.shimHits >= 1, x.spec.name);
+      assert.strictEqual(x.newR.shimHits, 0, x.spec.name);
+    }
+    for (const x of records.filter((y) => decisive.has(y.spec.expect))) assert.strictEqual(x.newR.stdout, x.oldR.stdout, x.spec.name);
+  });
+
+  test(`${L} gate: the skip path completes on a 2 MiB payload with no EPIPE`, () => {
+    const { records } = sec.current();
+    const big = records.filter((r) => /^2 MiB command, no trigger/.test(r.spec.name));
+    assert.strictEqual(big.length, 1);
+    assert.strictEqual(big[0].newR.error, null);
+    assert.strictEqual(big[0].newR.status, 0);
+    assert.strictEqual(big[0].newR.shimHits, 0);
+  });
+}
+
+const BG_DECISIVE = new Set(['deny', 'ask', 'rewrite', 'allow']);
+const bgMiB = 1024 * 1024;
+
+// ---------------------------------------------------------------------------
+// codex-quota-guard
+// ---------------------------------------------------------------------------
+
+const CQG = 'PreToolUse/codex-quota-guard.js';
+const CQ_CASES = [];
+// expect: kind of the OLD answer; skips: true when the gate must not start node. mode picks the mocked usage window.
+const addCq = (name, expect, skips, payload, extra = {}) => CQ_CASES.push({ name, expect, skips, payload, ...extra });
+
+// 1. Every trigger spelling the guard's own tests use, exhausted window: deny.
+const CQ_DENY = [
+  'codex exec "ship it"', 'codex e "x"', 'codex review --base main', 'codex mcp-server', 'codex app-server',
+  'node /p/codex-companion.mjs task --write', 'node "/p/codex-companion.mjs" review', "node '/p/codex-companion.mjs' review", 'bun /p/codex-companion.mjs task',
+  'node /p/app-server-broker.mjs serve', 'bash -c "codex exec x"', "sh -c 'codex exec x'", 'zsh -c "codex review"', 'cd /tmp && codex exec y',
+  'echo hi | codex exec', 'ls; codex   exec x', 'codex\texec x', 'CODEX exec x', 'Codex Review', 'cOdEx E', 'node /p/CODEX-COMPANION.mjs task', 'node /p/App-Server-Broker.mjs serve',
+  'FOO=1 codex exec "x"', 'echo app-server-broker', 'codex exec-ish', 'sudo -u runner codex exec x', 'nohup codex exec x &', 'codex exec "$(cat prompt.txt)"',
+];
+CQ_DENY.forEach((c, i) => addCq(`exhausted: ${c}`, 'deny', false, bashRaw(c)));
+addCq('bash -lc is not the -c form SHELL_C reads: quiet (pre-existing behaviour, pinned)', 'quiet', false, bashRaw('bash -lc "codex exec x"'));
+addCq('exhausted: JSON.stringify spelling (no session head)', 'deny', false, JSON.stringify({ tool_name: 'Bash', tool_input: { command: 'codex exec "ship it"' } }));
+addCq('exhausted: real-shape head, transcript_path ending .jsonl', 'deny', false, bashRaw('codex exec x'));
+addCq('exhausted: pretty-printed JSON', 'deny', false, JSON.stringify({ tool_name: 'Bash', tool_input: { command: 'codex review' }, session_id: 's' }, null, 2));
+addCq('exhausted: escaped slashes and a newline in the command', 'deny', false, bashRawBody('cd \\/tmp\\/x\\ncodex exec y'));
+addCq('exhausted: non-ASCII elsewhere in the command', 'deny', false, bashRaw('echo héllo ☃; codex exec x'));
+addCq('exhausted: no tool_name at all (run() never checks it)', 'deny', false, '{"tool_input":{"command":"codex exec x"}}');
+addCq('exhausted: tool_name Edit carrying a command field (run() never checks it)', 'deny', false, bashRaw('codex exec x', { tool: 'Edit' }));
+addCq('exhausted: trailing newlines (3)', 'deny', false, `${bashRaw('codex exec x')}\n\n\n`);
+addCq('exhausted: leading and trailing whitespace', 'deny', false, `\n  ${bashRaw('codex exec x')} \t\n`);
+addCq('exhausted: 200 KB of other command text before the trigger', 'deny', false, bashRaw(`echo ${'y'.repeat(200 * 1024)}; codex exec x`));
+addCq('exhausted: payload just under the 1 MiB cap', 'deny', false, (() => {
+  const head = bashRaw('codex exec x;');
+  return bashRaw(`codex exec x;${'y'.repeat(bgMiB - 64 - head.length)}`);
+})());
+addCq('exhausted: complete JSON then 1.5 MiB of whitespace (valid inside the cap)', 'deny', false, `${bashRaw('codex exec x')}${' '.repeat(bgMiB + bgMiB / 2)}`);
+
+// 2. Windows other than exhausted.
+addCq('rewrite: main window out, Spark open: codex exec is rewritten', 'rewrite', false, bashRaw('codex exec "ship it"'), { mode: 'spark' });
+addCq('rewrite: spark window, review is rewritten', 'rewrite', false, bashRaw('codex review --base main'), { mode: 'spark' });
+addCq('spark window: the broker command cannot be rewritten and is denied', 'deny', false, bashRaw('node /p/app-server-broker.mjs serve'), { mode: 'spark' });
+addCq('all windows out: codex exec denied with a receipt', 'deny', false, bashRaw('codex exec "ship it"'), { mode: 'all-out' });
+addCq('all windows out: companion denied', 'deny', false, bashRaw('node /p/codex-companion.mjs task'), { mode: 'all-out' });
+addCq('healthy window: codex exec passes', 'quiet', false, bashRaw('codex exec "ship it"'), { mode: 'healthy' });
+addCq('healthy window: broker passes', 'quiet', false, bashRaw('node /p/app-server-broker.mjs serve'), { mode: 'healthy' });
+addCq('unknown usage shape fails open', 'quiet', false, bashRaw('codex exec "ship it"'), { mode: 'unknown' });
+addCq('no auth file fails open', 'quiet', false, bashRaw('codex exec "ship it"'), { noAuth: true });
+addCq('custom model_provider on the command bypasses the query', 'quiet', false, bashRaw('codex exec -c model_provider=ccflare "x"'));
+
+// 3. Contains a trigger but is not a spend (node must run, answer is quiet).
+for (const c of ['codex login', 'codex', 'caam activate codex', 'echo "codex exec"', "grep 'codex exec' notes.md", 'cat codex.md', 'ls codex/', 'codex --version', 'codexe x', 'xcodex exec x', 'mycodex exec x', 'ls ~/.codex', 'cd ~/dotfiles/codex-notes']) {
+  addCq(`literal present, not a spend: ${c}`, 'quiet', false, bashRaw(c));
+}
+addCq('description-only literal (command ls)', 'quiet', false, bashRaw('ls -la', { desc: 'run codex exec to review the diff' }));
+addCq('description-only literal, uppercase', 'quiet', false, bashRaw('ls -la', { desc: 'CODEX EXEC' }));
+addCq('description-only broker literal', 'quiet', false, bashRaw('ls', { desc: 'start the app-server-broker' }));
+addCq('literal only in cwd (a codex checkout)', 'quiet', false, bashRaw('ls', { head: BASH_HEAD.replace('"cwd":"/tmp/golden"', '"cwd":"/home/u/SITES/codex"') }));
+addCq('literal only in the transcript path', 'quiet', false, bashRaw('ls', { head: BASH_HEAD.replace('golden-bg-0001.jsonl', 'codex-session.jsonl') }));
+addCq('non-Bash tool, file_path with codex', 'quiet', false, '{"tool_name":"Read","tool_input":{"file_path":"/a/codex.md"}}');
+addCq('command is an array holding a spend: quiet', 'quiet', false, '{"tool_name":"Bash","tool_input":{"command":["codex exec x"]}}');
+addCq('command is a number: quiet', 'quiet', true, '{"tool_name":"Bash","tool_input":{"command":42}}');
+addCq('command is null: quiet', 'quiet', true, '{"tool_name":"Bash","tool_input":{"command":null}}');
+addCq('tool_input missing, no literal: quiet', 'quiet', true, '{"tool_name":"Bash"}');
+
+// 4. Escaped spellings: every character of each trigger, then all of them, both hex cases.
+const CQ_TRIG = 'codex exec x';
+CQ_TRIG.split('').forEach((c, i) => {
+  addCq(`escaped char ${i} (${JSON.stringify(c).slice(1, -1)}) of "${CQ_TRIG}" denies`, 'deny', false, bashRawBody(bgEscapeAt(CQ_TRIG, i)));
+});
+addCq('every character of "codex exec x" escaped denies', 'deny', false, bashRawBody(bgEscapeAll(CQ_TRIG)));
+addCq('every character of "codex exec x" escaped, uppercase hex denies', 'deny', false, bashRawBody(bgEscapeAll(CQ_TRIG, true)));
+addCq('every character of "CODEX EXEC X" escaped denies', 'deny', false, bashRawBody(bgEscapeAll('CODEX EXEC X')));
+addCq('every character of the whole payload command (bash -c wrapper) escaped denies', 'deny', false, bashRawBody(bgEscapeAll('bash -c "codex exec x"')));
+const CQ_BROKER = 'node /p/app-server-broker.mjs serve';
+for (const i of [8, 12, 15, 16, 17, 21, 25, 28]) addCq(`escaped char ${i} (${CQ_BROKER[i]}) of the broker command denies`, 'deny', false, bashRawBody(bgEscapeAt(CQ_BROKER, i)));
+addCq('every character of the broker command escaped denies', 'deny', false, bashRawBody(bgEscapeAll(CQ_BROKER)));
+addCq('every character of "APP-SERVER-BROKER" escaped (broker command) denies', 'deny', false, bashRawBody(`node /p/${bgEscapeAll('APP-SERVER-BROKER')}.mjs serve`));
+// One escape per prefix class, with every other byte plain and no plain trigger left: \u002 \u004 \u005 \u006 \u007.
+addCq('only-escape: hyphen (\\u002d) of app-server-broker denies', 'deny', false, bashRawBody('node /p/app\\u002dserver-broker.mjs'));
+addCq('only-escape: uppercase C (\\u0043) of CODEX denies', 'deny', false, bashRawBody('\\u0043ODEX exec x'));
+addCq('only-escape: uppercase X (\\u0058) of CODEX denies', 'deny', false, bashRawBody('CODE\\u0058 exec x'));
+addCq('only-escape: lowercase o (\\u006f) of codex denies', 'deny', false, bashRawBody('c\\u006fdex exec x'));
+addCq('only-escape: lowercase x (\\u0078) of codex denies', 'deny', false, bashRawBody('code\\u0078 exec x'));
+addCq('only-escape: uppercase P (\\u0050) of broker denies', 'deny', false, bashRawBody('node /p/a\\u0050P-SERVER-BROKER.mjs'));
+addCq('escape of a space (\\u0020) between codex and exec denies', 'deny', false, bashRawBody('codex\\u0020exec x'));
+addCq('escape of a newline (\\u000a) between codex and exec denies', 'deny', false, bashRawBody('codex\\u000aexec x'));
+addCq('escaped key name (comm\\u0061nd) with a plain value denies', 'deny', false, `${BASH_HEAD},"tool_name":"Bash","tool_input":{"comm\\u0061nd":"codex exec x"}}`);
+addCq('escaped tool_name with a plain command denies', 'deny', false, `${BASH_HEAD},"tool_name":"B\\u0061sh","tool_input":{"command":"codex exec x"}}`);
+addCq('duplicate command key, spend last (JSON.parse keeps the last) denies', 'deny', false, `${BASH_HEAD},"tool_name":"Bash","tool_input":{"command":"ls","command":"codex exec x"}}`);
+addCq('duplicate command key, spend first: quiet', 'quiet', false, `${BASH_HEAD},"tool_name":"Bash","tool_input":{"command":"codex exec x","command":"ls"}}`);
+
+// 5. No trigger anywhere: the gate must skip node (quiet, exit 0, empty stderr).
+for (const c of ['ls -la', 'echo hello', 'git status', 'pnpm test', 'gh pr view 5', 'rg --no-config -n foo hooks/', 'cat package.json', 'cod ex exec', 'c o d e x', 'cdex exec', 'cpdex exec', 'app-server', 'app server broker', 'appserverbroker', 'app-server-brok', 'node server.js', 'echo "cod""ex exec"']) {
+  addCq(`no trigger: ${c}`, 'quiet', true, bashRaw(c));
+}
+addCq('no trigger, real-shape head with description', 'quiet', true, bashRaw('pnpm build', { desc: 'Build the workspace' }));
+addCq('no trigger, JSON.stringify spelling', 'quiet', true, JSON.stringify({ session_id: 'golden-bg-0003', cwd: '/tmp/golden', tool_name: 'Bash', tool_input: { command: 'ls' } }));
+addCq('no trigger, pretty-printed', 'quiet', true, JSON.stringify({ tool_name: 'Bash', tool_input: { command: 'ls' } }, null, 2));
+addCq('ANSI escape (\\u001b) in the command: quiet', 'quiet', true, bashRawBody('printf \\u001b[31mred\\u001b[0m'));
+addCq('short escapes (\\n \\t \\" \\\\) only: quiet', 'quiet', true, bashRawBody('echo l1\\nl2\\t\\"q\\" \\\\ end'));
+addCq('escape that is not a trigger char (\\u0000-\\u001f): quiet', 'quiet', true, bashRawBody('echo \\u0007\\u0008\\u000b\\u001f'));
+addCq('non-ASCII, no trigger: quiet', 'quiet', true, JSON.stringify({ tool_name: 'Bash', tool_input: { command: 'echo héllo ☃ \u{1F600}' } }));
+addCq('non-ASCII case-fold look-alikes (U+212A Kelvin, U+017F long s) are not trigger letters: quiet', 'quiet', true, JSON.stringify({ tool_name: 'Bash', tool_input: { command: 'echo K ſ codex'.replace('codex', '') + 'ƈodex exec' } }));
+addCq('trailing newlines (3), no trigger: quiet', 'quiet', true, `${bashRaw('ls')}\n\n\n`);
+addCq('200 KB command, no trigger: quiet', 'quiet', true, bashRaw(`echo ${'y'.repeat(200 * 1024)}`));
+addCq('Read of a file, no trigger: quiet', 'quiet', true, '{"tool_name":"Read","tool_input":{"file_path":"/a/b.js"}}');
+addCq('Grep, no trigger: quiet', 'quiet', true, `${BASH_HEAD},"tool_name":"Grep","tool_input":{"pattern":"x"}}`);
+
+// 6. Malformed and degenerate stdin.
+addCq('malformed JSON, no literal: quiet', 'quiet', true, '{not json');
+addCq('malformed JSON, with a spend: quiet', 'quiet', false, '{"tool_name":"Bash","tool_input":{"command":"codex exec x"');
+addCq('empty stdin: quiet', 'quiet', true, '');
+addCq('only a newline: quiet', 'quiet', true, '\n');
+addCq('JSON null: quiet', 'quiet', true, 'null');
+addCq('JSON array: quiet', 'quiet', true, '[]');
+addCq('JSON string holding a spend: quiet', 'quiet', false, '"codex exec x"');
+addCq('raw NUL byte inside a spend command (invalid JSON): quiet', 'quiet', false, '{"tool_name":"Bash","tool_input":{"command":"codex exec x\u0000"}}');
+addCq('raw NUL byte, no trigger (invalid JSON): quiet', 'quiet', true, '{"tool_name":"Bash","tool_input":{"command":"ls\u0000"}}');
+addCq('raw \\001 byte, no trigger (invalid JSON): quiet', 'quiet', true, '{"tool_name":"Bash","tool_input":{"command":"ls\u0001"}}');
+
+// 7. Over the 1 MiB accumulate cap (the guard stops appending once data.length >= 1 MiB: node sees a truncated document).
+const cqBig = 'y'.repeat(2 * bgMiB);
+addCq('2 MiB command, no trigger: quiet', 'quiet', true, bashRaw(`echo ${cqBig}`));
+addCq('2 MiB command, spend BEFORE the cap (truncated, invalid JSON): quiet', 'quiet', false, `{"tool_name":"Bash","tool_input":{"command":"codex exec x; echo ${cqBig}"},"cwd":"/tmp/golden"}`);
+addCq('2 MiB command, spend AFTER the cap (node never sees it): quiet', 'quiet', false, `{"tool_name":"Bash","tool_input":{"command":"echo ${cqBig}; codex exec x"}}`);
+addCq('2 MiB, literal only in the tail, plain command: quiet', 'quiet', false, `{"tool_name":"Bash","tool_input":{"command":"echo ${cqBig}"},"note":"codex"}`);
+
+const cqSec = bashGateSection({ hook: CQG, label: 'codex-quota-guard', cases: CQ_CASES, codex: true });
+bashGateTests(cqSec, { minCases: 140, minDecisive: 60, minSkips: 30, decisive: BG_DECISIVE });
+
+const CQ_ARM_LINE_RE = /( {2}\*\/PreToolUse\/codex-quota-guard\.js\)\n[\s\S]*? {4}case \$_hn_buf in\n {6})(.*)(\) _hn_stdin=1 ;;)/;
+const CQ_PATS = ['*[Cc][Oo][Dd][Ee][Xx]*', '*[Aa][Pp][Pp]-[Ss][Ee][Rr][Vv][Ee][Rr]-[Bb][Rr][Oo][Kk][Ee][Rr]*', "*'\\u002'*", "*'\\u004'*", "*'\\u005'*", "*'\\u006'*", "*'\\u007'*"];
+const cqSrcPats = () => LAUNCHER_SRC.match(CQ_ARM_LINE_RE)[2].split(' | ');
+/** The shell predicate for one pattern against raw stdin (ASCII-only case fold; quoted patterns literal). */
+const cqPatHit = (p, raw) => {
+  const fold = (s) => s.replace(/[A-Z]/g, (c) => c.toLowerCase());
+  const body = p.replace(/^\*/, '').replace(/\*$/, '');
+  return body.startsWith("'") ? raw.includes(body.slice(1, -1)) : fold(raw).includes(fold(body.replace(/\[(.)(.)\]/g, '$1')));
+};
+const cqMutate = (pats) => (s) => s.replace(CQ_ARM_LINE_RE, (m, a, b, c) => `${a}${pats.join(' | ')}${c}`);
+
+test('codex-quota-guard gate: the launcher carries exactly the seven expected patterns', () => {
+  assert.deepStrictEqual(cqSrcPats(), CQ_PATS);
+});
+
+CQ_PATS.forEach((pat, idx) => {
+  test(`PLANTED NEGATIVE CQ-${idx + 1}: dropping the pattern ${pat} is red on every case that only that pattern lets through`, (t) => {
+    const rest = CQ_PATS.filter((p) => p !== pat);
+    cqSec.planted(t, `without ${pat}`, cqMutate(rest),
+      (spec) => spec.expect !== 'quiet' && cqPatHit(pat, spec.raw) && !rest.some((p) => cqPatHit(p, spec.raw)), 1);
+  });
+});
+
+test('PLANTED NEGATIVE CQ-8: a gate with the plain literals only (no \\u escape prefixes) is red on every escaped-spelling case', (t) => {
+  cqSec.planted(t, 'no escape prefixes', cqMutate(CQ_PATS.slice(0, 2)),
+    (spec) => spec.expect !== 'quiet' && !cqPatHit(CQ_PATS[0], spec.raw) && !cqPatHit(CQ_PATS[1], spec.raw), 20);
+});
+
+test('PLANTED NEGATIVE CQ-9: a case-sensitive-only gate is red on every uppercase and mixed-case spelling', (t) => {
+  cqSec.planted(t, 'case-sensitive gate', cqMutate(["*'codex'*", "*'app-server-broker'*", ...CQ_PATS.slice(2)]),
+    (spec) => spec.expect !== 'quiet' && !spec.raw.includes('codex') && !spec.raw.includes('app-server-broker') && !CQ_PATS.slice(2).some((p) => cqPatHit(p, spec.raw)), 3);
+});
+
+test('PLANTED NEGATIVE CQ-10: a gate that drops stdin before node is red on every decisive case', (t) => {
+  cqSec.planted(t, 'dropping gate', (s) => s.split('printf \'%s\' "$_hn_buf" |').join('printf \'\' |'),
+    (spec) => BG_DECISIVE.has(spec.expect) && !spec.skips, 60);
+});
+
+test('PLANTED NEGATIVE CQ-13: a gate that truncates stdin to 40 bytes before node is red on every decisive case', (t) => {
+  cqSec.planted(t, 'truncating gate', (s) => s.split('printf \'%s\' "$_hn_buf" |').join('printf \'%.40s\' "$_hn_buf" |'),
+    (spec) => BG_DECISIVE.has(spec.expect) && !spec.skips, 60);
+});
+
+test('PLANTED NEGATIVE CQ-11: a gate that never skips cannot hide behind the seam exclusion (skip cases must see 0 beats)', (t) => {
+  cqSec.planted(t, 'never-skipping gate', cqMutate(['*']), (spec) => spec.skips, 30);
+});
+
+test('PLANTED NEGATIVE CQ-12: a gate that skips everything is red on every decisive case', (t) => {
+  cqSec.planted(t, 'always-skipping gate', cqMutate(["*'__never__'*"]), (spec) => BG_DECISIVE.has(spec.expect), 60);
+});
+

@@ -35,9 +35,10 @@ signals:
 
   beat  = hooks/lib/seam-heartbeat.js, written from inside every first-party
           PreToolUse guard process. loop-guard (matcher `*`) and settings-guard
-          (Edit|Write|MultiEdit) used to beat on those calls; their node starts are
-          now skipped by the launcher, so only tools whose guards always start
-          (BEAT_COVERED_TOOLS) are compared.
+          (Edit|Write|MultiEdit) used to beat on those calls, and codex-quota-guard
+          on most Bash calls; their node starts are now skipped by
+          the launcher, so only tools whose guards always start (BEAT_COVERED_TOOLS)
+          are compared.
   truth = the session transcript, which Claude Code writes regardless of hook
           health
 
@@ -97,11 +98,16 @@ TAIL_BYTES = 256 * 1024
 
 # Tools whose PreToolUse dispatch is witnessed by a beat from a node guard that always
 # starts: the first-party guards that load hooks/lib/pretooluse-decision (settings.json:
-# Bash -> codex-quota/grep-cost/heavy-job/whatsapp/git/runner/shape, EnterWorktree ->
-# canonical-worktree-route-guard). Two launcher gates (hooks/bin/node-hook, #369) skip a node
-# start: loop-guard (matcher `*`) unless CLAUDE_LOOP_GUARD=1, and settings-guard (matcher
+# Bash -> grep-cost/heavy-job/whatsapp/git/shape (codex-quota is gated, see
+# below), EnterWorktree -> canonical-worktree-route-guard). Launcher gates (hooks/bin/node-hook, #369) skip a node
+# start: loop-guard (matcher `*`) unless CLAUDE_LOOP_GUARD=1, settings-guard (matcher
 # Edit|Write|MultiEdit) unless stdin can name a settings file (about 98.5% of Edit/Write calls
-# skip). So a tool outside this set produces NO beat in a normal session, and comparing it
+# skip), and the Bash guards codex-quota-guard (unless stdin can spell a Codex spend; about 97.5% of
+# Bash calls skip). Bash
+# stays covered by the Bash guards that always start (grep-cost, heavy-job, whatsapp, git,
+# shape-rewrite, which loads heavy-job-admission and so pretooluse-decision);
+# tests/test_hook_seam_check.py fails if every one of them were gated. So a tool outside
+# this set produces NO beat in a normal session, and comparing it
 # against beats would flag a healthy session whose last few minutes were Read/Grep/Edit calls.
 # Only these tools are therefore used as "truth". Derived from settings.json by
 # tests/test_hook_seam_check.py (SeamCoverageTests), which fails when the registrations, the
