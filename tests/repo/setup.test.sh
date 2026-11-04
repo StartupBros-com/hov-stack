@@ -588,11 +588,29 @@ printf '%s\n' "$*" >> "$F/calls"
 case "$*" in
   --version) printf '%s (Claude Code)\n' "$(cat "$F/version")" ;;
   'plugin marketplace list --json')
+    # hov once added, then any marketplaces of other publishers the test lists in $F/extra
+    # (one JSON object per line).
+    items=
     if [ -f "$F/marketplace" ]; then
-      printf '[{"name":"hov","source":"github","repo":"StartupBros-com/hov-stack","installLocation":"%s"}]\n' "$(cat "$F/marketplace")"
-    else
-      echo '[]'
-    fi ;;
+      items=$(printf '{"name":"hov","source":"github","repo":"StartupBros-com/hov-stack","installLocation":"%s"}' "$(cat "$F/marketplace")")
+    fi
+    if [ -f "$F/extra" ]; then
+      while read -r obj; do items="${items:+$items,}$obj"; done < "$F/extra"
+    fi
+    printf '[%s]\n' "$items" ;;
+  'plugin marketplace update '?*)
+    # Exactly `plugin marketplace update <name>`: the bare form, or any flag, is not accepted.
+    [ $# -eq 4 ] || { echo "fake claude: unexpected call: $*" >&2; exit 64; }
+    if [ -f "$F/offline" ]; then echo "fake claude: could not reach github.com" >&2; exit 1; fi
+    echo "Successfully updated marketplace: $4" ;;
+  'plugin update '*' --scope user')
+    # Exactly `plugin update <id> --scope user`: -y or --accept-command would not match.
+    [ $# -eq 5 ] || { echo "fake claude: unexpected call: $*" >&2; exit 64; }
+    if [ -f "$F/update-refuse" ] && grep -q -x -F "$3" "$F/update-refuse"; then
+      echo "Error: $3 declares a command and needs --accept-command to update" >&2
+      exit 1
+    fi
+    echo "$3 is up to date" ;;
   'plugin marketplace add '*)
     if [ -f "$F/offline" ]; then echo "fake claude: could not reach github.com" >&2; exit 1; fi
     printf '%s\n' "$F/mkt" > "$F/marketplace"
@@ -1211,6 +1229,364 @@ node -e '
   if (bad.length) { console.log(bad.join("\n")); process.exit(1); }
 ' "$ROOT/lib/settings-seed.js" "$U" || fail "lib/settings-seed.js on the small template is wrong (above)"
 ok "settings-seed.js dedups across \$HOME/ and rendered spellings and within the overlay, gives the overlay's dcg hooks the template's rule, prunes nulls under a new key but keeps one in a list, keeps __proto__ as an own key, and refuses another kind of value in all six directions"
+
+# ./setup --update (G2c, part 3 of #395). Nothing here touches the network or the real HOME:
+# the upstream is a bare repository under $WORK, claude and uv are stand-ins that record their
+# calls, and the program releases are file:// tarballs served through HOV_SETUP_RELEASE_TABLE
+# by a curl that accepts only file:// URLs.
+UP=$WORK/upd
+mkdir -p "$UP/rel" "$WORK/uv-bin" "$WORK/file-curl"
+IRS=$ROOT/plugins/hov-stack/skills/hov-setup/scripts/install-release.sh
+gitc() { git -c user.name=t -c user.email=t@example.invalid -c commit.gpgsign=false "$@"; }
+cat > "$WORK/uv-bin/uv" <<'EOF'
+#!/usr/bin/env bash
+# A stand-in for uv: records calls in $FAKE_UV/calls, serves `tool list` and `tool dir` from
+# fixtures there, and on `tool install ... git+URL@TAG` rewrites that tool's uv-receipt.toml the
+# way uv does, with the revision in the git URL's query.
+if [ "${1:-}" = --version ]; then echo "uv 0.0.0-fake"; exit 0; fi
+F=${FAKE_UV:?}
+printf '%s\n' "$*" >> "$F/calls"
+case "$*" in
+  'tool list') cat "$F/list" ;;
+  'tool dir') echo "$F/tools" ;;
+  'tool upgrade '?*) [ $# -eq 3 ] || exit 64; echo "Nothing to upgrade" ;;
+  'tool install '*)
+    last=${!#}
+    case $last in
+      git+*@*)
+        url=${last#git+}; tag=${url##*@}; url=${url%@*}; name=${url##*/}
+        mkdir -p "$F/tools/$name"
+        printf 'requirements = [{ name = "%s", git = "%s?rev=%s" }]\n' "$name" "$url" "$tag" > "$F/tools/$name/uv-receipt.toml" ;;
+    esac
+    echo "Installed $last" ;;
+  *) echo "fake uv: unexpected call: $*" >&2; exit 64 ;;
+esac
+EOF
+cat > "$WORK/file-curl/curl" <<'EOF'
+#!/usr/bin/env bash
+out= url=
+while [ $# -gt 0 ]; do
+  case $1 in
+    -o) out=$2; shift ;;
+    --retry|--connect-timeout) shift ;;
+    -*) ;;
+    *) url=$1 ;;
+  esac
+  shift
+done
+case $url in
+  file://*) cp "${url#file://}" "$out" ;;
+  *) echo "file-curl: $url is not a file:// URL" >&2; exit 6 ;;
+esac
+EOF
+chmod +x "$WORK/uv-bin/uv" "$WORK/file-curl/curl"
+
+# A release tarball of <tool> <version> and its row for HOV_SETUP_RELEASE_TABLE. The program
+# prints "<tool> <version>"; uv's is the stand-in above.
+mk_release() {
+  local t=$1 v=$2 d=$UP/rel/$1-$2
+  # Built once: a rebuild changes the archive's bytes (gzip and file times) and so its checksum.
+  if [ ! -f "$UP/rel/$t-$v.tar.gz" ]; then
+    mkdir -p "$d"
+    if [ "$t" = uv ]; then cp "$WORK/uv-bin/uv" "$d/uv"; else printf '#!/bin/sh\necho "%s %s"\n' "$t" "$v" > "$d/$t"; fi
+    chmod +x "$d/$t"
+    tar -czf "$UP/rel/$t-$v.tar.gz" -C "$d" "$t"
+  fi
+  printf '%s|%s|linux-x86_64|file://%s|%s|%s\n' "$t" "$v" "$UP/rel/$t-$v.tar.gz" "$(sha256sum < "$UP/rel/$t-$v.tar.gz" | cut -d' ' -f1)" "$t"
+}
+T_SEED=$(mk_release gh 1.0.0; mk_release uv 1.0.0; mk_release jsm 1.0.0)
+T_NEW=$(mk_release gh 2.0.0; mk_release uv 1.0.0; mk_release cass 2.0.0; mk_release jsm 1.0.0)
+# The same, but gh 2.0.0 has a wrong pinned checksum: install-release.sh exits 1 for it.
+BAD_SHA=$(printf '0%.0s' $(seq 64))
+T_BADGH=$(printf 'gh|2.0.0|linux-x86_64|file://%s|%s|gh\n' "$UP/rel/gh-2.0.0.tar.gz" "$BAD_SHA"; mk_release uv 1.0.0; mk_release cass 2.0.0; mk_release jsm 1.0.0)
+seed_programs() {  # seed_programs <home>: gh, uv and jsm 1.0.0 installed by install-release.sh, cass placed by hand
+  local t
+  for t in gh uv jsm; do
+    HOME=$1 HOV_SETUP_PLATFORM=linux-x86_64 HOV_SETUP_RELEASE_TABLE=$T_SEED PATH=$WORK/file-curl:$PATH bash "$IRS" "$t" > /dev/null \
+      || fail "could not seed $t 1.0.0 into $1"
+  done
+  printf '#!/bin/sh\necho by-hand\n' > "$1/.local/bin/cass"
+  chmod +x "$1/.local/bin/cass"
+}
+
+# The offered git-tag uv tool, read from offers.json so the pin can move without this test.
+OFFER_LINE=$(node -e '
+  const o = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).offers.find((x) => x.name === "synthetic-panel");
+  console.log(o.install["linux-x86_64"].replace("<uv> ", ""));
+' "$ROOT/plugins/hov-stack/skills/hov-setup/scripts/offers.json")
+OFFER_REPO=$(printf '%s\n' "$OFFER_LINE" | sed -E 's/.*git\+(https:[^@]*)@.*/\1/')
+OFFER_TAG=${OFFER_LINE##*@}
+[ -n "$OFFER_REPO" ] && [ -n "$OFFER_TAG" ] && [ "$OFFER_REPO" != "$OFFER_LINE" ] || fail "could not read the synthetic-panel offer from offers.json"
+# uv's receipt for synthetic-panel, in the shape uv writes (the revision in the git URL's query,
+# as uv 0.13 does), except old-field, the separate rev field setup also reads.
+new_uvstate() {  # new_uvstate <dir> <old-rev|old-field|same-rev|newer-tag|branch|no-ref|other-repo|pypi> [no-ast-grep]: uv knows ast-grep-cli (unless told not to), synthetic-panel and an unoffered tool
+  mkdir -p "$1/tools/synthetic-panel"
+  : > "$1/calls"
+  printf 'synthetic-panel v0.0.9\n- synthetic-panel\nother-tool v1.0.0\n- other\n' > "$1/list"
+  if [ "${3:-}" != no-ast-grep ]; then printf 'ast-grep-cli v0.40.0\n- ast-grep\n- sg\n' >> "$1/list"; fi
+  case "$2" in
+    old-rev) printf 'requirements = [{ name = "synthetic-panel", git = "%s?rev=v0.0.9" }]\n' "$OFFER_REPO" ;;
+    old-field) printf 'requirements = [{ name = "synthetic-panel", git = "%s.git", rev = "v0.0.9" }]\n' "$OFFER_REPO" ;;
+    same-rev) printf 'requirements = [{ name = "synthetic-panel", git = "%s?rev=%s" }]\n' "$OFFER_REPO" "$OFFER_TAG" ;;
+    newer-tag) printf 'requirements = [{ name = "synthetic-panel", git = "%s?rev=v99.0.0" }]\n' "$OFFER_REPO" ;;
+    branch) printf 'requirements = [{ name = "synthetic-panel", git = "%s?branch=main" }]\n' "$OFFER_REPO" ;;
+    no-ref) printf 'requirements = [{ name = "synthetic-panel", git = "%s" }]\n' "$OFFER_REPO" ;;
+    other-repo) printf 'requirements = [{ name = "synthetic-panel", git = "https://github.com/someone/synthetic-panel?rev=%s" }]\n' "$OFFER_TAG" ;;
+    pypi) printf 'requirements = [{ name = "synthetic-panel" }]\n' ;;
+  esac > "$1/tools/synthetic-panel/uv-receipt.toml"
+}
+# The fake claude's state for an --update run: hov not added yet (setup adds it), two other
+# publishers' marketplaces listed (last30days with its plugin installed, codex without), a
+# marketplace of the user's own, and sign-it and last30days installed.
+new_update_fake() {  # new_update_fake <state dir>
+  new_fake "$1" 2.1.310
+  printf '%s\n' \
+    '{"name":"last30days-skill","source":"github","repo":"mvanhorn/last30days-skill"}' \
+    '{"name":"openai-codex","source":"github","repo":"openai/codex-plugin-cc"}' \
+    '{"name":"mine","source":"github","repo":"someone/else"}' > "$1/extra"
+  printf 'sign-it@hov 0.2.0 user\nlast30days@last30days-skill 3.0.0 user\nsomething@mine 1.0.0 user\n' >> "$1/plugins"
+}
+expected_update_calls() {  # the only update calls a full run may make, sorted
+  {
+    echo 'plugin marketplace update hov'
+    echo 'plugin marketplace update last30days-skill'
+    echo 'plugin marketplace update openai-codex'
+    echo 'plugin update sign-it@hov --scope user'
+    echo 'plugin update last30days@last30days-skill --scope user'
+    default_names | while read -r p; do echo "plugin update $p@hov --scope user"; done
+  } | LC_ALL=C sort
+}
+UPD_TABLE=
+UPD_PATH=
+upd_run() {  # upd_run <checkout> <home> <claude state dir> <uv state dir> <log> [setup args]: the checkout's setup --update
+  local c=$1 h=$2 f=$3 u=$4 log=$5
+  shift 5
+  FAKE=$f FAKE_UV=$u HOME=$h HOV_SETUP_PLATFORM=linux-x86_64 HOV_SETUP_RELEASE_TABLE=$UPD_TABLE \
+    PATH=${UPD_PATH:+$UPD_PATH:}$WORK/file-curl:$WORK/fake-bin:$PATH bash "$c/setup" --update --no-dcg "$@" > "$log" 2>&1
+}
+
+# --update and --check together are a usage error and change nothing.
+rc=0; HOME=$UP/home-usage bash "$copy/setup" --update --check > "$WORK/upd-usage.log" 2>&1 || rc=$?
+[ "$rc" = 2 ] || { cat "$WORK/upd-usage.log"; fail "--update --check exited $rc, not 2"; }
+grep -q -F -- '--update changes things and --check changes nothing' "$WORK/upd-usage.log" || fail "--update --check did not say why"
+[ ! -e "$UP/home-usage" ] || fail "--update --check still made files"
+ok "--update with --check exits 2 and makes nothing"
+
+# An upstream, a seed clone that pushes to it, and clones that stay one commit behind.
+UPSTREAM=$UP/origin.git
+SEED=$UP/seed
+git init -q --bare "$UPSTREAM"
+git -C "$UPSTREAM" symbolic-ref HEAD refs/heads/main
+mkdir -p "$SEED"
+(cd "$ROOT" && git ls-files -z | grep -z -v -E '^(tests|docs|release)/' | tar --null -T - -cf -) | tar -xf - -C "$SEED"
+git init -q "$SEED"
+git -C "$SEED" symbolic-ref HEAD refs/heads/main
+gitc -C "$SEED" add -A
+gitc -C "$SEED" commit -q -m seed
+git -C "$SEED" remote add origin "$UPSTREAM"
+git -C "$SEED" push -q origin main
+C0=$(git -C "$SEED" rev-parse HEAD)
+for c in a s1 s2 s3 dv dt nu lc; do git clone -q "$UPSTREAM" "$UP/clone-$c"; done
+# The README's install is a shallow clone; a local path ignores --depth, a file:// URL does not.
+git clone -q --depth 1 "file://$UPSTREAM" "$UP/clone-sh"
+[ "$(git -C "$UP/clone-sh" rev-parse --is-shallow-repository)" = true ] || fail "the shallow clone is not shallow"
+# The commit the clones lack: the new setup says so as its first output line.
+awk '{ print } /^set -euo pipefail$/ && !d { print "echo NEWER-SETUP-MARKER"; d = 1 }' "$SEED/setup" > "$SEED/setup.new"
+mv "$SEED/setup.new" "$SEED/setup"
+chmod +x "$SEED/setup"
+gitc -C "$SEED" commit -q -am "newer setup"
+git -C "$SEED" push -q origin main
+C1=$(git -C "$SEED" rev-parse HEAD)
+[ "$C0" != "$C1" ] || fail "the upstream did not move"
+
+# 1. Fast-forward, then the new setup runs the rest: gh, uv, cass and jsm through
+#    install-release.sh, the uv tools, the marketplaces and the plugins.
+HA=$UP/home-a
+FA=$UP/fake-a
+UA=$UP/uv-a
+new_update_fake "$FA"
+new_uvstate "$UA" old-rev
+mkdir -p "$HA/.local/bin"
+seed_programs "$HA"
+UPD_TABLE=$T_NEW
+UPD_PATH=$HA/.local/bin
+rc=0; upd_run "$UP/clone-a" "$HA" "$FA" "$UA" "$WORK/upd-a.log" || rc=$?
+sed 's/^/    | /' "$WORK/upd-a.log"
+[ "$rc" = 0 ] || fail "setup --update exited $rc"
+[ "$(git -C "$UP/clone-a" rev-parse HEAD)" = "$C1" ] || fail "the checkout did not fast-forward to the upstream"
+[ "$(grep -c -x -F NEWER-SETUP-MARKER "$WORK/upd-a.log")" = 1 ] || fail "the new setup did not run exactly once after the pull"
+grep -q -x -F "hov-stack: ${C0:0:7} -> ${C1:0:7}" "$WORK/upd-a.log" || fail "the new setup did not say which commits it moved between"
+grep -q -E "^  checkout +ok +updated ${C0:0:7} -> ${C1:0:7}\$" "$WORK/upd-a.log" || fail "no checkout row for the move"
+[ "$(sed -n '1p' "$WORK/upd-a.log")" = "hov-stack: fetching origin/main" ] || fail "the old setup did not fetch first"
+ok "--update fast-forwards the checkout and runs the new setup (it printed its marker once and the move ${C0:0:7} -> ${C1:0:7})"
+got=$(grep -E '^plugin (marketplace )?update ' "$FA/calls" | LC_ALL=C sort)
+[ "$got" = "$(expected_update_calls)" ] || { diff <(expected_update_calls) <(printf '%s\n' "$got") || true; fail "the update calls are not exactly the offered marketplaces and installed plugins"; }
+! grep -q -E ' -y|--accept-command|-y$' "$FA/calls" || fail "a claude call carried -y or --accept-command"
+! grep -q -x -E 'plugin marketplace update' "$FA/calls" || fail "the bare marketplace update was called"
+grep -q -x -F 'plugin install papercut@hov --scope user' "$FA/calls" || fail "the normal steps did not run under --update"
+grep -q -E '^  refresh +ok +refreshed 3 marketplaces, updated 6 plugins$' "$WORK/upd-a.log" || fail "no refresh row naming 3 marketplaces and 6 plugins"
+grep -q -x -F 'hov-stack: Claude Code sessions started from now on load the new plugin versions.' "$WORK/upd-a.log" || fail "the ending does not say new sessions load the new plugin versions"
+ok "marketplace and plugin updates are exactly hov, the two offered marketplaces that are added (not the user's own, not compound-engineering) and the 6 installed offered plugins, with no -y"
+grep -q -E '^  gh +ok +gh: 1\.0\.0 -> 2\.0\.0$' "$WORK/upd-a.log" || fail "gh was not updated 1.0.0 -> 2.0.0"
+[ "$("$HA/.local/bin/gh")" = "gh 2.0.0" ] || fail "the gh at ~/.local/bin is not 2.0.0"
+grep -q -E '^  uv +ok +uv: 1\.0\.0, current$' "$WORK/upd-a.log" || fail "uv at the pin was not reported current"
+grep -q -E '^  jsm +ok +jsm: 1\.0\.0, current$' "$WORK/upd-a.log" || fail "jsm at the pin was not reported current"
+grep -q -E "^  cass +skipped +cass: $HA/\.local/bin/cass has no hov-stack install record" "$WORK/upd-a.log" || fail "a cass nobody recorded was not left alone with its reason"
+[ "$("$HA/.local/bin/cass")" = by-hand ] || fail "the hand-placed cass was replaced"
+! grep -q -E 'steps? above (is|are) not finished' "$WORK/upd-a.log" || fail "a program left alone counted as an unfinished step"
+ok "gh moves 1.0.0 -> 2.0.0, uv and jsm are current, a cass hov-stack never installed is left alone, and none of that makes setup exit non-zero"
+want_uv=$(printf '%s\n' 'tool upgrade ast-grep-cli' 'tool upgrade synthetic-panel' "$OFFER_LINE" | LC_ALL=C sort)
+got_uv=$(grep -v -x -E 'tool (list|dir)' "$UA/calls" | LC_ALL=C sort)
+[ "$got_uv" = "$want_uv" ] || { diff <(printf '%s\n' "$want_uv") <(printf '%s\n' "$got_uv") || true; fail "uv was not asked for exactly the two upgrades and the offer's own line"; }
+grep -q -E '^  uvtools +ok +synthetic-panel upgraded; synthetic-panel moved to '"$OFFER_TAG"'; ast-grep-cli upgraded$' "$WORK/upd-a.log" || fail "no uvtools row for the upgrades and the move"
+ok "uv tools: the two offered ones installed get 'uv tool upgrade'; the git-tag offer recorded at an older tag of its repository is re-installed with the offer's own line; other-tool is not touched"
+grep -q -x -F "hov-stack: jsm's skills are not updated here. To update them, run: jsm upgrade" "$WORK/upd-a.log" || fail "no jsm upgrade line with jsm on PATH"
+ok "with jsm on PATH the jsm upgrade line is printed, not run"
+
+# A second run has nothing to do.
+: > "$UA/calls"
+rc=0; upd_run "$UP/clone-a" "$HA" "$FA" "$UA" "$WORK/upd-a2.log" || rc=$?
+[ "$rc" = 0 ] || { cat "$WORK/upd-a2.log"; fail "the second setup --update exited $rc"; }
+grep -q -E "^  checkout +ok +up to date at ${C1:0:7}\$" "$WORK/upd-a2.log" || { cat "$WORK/upd-a2.log"; fail "a second run did not report the checkout up to date"; }
+grep -q -E '^  gh +ok +gh: 2\.0\.0, current$' "$WORK/upd-a2.log" || fail "a second run did not find gh current"
+! grep -q '^tool install ' "$UA/calls" || fail "a second run re-installed a uv tool that is at the offer's tag"
+ok "a second --update finds the checkout up to date, gh current and the uv tool at its tag, and installs nothing"
+
+# 1b. A shallow clone (the README's `git clone --depth 1`) fast-forwards the same way.
+new_update_fake "$UP/fake-sh"
+new_uvstate "$UP/uv-sh" same-rev
+rc=0; UPD_TABLE=$T_NEW UPD_PATH='' upd_run "$UP/clone-sh" "$UP/home-sh" "$UP/fake-sh" "$UP/uv-sh" "$WORK/upd-sh.log" || rc=$?
+[ "$rc" = 0 ] || { cat "$WORK/upd-sh.log"; fail "setup --update in a shallow clone exited $rc"; }
+[ "$(git -C "$UP/clone-sh" rev-parse HEAD)" = "$C1" ] || { cat "$WORK/upd-sh.log"; fail "the shallow clone did not fast-forward to the upstream"; }
+[ "$(grep -c -x -F NEWER-SETUP-MARKER "$WORK/upd-sh.log")" = 1 ] || fail "the new setup did not run exactly once after the shallow clone's pull"
+grep -q -E "^  checkout +ok +updated ${C0:0:7} -> ${C1:0:7}\$" "$WORK/upd-sh.log" || { cat "$WORK/upd-sh.log"; fail "no checkout row for the shallow clone's move"; }
+ok "a shallow clone (git clone --depth 1) one commit behind fast-forwards and runs the new setup"
+
+# 2. A hand-off variable that is not a commit this checkout moved from never skips the pull.
+for stray in s1 s2 s3; do
+  case $stray in
+    s1) val=not-a-commit-id ;;
+    s2) val=0123456789abcdef0123456789abcdef01234567 ;;
+    s3)
+      gitc -C "$UP/clone-s3" checkout -q -b side
+      echo side > "$UP/clone-s3/side.txt"
+      gitc -C "$UP/clone-s3" add side.txt
+      gitc -C "$UP/clone-s3" commit -q -m side
+      val=$(git -C "$UP/clone-s3" rev-parse HEAD)
+      git -C "$UP/clone-s3" checkout -q main ;;
+  esac
+  new_update_fake "$UP/fake-$stray"
+  new_uvstate "$UP/uv-$stray" same-rev
+  UPD_TABLE=$T_NEW UPD_PATH='' HOV_STACK_UPDATE_FROM=$val upd_run "$UP/clone-$stray" "$UP/home-$stray" "$UP/fake-$stray" "$UP/uv-$stray" "$WORK/upd-$stray.log" \
+    || { cat "$WORK/upd-$stray.log"; fail "setup --update with a stray hand-off ($stray) exited non-zero"; }
+  [ "$(git -C "$UP/clone-$stray" rev-parse HEAD)" = "$C1" ] || { cat "$WORK/upd-$stray.log"; fail "a stray HOV_STACK_UPDATE_FROM ($stray: $val) skipped the pull"; }
+  grep -q -x -F NEWER-SETUP-MARKER "$WORK/upd-$stray.log" || fail "the pull happened but the new setup did not run ($stray)"
+done
+ok "a HOV_STACK_UPDATE_FROM that is not hex, not a known commit, or a commit that is not an ancestor of HEAD does not skip the pull"
+# Nothing is installed in these homes: every program is left alone, uv is not found, jsm is not on PATH.
+if [ ! -e /usr/local/bin/uv ] && [ ! -e /opt/homebrew/bin/uv ]; then
+  grep -q -E '^  uvtools +skipped +uv is not installed here' "$WORK/upd-s1.log" || fail "with no uv, there was no skip row for the uv tools"
+  [ ! -s "$UP/uv-s1/calls" ] || fail "uv was called although none was installed"
+fi
+for t in gh uv cass jsm; do
+  grep -q -E "^  $t +skipped +$t: not installed here; nothing to update\$" "$WORK/upd-s1.log" || fail "$t, not installed, was not reported as nothing to update"
+done
+! grep -q 'jsm upgrade' "$WORK/upd-s1.log" || fail "the jsm upgrade line was printed with no jsm on PATH"
+ok "with no programs installed each is a skip row, uv tools are skipped when uv is absent, and no jsm upgrade line is printed"
+
+# 3. Each refusal is one row with its fix; the checkout is left as it is and the rest still runs.
+gitc -C "$UP/clone-dv" commit -q --allow-empty -m "local commit"
+LOCAL_DV=$(git -C "$UP/clone-dv" rev-parse HEAD)
+git -C "$UP/clone-dt" checkout -q --detach
+git -C "$UP/clone-nu" branch -q --unset-upstream
+printf '# local edit\n' >> "$UP/clone-lc/setup"
+lc_sha=$(sha256sum < "$UP/clone-lc/setup")
+refuse_case() {  # refuse_case <clone> <row text fragment> <HEAD it must keep>
+  local c=$1 frag=$2 keep=$3 log=$WORK/upd-refuse-$1.log rc=0
+  new_update_fake "$UP/fake-r-$c"
+  new_uvstate "$UP/uv-r-$c" same-rev
+  UPD_TABLE=$T_NEW UPD_PATH=$WORK/uv-bin upd_run "$UP/clone-$c" "$UP/home-r-$c" "$UP/fake-r-$c" "$UP/uv-r-$c" "$log" || rc=$?
+  [ "$rc" = 0 ] || { cat "$log"; fail "setup --update with a refused pull ($c) exited $rc"; }
+  grep -q -E "^  checkout +skipped +.*$frag" "$log" || { cat "$log"; fail "no checkout skip row mentioning '$frag' ($c)"; }
+  [ "$(git -C "$UP/clone-$c" rev-parse HEAD)" = "$keep" ] || fail "the refused pull moved HEAD ($c)"
+  ! grep -q -x -F NEWER-SETUP-MARKER "$log" || fail "a refused pull still ran the new setup ($c)"
+  grep -q -E '^  links +ok ' "$log" || fail "the links step did not run after a refused pull ($c)"
+  [ "$(grep -c -x -E 'plugin marketplace update (hov|last30days-skill|openai-codex)' "$UP/fake-r-$c/calls")" = 3 ] || { cat "$UP/fake-r-$c/calls"; fail "the plugin refresh did not run after a refused pull ($c)"; }
+  grep -q -E '^  gh +skipped ' "$log" || fail "the program updates did not run after a refused pull ($c)"
+  grep -q -E '^  uvtools +ok ' "$log" || fail "the uv tools step did not run after a refused pull ($c)"
+}
+refuse_case dv 'cannot fast-forward' "$LOCAL_DV"
+refuse_case dt 'HEAD is detached' "$C0"
+refuse_case nu 'has no upstream branch' "$C0"
+refuse_case lc 'would not fast-forward main to origin/main \(Your local changes' "$C0"
+[ "$(sha256sum < "$UP/clone-lc/setup")" = "$lc_sha" ] || fail "the refused pull changed the locally edited file"
+grep -q -F 'git -C ' "$WORK/upd-refuse-dt.log" || fail "the detached row does not give the fix"
+ok "a diverged branch, a detached HEAD, no upstream and a local change git will not overwrite each give a skip row with its fix, leave the checkout alone, and the links, plugin refresh, programs and uv tools still run"
+# Not a git checkout at all, and a copy that sits inside someone else's repository.
+new_update_fake "$UP/fake-ng"
+new_uvstate "$UP/uv-ng" same-rev
+UPD_TABLE=$T_NEW UPD_PATH='' upd_run "$copy" "$UP/home-ng" "$UP/fake-ng" "$UP/uv-ng" "$WORK/upd-ng.log" || { cat "$WORK/upd-ng.log"; fail "setup --update outside a git checkout exited non-zero"; }
+grep -q -E "^  checkout +skipped +$copy is not the top of a git checkout" "$WORK/upd-ng.log" || { cat "$WORK/upd-ng.log"; fail "no skip row for a directory that is not a git checkout"; }
+mkdir -p "$UP/outer"
+git init -q "$UP/outer"
+mkdir -p "$UP/outer/inner"
+cp -R "$SEED/." "$UP/outer/inner/"
+rm -rf "$UP/outer/inner/.git"
+UPD_TABLE=$T_NEW UPD_PATH='' upd_run "$UP/outer/inner" "$UP/home-ng2" "$UP/fake-ng" "$UP/uv-ng" "$WORK/upd-ng2.log" || { cat "$WORK/upd-ng2.log"; fail "setup --update inside another repository exited non-zero"; }
+grep -q -E "^  checkout +skipped +$UP/outer/inner is not the top of a git checkout" "$WORK/upd-ng2.log" || { cat "$WORK/upd-ng2.log"; fail "a copy inside another repository would pull that repository"; }
+ok "a directory that is not a git checkout, or sits inside another repository, is a skip row (setup never pulls the wrong repository)"
+
+# 4. A refusal by Claude Code is relayed and the other updates go on; a program that fails is
+#    a failed row and the exit status, and the steps after it still run.
+git clone -q "$UPSTREAM" "$UP/clone-f"
+FF=$UP/fake-f
+UF=$UP/uv-f
+HFX=$UP/home-f
+new_update_fake "$FF"
+echo 'papercut@hov' > "$FF/update-refuse"
+new_uvstate "$UF" same-rev
+mkdir -p "$HFX/.local/bin"
+seed_programs "$HFX"
+rc=0; UPD_TABLE=$T_BADGH UPD_PATH=$HFX/.local/bin upd_run "$UP/clone-f" "$HFX" "$FF" "$UF" "$WORK/upd-f.log" || rc=$?
+[ "$rc" = 1 ] || { cat "$WORK/upd-f.log"; fail "a program whose update failed left the exit status at $rc, not 1"; }
+grep -q -E '^  gh +failed +install-release\.sh gh --update exited 1: ' "$WORK/upd-f.log" || fail "no failed row for gh"
+grep -q -F 'checksum mismatch for gh-2.0.0.tar.gz' "$WORK/upd-f.log" || fail "the checksum failure was not relayed"
+[ "$("$HFX/.local/bin/gh")" = "gh 1.0.0" ] || fail "a failed update changed the gh you had"
+for t in uv cass jsm; do grep -q -E "^  $t +(ok|skipped) " "$WORK/upd-f.log" || fail "$t's row is missing after gh failed"; done
+grep -q -E '^  uvtools ' "$WORK/upd-f.log" || fail "the uv tools did not run after gh failed"
+ok "a program whose update fails is a failed row and exit 1, the copy you had is untouched, and the rest still runs"
+grep -q -F 'Error: papercut@hov declares a command and needs --accept-command to update' "$WORK/upd-f.log" || { cat "$WORK/upd-f.log"; fail "Claude Code's refusal was not relayed"; }
+grep -q -E '^  refresh +skipped +refreshed 3 marketplaces, updated 5 plugins; 0 marketplace and 1 plugin commands did not finish' "$WORK/upd-f.log" || { cat "$WORK/upd-f.log"; fail "the refresh row does not count the refused update"; }
+[ "$(grep -c -x -E 'plugin update .* --scope user' "$FF/calls")" = 6 ] || { cat "$FF/calls"; fail "the updates after the refused one did not go on"; }
+! grep -q -E ' -y|--accept-command' "$FF/calls" || fail "setup retried a refused update with -y or --accept-command"
+ok "a plugin update Claude Code refuses is relayed, never forced with -y, and the other 5 updates go on"
+
+# 5. uv's own record decides whether the git-tag offer is re-installed.
+git clone -q "$UPSTREAM" "$UP/clone-u"
+for kind in same-rev newer-tag branch no-ref other-repo pypi; do
+  new_update_fake "$UP/fake-u-$kind"
+  new_uvstate "$UP/uv-u-$kind" "$kind" no-ast-grep
+  UPD_TABLE=$T_NEW UPD_PATH=$WORK/uv-bin upd_run "$UP/clone-u" "$UP/home-u-$kind" "$UP/fake-u-$kind" "$UP/uv-u-$kind" "$WORK/upd-u-$kind.log" \
+    || { cat "$WORK/upd-u-$kind.log"; fail "setup --update with uv's record '$kind' exited non-zero"; }
+  ! grep -q '^tool install ' "$UP/uv-u-$kind/calls" || { cat "$UP/uv-u-$kind/calls"; fail "uv's record '$kind' did not stop the offer's install line"; }
+  grep -q -x -F 'tool upgrade synthetic-panel' "$UP/uv-u-$kind/calls" || fail "synthetic-panel was not upgraded in place with record '$kind'"
+done
+! grep -q 'ast-grep' "$UP"/uv-u-*/calls || fail "uv was asked about ast-grep-cli although uv does not list it (an offered tool you lack is never installed)"
+grep -q -E '^  uvtools .*synthetic-panel is at '"$OFFER_TAG" "$WORK/upd-u-same-rev.log" || fail "a tool already at the offer's tag was not reported"
+for kind in other-repo pypi; do
+  grep -q -F "synthetic-panel: uv's record says it was installed from somewhere other than $OFFER_REPO, so it stays on that source" "$WORK/upd-u-$kind.log" || fail "no reason given for leaving a '$kind' synthetic-panel alone"
+done
+for kind in newer-tag branch no-ref; do
+  grep -q -F "synthetic-panel: uv's record says it was installed from $OFFER_REPO at a revision other than an older tag, so it stays there" "$WORK/upd-u-$kind.log" || fail "no reason given for leaving a '$kind' synthetic-panel alone"
+  grep -q -E '^  uvtools +ok +.*synthetic-panel left at the revision you chose' "$WORK/upd-u-$kind.log" || fail "the uvtools row does not say a '$kind' synthetic-panel was left at the user's revision"
+done
+# The separate rev field (and a .git suffix on the URL) is read as well: an older tag there is moved on.
+new_update_fake "$UP/fake-u-old-field"
+new_uvstate "$UP/uv-u-old-field" old-field no-ast-grep
+UPD_TABLE=$T_NEW UPD_PATH=$WORK/uv-bin upd_run "$UP/clone-u" "$UP/home-u-old-field" "$UP/fake-u-old-field" "$UP/uv-u-old-field" "$WORK/upd-u-old-field.log" \
+  || { cat "$WORK/upd-u-old-field.log"; fail "setup --update with uv's record 'old-field' exited non-zero"; }
+grep -q -x -F "$OFFER_LINE" "$UP/uv-u-old-field/calls" || { cat "$UP/uv-u-old-field/calls"; fail "an older tag in a separate rev field was not moved to the offer's tag"; }
+ok "the git-tag uv tool is re-installed only when uv's record names the offer's repository at an older tag; at its tag, at a newer tag, a branch or no revision, from another repository, or from PyPI it is left where it is, with the reason"
 
 export CLAUDE_CONFIG_DIR=$WORK/cfg
 bash "$ROOT/setup" > "$WORK/run3.log" 2>&1 || { cat "$WORK/run3.log"; fail "setup with CLAUDE_CONFIG_DIR exited non-zero"; }
