@@ -111,6 +111,18 @@ pkg-cache-prune
 - `sync.sh check` also reports a missing or differing drop-in, one no longer declared, and a declared timer that is not enabled.
 - An `override.conf` from `systemctl --user edit` sorts after `50-` and still wins.
 
+To keep `reclaim-sweep` away from paths no rule or age floor knows to spare, list them in the overlay's `reclaim-sweep-keep` file, next to `hygiene-posture`. One absolute glob per line; a leading `~/` is your home directory; blank lines and `#` comment lines are skipped. Each `*` matches within one path segment, and it is the only wildcard: every other character, `?` and `[` included, matches itself:
+
+```
+# a project's build caches, kept until its next release
+/tmp/build-cache-*
+~/.local/share/some-index
+```
+
+- A pattern keeps the paths it matches, everything under them, and every directory above them, since removing a parent would remove what it holds.
+- The list is read on every run, plan or apply, and is checked before any rule or floor. Each run's report has a `keep list:` line, and its "scratch kept" counts name the pattern that kept each entry.
+- No file means no list. A file that cannot be read, a broken symlink at the file, at the overlay directory or anywhere above it, a relative `$HOV_STACK_OVERLAY`, a relative pattern or a `.` or `..` segment makes the run refuse to plan or apply: it removes nothing and exits 1.
+
 Run each script once by hand in its default mode first and read what it plans to remove. `STOP_ORPHANS=1` stops Supabase stacks that have no `supabase/config.toml` and no live process; `REAP_VOLUMES=1` removes their database volumes.
 
 ## Tests
