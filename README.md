@@ -39,6 +39,17 @@ Everyone else, open Claude Code anywhere and paste:
 
 Setup ends by saying, in plain words, what it put in place. Then open a new Claude Code session, which loads the rules and safety checks setup just linked, and type `/hov-setup`, setup's second stage. Five plugins need what a script cannot do for you: a login, a sudo or Windows prompt, or a paid plan. They are `sign-it`, `wsl-cdp`, `product-video`, `token-eater` and `pro-gate`. For each one, `/hov-setup` says what it does for you, what it costs, what you would have to do yourself, and whether it recommends it. It installs the ones you pick, asks you to type `/reload-plugins` once so nothing restarts, and does every step it can itself; you only type logins and passwords, each into that service's own prompt and never into the chat. Each plugin ends with a check the session runs. It also offers the tuning plugins below, which need no setup, and the plugins and programs from other publishers listed under [More that `/hov-setup` offers](#more-that-hov-setup-offers), and finishes with a short tour of everything setup installed.
 
+## Updating
+
+Run `./setup --update` in the checkout. It fast-forwards the checkout to the latest `main`, runs the new copy of setup, and then updates what setup and `/hov-setup` installed:
+
+- `dcg`, to the version the checkout now names (never to an older one).
+- The `hov` plugins, and the other publishers' plugins `/hov-setup` offers that you installed.
+- `gh`, `uv`, `cass` and `jsm`, where `/hov-setup` installed them, to the versions the checkout now names. Each new copy has to match its checksum and start before it replaces the old one, and an update that fails part way puts the old one back.
+- `ast-grep` and `synthetic-panel`, where uv installed them.
+
+It leaves alone anything you installed some other way, a program that changed since `/hov-setup` installed it (jsm updates itself, and `cass upgrade` updates cass), and a checkout with commits or changes of yours that a fast-forward would lose, and says what it left and why. Plugin updates reach sessions started after it. Claude Code updates itself, and `jsm upgrade` updates the jeffreys-skills skills: setup prints that line rather than running it, since those skills come from your own subscription.
+
 ## Quick start
 
 1. Run `./setup`
@@ -116,7 +127,7 @@ These are not part of this repository. `/hov-setup` offers each one with its pub
   `config/settings.example.json`, `config/CLAUDE.example.md` and `config/env.example` show each, and `./setup --check` names an import not yet written, out of step with the overlay or whose file is gone, an `env` that does not parse, and a `settings.json` setup would refuse.
 
   `scripts/skills-localize.sh` reads one more optional entry: `skills-patches/`, laid out like this repository's. Each file there adds to this repository's patch for that skill and never replaces one: where both carry a file, this repository's applies and `skills-localize.sh check` reports a differing host copy. Setting `SKILLS_PATCHES_DIR` leaves the host's patches out; `SKILLS_HOST_PATCHES_DIR` names another directory, or none when it is empty.
-- A release train for the harness. It changes when my setup changes: `main` is its only version, `git pull` is the update, and no editions or support are owed. Each plugin carries its own version, which the `hov` marketplace serves.
+- A release train for the harness. It changes when my setup changes: `main` is its only version, `./setup --update` is the update, and no editions or support are owed. Each plugin carries its own version, which the `hov` marketplace serves.
 - The private repo's test dispatcher. CI here runs the three repository suites under `tests/repo/` (the fresh-HOME setup test, the layout and marketplace-collision check, the suite runner's own test), the hook tests, every unit suite `tests/run-claude-tests.sh` finds in the tree, a secrets scan (gitleaks) and the public-safety scan: `scripts/public-safety-scan.sh` fails on a home-directory path, a personal address, a private-network host or a private repository name anywhere in the tree, the skipped suites' sources included, and `.public-safety-allow` names each exception and why. `tests/claude-tests.skips` names the 5 suites that cannot pass from this repo and why: 4 read the author's host roster, install manifest or install-smoke launcher, 1 needs real Docker. The runner still runs the first 4, each with the failure signature its log must match, and fails the day one of them passes, times out, or fails for a different reason, so the list cannot go stale quietly.
 - A ccflare gateway. `scripts/reclaim-sweep.py` and `scripts/dispatcher-cost.py` assume one (better-ccflare, state under `~/.config/better-ccflare/`) and have nothing to read without it.
 
