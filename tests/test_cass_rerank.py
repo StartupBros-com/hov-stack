@@ -238,15 +238,47 @@ class CassRerankTests(unittest.TestCase):
                         self.assertIn(stderr, data["error"])
 
     def test_retrieval_timeout_and_missing_binary_are_bounded_failures(self):
-        for exc in [subprocess.TimeoutExpired([str(self.cass)], 45),
+        for exc in [subprocess.TimeoutExpired([str(self.cass)], 330),
                     FileNotFoundError("fake cass missing")]:
             with self.subTest(exc=type(exc).__name__):
                 with mock.patch("subprocess.run", side_effect=exc) as native:
                     result = self.invoke()
                 native.assert_called_once()
-                self.assertEqual(native.call_args.kwargs["timeout"], 45)
+                self.assertEqual(native.call_args.kwargs["timeout"], 330)
                 self.transport.assert_not_called()
-                self.assert_failure(result)
+                _, err = self.assert_failure(result)
+                if isinstance(exc, subprocess.TimeoutExpired):
+                    self.assertIn("did not exit within 330 seconds", err)
+
+    def test_native_search_gets_a_deadline_it_can_finish_inside(self):
+        # Default: cass gets --timeout 300000 and the subprocess cap sits 30 s past it.
+        with mock.patch("subprocess.run", wraps=subprocess.run) as native:
+            code, _, err = self.invoke()
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(native.call_args.kwargs["timeout"], 330)
+        argv = self.invocation()["argv"]
+        self.assertEqual(argv[argv.index("--timeout") + 1], "300000")
+
+        # cass's own variable, when set, is the deadline the wrapper passes.
+        with mock.patch.dict(os.environ, {"CASS_SEARCH_TIMEOUT_MS": " 90000 "}), \
+                mock.patch("subprocess.run", wraps=subprocess.run) as native:
+            code, _, err = self.invoke()
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(native.call_args.kwargs["timeout"], 120)
+        argv = self.invocation()["argv"]
+        self.assertEqual(argv[argv.index("--timeout") + 1], "90000")
+
+    def test_malformed_search_timeout_fails_before_cass_runs(self):
+        for raw in ["abc", "0", "-5", "1.5", "300s"]:
+            with self.subTest(raw=raw):
+                with mock.patch.dict(os.environ, {"CASS_SEARCH_TIMEOUT_MS": raw}), \
+                        mock.patch("subprocess.run") as native:
+                    result = self.invoke()
+                native.assert_not_called()
+                self.transport.assert_not_called()
+                data, err = self.assert_failure(result)
+                self.assertIn("CASS_SEARCH_TIMEOUT_MS", data["error"])
+                self.assertIn("positive whole number", err)
 
     def test_native_error_diagnostic_is_bounded(self):
         self.lexical({"error": "maintenance-required"}, code=5,

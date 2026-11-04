@@ -21,6 +21,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 CLAUDE = Path(__file__).resolve().parents[1]
 SWEEP = CLAUDE / "scripts" / "reclaim-sweep.py"
@@ -86,7 +87,8 @@ _REAL_ROOTS = None
 
 
 _ROOT_NAMES = ("SCRATCH_ROOTS", "JOBS_ROOT", "CC_TMPDIR", "SESSIONS_ROOT")
-_HERMETIC_NAMES = _ROOT_NAMES + ("MEMORY_ROOT", "DOCKER", "BULK_MIN_BYTES", "GIT_KEEPS_PATH")
+_HERMETIC_NAMES = _ROOT_NAMES + ("MEMORY_ROOT", "DOCKER", "BULK_MIN_BYTES", "GIT_KEEPS_PATH",
+                                  "KEEP_LIST_PATH")
 NO_CC_TMPDIR = "/nonexistent/claude-tmpdir"  # no fixture root is Claude Code's TMPDIR
 
 
@@ -107,6 +109,8 @@ def setUpModule():
     R.MEMORY_ROOT = os.path.join(_EMPTY.name, "projects")
     R.DOCKER = os.path.join(_EMPTY.name, "no-docker")  # not installed: no containers
     R.GIT_KEEPS_PATH = os.path.join(_EMPTY.name, "git-keeps.json")
+    # Nor the host's keep list: a broad pattern there would hide fixtures.
+    R.KEEP_LIST_PATH = os.path.join(_EMPTY.name, "overlay", "reclaim-sweep-keep")
     # Fixture files are a few KiB; the size gate has its own tests (BulkGateTests).
     R.BULK_MIN_BYTES = 0
 
@@ -2271,6 +2275,286 @@ class DockerMountTests(_FixtureTree):
         plan = self._plan(docker)
         self.assertEqual(plan.items, [])
         self.assertEqual(plan.kept.get("docker mounts unknown"), 2)
+
+
+class KeepListTests(_FixtureTree):
+    """The operator's keep list (<overlay>/reclaim-sweep-keep): nothing it names,
+    nothing under what it names, and no directory above it is ever reclaimed, and
+    a list that cannot be read stops the run instead of protecting nothing."""
+
+    FAR = 30 * DAY
+
+    def setUp(self):
+        super().setUp()
+        self.overlay = os.path.join(self.tmp.name, "overlay")
+        os.makedirs(self.overlay)
+        self.list_path = os.path.join(self.overlay, "reclaim-sweep-keep")
+
+    def _write(self, *lines):
+        Path(self.list_path).write_text("".join(f"{ln}\n" for ln in lines))
+        return R.load_keep_list(self.list_path)
+
+    @staticmethod
+    def _entry(*parts):
+        d = os.path.join(*parts)
+        os.makedirs(d)
+        Path(d, "a.bin").write_text("x" * 4096)
+        return d
+
+    def _main(self, *argv):
+        with _roots([self.root], self.jobs), _patched(KEEP_LIST_PATH=self.list_path, RULES=[]), \
+                contextlib.redirect_stdout(io.StringIO()) as out, \
+                contextlib.redirect_stderr(io.StringIO()) as err:
+            rc = R.main(["--now", str(time.time() + 2 * DAY), "--free-gb", "30", *argv])
+        return rc, out.getvalue(), err.getvalue()
+
+    def test_the_path_resolves_the_overlay_the_way_setup_does(self):
+        default = os.path.join(R.HOME, ".config", "hov-stack", "reclaim-sweep-keep")
+        for env, want in (({"HOV_STACK_OVERLAY": "/o", "XDG_CONFIG_HOME": "/x"}, "/o/reclaim-sweep-keep"),
+                          ({"XDG_CONFIG_HOME": "/x"}, "/x/hov-stack/reclaim-sweep-keep"),
+                          ({"XDG_CONFIG_HOME": "relative"}, default),
+                          ({}, default)):
+            with self.subTest(env=env), mock.patch.dict(os.environ, env):
+                for name in {"HOV_STACK_OVERLAY", "XDG_CONFIG_HOME"} - set(env):
+                    os.environ.pop(name, None)
+                self.assertEqual(R._keep_list_path(), want)
+
+    def test_no_file_is_an_empty_list(self):
+        keep = R.load_keep_list(self.list_path)
+        self.assertEqual((keep.read, keep.patterns, keep.error), (False, (), None))
+        self.assertIsNone(keep.keeper(self.root))
+
+    def test_comments_blank_lines_and_home_are_read(self):
+        keep = self._write("# scratch the operator keeps", "", "  ~/.cache/kept-tree  ", "/srv/build-*")
+        self.assertIsNone(keep.error)
+        self.assertEqual([w for w, _ in keep.patterns], ["~/.cache/kept-tree", "/srv/build-*"])
+        self.assertEqual(keep.keeper(os.path.join(R.HOME, ".cache", "kept-tree", "x")),
+                         "on the keep list: ~/.cache/kept-tree")
+
+    def test_an_unreadable_or_invalid_list_is_an_error_never_an_empty_list(self):
+        def file_with(data):
+            Path(self.list_path).write_bytes(data)
+            return self.list_path
+
+        def directory():
+            os.makedirs(self.list_path)
+            return self.list_path
+
+        def dangling_file():
+            os.symlink(os.path.join(self.tmp.name, "gone"), self.list_path)
+            return self.list_path
+
+        def dangling_overlay():
+            # The overlay is a symlink into another checkout; that checkout moved.
+            link = os.path.join(self.tmp.name, "overlay-link")
+            if not os.path.lexists(link):
+                os.symlink(os.path.join(self.tmp.name, "moved"), link)
+            return os.path.join(link, "reclaim-sweep-keep")
+
+        def dangling_ancestor():
+            # A directory above the overlay is a link whose target moved.
+            base = os.path.join(self.tmp.name, "above")
+            link = os.path.join(base, "config")
+            if not os.path.lexists(link):
+                os.makedirs(base, exist_ok=True)
+                os.symlink(os.path.join(self.tmp.name, "moved-config"), link)
+            return os.path.join(link, "hov-stack", "reclaim-sweep-keep")
+
+        cases = {
+            "a relative pattern": lambda: file_with(b"srv/build-*\n"),
+            "a .. segment": lambda: file_with(b"/srv/build-1/..\n"),
+            "a . segment": lambda: file_with(b"/srv/./build-1\n"),
+            "not UTF-8": lambda: file_with(b"/srv/\xff\n"),
+            "a directory": directory,
+            "a broken symlink": dangling_file,
+            "a broken overlay symlink": dangling_overlay,
+            "a broken symlink above the overlay": dangling_ancestor,
+            "a relative overlay": lambda: os.path.join("hov-stack", "reclaim-sweep-keep"),
+        }
+        for label, make in cases.items():
+            with self.subTest(label):
+                keep = R.load_keep_list(make())
+                self.assertTrue(keep.error, keep)
+                self.assertEqual(keep.keeper(self.root), "keep list unreadable")
+                if os.path.islink(self.list_path) or os.path.isfile(self.list_path):
+                    os.unlink(self.list_path)
+                elif os.path.isdir(self.list_path):
+                    os.rmdir(self.list_path)
+
+    def test_a_pattern_keeps_its_match_what_is_under_it_and_every_directory_above_it(self):
+        keep = self._write("/srv/cache/build-*/out")
+        for path, kept in (("/srv/cache/build-7/out", True),
+                           ("/srv/cache/build-7/out/a/b", True),
+                           ("/srv/cache/build-7", True),       # removing it removes the match
+                           ("/srv/cache/build-7/logs", False),
+                           ("/srv/cache/other", False),
+                           ("/srv/cache/build-7/x/out", False)):  # * stays inside one segment
+            with self.subTest(path):
+                self.assertEqual(keep.keeper(path) == "on the keep list: /srv/cache/build-*/out", kept)
+                self.assertEqual(keep.keeper(path) is None, not kept)
+
+    def test_a_missing_overlay_under_a_real_directory_is_no_list(self):
+        for parts in (("no-overlay",), ("no-config", "hov-stack")):
+            with self.subTest(parts):
+                keep = R.load_keep_list(os.path.join(self.tmp.name, *parts, "reclaim-sweep-keep"))
+                self.assertEqual((keep.read, keep.patterns, keep.error), (False, (), None))
+
+    def test_only_star_is_a_wildcard(self):
+        # A directory literally named [slug] (a dynamic route) or backup? must be
+        # kept by the line that spells it, not read as a character class.
+        keep = self._write("/srv/app/[slug]", "/srv/backup?", "/srv/[a]*")
+        for path, why in (("/srv/app/[slug]", "/srv/app/[slug]"),
+                          ("/srv/app/[slug]/page", "/srv/app/[slug]"),
+                          ("/srv/app/s", None),
+                          ("/srv/backup?", "/srv/backup?"),
+                          ("/srv/backup1", None),
+                          ("/srv/[a]bc", "/srv/[a]*"),
+                          ("/srv/abc", None)):
+            with self.subTest(path):
+                self.assertEqual(keep.keeper(path), why and f"on the keep list: {why}")
+
+    def test_a_pattern_below_a_scratch_entry_keeps_the_entry(self):
+        self._entry(self.root, "build-x", "inner", "keepme")
+        self._entry(self.root, "build-y")
+        pattern = os.path.join(self.root, "build-x", "inner", "keepme")
+        keep = self._write(pattern)
+        with _roots([self.root], self.jobs):
+            plan = R.plan_scratch(time.time() + self.FAR, _NO_HOLDERS, 72, 168, keep=keep)
+        self.assertEqual([os.path.basename(i["path"]) for i in plan.items], ["build-y"])
+        self.assertEqual(plan.kept.get(f"on the keep list: {pattern}"), 1)
+
+    def test_the_list_answers_before_a_live_holder_does(self):
+        d = tempfile.mkdtemp(dir=self.tmp.name)
+        for name in ("one.db.bak-1", "two.db.bak-2"):
+            Path(d, name).write_text("x")
+            _age(os.path.join(d, name), 90 * DAY)
+        self._entry(self.root, "build-cache-1")
+        listed = (os.path.join(d, "one.db.bak-1"), os.path.join(self.root, "build-cache-1"))
+        keep = self._write(*listed)
+        holds = _HoldsNames("one.db.bak-1", "two.db.bak-2", "build-cache-1")
+        with _patched(RULES=[R.Rule("t", f"{d}/*.bak-*", min_age_days=14)]):
+            items = R.plan(time.time(), holds, keep)
+        skips = {os.path.basename(i["path"]): i["skip"] for i in items}
+        self.assertEqual(skips["one.db.bak-1"], f"on the keep list: {listed[0]}")
+        self.assertTrue(skips["two.db.bak-2"].startswith("held by a live process"), skips)
+        with _roots([self.root], self.jobs):
+            plan = R.plan_scratch(time.time() + self.FAR, holds, 72, 168, keep=keep)
+        self.assertEqual((plan.items, plan.kept.get(f"on the keep list: {listed[1]}")), ([], 1))
+
+    def test_the_residue_planner_given_no_list_reads_the_overlays_and_fails_closed(self):
+        d = tempfile.mkdtemp(dir=self.tmp.name)
+        Path(d, "one.db.bak-1").write_text("x")
+        _age(os.path.join(d, "one.db.bak-1"), 90 * DAY)
+        for label, text, reason in (
+                ("valid", f"{d}/one.db.bak-*\n", f"on the keep list: {d}/one.db.bak-*"),
+                ("invalid", "srv/relative\n", "keep list unreadable")):
+            with self.subTest(label):
+                Path(self.list_path).write_text(text)
+                with _patched(KEEP_LIST_PATH=self.list_path,
+                              RULES=[R.Rule("t", f"{d}/*.bak-*", min_age_days=14)]):
+                    items = R.plan(time.time(), _NO_HOLDERS)
+                self.assertEqual([i["skip"] for i in items], [reason])
+
+    def test_listed_scratch_is_kept_fresh_or_idle_and_counted_per_pattern(self):
+        for name in ("build-cache-1", "build-cache-2", "other-scratch"):
+            self._entry(self.root, name)
+        pattern = os.path.join(self.root, "build-cache-*")
+        keep = self._write(pattern)
+        with _roots([self.root], self.jobs):
+            idle = R.plan_scratch(time.time() + self.FAR, _NO_HOLDERS, 72, 168, keep=keep)
+            fresh = R.plan_scratch(time.time(), _NO_HOLDERS, 72, 24, keep=keep)
+        reason = f"on the keep list: {pattern}"
+        self.assertEqual([os.path.basename(i["path"]) for i in idle.items], ["other-scratch"])
+        self.assertEqual(idle.kept.get(reason), 2)
+        self.assertEqual((fresh.items, fresh.kept.get(reason), fresh.kept.get("fresh")), ([], 2, 1))
+
+    def test_a_planner_given_no_list_reads_the_overlays_and_fails_closed(self):
+        self._entry(self.root, "build-cache-1")
+        for label, text, reason in (
+                ("valid", f"{self.root}/build-cache-*\n", f"on the keep list: {self.root}/build-cache-*"),
+                ("invalid", "srv/relative\n", "keep list unreadable")):
+            with self.subTest(label):
+                Path(self.list_path).write_text(text)
+                with _roots([self.root], self.jobs), _patched(KEEP_LIST_PATH=self.list_path):
+                    plan = R.plan_scratch(time.time() + self.FAR, _NO_HOLDERS, 72, 168)
+                self.assertEqual((plan.items, plan.kept.get(reason)), ([], 1))
+
+    def test_a_listed_claude_session_dir_is_kept_and_its_sibling_is_not(self):
+        slug, kept, gone = ("-home-user-SITES-app", "2b5a4195-acb4-41ae-a97e-89b145b9fbee",
+                            "c99ab8d4-375d-459b-98b6-d36c68ca2129")
+        for sid in (kept, gone):
+            self._entry(self.root, slug, sid)
+        keep = self._write(os.path.join(self.root, slug, kept))
+        with _roots([self.root], self.jobs, cc_tmpdir=self.root):
+            plan = R.plan_scratch(time.time() + self.FAR, _NO_HOLDERS, 72, 168, keep=keep)
+        self.assertEqual([os.path.basename(i["path"]) for i in plan.items], [gone])
+
+    def test_a_listed_child_of_a_jobs_tmp_stays_when_the_rest_goes(self):
+        j = os.path.join(self.jobs, "2b5a4195")
+        for name in ("kept-drafts", "build-out"):
+            self._entry(j, "tmp", name)
+        Path(j, "timeline.jsonl").write_text("{}\n")
+        Path(j, "state.json").write_text(json.dumps({
+            "state": "done", "tempo": "idle",
+            "lastTerminalAt": time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime(time.time() - DAY))}))
+        keep = self._write(os.path.join(j, "tmp", "kept-drafts"))
+        with _roots([self.root], self.jobs):
+            plan = R.plan_scratch(time.time() + self.FAR, _NO_HOLDERS, 72, 168, keep=keep)
+        self.assertEqual([[os.path.basename(p) for p, _ in i["_targets"]] for i in plan.items],
+                         [["build-out"]])
+        self.assertEqual(R.apply_scratch(plan.items, lambda: _NO_HOLDERS)[1:], ([], []))
+        self.assertEqual(os.listdir(os.path.join(j, "tmp")), ["kept-drafts"])
+
+    def test_a_residue_rule_skips_what_the_list_names_or_holds_inside(self):
+        d = tempfile.mkdtemp(dir=self.tmp.name)
+        for name in ("one.db.bak-1", "two.db.bak-2", "three.db.bak-3"):
+            p = os.path.join(d, name)
+            if name.startswith("three"):
+                os.makedirs(p)
+                Path(p, "inner").write_text("x")
+            else:
+                Path(p).write_text("x")
+            _age(p, 90 * DAY)
+        keep = self._write(os.path.join(d, "one.db.bak-*"), os.path.join(d, "three.db.bak-3", "inner"))
+        with _patched(RULES=[R.Rule("t", f"{d}/*.bak-*", min_age_days=14)]):
+            items = R.plan(time.time(), _NO_HOLDERS, keep)
+        skips = {os.path.basename(i["path"]): i["skip"] for i in items}
+        self.assertEqual(skips, {
+            "one.db.bak-1": f"on the keep list: {d}/one.db.bak-*",
+            "two.db.bak-2": None,
+            "three.db.bak-3": f"on the keep list: {d}/three.db.bak-3/inner",
+        })
+
+    def test_an_invalid_list_refuses_plan_and_apply(self):
+        victim = self._entry(self.root, "two-days-idle")
+        Path(self.list_path).write_text("# fine\nsrv/relative\n")
+        for argv in ((), ("--json",), ("--apply",)):
+            with self.subTest(argv):
+                rc, out, err = self._main(*argv)
+                self.assertEqual(rc, 1)
+                self.assertIn("line 2: 'srv/relative' is not an absolute or ~/ path — refusing to plan or apply", err)
+                self.assertEqual(out, "")
+                self.assertTrue(os.path.isdir(victim), "refusal must remove nothing")
+
+    def test_apply_leaves_what_the_list_names_and_reports_the_list(self):
+        kept = self._entry(self.root, "build-cache-1")
+        gone = self._entry(self.root, "other-scratch")
+        pattern = os.path.join(self.root, "build-cache-*")
+        self._write(pattern)
+        rc, out, _ = self._main("--apply", "--json")
+        doc = json.loads(out)
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(os.path.isdir(kept))
+        self.assertFalse(os.path.exists(gone))
+        self.assertEqual(doc["keep_list"], {"path": self.list_path, "read": True, "patterns": [pattern]})
+        self.assertEqual(doc["scratch"]["kept"].get(f"on the keep list: {pattern}"), 1)
+
+    def test_the_text_report_says_which_list_it_read(self):
+        _, absent, _ = self._main()
+        self.assertIn(f"keep list: none ({self.list_path} does not exist)", absent)
+        self._write("/srv/build-*")
+        _, one, _ = self._main()
+        self.assertIn(f"keep list: 1 pattern(s) read from {self.list_path}", one)
 
 
 class MainScratchTests(_FixtureTree):

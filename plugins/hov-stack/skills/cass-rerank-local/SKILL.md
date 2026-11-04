@@ -57,7 +57,7 @@ Each result prints the ranked snippet + `source_path:line` you can open.
 | Situation | Tool |
 |-----------|------|
 | "Find the ONE session where I solved X" (top-1 matters) | `cass-rerank` |
-| Broad keyword scan, many hits | `CASS_AUTO_REFRESH=0 cass search "query" --robot --no-maintenance --mode lexical --limit 3` |
+| Broad keyword scan, many hits | `CASS_AUTO_REFRESH=0 cass search "query" --robot --no-maintenance --mode lexical --limit 3 --timeout 300000` |
 | Deep dive / cited evidence pack | `cass pack "..." --robot` (jsm cass skill) |
 
 ## Diagnose retrieval without maintenance
@@ -69,9 +69,14 @@ hits or partial hits. Preserve the diagnostic and inspect `CASS_SEARCH_TIMEOUT_M
 completed empty search. To diagnose retrieval without maintenance:
 
 ```bash
-CASS_AUTO_REFRESH=0 cass search "query" --robot --no-maintenance --mode lexical --limit 3
+CASS_AUTO_REFRESH=0 cass search "query" --robot --no-maintenance --mode lexical --limit 3 --timeout 300000
 CASS_AUTO_REFRESH=0 cass status --json
 ```
+
+Pass `--timeout 300000` on direct searches. On a large archive, cass 0.10.0 reads
+the whole lexical index before each query (98.4 s at 6.1M docs, 2026-11-04), so
+the 120 s default budget can return zero hits marked `timed_out`. The wrapper
+passes the same deadline, or `CASS_SEARCH_TIMEOUT_MS` when that is set.
 
 On `maintenance-required`, `checkpoint_incomplete`, or an incomplete checkpoint,
 hand recovery to the operator. Agents must not initiate rebuilds or try a non-robot
