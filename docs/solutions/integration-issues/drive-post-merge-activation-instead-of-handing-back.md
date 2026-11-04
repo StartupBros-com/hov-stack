@@ -148,7 +148,10 @@ Per this session's conclusion, the design was chosen by an 18-agent workflow (fo
 
   The named cases in `tests/wt-done.test.sh` include the ordinary-repository handoff fixtures and the tree-proof activation race. Its planted negative still rejects `sync.sh install` in output. `hooks/tests/launchpad-advisory.test.js` covers bounded diagnostics, partial success, failed fetch with current cached refs, and preservation of colliding/unrelated state. `tests/dotup-deploy-loop.test.sh` checks that the localizer runs after installation and a localization failure warns without flipping `result=ok`. These are fixture contracts, not live-deployment evidence.
 - Dotup-managed merges that bypass `wt-done` remain dependent on a later hourly refresh, with its delay and refusal limits. Ordinary repositories do not acquire that timer merely because closeout now freshens their checkout.
-- Activation does not retrofit sessions that are already running: they cache hooks and settings until they restart, so a report may say the hook is live on the checkout and still name the sessions that have not picked it up (session history).
+- Activation does not reliably reach sessions that are already running.
+  - A hook script that changes in the checkout runs on the next call, because every registered hook command starts a fresh process.
+  - A rewrite of `settings.json` itself is less certain. Claude Code 2.1.318 applied one atomic-rename replacement of the live hook commands to sessions that were already running (2026-11-04, #414 item 6). Its settings watcher can still miss a replacement (HARNESS.md, "Guard hooks can silently stop firing").
+  - So a report may say the hook is live on the checkout and still name sessions that have not picked it up (session history). `scripts/hook-seam-check.py --no-prune` finds the guard seams that went quiet.
 - Any fail-closed check added to the unattended path (`install.sh` preflight, a new guard in `dotup`) has to carry the environment the interactive shell had when it was tested, or the hourly refresher becomes a silent outage (PR #544; session history).
 
 ## Related Issues
