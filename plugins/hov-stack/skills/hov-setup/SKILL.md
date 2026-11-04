@@ -125,7 +125,9 @@ python3 --version
 
 Ready means the detector reports it `installed` and a Python 3.12 or later is on PATH. last30days looks for `python3.14`, `python3.13`, `python3.12`, `python3` and `python`, in that order, so if `python3` is older, also run `python3.13 --version` and `python3.12 --version`.
 
-1. Python. If none is 3.12 or later, offer to add Python 3.13 with uv: about 100 MB, under a minute, and it leaves the system's own Python alone. Install uv first if the detector's `helpers` entry for uv is `absent`, with its `next` line. Then run `uv python install 3.13` (with uv's full path if it is not on PATH). That puts a `python3.13` command in `~/.local/bin`.
+1. Python. If none is 3.12 or later, add one where last30days will see it. It finds Python only by name on PATH, so a new one must land in a folder on PATH.
+   - If `~/.local/bin` is on PATH (the uv `helpers` entry's `onPath`, or the installer's `on PATH: yes`), offer to add Python 3.13 with uv: about 100 MB, under a minute, and it leaves the system's own Python alone. Install uv first if the detector's `helpers` entry for uv has no `path`, with its `next` line. Then run `uv python install 3.13`, which puts a `python3.13` command in `~/.local/bin`.
+   - If it is not, on a Mac with Homebrew run `brew install python@3.13` after a yes; Homebrew's folder is already on PATH. Otherwise offer to add `~/.local/bin` to PATH in their shell's startup file (Step 4's "Programs" paragraph), then add Python with uv as above. Claude Code windows opened after that change see it, but this window may not, so last30days may work only from the next time they open Claude Code. Say that plainly.
 2. Run the check.
 3. Ask for `/reload-plugins` if this run has not had one. Then the user types `/last30days:last30days` and a topic. Its first run walks them through choosing sources, then researches the topic. When it offers ScrapeCreators, suggest its GitHub sign-up, which saves the key without it passing through this chat.
 
@@ -376,7 +378,7 @@ Ready means `jsm whoami` shows them signed in with an active subscription.
 2. If the detector reports jsm `absent`, run its `next` line. It installs the version hov-stack checked into `~/.local/bin`. (jsm's own installer adds a line to the shell's startup file; this one does not.)
 3. The sign-in: the user types `! jsm login --remote` here (with jsm's full path if it is not on PATH). It waits up to 30 minutes for them to approve in their browser.
 4. Run the check.
-5. Help them pick. `jsm list --remote` lists the library and `jsm search <word>` finds skills on a topic. Suggest a few that fit what they told you rather than all of them; `jsm install-all` installs the whole library, more than anyone needs to start. Install each pick with `jsm install <name>`, adding `--yes` if it asks to confirm. If it says setup is needed first, the user runs `jsm setup` in a separate terminal window: it needs one to ask its questions. Then ask them to type `/reload-skills`.
+5. Help them pick. `jsm list --remote` lists the library and `jsm search <word>` finds skills on a topic. Suggest a few that fit what they told you rather than all of them; `jsm install-all` installs the whole library, more than anyone needs to start. Install each pick with `jsm install <name>`. If it says setup is needed first, the user runs `jsm setup` in a separate terminal window: it needs one to ask its questions. Then ask them to type `/reload-skills`.
 6. Updates: `jsm upgrade` updates the installed skills. For the jsm program itself, as in Step 4's "Updates" paragraph.
 
 ## Finish
