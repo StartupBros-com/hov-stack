@@ -570,6 +570,18 @@ const VAR_FRAMEWORK = /^--(tw|radix|shiki|vaul|sonner|cmdk|embla|reach|chakra|ma
 // Tailwind v4 generates `--color-<hue>-<step>` for its whole default palette from
 // `@theme`, so those resolve at build time with no definition in source.
 const VAR_TW_THEME = new RegExp(`^--color-${TW_HUE.slice(3, -1)}-(50|[1-9]00|950)$`);
+// Tailwind v4's theme.css also supplies these defaults. Match the shipped names,
+// not the whole --default-* namespace: custom tokens and typos must still fail.
+const VAR_TW_DEFAULTS = new Set([
+  "--default-transition-duration",
+  "--default-transition-timing-function",
+  "--default-font-family",
+  "--default-font-feature-settings",
+  "--default-font-variation-settings",
+  "--default-mono-font-family",
+  "--default-mono-font-feature-settings",
+  "--default-mono-font-variation-settings",
+]);
 // `var(--color-${key})` is a legitimate dynamic lookup (shadcn's Chart does this
 // from chartConfig). The regex can only capture the static prefix, so a name
 // ending in `-` is a truncated construction, never a real reference.
@@ -1470,6 +1482,7 @@ function analyse(files) {
         defined.has(r.name) ||
         VAR_FRAMEWORK.test(r.name) ||
         VAR_TW_THEME.test(r.name) ||
+        VAR_TW_DEFAULTS.has(r.name) ||
         isConstructedVar(r.name)
       ) {
         continue;
