@@ -1179,13 +1179,16 @@ The secrets runbook keeps credentials out of ambient state on purpose. A
 ## Install mechanics
 
 Every deployed copy is a **symlink**, so edits to the versioned source take
-effect immediately — no re-install step. `lib/manifest.sh`'s
-`DOTFILES_LINKS` maps each wrapper (`bin/gsc`, `bin/dfs`,
+effect immediately — no re-install step. `./setup` links each wrapper that
+`lib/manifest.sh`'s `DATA_CLIS` names (`bin/gsc`, `bin/dfs`,
 `bin/exa-cli`, `bin/firecrawl-cli`, `bin/ga4`,
-`bin/discord-cli`, `bin/resend-cli`, `bin/stripe-api`, `bin/posthog-api`, `bin/supabase-api`, `bin/fal-api`, `bin/vastai`, `bin/vast-ssh`) to `~/.local/bin/`, applied by `install.sh` through
-`lib/link.sh` as a direct symlink into the repo checkout. Separately,
-`sync.sh` symlinks the whole `bin` directory to
-`~/.claude/bin` (not on PATH), so `gsc.py`, `ga4.py`, `discord_cli.py`, `resend_cli.py`, `stripe_api.py`, `posthog_api.py`, `supabase_api.py`, `fal_api.py`, `dfs.py`, and `exa.py` resolve
+`bin/discord-cli`, `bin/resend-cli`, `bin/stripe-api`, `bin/posthog-api`, `bin/supabase-api`, `bin/fal-api`, `bin/vastai`, `bin/vast-ssh`) into `~/.local/bin/` as a direct symlink into the checkout.
+A path there that already holds something else (a `vastai` of your own, a link
+into another copy) is left alone and named in setup's `commands` row, and that
+wrapper still runs as `~/.claude/bin/<name>`; `./setup --check` names any not yet
+linked. `install.sh` links the same list on the maintainer's machines, through
+`DOTFILES_LINKS` rows built from `DATA_CLIS`. Separately, `./setup` links the
+whole `bin` directory to `~/.claude/bin` (not on PATH), so `gsc.py`, `ga4.py`, `discord_cli.py`, `resend_cli.py`, `stripe_api.py`, `posthog_api.py`, `supabase_api.py`, `fal_api.py`, `dfs.py`, and `exa.py` resolve
 back into the checkout the same way. `resend-cli` additionally needs the
 pinned vendor prefix from `scripts/resend-cli-install.sh install`
 (see "Resend" above); the wrapper's `--where` says whether it is converged.
@@ -1199,13 +1202,13 @@ then `uv pip install --python ~/.local/share/vastai-cli/venv/bin/python vastai==
 (the wrapper prints both on exit 3; `VASTAI_VENV` relocates it). The vendor
 binary stays off PATH on purpose: only the wrapper's name is in the
 `settings.json` allow list, and the vendor's `update` and `install.sh` paths are
-never used. To roll back, revert the two `DOTFILES_LINKS` rows
-(`bin/vastai`, `bin/vast-ssh`) and the two allow entries, run
-`dotup`, and remove the venv directory; the API key and the ssh key are deleted
+never used. To roll back, drop `vastai` and `vast-ssh` from `DATA_CLIS` and
+the two allow entries, delete the two links in `~/.local/bin` (setup never
+removes one), and remove the venv directory; the API key and the ssh key are deleted
 in the vast.ai console, since the agent key cannot delete keys.
 
-To roll back `firecrawl-cli`, revert its `DOTFILES_LINKS` manifest row and
-re-run activation (`dotup`) to remove the command. Rollback is complete when
+To roll back `firecrawl-cli`, drop it from `DATA_CLIS` and delete
+`~/.local/bin/firecrawl-cli`. Rollback is complete when
 `firecrawl-cli --version` reports command-not-found and harness-doctor checks
 31 and 32 read dormant for it. Orphaned ledger reservations expire by their
 lifetime and need no cleanup.

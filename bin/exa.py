@@ -202,8 +202,9 @@ def build_parser():
     search_p = sub.add_parser("search", help="search the web")
     search_p.add_argument("query")
     # SUPPRESS default: an absent --json here must not clobber a parent-level
-    # --json on merge (KTD2; the defect this guards is gsc.py:267,271, where
-    # the subparser's plain False default overwrites the parent's True).
+    # --json on merge (KTD2; the defect this guards is the one gsc.py had
+    # until 2026-11-05, where the subparser's plain False default overwrote
+    # the parent's True).
     search_p.add_argument("--json", action="store_true", default=argparse.SUPPRESS, help="machine-readable output")
     search_p.add_argument("--text", action="store_true", help="request full page text instead of highlights")
     search_p.add_argument("--type", choices=SEARCH_TYPES, default="auto", help="Exa search type")
