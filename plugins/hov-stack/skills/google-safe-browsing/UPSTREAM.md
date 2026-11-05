@@ -6,8 +6,8 @@ Frozen snapshot of https://github.com/davidondrej/skills (commit
 Deliberately NOT auto-tracked: re-pull manually if wanted.
 
 Local changes: replaced the generic "verify in / request review via Search
-Console" steps with our `gsc` CLI (see CLAUDE.md "Data-source access:
-prefer a CLI over an MCP server") and named the two domains our service
+Console" steps with our `gsc` CLI (see the `data-source-clis` skill: prefer
+a CLI over an MCP server) and named the two domains our service
 account already covers (startupbros.com, prbot.ai) so a flag on either skips
 verification entirely. No frontmatter change from upstream — kept
 model-invocable: the trigger is a browser interstitial or a domain-buying
