@@ -37,7 +37,8 @@
 #     that one, and names each missing step after a partial run, changing nothing
 #   - tool instructions (#420): a tool on PATH gets its line in rules/hov-stack-tools.md,
 #     a rerun moves nothing, a refresh drops a removed tool's line, and --check reports
-#     stale and missing without writing
+#     stale and missing without writing; with ~/.local/bin on PATH the linked data commands
+#     get their line (#440)
 #   - auto-update (#395): the fake claude writes what Claude Code writes on an add and an
 #     install; setup then turns auto-update on for hov in its own unedited seed and says
 #     how to turn it off, a rerun leaves it on and writes nothing, and a settings.json of
@@ -840,6 +841,16 @@ grep -q -E '^  instructions +missing +rules/hov-stack-tools.md is not written ye
 [ ! -e "$TOOLS" ] || fail "the missing check wrote tool rules"
 rm "$WORK/tool-bin/cass"
 ok "tool rules follow installed tools, reruns move nothing, and check reports stale and missing without writing"
+# The data commands those runs linked into ~/.local/bin get one line once it is on PATH (#440).
+HOV_SETUP_EXTRA_BIN_DIRS='' PATH=$HF/.local/bin:$PATH fake_setup "$FK" "$HF" "$WORK/tools-data.log" --no-dcg \
+  || { cat "$WORK/tools-data.log"; fail "setup with the data commands on PATH exited non-zero"; }
+grep -q -E '^  instructions +ok +rules/hov-stack-tools.md updated; mentions .*data-commands$' "$WORK/tools-data.log" \
+  || { cat "$WORK/tools-data.log"; fail "the instructions row does not name the data commands"; }
+grep -q -F -e '- Data sources: use these CLIs before an MCP server' "$TOOLS" || fail "the data commands have no line"
+for name in "${DATA_CLIS[@]}"; do
+  grep -q -F -e "\`$name\`" "$TOOLS" || fail "the data commands' line does not name $name"
+done
+ok "with ~/.local/bin on PATH, the data commands setup linked get their line, naming each of them"
 sed 's/^/    | /' "$WORK/run-fake.log"
 [ "$(calls_of "$FK" 'plugin marketplace add StartupBros-com/hov-stack')" = 1 ] || { cat "$FK/calls"; fail "the hov marketplace was not added exactly once"; }
 while read -r p; do
