@@ -141,7 +141,7 @@ Most of these are not part of this repository: `gsc`, `ga4` and `vastai` are its
 
 ## Where it came from
 
-- The two-hour walkthrough of this setup is the House of Vibe workshop "Steal My Whole Claude Code Setup" (Aug 5, 2026). houseofvibe.ai
+- The two-hour walkthrough of this setup is the House of Vibe workshop "Steal My Whole Claude Code Setup" (Aug 5, 2026), at [House of Vibe](https://houseofvibe.ai/?utm_source=github&utm_medium=repo&utm_campaign=hov-stack).
 - `dcg`, the third-party destructive-command guard this harness runs alongside its own hooks: https://github.com/Dicklesworthstone/destructive_command_guard
 - `cass`, the third-party coding-agent session search that `scripts/cass-rerank`, `scripts/cass-search-health.sh`, `scripts/cass-release-promote.sh` and `scripts/cass-index-rebuild.sh` drive: https://github.com/Dicklesworthstone/coding_agent_session_search. Those scripts call an installed `cass` and carry none of its code.
 - Both tools are Jeffrey Emanuel's and ship under the MIT License with an OpenAI/Anthropic rider; read each project's `LICENSE` before you install it.
