@@ -97,9 +97,9 @@ Take the picked and installed entries in the detector's order, one at a time:
 
 In the commands below, `<install-path>` is the entry's `installPath`, `<version>` is its `version` and `<skill-dir>` is the directory that holds this `SKILL.md`.
 
-Programs: a program's `next` line installs it into `~/.local/bin` without a password. Either it runs `install-release.sh` from this skill, which downloads the one version hov-stack checked, compares it with the checksum written in that file, installs nothing if they differ and removes what it installed if the program then fails to start; or it runs uv. If an entry's `needs` names a helper whose `path` is null, install the helper first with that helper's `next` line, after one line saying what it is: uv installs Python programs, and Python itself, without touching the system's own copy. Then run the detector again, so the program's `next` line names the uv it found. When `install-release.sh` prints `on PATH: no`, or uv warns that `~/.local/bin` is not on PATH, use full paths in this session's commands. Tell the user once that new terminal windows won't find these programs by name until that folder is on their PATH, and offer to add it to their shell's startup file; change that file only after a yes.
+Programs: a program's `next` line installs it into `~/.local/bin` without a password. Either it runs `install-release.sh` from this skill, which downloads the one version hov-stack checked, compares it with the checksum written in that file, installs nothing if they differ and removes what it installed if the program then fails to start; or it runs uv. Two have their own line: wacli runs `wacli-install.sh` from this skill, which checks its one release the same way, and vercel runs `pnpm add -g vercel`, which puts it in pnpm's global folder, `~/.local/bin` once pnpm is set up as the vercel section says. If an entry's `needs` names a helper whose `path` is null, install the helper first with that helper's `next` line, after one line saying what it is: uv installs Python programs, and Python itself, without touching the system's own copy. Then run the detector again, so the program's `next` line names the uv it found. When `install-release.sh` prints `on PATH: no`, or uv warns that `~/.local/bin` is not on PATH, use full paths in this session's commands. Tell the user once that new terminal windows won't find these programs by name until that folder is on their PATH, and offer to add it to their shell's startup file; change that file only after a yes.
 
-Updates: `./setup --update`, run in the hov-stack checkout, updates the checkout and then everything this skill installed: the plugins, and each program `install-release.sh` or uv installed. It replaces a program `install-release.sh` installed only when the copy on disk is still the one it put there, and only after the new version matches its checksum and starts. jsm updates itself, and `cass upgrade` updates cass; after either, `./setup --update` leaves that program to its own updater and says so. A copy installed some other way, such as through Homebrew or apt, updates through that instead; `./setup --update` leaves it and says so. When it says a copy has no install record, an earlier run of this skill probably put it there: `install-release.sh <tool> --force` from this skill replaces it and starts the record. When the user asks how to update, offer to run `./setup --update`, and run it after a yes.
+Updates: `./setup --update`, run in the hov-stack checkout, updates the checkout and then everything this skill installed except wacli and vercel, whose sections give their own update step: the plugins, and each program `install-release.sh` or uv installed. It replaces a program `install-release.sh` installed only when the copy on disk is still the one it put there, and only after the new version matches its checksum and starts. jsm updates itself, and `cass upgrade` updates cass; after either, `./setup --update` leaves that program to its own updater and says so. A copy installed some other way, such as through Homebrew or apt, updates through that instead; `./setup --update` leaves it and says so. When it says a copy has no install record, an earlier run of this skill probably put it there: `install-release.sh <tool> --force` from this skill replaces it and starts the record. When the user asks how to update, offer to run `./setup --update`, and run it after a yes.
 
 System tools: on macOS, `brew install` needs no password, so you run it after a yes. A Mac without Homebrew needs it installed first, from brew.sh, in a separate terminal window; it asks for their password. On Debian or Ubuntu, `sudo apt install` asks for a password, so the user pastes it into a separate terminal window.
 
@@ -167,6 +167,30 @@ Ready means the first prints its commands (`emit-prompts` and `score-reactions`)
 4. Run the check.
 5. Ask the user to type `/reload-skills` so this window picks up the new skill. Then tell them how to use it: type `/ce-synthetic-panel-beta`, and it asks about their customer and the options to compare. Its skill warns that the first scoring run downloads about 1.5 GB; the model it uses by default is about 90 MB, already counted above.
 
+### wacli
+
+**Card:** Lets Claude read and search your WhatsApp messages. Free and open source, from OpenClaw. It links as a WhatsApp linked device and keeps a copy of your messages on this computer in `~/.local/state/wacli`. It is not made or approved by WhatsApp or Meta. Only on Linux computers with an Intel or AMD processor. Good for people who want Claude to find things in their chats.
+
+**Credentials:** the user links on their phone by scanning a QR code shown in a separate terminal window. The code never goes into this chat, the phone number never goes on a command line, and nobody reads, copies or prints the store's `session.db`.
+
+Check:
+
+```bash
+bash "<skill-dir>/scripts/wacli-install.sh" check
+wacli --store <store> auth status --json
+```
+
+Here and below, replace `<store>` with the store's absolute path written out in full, with no `~` or `$`: use `$WACLI_STORE_DIR` if it is set to an absolute path, otherwise `~/.local/state/wacli` with the home directory written out, e.g. `/home/you/.local/state/wacli`. The WhatsApp guard refuses a path it cannot read before the command runs.
+
+Ready means the first prints `installed and verified` and the second's `data.authenticated` is `true`.
+
+1. If the detector reports wacli `absent`, run its `next` line. Without a password, it downloads about 9 MB, verifies the checked release and installs it under `~/.local/lib/wacli/v<version>/wacli`, with a link at `~/.local/bin/wacli`. If it refuses because another wacli or the wacli-sync service is running a different binary, explain that and let the user stop it.
+2. The user opens a separate terminal window, outside Claude Code, and runs `wacli --store <store> auth`, with the store path written out as above. If wacli is not on PATH, use its full path, e.g. `/home/you/.local/bin/wacli --store <store> auth`. Never run this through Claude Code's `!`: the QR code needs a real terminal to draw, the command stays running for the sync, and the code stays out of the chat. On their phone, open WhatsApp → Linked devices → Link a device (Linked devices is in Settings on iPhone and the ⋮ menu on Android), then scan the QR code. It downloads recent messages and exits on its own after 30 seconds without new ones.
+3. Run the check.
+4. Updates: `./setup --update` does not update wacli. After a hov-stack update, re-run its `next` line; it changes nothing when the checked version is already there.
+
+Keeping it synced in the background with `wacli --store <store> sync --follow` as a service is a separate choice left to the user.
+
 ### gh
 
 **Card:** GitHub's own program. It lets Claude open pull requests, read issues and check reviews in your GitHub projects, and token-eater and pro-gate need it. Free, from GitHub. You sign in once in your browser. Good for anyone with code on GitHub.
@@ -192,6 +216,33 @@ Ready means both succeed. `gh auth status` fails when nobody is signed in.
    If gh is not on PATH, give them the line with its full path instead: `! ~/.local/bin/gh auth login --web --hostname github.com --git-protocol https`. A bare `gh auth login` fails through `!`, because it needs a terminal to answer its questions. The code is one-time and stops working once used. Never ask them to paste it into the chat.
 3. Run the check.
 4. Updates: as in Step 4's "Updates" paragraph.
+
+### vercel
+
+**Card:** Vercel's own program lets Claude check your Vercel projects, deployments, logs and settings, and deploy when you ask. Free, from Vercel. Sign in once in your browser. It installs through pnpm, with about a 60 MB download and about 400 MB on disk. Good for anyone whose sites run on Vercel.
+
+**Credentials:** the sign-in happens on vercel.com in the user's browser, through a link with a one-time code the login line shows here. The code never goes into this chat and no token goes on a command line.
+
+Check:
+
+```bash
+vercel --version
+vercel whoami < /dev/null
+```
+
+Ready means both succeed. `< /dev/null` closes the input so `vercel whoami` answers without waiting; signed out, it prints `Logged out.`.
+
+1. Run `pnpm --version`. If missing, explain that vercel installs through pnpm and point to https://pnpm.io. Run `node --version`; it needs Node 20 or later.
+2. Run `pnpm bin -g`. On `ERR_PNPM_GLOBAL_BIN_DIR_NOT_IN_PATH`, offer `pnpm config set global-bin-dir ~/.local/bin` after a yes: this is a lasting pnpm setting for every later `pnpm add -g`, stored in `~/.config/pnpm/config.yaml`, and touches no shell startup file. Do not use `pnpm setup`, which edits the shell startup file.
+3. Explain that it downloads about 60 MB, then run its `next` line after a yes. `Ignored build scripts: esbuild...` is expected; vercel works without them, so do not run `pnpm approve-builds`. If the detector still reports `absent`, use the folder `pnpm bin -g` prints for this session's commands.
+4. The user types this login line here (with vercel's full path if it is not on PATH), opens the link it shows and approves it in their browser. Never ask for the code in chat.
+
+   ```
+   ! vercel login
+   ```
+
+5. Run the check.
+6. Updates: run `pnpm update -g --latest vercel` after a yes. `./setup --update` does not update it.
 
 ### ast-grep
 
@@ -406,5 +457,5 @@ Use the absolute skill path as in Step 1. When its `state` is `ok`, say in one p
 - Anything skipped or still waiting, and the one thing left for the user, if any.
 - What setup already gave them: each `alsoInstalled` plugin with its `what` and `start`, and the skill pack's slash commands. Typing `/` lists them all. Three to try first: `/bro` re-explains Claude's last answer in plain words, `/eli5 <topic>` explains any topic simply with a picture, and `/deep-research <question>` digs into a question across many sources.
 - Whether the plugins update themselves, from the detector's `marketplace.autoUpdate`, in one line: "The hov plugins update themselves", or that they stay at these versions and what it said to do.
-- How to update later, in one line: `./setup --update` in the hov-stack checkout updates it and everything installed here.
+- How to update later, in one line: `./setup --update` in the hov-stack checkout updates it and everything installed here except wacli and vercel; for either one installed, add the update line from its section.
 - They can type `/hov-setup` again any time to add the rest.
