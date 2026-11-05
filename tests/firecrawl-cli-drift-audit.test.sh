@@ -7,7 +7,7 @@ REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 SCANNER=$REPO/scripts/firecrawl-cli-drift-audit.py
 MAP=$REPO/bin/firecrawl-cli-verbmap.json
 DOCTOR=$REPO/scripts/harness-doctor.sh
-TMP=$(mktemp -d /tmp/firecrawl-cli-drift.XXXXXX)
+TMP=$(mktemp -d /tmp/firecrawl-cli-drift.XXXXXX) || exit 1
 trap 'rm -rf "$TMP"' EXIT
 PYTHON=$(command -v python3)
 mkdir -p "$TMP/bin" "$TMP/empty"

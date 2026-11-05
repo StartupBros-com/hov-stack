@@ -2179,5 +2179,30 @@ run_cli --help
 contains "$OUT" 'FIRECRAWL_CLI_KEYLESS=0' 'root help names free-first and its opt-out'
 unset FIRECRAWL_TEST_ENV_LOG
 
+# settings.json allows only the index verbs, so sessions in a stricter permission
+# mode (claude -p --permission-mode acceptEdits, plan-mode subagents) run them
+# unprompted; metered verbs and raw still fall through to a prompt.
+RESULT=$(python3 - "$REPO/settings.json" "$REPO/tests/permission_rules.py" <<'PY'
+import importlib.util
+import json
+import sys
+spec = importlib.util.spec_from_file_location("permission_rules", sys.argv[2])
+rules = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(rules)
+permissions = json.load(open(sys.argv[1]))["permissions"]
+expect = {
+    "firecrawl-cli gov 'food truck permit Texas' --limit 3 --json": "allow",
+    "firecrawl-cli developer 'axum middleware ordering' --json": "allow",
+    "firecrawl-cli fetch https://example.com --json": "prompt",
+    "firecrawl-cli search 'axum' --categories developer --json": "prompt",
+    "firecrawl-cli raw --json -- research search-papers 'crispr'": "prompt",
+}
+wrong = [f"{c!r} -> {rules.decide(c, permissions)}, want {w}"
+         for c, w in expect.items() if rules.decide(c, permissions) != w]
+print("; ".join(wrong) or "OK")
+PY
+)
+[[ "$RESULT" == OK ]] && ok || bad "settings permission rules: $RESULT"
+
 printf '%s passed, %s failed\n' "$pass" "$fail"
 [[ "$fail" -eq 0 ]]
