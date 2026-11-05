@@ -60,7 +60,7 @@ fail() { echo "FAIL: $*" >&2; exit 1; }
 pass=0
 ok() { pass=$((pass + 1)); echo "ok $pass - $*"; }
 # The data commands setup links into ~/.local/bin (DATA_CLIS), from the file setup reads.
-# shellcheck source=../../lib/manifest.sh
+# shellcheck source=lib/manifest.sh
 . "$ROOT/lib/manifest.sh"
 [ "${#DATA_CLIS[@]}" -ge 13 ] && [[ " ${DATA_CLIS[*]} " == *" gsc "* ]] && [[ " ${DATA_CLIS[*]} " == *" vastai "* ]] \
   || fail "lib/manifest.sh's DATA_CLIS lost the data commands: ${DATA_CLIS[*]}"
@@ -452,7 +452,7 @@ ok "second run moved nothing; a customized settings.json survived byte-for-byte 
 n_cli=${#DATA_CLIS[@]}
 for name in "${DATA_CLIS[@]}"; do
   [ -L "$HOME/.local/bin/$name" ] && [ "$(readlink "$HOME/.local/bin/$name")" = "$ROOT/bin/$name" ] \
-    || fail "~/.local/bin/$name is not a link to $ROOT/bin/$name"
+    || fail "$HOME/.local/bin/$name is not a link to $ROOT/bin/$name"
 done
 for log in run1 run2; do
   grep -q -E "^  commands +ok +$n_cli data commands linked into ~/\.local/bin; ~/\.local/bin is not on this shell's PATH" "$WORK/$log.log" \
