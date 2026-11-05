@@ -87,7 +87,8 @@
 #      themselves; for a settings.json you made it only says whether auto-update is on.
 #      --check reads what Claude Code reports installed; it writes no record of its own.
 #      Then it regenerates rules/hov-stack-tools.md: a line for each installed gh, ast-grep,
-#      codex, pro-gate and cass whose program is on PATH. Only setup's own regular file is
+#      codex, pro-gate and cass whose program is on PATH, and one naming the data commands
+#      PATH runs from this checkout. Only setup's own regular file is
 #      replaced or removed; into a rules/ that is a symlink it writes nothing and names the
 #      lines to add there, and it leaves a symlink or a file of yours at that path alone.
 #   6. Never reads or writes memory, projects/, credentials, or anything outside the config
@@ -637,7 +638,8 @@ EOF
 }
 
 # Claude's tool instructions: rules/hov-stack-tools.md holds a line for each installed tool
-# that has one in plugins/hov-stack/skills/hov-setup/instructions/, so Claude is never told to
+# that has one in plugins/hov-stack/skills/hov-setup/instructions/, plus one naming the data
+# commands PATH runs from this checkout, so Claude is never told to
 # use a tool this user lacks. instructions.mjs writes it (it reads the installed plugins through
 # claude) and prints "<state>: <reason>"; the state is the row's. Each refusal names its fix.
 instructions_row() {  # instructions_row [--check]

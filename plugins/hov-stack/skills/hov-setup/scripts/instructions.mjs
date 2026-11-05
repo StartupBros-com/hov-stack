@@ -1,9 +1,12 @@
 #!/usr/bin/env node
 /*
   Writes Claude's tool instructions: <config-dir>/rules/hov-stack-tools.md, holding
-  ../instructions/<offer>.md for each installed offer that has one, in offers.json order.
+  ../instructions/<offer>.md for each installed offer that has one, in offers.json order,
+  then ../instructions/data-commands.md naming the bundled data commands on PATH.
   Every line names a command Claude will run, so a tool counts only when its program is on
-  PATH, and codex only when the codex program is on PATH as well. The file is written
+  PATH, codex only when the codex program is on PATH as well, and a data command only when
+  PATH runs the config dir's own bin/<name> (the link ./setup makes), never a copy of the
+  user's own. The file is written
   atomically and removed when no offer contributes. Nothing is written through a rules/ that
   is a symlink (its rules files are read for the lines instead), over a symlink, or over a
   file without this file's header. A failed detection changes nothing.
@@ -37,6 +40,24 @@ const SOURCES = fileURLToPath(new URL("../instructions/", import.meta.url));
 const FILE = "rules/hov-stack-tools.md";
 // Offers whose lines also need a program that installing the offer does not install.
 const NEEDS = { codex: "codex" };
+// The data commands ./setup links into ~/.local/bin, in lib/manifest.sh's DATA_CLIS order
+// (instructions.test.mjs holds the two equal), with the note a command carries in the line.
+export const DATA_COMMANDS = [
+  ["gsc"],
+  ["ga4"],
+  ["discord-cli"],
+  ["resend-cli"],
+  ["stripe-api"],
+  ["posthog-api"],
+  ["supabase-api"],
+  ["fal-api", "live money"],
+  ["dfs"],
+  ["exa-cli"],
+  ["firecrawl-cli"],
+  ["vastai", "live money"],
+  ["vast-ssh"],
+];
+const DATA = "data-commands";
 
 function stat(path) {
   try {
@@ -72,8 +93,52 @@ function ruleLines(dir, depth = 0, out = new Set()) {
   return out;
 }
 
+function realOrNull(p) {
+  try {
+    return realpathSync(p);
+  } catch {
+    return null;
+  }
+}
+
+// The data-commands block, or null when no command is listed; what is left out is pushed
+// onto leftOut as one entry per reason. A command the config dir's bin/ lacks is silent:
+// that is a plugin-only install, not a missing link.
+function dataBlock(cfg, search, leftOut) {
+  const listed = [],
+    absent = [],
+    notOurs = [],
+    offPath = new Map();
+  let held = 0;
+  for (const [name, note] of DATA_COMMANDS) {
+    const ours = realOrNull(join(cfg, "bin", name));
+    if (!ours) continue;
+    held++;
+    const found = findBin(name, search);
+    if (!found.path) absent.push(name);
+    else if (realOrNull(found.path) !== ours) notOurs.push(name);
+    else if (!found.onPath) {
+      const dir = dirname(found.path);
+      offPath.set(dir, [...(offPath.get(dir) || []), name]);
+    } else listed.push(note ? `\`${name}\` (${note})` : `\`${name}\``);
+  }
+  // A reason every held command shares names none of them: ./setup links all or none.
+  const who = (names) => (names.length === held ? "" : `${names.join(", ")}: `);
+  if (absent.length) leftOut.push({ name: DATA, why: `${who(absent)}not on PATH: run ./setup` });
+  for (const [dir, names] of offPath)
+    leftOut.push({ name: DATA, why: `${who(names)}${dir} is not on PATH` });
+  if (notOurs.length)
+    leftOut.push({
+      name: DATA,
+      why: `${who(notOurs)}what PATH runs first is not hov-stack's`,
+    });
+  if (!listed.length) return null;
+  const template = readFileSync(join(SOURCES, `${DATA}.md`), "utf8").trim();
+  return { name: DATA, text: template.replace("{commands}", listed.join(", ")) };
+}
+
 // The blocks this config dir should get, and the installed offers left out, with why.
-function wanted(report) {
+function wanted(report, cfg) {
   const blocks = [],
     leftOut = [],
     search = searchDirs();
@@ -98,6 +163,8 @@ function wanted(report) {
     }
     blocks.push({ name: offer.name, text });
   }
+  const data = dataBlock(cfg, search, leftOut);
+  if (data) blocks.push(data);
   return { blocks, leftOut };
 }
 
@@ -122,7 +189,7 @@ function run(cfg, check) {
   try {
     // Pass the same config dir to Claude and the detector's settings reads.
     process.env.CLAUDE_CONFIG_DIR = cfg;
-    const w = wanted(detect());
+    const w = wanted(detect(), cfg);
     leftOut = w.leftOut;
     tools = w.blocks.map((b) => b.name);
     const mentions = tools.length
