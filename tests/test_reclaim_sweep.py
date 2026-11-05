@@ -1884,14 +1884,25 @@ class JobScratchTests(_FixtureTree):
                 "%Y-%m-%dT%H:%M:%S.000Z", time.gmtime(time.time() - terminal_ago))
         Path(j, "state.json").write_text(json.dumps(doc))
 
+    DELIVERED = "The bridge tests pass on main.\n\nresult: capacity bridge merged at 1a2b3c4"
+
     def _job(self, jid="2b5a4195", state="done", tempo="idle", terminal_ago=DAY, **ids):
+        """A job whose last turn delivered, as a finished job's does on this host."""
         j = os.path.join(self.jobs, jid)
         os.makedirs(os.path.join(j, "tmp", "u5-attempt-3", "node_modules"))
         Path(j, "tmp", "capacity-bridge-tests.log").write_text("x" * 4096)
         Path(j, "tmp", "u5-attempt-3", "node_modules", "index.js").write_text("x" * 4096)
-        Path(j, "timeline.jsonl").write_text("{}\n")
+        self._timeline(j, ("working", ""), (state, self.DELIVERED if state == "done" else ""))
         self._state(j, state, tempo, terminal_ago, **ids)
         return j
+
+    @staticmethod
+    def _timeline(j, *entries):
+        """timeline.jsonl as Claude Code writes it: one {at, state, detail, text}
+        line per update, oldest first."""
+        Path(j, "timeline.jsonl").write_text("".join(
+            json.dumps({"at": "2026-11-05T21:00:00.000Z", "state": s, "detail": "", "text": t}) + "\n"
+            for s, t in entries))
 
     def _plan(self, snap=_NO_HOLDERS, ahead=FAR, job_floor_h=72, sessions_root=None):
         with _roots([self.root], self.jobs, sessions_root=sessions_root):
@@ -1942,6 +1953,95 @@ class JobScratchTests(_FixtureTree):
                 self.assertEqual(plan.items, [])
                 self.assertEqual(plan.kept.get("job not quiet"), 1)
                 shutil.rmtree(j)
+
+    def test_a_done_job_whose_last_turn_delivered_no_result_outlasts_the_pressure_floor(self):
+        """Issue #451: on 2026-10-27 7e5fe6ab's last turn was a plain checkpoint
+        ("Noted the peer's reported merge. No usage-accounting edits or CI
+        watches are active, so no reconciliation is needed now."), the 6h
+        critical floor took 33.1 GB from its tmp/, and the operator resumed it
+        20 minutes later. A done turn with no result line is one a job comes
+        back from (153 of 153 on 2026-11-05), so pressure does not shorten its
+        floor; past the normal one it goes as before."""
+        reason = "job's last turn delivered no result: kept to the 72h floor"
+        cases = {
+            "plain checkpoint": [("done", "Noted the peer's reported merge. No usage-accounting edits "
+                                          "or CI watches are active, so no reconciliation is needed now.")],
+            "asks the operator": [("done", "Two ways to free it.\n\nneeds input: which copy to keep")],
+            "a Result list item is prose": [("done", "- **Result:** the build is green")],
+            "only empty done entries": [("working", ""), ("done", ""), ("done", "")],
+            "delivered, then a checkpoint": [("done", "result: shipped"), ("working", ""),
+                                             ("done", "Still building; the run continues.")],
+            "torn last line": "torn",
+            "no timeline": None,
+        }
+        for n, (name, entries) in enumerate(cases.items()):
+            with self.subTest(name):
+                j = self._job(f"aw{n:06d}")
+                timeline = os.path.join(j, "timeline.jsonl")
+                try:
+                    if entries is None:
+                        os.unlink(timeline)
+                    elif entries == "torn":
+                        with open(timeline, "a") as fh:
+                            fh.write('{"at": "2026-11-05T21:01:00.000Z", "state": "done", "te')
+                    else:
+                        self._timeline(j, *entries)
+                    plan = self._plan(ahead=7 * HOUR, job_floor_h=6)
+                    self.assertEqual(plan.items, [])
+                    self.assertEqual(plan.kept.get(reason), 1, plan.kept)
+                    plan = self._plan(ahead=80 * HOUR, job_floor_h=6)
+                    self.assertEqual(len(plan.items), 1, plan.kept)
+                    self.assertIn("quiet past the 72h floor (its last turn delivered no result)",
+                                  plan.items[0]["why"])
+                finally:
+                    shutil.rmtree(j)
+
+    def test_a_done_job_whose_last_turn_delivered_keeps_the_pressure_floor(self):
+        """The newest done entry with text decides; the empty ones a turn also
+        writes after it do not."""
+        for n, text in enumerate((self.DELIVERED, "`result: nothing left to remove`",
+                                  "The image is gone.\n\nfailed: the copy source no longer exists")):
+            with self.subTest(text=text):
+                j = self._job(f"dl{n:06d}")
+                try:
+                    self._timeline(j, ("working", ""), ("done", text), ("done", ""), ("done", ""))
+                    plan = self._plan(ahead=7 * HOUR, job_floor_h=6)
+                    self.assertEqual(len(plan.items), 1, plan.kept)
+                    self.assertIn("quiet past the 6h floor; tmp/ itself is kept", plan.items[0]["why"])
+                finally:
+                    shutil.rmtree(j)
+
+    def test_failed_and_stopped_jobs_keep_the_pressure_floor(self):
+        for state in ("failed", "stopped"):
+            with self.subTest(state=state):
+                j = self._job(f"{state}-0001", state=state)
+                try:
+                    plan = self._plan(ahead=7 * HOUR, job_floor_h=6)
+                    self.assertEqual(len(plan.items), 1, plan.kept)
+                finally:
+                    shutil.rmtree(j)
+
+    def test_only_the_timelines_tail_is_read(self):
+        j = self._job()
+        self._timeline(j, *[("working", "x" * 3000)] * 40, ("done", "result: shipped"))
+        self.assertGreater(os.path.getsize(os.path.join(j, "timeline.jsonl")), R.TIMELINE_TAIL_BYTES)
+        self.assertTrue(R._last_turn_delivered(j))
+        self._timeline(j, ("done", "result: shipped"), *[("done", "")] * 2000)
+        self.assertFalse(R._last_turn_delivered(j),
+                         "a result line before the tail is not seen, so the job waits: the safe way")
+
+    def test_a_timeline_line_added_after_the_plan_aborts_the_removal(self):
+        """A resumed turn appends to timeline.jsonl; that alone must stop it."""
+        j = self._job()
+        plan = self._plan(ahead=7 * HOUR, job_floor_h=6)
+        self.assertEqual(len(plan.items), 1, plan.kept)
+        with open(os.path.join(j, "timeline.jsonl"), "a") as fh:
+            fh.write(json.dumps({"at": "2026-11-05T21:05:00.000Z", "state": "working",
+                                 "detail": "", "text": ""}) + "\n")
+        removed, failed, aborted = R.apply_scratch(plan.items, lambda: _NO_HOLDERS)
+        self.assertEqual((removed, failed), ([], []))
+        self.assertEqual(aborted, [f"{os.path.join(j, 'tmp')}: the job's state changed since the plan"])
+        self.assertTrue(os.path.isfile(os.path.join(j, "tmp", "capacity-bridge-tests.log")))
 
     def test_a_job_a_residue_rule_already_removed_is_skipped_quietly(self):
         """claude-job-dir (30d) runs first in the same --apply; its job must not

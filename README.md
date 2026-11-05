@@ -97,11 +97,13 @@ This repository is the `hov` marketplace, and `./setup` adds it. To add it by ha
 
 ## More that `/hov-setup` offers
 
-These are not part of this repository. `/hov-setup` offers each one with its publisher, cost and what it needs, installs only the ones you pick, and gets each working in the same session. Plugins come from their publishers' own marketplaces, which it adds after a yes. Programs go into `~/.local/bin` without sudo: `gh`, `uv`, `cass` and `jsm` are release binaries checked against a SHA-256 written in `install-release.sh`, and `synthetic-panel` and `ast-grep` install through uv.
+These are not part of this repository. `/hov-setup` offers each one with its publisher, cost and what it needs, installs only the ones you pick, and gets each working in the same session. Plugins come from their publishers' own marketplaces, which it adds after a yes. Programs go into `~/.local/bin` without sudo: `gh`, `uv`, `cass` and `jsm` are release binaries checked against a SHA-256 written in `install-release.sh`, `wacli` has its own installer that checks its one release the same way, and `synthetic-panel` and `ast-grep` install through uv. `vercel` installs with `pnpm add -g vercel` into pnpm's global folder, which `/hov-setup` offers to point at `~/.local/bin`.
 
 - `last30days` (Matt Van Horn): a plugin that researches what people said about a topic in the last 30 days on Reddit, X, YouTube, Hacker News, GitHub and the web. Most sources are free; TikTok and Instagram go through ScrapeCreators, free for 10,000 calls and then paid. It needs Python 3.12 or later, which `/hov-setup` can add with uv.
 - `synthetic-panel` (StartupBros): ranks headlines, offers or product ideas by how a simulated customer panel reacts, scored locally with no account. On Linux it installs the CPU build of PyTorch (about 1.3 GB, against about 5.6 GB for the default CUDA build), and its skill is fetched at a fixed commit.
+- `wacli` (OpenClaw): free, open source WhatsApp message reads and search through a linked device, with a local message copy. Linux on Intel or AMD only; not made or approved by WhatsApp or Meta.
 - `gh` (GitHub): the GitHub CLI, which token-eater and pro-gate need. The login runs in the browser through `gh auth login --web`.
+- `vercel` (Vercel): Vercel's free program for projects, deployments, logs and settings, and deploying when asked. Installs through pnpm (about 60 MB download, 400 MB on disk), and you sign in through your browser.
 - `ast-grep` (Herrington Darkholme): structural code search and rewrite. Once it is installed and on PATH, `rules/hov-stack-tools.md` tells agents to prefer it over line-based grep.
 - `compound-engineering` (Every): Every's plan, build, review and learn loop, which token-eater's reviews use. MIT.
 - `codex` (OpenAI): OpenAI's plugin for handing tasks and reviews to Codex. It needs a ChatGPT plan with Codex or OpenAI credits, and its stop-time review gate stays off unless you turn it on.
