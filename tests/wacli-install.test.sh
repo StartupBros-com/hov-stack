@@ -4,7 +4,7 @@
 set -uo pipefail
 
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-INSTALLER=$REPO/scripts/wacli-install.sh
+INSTALLER=$REPO/plugins/hov-stack/skills/hov-setup/scripts/wacli-install.sh
 TMP=$(mktemp -d /tmp/wacli-install-test.XXXXXX) || exit 1
 trap 'rm -rf "$TMP"' EXIT
 
@@ -422,6 +422,17 @@ out=$(PATH="$TMP/bin:/usr/bin:/bin" CURL_SHOULD_FAIL=1 WACLI_INSTALL_TEST_MODE=1
   WACLI_INSTALL_TEST_ROOT=/ WACLI_INSTALL_TEST_PROC_ROOT="$TMP/case-first/proc" \
   "$INSTALLER" install 2>&1); status=$?
 if [ "$status" -ne 0 ] && [[ $out == *'test root must stay below /tmp'* ]]; then ok; else bad "test mode accepted a persistent destination: $out"; fi
+
+# 9. The installer lives in the hov-setup skill so /hov-setup can run it from a plugin install.
+# scripts/wacli-install.sh stays as a relative link to it: tool-smoke.sh and other callers reach it
+# as ~/.claude/scripts/wacli-install.sh, and ~/.claude/scripts links the checkout's scripts/.
+OLD=$REPO/scripts/wacli-install.sh
+if [ -L "$OLD" ] && [ "$(readlink "$OLD")" = ../plugins/hov-stack/skills/hov-setup/scripts/wacli-install.sh ] \
+  && [ "$(realpath "$OLD")" = "$(realpath "$INSTALLER")" ] && [ -x "$OLD" ]; then
+  ok
+else
+  bad "scripts/wacli-install.sh is not a relative link to the hov-setup copy: $(ls -l "$OLD" 2>&1)"
+fi
 
 if [ "$failures" -eq 0 ]; then
   printf 'ok — wacli installer: %d assertions passed\n' "$pass"
