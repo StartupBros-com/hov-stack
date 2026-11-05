@@ -31,7 +31,7 @@ set -uo pipefail
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 WRAP="$REPO/bin/vastai"
 VSSH="$REPO/bin/vast-ssh"
-TMP=$(mktemp -d /tmp/vastai-test.XXXXXX)
+TMP=$(mktemp -d /tmp/vastai-test.XXXXXX) || exit 1
 trap 'rm -rf "$TMP"' EXIT
 unset VAST_API_KEY VASTAI_VENV VAST_SSH_KEY VASTAI_BWS_TIMEOUT_SECONDS VAST_URL XDG_CONFIG_HOME VASTAI_NO_UPDATE_CHECK
 
