@@ -5,8 +5,8 @@
 # is no venv to rot.
 #
 # Deploy mechanism: this wrapper is versioned at bin/exa-cli
-# and symlinked to ~/.local/bin/exa-cli by install.sh (lib/manifest.sh).
-# sync.sh symlinks the WHOLE bin directory to ~/.claude/bin (a
+# and symlinked to ~/.local/bin/exa-cli by ./setup (lib/manifest.sh's DATA_CLIS).
+# ./setup symlinks the WHOLE bin directory to ~/.claude/bin (a
 # directory symlink, not a per-file copy), so exa.py is always this wrapper's
 # sibling: ~/.claude/bin/exa.py after deploy, or bin/exa.py in a
 # worktree before it. Resolving the sibling via our own real path -- instead

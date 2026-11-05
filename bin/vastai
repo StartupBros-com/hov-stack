@@ -5,7 +5,7 @@
 # The vendor binary itself stays off PATH; this wrapper owns the name.
 #
 # Deploy mechanism: versioned at bin/vastai and symlinked to
-# ~/.local/bin/vastai by install.sh (lib/manifest.sh). ~/.claude/bin is a
+# ~/.local/bin/vastai by ./setup (lib/manifest.sh's DATA_CLIS). ~/.claude/bin is a
 # directory symlink, so vastai_wrap.py is always this wrapper's sibling.
 #
 # `vastai --where` prints which credential source resolved. It never prints the key.

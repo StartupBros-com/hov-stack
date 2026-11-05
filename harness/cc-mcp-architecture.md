@@ -83,7 +83,7 @@ Dogfooding on 2026-07-15 verified all three Exa tools and Firecrawl scrape throu
 
 `~/.claude.json` is machine-local runtime state and is deliberately excluded from `sync.sh`; it can contain credential-bearing URLs, OAuth metadata, and project approvals. Never copy that file or provider credentials into tracked dotfiles. Tracked documentation may record server names, placement rules, tool allowlists, and redacted reconstruction commands only.
 
-Recreate the providers on a new machine after obtaining the keys from the external credential source. Exa is not part of this recovery: `exa-cli` arrives through `install.sh`'s `DOTFILES_LINKS` manifest, which symlinks `bin/exa-cli` into `~/.local/bin/` — no MCP registration step — and `EXA_API_KEY` resolves through the CLI's own credential chain (env, then Bitwarden Secrets Manager, then `~/.secrets`).
+Recreate the providers on a new machine after obtaining the keys from the external credential source. Exa is not part of this recovery: `exa-cli` arrives through `./setup`, which symlinks `bin/exa-cli` into `~/.local/bin/` (it is in `lib/manifest.sh`'s `DATA_CLIS`) — no MCP registration step — and `EXA_API_KEY` resolves through the CLI's own credential chain (env, then Bitwarden Secrets Manager, then `~/.secrets`).
 
 ```bash
 claude mcp add --scope user --transport http firecrawl \
