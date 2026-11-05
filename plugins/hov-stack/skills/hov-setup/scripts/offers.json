@@ -51,6 +51,17 @@
       }
     },
     {
+      "name": "wacli",
+      "kind": "tool",
+      "group": "everyday",
+      "publisher": "OpenClaw",
+      "what": "lets Claude read and search your WhatsApp messages",
+      "bin": "wacli",
+      "install": {
+        "linux-x86_64": "bash \"<skill-dir>/scripts/wacli-install.sh\""
+      }
+    },
+    {
       "name": "gh",
       "kind": "tool",
       "group": "code",
@@ -61,6 +72,19 @@
         "darwin-arm64": "bash \"<skill-dir>/scripts/install-release.sh\" gh",
         "linux-x86_64": "bash \"<skill-dir>/scripts/install-release.sh\" gh",
         "linux-aarch64": "bash \"<skill-dir>/scripts/install-release.sh\" gh"
+      }
+    },
+    {
+      "name": "vercel",
+      "kind": "tool",
+      "group": "code",
+      "publisher": "Vercel",
+      "what": "lets Claude check your Vercel projects and deploy when you ask",
+      "bin": "vercel",
+      "install": {
+        "darwin-arm64": "pnpm add -g vercel",
+        "linux-x86_64": "pnpm add -g vercel",
+        "linux-aarch64": "pnpm add -g vercel"
       }
     },
     {

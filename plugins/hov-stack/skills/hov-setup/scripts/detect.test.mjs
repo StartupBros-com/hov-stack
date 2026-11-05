@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import {
-  chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync,
+  chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -357,7 +357,7 @@ test("SKILL.md states the credential rule before Step 1, naming where a credenti
 
 test("SKILL.md puts the credential instruction before the first step of each plugin that needs one", () => {
   const all = sections(skillText);
-  for (const name of ["wsl-cdp", "token-eater", "pro-gate", "gh", "codex", "last30days", "jeffreys-skills"]) {
+  for (const name of ["wsl-cdp", "token-eater", "pro-gate", "gh", "wacli", "vercel", "codex", "last30days", "jeffreys-skills"]) {
     const body = all.get(name);
     assert.ok(body, `${name} has no section`);
     const cred = body.indexOf("**Credentials:**");
@@ -532,8 +532,12 @@ test("an unsupported platform makes every tool, paid-skills row and helper not a
     assert.equal(rep.platform, "darwin-x86_64");
     const want = `only offered on ${PLATFORMS.join(", ")}`;
     const programs = rep.plugins.filter((x) => x.kind === "tool" || x.kind === "paid-skills");
-    assert.equal(programs.length, 5);
-    for (const p of programs) assert.deepEqual([p.name, p.state, p.next, p.path], [p.name, "not-applicable", want, null]);
+    assert.equal(programs.length, 7);
+    for (const p of programs) {
+      const offer = offersJson.offers.find((o) => o.name === p.name);
+      const next = `only offered on ${Object.keys(offer.install).join(", ")}`;
+      assert.deepEqual([p.name, p.state, p.next, p.path], [p.name, "not-applicable", next, null]);
+    }
     assert.deepEqual(rep.helpers.map((h) => [h.state, h.next]), [["not-applicable", want]]);
     assert.equal(row(rep, "sign-it").state, "absent");
     assert.equal(row(rep, CE).state, "absent");
@@ -555,6 +559,39 @@ test("it runs nothing but the two claude list commands, never a tool it finds", 
     ]);
     assert.deepEqual(readdirSync(dir).filter((f) => f.startsWith("ran-")), []);
   });
+});
+
+test("wacli is Linux x86_64 only and vercel uses pnpm on all supported platforms", () => {
+  withFake({}, (dir) => {
+    for (const platform of PLATFORMS) {
+      const rep = report(dir, { HOV_SETUP_PLATFORM: platform });
+      const wacli = row(rep, "wacli");
+      assert.deepEqual([wacli.state, wacli.next], platform === "linux-x86_64"
+        ? ["absent", `bash "${skillDir}/scripts/wacli-install.sh"`]
+        : ["not-applicable", "only offered on linux-x86_64"]);
+      assert.deepEqual([row(rep, "vercel").state, row(rep, "vercel").next], ["absent", "pnpm add -g vercel"]);
+    }
+  });
+});
+
+test("every script named by an install line exists and is executable or run through bash", () => {
+  for (const offer of [...offersJson.offers, ...offersJson.helpers]) {
+    for (const line of Object.values(offer.install ?? {})) {
+      for (const match of line.matchAll(/<skill-dir>\/scripts\/([^"\s]+)/g)) {
+        const path = join(skillDir, "scripts", match[1]);
+        assert.ok(existsSync(path), path);
+        assert.ok(statSync(path).isFile(), path);
+        assert.ok(statSync(path).mode & 0o111 || line.includes(`bash "<skill-dir>/scripts/${match[1]}"`), line);
+      }
+    }
+  }
+});
+
+test("WhatsApp links in a separate terminal and Vercel checks close stdin", () => {
+  const all = sections(skillText);
+  assert.doesNotMatch(all.get("wacli"), /^\s*!\s*wacli\b/m);
+  assert.doesNotMatch(all.get("wacli"), /--phone/);
+  assert.match(all.get("vercel"), /Check:\s*```bash\nvercel --version\nvercel whoami < \/dev\/null\n```/);
 });
 
 test("offers.json has a valid shape", () => {

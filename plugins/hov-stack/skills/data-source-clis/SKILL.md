@@ -192,6 +192,8 @@ retry. Details:
 
 ## Vercel — `vercel`, including `vercel api`
 
+`./setup` does not install vercel; `/hov-setup` offers it.
+
 The whole CLI is allowed, and `vercel api /path` reads the REST API. These
 prompt, and a headless agent cannot answer a prompt, so plan around them:
 
@@ -241,6 +243,8 @@ Put `--json` and other global flags after the subcommand — that's the prompt-f
 Verbs: fetch, extract, shot, act, agent, interact, search, map, raw. Two or more URLs through the vendor CLI write into the working directory; the wrapper fans out. Verbs, flags, and budgets: `harness/data-source-clis.md`. The Firecrawl MCP is retired; there is no other path.
 
 ## WhatsApp — direct `wacli` with the canonical store
+
+`./setup` does not install wacli; `/hov-setup` offers it.
 
 Agents should spell reads as `wacli --store <store> --read-only --json ...`, with `<store>` written out as the literal absolute path of the canonical store (`~/.local/state/wacli` with the home directory expanded, since the guard denies shell-expanded values and treats `~` as one); install seeds that path into `WACLI_STORE_DIR`, which the guard reads as canonical when absolute, while the guard also recognizes a caller-supplied truthy `WACLI_READONLY` (sync does not set it globally). Explicit flags keep the effect reviewable. List/search calls need a concrete `--limit` from 1–200. Never inspect/copy `session.db`, export the whole archive into context, or automate bulk/broadcast/auto-reply messaging. Shell-expanded values in recognized literal-`wacli` forms are denied; literal writes are hook-ask-gated.
 
