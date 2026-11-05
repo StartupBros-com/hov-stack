@@ -50,7 +50,8 @@ so agents never need that file, and it closes the headless traps the
 Everything else is passed to the vendor binary unchanged:
   ~/.local/share/vastai-cli/venv/bin/vastai   (override: VASTAI_VENV)
 
-Recreate the venv (disposable, not versioned):
+Recreate the venv (disposable, not versioned) with /hov-setup, or
+`bash plugins/hov-stack/skills/hov-setup/scripts/venv-install.sh vastai` from the checkout, or by hand:
   uv venv ~/.local/share/vastai-cli/venv --python 3.12
   uv pip install --python ~/.local/share/vastai-cli/venv/bin/python vastai==1.8.3
 
@@ -92,7 +93,11 @@ LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
 NO_NETWORK_URL = "http://127.0.0.1:9"
 API_ERROR_TEXT = re.compile(r"^Failed with error \d+")
 
+# The installer's pin must equal PINNED_VERSION (tests/venv-install.test.sh checks it).
+INSTALLER = Path(__file__).resolve().parent.parent / "plugins/hov-stack/skills/hov-setup/scripts/venv-install.sh"
 RECREATE = (
+    "  bash " + str(INSTALLER).replace("{", "{{").replace("}", "}}") + " vastai\n"
+    "or by hand:\n"
     "  uv venv {venv} --python 3.12\n"
     "  uv pip install --python {venv}/bin/python vastai==" + PINNED_VERSION
 )
