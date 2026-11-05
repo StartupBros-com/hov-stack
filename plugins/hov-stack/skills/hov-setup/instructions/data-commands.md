@@ -1,0 +1,1 @@
+- Data sources: use these CLIs before an MCP server, and load the `data-source-clis` skill before the first call: {commands}. Their sends, deletes and money-moving or unlisted writes need prior human authorization, which a `--confirm-*` flag alone is not. Never enumerate credential stores to find a key.
