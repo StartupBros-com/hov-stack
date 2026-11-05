@@ -15,7 +15,8 @@ Legs, each reported by name:
   a phrase did not account for, so a count is either recomputed here or gone.
 - paths: every backticked repository path in those two sections exists, and so does
   every backticked file name (a dotfile, or a name with an extension) at the top level
-  or under the directory its bullet names.
+  or under the directory its bullet names. The overlay file names OVERLAY_FILES lists
+  live outside the tree and pass.
 - hooks: every hook the hooks bullet names runs before a tool call.
 - repositories: the only repository under the author's two GitHub owners, in any case,
   that the README, CONTRIBUTING.md and SECURITY.md name is StartupBros-com/hov-stack.
@@ -65,6 +66,10 @@ INSTALL_TIME_PATHS = {
 }
 # File names those sections give for the private overlay, which is outside the tree.
 OVERLAY_FILES = {
+    "ga4-properties.json": "an overlay file; config/ga4-properties.example.json shows its shape",
+    "posthog-projects.json": "an overlay file; config/posthog-projects.example.json shows its shape",
+    "resend-bws-bindings.json": "an overlay file; config/resend-bws-bindings.example.json shows its shape",
+    "stripe-accounts.json": "an overlay file; config/stripe-accounts.example.json shows its shape",
     "supabase-projects.json": "an overlay file; config/supabase-projects.example.json shows its shape",
     "migration-targets.json": "an overlay file; config/migration-targets.example.json shows its shape",
     "repo-routes.json": "an overlay file that replaces the tracked placeholder",
