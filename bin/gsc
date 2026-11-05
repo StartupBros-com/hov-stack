@@ -6,7 +6,13 @@
 #
 # The implementation, gsc.py, sits next to this wrapper in the harness's
 # bin (linked as ~/.claude/bin by ./setup), so it survives a machine
-# rebuild. Only the venv is local, and it is disposable; recreate with:
+# rebuild. Only the venv is local, and it is disposable; /hov-setup offers
+# to build it, or run (from the checkout)
+#
+#   bash plugins/hov-stack/skills/hov-setup/scripts/venv-install.sh gsc
+#
+# which installs the pinned google-api-python-client and google-auth into
+# ~/.local/share/gsc-cli/venv. By hand:
 #
 #   uv venv ~/.local/share/gsc-cli/venv --python 3.12
 #   uv pip install --python ~/.local/share/gsc-cli/venv/bin/python \
@@ -20,7 +26,8 @@ IMPL="${SELF%/*}/gsc.py"
 
 if [ ! -x "$VENV/bin/python" ]; then
   echo "gsc: venv missing at $VENV" >&2
-  echo "gsc: recreate it with the commands in the header of $0" >&2
+  echo "gsc: recreate it with: bash ${SELF%/*}/../plugins/hov-stack/skills/hov-setup/scripts/venv-install.sh gsc" >&2
+  echo "gsc: (or run /hov-setup; the by-hand commands are in the header of $SELF)" >&2
   exit 3
 fi
 

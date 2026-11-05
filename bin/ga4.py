@@ -189,7 +189,9 @@ def access_token(path, timeout, scopes=SCOPES):
         from google.oauth2 import service_account
     except ImportError:
         raise CliError(
-            "google-auth is missing; install with: uv pip install --python "
+            "google-auth is missing; build its venv with: bash "
+            + os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "plugins/hov-stack/skills/hov-setup/scripts/venv-install.sh")
+            + " gsc (or run /hov-setup); by hand: uv pip install --python "
             "~/.local/share/gsc-cli/venv/bin/python google-auth "
             "(create that venv with uv venv first)"
         ) from None

@@ -1197,11 +1197,14 @@ back into the checkout the same way. `resend-cli` additionally needs the
 pinned vendor prefix from `scripts/resend-cli-install.sh install`
 (see "Resend" above); the wrapper's `--where` says whether it is converged.
 
-`gsc` needs a venv (local and disposable — recreate per the wrapper header).
+`gsc` needs a venv (local and disposable): `/hov-setup` offers to build it, or run
+`bash plugins/hov-stack/skills/hov-setup/scripts/venv-install.sh gsc`, which installs the pinned
+google-api-python-client and google-auth (`ga4` uses the same venv).
 `dfs`, `exa-cli`, and `firecrawl-cli` are stdlib-only (HTTP Basic, an `x-api-key`
 header, and a subprocess of the vendor CLI respectively), so none has a venv to rot.
 
-`vastai` needs a venv as well: `uv venv ~/.local/share/vastai-cli/venv --python 3.12`
+`vastai` needs a venv as well: `/hov-setup` offers it, or `bash plugins/hov-stack/skills/hov-setup/scripts/venv-install.sh vastai`;
+by hand, `uv venv ~/.local/share/vastai-cli/venv --python 3.12`
 then `uv pip install --python ~/.local/share/vastai-cli/venv/bin/python vastai==1.8.3`
 (the wrapper prints both on exit 3; `VASTAI_VENV` relocates it). The vendor
 binary stays off PATH on purpose: only the wrapper's name is in the
