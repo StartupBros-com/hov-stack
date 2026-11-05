@@ -2409,7 +2409,7 @@ install() {
   reconcile_windows_auto_mode || return 1
   echo "  note: active Claude sessions cache settings and hooks; restart or cycle existing Auto sessions after install"
   # Stdlib-only, so a bare symlink is enough — no venv to create or rot (same
-  # reasoning as dfs; see CLAUDE.md "prefer a CLI over an MCP server").
+  # reasoning as dfs; see the data-source-clis skill, "prefer a CLI over an MCP server").
   if [ -d "$HOME/.local/bin" ]; then
     ln -sf "$HERE/bin/papercut.py" "$HOME/.local/bin/papercut" && echo "  linked bin/papercut"
   fi
