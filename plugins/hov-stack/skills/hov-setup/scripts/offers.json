@@ -1,5 +1,5 @@
 {
-  "about": "Everything /hov-setup offers, in walkthrough order. detect.mjs reads it to report what is installed, and scripts/check-readme-counts.py reads it to keep the README's plugin lists true. Each name has a section of the same name in SKILL.md, in this order. kind: plugin (on the hov marketplace), other-plugin (on another publisher's marketplace), tool (a program on PATH), paid-skills (a paid skill set and its manager program). helpers are programs an offer needs (named in its needs list) that are not offered on their own. In install, <skill-dir> is the directory holding SKILL.md and <uv> is the uv program the detector found.",
+  "about": "Everything /hov-setup offers, in walkthrough order. detect.mjs reads it to report what is installed, and scripts/check-readme-counts.py reads it to keep the README's plugin lists true. Each name has a section of the same name in SKILL.md, in this order. kind: plugin (on the hov marketplace), other-plugin (on another publisher's marketplace), tool (a program on PATH), paid-skills (a paid skill set and its manager program). helpers are programs an offer needs (named in its needs list) that are not offered on their own. In install, <skill-dir> is the directory holding SKILL.md and <uv> is the uv program the detector found. A tool with venv is one of hov-stack's own commands, which ./setup links into ~/.local/bin; it counts as installed only once file exists in the Python environment it runs from, whose folder is dir under the home directory, or the path in the variable env names when that is set.",
   "marketplace": "hov",
   "groups": [
     { "key": "everyday", "label": "Everyday work: documents, research and marketing" },
@@ -62,6 +62,36 @@
       }
     },
     {
+      "name": "gsc",
+      "kind": "tool",
+      "group": "everyday",
+      "publisher": "hov-stack",
+      "what": "lets Claude read your Google Search Console data: searches, clicks, positions, indexing and sitemaps",
+      "bin": "gsc",
+      "needs": ["uv"],
+      "venv": { "dir": ".local/share/gsc-cli/venv", "file": "bin/python" },
+      "install": {
+        "darwin-arm64": "bash \"<skill-dir>/scripts/venv-install.sh\" gsc install --uv \"<uv>\"",
+        "linux-x86_64": "bash \"<skill-dir>/scripts/venv-install.sh\" gsc install --uv \"<uv>\"",
+        "linux-aarch64": "bash \"<skill-dir>/scripts/venv-install.sh\" gsc install --uv \"<uv>\""
+      }
+    },
+    {
+      "name": "ga4",
+      "kind": "tool",
+      "group": "everyday",
+      "publisher": "hov-stack",
+      "what": "lets Claude read your Google Analytics 4 reports and property settings",
+      "bin": "ga4",
+      "needs": ["uv"],
+      "venv": { "dir": ".local/share/gsc-cli/venv", "file": "bin/python" },
+      "install": {
+        "darwin-arm64": "bash \"<skill-dir>/scripts/venv-install.sh\" gsc install --uv \"<uv>\"",
+        "linux-x86_64": "bash \"<skill-dir>/scripts/venv-install.sh\" gsc install --uv \"<uv>\"",
+        "linux-aarch64": "bash \"<skill-dir>/scripts/venv-install.sh\" gsc install --uv \"<uv>\""
+      }
+    },
+    {
       "name": "gh",
       "kind": "tool",
       "group": "code",
@@ -99,6 +129,21 @@
         "darwin-arm64": "<uv> tool install ast-grep-cli",
         "linux-x86_64": "<uv> tool install ast-grep-cli",
         "linux-aarch64": "<uv> tool install ast-grep-cli"
+      }
+    },
+    {
+      "name": "vastai",
+      "kind": "tool",
+      "group": "code",
+      "publisher": "hov-stack",
+      "what": "rents GPU computers on vast.ai by the hour for jobs that need one, runs work on them and shuts them down",
+      "bin": "vastai",
+      "needs": ["uv"],
+      "venv": { "dir": ".local/share/vastai-cli/venv", "env": "VASTAI_VENV", "file": "bin/vastai" },
+      "install": {
+        "darwin-arm64": "bash \"<skill-dir>/scripts/venv-install.sh\" vastai install --uv \"<uv>\"",
+        "linux-x86_64": "bash \"<skill-dir>/scripts/venv-install.sh\" vastai install --uv \"<uv>\"",
+        "linux-aarch64": "bash \"<skill-dir>/scripts/venv-install.sh\" vastai install --uv \"<uv>\""
       }
     },
     {
