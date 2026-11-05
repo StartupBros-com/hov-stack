@@ -447,6 +447,7 @@ version_of() { printf '%s\n' "$2" | awk -v p="$1" '$1 == p { print $2; exit }'; 
 # hov offers, the default plugins, the other-plugin offers) that is installed. Nothing else:
 # not the user's other marketplaces, not their other plugins.
 OFFERS_JSON=$HOV_STACK/plugins/hov-stack/skills/hov-setup/scripts/offers.json
+SETUP_DETECT=$HOV_STACK/plugins/hov-stack/skills/hov-setup/scripts/detect.mjs
 INSTALL_RELEASE=$HOV_STACK/plugins/hov-stack/skills/hov-setup/scripts/install-release.sh
 JS_UPDATE_PLAN='
 const fs = require("fs");
@@ -481,11 +482,10 @@ for (const p of ps) console.log("P " + p);'
 # `<uv> tool install ...`. One tab-separated line each: tool name (the last word, or for a git
 # offer the repository's name), git repository URL or -, tag or -, the line after `<uv> `.
 JS_UV_OFFERS='
-const fs = require("fs");
-const platform = process.env.HOV_SETUP_PLATFORM || (
-  process.platform === "darwin" && process.arch === "arm64" ? "darwin-arm64" :
-  process.platform === "linux" && process.arch === "x64" ? "linux-x86_64" :
-  process.platform === "linux" && process.arch === "arm64" ? "linux-aarch64" : process.platform + "-" + process.arch);
+import fs from "node:fs";
+import { pathToFileURL } from "node:url";
+const { platformName } = await import(pathToFileURL(process.argv[2]).href);
+const platform = platformName();
 const head = "<uv> tool install ";
 for (const o of JSON.parse(fs.readFileSync(process.argv[1], "utf8")).offers) {
   const line = o.install && o.install[platform];
@@ -591,7 +591,7 @@ update_uv_tools() {  # uv tool upgrade for the uv tools hov-stack offers that ar
   echo "hov-stack: upgrading the uv tools hov-stack offers that you have installed"
   listed=$("$uv" tool list 2>/dev/null < /dev/null) || listed=
   tdir=$("$uv" tool dir 2>/dev/null < /dev/null) || tdir=
-  if ! offered=$(node -e "$JS_UV_OFFERS" "$OFFERS_JSON"); then
+  if ! offered=$(node --input-type=module -e "$JS_UV_OFFERS" "$OFFERS_JSON" "$SETUP_DETECT"); then
     urow uvtools failed "could not read the uv tools offered in $OFFERS_JSON"
     return 0
   fi

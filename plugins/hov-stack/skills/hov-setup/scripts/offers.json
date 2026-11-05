@@ -14,6 +14,7 @@
       "bin": "uv",
       "install": {
         "darwin-arm64": "bash \"<skill-dir>/scripts/install-release.sh\" uv",
+        "darwin-x86_64": "bash \"<skill-dir>/scripts/install-release.sh\" uv",
         "linux-x86_64": "bash \"<skill-dir>/scripts/install-release.sh\" uv",
         "linux-aarch64": "bash \"<skill-dir>/scripts/install-release.sh\" uv"
       }
@@ -59,6 +60,7 @@
       "bin": "gh",
       "install": {
         "darwin-arm64": "bash \"<skill-dir>/scripts/install-release.sh\" gh",
+        "darwin-x86_64": "bash \"<skill-dir>/scripts/install-release.sh\" gh",
         "linux-x86_64": "bash \"<skill-dir>/scripts/install-release.sh\" gh",
         "linux-aarch64": "bash \"<skill-dir>/scripts/install-release.sh\" gh"
       }
@@ -73,6 +75,7 @@
       "needs": ["uv"],
       "install": {
         "darwin-arm64": "<uv> tool install ast-grep-cli",
+        "darwin-x86_64": "<uv> tool install ast-grep-cli",
         "linux-x86_64": "<uv> tool install ast-grep-cli",
         "linux-aarch64": "<uv> tool install ast-grep-cli"
       }
@@ -176,9 +179,11 @@
       "bin": "jsm",
       "install": {
         "darwin-arm64": "bash \"<skill-dir>/scripts/install-release.sh\" jsm",
+        "darwin-x86_64": "bash \"<skill-dir>/scripts/install-release.sh\" jsm",
         "linux-x86_64": "bash \"<skill-dir>/scripts/install-release.sh\" jsm",
         "linux-aarch64": "bash \"<skill-dir>/scripts/install-release.sh\" jsm"
       }
     }
   ]
 }
+
