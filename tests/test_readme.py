@@ -146,6 +146,12 @@ class PlantedFailures(unittest.TestCase):
         readme = self.changed("`sync.sh`", "`sink.sh`")
         self.assertNamed(problems({"README.md": readme}), "paths", "'sink.sh'", "at the top level")
 
+    def test_an_overlay_file_passes_only_when_listed(self):
+        # stripe-accounts.json lives in the overlay, outside the tree; OVERLAY_FILES lists it.
+        self.assertFalse([p for p in problems() if "stripe-accounts.json" in p])
+        readme = self.changed("`stripe-accounts.json`", "`stripe-account.json`")
+        self.assertNamed(problems({"README.md": readme}), "paths", "'stripe-account.json'", "at the top level")
+
     def test_a_dotfile_is_looked_up_under_its_bullets_directory(self):
         # .wslconfig is under windows/, not the top level; moved to a bullet with no directory it fails.
         line = next(line for line in README.splitlines() if line.startswith("- `install.sh`"))

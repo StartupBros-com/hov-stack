@@ -56,6 +56,10 @@ class StripeTests(unittest.TestCase):
         home = mock.patch.object(cli.Path, "home", return_value=self.home)
         home.start()
         self.addCleanup(home.stop)
+        # The host's account map, at its default location under the fixture home.
+        self.accounts_map = self.home / ".config/hov-stack/stripe-accounts.json"
+        self.accounts_map.parent.mkdir(parents=True)
+        self.accounts_map.write_text(json.dumps({"accounts": ["prbot", "startupbros"]}))
         sleep = mock.patch.object(cli.time, "sleep")
         sleep.start()
         self.addCleanup(sleep.stop)
@@ -174,7 +178,91 @@ class StripeTests(unittest.TestCase):
         text = out.getvalue()
         self.assertNotIn(PRBOT_KEY, text)
         self.assertNotIn(SB_KEY, text)
-        self.assertTrue(json.loads(text)["accounts"]["prbot"]["env:STRIPE_RK_PRBOT"])
+        result = json.loads(text)
+        self.assertTrue(result["accounts"]["prbot"]["env:STRIPE_RK_PRBOT"])
+        self.assertEqual(sorted(result["accounts"]), ["prbot", "startupbros"])
+        self.assertEqual(result["accounts_file"], str(self.accounts_map))
+
+    def test_where_without_a_map_lists_no_accounts(self):
+        self.accounts_map.unlink()
+        code, out = self.main("--where")
+        self.assertEqual((code, out["accounts"], out["accounts_file"]), (0, {}, str(self.accounts_map)))
+
+    # Account map
+    def test_accounts_come_from_the_overlay_map_in_lookup_order(self):
+        self.assertEqual(cli.accounts_file(), self.accounts_map)
+        self.assertEqual(cli.accounts(), {"prbot": "STRIPE_RK_PRBOT", "startupbros": "STRIPE_RK_STARTUPBROS"})
+        explicit = self.home / "explicit.json"
+        for env, value, path, account in (
+                ("XDG_CONFIG_HOME", self.home / "xdg", self.home / "xdg/hov-stack/stripe-accounts.json", "xdg"),
+                ("HOV_STACK_OVERLAY", self.home / "overlay", self.home / "overlay/stripe-accounts.json", "overlay"),
+                ("STRIPE_API_ACCOUNTS_FILE", explicit, explicit, "explicit")):
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps({"accounts": [account]}))
+            os.environ[env] = str(value)
+            self.assertEqual(cli.accounts_file(), path, env)
+            self.assertEqual(cli.accounts(), {account: "STRIPE_RK_" + account.upper()}, env)
+        # A selected but absent map is empty; it never falls through to a lower-priority one.
+        explicit.unlink()
+        self.assertEqual(cli.accounts(), {})
+
+    def test_missing_or_empty_map_refuses_every_account_before_credentials(self):
+        opener = self.opener([])
+        self.keys()
+        for content in ('{"accounts": []}', None):
+            if content is None:
+                self.accounts_map.unlink()
+            else:
+                self.accounts_map.write_text(content)
+            with mock.patch.object(cli, "credentials") as creds:
+                code, out = self.main("prbot", "GET", "/v1/account")
+            message = out["error"]["message"]
+            self.assertEqual((code, out["error"]["code"]), (2, "usage"), content)
+            for part in (str(self.accounts_map), "STRIPE_API_ACCOUNTS_FILE", "config/stripe-accounts.example.json"):
+                self.assertIn(part, message, content)
+            creds.assert_not_called()
+        opener.open.assert_not_called()
+
+    def test_unlisted_account_is_refused_naming_the_map(self):
+        # A key in the environment does not make an account: only the map does.
+        self.keys()
+        os.environ["STRIPE_RK_ACME"] = PRBOT_KEY
+        opener = self.opener([])
+        with mock.patch.object(cli, "credentials") as creds:
+            code, out = self.main("acme", "GET", "/v1/account")
+        message = out["error"]["message"]
+        self.assertEqual((code, out["ok"], out["error"]["code"]), (2, False, "usage"))
+        self.assertIn("'acme' is not a configured account", message)
+        self.assertIn(str(self.accounts_map) + " lists prbot, startupbros", message)
+        self.assertEqual(self.stderr, "")
+        creds.assert_not_called()
+        opener.open.assert_not_called()
+
+    def test_a_key_typed_as_the_account_is_not_echoed(self):
+        opener = self.opener([])
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = cli.main([PRBOT_KEY, "GET", "/v1/account"])
+        self.assertEqual((code, json.loads(out.getvalue())["error"]["code"]), (2, "usage"))
+        self.assertNotIn(PRBOT_KEY, out.getvalue())
+        self.assertIn("that name is not a configured account", out.getvalue())
+        opener.open.assert_not_called()
+
+    def test_malformed_maps_are_usage_errors_naming_the_file(self):
+        bad_maps = (b"{nope", b"[]", b"\xff", b"{}", b'{"accounts": "prbot"}', b'{"accounts": [1]}',
+                    b'{"accounts": ["Prbot"]}', b'{"accounts": ["acme-web"]}', b'{"accounts": ["1acme"]}',
+                    b'{"accounts": [""]}', b'{"accounts": ["' + b"a" * 33 + b'"]}',
+                    b'{"accounts": ["prbot", "prbot"]}', b'{"accounts": ["prbot"], "extra": 1}')
+        for bad in bad_maps:
+            self.accounts_map.write_bytes(bad)
+            for args in (("prbot", "GET", "/v1/account"), ("--where",)):
+                with mock.patch.object(cli, "credentials") as creds:
+                    code, out = self.main(*args)
+                self.assertEqual((code, out["error"]["code"]), (2, "usage"), (bad, args))
+                self.assertIn(str(self.accounts_map), out["error"]["message"], (bad, args))
+                creds.assert_not_called()
+        self.accounts_map.write_text('{"accounts": ["' + "a" * 32 + '", "a_1"]}')
+        self.assertEqual(sorted(cli.accounts()), ["a_1", "a" * 32])
 
     # 3. Encoding and idempotency
     def test_v1_post_is_form_encoded_with_a_generated_idempotency_key(self):
@@ -322,7 +410,8 @@ class StripeTests(unittest.TestCase):
     def test_parse_failures_are_json_usage_errors(self):
         # Collectors parse stdout; argparse's free-text exit would give them nothing.
         opener = self.opener([])
-        for args in (["acme", "GET", "/v1/account"], ["prbot", "PUT", "/v1/account"],
+        # An unknown account is refused by the account map; see test_unlisted_account_is_refused_naming_the_map.
+        for args in (["prbot", "PUT", "/v1/account"],
                      ["prbot", "POST", "/v1/customers", "-d", "novalue"],
                      ["prbot", "GET", "/v1/account", "--max-pages", "0"],
                      ["prbot", "GET", "/v1/account", "-d", "q=" + PRBOT_KEY, "--bogus"]):
@@ -335,9 +424,11 @@ class StripeTests(unittest.TestCase):
         opener.open.assert_not_called()
 
     def test_help_and_version_still_print_text_and_exit_zero(self):
+        # Neither reads the account map.
+        no_reads = mock.patch.object(cli.Path, "read_text", side_effect=AssertionError("account map read"))
         for flag, expected in (("--help", "usage: stripe-api"), ("--version", "stripe-api " + cli.VERSION)):
             out = io.StringIO()
-            with contextlib.redirect_stdout(out), self.assertRaises(SystemExit) as caught:
+            with contextlib.redirect_stdout(out), no_reads, self.assertRaises(SystemExit) as caught:
                 cli.main([flag])
             self.assertEqual(caught.exception.code, 0, flag)
             self.assertIn(expected, out.getvalue(), flag)

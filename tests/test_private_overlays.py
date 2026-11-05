@@ -36,6 +36,7 @@ class PrivateOverlayTests(unittest.TestCase):
         self.gsc = module("gsc")
         self.posthog = module("posthog_api")
         self.resend = module("resend_cli")
+        self.stripe = module("stripe_api")
         self.maps = [
             (
                 self.ga4,
@@ -68,6 +69,14 @@ class PrivateOverlayTests(unittest.TestCase):
                         }
                     },
                 },
+            ),
+            (
+                self.stripe,
+                "STRIPE_API_ACCOUNTS_FILE",
+                "stripe-accounts.json",
+                self.stripe.accounts_file,
+                self.stripe.accounts,
+                {"accounts": ["acme"]},
             ),
         ]
 
@@ -177,7 +186,7 @@ class PrivateOverlayTests(unittest.TestCase):
         with patch.object(
             Path, "read_text", side_effect=AssertionError("no file reads")
         ):
-            for cli in (self.ga4, self.posthog, self.resend):
+            for cli in (self.ga4, self.posthog, self.resend, self.stripe):
                 for argv in (["--help"], ["--version"]):
                     with self.subTest(tool=cli.__name__, argv=argv):
                         try:
