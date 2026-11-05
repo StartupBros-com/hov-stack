@@ -357,9 +357,15 @@ def human(n: int) -> str:
 #                its session is not in the live registry, and it has been
 #                quiet for the floor. "done" is per-turn — 2b5a4195 went done
 #                at 04:30Z and was resumed at 05:46Z on 2026-10-25, and seven
-#                done jobs sat waiting on the operator that day — so state.json
-#                and the registry are read again right before removal, and
-#                tmp/ itself stays for a resumed job to write into.
+#                done jobs sat waiting on the operator that day — so state.json,
+#                the timeline and the registry are read again right before
+#                removal, and tmp/ itself stays for a resumed job to write into.
+#                A done job whose last turn delivered no result (no `result:`
+#                or `failed:` line, DELIVERED_LINE) is mid-task: pressure never
+#                shortens its floor below the normal one (issue #451: on
+#                2026-10-27 the 6h critical floor took 33.1 GB from 7e5fe6ab,
+#                whose last turn was a plain checkpoint, 20 minutes before the
+#                operator resumed it).
 #   tmp-scratch  a direct child of /tmp or /tmp/claude-<uid> (Claude Code's
 #                TMPDIR) that this user owns, nothing holds, and whose whole
 #                tree has been write-idle for the floor. Claude Code's own
@@ -422,6 +428,11 @@ DAEMON_NAMES = ("claude-{uid}", "cc-daemon-{uid}", "tmux-{uid}",
 
 # Most severe first: (level, below this many GB free on /, job floor h, tmp floor h).
 # The job floor never drops under 6h: the 76-minute resume above, with margin.
+# Remeasured 2026-11-05 over the 46 job timelines on this host: from a done turn
+# to the next one, p50 0.01h, p99 2h, max 14h; 5 of 1,000 came after more than
+# 6h (4 of them after a delivered turn), none after 24h. Those are jobs whose
+# dirs survived, so 7e5fe6ab's 7h gap is not among them. The floor applies
+# only to jobs whose last turn delivered (see DELIVERED_LINE).
 # /tmp never drops under 24h: 6h instead of 24h measured only ~14 GiB more du on
 # 2026-10-25, and would take scratch a session left that morning.
 PRESSURE_LEVELS = (
@@ -489,6 +500,21 @@ SHOW_SCRATCH_ITEMS = 20
 UNPARSED_ENTRY_STALE_S = 3 * 24 * HOUR
 
 SETTLED_STATES = frozenset({"done", "failed", "stopped"})
+
+# A background job's turn that delivers ends on a line of its own reading
+# `result:` (or `failed:`), the harness's completion convention; a turn that
+# ends without one is a checkpoint and the job will be resumed. Measured
+# 2026-11-05 over this host's 46 job timelines, runs of one state collapsed: a
+# done run whose text has no such line was followed by more work 153 of 153
+# times; one with it, 843 of 864. Line starts seen: `result:` 966, `` `result:``
+# 9, `failed:` 1, `**Failed:` 1, and one `- **Result:` list item, which is
+# prose; the last two do not match. If the convention drifts, fewer turns read
+# as delivered and the sweep only waits longer, the safe way to fail.
+DELIVERED_LINE = re.compile(r"(?m)^[ \t`*]*(?:result|failed):")
+
+# How much of timeline.jsonl's tail is read for the last turn. An entry's text
+# is capped at 4,000 characters (the tail is kept), so this holds a dozen.
+TIMELINE_TAIL_BYTES = 64 * 1024
 
 # Below this many bytes an entry (or a job's tmp child) is not this sweep's to
 # take: 2026-10-25's 6,032 candidates of 1 MiB or more held 97.6% of the bytes.
@@ -1125,7 +1151,8 @@ def _iso_epoch(value) -> float:
 
 
 def _job_state(job: str):
-    """(fingerprint, state.json) — the fingerprint moves on any rewrite."""
+    """(fingerprint, state.json) — the fingerprint moves on any rewrite of
+    state.json and on any line added to timeline.jsonl."""
     p = os.path.join(job, "state.json")
     try:
         st = os.stat(p)
@@ -1135,8 +1162,43 @@ def _job_state(job: str):
         return None, None
     if not isinstance(doc, dict):
         return None, None
+    try:
+        tl = os.stat(os.path.join(job, "timeline.jsonl"))
+        timeline = (tl.st_ino, tl.st_mtime_ns, tl.st_size)
+    except OSError:
+        timeline = None
     return (st.st_ino, st.st_mtime_ns, st.st_size,
-            doc.get("state"), doc.get("tempo"), doc.get("lastTerminalAt")), doc
+            doc.get("state"), doc.get("tempo"), doc.get("lastTerminalAt"), timeline), doc
+
+
+def _last_turn_delivered(job: str) -> bool:
+    """Whether the job's last done turn delivered: DELIVERED_LINE in the text of
+    the newest done entry that has text. A turn writes several done entries and
+    most carry none, so the trailing run is walked back to one that does; an
+    entry of another state first means the job is not in a done turn. Anything
+    unreadable counts as not delivered."""
+    try:
+        with open(os.path.join(job, "timeline.jsonl"), "rb") as fh:
+            size = fh.seek(0, os.SEEK_END)
+            fh.seek(max(0, size - TIMELINE_TAIL_BYTES))
+            lines = fh.read().split(b"\n")
+    except OSError:
+        return False
+    if size > TIMELINE_TAIL_BYTES:
+        lines = lines[1:]  # cut mid-line
+    for raw in reversed(lines):
+        if not raw.strip():
+            continue
+        try:
+            entry = json.loads(raw)
+        except ValueError:
+            return False
+        if not isinstance(entry, dict) or entry.get("state") != "done":
+            return False
+        text = entry.get("text")
+        if isinstance(text, str) and text.strip():
+            return bool(DELIVERED_LINE.search(text))
+    return False
 
 
 def _pins_text(jobs_root: str) -> Optional[str]:
@@ -1352,8 +1414,11 @@ def plan_scratch(now: float, snap, job_floor_h: float, tmp_floor_h: float,
         return None
 
     # job-scratch: cheap checks first (state, pins, registry, liveness, quiet,
-    # owners), then the walk.
+    # owners), then the walk. A done job whose last turn delivered no result
+    # waits out the normal floor however full / is.
     job_cutoff = now - job_floor_h * HOUR
+    awaiting_floor_h = max(job_floor_h, NORMAL_FLOORS_H[0])
+    awaiting_cutoff = now - awaiting_floor_h * HOUR
     try:
         job_ids = sorted(e.name for e in os.scandir(JOBS_ROOT) if e.is_dir(follow_symlinks=False))
     except OSError:
@@ -1400,6 +1465,11 @@ def plan_scratch(now: float, snap, job_floor_h: float, tmp_floor_h: float,
         if newest > job_cutoff:
             kept["job not quiet"] += 1
             continue
+        delivered = state.get("state") != "done" or _last_turn_delivered(job)
+        floor_h, cutoff = (job_floor_h, job_cutoff) if delivered else (awaiting_floor_h, awaiting_cutoff)
+        if newest > cutoff:
+            kept[f"job's last turn delivered no result: kept to the {awaiting_floor_h}h floor"] += 1
+            continue
         why = owner(job)
         if why:
             kept[why] += 1
@@ -1414,7 +1484,7 @@ def plan_scratch(now: float, snap, job_floor_h: float, tmp_floor_h: float,
             if listed:
                 kept[listed] += 1
                 continue
-            scan = scan_tree(path, job_cutoff, uid)
+            scan = scan_tree(path, cutoff, uid)
             if scan.veto:
                 kept[scan.veto] += 1
                 continue
@@ -1455,10 +1525,11 @@ def plan_scratch(now: float, snap, job_floor_h: float, tmp_floor_h: float,
                 "unshared_bytes": unshared, "entries": len(targets),
                 "idle_hours": round(idle_h, 1), "age_days": round(idle_h / 24, 1),
                 "why": f"scratch of a job Claude Code reports {state.get('state')} and no live "
-                       f"session owns, quiet past the {job_floor_h}h floor; tmp/ itself is kept"
-                       + _clean_repos(clean) + let_go,
+                       f"session owns, quiet past the {floor_h}h floor"
+                       + ("" if delivered else " (its last turn delivered no result)")
+                       + "; tmp/ itself is kept" + _clean_repos(clean) + let_go,
                 "skip": None, "_job": job, "_state_fp": fp, "_targets": targets,
-                "_sessions": sessions, "_cutoff": job_cutoff,
+                "_sessions": sessions, "_cutoff": cutoff,
             })
 
     # tmp-scratch: one lstat and an index lookup per entry; walks go oldest first.
