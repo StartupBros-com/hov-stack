@@ -15,6 +15,13 @@
 #     the checkout sits at ~/dotfiles (tests and fixtures aside)
 #   - the dfs and gsc wrappers run the sibling implementation next to their own location
 #   - the old repository token appears in no tracked file outside the two history docs
+#   - the data commands (lib/manifest.sh's DATA_CLIS): a run links each into ~/.local/bin and
+#     is the only thing setup leaves under ~/.local offline; a rerun moves nothing; a file or
+#     a link of the user's own at one of those paths is left byte-identical, with no backup,
+#     and named with ~/.claude/bin/<name>; a link to nothing is replaced and its old target
+#     shown; --check on a never-run HOME names each one missing and makes no ~/.local; a
+#     ~/.local/bin that is a file fails the row and the run; the PATH note shows only when
+#     ~/.local/bin is not on PATH
 #   - dcg (#57, restructure plan U15): its licence is shown before anything is fetched; with
 #     no network it is reported skipped and the run goes on; --no-dcg fetches nothing and
 #     says so; a platform with no build is a skip naming the release page; an archive that
@@ -52,6 +59,23 @@ trap 'rm -rf "$WORK"' EXIT
 fail() { echo "FAIL: $*" >&2; exit 1; }
 pass=0
 ok() { pass=$((pass + 1)); echo "ok $pass - $*"; }
+# The data commands setup links into ~/.local/bin (DATA_CLIS), from the file setup reads.
+# shellcheck source=lib/manifest.sh
+. "$ROOT/lib/manifest.sh"
+[ "${#DATA_CLIS[@]}" -ge 13 ] && [[ " ${DATA_CLIS[*]} " == *" gsc "* ]] && [[ " ${DATA_CLIS[*]} " == *" vastai "* ]] \
+  || fail "lib/manifest.sh's DATA_CLIS lost the data commands: ${DATA_CLIS[*]}"
+# stray_local <home> <checkout>: anything under <home>/.local but bin/ and the data commands'
+# links into <checkout>/bin, one per line.
+stray_local() {
+  local h=$1 r=$2 e name
+  [ -d "$h/.local" ] || return 0
+  find "$h/.local" -mindepth 1 | while IFS= read -r e; do
+    [ "$e" != "$h/.local/bin" ] || continue
+    name=${e#"$h/.local/bin/"}
+    if [[ " ${DATA_CLIS[*]} " == *" $name "* ]] && [ -L "$e" ] && [ "$(readlink "$e")" = "$r/bin/$name" ]; then continue; fi
+    echo "$e"
+  done
+}
 
 mkdir -p "$WORK/bin"
 real_node=$(mise which node 2>/dev/null || command -v node)
@@ -109,11 +133,12 @@ grep -q -F "To leave dcg out, run ./setup --no-dcg instead." "$WORK/run1.log" ||
 ok "dcg's licence, its link and --no-dcg are shown before anything is downloaded"
 grep -q -F "dcg: skipped: could not download " "$WORK/run1.log" || fail "an offline dcg download was not reported skipped"
 [ "$(curl_calls)" = 1 ] || fail "expected one download attempt, got $(curl_calls)"
-[ ! -e "$HOME/.local" ] || fail "an offline dcg run left files under ~/.local"
-for want_row in 'links +ok ' 'dcg +skipped ' 'settings +ok ' 'claude +missing ' 'marketplace +skipped ' 'plugins +skipped '; do
+stray=$(stray_local "$HOME" "$ROOT")
+[ -z "$stray" ] || fail "an offline run left files under ~/.local besides the data commands' links: $stray"
+for want_row in 'links +ok ' 'commands +ok ' 'dcg +skipped ' 'settings +ok ' 'claude +missing ' 'marketplace +skipped ' 'plugins +skipped '; do
   grep -q -E "^  $want_row" "$WORK/run1.log" || fail "the status block has no '$want_row' row"
 done
-ok "offline: one download attempt, dcg reported skipped, nothing under ~/.local, and every step has its status row"
+ok "offline: one download attempt, dcg reported skipped, nothing under ~/.local but the data commands' links, and every step has its status row"
 
 [ "$(cat "$HOME/.claude/projects/-home-someone-app/memory/MEMORY.md" "$HOME/.claude/memory/notes.md" | sha256sum)" = "$mem_before" ] || fail "memory changed"
 ok "memory untouched"
@@ -422,6 +447,61 @@ W=$HOME/.claude/settings.hov-stack.json
 grep -q -F '"allow"' "$W" && ! grep -q -F 'theirOwnKey' "$W" || fail "settings.hov-stack.json is not the seed"
 ok "second run moved nothing; a customized settings.json survived byte-for-byte with the seed beside it"
 
+# The data commands (DATA_CLIS) in ~/.local/bin. Both runs above linked each one to this
+# checkout; the second changed none and replaced nothing.
+n_cli=${#DATA_CLIS[@]}
+for name in "${DATA_CLIS[@]}"; do
+  [ -L "$HOME/.local/bin/$name" ] && [ "$(readlink "$HOME/.local/bin/$name")" = "$ROOT/bin/$name" ] \
+    || fail "$HOME/.local/bin/$name is not a link to $ROOT/bin/$name"
+done
+for log in run1 run2; do
+  grep -q -E "^  commands +ok +$n_cli data commands linked into ~/\.local/bin; ~/\.local/bin is not on this shell's PATH" "$WORK/$log.log" \
+    || { cat "$WORK/$log.log"; fail "$log has no 'commands ok' row with the PATH note"; }
+done
+! grep -q -F 'which is gone; it now runs' "$WORK/run2.log" || fail "the second run replaced a link"
+ok "each of the $n_cli data commands is linked into ~/.local/bin, the row says ~/.local/bin is not on PATH, and a rerun replaces nothing"
+# A file of the user's own, a link of theirs and a link to nothing, each at one of those paths.
+HCL=$WORK/home-cmds
+mkdir -p "$HCL/.local/bin" "$HCL/elsewhere"
+printf '#!/bin/sh\necho my-own-vastai\n' > "$HCL/.local/bin/vastai"
+printf '#!/bin/sh\necho my-own-gsc\n' > "$HCL/elsewhere/gsc"
+ln -s "$HCL/elsewhere/gsc" "$HCL/.local/bin/gsc"
+ln -s "$HCL/gone/dfs" "$HCL/.local/bin/dfs"
+vastai_before=$(sha256sum < "$HCL/.local/bin/vastai")
+HOME=$HCL PATH=$HCL/.local/bin:$PATH bash "$ROOT/setup" --no-dcg > "$WORK/run-cmds.log" 2>&1 || { cat "$WORK/run-cmds.log"; fail "setup with commands of the user's own exited non-zero"; }
+[ -f "$HCL/.local/bin/vastai" ] && [ ! -L "$HCL/.local/bin/vastai" ] && [ "$(sha256sum < "$HCL/.local/bin/vastai")" = "$vastai_before" ] \
+  || fail "the user's own vastai was moved or changed"
+[ "$(readlink "$HCL/.local/bin/gsc")" = "$HCL/elsewhere/gsc" ] || fail "the user's own gsc link was replaced"
+[ "$(readlink "$HCL/.local/bin/dfs")" = "$ROOT/bin/dfs" ] || fail "a link to nothing was not replaced with hov-stack's dfs"
+grep -q -x -F "  ~/.local/bin/dfs pointed at $HCL/gone/dfs, which is gone; it now runs hov-stack's" "$WORK/run-cmds.log" \
+  || { cat "$WORK/run-cmds.log"; fail "the replaced link's old target was not shown"; }
+[ ! -e "$HCL/.hov-stack-backups" ] || fail "leaving the user's commands alone made a backup"
+grep -q -x -E "  commands +ok +$((n_cli - 2)) of $n_cli data commands linked into ~/\.local/bin; left alone, not hov-stack's: gsc, vastai \(ours runs as ~/\.claude/bin/<name>\)" "$WORK/run-cmds.log" \
+  || { cat "$WORK/run-cmds.log"; fail "the commands row does not name gsc and vastai as left alone with the fallback, or still has the PATH note"; }
+rc=0; HOME=$HCL PATH=$HCL/.local/bin:$PATH bash "$ROOT/setup" --check --no-dcg > "$WORK/check-cmds.log" 2>&1 || rc=$?
+grep -q -E "^  commands +ok +$((n_cli - 2)) of $n_cli .*left alone, not hov-stack's: gsc, vastai" "$WORK/check-cmds.log" \
+  || { cat "$WORK/check-cmds.log"; fail "--check does not count the commands left alone as in place"; }
+ok "a vastai file and a gsc link of the user's own are left byte-identical, unbacked-up and named with ~/.claude/bin/<name>; a link to nothing is replaced and its old target shown; --check counts them in place"
+# --check on a HOME setup never ran in: every one is named missing, and nothing is made.
+HCN=$WORK/home-cmds-never
+rc=0; HOME=$HCN bash "$ROOT/setup" --check --no-dcg > "$WORK/check-cmds-never.log" 2>&1 || rc=$?
+[ "$rc" = 1 ] || { cat "$WORK/check-cmds-never.log"; fail "--check on a never-run HOME exited $rc, not 1"; }
+grep -q -E "^  commands +missing +0 of $n_cli data commands linked into ~/\.local/bin; not linked: ${DATA_CLIS[*]}; run \./setup" "$WORK/check-cmds-never.log" \
+  || { cat "$WORK/check-cmds-never.log"; fail "--check on a never-run HOME did not name every data command missing"; }
+[ ! -e "$HCN/.local" ] || fail "--check made ~/.local"
+ok "--check on a never-run HOME names all $n_cli data commands missing and makes no ~/.local"
+# A ~/.local/bin that is a file: the row fails, the run exits 1, and the file is untouched.
+HCF=$WORK/home-cmds-file
+mkdir -p "$HCF/.local"
+echo "not a directory" > "$HCF/.local/bin"
+rc=0; HOME=$HCF bash "$ROOT/setup" --no-dcg > "$WORK/run-cmds-file.log" 2>&1 || rc=$?
+[ "$rc" = 1 ] || { cat "$WORK/run-cmds-file.log"; fail "a ~/.local/bin that is a file exited $rc, not 1"; }
+grep -q -E "^  commands +failed +could not make ~/\.local/bin, so no data command was linked; each still runs as ~/\.claude/bin/<name>" "$WORK/run-cmds-file.log" \
+  || { cat "$WORK/run-cmds-file.log"; fail "a ~/.local/bin that is a file has no 'commands failed' row naming it"; }
+[ "$(cat "$HCF/.local/bin")" = "not a directory" ] || fail "the file at ~/.local/bin was changed"
+[ -L "$HCF/.claude/hooks" ] || fail "a failed commands step stopped the other links"
+ok "a ~/.local/bin that is a file fails the commands row and the run, is left as it was, and the other steps still run"
+
 # The command line: --help prints the header and an unknown option is refused, both
 # before anything is made.
 bash "$ROOT/setup" --help > "$WORK/help.log" 2>&1 || { cat "$WORK/help.log"; fail "./setup --help exited non-zero"; }
@@ -454,7 +534,8 @@ rc=0; CURL_MODE=garbage HOME=$WORK/home-bad bash "$ROOT/setup" > "$WORK/run-bad.
 [ "$rc" = 1 ] || { cat "$WORK/run-bad.log"; fail "an archive that fails its checksum exited $rc, not 1"; }
 grep -q -F 'dcg: error: checksum mismatch for ' "$WORK/run-bad.log" || { cat "$WORK/run-bad.log"; fail "the checksum failure was not reported"; }
 grep -q -E '^  dcg +failed ' "$WORK/run-bad.log" || fail "the checksum failure has no 'dcg failed' status row"
-[ ! -e "$WORK/home-bad/.local" ] || fail "a refused archive left files under ~/.local"
+stray=$(stray_local "$WORK/home-bad" "$ROOT")
+[ -z "$stray" ] || fail "a refused archive left files under ~/.local: $stray"
 [ -L "$WORK/home-bad/.claude/hooks" ] && [ -f "$WORK/home-bad/.claude/settings.json" ] || fail "a refused archive stopped the links or the seed"
 grep -q -F 'hov-stack: status' "$WORK/run-bad.log" || fail "a refused archive cut the run short"
 ok "an archive that fails its checksum exits 1, installs nothing, and the links and seed are still made"
@@ -862,7 +943,7 @@ ok "--check names a removed default plugin (skill-tuner); a rerun installs only 
 rm "$WORK/home-plain/.claude/hooks"
 rc=0; HOME=$WORK/home-plain bash "$copy/setup" --check > "$WORK/check-partial.log" 2>&1 || rc=$?
 [ "$rc" = 1 ] || { cat "$WORK/check-partial.log"; fail "--check after a partial run exited $rc, not 1"; }
-for want_row in 'links +missing +not linked: hooks; run \./setup$' 'dcg +missing ' 'claude +missing '; do
+for want_row in 'links +missing +not linked: hooks; run \./setup$' 'commands +ok ' 'dcg +missing ' 'claude +missing '; do
   grep -q -E "^  $want_row" "$WORK/check-partial.log" || { cat "$WORK/check-partial.log"; fail "--check after a partial run has no '$want_row' row"; }
 done
 [ ! -e "$WORK/home-plain/.claude/hooks" ] || fail "--check made the missing link"

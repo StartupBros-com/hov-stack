@@ -43,6 +43,13 @@
 #      (lib/default-plugin-skills.txt names them).
 #      Anything already at one of those paths is MOVED to ~/.hov-stack-backups/<timestamp>/,
 #      never deleted.
+#      It also links the data commands in bin/ (lib/manifest.sh's DATA_CLIS: gsc, dfs,
+#      stripe-api and ten more) into ~/.local/bin, so they run by name. A free path, or a link
+#      to nothing, gets the link; one already resolving to this checkout's file is in place;
+#      anything else there, such as a vastai of your own, is left where it is and named, and
+#      ours still runs as ~/.claude/bin/<name>. Nothing turns this off: a link you remove is
+#      reported missing by --check. setup installs none of their Python packages; gsc, ga4
+#      and vastai each say how to add theirs when it is missing.
 #   2. Installs dcg, the destructive-command guard, with dcg/install.sh: one pinned release,
 #      checked against its checksum and a minisign signature before it lands. Its licence
 #      is shown first. A platform with no build, a missing tool or no network is a skip; a
@@ -84,8 +91,9 @@
 #      replaced or removed; into a rules/ that is a symlink it writes nothing and names the
 #      lines to add there, and it leaves a symlink or a file of yours at that path alone.
 #   6. Never reads or writes memory, projects/, credentials, or anything outside the config
-#      dir, ~/.hov-stack-backups, ~/.local (dcg; with --update also the install records
-#      under ~/.local/state/hov-stack and gh, uv, cass and jsm in ~/.local/bin) and this
+#      dir, ~/.hov-stack-backups, ~/.local (dcg and the data commands' links in ~/.local/bin;
+#      with --update also the install records under ~/.local/state/hov-stack and gh, uv,
+#      cass and jsm in ~/.local/bin) and this
 #      checkout (its git state, with --update), apart from reading the overlay. No sudo.
 #      Only dcg's download and the claude plugin commands use the network; with --update
 #      also git fetch, the program downloads of install-release.sh and uv.
@@ -158,6 +166,9 @@ fi
 
 # shellcheck source=lib/link.sh
 . "$HOV_STACK/lib/link.sh"
+# DATA_CLIS, the data commands step 1 links into ~/.local/bin; the file is data only.
+# shellcheck source=lib/manifest.sh
+. "$HOV_STACK/lib/manifest.sh"
 
 # The closing status block: one row per step. A row that is not ok counts against --check;
 # a failed row makes the run exit 1. "off" is a step the caller turned off with --no-dcg.
@@ -165,7 +176,7 @@ rows=()
 not_ok=0
 failed=0
 # Each step's last state (st_<step>), for the plain-language summary under the status block.
-st_claude="" st_overlay="" st_links="" st_dcg="" st_settings="" st_marketplace="" st_plugins=""
+st_claude="" st_overlay="" st_links="" st_commands="" st_dcg="" st_settings="" st_marketplace="" st_plugins=""
 row_uncounted=0
 row() {  # row <step> <state> <detail>
   rows+=("$(printf '  %-12s %-8s %s' "$1" "$2" "$3")")
@@ -761,6 +772,62 @@ overlay_settings=
 if overlay_usable && [ -f "$OVERLAY/settings.json" ]; then overlay_settings=$OVERLAY/settings.json; fi
 dcg_path=
 
+# The data commands (DATA_CLIS) go into ~/.local/bin, so a terminal, a cron job or a systemd
+# unit runs them by name, not only a Claude Code session. Not link_file: that moves whatever
+# is at the path into the backup, and a vastai or gsc of the user's own must keep working
+# where it is. A free path, or a link to nothing, gets the link; one that already resolves to
+# this checkout's file is in place; anything else is left alone and named, and ours still
+# runs as $CFG/bin/<name>. Only a link that could not be made fails the row. --check makes
+# nothing and reports each free path missing.
+CLI_DIR=$HOME/.local/bin
+commands_row() {  # commands_row run|check
+  local mode=$1 name src dst old have=0 kept="" absent="" broken="" detail
+  if [ "$mode" = run ] && ! mkdir -p "$CLI_DIR"; then
+    row commands failed "could not make $(_lf_display "$CLI_DIR"), so no data command was linked; each still runs as $(_lf_display "$CFG")/bin/<name>"
+    return 0
+  fi
+  for name in "${DATA_CLIS[@]}"; do
+    src=$HOV_STACK/bin/$name
+    dst=$CLI_DIR/$name
+    if [ -e "$dst" ] && [ "$dst" -ef "$src" ]; then
+      have=$((have + 1))
+    elif [ -e "$dst" ]; then
+      kept="$kept, $name"
+    elif [ "$mode" = check ]; then
+      absent="$absent $name"
+    elif [ -L "$dst" ]; then
+      # A link to nothing runs nothing: it is replaced, and what it pointed at is shown.
+      old=$(readlink "$dst") || old="?"
+      if ln -sfn "$src" "$dst"; then
+        have=$((have + 1))
+        echo "  $(_lf_display "$dst") pointed at $old, which is gone; it now runs hov-stack's"
+      else
+        broken="$broken $name"
+      fi
+    elif ln -s "$src" "$dst"; then
+      have=$((have + 1))
+    else
+      broken="$broken $name"
+    fi
+  done
+  if [ "$have" -eq "${#DATA_CLIS[@]}" ]; then
+    detail="${#DATA_CLIS[@]} data commands linked into $(_lf_display "$CLI_DIR")"
+  else
+    detail="$have of ${#DATA_CLIS[@]} data commands linked into $(_lf_display "$CLI_DIR")"
+  fi
+  [ -z "$absent" ] || detail="$detail; not linked:$absent; run ./setup"
+  [ -z "$broken" ] || detail="$detail; could not link:$broken (see above)"
+  [ -z "$kept" ] || detail="$detail; left alone, not hov-stack's: ${kept#, } (ours runs as $(_lf_display "$CFG")/bin/<name>)"
+  case ":$PATH:" in
+    *":$CLI_DIR:"*) ;;
+    *) detail="$detail; $(_lf_display "$CLI_DIR") is not on this shell's PATH: a new login shell may add it, else add it yourself" ;;
+  esac
+  if [ -n "$broken" ]; then row commands failed "$detail"
+  elif [ -n "$absent" ]; then row commands missing "$detail"
+  else row commands ok "$detail"
+  fi
+}
+
 if [ "$check" = 1 ]; then
   echo "hov-stack: checking $HOV_STACK against $CFG (nothing is changed)"
   absent="" i=0
@@ -769,6 +836,7 @@ if [ "$check" = 1 ]; then
     i=$((i + 1))
   done
   if [ -z "$absent" ]; then row links ok "${#srcs[@]} links in place"; else row links missing "not linked:$absent; run ./setup"; fi
+  commands_row check
 
   if [ "$no_dcg" = 1 ]; then
     row dcg off "left out of the check (--no-dcg)"
@@ -833,6 +901,7 @@ echo "  $linked links in place"
 overlay_import || echo "  could not import $OVERLAY/CLAUDE.md from $(_lf_display "$OVERLAY_RULE") (see above)"
 [ -d "$BACKUP" ] && echo "  replaced files were moved to $BACKUP (nothing was deleted)"
 if [ "$unlinked" -eq 0 ]; then row links ok "$linked links in place"; else row links failed "$unlinked could not be made (see above)"; fi
+commands_row run
 
 if [ "$no_dcg" = 1 ]; then
   echo "dcg: skipped (--no-dcg). Run ./dcg/install.sh to add it later, then re-run ./setup."
@@ -1003,6 +1072,11 @@ echo "What you have now:"
 have_any=0
 if [ "$st_links" = ok ]; then
   echo "  - The rules and safety checks every new Claude Code session loads, linked from this folder."
+  have_any=1
+fi
+if [ "$st_commands" = ok ]; then
+  echo "  - Commands that read Search Console, Analytics, Stripe and other services (gsc, ga4,"
+  echo "    stripe-api and the rest), run by name. Each needs that service's own key first."
   have_any=1
 fi
 if [ "$st_dcg" = ok ]; then
