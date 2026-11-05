@@ -26,7 +26,7 @@ wsl-cdp drives its agent profile, its own instance of the Windows browser (Brave
 ## Symptoms
 
 - `document.visibilityState` reads `hidden` in every tab, including the fronted tab of a maximized window.
-- `requestAnimationFrame` callbacks never fire. A frame-timing script hangs until `wsl-cdp eval` gives up (`TIMEOUT_MS = 20000`, `plugins/wsl-cdp/wsl-cdp-drive.mjs:17`). An earlier MV3 extension e2e run hit the same stall from a background tab (auto memory [claude]).
+- `requestAnimationFrame` callbacks never fire. A frame-timing script hangs until `wsl-cdp eval` gives up (`TIMEOUT_MS = 20000`, `plugins/wsl-cdp/wsl-cdp-drive.mjs:17`). An earlier browser-extension test run hit the same stall from a background tab.
 - The click on a site's overflow (⋯) menu is dispatched, but the menu renders on a frame that never comes, so the step that waits for its items times out.
 - The job works whenever someone is at the PC, which points away from the site and toward the browser.
 
@@ -71,7 +71,7 @@ Evidence, 2026-11-05:
 
 ## Why This Works
 
-The source references below are per chromium/main as read 2026-11-04.
+The source references below are per chromium/main, read 2026-11-04 and re-checked 2026-11-05.
 
 - **The cause.** On Windows, `ui/aura/native_window_occlusion_tracker_win.cc` marks every visible browser window occluded when the screen is locked or the display is off: `if (screen_locked_ || !display_on_) occl_state = OCCLUDED` (a window that is not visible is already marked hidden). An occluded window's pages go to `PageVisibilityState::kHidden`, and a hidden page gets no frames, so `requestAnimationFrame` stops and nothing paints.
 - **Why the fix holds.** `Emulation.setFocusEmulationEnabled(true)` makes the DevTools `EmulationHandler` (`content/browser/devtools/protocol/emulation_handler.cc`) take a capturer handle on the page's WebContents with `stay_hidden=false`. A WebContents with a visible capturer is visible whatever its window's occlusion says (`WebContentsImpl::CalculatePageVisibilityState`).
@@ -84,11 +84,12 @@ The source references below are per chromium/main as read 2026-11-04.
 - **Gate on a frame, not on `visibilityState`.** One `requestAnimationFrame` callback within 1 s after emulation. If it still fails, stop with a distinct "not drawing" result rather than clicking blind or reporting success.
 - **Confirm a test was really dark with a control tab.** Front a blank tab without emulation, in a window that is not minimized. It must read `hidden` and fail the frame check; otherwise the display was on and the test proves nothing.
 - **Not yet observed: a locked session.** The tracker branch covers both locked and display off, but only an idle, dark display was tested.
-- **Open follow-up, a feature.** wsl-cdp's own drive helper sends no emulation: `Runtime.evaluate` with `awaitPromise: true` at `plugins/wsl-cdp/wsl-cdp-drive.mjs:77-80`. So `wsl-cdp eval` and `wsl-cdp screenshot` still hit this on an unattended host. Baking the call into the helper is the one-owner fix. A test for it would run the helper against a fake CDP endpoint and assert that the `Emulation.setFocusEmulationEnabled` call comes before the first `Runtime.evaluate`.
+- **Open follow-up, a feature (#455).** wsl-cdp's own drive helper sends no emulation: `Runtime.evaluate` with `awaitPromise: true` at `plugins/wsl-cdp/wsl-cdp-drive.mjs:77-80`. So `wsl-cdp eval` and `wsl-cdp screenshot` still hit this on an unattended host. Baking the call into the helper is the one-owner fix. A test for it would run the helper against a fake CDP endpoint and assert that the `Emulation.setFocusEmulationEnabled` call comes before the first `Runtime.evaluate`.
 - **Known-limits wording.** `plugins/wsl-cdp/skills/wsl-cdp/SKILL.md:56` and `plugins/wsl-cdp/README.md:105` say only that attended use is the sweet spot. They do not say that a dark display hides every page, or that emulation keeps it drawing.
 
 ## Related Issues
 
+- #455: wsl-cdp's drive helper should send focus emulation itself; open when this was written.
 - dotfiles#2162: the fix (focus emulation per op), verified in the dark 2026-11-05.
 - dotfiles#2161: the interim skip when the page does not draw.
 - dotfiles#2157 and dotfiles#2160: the scheduled browser job this was found in.
