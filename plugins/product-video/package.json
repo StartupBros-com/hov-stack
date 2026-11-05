@@ -27,7 +27,7 @@
     "verify": "tsx src/cli/verify.ts"
   },
   "dependencies": {
-    "@remotion/bundler": "4.0.518",
+    "@remotion/bundler": "4.0.540",
     "@remotion/renderer": "4.0.518",
     "react": "19.2.3",
     "react-dom": "19.2.3",
