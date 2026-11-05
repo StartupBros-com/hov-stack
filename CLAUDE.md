@@ -20,7 +20,7 @@
 - **Number multi-step work**, one bounded action per step; follow an irreversible step with a verification step.
 - **Lead tracked multi-step turns with position**: "Step 3 of 5 done: X. Next: Y." Skip it on single-step turns or when a task list tracks the work.
 - **End with the next concrete action** — one you take yourself, not one you hand the human to run instead. When the remaining step is genuinely human-only (a credential, sudo, a policy call), ask for that decision or credential and say what you will do once you have it; when the ask is unclear, say what would narrow it down rather than inventing a plausible one.
-- **Show finished work by what you ran or observed** ("ran X, 12/12 pass"); an unverified change gets "changed X, verify by Y".
+- **Show finished work by what you ran or observed** ("ran X, 12/12 pass"); an unverified change gets "changed X, verify by Y" only when Y can't run now.
 - **Finish one thing before raising the next**: answer a mid-work question yourself and fold it in where you can, otherwise surface it once, at the end. This orders the presentation only; identifying the full scope still wins.
 - **Errors:** say what failed and where; name a cause only with the log line, frame or diff that shows it.
 - **Rank long lists, don't truncate them**; name anything you cut.
@@ -66,9 +66,10 @@ Python packages: `uv pip install`, never pip. Python apps: `pipx install`. Node:
 Enforcement is `settings.json` permissions, the managed floor and the guard hooks, not this file; below are the conventions on top. Posture: full trust minus laundering (`HARNESS.md` → "Autonomy & permission model").
 
 - **Drive, don't defer.** Anything allowed runs without asking, including merging your own gate-green PR; the merge is never handed back or filed as needs-human.
+- **Run it now; don't wait for a schedule.** When a step or its check is left to a timer, cron line, queue tick, nightly run or a date you set, start it yourself now and read the result; use the plan or dry-run form if the live run deletes or sends off-host. Wait only on a run already going, elapsed time a measurement needs, rate limits and human steps (`harness/run-it-now.md`).
 - **Work in worktrees, never main.** git-guard (`hooks/PreToolUse/git-guard.js`) refuses unsafe git and names the safer alternative. Deliberate exceptions lead the command as an env assignment: `ALLOW_MAIN_COMMIT=1`, `ALLOW_DESTRUCTIVE_GIT=1`, `ALLOW_GIT_CONFIG_EXEC=1`, `ALLOW_AI_TRAILER=1`.
 - **Secret files** (.env, keys): read only when the task requires it. Nothing enforces this.
-- **Pause before ungated effects**: external messages (Discord webhook sends), prod data mutation, `crontab` or `systemctl` changes.
+- **Pause before ungated effects**: external messages (Discord webhook sends), prod data mutation, schedule edits (`crontab` edits, enabling or disabling a unit). Starting an installed unit once to verify it is not a schedule edit.
 - **Ask before security-posture changes**: credential login or rotation, enabling MCP servers or plugins, editing `settings.json` permissions, hook files or this file. The ask is about the change before it is built; an approved plan or a "go" is the answer. A fleet-wide setting rollout with a clean dry run is run and reported, not asked.
 
 ## Honest Work and Anti-Ceremony
