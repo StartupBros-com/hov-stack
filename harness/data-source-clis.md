@@ -42,7 +42,11 @@ require a map.
   `migration-targets.json`, overridden by `HOV_STACK_MIGRATION_TARGETS_FILE`.
   It may include `legacy_identities`; see `config/migration-targets.example.json`.
 - `with-gemini-sandbox` gets its BWS record id from `GEMINI_SANDBOX_BWS_ID`.
-- `stripe-api` keeps its existing account routing and credential resolution.
+- `stripe-api ACCOUNT` takes a name from the account map `stripe-accounts.json`,
+  overridden by `STRIPE_API_ACCOUNTS_FILE`; see `config/stripe-accounts.example.json`.
+  Account `acme` reads its key from `STRIPE_RK_ACME`. Without a map no account
+  is configured and every request is a usage error (exit 2); `--where` prints
+  the map path and the configured names.
 
 ## Why a CLI and not an MCP server
 
@@ -606,15 +610,15 @@ the pre-existing `Bash(python3:*)` allow. A flag held in a variable or a raw
 API call with the key goes around the rules the same way. Agents spell
 confirm flags plainly and call the installed command, never the module.
 
-**`stripe-api ACCOUNT METHOD PATH`** (ACCOUNT is a configured public product alias) calls the
+**`stripe-api ACCOUNT METHOD PATH`** (ACCOUNT is a name from the account map, `stripe-accounts.json`) calls the
 Stripe REST API directly with that account's restricted live key. Whatever the
 key grants is reachable. A 403 means the key lacks that resource; grant it in
 the dashboard rather than switching keys.
 
 ```bash
-stripe-api prbot GET /v1/subscriptions -d status=active -d limit=100 --paginate
-stripe-api startupbros GET /v1/customers/search -d "query=email:'a@example.com'"
-stripe-api startupbros POST /v1/webhook_endpoints/we_123 -d 'enabled_events[]=invoice.paid'
+stripe-api acme GET /v1/subscriptions -d status=active -d limit=100 --paginate
+stripe-api acme_shop GET /v1/customers/search -d "query=email:'a@example.com'"
+stripe-api acme_shop POST /v1/webhook_endpoints/we_123 -d 'enabled_events[]=invoice.paid'
 ```
 
 - Keys resolve env `STRIPE_RK_<ACCOUNT>`, then BWS (same

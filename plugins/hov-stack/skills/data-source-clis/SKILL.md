@@ -43,7 +43,11 @@ require a map.
   `migration-targets.json`, overridden by `HOV_STACK_MIGRATION_TARGETS_FILE`.
   It may include `legacy_identities`; see `config/migration-targets.example.json`.
 - `with-gemini-sandbox` gets its BWS record id from `GEMINI_SANDBOX_BWS_ID`.
-- `stripe-api` keeps its existing account routing and credential resolution.
+- `stripe-api ACCOUNT` takes a name from the account map `stripe-accounts.json`,
+  overridden by `STRIPE_API_ACCOUNTS_FILE`; see `config/stripe-accounts.example.json`.
+  Account `acme` reads its key from `STRIPE_RK_ACME`. Without a map no account
+  is configured and every request is a usage error (exit 2); `--where` prints
+  the map path and the configured names.
 
 ## Search Console — `gsc`, never an MCP
 
@@ -132,7 +136,7 @@ installer. The vendor's own errors (`restricted_api_key` for a send-only key,
 
 ## Stripe — `stripe-api`, never the Stripe MCP
 
-`stripe-api prbot|startupbros GET|POST|DELETE /v1/...` is the full REST surface
+`stripe-api ACCOUNT GET|POST|DELETE /v1/...` is the full REST surface
 the account's restricted key grants. `-d key=value` is a query on GET and a form
 field on writes; `--paginate` follows `has_more`. Writes are fail-closed: a
 POST runs without a prompt only on the listed configuration paths (webhook
