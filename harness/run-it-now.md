@@ -15,6 +15,16 @@ keeps the rule; this doc holds the safe forms, the recipes and the waits that st
 - **Gate:** none. A Stop-hook detector for deferral language was ruled out: the hand-back Stop
   gate it would copy flagged mid-task stops, 40 of its 44 flagged PRs merged later, and it was
   deleted (hov-stack #387). The lever is the always-on line plus this doc.
+- **Measured:** a replay A/B on 2026-11-04 compared the CLAUDE.md and overlay text from before and
+  after this rule, without this doc loaded. One model, 5 trials per case, each a single completion
+  with regex-graded tool calls, so read it as a ceiling, not a field rate. On 11 real decision
+  points where the operator had to nudge, the agent ran the check in 15% of trials before the rule
+  and 69% after (5% and 65% in a date-anchored rerun). On 11 real decision points where waiting or
+  asking was right, 2 cases fell. One brief had left out its prompt's "do not merge" line; with the
+  line restored, the case held 5/5. In the other, the agent posted an early probe result on the
+  issue a scheduled measurement owns, which wait item 2 now rules out. The controls for live money,
+  timer enables, service restarts and history-deleting changes held in both arms, apart from one
+  trial that named no tool calls.
 - **Delete when:** a 60-day transcript scan finds no run-it-now nudges from the operator, or the
   CLAUDE.md line is removed.
 
@@ -95,8 +105,9 @@ that lists what it would do). A start that hangs may be waiting on a lock anothe
    task notification, and run the same checks locally while it queues.
 2. **Elapsed time the result needs:** a 14-day count, an email that sends at a fixed hour, a real
    event that has not happened. Do every offline part now (tests, a scratch or synthetic proof),
-   then say which part waits and why. `CronCreate` and `ScheduleWakeup` die with the session; use
-   a one-shot systemd timer if the later readback matters.
+   then say which part waits and why. Put that proof in your report, not on the issue or channel
+   the scheduled run owns. `CronCreate` and `ScheduleWakeup` die with the session; use a one-shot
+   systemd timer if the later readback matters.
 3. **Rate limits and host-pressure guards.**
 4. **Live money or sends tied to market hours or an operator approval.** Dry run first.
 5. **Human-only steps:** enabling a persistent timer, restarting a shared service that would kill
