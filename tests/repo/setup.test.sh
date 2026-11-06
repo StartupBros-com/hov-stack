@@ -1334,7 +1334,12 @@ HOV_STACK_OVERLAY=$OSP fake_setup "$FSP" "$HSP" "$WORK/sp-rerun.log" --no-dcg ||
 before=$(tree_state "$HSP")
 HOV_STACK_OVERLAY=$OSP fake_setup "$FSP" "$HSP" "$WORK/sp-green.log" --check --no-dcg || { cat "$WORK/sp-green.log"; fail 'plugin check not green'; }
 [ "$before" = "$(tree_state "$HSP")" ] || fail 'green check changed tree'
-ok 'own plugin linked by manifest name, rerun stable, unrelated entries left alone'
+mkdir "$P1/skills/my-skills"
+printf '# self\n' > "$P1/skills/my-skills/SKILL.md"
+HOV_STACK_OVERLAY=$OSP fake_setup "$FSP" "$HSP" "$WORK/sp-self.log" --check --no-dcg || { cat "$WORK/sp-self.log"; fail 'an inner skill named like its plugin was reported as a clash with its own link'; }
+rm "$P1/skills/my-skills/SKILL.md"
+rmdir "$P1/skills/my-skills"
+ok 'own plugin linked by manifest name, rerun stable, unrelated entries left alone, an inner skill may share the plugin name'
 
 sp_check_bad() {
   local needle=$1 before rc=0

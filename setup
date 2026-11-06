@@ -755,6 +755,7 @@ JS
       for inner in "$folder"/skills/*/SKILL.md; do
         [ -f "$inner" ] || continue
         s=$(basename "$(dirname "$inner")")
+        [ "$s" != "$name" ] || continue  # skills/<name> is this plugin's own link, checked above
         if [ -e "$CFG/skills/$s" ] || [ -L "$CFG/skills/$s" ]; then
           detail="${detail}skills/$s shares the bare name /$s with $name's skill (which one /$s runs is not established): remove or rename one; "
         fi

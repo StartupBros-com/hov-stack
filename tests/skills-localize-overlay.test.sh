@@ -37,6 +37,10 @@ has "$SKILLS_LOCAL_DIR/absent or skills/absent in plugin folders"
 [ "$(cat "$P/.claude-plugin/plugin.json")" = '{"name":"my-skills"}' ]
 run --dry-run
 [ "$rc" = 0 ] && [ -L "$SKILLS_DIR/my-skills" ]
+# A retired entry never moves a plugin-folder link to the trash.
+printf 'my-skills\n' > "$HOV_STACK_OVERLAY/retired-skills.txt"
+run apply
+[ "$rc" = 0 ] && [ -L "$SKILLS_DIR/my-skills" ] || { cat "$T/out"; echo 'FAIL: a retired entry removed a plugin-folder link'; exit 1; }
 printf 'victim unknown-field\n' > "$HOV_STACK_OVERLAY/retired-skills.txt"
 mkdir -p "$SKILLS_DIR/victim"
 printf keep > "$SKILLS_DIR/victim/keep"
@@ -48,11 +52,15 @@ mkdir -p "$SKILLS_DIR/alpha" "$SKILLS_DIR/managed" "$SKILLS_DIR/synced" "$SKILLS
 printf '# fork\n' > "$SKILLS_LOCAL_DIR/fork/SKILL.md"
 cp "$SKILLS_LOCAL_DIR/fork/SKILL.md" "$SKILLS_DIR/fork/SKILL.md"
 ln -s "$P/skills/alpha" "$SKILLS_DIR/linked"
+# A plugin folder made in place (claude plugin init) is owned by Claude Code.
+mkdir -p "$SKILLS_DIR/inplace/.claude-plugin" "$SKILLS_DIR/inplace/skills/gamma"
+printf '{"name":"inplace"}\n' > "$SKILLS_DIR/inplace/.claude-plugin/plugin.json"
+printf '# gamma\n' > "$SKILLS_DIR/inplace/skills/gamma/SKILL.md"
 run check
 [ "$rc" = 1 ]
 has 'DRIFT: ~/.claude/skills/alpha is a plain copy nothing owns'
 has "(it shares its name with my-skills's skill)"
-for name in linked fork synced .hidden managed my-skills; do
+for name in linked fork synced .hidden managed my-skills inplace; do
   if grep -F "skills/$name is a plain copy" "$T/out"; then echo "FAIL: exempt name $name"; exit 1; fi
 done
 rm "$HOV_STACK_OVERLAY/skill-plugins"
@@ -69,4 +77,21 @@ export RETIRED_SKILLS_HOST_LIST=
 run check
 [ "$(grep -c -F "retired skill 'beads-br' is present" "$T/out")" = 1 ] || { cat "$T/out"; echo 'FAIL: retired-skills.txt read twice'; exit 1; }
 unset RETIRED_SKILLS_HOST_LIST
+# An empty SKILL_PLUGINS_LIST means no plugin folders; it never falls back to the overlay file.
+printf '#!/bin/sh\nprintf "managed 1.0\\n"\n' > "$T/bin/jsm"
+export SKILL_PLUGINS_LIST=
+run check
+if grep -F -e 'is a plain copy nothing owns' -e 'skipping the unowned-copy check' "$T/out"; then echo 'FAIL: empty SKILL_PLUGINS_LIST read the overlay file'; exit 1; fi
+# Non-empty overrides replace the overlay's skill-plugins and codex-skills.txt.
+P2=$T/plugin2
+mkdir -p "$P2/.claude-plugin" "$P2/skills/beta"
+printf '{"name":"other-skills"}\n' > "$P2/.claude-plugin/plugin.json"
+printf '# beta\n' > "$P2/skills/beta/SKILL.md"
+printf '%s\n' "$P2" > "$T/alt-plugins"
+printf 'beta\n' > "$T/alt-codex"
+export SKILL_PLUGINS_LIST=$T/alt-plugins CODEX_SKILLS_HOST_LIST=$T/alt-codex
+run apply
+cmp "$P2/skills/beta/SKILL.md" "$CODEX_SKILLS_DIR/beta/SKILL.md" || { cat "$T/out"; echo 'FAIL: overrides not read'; exit 1; }
+if grep -F "lists 'absent'" "$T/out"; then echo 'FAIL: the overlay codex-skills.txt was read despite the override'; exit 1; fi
+unset SKILL_PLUGINS_LIST CODEX_SKILLS_HOST_LIST
 echo 'skills-localize-overlay: all cases passed'

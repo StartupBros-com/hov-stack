@@ -431,6 +431,7 @@ check_unowned() {
     [ -d "$d" ] && [ ! -L "$d" ] || continue
     name=$(basename "$d")
     case $name in .*|synced) continue ;; esac
+    [ ! -f "$d/.claude-plugin/plugin.json" ] || continue  # a plugin folder made in place
     [ ! -d "$LOCAL/$name" ] || continue
     case $owned in *" $name "*) continue ;; esac
     suffix=
