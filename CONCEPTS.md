@@ -432,6 +432,17 @@ The reasoning-stream mode a Claude Code session requests at launch, which decide
 
 It matters because the gateway judges a stream alive by content-bearing frames only: a long reasoning phase in the content-free mode is indistinguishable from a dead stream, is failed over to another account from the start, and is retried by the client until the session looks hung.
 
+## Browser bridge
+
+The vocabulary for wsl-cdp, which lets a session inside WSL drive a browser on the Windows side over the DevTools protocol.
+
+### Agent profile
+
+The dedicated browser profile wsl-cdp launches for agents, run as its own instance of the user's installed Windows browser, beside the user's daily browser and never inside it.
+*Avoid:* "the user's real browser", which reads as the daily window
+
+A human signs it into each site once, and it keeps those sessions across restarts and reboots but never saved passwords, which every launch scrubs. It should hold only the logins agents need, because anything that can reach its debug port can act as it. It stays bound to the browser vendor that first launched it.
+
 ## Config sync
 
 The vocabulary for how the harness's tracked configuration reaches a host's live Claude Code configuration, and why the direction differs by file.
