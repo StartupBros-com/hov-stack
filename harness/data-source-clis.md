@@ -217,7 +217,7 @@ exit dictionary; it makes no vendor request.
 - **Alexandria:** Firecrawl's provider catalogue (SEC EDGAR, FRED, CourtListener,
   FEC, SAM.gov, Companies House, and about 380 more) is not wrapped. Discovery
   needs an API key and vendor 1.26.x, and execution bills per capability; it
-  waits on the vendor-pin follow-up issue.
+  waits on the vendor pin move (#473).
 - **JSON envelope:** `ok`, `surface`, `verb`, `credits_spent`,
   `credits_remaining`, `budget_remaining`, `degraded`, `error`, and `data`.
   Unavailable credit values may be null; `error` supplies a code, message,
