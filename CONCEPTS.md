@@ -231,7 +231,7 @@ The vocabulary for finishing a PR after its author stops. Settled by the 2026-10
 The rule that the session which authored a PR also finishes it: it opens the PR ready for review, waits for CI, merges once the checks are green, and ends by reporting the merge commit, or leaves the PR open with the reason when CI stays red or the merge is refused.
 *Replaced:* Owned PR, Parked PR
 
-Only a diff touching billing, auth, migrations or CI gets a terminal review, one round, whose P0 and P1 findings are fixed before the merge; every other diff merges on CI alone. A red check the diff did not cause gets one failed-only rerun before it counts as blocking. Nothing runs after the session ends, so a PR left open is ordinary work for the next session.
+Only a diff touching billing, auth, migrations or CI gets a terminal review, one round, whose P0 and P1 findings are fixed before the merge; every other diff merges on CI alone. A red check the diff did not cause gets one retrigger before it counts as blocking: a merge of main into the branch when main has moved, since a rerun replays the branch's own workflow, else a failed-only rerun. Nothing runs after the session ends, so a PR left open is ordinary work for the next session.
 
 ### Owned PR
 
