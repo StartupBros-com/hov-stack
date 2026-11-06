@@ -35,7 +35,7 @@ The human step had already failed in other ways (session history, 2026-10-14 to 
 
 ## Guidance
 
-Every file path in this doc is in the hov-marketplace repository, as of the #209 merge; none is in this repo.
+Every file path in this doc is as of the #209 merge, in the repository then named hov-marketplace. That repository was renamed hov-stack and is this one (the stack joined it in #239), and #216 later moved `scripts/` to `release/scripts/`.
 
 ### 1. Converge on observed state; do not chain events
 
@@ -93,7 +93,9 @@ pro-gate v0.65.2 (pro-gate#301, merged at about 07:02Z) then went through the me
 - **A publish by the release App token fires the release train.** pro-gate's `Release train` ran on the `release` event at 08:46:44Z, and both of its jobs succeeded. A publish by `GITHUB_TOKEN` would not have fired it, because events caused by that token start no new workflow runs.
 - **The announce did not need its promotion-lag retry** (30 s × 8 in `scripts/tool-drop-announce.sh`). It returned `"status":"announced"` at 08:47:09Z, 64 s after the card merged, about 6 s after the step began.
 
-The step still bound to the schedule is the first one. Nothing wakes the reconciler when a plugin stages a draft. Between #210's merge (about 05:30Z) and the 08:44Z dispatch, the four-ticks-an-hour schedule produced no run at all, so v0.65.2's draft waited 90 minutes and would have kept waiting. pro-gate v0.65.4 on 2026-11-05 needed two hand dispatches: the first card (#435) went BEHIND when main moved, and no scheduled run came to replace it (hov-stack#438). Since the fix for #438, a finished Release run wakes the reconciler, and so does every push to main, which replaces a BEHIND card because main's sha is in the card's key. The schedule is now the fallback. Dispatch `repin-reconcile.yml` only when a staged draft still has no card PR a few minutes after its Release run.
+Until hov-stack#456 (merged 2026-11-06 01:23 UTC), the first step was bound to the schedule: nothing woke the reconciler when a plugin staged a draft. Between #210's merge (about 05:30Z) and the 08:44Z dispatch, the four-ticks-an-hour schedule produced no run at all, so v0.65.2's draft waited 90 minutes and would have kept waiting. pro-gate v0.65.4 on 2026-11-05 needed two hand dispatches: the first card (#435) went BEHIND when main moved, and no scheduled run came to replace it (hov-stack#438). #456, the fix for #438, made a finished Release run wake the reconciler, and every push to main, which replaces a BEHIND card because main's sha is in the card's key. The schedule is now the fallback. Dispatch `repin-reconcile.yml` only when a staged draft still has no card PR a few minutes after its Release run.
+
+pro-gate v0.65.6 (2026-11-06) was the first release through #456 with no dispatch. Its draft was staged at 15:48:27Z. The Release run's `workflow_run` reconcile (run 42247961673) opened card #469 at 15:58:55Z and queued its auto-merge. #469 merged at 16:15:07Z, and the push run that merge fired (42250615755) published v0.65.6 at 16:16:39Z, 28 minutes after the draft. A scheduled run (42250545219) that started before the merge opened a duplicate card, #470, at 16:15:34Z; the push run's land step closed it as superseded at 16:16:33Z, which is the close rule in section 1 doing its job.
 
 ## Why This Matters
 
@@ -127,4 +129,4 @@ After #209, the merge commit's smoke run printed `closed 0 superseded repin PR(s
 - `merging-a-plugin-version-bump-is-the-ship-moment.md` (what the automated train means for review: the VERSION-bump merge is when a release ships)
 - `../integration-issues/drive-post-merge-activation-instead-of-handing-back.md` (the same move, automating a post-merge human step, for host activation)
 - hov-marketplace#209 (this change), #168 (drafts invisible to the reconciler), #130 (superseded repin PRs never closed), #202 (review vs. no-review rationale); dotfiles#1832 (repins merge on checks), #1834 (fleet merge), #1873 (fleet retired)
-- The plugin release recipe in the hov-marketplace repository's docs folder (steps 1-6; "No step after the version-bump merge is human.")
+- `docs/release/plugin-release-recipe.md` ("The chain": "Merging the version bump is the ship moment. No step after it is a human step"; step 4 lists the reconciler's wake-ups)
