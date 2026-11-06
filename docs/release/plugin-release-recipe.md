@@ -70,8 +70,10 @@ chain converges without them.
    fires the announcement, and the announcement must find the card already
    current.
 4. **Card** (`repin-reconcile.yml`, "Repin reconcile"). The reconciler runs
-   four times an hour (GitHub delays and drops scheduled runs, so allow
-   longer), on every push to `main` that touches the manifest, and on dispatch.
+   when a Release run finishes, so a freshly staged draft gets its card
+   without waiting; on every push to `main`, so a card that went BEHIND is
+   replaced at once; four times an hour as a fallback (GitHub delays and
+   drops scheduled runs, so allow longer); and on dispatch.
    For each entry it reads the newest release by tag prefix, drafts included:
    a `git-subdir` entry against this repository, a `url` entry against its
    own. Drift opens the card PR through the marketplace bot (version, tag,
@@ -85,8 +87,9 @@ chain converges without them.
 
    Two dispatches are done by hand:
 
-   - The first releases through this chain: start a run now instead of waiting
-     for a late schedule.
+   - A staged draft with no card PR a few minutes after its Release run
+     finished, which means neither wake-up arrived: start a run now instead of
+     waiting for a late schedule.
 
      ```bash
      gh workflow run repin-reconcile.yml --repo StartupBros-com/hov-stack
