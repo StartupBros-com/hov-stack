@@ -231,7 +231,7 @@ The vocabulary for finishing a PR after its author stops. Settled by the 2026-10
 The rule that the session which authored a PR also finishes it: it opens the PR ready for review, waits for CI, merges once the checks are green, and ends by reporting the merge commit, or leaves the PR open with the reason when CI stays red or the merge is refused.
 *Replaced:* Owned PR, Parked PR
 
-Only a diff touching billing, auth, migrations or CI gets a terminal review, one round, whose P0 and P1 findings are fixed before the merge; every other diff merges on CI alone. A red check the diff did not cause gets one failed-only rerun before it counts as blocking. Nothing runs after the session ends, so a PR left open is ordinary work for the next session.
+Only a diff touching billing, auth, migrations or CI gets a terminal review, one round, whose P0 and P1 findings are fixed before the merge; every other diff merges on CI alone. A red check the diff did not cause gets one retrigger before it counts as blocking: a merge of main into the branch when main has moved, since a rerun replays the branch's own workflow, else a failed-only rerun. Nothing runs after the session ends, so a PR left open is ordinary work for the next session.
 
 ### Owned PR
 
@@ -431,6 +431,17 @@ It has no fallback: an empty reference is a refusal, never a search of the store
 The reasoning-stream mode a Claude Code session requests at launch, which decides whether the upstream streams the model's reasoning as text or as signature-only frames that carry no content. Headless runs default to the content-free mode, and interactive sessions do too unless the operator opts in, so harness launchers and the shared settings request the text-bearing mode explicitly.
 
 It matters because the gateway judges a stream alive by content-bearing frames only: a long reasoning phase in the content-free mode is indistinguishable from a dead stream, is failed over to another account from the start, and is retried by the client until the session looks hung.
+
+## Browser bridge
+
+The vocabulary for wsl-cdp, which lets a session inside WSL drive a browser on the Windows side over the DevTools protocol.
+
+### Agent profile
+
+The dedicated browser profile wsl-cdp launches for agents, run as its own instance of the user's installed Windows browser, beside the user's daily browser and never inside it.
+*Avoid:* "the user's real browser", which reads as the daily window
+
+A human signs it into each site once, and it keeps those sessions across restarts and reboots but never saved passwords, which every launch scrubs. It should hold only the logins agents need, because anything that can reach its debug port can act as it. It stays bound to the browser vendor that first launched it.
 
 ## Config sync
 
