@@ -49,8 +49,12 @@ question needs it:
   checkout's routing table when it is present.
 - **Literature discovery and citation expansion:** `firecrawl-research-index`.
 - **Preprint retrieval, local PDF extraction, and citations:** `papers`.
-- **Software documentation:** Context7 for the relevant version; inspect source
-  and GitHub history when the question turns on implementation behavior.
+- **Software documentation:** Context7 for the relevant version;
+  `firecrawl-developer-index` (`firecrawl-cli developer`) for an error string,
+  an issue or merged PR, or which release fixed a bug; inspect source and
+  GitHub history when the question turns on implementation behavior.
+- **US statutes, regulations, court opinions, and agency guidance:**
+  `firecrawl-gov-index` (`firecrawl-cli gov`, free), before web search.
 - **Current public discussion:** X only when the question needs that evidence.
   A post can establish what someone said, not whether their claim is true.
 

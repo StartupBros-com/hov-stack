@@ -15,9 +15,19 @@ or in a niche venue may not be indexed; general web search is the fallback.
 
 Every tool is a vendor CLI subcommand (`firecrawl research ...`); call it as
 `firecrawl-cli raw --json -- research <subcommand> ... --json` so the harness
-budget and envelope apply (the Firecrawl MCP is retired). The vendor CLI works
-without an API key — use it from subagents, cron, and scripts — but the keyless
-tier can intermittently return 401 under load; set a key for reliability. The
+budget and envelope apply (the Firecrawl MCP is retired). `search-papers` and
+`search-github` go to the vendor's keyless tier first, key or not: no
+credential, no credits, no hold, and a keyed call only when the free tier
+refuses. The other subcommands need a credential: they read the account
+balance first, so with no `FIRECRAWL_API_KEY` and no stored vendor login they
+exit 1 with `credentials_missing`. Each keyed wrapper call also holds 100 of
+the session's 300 credits until it settles, and after 30 minutes counts the
+whole hold as spent (a keyed `search-papers` call billed nothing on
+2026-10-30), so a keyed related, inspect, read chain exhausts a session. For
+those subcommands in a subagent, cron job, or script with no credential, call
+`firecrawl research <subcommand> ... --json` directly: the vendor's keyless
+tier spends no account credits, so there is nothing for the ledger to gate,
+but it can intermittently return 401 under load; set a key for reliability. The
 CLI result-count flag is `--limit`, never `--k`: `--k` silently binds to
 `-k/--api-key`, clobbering auth with your numeral and producing a misleading
 401.
@@ -39,10 +49,15 @@ CLI result-count flag is `--limit`, never `--k`: `--k` silently binds to
 
 Ids work in `arxiv:`, `pmid:`, `pmcid:`, and `doi:` forms interchangeably.
 
-Not this index: `firecrawl-cli search "<q>" --categories research --json` is a
-website filter on ordinary web search. Its results are pages (each research-site
+Not this index until 2026-11-16: `firecrawl-cli search "<q>" --categories research --json`
+is a website filter on ordinary web search. Its results are pages (each research-site
 hit carries `category: "research"`; plain web results carry no `category`
-field — key on that when merging). For paper-finding, use the tools above.
+field — key on that when merging). From 2026-11-16 Firecrawl points that category
+at this index and returns paper records under `data.research` instead of `data.web`;
+whether the pinned vendor CLI passes them through is unverified (dotfiles #2108).
+For paper-finding, use the tools above either way.
+Sibling indexes: US law goes to `firecrawl-gov-index`; library docs, issues,
+and merged PRs go to `firecrawl-developer-index`.
 
 ## Match the approach to the query
 

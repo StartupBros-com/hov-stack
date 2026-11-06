@@ -28,6 +28,8 @@ and the `NOTICE` that ux-writing carries.
 | `emil-design-eng` | https://github.com/emilkowalski/skills | MIT | Emil Kowalski |
 | `explain-interface` | https://github.com/jakubkrehel/skills | MIT | Jakub Krehel |
 | `find-animation-opportunities` | https://github.com/emilkowalski/skills | MIT | Emil Kowalski |
+| `firecrawl-developer-index` | https://github.com/firecrawl/cli | ISC | Firecrawl |
+| `firecrawl-gov-index` | https://github.com/firecrawl/cli | ISC | Firecrawl |
 | `firecrawl-research-index` | https://github.com/firecrawl/skills | ISC | Firecrawl |
 | `goal-brief` | https://github.com/davidondrej/skills | MIT | David Ondrej |
 | `google-safe-browsing` | https://github.com/davidondrej/skills | MIT | David Ondrej |
