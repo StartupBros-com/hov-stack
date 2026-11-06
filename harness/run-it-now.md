@@ -85,7 +85,8 @@ A host's overlay CLAUDE.md names its own live-by-default units and their safe fo
 6. **GitHub scheduled workflow.** `gh workflow run <file>.yml --repo <owner/repo> --ref <branch>`,
    then `gh run watch <id> --exit-status`. It needs a `workflow_dispatch` trigger and the file on
    that ref. Without one, run the workflow's script locally, or add the trigger in a PR. A failed
-   run: `gh run rerun --failed <id>`.
+   run: `gh run rerun --failed <id>`, unless a fix has landed on that ref since. A rerun replays
+   the run's own commit, so dispatch a new run instead.
 7. **HTTP cron route** (a hosted app's scheduled endpoint). Call it with its cron secret from the
    secrets store, then read the result back from the data store it writes.
 8. **Queue or dispatcher tick.** Enqueue or trigger the item yourself with the same command the
