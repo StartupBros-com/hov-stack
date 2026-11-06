@@ -116,6 +116,33 @@ Most of these are not part of this repository: `gsc`, `ga4` and `vastai` are its
 - `cass` (Jeffrey Emanuel): searches past agent sessions on this machine; the `cass-rerank-local` skill builds on it. Its MIT licence carries a rider barring OpenAI, Anthropic and anyone acting for them.
 - `jeffreys-skills` (Jeffrey Emanuel): a paid skill library ($20 a month or $216 a year, no trial) and its manager, `jsm`. This repository never redistributes those skills: `/hov-setup` installs `jsm`, the login runs in the browser through `jsm login --remote`, and you choose which skills to install.
 
+## Where your own skills go
+
+Keep your own skills in one plugin folder: `<folder>/.claude-plugin/plugin.json`
+and `<folder>/skills/<skill>/SKILL.md`. The manifest's `name` identifies the plugin.
+Claude Code loads such a folder found in `~/.claude/skills/` in place, as
+`<name>@skills-dir`. A new, edited or deleted skill takes effect at the next session
+start, with no command.
+
+With only the plugin installed, create the folder inside `~/.claude/skills` with
+`claude plugin init <name>`, or link one kept in your own git repository there.
+
+With a clone and `./setup`, list the folder's absolute path in the overlay's
+`skill-plugins` (see `config/skill-plugins.example`). Setup links it as
+`skills/<name>`. `./setup --check` reports a missing link, a skill in `skills/`
+that shares a bare name with one of the folder's skills, a turned-off plugin,
+and one Claude Code does not list. Setup refuses a name a hov-stack skill,
+`@hov` plugin or mod already uses, since Claude Code would silently skip the folder.
+
+Skills run as `/<skill>` or `/<name>:<skill>`. Which skill a shared bare name
+runs is not established. `skillOverrides` in your settings does not reach plugin
+skills. To keep the model from starting a skill on its own, put
+`disable-model-invocation: true` in its SKILL.md frontmatter.
+
+`scripts/skills-localize.sh` reads `codex-skills.txt` and `retired-skills.txt`
+from the overlay too, each adding to this repository's. An overlay
+`codex-skills.txt` name can come from a listed folder's `skills/`.
+
 ## What's not here
 
 - My memory notes, secrets, and business-specific skills. Those live in a private sibling.
@@ -133,10 +160,11 @@ Most of these are not part of this repository: `gsc`, `ga4` and `vastai` are its
   - `settings.json`, merged into the seed setup writes. Its keys win, its lists add to the template's without repeats, a `null` removes a key, and a hook of its that runs dcg is left out when dcg is not installed, as the template's is. It never changes a `settings.json` you already have. One that gives a setting another kind of value than the template's, such as a string where the template has an object, gets no seed written, and the run exits 1.
   - `CLAUDE.md`, imported in every project by the `rules/hov-stack-overlay.md` setup writes in the config dir. Into a `rules/` that is a symlink setup writes nothing, and names the line to add there yourself.
   - `env`, `NAME=value` lines that `claude-env.sh` exports before each Bash call.
+  - `skill-plugins`, your plugin folders, as described in [Where your own skills go](#where-your-own-skills-go).
 
   `config/settings.example.json`, `config/CLAUDE.example.md` and `config/env.example` show each, and `./setup --check` names an import not yet written, out of step with the overlay or whose file is gone, an `env` that does not parse, and a `settings.json` setup would refuse.
 
-  `scripts/skills-localize.sh` reads one more optional entry: `skills-patches/`, laid out like this repository's. Each file there adds to this repository's patch for that skill and never replaces one: where both carry a file, this repository's applies and `skills-localize.sh check` reports a differing host copy. Setting `SKILLS_PATCHES_DIR` leaves the host's patches out; `SKILLS_HOST_PATCHES_DIR` names another directory, or none when it is empty.
+  `scripts/skills-localize.sh` also reads `codex-skills.txt` and `retired-skills.txt`, as described in [Where your own skills go](#where-your-own-skills-go), and `skills-patches/`, laid out like this repository's. Each file there adds to this repository's patch for that skill and never replaces one: where both carry a file, this repository's applies and `skills-localize.sh check` reports a differing host copy. Setting `SKILLS_PATCHES_DIR` leaves the host's patches out; `SKILLS_HOST_PATCHES_DIR` names another directory, or none when it is empty.
 - A release train for the harness. It changes when my setup changes: `main` is its only version, `./setup --update` is the update, and no editions or support are owed. Each plugin carries its own version, which the `hov` marketplace serves.
 - The private repo's test dispatcher. CI here runs the three repository suites under `tests/repo/` (the fresh-HOME setup test, the layout and marketplace-collision check, the suite runner's own test), the hook tests, every unit suite `tests/run-claude-tests.sh` finds in the tree, a secrets scan (gitleaks) and the public-safety scan: `scripts/public-safety-scan.sh` fails on a home-directory path, a personal address, a private-network host or a private repository name anywhere in the tree, the skipped suites' sources included, and `.public-safety-allow` names each exception and why. `tests/claude-tests.skips` names the 5 suites that cannot pass from this repo and why: 4 read the author's host roster, install manifest or install-smoke launcher, 1 needs real Docker. The runner still runs the first 4, each with the failure signature its log must match, and fails the day one of them passes, times out, or fails for a different reason, so the list cannot go stale quietly.
 - A ccflare gateway. `scripts/reclaim-sweep.py` and `scripts/dispatcher-cost.py` assume one (better-ccflare, state under `~/.config/better-ccflare/`) and have nothing to read without it.

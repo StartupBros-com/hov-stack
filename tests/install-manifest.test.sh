@@ -98,7 +98,7 @@ check 'grep -q SSH-CONFIG "$BK/.ssh/config" 2>/dev/null'        "colliding basen
 # ── 7. missing source is skipped, destination left untouched ─────────────────────────────
 BK=$HOME/backups/case7
 printf 'UNTOUCHED\n' >"$HOME/.keepme"
-link_file "$SRC/does-not-exist" "$HOME/.keepme" "$BK" 2>/dev/null
+link_file "$SRC/does-not-exist" "$HOME/.keepme" "$BK" 2>/dev/null || [ "$?" -eq 2 ]
 check '[ ! -L "$HOME/.keepme" ] && grep -q UNTOUCHED "$HOME/.keepme"' \
                                                                 "missing source still disturbed the destination"
 
@@ -545,6 +545,23 @@ if [ "$root_install_status" -eq 37 ] \
 else
   bad "root installer swallowed or ran past a Docker policy sync failure (exit $root_install_status):"$'\n'"$root_install_out"
 fi
+
+# Missing sources are distinct to callers, while manifest installs still skip them.
+# The check helper evals its arguments; HOME's earlier subshell edits are intentional.
+# shellcheck disable=SC2031
+rc=0
+# shellcheck disable=SC2031
+missing_output=$(link_file "$TMP/no-source" "$HOME/no-link" "$TMP/backup" 2>&1) || rc=$?
+if [ "$rc" -eq 2 ]; then ok; else bad 'link_file returns 2 for missing source'; fi
+if [[ "$missing_output" == *"skip (source missing)"* ]]; then ok; else bad 'missing source prints skip'; fi
+if (
+  DOTFILES_ROOT_FILES=(no-source)
+  DOTFILES_LINKS=('also-no-source|also-no-link')
+  DOTFILES_MODES=()
+  # shellcheck disable=SC2031
+  install_manifest_links "$TMP" "$HOME" "$TMP/backup"
+) > "$TMP/missing.log" 2>&1; then ok; else bad 'manifest missing source returns 0'; fi
+if grep -q 'skip (source missing)' "$TMP/missing.log"; then ok; else bad 'manifest missing source prints skip'; fi
 
 if [ "$fail" -eq 0 ]; then
   echo "ok — install manifest + link_file + manifest_check + copy_file: $pass/$((pass + fail)) assertions passed"

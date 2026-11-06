@@ -107,5 +107,20 @@ h=$(make_home empty)
 out=$(section_7 "$h")
 contains "$out" "scanned zero skill directories" "vacuity: zero-scan warned"
 
+# Plugin containers contribute inner skills, including CRLF and built-in checks.
+h=$(make_home plugin)
+mkdir -p "$h/.claude/skills/review/.claude-plugin" "$h/.claude/skills/review/skills/alpha"
+printf '{"name":"review"}\n' > "$h/.claude/skills/review/.claude-plugin/plugin.json"
+printf '# alpha\n' > "$h/.claude/skills/review/skills/alpha/SKILL.md"
+out=$(section_7 "$h")
+omits "$out" 'skill dir without SKILL.md' 'plugin container needs no SKILL.md'
+omits "$out" "WARN: skill 'review'" 'container name is not an inner skill'
+printf '# alpha\r\n' > "$h/.claude/skills/review/skills/alpha/SKILL.md"
+mkdir -p "$h/.claude/skills/review/skills/review"
+printf '# review\n' > "$h/.claude/skills/review/skills/review/SKILL.md"
+out=$(section_7 "$h")
+contains "$out" 'CRLF line endings:' 'inner CRLF warned'
+contains "$out" "WARN: skill 'review'" 'inner built-in warned'
+
 echo "harness-doctor-skill-collision: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]
