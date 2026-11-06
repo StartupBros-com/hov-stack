@@ -455,11 +455,21 @@ run_pr_evidence_identity_tests() {
 #!/usr/bin/env bash
 [ -z "${PG_PR_TEST_GH_CALLS:-}" ] || printf '%s\n' "$*" >> "$PG_PR_TEST_GH_CALLS"
 case "$1 $2" in
+  'api --help')
+    # gh 2.103 and later list this flag and refuse escape bytes without it (#460); older gh has neither.
+    [ "${PG_PR_TEST_GH_ESC:-0}" = 1 ] || exit 99
+    printf '      --allow-escape-sequences   Allow printing terminal escape sequences\n' ;;
   'pr diff'|'api repos/'*)
     if [ "$1" = api ]; then
       expected="repos/acme/widgets/compare/$(jq -r .baseRefOid "$PG_PR_TEST_METADATA")...$(jq -r .headRefOid "$PG_PR_TEST_METADATA")"
       [ "$(printf '%s' "$2" | tr '[:upper:]' '[:lower:]')" = "$expected" ] || exit 99
       case " $* " in *' --hostname github.com -H Accept:application/vnd.github.diff '*) ;; *) exit 99 ;; esac
+      if [ "${PG_PR_TEST_GH_ESC:-0}" = 1 ] && LC_ALL=C grep -q "$(printf '\033')" "$PG_PR_TEST_PATCH"; then
+        case " $* " in *' --allow-escape-sequences '*) ;; *)
+          echo 'the response contains terminal escape sequences; pass --allow-escape-sequences to output it anyway' >&2
+          exit 1 ;;
+        esac
+      fi
       [ "${PG_PR_TEST_EMPTY:-0}" = 1 ] || cat "$PG_PR_TEST_PATCH"
     elif [ "${PG_PR_TEST_STALE:-0}" = 1 ]; then
       cat "$PG_PR_TEST_STALE_PATCH"
@@ -735,6 +745,29 @@ PR_EVIDENCE_GH
     "$([ "$rc" -eq 2 ] && grep -qF 'PR patch is empty or exceeds the evidence limit' "$root/empty-compare.err" && \
       [ ! -e "$dest" ] && ! compgen -G "$dest.prepare.*" >/dev/null && [ ! -e "$home" ]; echo $?)" \
     "rc=$rc stderr=$(cat "$root/empty-compare.err")"
+
+  # A diff that adds or deletes a captured-TTY fixture carries ESC bytes. gh 2.103 and later
+  # refuse to print such a response, even into a file, without --allow-escape-sequences (#460):
+  # the flag goes where gh lists it, the call stays as it was where gh does not, and the patch
+  # is published byte for byte either way.
+  cp "$root/endpoint.patch" "$root/endpoint.patch.plain"
+  printf 'diff --git a/menu.txt b/menu.txt\ndeleted file mode 100644\n--- a/menu.txt\n+++ /dev/null\n@@ -1 +0,0 @@\n-\033[1mLog in\033[0m\n' \
+    > "$root/endpoint.patch"
+  for gh_kind in current older; do
+    dest="$root/escape-$gh_kind"; home="$root/escape-$gh_kind-home"
+    case "$gh_kind" in current) esc=1 want=0 ;; older) esc=0 want=1 ;; esac
+    PG_PR_TEST_GH_ESC="$esc" pr_identity_engine --prepare-review-evidence "$dest" \
+      > "$root/escape-$gh_kind.out" 2> "$root/escape-$gh_kind.err"
+    rc=$?
+    call="$(grep -F 'api repos/acme/widgets/compare/' "$root/gh.calls" | tail -1)"
+    check "a compare diff holding escape bytes is published byte for byte ($gh_kind gh)" \
+      "$([ "$rc" -eq 0 ] && cmp -s "$dest/endpoint.patch" "$root/endpoint.patch" && \
+        jq -e --arg digest "$(sha256sum < "$root/endpoint.patch" | cut -d' ' -f1)" '.endpoint_digest==$digest' \
+          "$dest/pr-evidence.json" >/dev/null && \
+        { grep -qF -- ' --allow-escape-sequences' <<<"$call"; [ "$?" -eq "$want" ]; } && [ ! -e "$home" ]; echo $?)" \
+      "rc=$rc call=$call stderr=$(cat "$root/escape-$gh_kind.err")"
+  done
+  mv "$root/endpoint.patch.plain" "$root/endpoint.patch"
 
   # A publish that fails or is killed after claiming its destination releases it,
   # so the same path is retryable rather than blocked by a half-written pair.
