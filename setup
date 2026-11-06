@@ -37,6 +37,7 @@
 #
 # Each step is reported ok, skipped with the command to run later, or failed:
 #   1. Symlinks the harness into $CLAUDE_CONFIG_DIR (default ~/.claude):
+#      also links the plugin folders listed in the overlay's skill-plugins.
 #        CLAUDE.md agents/ bin/ commands/ hooks/ mods/ scripts/ workflows/ claude-env.sh memory-dream.json
 #      plus one link per skill in plugins/hov-stack/skills/ and skills-stack/ into
 #      skills/, skipping the skills a default plugin provides
@@ -80,6 +81,11 @@
 #                       path is moved to the backup first, like step 1's. A rules/ that is a
 #                       symlink into another tree gets nothing written to it.
 #        env            NAME=value lines that claude-env.sh exports before each Bash call.
+#        skill-plugins  one absolute folder path per line, linked as skills/<name>.
+#                       Refuses missing folders or manifests, invalid JSON objects or names,
+#                       and names taken by pack/default/retired skills, synced, plugins,
+#                       mods or an earlier accepted entry. --check names a missing link,
+#                       a shared bare name, a turned-off plugin and one Claude Code does not list.
 #   5. With Claude Code 2.1.76 or later on PATH (older releases refuse the hov manifest),
 #      adds the hov marketplace and installs the plugins lib/default-plugins.txt names.
 #      Then it turns on auto-update for the hov marketplace when settings.json is setup's
@@ -181,7 +187,7 @@ st_claude="" st_overlay="" st_links="" st_commands="" st_dcg="" st_settings="" s
 row_uncounted=0
 row() {  # row <step> <state> <detail>
   rows+=("$(printf '  %-12s %-8s %s' "$1" "$2" "$3")")
-  printf -v "st_$1" '%s' "$2"
+  printf -v "st_${1//-/_}" '%s' "$2"
   case "$2" in ok|off) ;; *) [ "$row_uncounted" = 1 ] || not_ok=$((not_ok + 1)) ;; esac
   [ "$2" != failed ] || failed=1
 }
@@ -666,6 +672,109 @@ instructions_row() {  # instructions_row [--check]
 # through a rules/ that is a symlink: it leads into another tree, often one that is shared,
 # and the import names a path in this HOME.
 overlay_usable() { case $OVERLAY in /*) return 0 ;; *) return 1 ;; esac; }
+
+# Own plugin folders stay outside the pack's link count (#476).
+skill_plugins_row() {
+  local mode=$1 state=ok detail="" names="" taken=" " count=0 folder name why dst inner s target
+  local reserved=" " item label list line cli_json="" cli_ok=0
+  overlay_usable || { row skill-plugins ok "nothing listed in $(_lf_display "$OVERLAY")/skill-plugins"; return; }
+  for item in "$HOV_STACK"/plugins/hov-stack/skills/*/ "$HOV_STACK"/skills-stack/*/; do
+    [ -d "$item" ] || continue
+    reserved="$reserved$(basename "$item")=skill-pack "
+  done
+  for list in "$HOV_STACK/lib/default-plugin-skills.txt" "$HOV_STACK/retired-skills.txt" "$OVERLAY/retired-skills.txt"; do
+    [ -f "$list" ] || continue
+    label=retired-skills.txt
+    if [ "$list" = "$HOV_STACK/lib/default-plugin-skills.txt" ]; then label=lib/default-plugin-skills.txt
+    elif [ "$list" = "$OVERLAY/retired-skills.txt" ]; then label=overlay/retired-skills.txt
+    fi
+    while IFS= read -r line || [ -n "$line" ]; do
+      line=${line%%#*}; name=; read -r name item <<< "$line"
+      [ -z "$name" ] || reserved="$reserved$name=$label "
+    done < "$list"
+  done
+  reserved="${reserved}synced=synced "
+  while IFS='|' read -r name label; do
+    [ -z "$name" ] || reserved="$reserved$name=$label "
+  done < <(node - "$HOV_STACK" <<'JS'
+const fs = require('fs'), root = process.argv[2];
+try { for (const p of JSON.parse(fs.readFileSync(root+'/.claude-plugin/marketplace.json')).plugins || []) console.log(p.name+'|marketplace'); } catch {}
+for (const d of fs.readdirSync(root+'/mods')) {
+  try { console.log(JSON.parse(fs.readFileSync(root+'/mods/'+d+'/.claude-plugin/plugin.json')).name+'|mods'); } catch {}
+}
+JS
+  )
+  if [ "$mode" = check ] && claude_usable; then
+    cli_json=$(claude plugin list --json) || cli_json=
+    if printf '%s' "$cli_json" | node -e 'const x=JSON.parse(require("fs").readFileSync(0,"utf8")); if (!Array.isArray(x)) process.exit(1)' 2>/dev/null; then cli_ok=1; fi
+  fi
+  if [ -f "$OVERLAY/skill-plugins" ]; then
+    while IFS= read -r line || [ -n "$line" ]; do
+      folder=${line%%#*}
+      folder="${folder#"${folder%%[![:space:]]*}"}"
+      folder="${folder%"${folder##*[![:space:]]}"}"
+      [ -n "$folder" ] || continue
+      why="" name=""
+      case $folder in /*) ;; *) why='not an absolute path' ;; esac
+      if [ -z "$why" ]; then
+        if [ ! -d "$folder" ]; then why='no folder there'
+        elif [ ! -f "$folder/.claude-plugin/plugin.json" ]; then why='no .claude-plugin/plugin.json'
+        elif ! name=$(node -e 'const fs=require("fs"); try {const p=JSON.parse(fs.readFileSync(process.argv[1])); if (!p || Array.isArray(p) || typeof p!=="object" || typeof p.name!=="string" || !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(p.name)) throw Error(); console.log(p.name)} catch {process.exit(1)}' "$folder/.claude-plugin/plugin.json"); then why='plugin.json must be a JSON object with a valid name'
+        fi
+      fi
+      if [ -z "$why" ]; then
+        # Space-delimited lookups keep setup compatible with bash 3.2.
+        for item in $reserved; do
+          if [ "${item%%=*}" = "$name" ]; then why="name $name clashes with ${item#*=}"; break; fi
+        done
+        case $taken in *" $name "*) why="name $name clashes with an earlier accepted entry" ;; esac
+      fi
+      if [ -n "$why" ]; then
+        state=invalid; [ "$mode" = check ] || state=failed
+        detail="$detail$(_lf_display "$folder"): $why; "
+        [ "$mode" = check ] || echo "  skill-plugins: refused $(_lf_display "$folder"): $why"
+        continue
+      fi
+      taken="$taken$name "; count=$((count + 1)); names="$names$name, "
+      dst=$CFG/skills/$name
+      if [ "$mode" != check ]; then
+        if ! link_file "$folder" "$dst" "$BACKUP"; then
+          state=failed; detail="${detail}skills/$name could not be linked to $(_lf_display "$folder"); "
+        fi
+        continue
+      fi
+      if [ -L "$dst" ]; then
+        if [ ! "$dst" -ef "$folder" ]; then
+          target=$(readlink "$dst")
+          detail="${detail}skills/$name points at $(_lf_display "$target"), not $(_lf_display "$folder"): run ./setup; "
+        fi
+      elif [ -e "$dst" ]; then
+        detail="${detail}skills/$name is not the link to $(_lf_display "$folder"): run ./setup, which moves it to the backup first; "
+      else detail="${detail}skills/$name is not linked: run ./setup; "
+      fi
+      for inner in "$folder"/skills/*/SKILL.md; do
+        [ -f "$inner" ] || continue
+        s=$(basename "$(dirname "$inner")")
+        [ "$s" != "$name" ] || continue  # skills/<name> is this plugin's own link, checked above
+        if [ -e "$CFG/skills/$s" ] || [ -L "$CFG/skills/$s" ]; then
+          detail="${detail}skills/$s shares the bare name /$s with $name's skill (which one /$s runs is not established): remove or rename one; "
+        fi
+      done
+      if node -e 'try {const p=JSON.parse(require("fs").readFileSync(process.argv[1])); process.exit(p.enabledPlugins?.[process.argv[2]]===false?0:1)} catch {process.exit(1)}' "$CFG/settings.json" "$name@skills-dir"; then
+        detail="${detail}$name@skills-dir is turned off in settings.json: run claude plugin enable $name@skills-dir; "
+      fi
+      if [ "$cli_ok" = 1 ] && ! printf '%s' "$cli_json" | node -e 'const x=JSON.parse(require("fs").readFileSync(0,"utf8")); process.exit(x.some(p=>p.id===process.argv[1])?0:1)' "$name@skills-dir"; then
+        detail="${detail}Claude Code does not list $name@skills-dir (a managed setting such as strictKnownMarketplaces can leave skills-dir plugins out without a message); "
+      fi
+    done < "$OVERLAY/skill-plugins"
+  fi
+  if [ -n "$detail" ]; then
+    [ "$state" != ok ] || state=missing
+    row skill-plugins "$state" "${detail%; }"
+  elif [ "$count" -eq 0 ]; then row skill-plugins ok "nothing listed in $(_lf_display "$OVERLAY")/skill-plugins"
+  else row skill-plugins ok "$count linked from $(_lf_display "$OVERLAY")/skill-plugins: ${names%, }"
+  fi
+}
 overlay_rule_target() {  # the path setup's own rules file imports; fails when the file is not setup's
   [ -f "$OVERLAY_RULE" ] && [ ! -L "$OVERLAY_RULE" ] || return 1
   awk -v h="$OVERLAY_RULE_HEAD" '
@@ -854,6 +963,7 @@ if [ "$check" = 1 ]; then
   else row settings ok "$CFG/settings.json"
   fi
   overlay_row check
+  skill_plugins_row check
 
   claude_row
   if claude_usable; then
@@ -899,7 +1009,7 @@ while [ "$i" -lt "${#srcs[@]}" ]; do
   if link_file "${srcs[i]}" "${dsts[i]}" "$BACKUP"; then linked=$((linked + 1)); else unlinked=$((unlinked + 1)); fi
   i=$((i + 1))
 done
-echo "  $linked links in place"
+if [ "$unlinked" -eq 0 ]; then echo "  $linked links in place"; fi
 overlay_import || echo "  could not import $OVERLAY/CLAUDE.md from $(_lf_display "$OVERLAY_RULE") (see above)"
 [ -d "$BACKUP" ] && echo "  replaced files were moved to $BACKUP (nothing was deleted)"
 if [ "$unlinked" -eq 0 ]; then row links ok "$linked links in place"; else row links failed "$unlinked could not be made (see above)"; fi
@@ -963,6 +1073,7 @@ else
   row settings failed "lib/settings-seed.js wrote no seed; the lines above say why"
 fi
 overlay_row run
+skill_plugins_row run
 if [ -z "$dcg_path" ]; then
   echo "  dcg (the destructive-command guard) is not installed, so its hook was left out."
   echo "  It is the one third-party guard this setup leans on:"

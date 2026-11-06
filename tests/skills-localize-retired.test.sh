@@ -17,6 +17,8 @@
 #   through eval, so SC2034 is a false positive file-wide.
 # shellcheck disable=SC2034
 set -uo pipefail
+unset HOV_STACK_OVERLAY XDG_CONFIG_HOME
+export CODEX_SKILLS_HOST_LIST="" RETIRED_SKILLS_HOST_LIST="" SKILL_PLUGINS_LIST=""
 
 SELF=$(readlink -f "${BASH_SOURCE[0]}")
 SCRIPT=$(cd -P "$(dirname "$SELF")/.." && pwd)/scripts/skills-localize.sh

@@ -10,6 +10,8 @@
 #   rsync over, or move to .trash, the entire config directory. Found 2026-08-05 while
 #   reviewing the Codex deploy target; the same hole was already latent in retire_one().
 set -uo pipefail
+unset HOV_STACK_OVERLAY XDG_CONFIG_HOME
+export CODEX_SKILLS_HOST_LIST="" RETIRED_SKILLS_HOST_LIST="" SKILL_PLUGINS_LIST=""
 
 SELF=$(readlink -f "${BASH_SOURCE[0]}")
 SCRIPT=$(cd -P "$(dirname "$SELF")/.." && pwd)/scripts/skills-localize.sh

@@ -24,7 +24,7 @@
 
 # link_file <src> <dst> <backup_root>
 #
-# Idempotent. Returns 0 when the link is correct on exit, 1 when it could not be made.
+# Idempotent. Returns 0 when correct, 1 when it could not be made, 2 for a missing source.
 # Prints one line per state change and stays silent when there is nothing to do, so a
 # no-op re-run of install.sh is visibly quiet.
 link_file() {
@@ -33,7 +33,7 @@ link_file() {
 
   if [ ! -e "$src" ]; then
     echo "  skip (source missing): ${src}" >&2
-    return 0
+    return 2
   fi
 
   parent=$(dirname "$dst")
@@ -188,14 +188,14 @@ install_manifest_links() {
 
   for f in "${DOTFILES_ROOT_FILES[@]}"; do
     case "$skip_list" in *" $f "*) echo "  skip (DOTFILES_SKIP_LINKS): $f"; continue ;; esac
-    link_file "$root/$f" "$home/$f" "$backup_root" || rc=1
+    link_file "$root/$f" "$home/$f" "$backup_root" || { [ "$?" -eq 2 ] || rc=1; }
   done
 
   for pair in "${DOTFILES_LINKS[@]}"; do
     src=${pair%%|*}
     dst=${pair##*|}
     case "$skip_list" in *" $src "*) echo "  skip (DOTFILES_SKIP_LINKS): $src"; continue ;; esac
-    link_file "$root/$src" "$home/$dst" "$backup_root" || rc=1
+    link_file "$root/$src" "$home/$dst" "$backup_root" || { [ "$?" -eq 2 ] || rc=1; }
   done
 
   for pair in "${DOTFILES_MODES[@]:-}"; do

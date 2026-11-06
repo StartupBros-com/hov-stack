@@ -503,6 +503,12 @@ w0=$WARNS
 for d in "$HOME"/.claude/skills/*/; do
   # skills/synced is skills-sync's container of vendored skills, not a skill.
   [ "$(basename "$d")" = synced ] && continue
+  if [ -f "$d/.claude-plugin/plugin.json" ]; then
+    for f in "$d"/skills/*/SKILL.md; do
+      grep -q $'\r' "$f" 2>/dev/null && warn "CRLF line endings: $f"
+    done
+    continue
+  fi
   [ -f "$d/SKILL.md" ] || warn "skill dir without SKILL.md: $(basename "$d")"
 done
 for f in "$HOME"/.claude/skills/*/SKILL.md; do
@@ -519,21 +525,26 @@ done
 # cli-reference, plugins) on 2026-09-20; extend it when the CLI adds one.
 # claude-api was added 2026-09-23: the 2.1.280 binary registers it as a
 # bundled skill, so a same-named user skill would collide with it too.
-# Plugin-namespaced skills (plugin:skill) are a different namespace and are
-# not scanned. Consumer: every third-party skill install. Deletion
+# Plugin folders contribute their inner skill names.
+# Consumer: every third-party skill install. Deletion
 # condition: the CLI namespaces user skills away from its own commands.
 BUILTIN_SLASH_COMMANDS="init doctor skill-doctor review code-review security-review simplify loop schedule run verify run-skill-generator workflows compact clear help config model memory plugin plugins reload-plugins fewer-permission-prompts update-config keybindings-help claude-api status cost usage resume login logout mcp agents hooks permissions terminal-setup vim export rename release-notes bug feedback add-dir context upgrade ide rewind tasks theme output-style privacy-settings btw diff recap effort fast teleport tui voice rate-limit-options usage-credits cd"
 _skill_dirs_scanned=0
 for d in "$HOME"/.claude/skills/*/ "$HOME"/.agents/skills/*/ "$HOME"/.codex/skills/*/; do
   [ -d "$d" ] || continue
-  _skill_dirs_scanned=$((_skill_dirs_scanned + 1))
-  _skill_name=$(basename "$d")
-  # Literal comparison, never a case pattern: a directory name is data and may
-  # carry glob characters.
-  for _builtin in $BUILTIN_SLASH_COMMANDS; do
-    if [ "$_builtin" = "$_skill_name" ]; then
-      warn "skill '$_skill_name' ($d) shares its name with the built-in /$_skill_name; a same-named user skill was observed to answer /skill-doctor in place of the built-in (2026-09-20). Check which one answers /$_skill_name here and rename the skill if the built-in is wanted"
-    fi
+  _skill_candidates=("$d")
+  if [ -f "$d/.claude-plugin/plugin.json" ]; then _skill_candidates=("$d"/skills/*/); fi
+  for _skill_dir in "${_skill_candidates[@]}"; do
+    [ -d "$_skill_dir" ] || continue
+    _skill_dirs_scanned=$((_skill_dirs_scanned + 1))
+    _skill_name=$(basename "$_skill_dir")
+    # Literal comparison, never a case pattern: a directory name is data and may
+    # carry glob characters.
+    for _builtin in $BUILTIN_SLASH_COMMANDS; do
+      if [ "$_builtin" = "$_skill_name" ]; then
+        warn "skill '$_skill_name' ($_skill_dir) shares its name with the built-in /$_skill_name; a same-named user skill was observed to answer /skill-doctor in place of the built-in (2026-09-20). Check which one answers /$_skill_name here and rename the skill if the built-in is wanted"
+      fi
+    done
   done
 done
 [ "$_skill_dirs_scanned" -gt 0 ] || warn "skill-name collision check scanned zero skill directories under ~/.claude, ~/.agents and ~/.codex (vacuity)"

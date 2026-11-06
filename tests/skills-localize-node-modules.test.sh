@@ -10,6 +10,8 @@
 #   excludes node_modules from the sync in both directions. This test runs the real
 #   function against temp trees, so a regression shows up in CI without a live jsm tree.
 set -uo pipefail
+unset HOV_STACK_OVERLAY XDG_CONFIG_HOME
+export CODEX_SKILLS_HOST_LIST="" RETIRED_SKILLS_HOST_LIST="" SKILL_PLUGINS_LIST=""
 
 SELF=$(readlink -f "${BASH_SOURCE[0]}")
 SCRIPT=$(cd -P "$(dirname "$SELF")/.." && pwd)/scripts/skills-localize.sh

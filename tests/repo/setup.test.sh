@@ -770,6 +770,12 @@ case "$*" in
       printf '%s{"id":"%s","version":"%s","scope":"%s","enabled":true}' "$sep" "$id" "$v" "$scope"
       sep=,
     done < "$F/plugins"
+    if [ -f "$F/skills-dir" ]; then
+      while read -r id; do
+        printf '%s{"id":"%s","version":"1.0.0","scope":"user","enabled":true}' "$sep" "$id"
+        sep=,
+      done < "$F/skills-dir"
+    fi
     echo ']' ;;
   'plugin install '*'@hov --scope user')
     if [ -f "$F/offline" ]; then echo "fake claude: could not reach github.com" >&2; exit 1; fi
@@ -1300,6 +1306,126 @@ printf '{ "model": "home-default" }\n' > "$HX/.config/hov-stack/settings.json"
 node -e 'process.exit(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).model === "home-default" ? 0 : 1)' "$HX/.claude/settings.json" \
   || fail "a relative XDG_CONFIG_HOME was not ignored for ~/.config/hov-stack"
 ok "a relative HOV_STACK_OVERLAY is named and read by nothing, and a relative XDG_CONFIG_HOME is ignored for ~/.config"
+# Own plugin folders use manifest names and never adopt unrelated skills (#476).
+OSP=$WORK/overlay-skill-plugins
+HSP=$WORK/home-skill-plugins
+FSP=$WORK/fake-skill-plugins
+P1=$WORK/folder-basename
+mkdir -p "$OSP" "$P1/.claude-plugin" "$P1/skills/alpha" "$HSP/.claude/skills/foreign" "$WORK/foreign-target"
+printf '{"name":"my-skills"}\n' > "$P1/.claude-plugin/plugin.json"
+printf '# alpha\n' > "$P1/skills/alpha/SKILL.md"
+printf '# foreign\n' > "$HSP/.claude/skills/foreign/SKILL.md"
+printf 'note\n' > "$HSP/.claude/skills/note.md"
+ln -s "$WORK/foreign-target" "$HSP/.claude/skills/foreign-link"
+printf '  %s # comment, no final newline' "$P1" > "$OSP/skill-plugins"
+new_fake "$FSP" 2.1.310
+printf 'my-skills@skills-dir\n' > "$FSP/skills-dir"
+HOV_STACK_OVERLAY=$OSP fake_setup "$FSP" "$HSP" "$WORK/sp-run.log" --no-dcg || { cat "$WORK/sp-run.log"; fail 'plugin setup failed'; }
+[ "$(readlink -f "$HSP/.claude/skills/my-skills")" = "$P1" ] || fail 'plugin link does not use manifest name'
+grep -Eq '^  skill-plugins +ok ' "$WORK/sp-run.log" || fail 'plugin row not ok'
+[ "$(cat "$HSP/.claude/skills/foreign/SKILL.md")" = '# foreign' ] || fail 'foreign skill changed'
+[ "$(cat "$HSP/.claude/skills/note.md")" = note ] || fail 'foreign file changed'
+[ "$(readlink "$HSP/.claude/skills/foreign-link")" = "$WORK/foreign-target" ] || fail 'foreign link changed'
+[ ! -e "$HSP/.hov-stack-backups" ] || fail 'foreign entries backed up'
+before=$(tree_state "$HSP/.claude/skills")
+HOV_STACK_OVERLAY=$OSP fake_setup "$FSP" "$HSP" "$WORK/sp-rerun.log" --no-dcg || fail 'plugin rerun failed'
+[ "$before" = "$(tree_state "$HSP/.claude/skills")" ] || fail 'plugin rerun changed skills tree'
+[ ! -e "$HSP/.hov-stack-backups" ] || fail 'plugin rerun made a backup'
+before=$(tree_state "$HSP")
+HOV_STACK_OVERLAY=$OSP fake_setup "$FSP" "$HSP" "$WORK/sp-green.log" --check --no-dcg || { cat "$WORK/sp-green.log"; fail 'plugin check not green'; }
+[ "$before" = "$(tree_state "$HSP")" ] || fail 'green check changed tree'
+mkdir "$P1/skills/my-skills"
+printf '# self\n' > "$P1/skills/my-skills/SKILL.md"
+HOV_STACK_OVERLAY=$OSP fake_setup "$FSP" "$HSP" "$WORK/sp-self.log" --check --no-dcg || { cat "$WORK/sp-self.log"; fail 'an inner skill named like its plugin was reported as a clash with its own link'; }
+rm "$P1/skills/my-skills/SKILL.md"
+rmdir "$P1/skills/my-skills"
+ok 'own plugin linked by manifest name, rerun stable, unrelated entries left alone, an inner skill may share the plugin name'
+
+sp_check_bad() {
+  local needle=$1 before rc=0
+  before=$(tree_state "$HSP")
+  HOV_STACK_OVERLAY=$OSP fake_setup "$FSP" "$HSP" "$WORK/sp-check.log" --check --no-dcg || rc=$?
+  [ "$rc" = 1 ] || { cat "$WORK/sp-check.log"; fail "plugin check expected 1: $needle"; }
+  grep -F "$needle" "$WORK/sp-check.log" >/dev/null || { cat "$WORK/sp-check.log"; fail "plugin check missing: $needle"; }
+  [ "$before" = "$(tree_state "$HSP")" ] || fail 'plugin check changed tree'
+}
+rm "$HSP/.claude/skills/my-skills"
+sp_check_bad 'skills/my-skills is not linked: run ./setup'
+ln -s "$WORK/foreign-target" "$HSP/.claude/skills/my-skills"
+sp_check_bad 'skills/my-skills points at'
+HOV_STACK_OVERLAY=$OSP fake_setup "$FSP" "$HSP" "$WORK/sp-relink.log" --no-dcg || fail 'wrong plugin link not replaced'
+[ ! -e "$HSP/.hov-stack-backups" ] || fail 'wrong link backed up'
+rm "$HSP/.claude/skills/my-skills"
+mkdir "$HSP/.claude/skills/my-skills"
+printf 'keep\n' > "$HSP/.claude/skills/my-skills/keep"
+sp_check_bad 'which moves it to the backup first'
+HOV_STACK_OVERLAY=$OSP fake_setup "$FSP" "$HSP" "$WORK/sp-adopt.log" --no-dcg || fail 'plugin folder not adopted'
+bk=("$HSP"/.hov-stack-backups/*/.claude/skills/my-skills/keep)
+[ "$(cat "${bk[0]}")" = keep ] || fail 'plugin folder data not backed up'
+mkdir "$HSP/.claude/skills/alpha"
+printf '# plain\n' > "$HSP/.claude/skills/alpha/SKILL.md"
+sp_check_bad "skills/alpha shares the bare name /alpha with my-skills's skill (which one /alpha runs is not established)"
+rm "$HSP/.claude/skills/alpha/SKILL.md"
+rmdir "$HSP/.claude/skills/alpha"
+cp "$HSP/.claude/settings.json" "$WORK/sp-settings.json"
+node -e 'const fs=require("fs"),p=process.argv[1],x=JSON.parse(fs.readFileSync(p)); x.enabledPlugins["my-skills@skills-dir"]=false; fs.writeFileSync(p,JSON.stringify(x))' "$HSP/.claude/settings.json"
+sp_check_bad 'my-skills@skills-dir is turned off in settings.json'
+cp "$WORK/sp-settings.json" "$HSP/.claude/settings.json"
+: > "$FSP/skills-dir"
+sp_check_bad 'Claude Code does not list my-skills@skills-dir'
+ok 'plugin check names missing/wrong/real links, shared names, disabled and unlisted plugins without writes'
+
+# Each refusal coexists with a valid entry, which must still link.
+pack_name=$(basename "$(printf '%s\n' "$copy"/plugins/hov-stack/skills/*/ | head -1)")
+default_name=$(awk '!/^#/ && NF {print $1; exit}' "$copy/lib/default-plugin-skills.txt")
+retired_name=$(awk '!/^#/ && NF {print $1; exit}' "$copy/retired-skills.txt")
+market_name=$(node -e 'console.log(require(process.argv[1]).plugins[0].name)' "$copy/.claude-plugin/marketplace.json")
+mod_manifest=$(printf '%s\n' "$copy"/mods/*/.claude-plugin/plugin.json | head -1)
+mod_name=$(node -e 'console.log(require(process.argv[1]).name)' "$mod_manifest")
+for kind in relative absent manifest json object invalid-name pack default retired synced marketplace mod duplicate overlay-retired; do
+  badpath=$WORK/sp-bad-$kind
+  reason="" name=bad-skills
+  mkdir -p "$badpath/.claude-plugin"
+  case $kind in
+    relative) badpath=relative/plugin; reason='not an absolute path' ;;
+    absent) badpath=$WORK/does-not-exist; reason='no folder there' ;;
+    manifest) reason='no .claude-plugin/plugin.json' ;;
+    json) printf 'not json\n' > "$badpath/.claude-plugin/plugin.json"; reason='JSON object with a valid name' ;;
+    object) printf '[]\n' > "$badpath/.claude-plugin/plugin.json"; reason='JSON object with a valid name' ;;
+    invalid-name) name='../bad'; reason='JSON object with a valid name' ;;
+    pack) name=$pack_name; reason='skill-pack' ;;
+    default) name=$default_name; reason='default-plugin-skills.txt' ;;
+    retired) name=$retired_name; reason='retired-skills.txt' ;;
+    synced) name=synced; reason='synced' ;;
+    marketplace) name=$market_name; reason='marketplace' ;;
+    mod) name=$mod_name; reason='mods' ;;
+    duplicate) name=my-skills; reason='earlier accepted entry' ;;
+    overlay-retired) name=old-own; reason='retired-skills.txt'; printf 'old-own # retired\n' > "$OSP/retired-skills.txt" ;;
+  esac
+  case $kind in relative|absent|manifest|json|object) ;; *) printf '{"name":"%s"}\n' "$name" > "$badpath/.claude-plugin/plugin.json" ;; esac
+  printf '%s\n%s\n' "$P1" "$badpath" > "$OSP/skill-plugins"
+  rc=0
+  hp=$WORK/home-sp-refuse-$kind
+  HOV_STACK_OVERLAY=$OSP fake_setup "$FSP" "$hp" "$WORK/sp-refuse.log" --no-dcg || rc=$?
+  [ "$rc" = 1 ] || { cat "$WORK/sp-refuse.log"; fail "refusal $kind exited $rc"; }
+  grep -F "skill-plugins: refused $badpath:" "$WORK/sp-refuse.log" | grep -F "$reason" >/dev/null || { cat "$WORK/sp-refuse.log"; fail "refusal $kind missing reason"; }
+  [ "$(readlink -f "$hp/.claude/skills/my-skills")" = "$P1" ] || fail "refusal $kind prevented valid link"
+  [ ! -e "$hp/.claude/skills/bad-skills" ] || fail "refused $kind linked"
+done
+ok 'plugin refusals name all conflicting lists and invalid paths/manifests, and valid entries still link'
+
+# A missing fixed source is not a successful setup link.
+missing_copy=$WORK/missing-source-copy
+cp -a "$copy" "$missing_copy"
+rm "$missing_copy/memory-dream.json"
+rc=0
+HOME=$WORK/home-sp-missing HOV_STACK_OVERLAY=$WORK/no-overlay bash "$missing_copy/setup" --no-dcg > "$WORK/sp-missing.log" 2>&1 || rc=$?
+[ "$rc" = 1 ] || fail 'missing setup source did not fail'
+grep -Eq '^  links +failed ' "$WORK/sp-missing.log" || fail 'missing source links row not failed'
+grep -F "skip (source missing): $missing_copy/memory-dream.json" "$WORK/sp-missing.log" >/dev/null || fail 'missing source not named'
+if grep -F 'links in place' "$WORK/sp-missing.log"; then fail 'missing source claimed links in place'; fi
+ok 'missing setup source fails the link row and the run'
+
 # The tracked examples are overlays that work as they stand.
 node "$ROOT/lib/settings-seed.js" "$ROOT/settings.json" "$WORK/seed-example.json" "$WORK/cfg-example" "$WORK/home-example" "" "$ROOT/config/settings.example.json" > "$WORK/seed-example.log" \
   || { cat "$WORK/seed-example.log"; fail "config/settings.example.json is refused as an overlay"; }
