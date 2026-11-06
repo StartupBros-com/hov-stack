@@ -49,6 +49,7 @@ leg_rest=(
   "bash tests/memo-recovery.test.sh"
   "bash tests/round-continue.test.sh"
   "bash tests/delivery-disposition.test.sh"
+  "bash tests/fd-lock.test.sh"
   "bash tests/template-verdict.test.sh"
   "bash tests/autoupdate.test.sh"
   "bash tests/resolve-identity.test.sh"

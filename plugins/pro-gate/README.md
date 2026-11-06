@@ -313,7 +313,7 @@ or merge authorization. Version-matched release and private-consumer migration r
 - [`oracle`](https://github.com/steipete/oracle): `pnpm add -g @steipete/oracle`
 - A coding agent to apply fixes: Claude Code (always works); Codex CLI / Compound
   Engineering used automatically if present
-- `gh` (authenticated), `git`, `jq`, `flock`
+- `gh` (authenticated), `git`, `jq`, and `flock` or `perl` (stock macOS ships `perl`, not `flock`)
 
 ## Installation
 
@@ -648,7 +648,6 @@ an endless collect. Use `bundle` or `both` for the final round.
 | `PRO_GATE_MAX_CONCURRENCY`          | `1`                               | Ceiling for parallel Pro chats; a ramp governor earns up to it on clean streaks                                                                                                                                                          |
 | `PRO_GATE_RESERVATION_TTL`          | `21600`                           | Minimum age before confirmed exact-marker misses may exhaust recovery; elapsed time alone never removes the reservation or its charge                                                                                                     |
 | `PRO_GATE_GENERATION_CEILING`       | `10800`                           | Seconds after its charge that a still-`generating` reservation stops counting against review capacity; it stays harvestable and keeps its charge (`0` = never stop counting)                                                            |
-| `PRO_GATE_DIRLOCK_ORPHAN_GRACE`     | `5`                               | No-flock platforms only: seconds an unmarked guard directory must sit before a reclaimer may remove it                                                                                                                                   |
 | `PRO_GATE_BROWSER_MEM_PRESSURE_PCT` | `85`                              | Percent of the browser cgroup's effective limit (the smaller finite of `memory.high` and `memory.max`; `max` means unlimited) at which two consecutive samples arm the pressure sentinel and the health gate defers a slot with no spend |
 | `PRO_GATE_BROWSER_MEM_SAMPLE_SECS`  | `5`                               | Seconds between browser cgroup samples                                                                                                                                                                                                   |
 | `PRO_GATE_BROWSER_MEM_PRESSURE_TTL` | `60`                              | Seconds a pressure sentinel stays fresh; a stale or absent sentinel never defers a slot                                                                                                                                                  |
@@ -705,7 +704,8 @@ semantics. Native mode keeps the prompt's title hint and does not run remote-CDP
 
 ## Safety and scale
 
-- **Concurrency**: oracle has no cross-process limit, so the engine holds a `flock`:
+- **Concurrency**: oracle has no cross-process limit, so the engine holds a kernel file lock
+  (`flock(2)`, taken with `flock`, or `perl` where `flock` is absent):
   concurrent calls queue one-at-a-time against the single ChatGPT account by default. An
   adaptive ramp can earn limited parallelism on clean streaks; true parallelism needs more
   ChatGPT accounts (one Chrome profile each).

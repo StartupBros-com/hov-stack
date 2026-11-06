@@ -90,61 +90,37 @@ OS="$(pg_os)"; MODE="$(pg_browser_mode)"
 
 # One live run per --out (gate #54 r11): the status sidecar is keyed by $OUT, so two
 # concurrent runs sharing it would overwrite each other's phase/marker and cross-feed their
-# pollers even with distinct result artifacts. Held for the process lifetime; best-effort
-# where flock or the directory is unavailable. gate #91 round3 P1 (:880): extracted to a
+# pollers even with distinct result artifacts. Held for the process lifetime; fails closed when
+# the lock cannot be taken. gate #91 round3 P1 (:880): extracted to a
 # function — defined here, ahead of both callers — so --recover's own publications (:191-219)
 # can take the IDENTICAL guard before writing $OUT instead of doing it unguarded. A fast-path
 # recovery used to publish straight to --out with no lock at all, racing a live fresh/harvest
 # run (or a second concurrent recovery) that IS holding this guard: two publishers, two
-# "success" reports, one silently overwritten. Logic, fallbacks, and messages are VERBATIM
-# from the original inline block; only the failure signal changed (return 1, not exit) so
+# "success" reports, one silently overwritten. The failure signal is return 1, not exit, so
 # each caller can map "cannot acquire" onto its own contract — a fresh/harvest run keeps its
 # long-standing exit 2, --recover maps it onto the trouble state its own contract promises.
+# Since #322 it is the one fd lock (pg_fd_lock) on every platform: the kernel drops it when this
+# process exits, so a dead owner needs no takeover and a live one always refuses.
 pg_out_guard_acquire() {
-  PG_OUT_GUARD_OK=0
-  if pg_have flock; then
-    if { exec {PG_OUT_GUARD_FD}>>"$OUT.lock"; } 2>/dev/null; then
-      if flock -n "$PG_OUT_GUARD_FD" 2>/dev/null; then PG_OUT_GUARD_OK=1; else
-        echo "ERROR: another live run is already using --out $OUT (its status sidecar would be overwritten). Use a distinct --out per run." >&2
-        return 1
-      fi
-    fi
+  local rc
+  PG_OUT_GUARD_OK=0; PG_OUT_GUARD_FD=""
+  if ! pg_fd_open "$OUT.lock"; then
+    # Fail CLOSED: with no ownership established, two runs could share one sidecar.
+    echo "ERROR: cannot establish ownership of --out $OUT (directory unwritable?). Choose an --out in a writable directory." >&2
+    return 1
   fi
-  if [ "$PG_OUT_GUARD_OK" != 1 ]; then
-    # mkdir/PID fallback (gate #54 r12): stock macOS has no flock, and skipping the guard
-    # there reopens the sidecar cross-feed. Dead owners self-heal; a live owner refuses.
-    PG_OUT_GUARD_DIR="$OUT.lock.d"
-    if mkdir "$PG_OUT_GUARD_DIR" 2>/dev/null; then
-      echo "$$" > "$PG_OUT_GUARD_DIR/pid" 2>/dev/null || true
-      PG_OUT_GUARD_OK=1
-    else
-      OG_PID="$(cat "$PG_OUT_GUARD_DIR/pid" 2>/dev/null || true)"
-      case "$OG_PID" in
-        ''|*[!0-9]*) ;;
-        *) if kill -0 "$OG_PID" 2>/dev/null; then
-             echo "ERROR: another live run (pid $OG_PID) is already using --out $OUT. Use a distinct --out per run." >&2
-             return 1
-           fi ;;
-      esac
-      # Atomic TAKEOVER of the stale dir (gate #54 r14): rename it aside first — exactly one
-      # racer's mv succeeds; the loser's retake mkdir then fails against the winner's fresh
-      # dir and it refuses below. Immediate rm+mkdir let both racers "win".
-      if mv "$PG_OUT_GUARD_DIR" "$PG_OUT_GUARD_DIR.reap.$$" 2>/dev/null; then
-        rm -f "$PG_OUT_GUARD_DIR.reap.$$/pid" 2>/dev/null
-        rmdir "$PG_OUT_GUARD_DIR.reap.$$" 2>/dev/null
-        if mkdir "$PG_OUT_GUARD_DIR" 2>/dev/null; then
-          echo "$$" > "$PG_OUT_GUARD_DIR/pid" 2>/dev/null || true
-          [ "$(cat "$PG_OUT_GUARD_DIR/pid" 2>/dev/null)" = "$$" ] && PG_OUT_GUARD_OK=1
-        fi
-      fi
-    fi
-    if [ "$PG_OUT_GUARD_OK" != 1 ]; then
-      # Fail CLOSED: with no ownership established, two runs could share one sidecar.
-      echo "ERROR: cannot establish ownership of --out $OUT (directory unwritable?). Choose an --out in a writable directory." >&2
-      return 1
-    fi
+  pg_fd_lock "$PG_FD" 0 2>/dev/null; rc=$?
+  if [ "$rc" = 0 ]; then
+    PG_OUT_GUARD_FD="$PG_FD"; PG_OUT_GUARD_OK=1
+    return 0
   fi
-  return 0
+  pg_fd_close "$PG_FD"
+  if [ "$rc" = 1 ]; then
+    echo "ERROR: another live run is already using --out $OUT (its status sidecar would be overwritten). Use a distinct --out per run." >&2
+  else
+    echo "ERROR: cannot establish ownership of --out $OUT: neither flock(1) nor perl is installed; refusing to continue unlocked" >&2
+  fi
+  return 1
 }
 
 PR=""; REPO=""; DIFF_FILE=""; DIFF_IS_CALLER_SUPPLIED=0; INPUT=""; INPUT_SUPPLIED=0; OUT=""; TIMEOUT=""; EXTRA_GLOB=""; HARVEST_MARKER=""; HARVEST_REQUESTED=0; CONFIRM_FILE=""; BRIEF_FILE=""
@@ -1286,31 +1262,7 @@ if [ "$STATUS_REQUESTED" = 1 ]; then
   # ledger row yet, where "no state found" would wrongly invite a duplicate launch. Read-only:
   # probe only locks that already exist (opening would otherwise create the file).
   st_inflight() {  # $1 = round key -> rc 0 when a same-change run holds the lock now
-    local lf="${ST_LOCKFILE}.pr-$1" pfd opid otok
-    if [ -d "${lf}.d" ]; then
-      # mkdir-fallback lock (no flock, e.g. stock macOS): live only when the recorded owner
-      # is a running pid. A dead/absent owner is a stale dir from SIGKILL/reboot — pg_lock
-      # self-heals it at the next acquisition; report it NOT live, mutate nothing
-      # (gate #53 r3 P1: existence alone reported stale locks as RUNNING forever).
-      opid="$(cat "${lf}.d/pid" 2>/dev/null || true)"
-      case "$opid" in ''|*[!0-9]*) return 1;; esac
-      kill -0 "$opid" 2>/dev/null || return 1
-      # Token-verify when the lock recorded one: a recycled pid must not report a long-dead
-      # holder as RUNNING (gate #61 r2 P1). Token-less locks (legacy) keep the pid-only check.
-      # pg_pid_recycled fails closed (still in flight) on a failed recompute -- issue #177: the
-      # old inline comparison read an empty recompute as "token differs", so a live same-change
-      # review reported as not running, inviting a duplicate paid Pro run.
-      otok="$(cat "${lf}.d/token" 2>/dev/null || true)"
-      pg_pid_recycled "$opid" "$otok" && return 1
-      return 0
-    fi
-    [ -e "$lf" ] || return 1
-    pg_have flock || return 1
-    if { exec {pfd}>>"$lf"; } 2>/dev/null; then
-      if flock -n "$pfd" 2>/dev/null; then eval "exec ${pfd}>&-" 2>/dev/null; return 1; fi
-      eval "exec ${pfd}>&-" 2>/dev/null; return 0
-    fi
-    return 1
+    pg_fd_lock_busy "${ST_LOCKFILE}.pr-$1"
   }
 
   # Normalize the query: marker, PR URL (repo-scoped slug + number), bare number, or all.
@@ -1814,9 +1766,9 @@ if [ "$STATUS_REQUESTED" = 1 ]; then
   exit 0
 fi
 
-# Organizer locks are marker-unique and held for at most 95s. Sweep crash-left flock files and
-# mkdir fallbacks at the first write-capable boundary so artifact recovery and every --harvest path
-# self-heal too. --status exits above and remains strictly read-only; fresh locks survive one day.
+# Organizer locks are marker-unique and held for at most 95s. Sweep crash-left lock files (and the
+# lock directories releases before #322 made where flock(1) was absent) at the first write-capable
+# boundary so artifact recovery and every --harvest path self-heal too. --status exits above and remains strictly read-only; fresh locks survive one day.
 find "${PRO_GATE_ORGANIZER_LOCK_DIR:-$PRO_GATE_HOME/organizer-locks}" \
   -mindepth 1 -maxdepth 1 -type f -mmin +1440 -delete 2>/dev/null || true
 find "${PRO_GATE_ORGANIZER_LOCK_DIR:-$PRO_GATE_HOME/organizer-locks}" \
@@ -2416,76 +2368,28 @@ pg_publish_fail() {  # $1 = snapshot — shared failure path: durability decides
 # v0.32: serialize every organizer for one marker. The delayed early rename and terminal
 # archive/close must never overlap: on a short run the latter can finish before the former wakes,
 # and an unsynchronized helper would then reopen the remembered URL after successful cleanup.
-# Linux uses a dedicated dynamic flock fd (never the engine's lock fds); stock macOS uses an
-# owner-verified mkdir lock. Globals are process-local inside the early organizer's subshell.
+# Every platform uses the one fd lock (pg_fd_lock) on a descriptor of its own, never the engine's
+# lock fds. Globals are process-local inside the early organizer's subshell.
 pg_organizer_lock_acquire() {  # <marker> [wait-seconds]
-  local marker="$1" wait_s="${2:-95}" lock start self self_token probe_pid
+  local marker="$1" wait_s="${2:-95}" lock rc
   case "$wait_s" in ''|*[!0-9]*) wait_s=95;; esac
-  PG_ORGANIZER_LOCK_FD=""; PG_ORGANIZER_LOCK_DIR=""
-  PG_ORGANIZER_LOCK_OWNER=""; PG_ORGANIZER_LOCK_TOKEN=""
+  PG_ORGANIZER_LOCK_FD=""
   lock="${PRO_GATE_ORGANIZER_LOCK_DIR:-$PRO_GATE_HOME/organizer-locks}/$marker"
   mkdir -p "$(dirname "$lock")" 2>/dev/null || return 1
-  if [ "${PRO_GATE_TEST_ORGANIZER_NO_FLOCK:-0}" != 1 ] && command -v flock >/dev/null 2>&1; then
-    if { exec {PG_ORGANIZER_LOCK_FD}>>"$lock"; } 2>/dev/null \
-       && flock -w "$wait_s" "$PG_ORGANIZER_LOCK_FD" 2>/dev/null; then
-      return 0
-    fi
-    [ -n "${PG_ORGANIZER_LOCK_FD:-}" ] && eval "exec ${PG_ORGANIZER_LOCK_FD}>&-" 2>/dev/null
-    PG_ORGANIZER_LOCK_FD=""
+  pg_fd_open "$lock" || return 1
+  pg_fd_lock "$PG_FD" "$wait_s" 2>/dev/null; rc=$?
+  if [ "$rc" != 0 ]; then
+    pg_fd_close "$PG_FD"
+    [ "$rc" = 2 ] && echo "ERROR: cannot lock ${lock}: neither flock(1) nor perl is installed; refusing to continue unlocked" >&2
     return 1
   fi
-  PG_ORGANIZER_LOCK_DIR="${lock}.d"; start="$(date +%s)"
-  # BASHPID is absent in macOS's Bash 3.2, and $$ stays the parent engine's pid inside a
-  # background subshell. The PPID of a short child is the actual current shell process; unlike
-  # a $$-named temp file, this cannot collide between sibling helpers.
-  self="${BASHPID:-}"
-  if [ -z "$self" ]; then
-    sleep 5 & probe_pid=$!
-    self="$(ps -o ppid= -p "$probe_pid" 2>/dev/null | tr -d ' ')"
-    kill "$probe_pid" 2>/dev/null || true
-    wait "$probe_pid" 2>/dev/null || true
-  fi
-  case "$self" in ''|*[!0-9]*) self="$$";; esac
-  self_token="$(pg_pid_token "$self" 2>/dev/null || true)"
-  [ -n "$self_token" ] || { PG_ORGANIZER_LOCK_DIR=""; return 1; }
-  # Existing directories are always BUSY, including missing/torn/dead owner metadata. Reaping a
-  # path after reading its metadata cannot be made conditional with portable Bash: a live winner
-  # can replace the directory before rm/rename and be deleted instead. The startup sweep removes
-  # crash-left organizer locks only after one day; this bounded acquisition therefore fails closed.
-  while ! mkdir "$PG_ORGANIZER_LOCK_DIR" 2>/dev/null; do
-    [ $(( $(date +%s) - start )) -ge "$wait_s" ] \
-      && { PG_ORGANIZER_LOCK_DIR=""; return 1; }
-    sleep 1
-  done
-  # Ownership publication is part of acquisition, not best-effort diagnostics. A process may run
-  # browser work only after both fields are atomically installed and read back from its directory.
-  if ! printf '%s\n' "$self" > "$PG_ORGANIZER_LOCK_DIR/pid.tmp.$self" 2>/dev/null \
-     || ! mv -f "$PG_ORGANIZER_LOCK_DIR/pid.tmp.$self" "$PG_ORGANIZER_LOCK_DIR/pid" 2>/dev/null \
-     || ! printf '%s\n' "$self_token" > "$PG_ORGANIZER_LOCK_DIR/token.tmp.$self" 2>/dev/null \
-     || ! mv -f "$PG_ORGANIZER_LOCK_DIR/token.tmp.$self" "$PG_ORGANIZER_LOCK_DIR/token" 2>/dev/null \
-     || [ "$(cat "$PG_ORGANIZER_LOCK_DIR/pid" 2>/dev/null || true)" != "$self" ] \
-     || [ "$(cat "$PG_ORGANIZER_LOCK_DIR/token" 2>/dev/null || true)" != "$self_token" ]; then
-    rm -rf "$PG_ORGANIZER_LOCK_DIR" 2>/dev/null
-    PG_ORGANIZER_LOCK_DIR=""
-    return 1
-  fi
-  PG_ORGANIZER_LOCK_OWNER="$self"
-  PG_ORGANIZER_LOCK_TOKEN="$self_token"
-  return 0
+  PG_ORGANIZER_LOCK_FD="$PG_FD"
 }
 
 pg_organizer_lock_release() {
-  local owner owner_token
-  [ -n "${PG_ORGANIZER_LOCK_FD:-}" ] && eval "exec ${PG_ORGANIZER_LOCK_FD}>&-" 2>/dev/null
-  if [ -n "${PG_ORGANIZER_LOCK_DIR:-}" ]; then
-    owner="$(cat "$PG_ORGANIZER_LOCK_DIR/pid" 2>/dev/null || true)"
-    owner_token="$(cat "$PG_ORGANIZER_LOCK_DIR/token" 2>/dev/null || true)"
-    [ "$owner" = "${PG_ORGANIZER_LOCK_OWNER:-}" ] \
-      && [ "$owner_token" = "${PG_ORGANIZER_LOCK_TOKEN:-}" ] \
-      && rm -rf "$PG_ORGANIZER_LOCK_DIR" 2>/dev/null
-  fi
-  PG_ORGANIZER_LOCK_FD=""; PG_ORGANIZER_LOCK_DIR=""
-  PG_ORGANIZER_LOCK_OWNER=""; PG_ORGANIZER_LOCK_TOKEN=""
+  [ -n "${PG_ORGANIZER_LOCK_FD:-}" ] && pg_fd_close "$PG_ORGANIZER_LOCK_FD"
+  PG_ORGANIZER_LOCK_FD=""
+  return 0
 }
 
 pg_organizer_join() {  # wait for and retire any early organizer without browser traffic
@@ -2974,7 +2878,7 @@ if [ -n "$HARVEST_MARKER" ]; then
   command -v node >/dev/null 2>&1 || { echo "ERROR: --harvest needs node for CDP salvage" >&2; pg_status failed "node missing"; pg_finish 3; }
   # Serialize the entire marker harvest. Without this, two collectors can share $OUT.cdp,
   # both read the same completed tab, and one closes it underneath the other (exit 6 + false
-  # reservation removal). Linux uses flock; macOS/no-flock uses the existing pg_lock mkdir path.
+  # reservation removal). pg_lock's fd lock serves every platform.
   HARVEST_LOCK="${PRO_GATE_HARVEST_LOCK_DIR:-$PRO_GATE_HOME/harvest-locks}/${RUN_MARKER}"
   mkdir -p "$(dirname "$HARVEST_LOCK")" 2>/dev/null || { pg_status failed "harvest lock dir unavailable"; pg_finish 3; }
   if ! pg_lock "$HARVEST_LOCK" "${PRO_GATE_HARVEST_LOCK_WAIT:-5}"; then
@@ -3772,9 +3676,8 @@ EFF_CONC="$(pg_ramp_level "$MAX_CONC")"
 # this horizon and inside the 6h reservation TTL. Same for per-marker harvest locks
 # (v0.20.2 dogfood left one stale for 10h; flock holders keep the
 # file's inode alive, so deleting an unheld file is always safe).
-# -type f, because the glob also matches the mkdir-fallback lock DIRECTORIES ("<lock>.pr-<key>.d")
-# that pg_lock creates where flock is absent. Deleting one out from under its owner is exactly the
-# reclaim this release moved behind a helper that proves the owner dead first (#158).
+# -type f: locks are files. The lock DIRECTORIES ("<lock>.pr-<key>.d") that releases before #322
+# made where flock(1) was absent are inert now and are left alone.
 find "$(dirname "$LOCKFILE")" -maxdepth 1 -type f -name "$(basename "$LOCKFILE").pr-*" -mmin +1440 -delete 2>/dev/null || true
 find "${PRO_GATE_HARVEST_LOCK_DIR:-$PRO_GATE_HOME/harvest-locks}" -maxdepth 1 -type f -mmin +1440 -delete 2>/dev/null || true
 find "$(pg_active_dir)" -maxdepth 1 -type f -mmin +1440 -delete 2>/dev/null || true
@@ -3920,7 +3823,7 @@ round_capped() {  # $1 = reason
   # reviewer's own claims, exactly the signal observed to oscillate across rounds), but a cap
   # hit while the change's LAST completed review reported P0s is the one case a human may
   # want to grant PRO_GATE_FORCE_ROUND=1, so say it loudly instead of burying it.
-  local sev="" last_p0="" last_p1="" note="" pfd inflight=0 used elapsed_h totals
+  local sev="" last_p0="" last_p1="" note="" inflight=0 used elapsed_h totals
   if sev="$(pg_round_last_severity "$ROUND_KEY")"; then
     last_p0="${sev%% *}"; last_p1="${sev##* }"
     note="; last completed review: ${last_p0} P0 / ${last_p1} P1 unconfirmed by a re-review"
@@ -3942,16 +3845,11 @@ round_capped() {  # $1 = reason
   # sidecar note above describes the round BEFORE the one in flight; its completion may
   # change the picture, so tell the human to re-read before granting a forced round (the
   # refusal itself stays correct either way: a recorded spend never un-spends). Skipped when
-  # THIS process owns the lock (post-lock re-check site): flock on a second fd would report
+  # THIS process owns the lock (post-lock re-check site): a probe on a second fd would report
   # our own lock as a foreign in-flight run.
   if [ "${CHANGE_LOCK_HELD:-0}" = 1 ]; then
     inflight=0
-  elif pg_have flock; then
-    if { exec {pfd}>>"${LOCKFILE}.pr-${ROUND_KEY}"; } 2>/dev/null; then
-      flock -n "$pfd" 2>/dev/null || inflight=1
-      eval "exec ${pfd}>&-" 2>/dev/null
-    fi
-  elif [ -d "${LOCKFILE}.pr-${ROUND_KEY}.d" ]; then
+  elif pg_fd_lock_busy "${LOCKFILE}.pr-${ROUND_KEY}"; then
     inflight=1
   fi
   # Gated on $sev (a SEVERITY claim is being shown), not on $note: since the totals summary
@@ -4072,7 +3970,7 @@ while :; do
   # #179: EVERY path that ends an iteration must reach the ONE deadline boundary at the bottom.
   # A failed guard acquisition used to `sleep 3; continue`, and `continue` jumps over that
   # check — so any guard this run could not acquire for the whole wait (an unwritable lock
-  # path, sustained flock contention, a no-flock guard whose reclaim keeps losing the mkdir)
+  # path, sustained lock contention)
   # turned a bounded slot wait into an unbounded one: SLOT_WAIT stopped meaning anything and
   # the run neither timed out nor progressed. The guard still gates planning and acquisition,
   # exactly as before: without it this iteration has read NO capacity state, so it books
@@ -4181,11 +4079,10 @@ if [ "$SLOT_OK" != 1 ]; then
   # ever narrows: it is reached exactly when every slice failed to read occupancy.
   if [ "${SLOT_GUARD_BLOCKED:-0}" = 1 ] && [ "${SLOT_CAPACITY_EVER_READ:-0}" != 1 ]; then
     echo "ERROR: timed out after ${SLOT_WAIT}s — the reservation handoff guard ($(pg_reservation_lock)) was still unacquirable; account capacity was never read, so no slot was planned or taken and no review was submitted." >&2
-    # Do NOT send the operator after a stale guard directory: pg_reservation_guard_acquire runs
-    # pg_dirlock_reclaim_dead on every attempt, so a directory left by a dead process is already
-    # reclaimed inside this same wait, thousands of times over on a default budget. Name only what
-    # can still be true once the whole budget has elapsed.
-    echo "  This is a lock-path problem, not a busy account. A guard left behind by a dead process is reclaimed automatically inside this same wait, so what remains after a full budget is a ${PRO_GATE_HOME} that cannot be written (mkdir and flock must both succeed there), or a live process that is genuinely still holding the guard." >&2
+    # Do NOT send the operator after a stale guard: it is a kernel lock on an open descriptor,
+    # dropped the moment its holder exits, so nothing a dead process left behind can hold it.
+    # Name only what can still be true once the whole budget has elapsed.
+    echo "  This is a lock-path problem, not a busy account. The guard is released the moment its holder exits, so what remains after a full budget is a guard file under ${PRO_GATE_HOME} that cannot be opened, no lock tool (neither flock(1) nor perl is installed), or a live process that is genuinely still holding the guard." >&2
   elif [ "${SLOT_GUARD_BLOCKED:-0}" = 1 ]; then
     # Read capacity, then lost the guard before the deadline. The two branches below re-derive
     # their answer from a scan taken AT expiry; this wait cannot, because the guard it needs to

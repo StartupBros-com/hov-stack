@@ -253,13 +253,23 @@ pg_file_sig() {
   printf '%s' "$acc" | cksum 2>/dev/null | awk '{print $1"-"$2}'
 }
 
-# Cross-process lock — waits up to $2 seconds; returns 0 acquired / 1 timeout. Uses flock when
-# present (Linux); else an atomic mkdir spinlock (macOS has no flock). Held until the shell exits.
+# Cross-process locks (#322). Every lock in pro-gate is one kind: an exclusive flock(2) on an open
+# descriptor of a stable file. The kernel drops it when the last descriptor on that open file
+# closes, the holder being SIGKILLed included, so there is no owner record to publish, read back or
+# reclaim, and no pathname a late reclaimer can remove from under a live replacement. That race
+# is why the mkdir spinlock this replaced is gone; see
+# docs/solutions/conventions/a-pathname-locks-reclaim-cannot-be-fenced-lock-a-stable-files-open-descriptor-instead.md.
+#
+# flock(1) takes the lock where it is installed (Linux); else perl's flock() on the same inherited
+# descriptor (stock macOS ships perl, not flock(1)). perl's flock is flock(2) on both, so a perl
+# holder and a flock(1) holder exclude each other. A lock belongs to the open file, not to the
+# process that took it: a child that inherits the descriptor keeps it held until that child exits.
+#
 # Chained EXIT handlers (gate #61 r2 P1): bash `trap ... EXIT` REPLACES the previous handler,
-# so the no-flock lock-cleanup traps used to silently disable the engine's scratch-cleanup
-# trap on macOS (leaking WORK and dropping run logs). Every EXIT registration in engine+lib
-# goes through here; handlers run in registration order, each isolated by `;` so one failing
-# handler cannot skip the rest.
+# so registering a second one used to silently disable the engine's scratch-cleanup trap
+# (leaking WORK and dropping run logs). Every EXIT registration in engine+lib goes through
+# here; handlers run in registration order, each isolated by `;` so one failing handler cannot
+# skip the rest.
 pg_on_exit() {
   PG_EXIT_HANDLERS="${PG_EXIT_HANDLERS:-}${PG_EXIT_HANDLERS:+; }$1"
   # shellcheck disable=SC2064
@@ -267,8 +277,8 @@ pg_on_exit() {
 }
 
 # Process-identity token: pid start time, so a RECYCLED pid can never impersonate a live run
-# (gate #61 r2 P1: kill -0 alone made a stale active record/lock "live" forever once an
-# unrelated long-lived process inherited the pid). Empty output = no such process.
+# (gate #61 r2 P1: kill -0 alone made a stale active record "live" forever once an unrelated
+# long-lived process inherited the pid). Empty output = no such process.
 pg_pid_token() {
   local p="${1:-}" st=""
   [ -n "$p" ] || return 1
@@ -283,133 +293,143 @@ pg_pid_token() {
   printf '%s' "$st"
 }
 
-# pg_pid_recycled <pid> <stored-token>: 0 ONLY when it is positively PROVEN that <pid> has been
-# recycled -- the process now holding that pid is not the one that wrote <stored-token>. 1 in
-# every other case, including the two "cannot tell" cases, which must fail closed toward "still
-# the original holder" rather than toward "recycled": an unreadable/empty stored token (nothing
-# to compare against) and a failed recomputation of <pid>'s CURRENT token (a /proc read or `ps`
-# fork can fail transiently for a perfectly live pid). Treating either failure as proof of
-# recycling is the defect issue #177 named in pg_harvest_claimed's and st_inflight's own copies
-# of this comparison: an empty recomputed token compared unequal to a valid stored one, so a
-# live, correctly-identified holder read as dead. Liveness must be positively DISPROVED, never
-# inferred from a failed measurement (gate #148 r8 P0, applied here to every reader of this
-# shape: pg_dirlock_reclaim_dead, pg_harvest_claimed's no-flock branch, and st_inflight in
-# bin/oracle-review.sh).
-pg_pid_recycled() {
-  local pid="$1" tok="$2" cur
-  [ -n "$tok" ] || return 1
-  cur="$(pg_pid_token "$pid" 2>/dev/null || true)"
-  [ -n "$cur" ] || return 1
-  [ "$tok" != "$cur" ]
+# pg_fd_open <path>: open <path> for append on a fresh descriptor and set PG_FD to its number;
+# 1 when it cannot be opened. Bash 4.1+ allocates the descriptor. macOS /bin/bash 3.2 has no {var}
+# redirection, so it takes the first free descriptor from 20; the probe runs INSIDE the braces,
+# after bash has saved stderr for their 2>/dev/null, so it cannot pick that saved copy.
+# The braces scope 2>/dev/null to the exec itself -- a bare `exec 9>f 2>/dev/null` permanently
+# redirects the CALLER's stderr to /dev/null (v0.11 bug: every engine log line after the first
+# pg_lock call was silently discarded).
+pg_fd_open() {
+  local _pg_path="$1" _pg_n=20
+  PG_FD=""
+  if [ "${BASH_VERSINFO[0]}" -gt 4 ] || { [ "${BASH_VERSINFO[0]}" -eq 4 ] && [ "${BASH_VERSINFO[1]}" -ge 1 ]; }; then
+    { exec {PG_FD}>>"$_pg_path"; } 2>/dev/null || { PG_FD=""; return 1; }
+    return 0
+  fi
+  {
+    while [ -e "/dev/fd/$_pg_n" ]; do _pg_n=$(( _pg_n + 1 )); done
+    [ "$_pg_n" -lt 256 ] && eval "exec ${_pg_n}>>\"\$_pg_path\""
+  } 2>/dev/null || return 1
+  PG_FD="$_pg_n"
 }
 
-pg_lock() {
-  local lockfile="$1" wait_s="${2:-2400}"
-  if pg_have flock; then
-    # Braces scope 2>/dev/null to the exec itself — a bare `exec 9>f 2>/dev/null`
-    # permanently redirects the CALLER's stderr to /dev/null (v0.11 bug: every engine
-    # log line after the first pg_lock call was silently discarded).
-    if { exec 9>>"$lockfile"; } 2>/dev/null; then
-      flock -w "$wait_s" 9; return $?
-    fi
-    return 0   # unwritable lock path -> proceed unlocked (preserves prior behavior)
-  fi
-  local lockdir="${lockfile}.d" start spins=0 max_spins
-  start=$(date +%s)
-  # A successful reclaim is not a wait: it retries mkdir at once, spending neither the sleep below
-  # nor the wait bound beside it. That is progress only while it is finite, so the reclaim path
-  # carries its own bound, exactly as pg_reservation_guard_acquire's does and for the same reason
-  # (#189). Without one, sustained reclaim-success with mkdir still failing -- the pathological
-  # alternation of dead owners, another process re-creating this pathname between our reclaim and
-  # our mkdir -- retried forever at 100% CPU and never honoured wait_s at all.
-  #
-  # The counter is the ONLY bound on that path, deliberately, and an elapsed check does NOT belong
-  # beside it: it would throw away a reclaim that had just succeeded, and the free lock with it.
-  # A directory orphaned between its mkdir and its owner record is reclaimable only once it has
-  # sat unmarked for PRO_GATE_DIRLOCK_ORPHAN_GRACE (default 5s), which a waiter reaches one sleep
-  # AFTER a stock 5s budget has already run out -- so the reclaim that recovers a crashed run is
-  # routinely the late one. It acquired the lock before this change and it must keep acquiring it;
-  # crash recovery is the case this whole branch exists for. Reproduced at the shipped 5s/5s
-  # defaults during review, with a regression test beside the spin test.
-  #
-  # Sized off wait_s but computed from a SANITIZED copy, never by overwriting wait_s: the value
-  # arrives from operator env knobs (PRO_GATE_CHANGE_LOCK_WAIT and friends) and is handed to
-  # `flock -w` above, so it must keep behaving exactly as it does today. `10#` forces base ten --
-  # a zero-padded budget like `08` is not a valid OCTAL literal, and bash aborts the whole function
-  # on that arithmetic error, refusing even an uncontended lock. The digit clamp keeps an absurd
-  # budget from overflowing int64 into a NEGATIVE bound, which would compare true on the first
-  # reclaim and refuse a lock whose owner is provably dead. Both were caught in review, both are
-  # regressions this bound would otherwise have introduced, and both have their own test.
-  max_spins="$wait_s"; case "$max_spins" in ''|*[!0-9]*) max_spins=2400;; esac
-  [ "${#max_spins}" -le 9 ] || max_spins=2400
-  max_spins=$(( 10#$max_spins * 100 + 100 ))
-  while ! mkdir "$lockdir" 2>/dev/null; do
-    # The old inline reclaim read the owner pid, and on a dead one rm -rf'd the directory and
-    # retried. Three things were wrong with it and all three are the reclaimer's job now:
-    # two waiters reading the same dead pid could both remove and both enter; rm -rf could
-    # take a REPLACEMENT directory a live winner had already created; and the token written
-    # on the line below was never read back, so a recycled pid read as the original owner.
-    # Racing this is safe -- reclaiming is not the mutual exclusion, mkdir is, and the loser
-    # of that simply comes round again.
-    if pg_dirlock_reclaim_dead "$lockdir" 2>/dev/null; then
-      spins=$(( spins + 1 ))
-      [ "$spins" -ge "$max_spins" ] && return 1
-    else
-      [ $(( $(date +%s) - start )) -ge "$wait_s" ] && return 1
-      sleep 2
-    fi
-  done
-  echo "$$" > "$lockdir/pid" 2>/dev/null || true
-  pg_pid_token "$$" > "$lockdir/token" 2>/dev/null || true
-  pg_on_exit 'pg_dirlock_release_own "'"$lockdir"'" "'"$$"'"'
+# pg_fd_close <fd>: close a descriptor pg_fd_open returned, dropping its lock with it.
+pg_fd_close() {
+  case "${1:-}" in ''|*[!0-9]*) return 0;; esac
+  eval "exec ${1}>&-" 2>/dev/null
   return 0
+}
+
+# pg_fd_lock <fd> <wait-seconds>: exclusive lock on an open descriptor, waiting up to <wait>
+# (0 = try once). 0 held, 1 busy or timed out, 2 no lock tool (neither flock(1) nor perl).
+pg_fd_lock() {
+  local fd="$1" wait_s="${2:-0}"
+  case "$fd" in ''|*[!0-9]*) return 1;; esac
+  if pg_have flock; then
+    if [ "$wait_s" = 0 ]; then flock -n "$fd" || return 1; else flock -w "$wait_s" "$fd" || return 1; fi
+    return 0
+  fi
+  pg_have perl || return 2
+  # The wait reaches perl as text and is never bash arithmetic: a zero-padded operator knob such
+  # as `08` is not a valid OCTAL literal, and bash aborts the whole function on that. perl reads
+  # it as decimal. Polling a non-blocking try keeps the bound exact on every platform, where a
+  # blocking flock interrupted by alarm() depends on whether the syscall restarts.
+  case "$wait_s" in ''|*[!0-9.]*|*.*.*) return 1;; esac
+  perl -MFcntl=:flock -MTime::HiRes=time,sleep -e '
+    my ($fd, $wait) = @ARGV;
+    open(my $fh, ">&=", $fd) or exit 3;
+    my $end = time + $wait;
+    while (1) {
+      exit 0 if flock($fh, LOCK_EX | LOCK_NB);
+      exit 1 if time >= $end;
+      sleep 0.1;
+    }' "$fd" "$wait_s" || return 1
+}
+
+# pg_fd_lock_busy <path>: 0 when another open file holds <path>'s lock right now; 1 when it is free,
+# absent, or cannot be opened. A non-blocking try on a fresh descriptor, closed at once, so it never
+# queues behind the holder and never keeps the lock. An absent file is not opened, because opening
+# would create it. This process's OWN lock on another descriptor reads as busy too, so a caller
+# that may hold the lock skips the probe (CHANGE_LOCK_HELD).
+pg_fd_lock_busy() {
+  local path="$1" fd rc
+  [ -e "$path" ] || return 1
+  pg_fd_open "$path" || return 1
+  fd="$PG_FD"
+  pg_fd_lock "$fd" 0 2>/dev/null; rc=$?
+  pg_fd_close "$fd"
+  [ "$rc" = 1 ]
+}
+
+# pg_fd_same_file <fd> <fd>: 0 when both descriptors name one file (same device and inode).
+# `-ef` on /dev/fd is exact on Linux, but macOS answers /dev/fd/N with devfs's device number, so
+# there it compares inodes only; perl's fstat, which macOS always has, confirms the device.
+# Measured on macOS 26.3 and Linux 6.6 when this was written (#322).
+pg_fd_same_file() {
+  [ "/dev/fd/$1" -ef "/dev/fd/$2" ] || return 1
+  pg_have perl || return 0
+  perl -e 'open(my $a, ">&=", $ARGV[0]) or exit 2; open(my $b, ">&=", $ARGV[1]) or exit 2;
+    my @a = stat($a); my @b = stat($b); exit(($a[0] == $b[0] && $a[1] == $b[1]) ? 0 : 1)' "$1" "$2"
+}
+
+# pg_lock <lockfile> [wait-seconds]: 0 acquired, 1 timed out or no lock tool. Held until this
+# process exits: the descriptor is never closed, and each call opens its own, so a second pg_lock
+# in one shell keeps the first (the fixed fd 9 it used to reuse silently released it, #322). An
+# unwritable lock path proceeds unlocked, as it always has where flock(1) existed.
+#
+# Re-entrant per file. flock(2) belongs to the open file description, so a second descriptor on a
+# file this process already holds would wait on its own lock for the whole budget and then fail.
+# When the descriptor just opened names the same file as one pg_lock already holds, the lock is
+# already ours; a lock file unlinked and recreated since is a different file and is locked afresh.
+# Subshells inherit both the descriptors and PG_LOCK_FDS, so the answer holds there too.
+pg_lock() {
+  local lockfile="$1" wait_s="${2:-2400}" fd held rc
+  pg_fd_open "$lockfile" || return 0
+  fd="$PG_FD"
+  for held in ${PG_LOCK_FDS:-}; do
+    [ "$held" = "$fd" ] && continue   # that number was free again, so it is not held any more
+    if pg_fd_same_file "$held" "$fd"; then pg_fd_close "$fd"; return 0; fi
+  done
+  pg_fd_lock "$fd" "$wait_s"; rc=$?
+  if [ "$rc" = 0 ]; then
+    PG_LOCK_FDS="${PG_LOCK_FDS:-} $fd"
+    return 0
+  fi
+  pg_fd_close "$fd"
+  [ "$rc" = 2 ] && echo "ERROR: cannot lock ${lockfile}: neither flock(1) nor perl is installed; refusing to continue unlocked" >&2
+  return 1
 }
 
 # Counting semaphore — acquire one of $maxn slots ("<base>.slotN"), so up to N reviews share the
 # single ChatGPT account concurrently (the account tolerates several parallel chats; this just
-# bounds it). Returns 0 with a slot HELD until the process exits, 1 on timeout. flock-based on Linux
-# (the winning fd is kept open and auto-released on exit); mkdir-spinlock fallback on macOS scans N
-# slot dirs and self-heals stale ones via the dead-pid check. maxn<=1 is plain mutual exclusion.
+# bounds it). Returns 0 with a slot HELD until the process exits (the winning descriptor stays
+# open), 1 on timeout or with no lock tool. maxn<=1 is plain mutual exclusion.
 pg_lock_n() {
-  local base="$1" maxn="${2:-1}" wait_s="${3:-2400}" exclude="${4:-}" start i fd lockdir
+  local base="$1" maxn="${2:-1}" wait_s="${3:-2400}" exclude="${4:-}" start i fd rc
   [ "${maxn:-1}" -ge 1 ] 2>/dev/null || maxn=1
   # v0.20.3: report WHICH slot was won (durable reservations must remember their slot so fresh
   # runs exclude it instead of shrinking the scan range, which overbooked real capacity), and
   # optionally skip reserved slot numbers ($4, space-separated).
   PG_SLOT_ACQUIRED=""
   start=$(date +%s)
-  if pg_have flock; then
-    while :; do
-      i=1
-      while [ "$i" -le "$maxn" ]; do
-        case " $exclude " in *" $i "*) i=$((i + 1)); continue;; esac
-        # Braces scope 2>/dev/null to the exec (same stderr-nuking bug class as pg_lock).
-        if { exec {fd}>>"${base}.slot${i}"; } 2>/dev/null && flock -n "$fd"; then
-          PG_SLOT_ACQUIRED="$i"
-          return 0   # keep $fd OPEN (do not close) -> slot held until this process exits
-        fi
-        [ -n "${fd:-}" ] && eval "exec ${fd}>&-" 2>/dev/null
-        i=$((i + 1))
-      done
-      [ $(( $(date +%s) - start )) -ge "$wait_s" ] && return 1
-      sleep 3
-    done
-  fi
-  # macOS / no flock: atomic mkdir over N slot dirs (self-heals dirs left by dead pids)
   while :; do
     i=1
     while [ "$i" -le "$maxn" ]; do
       case " $exclude " in *" $i "*) i=$((i + 1)); continue;; esac
-      lockdir="${base}.slot${i}.d"
-      if mkdir "$lockdir" 2>/dev/null; then
-        echo "$$" > "$lockdir/pid" 2>/dev/null || true
-        pg_pid_token "$$" > "$lockdir/token" 2>/dev/null || true
-        pg_on_exit 'pg_dirlock_release_own "'"$lockdir"'" "'"$$"'"'
-        PG_SLOT_ACQUIRED="$i"
-        return 0
+      if pg_fd_open "${base}.slot${i}"; then
+        fd="$PG_FD"
+        pg_fd_lock "$fd" 0 2>/dev/null; rc=$?
+        if [ "$rc" = 0 ]; then
+          PG_SLOT_ACQUIRED="$i"
+          return 0   # keep $fd OPEN (do not close) -> slot held until this process exits
+        fi
+        pg_fd_close "$fd"
+        if [ "$rc" = 2 ]; then
+          echo "ERROR: cannot lock ${base}.slot${i}: neither flock(1) nor perl is installed; refusing to continue unlocked" >&2
+          return 1
+        fi
       fi
-      # Same hardened reclaimer as pg_lock and the reservation guard; see the note there.
-      pg_dirlock_reclaim_dead "$lockdir" 2>/dev/null || true
       i=$((i + 1))
     done
     [ $(( $(date +%s) - start )) -ge "$wait_s" ] && return 1
@@ -759,7 +779,7 @@ pg_cdp_heal() {
 # Fresh runs reconcile files via marker probes and subtract the count from effective semaphore
 # capacity. Live resets the miss streak; throttle/inconclusive stays fail-closed; only several
 # consecutive confirmed absences release the reservation before TTL.
-# Harvest success/lost removes the file. Writes/removes serialize under one flock/mkdir lock.
+# Harvest success/lost removes the file. Writes/removes serialize under one fd lock (pg_fd_lock).
 pg_reservation_dir() { echo "${PRO_GATE_RESERVATION_DIR:-$PRO_GATE_HOME/in-progress}"; }
 # v0.28: change-manifest sidecars (the diff's file list, for provenance checks) live in their
 # OWN directory — NOT inside in-progress/. Every reservation enumerator globs that directory
@@ -1641,16 +1661,13 @@ pg_round_has_epoch() { # round-key epoch
 }
 
 pg_round_unrecord_epoch() { # round-key exact epoch; remove exactly one matching entry
-  local key="$1" epoch="$2" f rfd lockdir="" waited=0 value removed=0 rc=0
+  local key="$1" epoch="$2" f rfd value removed=0 rc=0
   pg_round_key_ok "$key" || return 1
   case "$epoch" in ''|*[!0-9]*) return 1;; esac
   f="$(pg_rounds_dir)/$key"; [ -f "$f" ] || return 0
-  if pg_have flock; then
-    { exec {rfd}>>"$f.lock"; } 2>/dev/null && flock -w 10 "$rfd" 2>/dev/null || return 1
-  else
-    lockdir="$f.lock.d"
-    while ! mkdir "$lockdir" 2>/dev/null; do waited=$((waited + 1)); [ "$waited" -ge 10 ] && return 1; sleep 1; done
-  fi
+  pg_fd_open "$f.lock" || return 1
+  rfd="$PG_FD"
+  pg_fd_lock "$rfd" 10 2>/dev/null || { pg_fd_close "$rfd"; return 1; }
   if ! : > "$f.tmp" 2>/dev/null; then
     rc=1
   else
@@ -1664,8 +1681,7 @@ pg_round_unrecord_epoch() { # round-key exact epoch; remove exactly one matching
   else
     rm -f "$f.tmp" 2>/dev/null || true
   fi
-  [ -n "${rfd:-}" ] && eval "exec ${rfd}>&-" 2>/dev/null
-  [ -n "$lockdir" ] && rmdir "$lockdir" 2>/dev/null
+  pg_fd_close "$rfd"
   return "$rc"
 }
 
@@ -1939,256 +1955,30 @@ pg_attempt_snapshot() { # host owner repo pr round-key [exclude-marker] -> canon
     '{artifact:{kind:$kind,path:$path},charged_spend_epoch:$epoch,cleanup_pending:$cleanup,fresh_eligible:$fresh,marker:$marker,out:$out,recoverable:$recoverable,source:$source,state:$state,target:{host:$host,owner:$owner,pr:$pr,repo:$repo,round_key:$key},terminal:$terminal}'
 }
 
-# pg_dir_age_secs <dir>: seconds since <dir> was last modified, or failure when it cannot be read.
-# Creating the owner marker inside a directory updates that directory's mtime, so an UNMARKED
-# directory's age is the age of its mkdir.
-pg_dir_age_secs() {
-  local d="$1" mt now
-  mt="$(stat -c %Y "$d" 2>/dev/null || stat -f %m "$d" 2>/dev/null || true)"
-  case "$mt" in ''|*[!0-9]*) return 1;; esac
-  now="$(date +%s 2>/dev/null)"; case "$now" in ''|*[!0-9]*) return 1;; esac
-  echo $(( now - mt ))
-}
-
-# pg_dirlock_owner_count <dir>: how many owner.* markers the directory currently holds. A correctly
-# held guard has exactly one; two means a race let a second shell in and BOTH must stand down.
-pg_dirlock_owner_count() {
-  local d="$1" f n=0
-  for f in "$d"/owner.*; do [ -e "$f" ] && n=$(( n + 1 )); done
-  echo "$n"
-}
-
-# pg_dirlock_reclaim_dead <lockdir>: reclaim a mkdir-spinlock directory whose every owner is dead.
-# Ownership is a marker file named owner.<pid> INSIDE the directory whose CONTENTS are that pid's
-# start-time token, and this helper only ever (a) unlinks a dead marker by its exact name and
-# (b) rmdir()s the directory, which the kernel refuses unless it is empty. There is no rm -rf on a
-# shared pathname and no rename (gate #148 r1 P1, r2 P1).
-#
-# Three rules this helper must not lose, each of which cost a round:
-#
-#  1. ABSENCE IS NOT SUCCESS. The directory is probed first and a missing one returns 1. Reporting
-#     success for a directory that was never there made pg_reservation_guard_acquire spin forever
-#     at 100% CPU, ignoring its own wait bound, whenever mkdir failed for any reason other than
-#     EEXIST -- an unwritable or missing parent, for instance (v0.41 defect, reproduced).
-#  2. A RECYCLED PID IS NOT A LIVE OWNER. kill -0 alone wedges the guard permanently once the OS
-#     hands a dead owner's pid to an unrelated live process, so the marker carries pg_pid_token's
-#     process start time and liveness requires BOTH to match. Be precise about the precedent: this
-#     is the check pg_harvest_claimed applies on reclaim. pg_lock and pg_lock_n WRITE a `token`
-#     beside their `pid` but never read it back when they reclaim a dead-owner directory, so they
-#     still carry the recycled-pid hazard (and an unscoped rm -rf with it). This helper is
-#     deliberately STRICTER than they are; do not "align" it down to match them.
-#     Liveness must also be positively DISPROVED, never inferred from a failed measurement: a
-#     token that cannot be RECOMPUTED for a live pid fails closed exactly as an unreadable stored
-#     token does, or a transient /proc or `ps` failure unlinks a live owner's marker (r8 P0).
-#  3. AN UNMARKED DIRECTORY IS NOT AN ORPHAN YET. A contender that has just mkdir'd is about to
-#     write its marker. Deleting the directory in that window let the contender's later marker
-#     write land inside a REPLACEMENT directory another process had already claimed, so two live
-#     shells each believed they held the guard (v0.41 defect, reproduced: the previous comment
-#     claimed "the contender learns that when its marker creation fails", but the write succeeds
-#     because the pathname was re-created). An unmarked directory is therefore only reclaimed once
-#     it has sat unmarked for PRO_GATE_DIRLOCK_ORPHAN_GRACE seconds -- a bound a live contender
-#     never reaches and a process that died between mkdir and marker always does.
-#
-# Returns 0 when the directory is gone, 1 when it is held or too young to judge.
-pg_dirlock_reclaim_dead() {
-  local lockdir="$1" f pid tok had_marker=0 grace age
-  [ -d "$lockdir" ] || return 1
-  for f in "$lockdir"/owner.*; do
-    [ -e "$f" ] || continue
-    had_marker=1
-    pid="${f##*/owner.}"
-    case "$pid" in ''|*[!0-9]*) rm -f "$f" 2>/dev/null; continue;; esac
-    if kill -0 "$pid" 2>/dev/null; then
-      tok="$(head -c 64 "$f" 2>/dev/null | tr -d '\n')"
-      # pg_pid_recycled fails closed (held) on an unreadable/tokenless marker or a recomputation
-      # that fails transiently for a perfectly live pid (a /proc read or a `ps` fork under memory
-      # pressure) -- either failure must never be read as proof the holder is dead. Liveness must
-      # be positively DISPROVED before removal, never inferred from a failed measurement.
-      pg_pid_recycled "$pid" "$tok" || return 1
-    fi
-    rm -f "$f" 2>/dev/null
-  done
-  # pg_lock and pg_lock_n record their holder as a `pid` file with the token beside it,
-  # rather than as an owner.<pid> marker. Same question, same fail-closed rules, one
-  # implementation -- v0.41 deferred the guard's self-heal specifically so one hardened
-  # helper could serve all three call sites instead of two divergent ones. Their shape is
-  # read outside this function too (st_inflight in the engine, pg_harvest_claimed here),
-  # so it stays as it is and the reclaimer learns it.
-  if [ "$had_marker" = 0 ] && [ -e "$lockdir/pid" ]; then
-    pid="$(cat "$lockdir/pid" 2>/dev/null || true)"
-    case "$pid" in
-      ''|*[!0-9]*)
-        # A torn or empty record is not a live claim -- but it is NOT a marker either, and
-        # counting it as one skips rule 3 above. `echo "$$" > "$lockdir/pid"` opens with
-        # O_CREAT|O_TRUNC and writes a syscall later, so "exists but empty" is a state every
-        # live winner passes through on its way to publishing itself, and it is the PERSISTENT
-        # state when that write fails (the call is `|| true`). Treating it as a marker made a
-        # winner's directory reclaimable mid-write with no grace at all, which is exactly the
-        # double-entry rule 3 exists to prevent (v0.44.0 defect, reproduced: the same winner was
-        # kept one syscall earlier and removed one syscall later). Leave had_marker at 0 so the
-        # grace still has to elapse, and leave the file alone so a merely slow winner can still
-        # finish its own record.
-        : ;;
-      *)
-        had_marker=1
-        if kill -0 "$pid" 2>/dev/null; then
-          tok="$(head -c 64 "$lockdir/token" 2>/dev/null | tr -d '\n')"
-          # A tokenless lock is legacy: a live pid is the whole claim, so it holds.
-          # pg_pid_recycled fails closed the same way for a transient recompute failure -- a
-          # merely-unlucky read must never hand a live holder's lock to a reclaimer.
-          pg_pid_recycled "$pid" "$tok" || return 1
-        fi
-        rm -f "$lockdir/pid" "$lockdir/token" 2>/dev/null
-        ;;
-    esac
-  fi
-  if [ "$had_marker" = 0 ]; then
-    grace="${PRO_GATE_DIRLOCK_ORPHAN_GRACE:-5}"; case "$grace" in ''|*[!0-9]*) grace=5;; esac
-    age="$(pg_dir_age_secs "$lockdir")" || return 1
-    [ "$age" -ge "$grace" ] 2>/dev/null || return 1
-    # Past the grace the directory is provably abandoned -- a live winner records itself in
-    # microseconds -- so a torn record may be cleared here, where age has authorized it, and
-    # nowhere else. RE-READ it first: for the owner.<pid> shape the final rmdir is itself the
-    # check, because the kernel refuses a directory a contender has just written a marker into.
-    # Unlinking by name would throw that away, so re-reading restores the equivalent guarantee
-    # and narrows the window from the whole grace to the gap before rmdir.
-    if [ -e "$lockdir/pid" ]; then
-      # No `|| true` here, deliberately. An unreadable record and an EMPTY one are different
-      # facts, and `|| true` reports both as the empty string -- so a cat that merely failed
-      # (a fork under memory pressure, a stalled mount) would authorize deleting a record that
-      # may name a live owner. That is the same fail-open the token checks above refuse, and it
-      # would be a new instance of it in the one branch that unlinks another process's claim.
-      # A failed READ is not evidence of an absent owner: keep the lock and re-decide later.
-      pid="$(cat "$lockdir/pid" 2>/dev/null)" || return 1
-      case "$pid" in
-        ''|*[!0-9]*) rm -f "$lockdir/pid" "$lockdir/token" 2>/dev/null ;;
-        *) return 1 ;;   # a slow winner finished its record during the grace: it holds
-      esac
-    fi
-  fi
-  rmdir "$lockdir" 2>/dev/null || [ ! -d "$lockdir" ]
-}
-
-# Release a mkdir-fallback lock this process still owns. A holder whose directory was
-# reclaimed -- correctly, because it looked dead -- must never delete the replacement a live
-# process has since created at the same path. Check the recorded owner is still us, drop our
-# own two files by name, then rmdir, which refuses a directory that still holds anyone's.
-# Never rm -rf a pathname another live process may own by now (the same rule the reservation
-# guard's release follows).
-pg_dirlock_release_own() { # <lockdir> <pid>
-  local dir="$1" pid="$2" opid
-  [ -d "$dir" ] || return 0
-  opid="$(cat "$dir/pid" 2>/dev/null || true)"
-  [ "$opid" = "$pid" ] || return 0
-  rm -f "$dir/pid" "$dir/token" 2>/dev/null
-  rmdir "$dir" 2>/dev/null || true
-}
-
 # Shared guard for reservation writes/removes AND the fresh-run count+slot-acquire decision.
 # This makes the handoff atomic: an exit-9 run writes its durable reservation while it still
 # owns the process slot; no waiter can observe "slot released, reservation not counted" (or
 # compute capacity before the write and acquire the just-released slot on stale information).
 pg_reservation_guard_acquire() {
-  local lock wait_s; lock="$(pg_reservation_lock)"
+  local lock wait_s rc; lock="$(pg_reservation_lock)"
   wait_s="${PRO_GATE_RESERVATION_GUARD_WAIT:-10}"; case "$wait_s" in ''|*[!0-9]*) wait_s=10;; esac
-  if pg_have flock; then
-    { exec {PG_RESERVATION_GUARD_FD}>>"$lock"; } 2>/dev/null || { PG_RESERVATION_GUARD_FD=""; return 1; }
-    if ! flock -w "$wait_s" "$PG_RESERVATION_GUARD_FD" 2>/dev/null; then
-      # A timed-out acquire returns 1 to a caller that never calls release, so the descriptor
-      # must be closed HERE or every contended acquire leaks one fd for the life of the process
-      # (v0.41; pg_lock_n already closes its losing descriptors the same way).
-      eval "exec ${PG_RESERVATION_GUARD_FD}>&-" 2>/dev/null
-      PG_RESERVATION_GUARD_FD=""
-      return 1
-    fi
-    return 0
+  PG_RESERVATION_GUARD_FD=""
+  pg_fd_open "$lock" || return 1
+  pg_fd_lock "$PG_FD" "$wait_s" 2>/dev/null; rc=$?
+  if [ "$rc" != 0 ]; then
+    # A timed-out acquire returns 1 to a caller that never calls release, so the descriptor
+    # must be closed HERE or every contended acquire leaks one fd for the life of the process
+    # (v0.41; pg_lock_n closes its losing descriptors the same way).
+    pg_fd_close "$PG_FD"
+    [ "$rc" = 2 ] && echo "ERROR: cannot lock ${lock}: neither flock(1) nor perl is installed; refusing to continue unlocked" >&2
+    return 1
   fi
-  # macOS / no flock: a mkdir spinlock in the same family as pg_lock's, but with a stricter reclaim
-  # (see pg_dirlock_reclaim_dead: token-checked liveness, orphan grace, no rm -rf). Without it a guard
-  # directory left by a killed process wedged every later reservation write for the full wait, and
-  # a failed acquire left PG_RESERVATION_GUARD_DIR pointing at a directory this process did not
-  # own, so a later release could remove another process's guard. Ownership is the marker file
-  # owner.<pid> inside the directory and reclamation goes through pg_dirlock_reclaim_dead (gate
-  # #148 r1 P1 and r2 P1): the bare `rm -rf` that used to live here let two waiters that read the
-  # same dead pid both end up inside the guard, and let a remover orphaned by a dying holder
-  # delete the replacement a reclaimer had already re-created.
-  PG_RESERVATION_GUARD_DIR="${lock}.d"
-  # gate #148 r2 P1: $$ is the parent shell even inside a command substitution or subshell, so a
-  # restore running under $( ) would publish an owner pid that can die while the real holder lives.
-  # BASHPID names the shell that actually holds the guard and performs the guarded mutation, and it
-  # MUST be read by direct expansion here -- reading it inside $( ) would name the substitution's
-  # own short-lived subshell and reinstate exactly the defect it fixes.
-  #
-  # BASHPID is bash 4+. Stock macOS /bin/bash is 3.2, and macOS is also the platform with no flock,
-  # so the one shell that always reaches this fallback is the one that was silently falling back to
-  # $$ and re-opening r2 P1 (v0.41 defect).
-  #
-  # `exec` is load-bearing (gate #148 r5 P1). Bash replaces a command-substitution subshell with a
-  # lone simple command, so $PPID there names the shell that actually holds the guard. Adding any
-  # `|| fallback` INSIDE the substitution makes it a compound command, bash forks an extra subshell,
-  # and sh reports THAT subshell -- a pid which has already exited by the time the marker is
-  # published, whose /proc entry is gone, and which therefore yields an empty token and reads as
-  # dead to every reclaimer. A contender then reclaimed a guard whose real holder was still inside
-  # its critical section: the exact double-hold this release fixes, reintroduced by the fallback.
-  # Failure is handled OUT here and REFUSES the acquisition rather than publishing a wrong owner.
-  PG_RESERVATION_GUARD_OWNER="${BASHPID:-}"
-  if [ -z "$PG_RESERVATION_GUARD_OWNER" ]; then
-    PG_RESERVATION_GUARD_OWNER="$(exec sh -c 'echo "$PPID"' 2>/dev/null)"
-    case "$PG_RESERVATION_GUARD_OWNER" in
-      ''|*[!0-9]*) PG_RESERVATION_GUARD_DIR=""; PG_RESERVATION_GUARD_OWNER=""; return 1;;
-    esac
-  fi
-  local waited=0 spins=0 max_spins guard_token
-  # Reclaim retries are not sleeps, so they need their own bound or a pathological alternation of
-  # dead owners loops without ever reaching the wait bound.
-  max_spins=$(( wait_s * 100 + 100 ))
-  while :; do
-    if mkdir "$PG_RESERVATION_GUARD_DIR" 2>/dev/null; then
-      # Publish the start-time token so a recycled pid cannot later impersonate this owner, then
-      # confirm we are the ONLY owner. A second marker means a reclaimer took our still-empty
-      # directory and another shell re-created it at the same pathname, in which case our write
-      # landed in a guard we do not hold: stand down and retry rather than return a false hold.
-      #
-      # gate #148 r5 P1: the token must be NON-EMPTY before the marker is published. An empty token
-      # means the owner pid has no readable process, so every reclaimer reads this marker as dead
-      # and takes the guard while we are inside it. Refuse rather than publish an unprovable owner.
-      guard_token="$(pg_pid_token "$PG_RESERVATION_GUARD_OWNER" 2>/dev/null || true)"
-      if [ -n "$guard_token" ] \
-         && printf '%s' "$guard_token" \
-           > "$PG_RESERVATION_GUARD_DIR/owner.$PG_RESERVATION_GUARD_OWNER" 2>/dev/null \
-         && [ "$(pg_dirlock_owner_count "$PG_RESERVATION_GUARD_DIR")" = 1 ]; then
-        return 0
-      fi
-      rm -f "$PG_RESERVATION_GUARD_DIR/owner.$PG_RESERVATION_GUARD_OWNER" 2>/dev/null
-      rmdir "$PG_RESERVATION_GUARD_DIR" 2>/dev/null
-    elif [ -d "$PG_RESERVATION_GUARD_DIR" ] && pg_dirlock_reclaim_dead "$PG_RESERVATION_GUARD_DIR"; then
-      # mkdir failing while the directory does not exist is NOT contention (a missing or unwritable
-      # parent, say); it must fall through to the bounded wait instead of retrying forever.
-      spins=$(( spins + 1 ))
-      [ "$spins" -ge "$max_spins" ] && { PG_RESERVATION_GUARD_DIR=""; PG_RESERVATION_GUARD_OWNER=""; return 1; }
-      continue
-    fi
-    waited=$(( waited + 1 ))
-    [ "$waited" -ge "$wait_s" ] && { PG_RESERVATION_GUARD_DIR=""; PG_RESERVATION_GUARD_OWNER=""; return 1; }
-    sleep 1
-  done
+  PG_RESERVATION_GUARD_FD="$PG_FD"
 }
 pg_reservation_guard_release() {
-  local dir owner
-  if [ -n "${PG_RESERVATION_GUARD_FD:-}" ]; then
-    eval "exec ${PG_RESERVATION_GUARD_FD}>&-" 2>/dev/null
-    PG_RESERVATION_GUARD_FD=""
-  fi
-  if [ -n "${PG_RESERVATION_GUARD_DIR:-}" ]; then
-    dir="$PG_RESERVATION_GUARD_DIR"; owner="${PG_RESERVATION_GUARD_OWNER:-}"
-    PG_RESERVATION_GUARD_DIR=""; PG_RESERVATION_GUARD_OWNER=""
-    # gate #148 r2 P1: unlink only OUR marker, by exact name, then rmdir. A remover orphaned by a
-    # holder that dies here cannot touch a replacement: the replacement's marker has another name
-    # and rmdir refuses a directory that still holds one. Never rm -rf a pathname another live
-    # process may own by now.
-    [ -n "$owner" ] && rm -f "$dir/owner.$owner" 2>/dev/null
-    rmdir "$dir" 2>/dev/null
-  fi
+  [ -n "${PG_RESERVATION_GUARD_FD:-}" ] && pg_fd_close "$PG_RESERVATION_GUARD_FD"
+  PG_RESERVATION_GUARD_FD=""
+  return 0
 }
 
 pg_reservation_write() { # marker [pr] [out] [slot] [model] [spend_epoch] -- empty fields preserve the record's
@@ -2776,33 +2566,10 @@ pg_reservation_expire_if_stale() {
 # A stale lock FILE with no holder reads as unclaimed (flock is inode-scoped, not path-scoped),
 # which is what the housekeeping sweep of harvest-locks/ already relies on.
 pg_harvest_claimed() {
-  local marker="$1" f pfd rc=1
+  local marker="$1" f
   pg_reservation_marker_ok "$marker" || return 1
   f="${PRO_GATE_HARVEST_LOCK_DIR:-$PRO_GATE_HOME/harvest-locks}/$marker"
-  if pg_have flock; then
-    [ -f "$f" ] || return 1
-    if { exec {pfd}>>"$f"; } 2>/dev/null; then
-      flock -n "$pfd" 2>/dev/null || rc=0     # could NOT take it => someone holds it
-      eval "exec ${pfd}>&-" 2>/dev/null
-    fi
-    return "$rc"
-  fi
-  # mkdir-lock platforms (stock macOS): the directory exists only while held. Owner metadata
-  # must PROVE a live holder (#68 gate r3 P2) — a crash between mkdir and the pid write, or a
-  # recycled pid, would otherwise mark the reservation claimed forever and freeze reconciliation
-  # (pg_lock cannot reap an empty-pid directory either). Require a live pid AND, when the lock
-  # recorded a process-identity token, a matching one.
-  [ -d "$f.d" ] || return 1
-  local opid otok
-  opid="$(cat "$f.d/pid" 2>/dev/null || true)"
-  case "$opid" in ''|*[!0-9]*) return 1;; esac        # torn/missing owner record: not a claim
-  kill -0 "$opid" 2>/dev/null || return 1             # dead holder: stale directory
-  otok="$(cat "$f.d/token" 2>/dev/null || true)"
-  # pg_pid_recycled fails closed (not recycled -> still held) when otok is empty/unreadable or
-  # the recomputation fails transiently -- issue #177: comparing a failed recompute's empty
-  # output directly against otok made a live, correctly-identified holder read as dead.
-  pg_pid_recycled "$opid" "$otok" && return 1         # pid reused by an unrelated process
-  return 0
+  pg_fd_lock_busy "$f"
 }
 
 # pg_reservation_reconcile <salvage-script> <port>: drop reservations older than TTL or only
@@ -2927,13 +2694,13 @@ pg_reservation_reconcile() {
 pg_ledger_append() {
   local ledger="${PRO_GATE_LEDGER:-$PRO_GATE_HOME/ledger.jsonl}" line="$1" lfd
   [ -n "$line" ] || return 0
-  if pg_have flock; then
-    if { exec {lfd}>>"$ledger"; } 2>/dev/null; then
-      flock -w 5 "$lfd" 2>/dev/null || true
-      { printf '%s\n' "$line" >&"$lfd"; } 2>/dev/null || true
-      eval "exec ${lfd}>&-" 2>/dev/null
-      return 0
-    fi
+  # Best-effort lock: an append that cannot lock (busy past 5s, or no lock tool) still appends.
+  if pg_fd_open "$ledger"; then
+    lfd="$PG_FD"
+    pg_fd_lock "$lfd" 5 2>/dev/null || true
+    { printf '%s\n' "$line" >&"$lfd"; } 2>/dev/null || true
+    pg_fd_close "$lfd"
+    return 0
   fi
   { printf '%s\n' "$line" >> "$ledger"; } 2>/dev/null || true
 }
@@ -2961,30 +2728,22 @@ pg_ramp_level() {  # $1 = ceiling; echoes the effective concurrency
 
 pg_ramp_update() {  # $1 = clean|throttle|failed, $2 = ceiling
   [ "${PRO_GATE_RAMP:-1}" = 1 ] || return 0
-  local outcome="$1" ceiling="${2:-1}" state need level streak rfd lockdir="" waited
+  local outcome="$1" ceiling="${2:-1}" state need level streak rfd
   state="${PRO_GATE_RAMP_STATE:-$PRO_GATE_HOME/ramp.state}"
   need="${PRO_GATE_RAMP_STREAK:-5}"
-  # Serialize the read-modify-write (v0.19.1, pro-gate self-review P1): flock where
-  # available, else a mkdir spinlock (macOS). If NO lock can be obtained, skip the update
+  # Serialize the read-modify-write (v0.19.1, pro-gate self-review P1) under the one fd lock
+  # (pg_fd_lock: flock(1), else perl). If NO lock can be obtained, skip the update
   # rather than racing — a lost 'clean' credit is harmless, and a lost 'throttle' drop is
   # still covered by the independent cooldown file, which blocks all new spends regardless
   # of the ramp level.
-  if pg_have flock; then
-    if ! { { exec {rfd}>>"$state.lock"; } 2>/dev/null && flock -w 10 "$rfd" 2>/dev/null; }; then
-      echo "[pro-gate ramp] could not lock ramp state — skipping this update" >&2
-      [ -n "${rfd:-}" ] && eval "exec ${rfd}>&-" 2>/dev/null
-      return 0
-    fi
-  else
-    lockdir="$state.lock.d"; waited=0
-    while ! mkdir "$lockdir" 2>/dev/null; do
-      waited=$(( waited + 1 ))
-      if [ "$waited" -ge 10 ]; then
-        echo "[pro-gate ramp] could not lock ramp state — skipping this update" >&2
-        return 0
-      fi
-      sleep 1
-    done
+  rfd=""
+  if pg_fd_open "$state.lock"; then
+    rfd="$PG_FD"
+    pg_fd_lock "$rfd" 10 2>/dev/null || { pg_fd_close "$rfd"; rfd=""; }
+  fi
+  if [ -z "$rfd" ]; then
+    echo "[pro-gate ramp] could not lock ramp state — skipping this update" >&2
+    return 0
   fi
   level="$(awk -F'\t' 'NR==1{print $1}' "$state" 2>/dev/null)"
   streak="$(awk -F'\t' 'NR==1{print $2}' "$state" 2>/dev/null)"
@@ -3006,8 +2765,7 @@ pg_ramp_update() {  # $1 = clean|throttle|failed, $2 = ceiling
     *) : ;;
   esac
   { printf '%s\t%s\t%s\n' "$level" "$streak" "$(date +%Y-%m-%dT%H:%M:%S%z)" > "$state.tmp" && mv -f "$state.tmp" "$state"; } 2>/dev/null || true
-  [ -n "${rfd:-}" ] && eval "exec ${rfd}>&-" 2>/dev/null
-  [ -n "$lockdir" ] && rmdir "$lockdir" 2>/dev/null
+  pg_fd_close "$rfd"
   return 0
 }
 
@@ -3126,7 +2884,7 @@ pg_round_record() {  # $1 = key; prune entries older than the window, append now
   # under-counts and the guard quietly stops guarding. Same-key engine runs are already
   # serialized by the per-change lock; this file lock just keeps the rewrite atomic against
   # out-of-band readers/writers.
-  local key="$1" dir f now win t rfd lockdir="" waited=0
+  local key="$1" dir f now win t rfd
   PG_ROUND_SPEND_EPOCH=""
   pg_round_key_ok "$key" || return 0
   dir="$(pg_rounds_dir)"
@@ -3135,22 +2893,14 @@ pg_round_record() {  # $1 = key; prune entries older than the window, append now
     return 0
   }
   f="$dir/$key"; win="$(pg_round_window_secs)"; now="$(date +%s)"
-  if pg_have flock; then
-    if ! { { exec {rfd}>>"$f.lock"; } 2>/dev/null && flock -w 10 "$rfd" 2>/dev/null; }; then
-      echo "[pro-gate rounds] could not lock ${f}; round NOT recorded (budget will under-count)" >&2
-      [ -n "${rfd:-}" ] && eval "exec ${rfd}>&-" 2>/dev/null
-      return 0
-    fi
-  else
-    lockdir="$f.lock.d"
-    while ! mkdir "$lockdir" 2>/dev/null; do
-      waited=$(( waited + 1 ))
-      if [ "$waited" -ge 10 ]; then
-        echo "[pro-gate rounds] could not lock ${f}; round NOT recorded (budget will under-count)" >&2
-        return 0
-      fi
-      sleep 1
-    done
+  rfd=""
+  if pg_fd_open "$f.lock"; then
+    rfd="$PG_FD"
+    pg_fd_lock "$rfd" 10 2>/dev/null || { pg_fd_close "$rfd"; rfd=""; }
+  fi
+  if [ -z "$rfd" ]; then
+    echo "[pro-gate rounds] could not lock ${f}; round NOT recorded (budget will under-count)" >&2
+    return 0
   fi
   {
     if [ -f "$f" ]; then
@@ -3162,8 +2912,7 @@ pg_round_record() {  # $1 = key; prune entries older than the window, append now
     printf '%s\n' "$now"
   } > "$f.tmp" 2>/dev/null && mv -f "$f.tmp" "$f" && PG_ROUND_SPEND_EPOCH="$now" \
     || echo "[pro-gate rounds] could not write ${f}; round NOT recorded (budget will under-count)" >&2
-  [ -n "${rfd:-}" ] && eval "exec ${rfd}>&-" 2>/dev/null
-  [ -n "$lockdir" ] && rmdir "$lockdir" 2>/dev/null
+  pg_fd_close "$rfd"
   return 0
 }
 
@@ -3175,29 +2924,20 @@ pg_round_record() {  # $1 = key; prune entries older than the window, append now
 # salvage) must NOT refund: over-counting wastes one retry, under-counting resurrects the
 # unbounded loop.
 pg_round_unrecord() {
-  local key="$1" f rfd lockdir="" waited=0 n
+  local key="$1" f rfd n
   pg_round_key_ok "$key" || return 0
   f="$(pg_rounds_dir)/$key"
   [ -f "$f" ] || return 0
-  if pg_have flock; then
-    if ! { { exec {rfd}>>"$f.lock"; } 2>/dev/null && flock -w 10 "$rfd" 2>/dev/null; }; then
-      [ -n "${rfd:-}" ] && eval "exec ${rfd}>&-" 2>/dev/null
-      return 0
-    fi
-  else
-    lockdir="$f.lock.d"
-    while ! mkdir "$lockdir" 2>/dev/null; do
-      waited=$(( waited + 1 )); [ "$waited" -ge 10 ] && return 0; sleep 1
-    done
-  fi
+  pg_fd_open "$f.lock" || return 0
+  rfd="$PG_FD"
+  pg_fd_lock "$rfd" 10 2>/dev/null || { pg_fd_close "$rfd"; return 0; }
   n="$(grep -c . "$f" 2>/dev/null)"; [ -n "$n" ] || n=0
   if [ "$n" -le 1 ] 2>/dev/null; then
     rm -f "$f" 2>/dev/null
   else
     head -n $(( n - 1 )) "$f" > "$f.tmp" 2>/dev/null && mv -f "$f.tmp" "$f"
   fi
-  [ -n "${rfd:-}" ] && eval "exec ${rfd}>&-" 2>/dev/null
-  [ -n "$lockdir" ] && rmdir "$lockdir" 2>/dev/null
+  pg_fd_close "$rfd"
   return 0
 }
 

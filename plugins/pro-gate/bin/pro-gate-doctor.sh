@@ -222,7 +222,10 @@ have_bin "$GH_BIN" && { "$GH_BIN" auth status >/dev/null 2>&1 && P "gh authentic
 pg_have git && P "git present" || X "git missing"
 pg_have claude && P "claude CLI present" || W "claude CLI missing (needed for the daemon's fixer)"
 pg_have jq && P "jq present" || W "jq missing (usage guardrail degraded)"
-pg_have flock && P "concurrency serialized (flock)" || P "concurrency serialized (portable mkdir lock; flock absent — normal on macOS)"
+if pg_have flock; then P "concurrency serialized (flock)"
+elif pg_have perl; then P "concurrency serialized (perl flock; flock(1) absent — normal on macOS)"
+else X "no lock tool — install flock(1) or perl; every locked step refuses to run without one"
+fi
 
 # fixer tier available?
 if [ -f "$HOME/.claude/skills/ce-work-beta/SKILL.md" ] || ls "$HOME/.claude/plugins"/**/ce-work-beta* >/dev/null 2>&1; then
