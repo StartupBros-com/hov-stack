@@ -522,5 +522,6 @@ Use the absolute skill path as in Step 1. When its `state` is `ok`, say in one p
 - Anything skipped or still waiting, and the one thing left for the user, if any.
 - What setup already gave them: each `alsoInstalled` plugin with its `what` and `start`, and the skill pack's slash commands. Typing `/` lists them all. Three to try first: `/bro` re-explains Claude's last answer in plain words, `/eli5 <topic>` explains any topic simply with a picture, and `/deep-research <question>` digs into a question across many sources.
 - Whether the plugins update themselves, from the detector's `marketplace.autoUpdate`, in one line: "The hov plugins update themselves", or that they stay at these versions and what it said to do.
+- How to check it later, in one line: `./setup --check` in the hov-stack checkout changes nothing and lists each setup step as in place or not, with the fix.
 - How to update later, in one line: `./setup --update` in the hov-stack checkout updates it and everything installed here except wacli, vercel and the Python environments of gsc, ga4 and vastai; for each of those installed, add the update line from its section.
 - They can type `/hov-setup` again any time to add the rest.

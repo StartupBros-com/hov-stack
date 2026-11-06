@@ -39,6 +39,8 @@ Everyone else, open Claude Code anywhere and paste:
 
 Setup ends by saying, in plain words, what it put in place. Then open a new Claude Code session, which loads the rules and safety checks setup just linked, and type `/hov-setup`, setup's second stage. Five plugins need what a script cannot do for you: a login, a sudo or Windows prompt, or a paid plan. They are `sign-it`, `wsl-cdp`, `product-video`, `token-eater` and `pro-gate`. For each one, `/hov-setup` says what it does for you, what it costs, what you would have to do yourself, and whether it recommends it. It installs the ones you pick, asks you to type `/reload-plugins` once so nothing restarts, and does every step it can itself; you only type logins and passwords, each into that service's own prompt and never into the chat. Each plugin ends with a check the session runs. It also offers the tuning plugins below, which need no setup, and the plugins and programs from other publishers listed under [More that `/hov-setup` offers](#more-that-hov-setup-offers), and finishes with a short tour of everything setup installed.
 
+To see later whether everything setup put in place is still there, run `./setup --check` in the checkout. It changes nothing. It prints one row per setup step, names the fix for any step not in place, and exits 1 if one is not. For the plugins and programs `/hov-setup` offers, type `/hov-setup` again: it looks at what is installed and offers only what is not.
+
 ## Updating
 
 Run `./setup --update` in the checkout. It fast-forwards the checkout to the latest `main`, runs the new copy of setup, and then updates what setup and `/hov-setup` installed:
