@@ -2,7 +2,7 @@
 title: "A dead-owner lock reclaim must prove death, not infer it from absence"
 module: "pro-gate"
 date: "2026-09-08"
-last_updated: "2026-09-21"
+last_updated: "2026-11-06"
 category: "conventions"
 problem_type: "design_pattern"
 component: "development_workflow"
@@ -30,6 +30,18 @@ tags:
 ---
 
 # Four ways to get a mkdir-spinlock dead-owner self-heal wrong
+
+> **Superseded by #322 (v0.65.6).** pro-gate no longer has a mkdir spinlock, a dead-owner
+> reclaim, or the helpers this doc names (`pg_dirlock_reclaim_dead`, `pg_dirlock_release_own`,
+> `pg_pid_recycled`, `PRO_GATE_DIRLOCK_ORPHAN_GRACE`). Every lock is now one exclusive `flock(2)`
+> on an open descriptor of a stable file (`pg_fd_lock` in `lib/pro-gate-lib.sh`): `flock(1)` where
+> installed, else perl's `flock()` on the same descriptor, which is what stock macOS runs. The
+> kernel drops the lock when its holder exits, so there is no owner record to prove dead. The
+> reclaim this doc hardened round after round still admitted two contenders after a SIGKILLed
+> owner in about 5 of 100 races (#322); that is why it was removed rather than fixed again. The
+> four failure modes below remain true of any pathname lock with a reclaim step; read them as the
+> case for `./a-pathname-locks-reclaim-cannot-be-fenced-lock-a-stable-files-open-descriptor-instead.md`,
+> not as a description of the current code. Line references below are to the tree as it was then.
 
 ## Context
 

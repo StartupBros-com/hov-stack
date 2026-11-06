@@ -36,8 +36,44 @@ phase_of() { jq -r .phase "$1" 2>/dev/null || sed -nE 's/.*"phase":"([^"]+)".*/\
 TDIR="$(mktemp -d "${TMPDIR:-/tmp}/pg-engine-test.XXXXXX")"
 # Kill only a mock this run started: `kill 0` would signal the caller's whole process group, and a
 # run that exits before its first start_mock, such as a shard that selects no region, has none (#254).
-trap '[ -n "${MOCK_PID:-}" ] && kill "$MOCK_PID" 2>/dev/null; rm -rf "$TDIR"' EXIT
+trap 'lock_cleanup; [ -n "${MOCK_PID:-}" ] && kill "$MOCK_PID" 2>/dev/null; rm -rf "$TDIR"' EXIT
 mkdir -p "$TDIR/home" "$TDIR/bin" "$TDIR/user/.local/bin"
+
+# Real library holders become sleep so killing $LOCK_HOLDER closes the last inherited fd.
+LOCK_HOLDERS=""
+lock_cleanup() {
+  local p
+  for p in $LOCK_HOLDERS; do kill -9 "$p" 2>/dev/null; wait "$p" 2>/dev/null; done
+}
+lock_wait_ready() {
+  local i
+  for i in $(seq 1 100); do [ -e "$1" ] && return 0; sleep 0.1; done
+  return 1
+}
+lock_hold() { # path readiness-file
+  ( # shellcheck disable=SC1091
+    declare -F pg_lock >/dev/null || . "$HERE/../lib/pro-gate-lib.sh"
+    pg_lock "$1" 5 && : > "$2" && exec sleep 60 ) &
+  LOCK_HOLDER=$!; LOCK_HOLDERS="$LOCK_HOLDERS $LOCK_HOLDER"
+  lock_wait_ready "$2"
+}
+lock_reap() {
+  local pid="$1" rc i stat_line
+  kill -9 "$pid" 2>/dev/null
+  wait "$pid" 2>/dev/null; rc=$?
+  [ "$rc" = 127 ] || return 0
+  # An orphaned substitution is not our child. Wait for exit (including a zombie, whose
+  # descriptors are closed), rather than racing the kernel's delivery of SIGKILL.
+  for ((i=0; i<100; i++)); do
+    IFS= read -r stat_line 2>/dev/null < "/proc/$pid/stat" || return 0
+    case "${stat_line##*) }" in "Z "*|"X "*) return 0;; esac
+    sleep 0.01
+  done
+  printf 'test holder %s did not exit after SIGKILL\n' "$pid" >&2
+  return 1
+}
+# Count in this shell: command substitution can count its own transient pipe in the parent.
+lock_nfds() { local fds=(/proc/"$1"/fd/*); LOCK_NFDS=${#fds[@]}; }
 
 # Self-hosted runners may export operator overrides. The fixture supplies every setting it needs,
 # so inherited runtime configuration must not redirect state, browser probes, or timing behavior.
@@ -152,7 +188,7 @@ chmod +x "$TIMEOUT_LOG_BIN"
 #                                     deterministic.
 # All three default off, so installing the shim alone changes nothing. The fd is resolved through
 # /proc/self/fd because bash hands the descriptor down by inheritance, not by name — that works
-# for pg_lock's fixed fd 9 and for the guard's {var}-allocated fd alike.
+# for the independently allocated descriptors of pg_lock and the guard alike.
 install_flock_shim() { # $1 = bin directory to install into
   local dir="$1" real
   real="$(command -v flock)"
@@ -4583,7 +4619,13 @@ PRO_GATE_HOME="$SHOME" bash "$ENGINE" --status 42 >"$TDIR/st14.out" 2>/dev/null
 check 'stale .d lock (dead owner) not reported RUNNING' "$(grep -q 'RUNNING' "$TDIR/st14.out"; [ $? -ne 0 ]; echo $?)" "$(grep -i running "$TDIR/st14.out")"
 echo "$$" > "$SHOME/oracle.lock.pr-acme-widgets-42.d/pid"
 PRO_GATE_HOME="$SHOME" bash "$ENGINE" --status 42 >"$TDIR/st15.out" 2>/dev/null
-check 'live .d lock (live owner) reported RUNNING' "$(grep -q 'RUNNING' "$TDIR/st15.out"; echo $?)" "$(cat "$TDIR/st15.out")"
+check 'legacy .d lock with live pid is not reported RUNNING' "$(! grep -q 'RUNNING' "$TDIR/st15.out"; echo $?)" "$(cat "$TDIR/st15.out")"
+lock_hold "$SHOME/oracle.lock.pr-acme-widgets-42" "$TDIR/status-held"
+PRO_GATE_HOME="$SHOME" bash "$ENGINE" --status 42 >"$TDIR/st16.out" 2>"$TDIR/st16.err"
+check 'real live lock holder reported RUNNING' "$(grep -q RUNNING "$TDIR/st16.out"; echo $?)" "$(cat "$TDIR/st16.out")"
+lock_reap "$LOCK_HOLDER"
+PRO_GATE_HOME="$SHOME" bash "$ENGINE" --status 42 >"$TDIR/st17.out" 2>"$TDIR/st17.err"
+check 'SIGKILLed lock holder is not reported RUNNING' "$(! grep -q RUNNING "$TDIR/st17.out"; echo $?)" "$(cat "$TDIR/st17.out")"
 rm -rf "$SHOME/oracle.lock.pr-acme-widgets-42.d"
 
 echo '# v0.27: pro-gate-stats.sh --pr filters every view'
@@ -5646,49 +5688,8 @@ check 'organizer throttle applies exactly one ramp reset' \
       && awk -F'\t' 'NR==1{exit !($1==1 && $2==0)}' "$THROTTLE_HOME/ramp.state"; echo $?)" \
   "state=$(cat "$THROTTLE_HOME/ramp.state" 2>/dev/null) ramp-log=$(grep '^\[pro-gate ramp\]' "$TDIR/stderr")"
 
-# Stock macOS lacks flock. Model a winner paused after mkdir but before metadata publication; a
-# contender must treat that empty directory as busy rather than deleting a live lock after one second.
-echo '# v0.32 gate: no-flock organizer lock never steals a publication-in-progress'
-NOFLOCK_HOME="$TDIR/home-organizer-noflock"
-NOFLOCK_MARKER='pg-run-config-208-1700000208-28'
-NOFLOCK_DIR="$NOFLOCK_HOME/organizer-locks/$NOFLOCK_MARKER.d"
-mkdir -p "$NOFLOCK_HOME/completed" "$NOFLOCK_HOME/conversation-titles" "$NOFLOCK_DIR"
-cp "$TDIR/prov-ours.md" "$NOFLOCK_HOME/completed/$NOFLOCK_MARKER"
-seed_review_tokens "$NOFLOCK_HOME" "$NOFLOCK_MARKER"
-printf 'pro-gate review: PR #208 r1 [noflock]\n' > "$NOFLOCK_HOME/conversation-titles/$NOFLOCK_MARKER"
-inode_of() { stat -c %i "$1" 2>/dev/null || stat -f %i "$1" 2>/dev/null; }
-NOFLOCK_INODE="$(inode_of "$NOFLOCK_DIR")"
-(
-  sleep 2
-  [ -d "$NOFLOCK_DIR" ] && [ "$(inode_of "$NOFLOCK_DIR")" = "$NOFLOCK_INODE" ] \
-    || { : > "$TDIR/noflock-stolen"; exit 0; }
-  owner="${BASHPID:-$$}"
-  token="$(bash -c '. "'$HERE'/../lib/pro-gate-lib.sh"; pg_pid_token '"$owner" 2>/dev/null || true)"
-  printf '%s\n' "$owner" > "$NOFLOCK_DIR/pid"
-  printf '%s\n' "$token" > "$NOFLOCK_DIR/token"
-  : > "$TDIR/noflock-published"
-  sleep 2
-  rm -rf "$NOFLOCK_DIR"
-) &
-NOFLOCK_OWNER_PID=$!
-printf 'idle tab with no markers\n' > "$TDIR/tab.txt"
-start_mock "$TDIR/tab.txt"
-env PRO_GATE_HOME="$NOFLOCK_HOME" ORACLE_BROWSER_PORT="$PORT" PRO_GATE_MIN_UPTIME=0 \
-  PRO_GATE_SELF_HEAL=0 PRO_GATE_RAMP=0 PRO_GATE_TEST_ORGANIZER_NO_FLOCK=1 \
-  PRO_GATE_TEST_ORGANIZER_LOCK_WAIT=8 PRO_GATE_TIMEOUT_BIN="$TIMEOUT_LOG_BIN" \
-  PG_TEST_NODE_ARGS="$TDIR/node-args-noflock.log" NODE_OPTIONS= \
-  bash "$ENGINE" --harvest "$NOFLOCK_MARKER" --out "$TDIR/o-noflock.md" --timeout 5s \
-    >"$TDIR/stdout" 2>"$TDIR/stderr"
-RC=$?
-wait "$NOFLOCK_OWNER_PID"
-check 'no-flock contender preserves the live unpublished lock' \
-  "$([ "$RC" -eq 0 ] && [ -f "$TDIR/noflock-published" ] && [ ! -f "$TDIR/noflock-stolen" ]; echo $?)" \
-  "rc=$RC published=$(test -f "$TDIR/noflock-published"; echo $?) stolen=$(test -f "$TDIR/noflock-stolen"; echo $?) stderr=$(tail -2 "$TDIR/stderr")"
-check 'no-flock lock metadata and directory are retired after the join' \
-  "$([ ! -e "$NOFLOCK_DIR" ]; echo $?)" "lock remains: $(find "$NOFLOCK_HOME/organizer-locks" -maxdepth 2 -print 2>/dev/null)"
-
 # Housekeeping must run on artifact-only harvests, not only fresh reviews. A day-old crash-left
-# directory should be removed before the no-flock join, while a fresh sibling remains untouched.
+# directory should be removed before the join, while a fresh sibling remains untouched.
 echo '# v0.32 gate: harvest-only recovery sweeps stale organizer locks'
 STALE_HOME="$TDIR/home-organizer-stale"
 STALE_LOCK_ROOT="$TDIR/custom-organizer-locks"
@@ -5702,11 +5703,11 @@ touch -d '3 days ago' "$STALE_DIR" 2>/dev/null || touch -t 202001010000 "$STALE_
 env PRO_GATE_HOME="$STALE_HOME" PRO_GATE_ORGANIZER_LOCK_DIR="$STALE_LOCK_ROOT" \
   ORACLE_BROWSER_PORT="$PORT" PRO_GATE_MIN_UPTIME=0 PRO_GATE_SELF_HEAL=0 \
   PRO_GATE_RAMP=0 PRO_GATE_KEEP_TABS=1 PRO_GATE_CHAT_RENAME=0 \
-  PRO_GATE_TEST_ORGANIZER_NO_FLOCK=1 PRO_GATE_TEST_ORGANIZER_LOCK_WAIT=1 NODE_OPTIONS= \
+  PRO_GATE_TEST_ORGANIZER_LOCK_WAIT=1 NODE_OPTIONS= \
   bash "$ENGINE" --harvest "$STALE_MARKER" --out "$TDIR/o-noflock-stale.md" --timeout 5s \
     >"$TDIR/stdout" 2>"$TDIR/stderr"
 RC=$?
-check 'artifact-only harvest removes its stale no-flock lock before joining' \
+check 'artifact-only harvest sweeps its stale legacy lock directory before joining' \
   "$([ "$RC" -eq 0 ] && [ ! -e "$STALE_DIR" ] \
       && ! grep -q 'organizer-lock-timeout' "$TDIR/stderr"; echo $?)" \
   "rc=$RC stderr=$(cat "$TDIR/stderr") locks=$(find "$STALE_LOCK_ROOT" -maxdepth 2 -print 2>/dev/null)"
@@ -5728,93 +5729,51 @@ check '--status does not sweep stale organizer locks' \
   "$([ "$RC" -eq 0 ] && [ -d "$STATUS_STALE_DIR" ]; echo $?)" \
   "rc=$RC stderr=$(cat "$TDIR/status-organizer-lock.err")"
 
-# An empty crash-left directory has no trustworthy owner record. It stays busy for this bounded
-# call rather than being deleted from under a winner that may still be publishing metadata.
+# Artifact-only joins use the same stable fd lock as the early organizer.
 BUSY_HOME="$TDIR/home-organizer-busy"
 BUSY_MARKER='pg-run-config-209-1700000209-29'
 mkdir -p "$BUSY_HOME/completed" "$BUSY_HOME/organizer-locks/$BUSY_MARKER.d"
+printf '%s\n' "$$" > "$BUSY_HOME/organizer-locks/$BUSY_MARKER.d/pid"
 cp "$TDIR/prov-ours.md" "$BUSY_HOME/completed/$BUSY_MARKER"
 seed_review_tokens "$BUSY_HOME" "$BUSY_MARKER"
+lock_hold "$BUSY_HOME/organizer-locks/$BUSY_MARKER" "$TDIR/organizer-held"
 env PRO_GATE_HOME="$BUSY_HOME" ORACLE_BROWSER_PORT="$PORT" PRO_GATE_MIN_UPTIME=0 \
   PRO_GATE_SELF_HEAL=0 PRO_GATE_RAMP=0 PRO_GATE_KEEP_TABS=1 PRO_GATE_CHAT_RENAME=0 \
-  PRO_GATE_TEST_ORGANIZER_NO_FLOCK=1 PRO_GATE_TEST_ORGANIZER_LOCK_WAIT=1 NODE_OPTIONS= \
-  bash "$ENGINE" --harvest "$BUSY_MARKER" --out "$TDIR/o-noflock-busy.md" --timeout 5s \
+  PRO_GATE_TEST_ORGANIZER_LOCK_WAIT=1 NODE_OPTIONS= \
+  bash "$ENGINE" --harvest "$BUSY_MARKER" --out "$TDIR/o-organizer-busy.md" --timeout 5s \
     >"$TDIR/stdout" 2>"$TDIR/stderr"
 RC=$?
-check 'no-flock missing metadata stays busy instead of being stolen' \
-  "$([ "$RC" -eq 0 ] && [ -d "$BUSY_HOME/organizer-locks/$BUSY_MARKER.d" ] \
-      && grep -q 'organizer-lock-timeout' "$TDIR/stderr"; echo $?)" \
+check 'organizer join times out behind a live fd holder' \
+  "$([ "$RC" -eq 0 ] && grep -q 'organizer-lock-timeout' "$TDIR/stderr"; echo $?)" \
   "rc=$RC stderr=$(cat "$TDIR/stderr")"
-
-# Selectively fail the ownership-record install after mkdir. Acquisition must fail and remove its
-# partial directory; browser work must never start under unpublished ownership.
-PUB_HOME="$TDIR/home-organizer-publish-fail"
-PUB_MARKER='pg-run-config-210-1700000210-30'
-PUB_OS_HOME="$TDIR/os-home-organizer-publish-fail"
-PUB_INTERCEPT="$TDIR/organizer-publish-intercepted"
-mkdir -p "$PUB_HOME/completed" "$PUB_OS_HOME/.local/bin"
-cp "$TDIR/prov-ours.md" "$PUB_HOME/completed/$PUB_MARKER"
-seed_review_tokens "$PUB_HOME" "$PUB_MARKER"
-cat > "$PUB_OS_HOME/.local/bin/mv" <<'PUB_MV'
-#!/usr/bin/env bash
-last=""
-for arg in "$@"; do last="$arg"; done
-case "$last" in
-  */organizer-locks/*.d/pid)
-    : > "${PG_TEST_PUB_INTERCEPT:?}"
-    exit 1
-    ;;
-esac
-exec /bin/mv "$@"
-PUB_MV
-chmod +x "$PUB_OS_HOME/.local/bin/mv"
-env HOME="$PUB_OS_HOME" PG_TEST_PUB_INTERCEPT="$PUB_INTERCEPT" \
-  PRO_GATE_HOME="$PUB_HOME" ORACLE_BROWSER_PORT="$PORT" PRO_GATE_MIN_UPTIME=0 \
+lock_reap "$LOCK_HOLDER"
+env PRO_GATE_HOME="$BUSY_HOME" ORACLE_BROWSER_PORT="$PORT" PRO_GATE_MIN_UPTIME=0 \
   PRO_GATE_SELF_HEAL=0 PRO_GATE_RAMP=0 PRO_GATE_KEEP_TABS=1 PRO_GATE_CHAT_RENAME=0 \
-  PRO_GATE_TEST_ORGANIZER_NO_FLOCK=1 PRO_GATE_TEST_ORGANIZER_LOCK_WAIT=1 NODE_OPTIONS= \
-  bash "$ENGINE" --harvest "$PUB_MARKER" --out "$TDIR/o-noflock-publish.md" --timeout 5s \
+  PRO_GATE_TEST_ORGANIZER_LOCK_WAIT=1 NODE_OPTIONS= \
+  bash "$ENGINE" --harvest "$BUSY_MARKER" --out "$TDIR/o-organizer-free.md" --timeout 5s \
     >"$TDIR/stdout" 2>"$TDIR/stderr"
 RC=$?
-check 'no-flock acquisition fails when ownership publication fails' \
-  "$([ "$RC" -eq 0 ] && [ -f "$PUB_INTERCEPT" ] \
-      && [ ! -e "$PUB_HOME/organizer-locks/$PUB_MARKER.d" ] \
-      && grep -q 'organizer-lock-timeout' "$TDIR/stderr"; echo $?)" \
-  "rc=$RC intercepted=$(test -f "$PUB_INTERCEPT"; echo $?) stderr=$(cat "$TDIR/stderr") locks=$(find "$PUB_HOME/organizer-locks" -maxdepth 2 -print 2>/dev/null)"
-
-# Replace ownership while the organizer helper runs. Release must compare both fields and preserve
-# the replacement directory instead of deleting a lock it no longer owns.
-RELEASE_HOME="$TDIR/home-organizer-release"
-RELEASE_MARKER='pg-run-config-211-1700000211-31'
-RELEASE_TIMEOUT="$TDIR/timeout-organizer-release"
-mkdir -p "$RELEASE_HOME/completed" "$RELEASE_HOME/conversation-titles"
-cp "$TDIR/prov-ours.md" "$RELEASE_HOME/completed/$RELEASE_MARKER"
-seed_review_tokens "$RELEASE_HOME" "$RELEASE_MARKER"
-printf 'pro-gate review: PR #211 r1 [release]\n' > "$RELEASE_HOME/conversation-titles/$RELEASE_MARKER"
-cat > "$RELEASE_TIMEOUT" <<'RELEASE_TIMEOUT_SH'
-#!/usr/bin/env bash
-case " $* " in
-  *' --organize '*)
-    for dir in "${PRO_GATE_HOME:?}"/organizer-locks/*.d; do
-      [ -d "$dir" ] || continue
-      printf 'replacement-owner\n' > "$dir/pid"
-    done ;;
-esac
-exec /usr/bin/timeout "$@"
-RELEASE_TIMEOUT_SH
-chmod +x "$RELEASE_TIMEOUT"
-printf 'idle tab with no markers\n' > "$TDIR/tab.txt"
-start_mock "$TDIR/tab.txt"
-env PRO_GATE_HOME="$RELEASE_HOME" ORACLE_BROWSER_PORT="$PORT" PRO_GATE_MIN_UPTIME=0 \
-  PRO_GATE_SELF_HEAL=0 PRO_GATE_RAMP=0 PRO_GATE_TEST_ORGANIZER_NO_FLOCK=1 \
-  PRO_GATE_TIMEOUT_BIN="$RELEASE_TIMEOUT" NODE_OPTIONS= \
-  bash "$ENGINE" --harvest "$RELEASE_MARKER" --out "$TDIR/o-noflock-release.md" --timeout 5s \
-    >"$TDIR/stdout" 2>"$TDIR/stderr"
-RC=$?
-REPLACEMENT_DIR="$RELEASE_HOME/organizer-locks/$RELEASE_MARKER.d"
-check 'no-flock release cannot remove replacement ownership' \
-  "$([ "$RC" -eq 0 ] && [ -d "$REPLACEMENT_DIR" ] \
-      && grep -q '^replacement-owner$' "$REPLACEMENT_DIR/pid"; echo $?)" \
-  "rc=$RC stderr=$(tail -2 "$TDIR/stderr") locks=$(find "$RELEASE_HOME/organizer-locks" -maxdepth 2 -print 2>/dev/null)"
+check 'organizer join succeeds after SIGKILL with a legacy live-pid directory present' \
+  "$([ "$RC" -eq 0 ] && [ -d "$BUSY_HOME/organizer-locks/$BUSY_MARKER.d" ] \
+      && ! grep -q 'organizer-lock-timeout' "$TDIR/stderr"; echo $?)" \
+  "rc=$RC stderr=$(cat "$TDIR/stderr")"
+check 'organizer join returns the exact durable artifact' \
+  "$(cmp -s "$TDIR/o-organizer-free.md" "$BUSY_HOME/completed/$BUSY_MARKER"; echo $?)"
+# Release on a non-owning organizer descriptor must leave the real holder excluded.
+ORGANIZER_DEFS="$(sed -n '/^pg_organizer_lock_acquire() {/,/^}/p; /^pg_organizer_lock_release() {/,/^}/p' "$ENGINE")"
+(
+  # shellcheck disable=SC1091
+  . "$HERE/../lib/pro-gate-lib.sh"
+  eval "$ORGANIZER_DEFS"
+  PRO_GATE_HOME="$BUSY_HOME" pg_organizer_lock_acquire "$BUSY_MARKER" 0 || exit 1
+  pg_organizer_lock_release
+  lock_hold "$BUSY_HOME/organizer-locks/$BUSY_MARKER" "$TDIR/organizer-replacement" || exit 1
+  pg_organizer_lock_release
+  PRO_GATE_HOME="$BUSY_HOME" pg_organizer_lock_acquire "$BUSY_MARKER" 0; rc=$?
+  lock_reap "$LOCK_HOLDER"
+  [ "$rc" -eq 1 ]
+); RC=$?
+check 'organizer release never frees a replacement holder' "$RC"
 
 echo '# v0.29: the prompt leads with the run-naming title line (#49 phase 1)'
 cat > "$TDIR/bin/oracle-dump" <<'DUMP'
@@ -6023,7 +5982,7 @@ check 'bad-repo run still exits 4' "$([ "$RC" -eq 4 ]; echo $?)" "rc=$RC"
 PLOG="$(find "$PLHOME/logs" -name 'pg-run-unidentified-*.log' -size +0c 2>/dev/null | head -1)"
 check 'provisional run log persisted for the pre-marker failure' "$([ -n "$PLOG" ]; echo $?)" "logs: $(ls "$PLHOME/logs" 2>/dev/null | tr '\n' ' ')"
 
-echo '# v0.30 gate r2: EXIT handlers chain instead of clobbering (no-flock lock cleanup vs scratch cleanup)'
+echo '# v0.30 gate r2: EXIT handlers chain instead of clobbering scratch cleanup'
 ( cd "$TDIR" && bash -c '
   . "'"$HERE"'/../lib/pro-gate-lib.sh"
   pg_on_exit "touch \"'"$TDIR"'/exit-a\""
@@ -8793,603 +8752,166 @@ check 'disposition cleanup releases the reservation guard when the binding unlin
           || { [ "$SUPER_LEAK_RC" -ne 0 ] && [ "$SUPER_LEAK_BINDING_PRESENT" = yes ]; }; }; echo $?)" \
   "disposition_valid=$([ -n "$SUPER_LEAK_DISP" ] && echo yes || echo no) cleanup_rc=$SUPER_LEAK_RC binding_present=$SUPER_LEAK_BINDING_PRESENT reacquire_rc=$SUPER_LEAK_REACQUIRE"
 
-# v0.41: a CONTENDED guard acquire must fail without leaking its descriptor (the caller never
-# calls release on failure), and the no-flock fallback must self-heal a guard directory left by
-# a dead process instead of waiting out the full window on every later reservation write.
-GUARD_HOME="$TDIR/home-guard-contended"; mkdir -p "$GUARD_HOME"
-GUARD_LOCK="$(PRO_GATE_HOME="$GUARD_HOME" pg_reservation_lock)"; mkdir -p "$(dirname "$GUARD_LOCK")"
-exec {GUARD_HOLD_FD}>>"$GUARD_LOCK"; flock -n "$GUARD_HOLD_FD"
-GUARD_FDS_BEFORE="$(ls /proc/$$/fd 2>/dev/null | wc -l | tr -d ' ')"
-PRO_GATE_HOME="$GUARD_HOME" PRO_GATE_RESERVATION_GUARD_WAIT=1 pg_reservation_guard_acquire; GUARD_CONTENDED_RC=$?
-GUARD_FDS_AFTER="$(ls /proc/$$/fd 2>/dev/null | wc -l | tr -d ' ')"
-eval "exec ${GUARD_HOLD_FD}>&-"
-check 'contended reservation guard acquire fails without leaking a descriptor' \
-  "$([ "$GUARD_CONTENDED_RC" -ne 0 ] && [ -z "${PG_RESERVATION_GUARD_FD:-}" ] \
-     && { [ ! -d /proc/$$/fd ] || [ "$GUARD_FDS_BEFORE" = "$GUARD_FDS_AFTER" ]; }; echo $?)" \
-  "rc=$GUARD_CONTENDED_RC fd_var=${PG_RESERVATION_GUARD_FD:-} fds_before=$GUARD_FDS_BEFORE fds_after=$GUARD_FDS_AFTER"
-(
-  pg_have() { [ "$1" = flock ] && return 1; command -v "$1" >/dev/null 2>&1; }
-  sleep 0 & GUARD_DEAD=$!; wait "$GUARD_DEAD"
-  mkdir -p "$GUARD_LOCK.d"; : > "$GUARD_LOCK.d/owner.$GUARD_DEAD"
-  PRO_GATE_HOME="$GUARD_HOME" PRO_GATE_RESERVATION_GUARD_WAIT=3 pg_reservation_guard_acquire; rc=$?
-  owner=""; for f in "$GUARD_LOCK.d"/owner.*; do [ -e "$f" ] && owner="${f##*/owner.}"; done
-  PRO_GATE_HOME="$GUARD_HOME" pg_reservation_guard_release
-  # the owner is the shell that holds the guard (BASHPID of this subshell), never the parent $$
-  [ "$rc" -eq 0 ] && [ "$owner" = "$BASHPID" ] && [ ! -e "$GUARD_LOCK.d/owner.$GUARD_DEAD" ] && [ ! -d "$GUARD_LOCK.d" ]
-); GUARD_STALE_RC=$?
-check 'no-flock reservation guard self-heals a directory left by a dead process and releases its own' "$GUARD_STALE_RC"
-
-# gate #148 r1 P1: two no-flock waiters that observe the same dead guard owner must never both hold
-# the guard. Unserialized reclamation let B's cached dead pid remove A's freshly re-created LIVE
-# directory and enter A's critical section. B is slowed only at its `rm` (a PATH shim that also
-# signals once B has read the dead pid), so A reclaims and enters first and B's removal lands while
-# A is inside; the section log must never show two enters without an exit between them.
-GUARD_RACE_HOME="$TDIR/home-guard-race"; mkdir -p "$GUARD_RACE_HOME/bin"
-GUARD_RACE_LOCK="$(PRO_GATE_HOME="$GUARD_RACE_HOME" pg_reservation_lock)"; mkdir -p "$(dirname "$GUARD_RACE_LOCK")"
-sleep 0 & GUARD_RACE_DEAD=$!; wait "$GUARD_RACE_DEAD"
-mkdir -p "$GUARD_RACE_LOCK.d"; : > "$GUARD_RACE_LOCK.d/owner.$GUARD_RACE_DEAD"
-GUARD_RACE_RM="$(command -v rm)"
-printf '#!/usr/bin/env bash\nif [ -n "${PG_TEST_RM_DELAY:-}" ]; then : > "${PG_TEST_RM_SENTINEL:?}"; sleep "$PG_TEST_RM_DELAY"; fi\nexec "%s" "$@"\n' "$GUARD_RACE_RM" > "$GUARD_RACE_HOME/bin/rm"
-chmod +x "$GUARD_RACE_HOME/bin/rm"
-GUARD_RACE_LOG="$GUARD_RACE_HOME/sections.log"; : > "$GUARD_RACE_LOG"
-GUARD_RACE_SENTINEL="$GUARD_RACE_HOME/b-read-dead-pid"
-guard_race_holder() { # name rm-delay
-  PATH="$GUARD_RACE_HOME/bin:$PATH" PG_TEST_RM_DELAY="$2" PG_TEST_RM_SENTINEL="$GUARD_RACE_SENTINEL" \
-  PRO_GATE_HOME="$GUARD_RACE_HOME" PRO_GATE_RESERVATION_GUARD_WAIT=20 \
-    bash -c '. "$1"; pg_have() { [ "$1" = flock ] && return 1; command -v "$1" >/dev/null 2>&1; }
-      pg_reservation_guard_acquire || { echo "fail $2" >> "$3"; exit 1; }
-      echo "enter $2" >> "$3"; sleep 3; echo "exit $2" >> "$3"; pg_reservation_guard_release' _ "$HERE/../lib/pro-gate-lib.sh" "$1" "$GUARD_RACE_LOG"
-}
-guard_race_holder B 1 & GUARD_RACE_B=$!
-for _ in $(seq 1 100); do [ -e "$GUARD_RACE_SENTINEL" ] && break; sleep 0.1; done
-guard_race_holder A "" & GUARD_RACE_A=$!
-wait "$GUARD_RACE_A"; GUARD_RACE_A_RC=$?; wait "$GUARD_RACE_B"; GUARD_RACE_B_RC=$?
-check 'gate #148 r1 P1: two no-flock reclaimers of one dead guard owner never both hold the guard' \
-  "$([ -e "$GUARD_RACE_SENTINEL" ] && [ "$GUARD_RACE_A_RC" -eq 0 ] && [ "$GUARD_RACE_B_RC" -eq 0 ] \
-     && [ "$(wc -l < "$GUARD_RACE_LOG" | tr -d ' ')" -eq 4 ] \
-     && awk '$1=="enter"{if(open)bad=1; open=1} $1=="exit"{open=0} END{exit bad}' "$GUARD_RACE_LOG"; echo $?)" \
-  "a_rc=$GUARD_RACE_A_RC b_rc=$GUARD_RACE_B_RC sentinel=$(test -e "$GUARD_RACE_SENTINEL"; echo $?) log=$(tr '\n' ';' < "$GUARD_RACE_LOG")"
-# An ownerless guard directory is one a holder died inside between mkdir and its marker, or
-# between its marker's removal and the rmdir; it is empty, so rmdir reclaims it without any
-# pathname-level deletion that could hit a replacement.
-#
-# r3 P1 refined WHEN that reclaim is allowed. "Ownerless" alone does not mean abandoned: a live
-# contender is ownerless for the instant between its mkdir and its marker write, and reclaiming it
-# there is what let two shells hold one guard. So the directory must also be older than
-# PRO_GATE_DIRLOCK_ORPHAN_GRACE, and this fixture ages it to represent the genuine crash this case
-# is about. The young-directory half of the same rule is asserted separately below; setting the
-# grace to 0 here would re-assert the unsafe behaviour rather than the intended one.
-(
-  pg_have() { [ "$1" = flock ] && return 1; command -v "$1" >/dev/null 2>&1; }
-  mkdir -p "$GUARD_RACE_LOCK.d"
-  touch -t 202001010000 "$GUARD_RACE_LOCK.d" 2>/dev/null
-  PRO_GATE_HOME="$GUARD_RACE_HOME" PRO_GATE_RESERVATION_GUARD_WAIT=2 pg_reservation_guard_acquire; rc=$?
-  owner=""; for f in "$GUARD_RACE_LOCK.d"/owner.*; do [ -e "$f" ] && owner="${f##*/owner.}"; done
-  PRO_GATE_HOME="$GUARD_RACE_HOME" pg_reservation_guard_release
-  [ "$rc" -eq 0 ] && [ "$owner" = "$BASHPID" ] && [ ! -d "$GUARD_RACE_LOCK.d" ]
-); GUARD_RECLAIM_DEAD_RC=$?
-check 'gate #148 r1 P1: an abandoned ownerless guard directory is reclaimed by rmdir and then released cleanly' "$GUARD_RECLAIM_DEAD_RC"
-(
-  pg_have() { [ "$1" = flock ] && return 1; command -v "$1" >/dev/null 2>&1; }
-  sleep 60 & live=$!
-  mkdir -p "$GUARD_RACE_LOCK.d"; : > "$GUARD_RACE_LOCK.d/owner.$live"
-  PRO_GATE_HOME="$GUARD_RACE_HOME" PRO_GATE_RESERVATION_GUARD_WAIT=2 pg_reservation_guard_acquire; rc=$?
-  kill "$live" 2>/dev/null
-  marker_kept=$([ -e "$GUARD_RACE_LOCK.d/owner.$live" ]; echo $?)
-  rm -rf "$GUARD_RACE_LOCK.d"
-  [ "$rc" -ne 0 ] && [ -z "${PG_RESERVATION_GUARD_DIR:-}" ] && [ "$marker_kept" -eq 0 ]
-); GUARD_RECLAIM_LIVE_RC=$?
-check 'gate #148 r1 P1: a guard whose marker names a live process is never removed and the acquire fails closed' "$GUARD_RECLAIM_LIVE_RC"
-
-# gate #148 r2 P1: a guard acquired inside a command substitution records the subshell that holds
-# it (BASHPID), never the parent wrapper ($$). Killing the parent must not make a live guard look
-# dead, so a contender stays excluded while the substitution's holder is still inside.
-GUARD_SUB_HOME="$TDIR/home-guard-subshell"; mkdir -p "$GUARD_SUB_HOME"
-GUARD_SUB_LOCK="$(PRO_GATE_HOME="$GUARD_SUB_HOME" pg_reservation_lock)"; mkdir -p "$(dirname "$GUARD_SUB_LOCK")"
-GUARD_SUB_LOG="$GUARD_SUB_HOME/sections.log"; : > "$GUARD_SUB_LOG"
-PRO_GATE_HOME="$GUARD_SUB_HOME" bash -c '. "$1"; pg_have() { [ "$1" = flock ] && return 1; command -v "$1" >/dev/null 2>&1; }
-  out="$(pg_reservation_guard_acquire || exit 9; echo "enter sub" >> "$2"; echo "held"; : > "$3"; until [ -e "$4" ]; do sleep 0.1; done; echo "exit sub" >> "$2"; pg_reservation_guard_release)"
-  [ "$out" = held ]' _ "$HERE/../lib/pro-gate-lib.sh" "$GUARD_SUB_LOG" "$GUARD_SUB_HOME/held" "$GUARD_SUB_HOME/go" & GUARD_SUB_PARENT=$!
-for _ in $(seq 1 100); do [ -e "$GUARD_SUB_HOME/held" ] && break; sleep 0.1; done
-GUARD_SUB_OWNER=""; for f in "$GUARD_SUB_LOCK.d"/owner.*; do [ -e "$f" ] && GUARD_SUB_OWNER="${f##*/owner.}"; done
-kill "$GUARD_SUB_PARENT" 2>/dev/null
-(
-  pg_have() { [ "$1" = flock ] && return 1; command -v "$1" >/dev/null 2>&1; }
-  PRO_GATE_HOME="$GUARD_SUB_HOME" PRO_GATE_RESERVATION_GUARD_WAIT=2 pg_reservation_guard_acquire; rc=$?
-  [ "$rc" -ne 0 ] && [ -z "${PG_RESERVATION_GUARD_DIR:-}" ]
-); GUARD_SUB_CONTENDER_RC=$?
-: > "$GUARD_SUB_HOME/go"
-wait "$GUARD_SUB_PARENT" 2>/dev/null
-for _ in $(seq 1 100); do grep -q 'exit sub' "$GUARD_SUB_LOG" && break; sleep 0.1; done
-check 'gate #148 r2 P1: a guard held from a command substitution records the holder, not the wrapper' \
-  "$([ -n "$GUARD_SUB_OWNER" ] && [ "$GUARD_SUB_OWNER" != "$GUARD_SUB_PARENT" ] && [ "$GUARD_SUB_CONTENDER_RC" -eq 0 ]; echo $?)" \
-  "owner=$GUARD_SUB_OWNER parent=$GUARD_SUB_PARENT contender_rc=$GUARD_SUB_CONTENDER_RC log=$(tr '\n' ';' < "$GUARD_SUB_LOG")"
-check 'gate #148 r2 P1: the substitution holder still releases its own guard after the wrapper dies' \
-  "$([ ! -d "$GUARD_SUB_LOCK.d" ]; echo $?)" "$(ls -d "$GUARD_SUB_LOCK.d"* 2>/dev/null | tr '\n' ' ')"
-
-# gate #148 r2 P1: an orphaned release must never delete a replacement guard. Holder A's release
-# has already unlinked its own marker and is parked inside its `rmdir` (PATH shim); A's shell is
-# then killed, so the directory is empty and ownerless. B reclaims it by rmdir, re-creates it,
-# marks it and enters; A's surviving rmdir resumes and must fail against B's marker, so B's guard
-# survives and a third contender C stays excluded while B is inside.
-GUARD_REL_HOME="$TDIR/home-guard-release"; mkdir -p "$GUARD_REL_HOME/bin"
-GUARD_REL_LOCK="$(PRO_GATE_HOME="$GUARD_REL_HOME" pg_reservation_lock)"; mkdir -p "$(dirname "$GUARD_REL_LOCK")"
-GUARD_REL_RMDIR="$(command -v rmdir)"
-printf '#!/usr/bin/env bash\nif [ -n "${PG_TEST_RMDIR_GATE:-}" ] && [ "${@: -1}" = "${PG_TEST_RMDIR_TARGET:-}" ]; then : > "${PG_TEST_RMDIR_GATE}.ready"; until [ -e "$PG_TEST_RMDIR_GATE" ]; do sleep 0.1; done; fi\nexec "%s" "$@"\n' "$GUARD_REL_RMDIR" > "$GUARD_REL_HOME/bin/rmdir"
-chmod +x "$GUARD_REL_HOME/bin/rmdir"
-GUARD_REL_LOG="$GUARD_REL_HOME/sections.log"; : > "$GUARD_REL_LOG"
-PATH="$GUARD_REL_HOME/bin:$PATH" PG_TEST_RMDIR_GATE="$GUARD_REL_HOME/rmdir-gate" PG_TEST_RMDIR_TARGET="$GUARD_REL_LOCK.d" \
-PRO_GATE_HOME="$GUARD_REL_HOME" PRO_GATE_RESERVATION_GUARD_WAIT=20 \
-  bash -c '. "$1"; pg_have() { [ "$1" = flock ] && return 1; command -v "$1" >/dev/null 2>&1; }
-    pg_reservation_guard_acquire || exit 9; echo "enter A" >> "$2"; echo "exit A" >> "$2"; pg_reservation_guard_release' _ "$HERE/../lib/pro-gate-lib.sh" "$GUARD_REL_LOG" & GUARD_REL_A=$!
-for _ in $(seq 1 100); do [ -e "$GUARD_REL_HOME/rmdir-gate.ready" ] && break; sleep 0.1; done
-GUARD_REL_A_PARKED=$([ -e "$GUARD_REL_HOME/rmdir-gate.ready" ]; echo $?)
-# A's marker is gone and its rmdir is parked. Kill A's shell but not the parked remover.
-kill "$GUARD_REL_A" 2>/dev/null; wait "$GUARD_REL_A" 2>/dev/null
-PRO_GATE_HOME="$GUARD_REL_HOME" PRO_GATE_RESERVATION_GUARD_WAIT=20 \
-  bash -c '. "$1"; pg_have() { [ "$1" = flock ] && return 1; command -v "$1" >/dev/null 2>&1; }
-    pg_reservation_guard_acquire || { echo "fail B" >> "$2"; exit 9; }; echo "enter B" >> "$2"; : > "$3"; until [ -e "$4" ]; do sleep 0.1; done; echo "exit B" >> "$2"; pg_reservation_guard_release' _ "$HERE/../lib/pro-gate-lib.sh" "$GUARD_REL_LOG" "$GUARD_REL_HOME/b-in" "$GUARD_REL_HOME/b-go" & GUARD_REL_B=$!
-for _ in $(seq 1 200); do [ -e "$GUARD_REL_HOME/b-in" ] && break; sleep 0.1; done
-GUARD_REL_B_IN=$([ -e "$GUARD_REL_HOME/b-in" ]; echo $?)
-# Resume A's orphaned rmdir while B is inside, then try a third contender.
-: > "$GUARD_REL_HOME/rmdir-gate"
-sleep 1
-(
-  pg_have() { [ "$1" = flock ] && return 1; command -v "$1" >/dev/null 2>&1; }
-  PRO_GATE_HOME="$GUARD_REL_HOME" PRO_GATE_RESERVATION_GUARD_WAIT=2 pg_reservation_guard_acquire; rc=$?
-  [ "$rc" -ne 0 ] && [ -z "${PG_RESERVATION_GUARD_DIR:-}" ]
-); GUARD_REL_C_RC=$?
-GUARD_REL_B_GUARD_ALIVE=$([ -d "$GUARD_REL_LOCK.d" ] && [ -e "$GUARD_REL_LOCK.d/owner.$GUARD_REL_B" ]; echo $?)
-: > "$GUARD_REL_HOME/b-go"
-wait "$GUARD_REL_B" 2>/dev/null
-check 'gate #148 r2 P1: an orphaned release never deletes a replacement live guard' \
-  "$([ "$GUARD_REL_A_PARKED" -eq 0 ] && [ "$GUARD_REL_B_IN" -eq 0 ] && [ "$GUARD_REL_B_GUARD_ALIVE" -eq 0 ] && [ "$GUARD_REL_C_RC" -eq 0 ] \
-     && awk '$1=="enter"{if(open)bad=1; open=1} $1=="exit"{open=0} END{exit bad}' "$GUARD_REL_LOG"; echo $?)" \
-  "a_parked=$GUARD_REL_A_PARKED b_in=$GUARD_REL_B_IN b_guard_alive=$GUARD_REL_B_GUARD_ALIVE c_rc=$GUARD_REL_C_RC log=$(tr '\n' ';' < "$GUARD_REL_LOG") dirs=$(ls -d "$GUARD_REL_LOCK.d"* 2>/dev/null | tr '\n' ' ')"
-check 'gate #148 r2 P1: the replacement holder releases its own guard after the orphaned rmdir failed' \
-  "$([ ! -d "$GUARD_REL_LOCK.d" ]; echo $?)" "$(ls -d "$GUARD_REL_LOCK.d"* 2>/dev/null | tr '\n' ' ')"
-
-# gate #148 r3 P1: mkdir can fail for reasons that are NOT contention (a missing or unwritable
-# parent). Treating "the directory is not there" as a successful reclaim made acquire retry with no
-# sleep and no counter increment, so it spun at 100% CPU forever and never honoured its own wait
-# bound. The outer coreutils timeout is what turns a regression back into a fast failure instead of
-# a hung suite: without the fix this call never returns.
-GUARD_SPIN_HOME="$TDIR/home-guard-spin"; mkdir -p "$GUARD_SPIN_HOME"
-GUARD_SPIN_START=$(date +%s)
-/usr/bin/timeout 20 bash -c '
-  . "$1"
-  pg_have() { [ "$1" = flock ] && return 1; command -v "$1" >/dev/null 2>&1; }
-  PRO_GATE_RESERVATION_LOCK="$2" PRO_GATE_RESERVATION_GUARD_WAIT=3 pg_reservation_guard_acquire
-' _ "$HERE/../lib/pro-gate-lib.sh" "$GUARD_SPIN_HOME/absent-parent/in-progress.lock"
-GUARD_SPIN_RC=$?
-GUARD_SPIN_ELAPSED=$(( $(date +%s) - GUARD_SPIN_START ))
-check 'gate #148 r3 P1: a non-EEXIST mkdir failure honours the guard wait instead of spinning forever' \
-  "$([ "$GUARD_SPIN_RC" -eq 1 ] && [ "$GUARD_SPIN_ELAPSED" -lt 15 ]; echo $?)" \
-  "rc=$GUARD_SPIN_RC (124=timed out, i.e. spun) elapsed=${GUARD_SPIN_ELAPSED}s"
-
-# gate #148 r3 P1: a contender that has mkdir'd but not yet written its marker must not have the
-# directory reclaimed out from under it. When that happened, the contender's marker write landed in
-# a REPLACEMENT directory another shell had already claimed at the same pathname, and both shells
-# believed they held the guard. The reclaim helper must refuse a young unmarked directory.
-GUARD_YOUNG_HOME="$TDIR/home-guard-young"; mkdir -p "$GUARD_YOUNG_HOME"
-GUARD_YOUNG_DIR="$GUARD_YOUNG_HOME/in-progress.lock.d"
-mkdir -p "$GUARD_YOUNG_DIR"                      # A has mkdir'd and not yet marked
-pg_dirlock_reclaim_dead "$GUARD_YOUNG_DIR"; GUARD_YOUNG_RECLAIM_RC=$?
-: > "$GUARD_YOUNG_DIR/owner.1111"                # A resumes and writes its marker
-GUARD_YOUNG_OWNERS="$(pg_dirlock_owner_count "$GUARD_YOUNG_DIR")"
-check 'gate #148 r3 P1: a young unmarked guard directory is never reclaimed from under its creator' \
-  "$([ "$GUARD_YOUNG_RECLAIM_RC" -ne 0 ] && [ -d "$GUARD_YOUNG_DIR" ] && [ "$GUARD_YOUNG_OWNERS" = 1 ]; echo $?)" \
-  "reclaim_rc=$GUARD_YOUNG_RECLAIM_RC owners=$GUARD_YOUNG_OWNERS"
-# ...but a genuinely orphaned unmarked directory (older than the grace) is still reclaimable, or a
-# process that died between mkdir and marker would wedge the guard forever.
-GUARD_ORPHAN_DIR="$GUARD_YOUNG_HOME/orphan.lock.d"
-mkdir -p "$GUARD_ORPHAN_DIR"
-touch -t 202001010000 "$GUARD_ORPHAN_DIR" 2>/dev/null
-pg_dirlock_reclaim_dead "$GUARD_ORPHAN_DIR"; GUARD_ORPHAN_RC=$?
-check 'gate #148 r3 P1: an unmarked directory older than the orphan grace is still reclaimed' \
-  "$([ "$GUARD_ORPHAN_RC" -eq 0 ] && [ ! -d "$GUARD_ORPHAN_DIR" ]; echo $?)" "rc=$GUARD_ORPHAN_RC"
-
-# gate #148 r3 P2: a recycled pid must not read as a live owner. kill -0 alone would keep the guard
-# held forever once the OS hands a dead owner's pid to an unrelated live process, so the marker
-# carries pg_pid_token's start time and BOTH must match for the owner to count as alive.
-GUARD_TOK_DIR="$GUARD_YOUNG_HOME/token.lock.d"
-mkdir -p "$GUARD_TOK_DIR"
-printf 'not-the-start-time-of-this-pid' > "$GUARD_TOK_DIR/owner.$$"   # live pid, WRONG token
-pg_dirlock_reclaim_dead "$GUARD_TOK_DIR"; GUARD_TOK_RC=$?
-check 'gate #148 r3 P2: a live pid whose start-time token does not match is reclaimed, not trusted' \
-  "$([ "$GUARD_TOK_RC" -eq 0 ] && [ ! -d "$GUARD_TOK_DIR" ]; echo $?)" "rc=$GUARD_TOK_RC"
-GUARD_LIVE_DIR="$GUARD_YOUNG_HOME/live.lock.d"
-mkdir -p "$GUARD_LIVE_DIR"
-pg_pid_token "$$" > "$GUARD_LIVE_DIR/owner.$$"                        # live pid, CORRECT token
-pg_dirlock_reclaim_dead "$GUARD_LIVE_DIR"; GUARD_LIVE_RC=$?
-check 'gate #148 r3 P2: a live pid with a matching token still holds its guard' \
-  "$([ "$GUARD_LIVE_RC" -ne 0 ] && [ -d "$GUARD_LIVE_DIR" ]; echo $?)" "rc=$GUARD_LIVE_RC"
-
-# ── #155: pg_lock and pg_lock_n on the same hardened reclaimer ────────────────
-# The inline reclaim these replace read the owner pid and, on a dead one, rm -rf'd the
-# directory and retried. Every case below is one of the three things wrong with that.
-DL_HOME="$TDIR/home-dirlock"; mkdir -p "$DL_HOME"
-
-# The pid/token shape pg_lock records is not the guard's owner.<pid> marker. Two readers
-# outside the reclaimer depend on it (st_inflight, pg_harvest_claimed), so the shape
-# stays and the reclaimer understands both.
-DL_DEAD="$DL_HOME/dead.lock.d"; mkdir -p "$DL_DEAD"
-sleep 0 & DL_DEAD_PID=$!; wait "$DL_DEAD_PID"       # a pid that has certainly exited
-printf '%s\n' "$DL_DEAD_PID" > "$DL_DEAD/pid"
-pg_pid_token "$DL_DEAD_PID" > "$DL_DEAD/token" 2>/dev/null || : > "$DL_DEAD/token"
-pg_dirlock_reclaim_dead "$DL_DEAD"; DL_DEAD_RC=$?
-check '#155: a pid/token lock whose owner is dead is reclaimed by the shared helper' \
-  "$([ "$DL_DEAD_RC" -eq 0 ] && [ ! -d "$DL_DEAD" ]; echo $?)" "rc=$DL_DEAD_RC"
-
-# A live owner with a matching token holds it. This is the case the old code got right.
-DL_LIVE="$DL_HOME/live.lock.d"; mkdir -p "$DL_LIVE"
-printf '%s\n' "$$" > "$DL_LIVE/pid"
-pg_pid_token "$$" > "$DL_LIVE/token"
-pg_dirlock_reclaim_dead "$DL_LIVE"; DL_LIVE_RC=$?
-check '#155: a pid/token lock whose owner is live is never reclaimed' \
-  "$([ "$DL_LIVE_RC" -ne 0 ] && [ -d "$DL_LIVE" ] && [ -e "$DL_LIVE/pid" ]; echo $?)" "rc=$DL_LIVE_RC"
-
-# The token the old code wrote and never read. A live pid recycled from a long-dead holder
-# has a token that no longer matches, so the lock is stale and must be reclaimed -- the old
-# inline check saw `kill -0` succeed and wedged forever instead.
-DL_RECYC="$DL_HOME/recycled.lock.d"; mkdir -p "$DL_RECYC"
-printf '%s\n' "$$" > "$DL_RECYC/pid"
-printf 'not-the-token-of-this-process\n' > "$DL_RECYC/token"
-pg_dirlock_reclaim_dead "$DL_RECYC"; DL_RECYC_RC=$?
-check '#155: a live pid whose token does not match is reclaimed, not trusted (planted negative)' \
-  "$([ "$DL_RECYC_RC" -eq 0 ] && [ ! -d "$DL_RECYC" ]; echo $?)" "rc=$DL_RECYC_RC"
-
-# r8 P0 inherited: a transient failure to recompute the token must not read as "dead".
-DL_TOKFAIL="$DL_HOME/tokfail.lock.d"; mkdir -p "$DL_TOKFAIL"
-printf '%s\n' "$$" > "$DL_TOKFAIL/pid"
-pg_pid_token "$$" > "$DL_TOKFAIL/token"
-(
-  pg_pid_token() { return 1; }
-  pg_dirlock_reclaim_dead "$DL_TOKFAIL"
-); DL_TOKFAIL_RC=$?
-check '#155: a live pid/token owner survives a transient token read failure' \
-  "$([ "$DL_TOKFAIL_RC" -ne 0 ] && [ -d "$DL_TOKFAIL" ] && [ -e "$DL_TOKFAIL/pid" ]; echo $?)" \
-  "rc=$DL_TOKFAIL_RC"
-
-# A torn record -- mkdir succeeded, the pid write did not -- is not a live claim, and the old
-# code could not reap it at all ("pg_lock cannot reap an empty-pid directory either"). It is
-# reclaimable, but ONLY once the orphan grace has elapsed: see the pair below for why. The
-# v0.44.0 version of this case asserted immediate reclaim, which enshrined the very defect
-# rule 3 forbids -- a test that passes against the bug is worth less than no test.
-DL_TORN="$DL_HOME/torn.lock.d"; mkdir -p "$DL_TORN"; : > "$DL_TORN/pid"
-( PRO_GATE_DIRLOCK_ORPHAN_GRACE=0; pg_dirlock_reclaim_dead "$DL_TORN" ); DL_TORN_RC=$?
-check '#155: an empty pid record past the orphan grace is reclaimed, not wedged forever' \
-  "$([ "$DL_TORN_RC" -eq 0 ] && [ ! -d "$DL_TORN" ]; echo $?)" "rc=$DL_TORN_RC"
-
-# ── v0.44.0 regression: the torn record must not skip the orphan grace ────────────────────
-# pg_lock's winner runs `mkdir "$lockdir"` then `echo "$$" > "$lockdir/pid"`. The redirection
-# creates the file (O_CREAT|O_TRUNC) BEFORE writing into it, so a live winner is momentarily a
-# directory holding an EMPTY pid file -- and that is also the persistent state when the write
-# fails, since the call is `|| true`. v0.44.0 set had_marker=1 on the file merely existing,
-# which skipped rule 3's grace and made the winner's own directory reclaimable mid-write.
-# These two cases are the same live winner one syscall apart; both must be KEPT.
-DL_G1="$DL_HOME/grace-nofile.lock.d"; mkdir -p "$DL_G1"
-( PRO_GATE_DIRLOCK_ORPHAN_GRACE=300; pg_dirlock_reclaim_dead "$DL_G1" ); DL_G1_RC=$?
-check '#155 r2/v0.44.0: a just-created lock dir with no pid file yet is held by the grace' \
-  "$([ "$DL_G1_RC" -ne 0 ] && [ -d "$DL_G1" ]; echo $?)" "rc=$DL_G1_RC"
-
-DL_G2="$DL_HOME/grace-emptypid.lock.d"; mkdir -p "$DL_G2"; : > "$DL_G2/pid"
-( PRO_GATE_DIRLOCK_ORPHAN_GRACE=300; pg_dirlock_reclaim_dead "$DL_G2" ); DL_G2_RC=$?
-check '#155 r2/v0.44.0: an EMPTY pid file does not count as a marker and cannot skip the grace' \
-  "$([ "$DL_G2_RC" -ne 0 ] && [ -d "$DL_G2" ] && [ -e "$DL_G2/pid" ]; echo $?)" "rc=$DL_G2_RC"
-
-# ...and a real, live owner is still held on its own merits, not on the grace.
-DL_G3="$DL_HOME/grace-liveowner.lock.d"; mkdir -p "$DL_G3"
-printf '%s\n' "$$" > "$DL_G3/pid"; pg_pid_token "$$" > "$DL_G3/token"
-( PRO_GATE_DIRLOCK_ORPHAN_GRACE=0; pg_dirlock_reclaim_dead "$DL_G3" ); DL_G3_RC=$?
-check '#155 r2/v0.44.0: a live recorded owner is held even with the grace disabled' \
-  "$([ "$DL_G3_RC" -ne 0 ] && [ -d "$DL_G3" ]; echo $?)" "rc=$DL_G3_RC"
-
-# A SLOW winner that completes its record WHILE the reclaimer is deciding must keep the lock.
-# For the owner.<pid> shape the closing rmdir is itself this check -- the kernel refuses a
-# directory a contender has written into -- so the torn-record path must re-read the owner
-# rather than unlink it by name, which would discard that guarantee.
-#
-# The interleaving is INJECTED, not raced. An earlier draft backgrounded a writer behind a sleep
-# and was flaky in both directions: land the write before the reclaimer's FIRST read and the
-# tokenless-legacy branch returns 1, satisfying every assertion here without the re-read ever
-# running; land it after the age check and correct code fails. pg_dir_age_secs is called exactly
-# once, between the two reads, so publishing the winner's record from inside that stub puts the
-# write at the only point that exercises the re-read -- deterministically, with no sleeps.
-DL_G4="$DL_HOME/grace-slowwinner.lock.d"; mkdir -p "$DL_G4"
-: > "$DL_G4/pid"                                   # torn at the moment the reclaimer first looks
-(
-  PRO_GATE_DIRLOCK_ORPHAN_GRACE=0
-  pg_dir_age_secs() { printf '%s\n' "$$" > "$DL_G4/pid"; echo 999; }
-  pg_dirlock_reclaim_dead "$DL_G4"
-); DL_G4_RC=$?
-check '#155 r2/v0.44.0: a winner that completes its record mid-decision keeps the lock' \
-  "$([ "$DL_G4_RC" -ne 0 ] && [ -d "$DL_G4" ] && [ -s "$DL_G4/pid" ]; echo $?)" "rc=$DL_G4_RC"
-
-# The post-grace re-read must fail CLOSED when the read itself fails. An unreadable record and an
-# empty one are different facts; conflating them would let a transient cat failure authorize
-# deleting a record that may name a live owner -- the same fail-open the token checks refuse.
-# cat is stubbed to fail only on the SECOND call, so the first read still sees a torn record and
-# only the re-read is affected.
-DL_G5="$DL_HOME/grace-readfail.lock.d"; mkdir -p "$DL_G5"
-: > "$DL_G5/pid"
-DL_G5_N="$DL_HOME/g5.count"; printf '0\n' > "$DL_G5_N"
-(
-  PRO_GATE_DIRLOCK_ORPHAN_GRACE=0
-  cat() {
-    local n; n="$(command cat "$DL_G5_N")"; printf '%s\n' "$(( n + 1 ))" > "$DL_G5_N"
-    [ "$n" -ge 1 ] && return 1
-    command cat "$@"
-  }
-  pg_dirlock_reclaim_dead "$DL_G5"
-); DL_G5_RC=$?
-check '#155 r2/v0.44.1: a failed re-read of the owner record holds the lock, never deletes it' \
-  "$([ "$DL_G5_RC" -ne 0 ] && [ -d "$DL_G5" ] && [ -e "$DL_G5/pid" ]; echo $?)" "rc=$DL_G5_RC"
-
-# The release must never take a REPLACEMENT. A holder reclaimed while it believed it held
-# the lock runs its exit handler against a path a live process now owns; rm -rf took it.
-DL_REPL="$DL_HOME/replaced.lock.d"; mkdir -p "$DL_REPL"
-printf '%s\n' "$$" > "$DL_REPL/pid"                 # a DIFFERENT owner holds it now
-pg_pid_token "$$" > "$DL_REPL/token"
-pg_dirlock_release_own "$DL_REPL" 999999            # the orphaned holder's release
-check '#155: an orphaned release leaves a replacement holder untouched (planted negative)' \
-  "$([ -d "$DL_REPL" ] && [ -e "$DL_REPL/pid" ]; echo $?)" \
-  "dir=$([ -d "$DL_REPL" ] && echo yes || echo GONE)"
-
-# ...and still releases its own.
-pg_dirlock_release_own "$DL_REPL" "$$"
-check '#155: a holder releasing its own lock removes it' \
-  "$([ ! -d "$DL_REPL" ]; echo $?)" "dir=$([ -d "$DL_REPL" ] && echo STILL-THERE || echo gone)"
-
-# Two reclaimers of one dead owner: the defect #155 was opened for. Reclaiming is not the
-# mutual exclusion -- mkdir is -- so both may reclaim, but only one may end up inside.
-DL_RACE="$DL_HOME/race.lock.d"; DL_RACE_LOG="$DL_HOME/race.log"; : > "$DL_RACE_LOG"
-mkdir -p "$DL_RACE"
-printf '%s\n' "$DL_DEAD_PID" > "$DL_RACE/pid"
-: > "$DL_RACE/token"
-dl_contend() {
-  pg_dirlock_reclaim_dead "$DL_RACE" 2>/dev/null || true
-  if mkdir "$DL_RACE" 2>/dev/null; then printf 'enter\n' >> "$DL_RACE_LOG"; fi
-}
-dl_contend & DL_A=$!
-dl_contend & DL_B=$!
-wait "$DL_A" 2>/dev/null; wait "$DL_B" 2>/dev/null
-DL_ENTERED="$(grep -c '^enter$' "$DL_RACE_LOG" 2>/dev/null || echo 0)"
-check '#155: two reclaimers of one dead owner never both enter the lock' \
-  "$([ "$DL_ENTERED" -le 1 ]; echo $?)" "entered=$DL_ENTERED"
-
-# ── #189: pg_lock's reclaim-success path carries its own bound ────────────────
-# A successful reclaim skips no-flock pg_lock's wait bound AND its sleep -- both lived in the same
-# `if !` body -- so the loop retried mkdir immediately. Finite reclaim-success is progress;
-# SUSTAINED reclaim-success with mkdir still failing was a 100% CPU spin that never honoured
-# wait_s, the same shape pg_reservation_guard_acquire fixed with its own spin counter.
-# The stub IS that pathological alternation, deterministically rather than raced: every call
-# really does reclaim (the dead owner's directory is removed and rc is 0) and another dead owner
-# really does take the pathname back before pg_lock's next mkdir. The outer coreutils timeout is
-# what turns a regression into a fast failure instead of a hung suite: without the fix this call
-# never returns (verified at HEAD: 2506 reclaim retries in 10s against a wait_s of 2).
-LOCKSPIN_HOME="$TDIR/home-lock-spin"; mkdir -p "$LOCKSPIN_HOME/change.lock.d"
-printf '%s\n' 999999 > "$LOCKSPIN_HOME/change.lock.d/pid"   # occupied, so the first mkdir fails
-LOCKSPIN_LOG="$LOCKSPIN_HOME/reclaims"; : > "$LOCKSPIN_LOG"
-LOCKSPIN_START=$(date +%s)
-/usr/bin/timeout 20 bash -c '
-  . "$1"
-  # SPINLOG, not "$3": inside a function the positional parameters are the FUNCTION s own, so a
-  # stub reading $3 logs nothing and the count below silently reads as "never reclaimed".
-  SPINLOG="$3"
-  pg_have() { [ "$1" = flock ] && return 1; command -v "$1" >/dev/null 2>&1; }
-  pg_dirlock_reclaim_dead() {
-    [ -d "$1" ] || return 1
-    rm -f "$1/pid" "$1/token" 2>/dev/null
-    rmdir "$1" 2>/dev/null || return 1                       # a real reclaim: the owner is gone
-    mkdir "$1" 2>/dev/null && printf "%s\n" 999999 > "$1/pid"  # another dead owner takes it back
-    echo x >> "$SPINLOG"
-    return 0
-  }
-  pg_lock "$2" 1
-' _ "$HERE/../lib/pro-gate-lib.sh" "$LOCKSPIN_HOME/change.lock" "$LOCKSPIN_LOG"
-LOCKSPIN_RC=$?
-LOCKSPIN_ELAPSED=$(( $(date +%s) - LOCKSPIN_START ))
-# awk, not `grep -c . || echo 0`: grep exits 1 on an empty file, so that idiom prints ITS zero AND
-# the fallback zero, and every later numeric test errors on the two-line value.
-LOCKSPIN_TRIES="$(awk 'END{print NR}' "$LOCKSPIN_LOG" 2>/dev/null)"
-case "$LOCKSPIN_TRIES" in ''|*[!0-9]*) LOCKSPIN_TRIES=0;; esac
-check '#189: pg_lock gives up on a lock whose reclaim keeps succeeding instead of spinning forever' \
-  "$([ "$LOCKSPIN_RC" -eq 1 ] && [ "$LOCKSPIN_ELAPSED" -lt 15 ]; echo $?)" \
-  "rc=$LOCKSPIN_RC (124=timed out, i.e. spun) elapsed=${LOCKSPIN_ELAPSED}s reclaims=$LOCKSPIN_TRIES"
-# ...and it ended because the reclaim-success path ran out of retries, not because it never took
-# that path: each logged line is one reclaim that reported success while mkdir still failed.
-check '#189: the bounded loop really did keep taking the reclaim-success path' \
-  "$([ "$LOCKSPIN_TRIES" -ge 2 ] && [ "$LOCKSPIN_TRIES" -le 1000 ]; echo $?)" \
-  "reclaims=$LOCKSPIN_TRIES (wait_s=1 bounds it at 1*100+100 retries)"
-
-# The bound must not cost pg_lock its crash recovery: ONE reclaim of a genuinely dead owner is
-# still followed by a successful mkdir, and the winner still records the pid/token shape that
-# st_inflight and pg_harvest_claimed read outside this function (#189 keeps that shape as it is).
-LOCKREC_HOME="$TDIR/home-lock-reclaim"; mkdir -p "$LOCKREC_HOME/change.lock.d"
-sleep 0 & LOCKREC_DEAD=$!; wait "$LOCKREC_DEAD"     # a pid that has certainly exited
-printf '%s\n' "$LOCKREC_DEAD" > "$LOCKREC_HOME/change.lock.d/pid"
-pg_pid_token "$LOCKREC_DEAD" > "$LOCKREC_HOME/change.lock.d/token" 2>/dev/null \
-  || : > "$LOCKREC_HOME/change.lock.d/token"
-LOCKREC_OUT="$(/usr/bin/timeout 20 bash -c '
-  . "$1"
-  pg_have() { [ "$1" = flock ] && return 1; command -v "$1" >/dev/null 2>&1; }
-  pg_lock "$2" 5 || { printf "rc=1"; exit 0; }
-  printf "rc=0 self=%s pid=%s token=%s" "$$" \
-    "$(cat "$2.d/pid" 2>/dev/null)" "$([ -s "$2.d/token" ] && echo present || echo EMPTY)"
-' _ "$HERE/../lib/pro-gate-lib.sh" "$LOCKREC_HOME/change.lock" 2>/dev/null)"
-LOCKREC_SELF="$(printf '%s' "$LOCKREC_OUT" | sed -nE 's/.*self=([0-9]+).*/\1/p')"
-LOCKREC_PID="$(printf '%s' "$LOCKREC_OUT" | sed -nE 's/.*pid=([0-9]+).*/\1/p')"
-check '#189: a single reclaim of a dead owner still acquires, and records pid+token as before' \
-  "$(grep -q '^rc=0 ' <<<"$LOCKREC_OUT" \
-     && [ -n "$LOCKREC_SELF" ] && [ "$LOCKREC_SELF" = "$LOCKREC_PID" ] \
-     && grep -q 'token=present' <<<"$LOCKREC_OUT"; echo $?)" \
-  "out=${LOCKREC_OUT:-<empty>}"
-
-# ...and a LIVE owner is still waited out for the full budget rather than refused early: the spin
-# counter bounds the reclaim path only, and that path is never taken against a live holder.
-LOCKLIVE_HOME="$TDIR/home-lock-live"; mkdir -p "$LOCKLIVE_HOME/change.lock.d"
-printf '%s\n' "$$" > "$LOCKLIVE_HOME/change.lock.d/pid"
-pg_pid_token "$$" > "$LOCKLIVE_HOME/change.lock.d/token"
-LOCKLIVE_START=$(date +%s)
-/usr/bin/timeout 30 bash -c '
-  . "$1"
-  pg_have() { [ "$1" = flock ] && return 1; command -v "$1" >/dev/null 2>&1; }
-  pg_lock "$2" 2
-' _ "$HERE/../lib/pro-gate-lib.sh" "$LOCKLIVE_HOME/change.lock"
-LOCKLIVE_RC=$?
-LOCKLIVE_ELAPSED=$(( $(date +%s) - LOCKLIVE_START ))
-check '#189: a live owner is still waited out for the whole wait bound, then refused' \
-  "$([ "$LOCKLIVE_RC" -eq 1 ] && [ "$LOCKLIVE_ELAPSED" -ge 2 ] && [ "$LOCKLIVE_ELAPSED" -lt 20 ] \
-     && [ -e "$LOCKLIVE_HOME/change.lock.d/pid" ]; echo $?)" \
-  "rc=$LOCKLIVE_RC elapsed=${LOCKLIVE_ELAPSED}s"
-
-# gate r1: the reclaim path must carry NO elapsed check beside its counter. A directory orphaned
-# between its mkdir and its owner record is reclaimable only once it has sat unmarked for the
-# orphan grace, so the reclaim that recovers a crashed run is routinely the LATE one -- at the
-# shipped defaults (5s budget, 5s grace) the waiter reaches it one sleep after its own budget has
-# run out. An elapsed check there discarded that reclaim and returned 1, refusing a lock this
-# process had itself just freed; crash recovery is the case the whole branch exists for. The
-# fixture compresses the shipped 5s/5s into 2s/2s: same ordering, two seconds instead of six.
-# Not 1s/2s: pg_lock counts whole seconds, so a 1s budget that starts late in a second can be
-# spent by a slow first reclaim before any sleep, which failed this check under load (#254).
-LOCKLATE_HOME="$TDIR/home-lock-late"; mkdir -p "$LOCKLATE_HOME/change.lock.d"   # unmarked orphan
-LOCKLATE_START=$(date +%s)
-LOCKLATE_OUT="$(/usr/bin/timeout 30 bash -c '
-  . "$1"
-  pg_have() { [ "$1" = flock ] && return 1; command -v "$1" >/dev/null 2>&1; }
-  PRO_GATE_DIRLOCK_ORPHAN_GRACE=2 pg_lock "$2" 2
-  printf "rc=%s" "$?"
-' _ "$HERE/../lib/pro-gate-lib.sh" "$LOCKLATE_HOME/change.lock")"
-LOCKLATE_ELAPSED=$(( $(date +%s) - LOCKLATE_START ))
-check '#189: a reclaim that only becomes possible after the budget still takes the lock' \
-  "$([ "$LOCKLATE_OUT" = "rc=0" ] && [ "$LOCKLATE_ELAPSED" -lt 20 ]; echo $?)" \
-  "out=${LOCKLATE_OUT:-<empty>} elapsed=${LOCKLATE_ELAPSED}s"
-
-# gate r1: a wait budget an operator can legally write must not change what pg_lock DOES. Two
-# values a naive `$(( wait_s * 100 + 100 ))` mishandles: a leading zero is OCTAL to bash, and "08"
-# is not even valid octal -- that arithmetic error aborts the whole function, so pg_lock refused
-# locks that were free; and a budget near the int64 ceiling overflows to a NEGATIVE bound, which
-# compares true on the first reclaim and refuses a lock whose owner is provably dead. Both are
-# regressions the spin bound introduced, and both are invisible unless the assertion is that the
-# lock is still ACQUIRED. stderr is asserted empty: the arithmetic error was loud as well as fatal.
-for LOCKARG_WAIT in 08 92233720368547758; do
-  LOCKARG_HOME="$TDIR/home-lock-arg-$LOCKARG_WAIT"; mkdir -p "$LOCKARG_HOME/change.lock.d"
-  sleep 0 & LOCKARG_DEAD=$!; wait "$LOCKARG_DEAD"          # a pid that has certainly exited
-  printf '%s\n' "$LOCKARG_DEAD" > "$LOCKARG_HOME/change.lock.d/pid"
-  pg_pid_token "$LOCKARG_DEAD" > "$LOCKARG_HOME/change.lock.d/token" 2>/dev/null \
-    || : > "$LOCKARG_HOME/change.lock.d/token"
-  LOCKARG_OUT="$(/usr/bin/timeout 30 bash -c '
-    . "$1"
+# #322: public lock behaviours through real holders, including the Perl path.
+lock_surface_checks() {
+  local FAILS=0 CHECKS=0
+  if [ "$LOCK_MODE" = perl ]; then
     pg_have() { [ "$1" = flock ] && return 1; command -v "$1" >/dev/null 2>&1; }
+  fi
+  D="$TDIR/fd-surfaces-$LOCK_MODE"; mkdir -p "$D"
+  local PRO_GATE_HOME="$D"
+  export PRO_GATE_HOME="$D"
+  export PRO_GATE_RESERVATION_LOCK="$D/in-progress.lock" PRO_GATE_HARVEST_LOCK_DIR="$D/harvest-locks"
+  G="$(pg_reservation_lock)"
+  mkdir -p "$G.d"; printf '%s\n' "$$" > "$G.d/pid"
+  lock_hold "$G" "$D/guard-held"
+  shell_pid=$BASHPID
+  lock_nfds "$shell_pid"; before=$LOCK_NFDS
+  PRO_GATE_RESERVATION_GUARD_WAIT=1 pg_reservation_guard_acquire; rc=$?
+  lock_nfds "$shell_pid"; after=$LOCK_NFDS
+  check "$LOCK_MODE: contended reservation guard fails without leaking a descriptor" \
+    "$([ "$rc" -eq 1 ] && [ -z "${PG_RESERVATION_GUARD_FD:-}" ] && [ "$before" = "$after" ]; echo $?)" \
+    "rc=$rc fd_var=${PG_RESERVATION_GUARD_FD:-} before=$before after=$after"
+  pg_reservation_guard_release
+  check "$LOCK_MODE: non-owning reservation release leaves the holder locked" "$(pg_fd_lock_busy "$G"; echo $?)"
+  lock_reap "$LOCK_HOLDER"
+  start=$SECONDS
+  PRO_GATE_RESERVATION_GUARD_WAIT=0 pg_reservation_guard_acquire; rc=$?
+  check "$LOCK_MODE: SIGKILL releases the reservation guard at once despite a legacy live-pid directory" \
+    "$([ "$rc" -eq 0 ] && [ "$((SECONDS-start))" -le 1 ] && [ -d "$G.d" ]; echo $?)"
+  pg_reservation_guard_release
+  check "$LOCK_MODE: reservation holder releases its own guard" "$(pg_fd_lock_busy "$G"; [ $? -eq 1 ]; echo $?)"
+  # A late release from the previous holder cannot close a replacement's descriptor.
+  lock_hold "$G" "$D/replacement-held"
+  pg_reservation_guard_release
+  check "$LOCK_MODE: an orphaned reservation release leaves a replacement holder locked" "$(pg_fd_lock_busy "$G"; echo $?)"
+  lock_reap "$LOCK_HOLDER"
+  PRO_GATE_RESERVATION_GUARD_WAIT=0 pg_reservation_guard_acquire; rc=$?
+  pg_reservation_guard_release
+  check "$LOCK_MODE: the replacement reservation guard can be acquired and released" "$rc"
+
+  # The substitution owns its fd even after its wrapper dies. Report the process solely for
+  # cleanup; exclusion is measured by a real contender, never by an ownership record.
+  bash -c '. "$1"
+    pg_have() { [ "$1" = flock ] && return 1; command -v "$1" >/dev/null 2>&1; }
+    out="$(subpid=$BASHPID; unset BASHPID
+      pg_reservation_guard_acquire || exit 9
+      printf "%s\n" "$subpid" > "$2/holder-pid"
+      : > "$2/sub-held"
+      exec sleep 60)"
+    [ -z "$out" ]' _ "$HERE/../lib/pro-gate-lib.sh" "$D" & wrapper=$!
+  LOCK_HOLDERS="$LOCK_HOLDERS $wrapper"; lock_wait_ready "$D/sub-held"
+  subholder="$(cat "$D/holder-pid")"; LOCK_HOLDERS="$LOCK_HOLDERS $subholder"
+  lock_reap "$wrapper"
+  PRO_GATE_RESERVATION_GUARD_WAIT=0 pg_reservation_guard_acquire; rc=$?
+  check "$LOCK_MODE: a substitution guard remains held after its wrapper dies without BASHPID" "$([ "$rc" -eq 1 ]; echo $?)"
+  lock_reap "$subholder" || return 1
+  PRO_GATE_RESERVATION_GUARD_WAIT=0 pg_reservation_guard_acquire; rc=$?
+  pg_reservation_guard_release
+  check "$LOCK_MODE: killing the substitution holder releases its guard" "$rc"
+  lock_hold "$D/change" "$D/change-held"
+  start=$SECONDS
+  # The literal program is expanded by the child bash, not timeout's caller.
+  # shellcheck disable=SC2016
+  /usr/bin/timeout 30 bash -c '
+    . "$1"
+    if [ "$4" = perl ]; then
+      pg_have() { [ "$1" = flock ] && return 1; command -v "$1" >/dev/null 2>&1; }
+    fi
     pg_lock "$2" "$3"
-    printf "rc=%s" "$?"
-  ' _ "$HERE/../lib/pro-gate-lib.sh" "$LOCKARG_HOME/change.lock" "$LOCKARG_WAIT" 2>"$LOCKARG_HOME/err")"
-  check "#189: a wait budget of $LOCKARG_WAIT still reclaims a dead owner and acquires" \
-    "$([ "$LOCKARG_OUT" = "rc=0" ] && [ ! -s "$LOCKARG_HOME/err" ]; echo $?)" \
-    "out=${LOCKARG_OUT:-<empty>} err=$(tr '\n' ';' < "$LOCKARG_HOME/err" | cut -c1-160)"
+  ' _ "$HERE/../lib/pro-gate-lib.sh" "$D/change" 2 "$LOCK_MODE"; rc=$?
+  check "$LOCK_MODE: a live pg_lock holder is waited out for the whole 2s bound then refused" \
+    "$([ "$rc" -eq 1 ] && [ "$((SECONDS-start))" -ge 2 ] && [ "$((SECONDS-start))" -lt 20 ]; echo $?)"
+  start=$SECONDS; pg_lock "$D/change" 0; rc=$?
+  check "$LOCK_MODE: a live pg_lock holder refuses a zero-wait contender at once" \
+    "$([ "$rc" -eq 1 ] && [ "$((SECONDS-start))" -le 1 ]; echo $?)"
+  lock_reap "$LOCK_HOLDER"
+  start=$SECONDS; ( pg_lock "$D/change" 0 ); rc=$?
+  check "$LOCK_MODE: pg_lock acquires at once after SIGKILL" "$([ "$rc" -eq 0 ] && [ "$((SECONDS-start))" -le 1 ]; echo $?)"
+  mkdir -p "$D/change.d"; printf '%s\n' "$$" > "$D/change.d/pid"
+  for budget in 08 92233720368547758; do
+    # The literal program is expanded by the child bash, not timeout's caller.
+    # shellcheck disable=SC2016
+    /usr/bin/timeout 30 bash -c '
+      . "$1"
+      if [ "$4" = perl ]; then
+        pg_have() { [ "$1" = flock ] && return 1; command -v "$1" >/dev/null 2>&1; }
+      fi
+      pg_lock "$2" "$3"
+    ' _ "$HERE/../lib/pro-gate-lib.sh" "$D/change" "$budget" "$LOCK_MODE" >"$D/arg.out" 2>"$D/arg.err"; rc=$?
+    check "$LOCK_MODE: a wait budget of $budget acquires despite a legacy live-pid directory" \
+      "$([ "$rc" -eq 0 ] && [ ! -s "$D/arg.out" ] && [ ! -s "$D/arg.err" ]; echo $?)" \
+      "rc=$rc out=$(cat "$D/arg.out") err=$(cat "$D/arg.err")"
+  done
+  ( pg_lock "$D/missing/lock" 0 ); rc=$?
+  check "$LOCK_MODE: an unwritable pg_lock path proceeds unlocked" "$rc"
+  start=$SECONDS
+  /usr/bin/timeout 20 bash -c '
+    . "$1"
+    if [ "$3" = perl ]; then
+      pg_have() { [ "$1" = flock ] && return 1; command -v "$1" >/dev/null 2>&1; }
+    fi
+    PRO_GATE_RESERVATION_LOCK="$2" PRO_GATE_RESERVATION_GUARD_WAIT=3 pg_reservation_guard_acquire
+  ' _ "$HERE/../lib/pro-gate-lib.sh" "$D/missing/guard" "$LOCK_MODE"; rc=$?
+  check "$LOCK_MODE: an unwritable reservation guard path refuses without spinning" \
+    "$([ "$rc" -eq 1 ] && [ "$((SECONDS-start))" -lt 15 ]; echo $?)"
+  ( pg_lock "$D/outer" 0 && pg_lock "$D/inner" 0 && pg_lock "$D/inner" 0 \
+      && : > "$D/nested-held" && exec sleep 60 ) & nested=$!
+  LOCK_HOLDERS="$LOCK_HOLDERS $nested"; lock_wait_ready "$D/nested-held"
+  ( pg_lock "$D/outer" 0 ); rc=$?
+  check "$LOCK_MODE: a nested lock and re-entry never drop the outer lock" "$([ "$rc" -eq 1 ]; echo $?)"
+  lock_reap "$nested"
+  lock_hold "$D/race" "$D/race-held"; lock_reap "$LOCK_HOLDER"
+  : > "$D/race.log"
+  for name in A B; do
+    ( while [ ! -e "$D/go" ]; do sleep 0.01; done
+      if pg_lock "$D/race" 0; then echo enter >> "$D/race.log"; exec sleep 60; fi
+      echo lost >> "$D/race.log" ) &
+    if [ "$name" = A ]; then a=$!; else b=$!; fi
+  done
+  LOCK_HOLDERS="$LOCK_HOLDERS $a $b"; : > "$D/go"
+  for _ in $(seq 1 100); do [ "$(wc -l < "$D/race.log")" = 2 ] && break; sleep 0.1; done
+  check "$LOCK_MODE: two contenders after SIGKILL have exactly one winner" \
+    "$([ "$(grep -c '^enter$' "$D/race.log")" = 1 ] && [ "$(grep -c '^lost$' "$D/race.log")" = 1 ]; echo $?)"
+  lock_reap "$a"; lock_reap "$b"
+  lock_hold "$D/guard-race" "$D/guard-race-held"; lock_reap "$LOCK_HOLDER"
+  : > "$D/guard-race.log"
+  for name in A B; do
+    ( while [ ! -e "$D/guard-go" ]; do sleep 0.01; done
+      if PRO_GATE_RESERVATION_LOCK="$D/guard-race" PRO_GATE_RESERVATION_GUARD_WAIT=0 pg_reservation_guard_acquire; then
+        echo enter >> "$D/guard-race.log"; exec sleep 60
+      fi
+      echo lost >> "$D/guard-race.log" ) &
+    if [ "$name" = A ]; then a=$!; else b=$!; fi
+  done
+  LOCK_HOLDERS="$LOCK_HOLDERS $a $b"; : > "$D/guard-go"
+  for _ in $(seq 1 100); do [ "$(wc -l < "$D/guard-race.log")" = 2 ] && break; sleep 0.1; done
+  check "$LOCK_MODE: two reservation contenders after SIGKILL have exactly one winner" \
+    "$([ "$(grep -c '^enter$' "$D/guard-race.log")" = 1 ] && [ "$(grep -c '^lost$' "$D/guard-race.log")" = 1 ]; echo $?)"
+  lock_reap "$a"; lock_reap "$b"
+  mkdir -p "$D/harvest-locks"
+  lock_hold "$D/harvest-locks/pg-run-probe" "$D/harvest-held"
+  check "$LOCK_MODE: harvest claim sees a real live holder" "$(pg_harvest_claimed pg-run-probe; echo $?)"
+  lock_reap "$LOCK_HOLDER"
+  mkdir -p "$D/harvest-locks/pg-run-probe.d"; printf '%s\n' "$$" > "$D/harvest-locks/pg-run-probe.d/pid"
+  check "$LOCK_MODE: harvest claim is free after SIGKILL despite a legacy live-pid directory" \
+    "$(pg_harvest_claimed pg-run-probe; [ $? -eq 1 ]; echo $?)"
+  ST_LOCKFILE="$D/oracle.lock"
+  eval "$(sed -n '/^  st_inflight() {/,/^  }/p' "$ENGINE")"
+  lock_hold "$ST_LOCKFILE.pr-probe" "$D/inflight-held"
+  check "$LOCK_MODE: st_inflight sees a real live holder" "$(st_inflight probe; echo $?)"
+  lock_reap "$LOCK_HOLDER"
+  mkdir -p "$ST_LOCKFILE.pr-probe.d"; printf '%s\n' "$$" > "$ST_LOCKFILE.pr-probe.d/pid"
+  check "$LOCK_MODE: st_inflight is free after SIGKILL despite a legacy live-pid directory" \
+    "$(st_inflight probe; [ $? -eq 1 ]; echo $?)"
+  return "$FAILS"
+}
+for LOCK_MODE in native perl; do
+  # Each mode isolates overrides and counts; its exit code carries failures out.
+  ( lock_surface_checks ); LOCK_CASE_RC=$?
+  check "$LOCK_MODE: public fd lock surface checks pass" "$LOCK_CASE_RC"
 done
 
-# gate #148 r8 P0: liveness must be positively DISPROVED, never inferred from a failed measurement.
-# Recomputing the owner's start-time token can fail transiently for a perfectly live pid (a /proc
-# read or a `ps` fork under memory pressure). An empty result then compares unequal to a valid
-# stored token, and the old code fell straight through to unlink a LIVE owner's marker -- handing
-# the guard to a reclaimer while its real holder was still inside. The stored token already failed
-# closed on empty; the recomputed one must too. Stubbed inside a subshell so the override cannot
-# leak into any later check.
-GUARD_TOKFAIL_DIR="$GUARD_YOUNG_HOME/tokfail.lock.d"
-mkdir -p "$GUARD_TOKFAIL_DIR"
-pg_pid_token "$$" > "$GUARD_TOKFAIL_DIR/owner.$$"                     # live pid, VALID stored token
-(
-  pg_pid_token() { return 1; }                                        # recomputation fails
-  pg_dirlock_reclaim_dead "$GUARD_TOKFAIL_DIR"
-); GUARD_TOKFAIL_RC=$?
-check 'gate #148 r8 P0: a live owner survives a transient start-time-token read failure' \
-  "$([ "$GUARD_TOKFAIL_RC" -ne 0 ] && [ -d "$GUARD_TOKFAIL_DIR" ] && [ -e "$GUARD_TOKFAIL_DIR/owner.$$" ]; echo $?)" \
-  "rc=$GUARD_TOKFAIL_RC dir=$([ -d "$GUARD_TOKFAIL_DIR" ] && echo yes || echo NO) marker=$([ -e "$GUARD_TOKFAIL_DIR/owner.$$" ] && echo yes || echo GONE)"
-
-# issue #177: pg_harvest_claimed's no-flock branch and st_inflight (bin/oracle-review.sh) read
-# the SAME owner-pid + process-identity-token shape pg_dirlock_reclaim_dead does above, but
-# compared a possibly-EMPTY recomputed token directly against the stored one: a transient
-# pg_pid_token failure for a perfectly live pid produced an empty string that compared unequal
-# to a valid stored token, so a live holder read as dead. Both now share pg_pid_recycled, the
-# rule extracted from pg_dirlock_reclaim_dead's r8 P0 fix above. Force the no-flock/mkdir-
-# fallback branch (on Linux `pg_have flock` is true and neither function would otherwise reach
-# it); st_inflight has no BASH_SOURCE guard and cannot be sourced, so extract its exact bytes
-# and eval them, same technique as the issue's own repro.
-ISSUE177_HOME="$TDIR/home-issue177"; mkdir -p "$ISSUE177_HOME/harvest-locks"
-ISSUE177_MARKER="pg-run-issue177-probe"
-ISSUE177_FD="$ISSUE177_HOME/harvest-locks/$ISSUE177_MARKER.d"
-
-# (positive) pg_harvest_claimed: live holder (this test process), correct stored token, but the
-# recomputation FAILS -- must still report HELD (0), not FREE (1).
-mkdir -p "$ISSUE177_FD"
-printf '%s\n' "$$" > "$ISSUE177_FD/pid"
-pg_pid_token "$$" > "$ISSUE177_FD/token"
-(
-  pg_have() { [ "$1" = flock ] && return 1; command -v "$1" >/dev/null 2>&1; }
-  pg_pid_token() { return 1; }
-  PRO_GATE_HARVEST_LOCK_DIR="$ISSUE177_HOME/harvest-locks" pg_harvest_claimed "$ISSUE177_MARKER"
-); ISSUE177_HC_POS_RC=$?
-check '#177: pg_harvest_claimed (no-flock) -- live holder survives a failing token recompute' \
-  "$([ "$ISSUE177_HC_POS_RC" -eq 0 ]; echo $?)" "rc=$ISSUE177_HC_POS_RC"
-rm -rf "$ISSUE177_FD"
-
-# (planted negative) same shape, but a readable, DIFFERENT token (recycled pid) -- must still
-# report FREE (1); no stubbing here, the real recompute succeeds and differs. This does not by
-# itself prove anything about the flock branch, which never reads a token at all.
-mkdir -p "$ISSUE177_FD"
-printf '%s\n' "$$" > "$ISSUE177_FD/pid"
-printf 'not-the-token-of-this-process\n' > "$ISSUE177_FD/token"
-(
-  pg_have() { [ "$1" = flock ] && return 1; command -v "$1" >/dev/null 2>&1; }
-  PRO_GATE_HARVEST_LOCK_DIR="$ISSUE177_HOME/harvest-locks" pg_harvest_claimed "$ISSUE177_MARKER"
-); ISSUE177_HC_NEG_RC=$?
-check '#177: pg_harvest_claimed (no-flock) -- recycled pid (readable, different token) still reads FREE (planted negative)' \
-  "$([ "$ISSUE177_HC_NEG_RC" -eq 1 ]; echo $?)" "rc=$ISSUE177_HC_NEG_RC"
-rm -rf "$ISSUE177_FD"
-
-# st_inflight: identical shape, mkdir-fallback branch selected by the lockfile being a
-# directory (no pg_have involved).
-ISSUE177_ST_DEF="$(sed -n '/^  st_inflight() {/,/^  }/p' "$ENGINE")"
-ISSUE177_ST_LOCKFILE="$TDIR/issue177-oracle.lock"
-ISSUE177_ST_LFD="${ISSUE177_ST_LOCKFILE}.pr-issue177.d"
-
-# (positive) live holder, correct stored token, recomputation FAILS -- must report IN-FLIGHT (0).
-mkdir -p "$ISSUE177_ST_LFD"
-printf '%s\n' "$$" > "$ISSUE177_ST_LFD/pid"
-pg_pid_token "$$" > "$ISSUE177_ST_LFD/token"
-(
-  ST_LOCKFILE="$ISSUE177_ST_LOCKFILE"
-  pg_pid_token() { return 1; }
-  eval "$ISSUE177_ST_DEF"
-  st_inflight issue177
-); ISSUE177_SI_POS_RC=$?
-check '#177: st_inflight (mkdir-fallback) -- live holder survives a failing token recompute' \
-  "$([ "$ISSUE177_SI_POS_RC" -eq 0 ]; echo $?)" \
-  "rc=$ISSUE177_SI_POS_RC def_extracted=$([ -n "$ISSUE177_ST_DEF" ] && echo yes || echo NO)"
-rm -rf "$ISSUE177_ST_LFD"
-
-# (planted negative) readable, DIFFERENT token (recycled pid) -- must still report NOT in flight.
-mkdir -p "$ISSUE177_ST_LFD"
-printf '%s\n' "$$" > "$ISSUE177_ST_LFD/pid"
-printf 'not-the-token-of-this-process\n' > "$ISSUE177_ST_LFD/token"
-(
-  ST_LOCKFILE="$ISSUE177_ST_LOCKFILE"
-  eval "$ISSUE177_ST_DEF"
-  st_inflight issue177
-); ISSUE177_SI_NEG_RC=$?
-check '#177: st_inflight (mkdir-fallback) -- recycled pid (readable, different token) still reads NOT in flight (planted negative)' \
-  "$([ "$ISSUE177_SI_NEG_RC" -eq 1 ]; echo $?)" "rc=$ISSUE177_SI_NEG_RC"
-rm -rf "$ISSUE177_ST_LFD"
-
-# gate #148 r5 P1: the no-BASHPID fallback must name the shell that actually holds the guard.
-# Two contenders, flock disabled AND BASHPID unset — the exact bash 3.2 path, and the only path
-# that uses the fallback at all. When the fallback published an already-exited pid (an `||` inside
-# the command substitution defeats bash's exec replacement, so `sh` reported an inner subshell),
-# that owner had no /proc entry, produced an empty token, and read as dead to every reclaimer, so
-# B took the guard while A was still inside it. The log must never show a second `enter` before
-# the matching `exit`.
 GUARD_FB_HOME="$TDIR/home-guard-fallback"; mkdir -p "$GUARD_FB_HOME/home"
 GUARD_FB_LOG="$GUARD_FB_HOME/log"; : > "$GUARD_FB_LOG"
 guard_fb_holder() { # name start-delay
@@ -9411,50 +8933,9 @@ wait "$GUARD_FB_A" 2>/dev/null; wait "$GUARD_FB_B" 2>/dev/null
 check 'gate #148 r5 P1: with no BASHPID, two contenders never both hold the reservation guard' \
   "$(awk '$1=="enter"{if(open)bad=1; open=1} $1=="exit"{open=0} END{exit bad}' "$GUARD_FB_LOG"; echo $?)" \
   "log=$(tr '\n' ';' < "$GUARD_FB_LOG")"
-# The holder that did get in must have published a provable owner: a numeric pid and a NON-EMPTY
-# start-time token. An empty token is what made the bogus owner read as dead.
 GUARD_FB_ACQUIRED="$(grep -c '^enter ' "$GUARD_FB_LOG" 2>/dev/null || echo 0)"
 check 'gate #148 r5 P1: the no-BASHPID fallback still lets exactly one contender acquire' \
   "$([ "$GUARD_FB_ACQUIRED" -ge 1 ]; echo $?)" "entered=$GUARD_FB_ACQUIRED log=$(tr '\n' ';' < "$GUARD_FB_LOG")"
-# A marker may only be published with a non-empty token, so an unprovable owner refuses instead.
-GUARD_TOKENLESS_DIR="$GUARD_FB_HOME/tokenless.lock.d"
-mkdir -p "$GUARD_TOKENLESS_DIR"
-: > "$GUARD_TOKENLESS_DIR/owner.999999999"          # dead pid, empty token
-touch -t 202001010000 "$GUARD_TOKENLESS_DIR" 2>/dev/null
-pg_dirlock_reclaim_dead "$GUARD_TOKENLESS_DIR"; GUARD_TOKENLESS_RC=$?
-check 'gate #148 r5 P1: an empty-token marker for a dead pid is reclaimed, never treated as held' \
-  "$([ "$GUARD_TOKENLESS_RC" -eq 0 ] && [ ! -d "$GUARD_TOKENLESS_DIR" ]; echo $?)" "rc=$GUARD_TOKENLESS_RC"
-
-# gate #148 r8 P1: the two conditions that produced r5 must be tested TOGETHER. The checks above
-# unset BASHPID but acquire at the top level of their shell; the pre-existing subshell check
-# acquires inside $( ) but with BASHPID available. The r5 defect needed both at once: no BASHPID,
-# AND acquisition inside a command substitution. The broken fallback published an already-exited
-# pid there, which produced an empty token and read as dead to every reclaimer. Assert the
-# published owner is genuinely alive by proving a reclaimer REFUSES the guard while it is held.
-GUARD_NEST_HOME="$TDIR/home-guard-nested"; mkdir -p "$GUARD_NEST_HOME"
-GUARD_NEST_OUT="$(
-  bash --noprofile --norc -c '
-    LIB="$1"; HOMEDIR="$2"
-    unset BASHPID
-    . "$LIB"
-    pg_have() { [ "$1" = flock ] && return 1; command -v "$1" >/dev/null 2>&1; }
-    export PRO_GATE_HOME="$HOMEDIR"
-    # Acquire INSIDE a command substitution, with no BASHPID.
-    inner="$(PRO_GATE_RESERVATION_GUARD_WAIT=2 pg_reservation_guard_acquire || exit 9
-      d="$PRO_GATE_HOME/in-progress.lock.d"
-      owner=""; for m in "$d"/owner.*; do [ -e "$m" ] && owner="${m##*/owner.}"; done
-      tok="$(head -c 64 "$d/owner.$owner" 2>/dev/null | tr -d "\n")"
-      alive=no; kill -0 "$owner" 2>/dev/null && alive=yes
-      # A reclaimer must refuse this guard: its owner is live and its token matches.
-      reclaim=taken; pg_dirlock_reclaim_dead "$d" || reclaim=refused
-      printf "owner=%s alive=%s token=%s reclaim=%s" "${owner:-none}" "$alive" "$([ -n "$tok" ] && echo present || echo EMPTY)" "$reclaim"
-      pg_reservation_guard_release)"
-    printf "%s" "$inner"
-  ' _ "$HERE/../lib/pro-gate-lib.sh" "$GUARD_NEST_HOME" 2>/dev/null
-)"
-check 'gate #148 r8 P1: acquiring inside a command substitution with no BASHPID publishes a LIVE owner' \
-  "$(grep -q 'alive=yes' <<<"$GUARD_NEST_OUT" && grep -q 'token=present' <<<"$GUARD_NEST_OUT" && grep -q 'reclaim=refused' <<<"$GUARD_NEST_OUT"; echo $?)" \
-  "out=${GUARD_NEST_OUT:-<empty>}"
 
 # gate #148 r1 P2 (engine side): a --harvest/--recover with no --timeout takes its budget from
 # PRO_GATE_HARVEST_TIMEOUT (default 45m). The daemon's recovery now relies on exactly this instead
