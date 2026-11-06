@@ -31,6 +31,8 @@ Local changes (forced by a two-skeptic inward review; both landed on TRIM):
 - Trimmed the ~150-word upstream frontmatter description to listing-budget
   size; consolidated upstream's six restatements of the include-the-family
   principle into one; removed the sentence containing the "sturctural" typo.
+- Added a two-line pointer to the sibling Government and Developer index
+  skills after the "Not this index" note (dotfiles #2103).
 
 Kept: the query-shape → tool-strategy table and the verify-to-exclude
 principle — upstream's genuinely novel content, absent from every schema and
