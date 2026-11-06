@@ -972,8 +972,16 @@ pg_prepare_pr_evidence() ( # repo host owner name pr new-output-directory [candi
   # The mutable PR diff endpoint can lag a push while PR metadata is already
   # current. Address the comparison by immutable commit IDs instead (#221).
   base="$(jq -r .target.base_oid <<<"$before")" || exit 2
+  # gh 2.103 and later refuse to print a response holding terminal escape bytes, even into
+  # a file, unless asked to (#460). A diff that adds or deletes a captured-TTY fixture holds
+  # them, and the bytes land in a file the engine reads as data. Older gh lacks the flag and
+  # does not refuse, so it keeps the plain call.
+  local esc_args=() gh_api_help=''
+  gh_api_help="$("$timeout_bin" -k 1s 10s "$gh_bin" api --help 2>/dev/null)" || gh_api_help=''
+  case "$gh_api_help" in *--allow-escape-sequences*) esc_args=(--allow-escape-sequences) ;; esac
   "$timeout_bin" -k 1s 30s "$gh_bin" api "repos/$owner/$name/compare/$base...$head" \
-    --hostname "$host" -H 'Accept:application/vnd.github.diff' > "$tmp/endpoint.patch" || {
+    --hostname "$host" -H 'Accept:application/vnd.github.diff' ${esc_args[@]+"${esc_args[@]}"} \
+    > "$tmp/endpoint.patch" || {
     echo 'ERROR: PR patch fetch failed; no review submitted' >&2; exit 2;
   }
   [ -s "$tmp/endpoint.patch" ] && [ "$(wc -c < "$tmp/endpoint.patch")" -le 26214400 ] || {
