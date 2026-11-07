@@ -431,6 +431,9 @@ check_unowned() {
     [ -d "$d" ] && [ ! -L "$d" ] || continue
     name=$(basename "$d")
     case $name in .*|synced) continue ;; esac
+    # sbh's install.sh writes ~/.claude/skills/sbh on every run, so its installer owns the
+    # copy while sbh is installed (`sbh update` replaces only the binary).
+    if [ "$name" = sbh ] && command -v sbh >/dev/null 2>&1; then continue; fi
     [ ! -f "$d/.claude-plugin/plugin.json" ] || continue  # a plugin folder made in place
     [ ! -d "$LOCAL/$name" ] || continue
     case $owned in *" $name "*) continue ;; esac
