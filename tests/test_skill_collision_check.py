@@ -206,6 +206,58 @@ class CliFloorTests(unittest.TestCase):
             self.assertNotIn("refusing to report clean", result.stderr)
 
 
+class PluginSourceTests(unittest.TestCase):
+    """The default scan covers plugin skills, which Claude Code loads too."""
+
+    def make_home(self, home: Path, enabled: dict) -> None:
+        claude = home / ".claude"
+        write_skill(claude / "skills", "alpha", FLAKY)
+        kit = claude / "skills" / "kit-src"
+        (kit / ".claude-plugin").mkdir(parents=True)
+        (kit / ".claude-plugin" / "plugin.json").write_text(json.dumps({"name": "kit"}), encoding="utf-8")
+        write_skill(kit / "skills", "beta", FLAKY)
+        install = claude / "plugins" / "cache" / "mk" / "tools" / "1.0.0"
+        write_skill(install / "skills", "gamma", UNRELATED)
+        (claude / "plugins" / "installed_plugins.json").write_text(json.dumps(
+            {"version": 2, "plugins": {"tools@mk": [{"scope": "user", "installPath": str(install)}]}}),
+            encoding="utf-8")
+        # An override naming a plugin skill: Claude Code ignores it, so must this.
+        (claude / "settings.json").write_text(json.dumps(
+            {"enabledPlugins": enabled, "skillOverrides": {"beta": "user-invocable-only"}}),
+            encoding="utf-8")
+
+    def run_default(self, home: Path) -> tuple[int, dict]:
+        result = subprocess.run([sys.executable, str(CHECKER), "--json"],
+                                env={**os.environ, "HOME": str(home)},
+                                capture_output=True, text=True, check=False)
+        return result.returncode, json.loads(result.stdout)
+
+    def test_default_scan_includes_both_plugin_kinds_and_ignores_overrides_for_them(self):
+        with tempfile.TemporaryDirectory() as t:
+            home = Path(t)
+            self.make_home(home, {"tools@mk": True})
+            code, out = self.run_default(home)
+            self.assertEqual(out["scanned"], 3, out)
+            self.assertEqual(code, 1, "the user skill and the plugin skill both stay visible")
+            self.assertEqual([f["skills"] for f in out["live"]], [["alpha", "kit:beta"]])
+
+    def test_disabled_plugins_are_not_scanned(self):
+        """PLANTED NEGATIVE: a scan that reads every plugin on disk counts 3 here."""
+        with tempfile.TemporaryDirectory() as t:
+            home = Path(t)
+            self.make_home(home, {"tools@mk": False, "kit@skills-dir": False})
+            code, out = self.run_default(home)
+            self.assertEqual(out["scanned"], 1, out)
+            self.assertEqual((code, out["live"]), (0, []))
+
+    def test_explicit_plugin_source_is_tagged_from_its_manifest(self):
+        with tempfile.TemporaryDirectory() as t:
+            home = Path(t)
+            self.make_home(home, {})
+            skills = SC.discover([home / ".claude" / "skills" / "kit-src" / "skills"])
+            self.assertEqual([(s["id"], s["plugin"]) for s in skills], [("kit:beta", "kit")])
+
+
 class FrontmatterParsingTests(unittest.TestCase):
     def test_folded_block_description_is_flattened(self):
         with tempfile.TemporaryDirectory() as t:
