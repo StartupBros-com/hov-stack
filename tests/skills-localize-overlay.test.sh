@@ -94,4 +94,29 @@ run apply
 cmp "$P2/skills/beta/SKILL.md" "$CODEX_SKILLS_DIR/beta/SKILL.md" || { cat "$T/out"; echo 'FAIL: overrides not read'; exit 1; }
 if grep -F "lists 'absent'" "$T/out"; then echo 'FAIL: the overlay codex-skills.txt was read despite the override'; exit 1; fi
 unset SKILL_PLUGINS_LIST CODEX_SKILLS_HOST_LIST
+# A Codex fork from a plugin folder keeps its own text, as a skill-pack fork does: apply
+# settles in one pass and drops the layer state an older run saved for it.
+P3=$T/plugin3
+mkdir -p "$P3/.claude-plugin" "$P3/skills/noted"
+printf '{"name":"noted-skills"}\n' > "$P3/.claude-plugin/plugin.json"
+printf -- '---\nname: noted\ndescription: demo\n---\n\n> **Local tooling on this machine.** Track work with gh, not beads.\n\nRun br create for each task.\n' > "$P3/skills/noted/SKILL.md"
+printf '%s\n' "$P3" > "$T/p3-plugins"
+printf 'noted\n' > "$T/p3-codex"
+mkdir -p "$SKILLS_LOCALIZE_STATE/codex/manifest" "$SKILLS_LOCALIZE_STATE/codex/pristine/noted"
+[ -f "$SKILLS_LOCALIZE_STATE/codex/root" ] || printf '%s\n' "$CODEX_SKILLS_DIR" > "$SKILLS_LOCALIZE_STATE/codex/root"
+printf 'SKILL.md\t0000\tfile\n' > "$SKILLS_LOCALIZE_STATE/codex/manifest/noted"
+cp "$P3/skills/noted/SKILL.md" "$SKILLS_LOCALIZE_STATE/codex/pristine/noted/SKILL.md"
+export SKILL_PLUGINS_LIST=$T/p3-plugins CODEX_SKILLS_HOST_LIST=$T/p3-codex
+for pass in 1 2; do
+  run apply
+  if [ "$rc" != 0 ] || ! cmp "$P3/skills/noted/SKILL.md" "$CODEX_SKILLS_DIR/noted/SKILL.md"; then
+    cat "$T/out"; echo "FAIL: apply $pass left the plugin fork's Codex copy different"; exit 1
+  fi
+  run check
+  if grep -F -e 'codex noted/' -e "for 'noted'" "$T/out"; then echo "FAIL: check after apply $pass reports the plugin fork"; exit 1; fi
+done
+if [ -e "$SKILLS_LOCALIZE_STATE/codex/manifest/noted" ] || [ -e "$SKILLS_LOCALIZE_STATE/codex/pristine/noted" ]; then
+  echo 'FAIL: stale layer state for the plugin fork was kept'; exit 1
+fi
+unset SKILL_PLUGINS_LIST CODEX_SKILLS_HOST_LIST
 echo 'skills-localize-overlay: all cases passed'
