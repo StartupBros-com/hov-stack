@@ -56,11 +56,23 @@ ln -s "$P/skills/alpha" "$SKILLS_DIR/linked"
 mkdir -p "$SKILLS_DIR/inplace/.claude-plugin" "$SKILLS_DIR/inplace/skills/gamma"
 printf '{"name":"inplace"}\n' > "$SKILLS_DIR/inplace/.claude-plugin/plugin.json"
 printf '# gamma\n' > "$SKILLS_DIR/inplace/skills/gamma/SKILL.md"
+# sbh's installer owns its skill copy, but only while the sbh command is installed.
+# The first check hides any sbh the host has on PATH.
+mkdir -p "$SKILLS_DIR/sbh"
+sbh_free=
+IFS=: read -r -a path_dirs <<< "$PATH"
+for dir in "${path_dirs[@]}"; do
+  [ -x "$dir/sbh" ] || sbh_free=${sbh_free:+$sbh_free:}$dir
+done
+PATH=$sbh_free run check
+has 'DRIFT: ~/.claude/skills/sbh is a plain copy nothing owns'
+printf '#!/bin/sh\n' > "$T/bin/sbh"
+chmod +x "$T/bin/sbh"
 run check
 [ "$rc" = 1 ]
 has 'DRIFT: ~/.claude/skills/alpha is a plain copy nothing owns'
 has "(it shares its name with my-skills's skill)"
-for name in linked fork synced .hidden managed my-skills inplace; do
+for name in linked fork synced .hidden managed my-skills inplace sbh; do
   if grep -F "skills/$name is a plain copy" "$T/out"; then echo "FAIL: exempt name $name"; exit 1; fi
 done
 rm "$HOV_STACK_OVERLAY/skill-plugins"
