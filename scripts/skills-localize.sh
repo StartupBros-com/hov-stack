@@ -823,12 +823,24 @@ drop_state() {
   rm -rf "${STATE:?}/$label/manifest/$skill" "$STATE/$label/pristine/$skill" && say "dropped $label layer state: $skill"
 }
 
+# codex_plugin_fork <label> <skill> — deploy_codex copies this skill from a skill-plugins
+# folder, so, like a skill-pack fork, it carries its own text. Layering it anyway never
+# settles: deploy_codex copies the fork back over the layered SKILL.md on every apply.
+codex_plugin_fork() {
+  local folder
+  [ "$1" = codex ] && [ ! -d "$LOCAL/$2" ] && codex_wants "$2" || return 1
+  for folder in ${PLUGIN_FOLDERS[@]+"${PLUGIN_FOLDERS[@]}"}; do
+    [ -d "$folder/skills/$2" ] && return 0
+  done
+  return 1
+}
+
 # layer_skill <label> <root> <skill> <note> — apply, dry-run or check one skill.
 layer_skill() {
   local label="$1" root="$2" skill="$3" noteline="$4" dir="$2/$3" rel live old stale=0
   local -a towrite=()
   valid_skill_name "$skill" || return 0
-  if [ ! -d "$dir" ] || [ -L "$dir" ] || [ -f "$LOCAL/$skill/SKILL.md" ]; then
+  if [ ! -d "$dir" ] || [ -L "$dir" ] || [ -f "$LOCAL/$skill/SKILL.md" ] || codex_plugin_fork "$label" "$skill"; then
     drop_state "$label" "$skill"; return 0
   fi
   if [ ! -e "$STATE/$label/manifest/$skill" ] && legacy_hits "$label" "$dir" "$skill"; then
