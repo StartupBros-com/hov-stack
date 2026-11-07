@@ -449,12 +449,31 @@ The vocabulary for how the harness's tracked configuration reaches a host's live
 
 ### Volatile file
 
-A live configuration file that the running client rewrites in place, so the repo can hold only a copy of it rather than a link to it. The live copy is authoritative once a host has one: installing seeds it only on a host that lacks it, pushing captures live into the repo, and a difference between the two reads as drift to be captured, never as a change waiting to be delivered. A change that originates in the repo therefore reaches live automatically only through a Reconciler, and otherwise only through a deliberate apply on each host, which for the permission surface goes through that surface's approval gate; an edit to the tracked copy alone is dead on every host that already has the file, and the capture step would remove it from the repo.
+A live configuration file that the running client rewrites in place, so the repo can hold only a copy of it rather than a link to it. For `settings.json` the direction is now both ways. A change that originates in the repo reaches live through the Settings apply. A key, entry or value that live changed on its own stays in live, and pushing captures it into the repo. Installing still only seeds the file on a host that lacks it. `keybindings.json` has no apply: for it, the live copy is authoritative and a repo edit reaches a host only by a deliberate change there.
 *Avoid:* copy-synced file, unlinked file
+
+### Settings apply
+
+The three-way merge (`sync.sh apply-settings`, engine `lib/settings-apply.js`) that carries repo changes into a host's live `settings.json`. It compares three versions:
+- desired: the tracked file rendered for this host, with the overlay;
+- base: what the last apply delivered, kept at `~/.claude/.hov-stack/settings-base.json`;
+- live.
+
+What it does with a key or entry:
+- the repo changed it since the base and live did not: it takes the repo's version;
+- live changed it and the repo did not: live is left alone;
+- both changed it: that is a conflict, live is kept, and the conflict is reported on every run until it is resolved.
+
+Two kinds of path are never touched: live-owned paths (`model`, `statusLine` and the proxy credentials) and keys only live has.
+
+Deny entries are asymmetric. A tracked deny entry missing from live is put back. A deny entry the repo drops is held and reported, never removed.
+
+Where it runs, on workstation and satellite hosts: closeout after freshening the harness checkout, a hash-gated SessionStart hook, and install. `sync.sh apply-settings --plan` and `sync.sh check` show the conflicts and held removals.
+*Avoid:* settings sync, settings push
 
 ### Reconciler
 
-A sync step that merges one canonical, repo-originated entry into a Volatile file on the host: it adds or updates only that entry, proves nothing else changed, replaces the file atomically, and keeps a backup. Reconcilers exist per entry because the volatile file's default direction is live-to-repo. Hook registrations and harness environment keys have them; ordinary permission rules currently do not, so a permission rule added in the repo reaches a host only by a deliberate per-host apply. An entry with neither a Reconciler nor that apply is not deployed, however green its merge.
+A sync step that merges one canonical, repo-originated entry into a Volatile file on the host: it adds or updates only that entry, proves nothing else changed, replaces the file atomically, and keeps a backup. Reconcilers predate the Settings apply, which now delivers any repo change to `settings.json`, including permission rules that never had a reconciler. The per-entry reconcilers for hook registrations and harness environment keys still run during install, and still own what the apply leaves to them: the dcg hook's versioned path, the Windows settings file and the policy validations. Retiring the ones the apply has made redundant is tracked in #479.
 
 ## Tracking and claims
 

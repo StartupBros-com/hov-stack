@@ -60,6 +60,8 @@ The harness closes the same gap for **hooks** and the harness env keys: `sync.sh
 
 ## Solution
 
+**Update 2026-11-07 (#479):** this gap is closed by the Settings apply (`sync.sh apply-settings`, `CONCEPTS.md`). A tracked allow, ask or deny entry now reaches live without a hand edit. The apply is a three-way merge of the tracked file, the last-applied base and live, and it runs at closeout after freshening the harness checkout, from a hash-gated SessionStart hook, and during install. Live edits survive and conflicts are reported. A tracked deny entry missing from live is put back, and a deny removal is held and reported, never applied. `sync.sh apply-settings --plan` and `sync.sh check` show what is pending. The push guard from the #1775 ruling now exists: `sync.sh push` refuses while live lacks a tracked allow or deny entry, unless `SYNC_ALLOW_PERMISSION_DROP=1` says the drop is deliberate. The manual procedure below is kept as history, and for a host that has not yet run the apply.
+
 ### Current host: the guarded Edit
 
 Apply only the tracked-only entries to the live `~/.claude/settings.json` with the Edit tool. settings-guard raises an ask, and that ask is the approval point for a permission-surface change (the global instructions classify editing the permission surface as security-posture, ask first). Add only what is missing, keep every existing entry, and compare the allow, deny and ask counts before and after.

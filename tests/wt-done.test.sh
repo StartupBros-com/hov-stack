@@ -1257,6 +1257,56 @@ hasnot "transcript elsewhere, the caller's own: no session refusal" "$out" "a Cl
 chk "transcript elsewhere, the caller's own: pointer moved" "$S" "$(git -C "$TMP/heldfar/wt" rev-parse HEAD)"
 
 echo
+settingsfix() {
+  export STUB_SYSTEMCTL_CALLS="$TMP/settings-systemctl.calls"
+  ordinaryfix "$1"
+  git -C "$C" reset -q --keep origin/main
+  mkdir -p "$C/lib" "$C/hooks" "$TMP/$1/cfg"
+  printf 'fixture\n' >"$C/lib/settings-apply.js"
+  printf 'fixture\n' >"$C/hooks/fixture"
+  cat >"$C/sync.sh" <<'SETTINGS_STUB'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$SETTINGS_CALLS"
+[ "${SETTINGS_SLEEP:-0}" = 0 ] || sleep 5
+echo "settings: ${SETTINGS_STATUS:-applied 2}"
+exit "${SETTINGS_RC:-0}"
+SETTINGS_STUB
+  chmod +x "$C/sync.sh"
+  git -C "$C" add sync.sh lib/settings-apply.js hooks/fixture
+  git -C "$C" commit -qm 'settings activation fixture'
+  git -C "$C" push -q origin main
+  git -C "$C" reset -q --keep "$S~1"
+  export CLAUDE_HOME="$TMP/$1/cfg" SETTINGS_CALLS="$TMP/$1/settings.calls"
+  ln -s "$C/hooks" "$CLAUDE_HOME/hooks"
+  : >"$SETTINGS_CALLS"
+}
+settingsfix settings-fresh
+out=$(runordinary); rc=$?
+chk 'settings post-freshen closeout succeeds' 0 "$rc"
+chk 'settings post-freshen called exactly once' 'apply-settings --quiet' "$(cat "$SETTINGS_CALLS")"
+has 'settings post-freshen reports apply' "$out" 'activation: settings applied 2'
+chk 'settings retains one checkout current line' 1 "$(printf '%s\n' "$out" | grep -c -F 'activation: checkout current')"
+: >"$SETTINGS_CALLS"
+out=$(runordinary)
+chk 'settings already-current called once' 'apply-settings --quiet' "$(cat "$SETTINGS_CALLS")"
+: >"$SETTINGS_CALLS"
+out=$(cd "$W" && DRY_RUN=1 bash "$ORDINARY_SCRIPT" 2>&1)
+chk 'settings preview invokes nothing' '' "$(cat "$SETTINGS_CALLS")"
+has 'settings preview prints command' "$out" "would: $C/sync.sh apply-settings"
+out=$(SETTINGS_RC=1 runordinary); rc=$?
+chk 'settings failure keeps closeout successful' 0 "$rc"
+has 'settings failure is explicit' "$out" '!! activation: settings apply failed (rc=1;'
+out=$(WT_DONE_SETTINGS_TIMEOUT=1 SETTINGS_SLEEP=1 runordinary)
+has 'settings timeout is explicit' "$out" '!! activation: settings apply failed (rc=124;'
+out=$(SETTINGS_STATUS='unchanged; 1 conflict(s), see sync.sh check' runordinary)
+has 'settings conflict is explicit' "$out" '!! activation: settings unchanged; 1 conflict(s)'
+unlink "$CLAUDE_HOME/hooks"
+mkdir "$CLAUDE_HOME/hooks"
+: >"$SETTINGS_CALLS"
+out=$(runordinary)
+chk 'non-harness repo does not apply' '' "$(cat "$SETTINGS_CALLS")"
+hasnot 'non-harness repo has no settings activation line' "$out" 'activation: settings'
+unset CLAUDE_HOME SETTINGS_CALLS
 echo "wt-done: $pass passed, $fail failed"
 [ "$fail" = 0 ] || exit 1
 exit 0
