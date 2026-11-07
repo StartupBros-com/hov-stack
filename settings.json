@@ -728,6 +728,15 @@
         "hooks": [
           {
             "type": "command",
+            "command": "\"$HOME/.claude/hooks/bin/node-hook\" \"$HOME/.claude/hooks/SessionStart/settings-apply.js\"",
+            "timeout": 20
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
             "command": "\"$HOME/.claude/hooks/bin/node-hook\" \"$HOME/.claude/hooks/plugin-auto-update.js\""
           }
         ]

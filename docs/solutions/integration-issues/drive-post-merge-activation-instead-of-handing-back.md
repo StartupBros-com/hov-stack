@@ -55,6 +55,13 @@ A merged dotfiles PR is not live. `~/.claude/{scripts,hooks,agents,bin,CLAUDE.md
 
 ## Solution
 
+**Update 2026-11-07 (#479):** when `~/.claude/hooks` links into the activated harness checkout, closeout also runs the Settings apply once the checkout is current, and prints its own line:
+- `activation: settings applied N` or `activation: settings unchanged`.
+- `!! activation: settings <status>` when the apply reported conflicts, held deny removals, skipped hooks or a role skip.
+- `!! activation: settings apply failed (rc=<code>; 124 means timeout); sync.sh apply-settings --plan shows why` when it failed or timed out.
+
+A settings failure never fails the closeout. A dry run prints `would: <repo>/sync.sh apply-settings` and runs nothing.
+
 After merging your own PR, run the closeout from inside the worktree:
 
 ```

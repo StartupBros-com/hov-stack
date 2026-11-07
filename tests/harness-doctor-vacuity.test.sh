@@ -323,6 +323,7 @@ cp "$REPO/scripts/lib/floor-assert.sh" "$SYNC_FIX/scripts/lib/floor-assert.sh"
 # the populated control reads as drift ("canonical copy could not be built").
 mkdir -p "$SYNC_FIX/lib"
 cp "$REPO/lib/settings-seed.js" "$SYNC_FIX/lib/settings-seed.js"
+cp "$REPO/lib/settings-apply.js" "$SYNC_FIX/lib/settings-apply.js"
 SYNC_EMPTY_OUT=$(HOME="$SYNC_HOME" \
   CLAUDE_HOME="$SYNC_HOME/.claude" \
   CLAUDE_MEMORY_LIVE_ROOT="$SYNC_HOME/.claude/projects" \

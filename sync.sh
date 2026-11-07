@@ -12,7 +12,8 @@
 #   VOLATILE parts (settings.json, keybindings.json — Claude Code rewrites these
 #       atomically, which would break symlinks; per-project memory; systemd
 #       user units; Windows break-glass stubs)
-#       are copy-synced by `push`.
+#       are copy-synced by `push`. Settings also receive repo changes through
+#       the three-way apply, preserving live edits and holding deny removals.
 #   MANAGED LOCK   (/etc/claude-code/managed-settings.json — the root-owned deny
 #       floor that holds even in bypassPermissions/YOLO mode) is deployed FROM
 #       this repo by `install` (needs sudo) and captured by `push`. It cannot be
@@ -36,7 +37,10 @@
 #                     hook without replacing other live settings, deploy the
 #                     managed lock (sudo), deploy user units, and reconcile
 #                     role-eligible timers (five are cron-ownership-gated).
-#                     Idempotent.
+#                     Applies settings after the reconcilers. Idempotent.
+#   sync.sh apply-settings [--plan] [--quiet] [--seed-base <rev>]
+#                     Apply tracked settings against the last-applied base.
+#                     Plan and check report conflicts and held deny removals.
 #   sync.sh reconcile-docker-init
 #                     Validate the reviewed init=true candidate and finalize only
 #                     an already-published workstation adoption transaction.
@@ -1919,6 +1923,7 @@ push() {
   fi
   guard_no_credentials || exit 1
   guard_auto_mode_policy_for_push || return 1
+  guard_permission_drop_for_push || return 1
   # No "$HERE/memory" here: an existing mirror directory opts push and check into
   # memory (#346), so creating it on every push would opt every host in.
   # memory_push creates the mirror root itself when it runs.
@@ -2305,7 +2310,7 @@ apply_hygiene_posture() {
 }
 
 install() {
-  local ts backup="" papercut_failed=0 posture_failed=0 posture_ok=0
+  local ts backup="" papercut_failed=0 posture_failed=0 posture_ok=0 settings_apply_failed=0
   # install seeds settings and changes other live artifacts before the runtime
   # reconciler runs, so validate this canonical policy before any of those writes.
   validate_canonical_compact_window || return 1
@@ -2407,6 +2412,11 @@ install() {
   # a foreign-host smoke test explicitly skips absolute hook registrations.
   reconcile_runtime_env || return 1
   reconcile_windows_auto_mode || return 1
+  if [ "${CLAUDE_SYNC_SKIP_HOOK_RECONCILE:-}" = 1 ]; then
+    echo '  skipped settings apply (CLAUDE_SYNC_SKIP_HOOK_RECONCILE=1)'
+  else
+    apply_settings || settings_apply_failed=1
+  fi
   echo "  note: active Claude sessions cache settings and hooks; restart or cycle existing Auto sessions after install"
   # Stdlib-only, so a bare symlink is enough — no venv to create or rot (same
   # reasoning as dfs; see the data-source-clis skill, "prefer a CLI over an MCP server").
@@ -2577,15 +2587,17 @@ install() {
     fi
   fi
   [ -n "$backup" ] && echo "  originals backed up to $backup"
+  if [ "$settings_apply_failed" = 1 ]; then
+    echo 'install finished everything else, but settings apply failed (see above)' >&2
+  fi
   if [ "$papercut_failed" = 1 ]; then
     echo "install finished everything else, but FAILED to install $PAPERCUT_PLUGIN_ID: $PAPERCUT_INSTALL_ERROR" >&2
     echo "  The settings.json copies of its three hooks were left in place. Fix the cause above, then re-run sync.sh install." >&2
-    return 1
   fi
   if [ "$posture_failed" = 1 ]; then
     echo "install finished everything else, but the hygiene posture from the overlay was not applied in full (see above); fix it and re-run sync.sh install." >&2
-    return 1
   fi
+  if [ "$settings_apply_failed$papercut_failed$posture_failed" != 000 ]; then return 1; fi
   echo "install done. Restore separately: credentials (claude login), skills (jsm sync), plugins (claude plugin — enabledPlugins already in settings.json)."
 }
 
@@ -2598,6 +2610,112 @@ live_tree_is_here() {
   done
   return 1
 }
+
+guard_permission_drop_for_push() {
+  [ "${SYNC_ALLOW_PERMISSION_DROP:-}" != 1 ] || return 0
+  local list missing count first noun
+  for list in allow deny; do
+    missing=$(jq -rn --arg cfg "$H" --arg home "$HOME" --arg list "$list" --slurpfile tracked "$HERE/settings.json" --slurpfile live "$H/settings.json" "$SETTINGS_NORMAL_JQ"'
+      ($live[0].permissions[$list] // [] | map(render_home($cfg; $home))) as $live
+      | ($tracked[0].permissions[$list] // [])[] | render_home($cfg; $home) | select(. as $entry | $live | index($entry) | not)') || return 1
+    if [ -n "$missing" ]; then
+      count=$(printf '%s\n' "$missing" | wc -l)
+      first=$(printf '%s\n' "$missing" | head -1)
+      noun=entries; [ "$count" != 1 ] || noun=entry
+      echo "push refused: live settings at $H/settings.json lack $count tracked permissions.$list $noun, e.g. $first; run sync.sh apply-settings first, or set SYNC_ALLOW_PERMISSION_DROP=1 if live dropped them on purpose" >&2
+      return 1
+    fi
+  done
+}
+
+build_settings_desired() (
+  local src=$1 out=$2 tmp ov='' dir env_file plugin_dirs proxy_url=''
+  tmp=$(mktemp -d) || return 1
+  trap 'rm -rf "$tmp"' EXIT
+  if dir=$(overlay_dir) && [ -f "$dir/settings.json" ]; then ov=$dir/settings.json; fi
+  SETTINGS_SEED_ALL_KEYS=1 node "$HERE/lib/settings-seed.js" "$src" "$tmp/seed.json" "$H" "$HOME" "$DCG_COMMAND" "$ov" >/dev/null || return 1
+  env_file=$(target_in_harness_home "$(jq -r '.env.CLAUDE_ENV_FILE // empty' "$src")")
+  plugin_dirs=$(mapped_plugin_dirs_of "$(jq -r '.env.CLAUDE_CODE_PLUGIN_DIRS // empty' "$src")")
+  case "$(profile_role 2>/dev/null)" in
+    workstation) proxy_url=$CCFLARE_URL_WORKSTATION ;;
+    satellite) proxy_url=$CCFLARE_URL_SATELLITE ;;
+  esac
+  node -e 'const fs=require("fs"); const {stripOwned}=require(process.argv[1]); fs.writeFileSync(process.argv[3],JSON.stringify(stripOwned(JSON.parse(fs.readFileSync(process.argv[2])))))' "$HERE/lib/settings-apply.js" "$tmp/seed.json" "$tmp/owned.json" || return 1
+  jq --arg env_file "$env_file" --arg plugin_dirs "$plugin_dirs" --arg proxy_url "$proxy_url" '
+    if (.env | type) == "object" then
+      (if (.env | has("CLAUDE_ENV_FILE")) and $env_file != "" then .env.CLAUDE_ENV_FILE=$env_file else . end)
+      | (if (.env | has("CLAUDE_CODE_PLUGIN_DIRS")) and $plugin_dirs != "" then .env.CLAUDE_CODE_PLUGIN_DIRS=$plugin_dirs else . end)
+      | (if (.env | has("ANTHROPIC_BASE_URL")) and $proxy_url != "" then .env.ANTHROPIC_BASE_URL=$proxy_url else . end)
+    else . end' "$tmp/owned.json" >"$out" || return 1
+)
+
+apply_settings() (
+  local plan=0 quiet=0 rev='' role tmp base rc
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --plan) plan=1 ;;
+      --quiet) quiet=1 ;;
+      --seed-base) [ "$#" -ge 2 ] || { echo 'missing seed revision' >&2; return 2; }; rev=$2; shift ;;
+      *) echo 'usage: sync.sh apply-settings [--plan] [--quiet] [--seed-base <rev>]' >&2; return 2 ;;
+    esac
+    shift
+  done
+  if ! command -v node >/dev/null || ! command -v jq >/dev/null; then
+    echo 'settings: node and jq are required' >&2
+    return 1
+  fi
+  if [ -n "$rev" ]; then
+    git -C "$HERE" rev-parse --verify "$rev^{commit}" >/dev/null 2>&1 || { echo "invalid seed revision" >&2; return 2; }
+  fi
+  role=$(profile_role 2>/dev/null) || role=undeclared
+  if [ "$plan" = 0 ]; then
+    if [ -n "$rev" ] && [[ "$role" != workstation && "$role" != satellite ]]; then
+      echo "settings: skipped (host role $role: --seed-base needs a workstation or satellite host)"; return 2
+    fi
+    mkdir -p "$H/.hov-stack" || return 1
+    chmod 700 "$H/.hov-stack" || return 1
+    case "$role" in workstation|satellite) ;; *)
+      node -e 'const fs=require("fs"); const {inputsHash}=require(process.argv[1]+"/lib/settings-apply.js");const file=process.argv[2]+"/.hov-stack/settings-apply.stamp", tmp=file+"."+process.pid; fs.writeFileSync(tmp,inputsHash({root:process.argv[1],cfg:process.argv[2],overlayDir:process.argv[3],dcgPath:process.argv[4]})+"\n",{mode:0o600,flag:"wx"});fs.renameSync(tmp,file)' "$HERE" "$H" "$(overlay_dir)" "$DCG_COMMAND" || return 1
+      echo "settings: skipped (host role $role: only workstation and satellite hosts apply automatically)"; return 0 ;;
+    esac
+    exec 9>"$H/.hov-stack/settings-apply.lock" || return 1
+    flock -w 10 9 || { echo 'settings: skipped (another apply held the lock for 10s)'; return 0; }
+  fi
+  tmp=$(mktemp -d) || return 1
+  trap 'rm -rf "$tmp"' EXIT
+  base=$H/.hov-stack/settings-base.json
+  build_settings_desired "$HERE/settings.json" "$tmp/desired.json" 2>"$tmp/error" || { head -1 "$tmp/error" >&2; return 1; }
+  if [ -n "$rev" ]; then
+    [ ! -e "$base" ] || { echo 'a base already exists' >&2; return 2; }
+    git -C "$HERE" show "$rev:settings.json" >"$tmp/template.json" 2>/dev/null || { echo 'invalid seed revision' >&2; return 2; }
+    build_settings_desired "$tmp/template.json" "$tmp/base.json" || return 1
+    if [ "$plan" = 1 ]; then base=$tmp/base.json
+    else (umask 077; cp "$tmp/base.json" "$base") || return 1; fi
+  fi
+  local -a flags=()
+  local value reason missing
+  value=$(jq -r '.env.CLAUDE_ENV_FILE // empty' "$tmp/desired.json")
+  if jq -e '.env | has("CLAUDE_ENV_FILE")' "$tmp/desired.json" >/dev/null 2>&1 && [ ! -f "$value" ]; then
+    flags+=(--skip-path "env.CLAUDE_ENV_FILE=target is not a regular file")
+  fi
+  value=$(jq -r '.env.CLAUDE_CODE_PLUGIN_DIRS // empty' "$tmp/desired.json")
+  if jq -e '.env | has("CLAUDE_CODE_PLUGIN_DIRS")' "$tmp/desired.json" >/dev/null 2>&1; then
+    reason=$(plugin_dirs_invalid_reason "$value")
+    # Mapping splits on colons; validate the source too so control characters
+    # or empty entries cannot disappear before the mapped-value validation.
+    if [ -z "$reason" ] && jq -e '.env | has("CLAUDE_CODE_PLUGIN_DIRS")' "$HERE/settings.json" >/dev/null 2>&1; then
+      reason=$(plugin_dirs_invalid_reason "$(jq -r '.env.CLAUDE_CODE_PLUGIN_DIRS // empty' "$HERE/settings.json")")
+    fi
+    missing=$(plugin_dir_missing_manifest "$value")
+    if [ -n "$reason" ] || [ -n "$missing" ]; then
+      flags+=(--skip-path "env.CLAUDE_CODE_PLUGIN_DIRS=plugin directories invalid or missing manifest")
+    fi
+  fi
+  [ "$plan" = 0 ] || flags+=(--plan)
+  node "$HERE/lib/settings-apply.js" --desired "$tmp/desired.json" --live "$H/settings.json" --base "$base" --config-dir "$H" --home "$HOME" --backup-root "$H/backups" --stamp "$H/.hov-stack/settings-apply.stamp" --overlay-dir "$(overlay_dir)" --dcg-path "$DCG_COMMAND" "${flags[@]}" >"$tmp/output"; rc=$?
+  if [ "$quiet" = 1 ]; then grep '^settings: ' "$tmp/output" || :; else cat "$tmp/output"; fi
+  return "$rc"
+)
 
 check() {
   local drift=0 examined=0 canonical_env_file mapped_env_file _docker_policy_out
@@ -2751,8 +2869,7 @@ check() {
       fi
       settings_tmp=$(mktemp -d "${TMPDIR:-/tmp}/sync-check-settings.XXXXXX") || {
         echo "DRIFT: $f was not compared (no scratch directory for the projection)"; drift=1; continue; }
-      if ! settings_seed_err=$(SETTINGS_SEED_ALL_KEYS=1 node "$HERE/lib/settings-seed.js" "$HERE/$f" \
-             "$settings_tmp/canonical.json" "$H" "$HOME" "$DCG_COMMAND" "$settings_overlay" 2>&1 >/dev/null); then
+      if ! settings_seed_err=$(build_settings_desired "$HERE/$f" "$settings_tmp/canonical.json" 2>&1 >/dev/null); then
         # The builder's own refusal is one line; an uncaught node error ends in a
         # "Node.js vN" banner, so name its Error line instead.
         settings_seed_why=$(printf '%s\n' "$settings_seed_err" | grep -m1 -E '^(settings-seed: |[A-Za-z]*Error: )') \
@@ -2761,31 +2878,19 @@ check() {
         drift=1; rm -rf "$settings_tmp"; continue
       fi
       settings_live_ok=1 settings_canonical_ok=1
+      node -e 'const fs=require("fs"); const {stripOwned}=require(process.argv[1]); fs.writeFileSync(process.argv[3],JSON.stringify(stripOwned(JSON.parse(fs.readFileSync(process.argv[2])))))' "$HERE/lib/settings-apply.js" "$H/$f" "$settings_tmp/live.owned.json" 2>/dev/null || settings_live_ok=0
       jq -S --arg cfg "$H" --arg home "$HOME" --argjson canonical_windows "$canonical_windows" --argjson canonical_global_window "$canonical_global_window" "$VALID_COMPACT_WINDOW_JQ$SETTINGS_NORMAL_JQ"'
-                      del(.statusLine, .spinnerVerbs, .feedbackSurveyState, .model)
-                      | if (.autoCompactWindow | valid_compact_window) then .autoCompactWindow = $canonical_global_window else . end
-                      | if (.env | type) == "object" then .env |= (del(.ANTHROPIC_AUTH_TOKEN) | del(.ANTHROPIC_CUSTOM_HEADERS)) else . end
+                      if (.autoCompactWindow | valid_compact_window) then .autoCompactWindow = $canonical_global_window else . end
                       | if ($canonical_windows | length) > 0
                         then .modelSettings = ((if (.modelSettings | type) == "object" then .modelSettings else {} end)
                                | with_entries(select(.key as $k | $canonical_windows | has($k)))
                                | with_entries(.value |= (if type == "object" then {autoCompactWindow: .autoCompactWindow} else {autoCompactWindow: .} end)))
                         else del(.modelSettings) end
-                      | settings_normal($cfg; $home)' "$H/$f" >"$settings_tmp/live.proj.json" 2>/dev/null || settings_live_ok=0
+                      | settings_normal($cfg; $home)' "$settings_tmp/live.owned.json" >"$settings_tmp/live.proj.json" 2>/dev/null || settings_live_ok=0
       jq -S --arg env_file "$mapped_env_file" --arg proxy_url "$proxy_base_url" --arg plugin_dirs "$mapped_plugin_dirs" --argjson canonical_windows "$canonical_windows" --arg cfg "$H" --arg home "$HOME" "$SETTINGS_NORMAL_JQ"'
-               del(.statusLine, .spinnerVerbs, .feedbackSurveyState, .model)
-               | if ($canonical_windows | length) > 0
+               if ($canonical_windows | length) > 0
                  then .modelSettings = $canonical_windows
                  else del(.modelSettings) end
-               | if ((.env | type) == "object") and (.env | has("CLAUDE_ENV_FILE"))
-                 then .env.CLAUDE_ENV_FILE = $env_file
-                 else . end
-               | if ((.env | type) == "object") and (.env | has("CLAUDE_CODE_PLUGIN_DIRS")) and ($plugin_dirs != "")
-                 then .env.CLAUDE_CODE_PLUGIN_DIRS = $plugin_dirs
-                 else . end
-               | if ((.env | type) == "object") and (.env | has("ANTHROPIC_BASE_URL")) and ($proxy_url != "")
-                 then .env.ANTHROPIC_BASE_URL = $proxy_url
-                 else . end
-               | if (.env | type) == "object" then .env |= (del(.ANTHROPIC_AUTH_TOKEN) | del(.ANTHROPIC_CUSTOM_HEADERS)) else . end
                | settings_normal($cfg; $home)
              ' "$settings_tmp/canonical.json" >"$settings_tmp/canonical.proj.json" 2>/dev/null || settings_canonical_ok=0
       if [ "$settings_live_ok" -eq 0 ] || [ "$settings_canonical_ok" -eq 0 ] ||
@@ -2804,9 +2909,15 @@ check() {
         # included, so it is the remedy only for a live-only entry that is
         # public (docs/solutions/integration-issues/a-permissions-entry-added-
         # to-the-tracked-settings-json-never-reaches-the-live-file.md).
-        echo "DRIFT: $f differs from repo copy beyond ad-daemon-owned keys$settings_keys (an entry only live has goes into settings.json, or the overlay when private; one only the repo has reaches live by a reviewed edit)"
+        echo "DRIFT: $f differs from repo copy beyond ad-daemon-owned keys$settings_keys (an entry only live has goes into settings.json, or the overlay when private; one only the repo has reaches live through sync.sh apply-settings)"
         drift=1
       fi
+      if ! settings_apply_check=$(node "$HERE/lib/settings-apply.js" --desired "$settings_tmp/canonical.json" --live "$H/$f" --base "$H/.hov-stack/settings-base.json" --config-dir "$H" --home "$HOME" --report check 2>"$settings_tmp/apply-error"); then
+        echo "DRIFT: settings.json apply check failed: $(head -1 "$settings_tmp/apply-error")"
+        drift=1
+      fi
+      [ -z "$settings_apply_check" ] || printf '%s\n' "$settings_apply_check"
+      if [[ "$settings_apply_check" == *DRIFT:* ]]; then drift=1; fi
       rm -rf "$settings_tmp"
     else
       cmp -s "$H/$f" "$HERE/$f" ||
@@ -3022,6 +3133,7 @@ EOF_LIVE_UNITS
 }
 
 case "$MODE" in
+  apply-settings) apply_settings "${@:2}" ;;
   push) push ;;
   install) install ;;
   reconcile-dcg) reconcile_dcg_hook --write-canonical ;;
@@ -3074,5 +3186,5 @@ case "$MODE" in
   check) check ;;
   memory-preview|memory-check) memory_preview ;;
   memory-push) memory_push ;;
-  *) echo "usage: sync.sh push|install|reconcile-docker-init|adopt-docker-init [--allow-existing-false]|rollback-docker-init|reconcile-dcg|reconcile-grep-cost-guard|reconcile-heavy-job-admission|reconcile-whatsapp-guard|reconcile-runtime-env|reconcile-windows-auto-mode|reconcile-memory-hook|reconcile-papercut-hook|ensure-papercut-plugin|reconcile-structured-output-unwrap|reconcile-read-ceiling-chunk|reconcile-shape-rewrite|reconcile-pr-record-hook|reconcile-push-tracking-pr-hook|reconcile-worktree-claim-advisory-hook|reconcile-codex-quota-hook|reconcile-repo-route-hook|reconcile-context-fence|reconcile-fanout-admission|check|memory-preview|memory-check|memory-push" >&2; exit 2 ;;
+  *) echo "usage: sync.sh apply-settings [--plan] [--quiet] [--seed-base <rev>]|push|install|reconcile-docker-init|adopt-docker-init [--allow-existing-false]|rollback-docker-init|reconcile-dcg|reconcile-grep-cost-guard|reconcile-heavy-job-admission|reconcile-whatsapp-guard|reconcile-runtime-env|reconcile-windows-auto-mode|reconcile-memory-hook|reconcile-papercut-hook|ensure-papercut-plugin|reconcile-structured-output-unwrap|reconcile-read-ceiling-chunk|reconcile-shape-rewrite|reconcile-pr-record-hook|reconcile-push-tracking-pr-hook|reconcile-worktree-claim-advisory-hook|reconcile-codex-quota-hook|reconcile-repo-route-hook|reconcile-context-fence|reconcile-fanout-admission|check|memory-preview|memory-check|memory-push" >&2; exit 2 ;;
 esac

@@ -282,6 +282,7 @@ add(CP, 'compact-preserve: auto trigger emits the preserve list', 'emit', { payl
 add(CP, 'compact-preserve: manual with instructions is silent', 'quiet', { payload: () => ({ hook_event_name: 'PreCompact', trigger: 'manual', custom_instructions: 'focus on the auth fix' }) });
 
 const LP = 'SessionStart/launchpad-advisory.js';
+add('SessionStart/settings-apply.js', 'settings apply: unrelated config is quiet', 'quiet', { env: (_fx, home) => ({ CLAUDE_HOME: path.join(home, 'settings-apply-config') }), payload: () => ({hook_event_name:'SessionStart'}) });
 add(LP, 'launchpad: non-git directory is silent', 'quiet', { payload: (fx) => ({ hook_event_name: 'SessionStart', source: 'startup', cwd: fx.cwd }) });
 add(LP, 'launchpad: malformed input is silent', 'quiet', { payload: () => 'not-json{{{' });
 
