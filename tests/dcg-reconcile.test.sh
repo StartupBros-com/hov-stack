@@ -113,27 +113,67 @@ jq -e '[.. | objects | (.command? // "") | select(startswith("$HOME/"))] | lengt
   "$HOME/.claude/settings.json" >/dev/null ||
   fail "live settings.json carries an unrendered \$HOME/ dcg command"
 
-# With both spellings live (the user's symlink entry and the resolved canonical
-# block), the grep-cost reconciler must anchor on the RESOLVED entry and land
-# directly behind it: never ahead of dcg (the unmatched-anchor prepend path)
-# and never behind the user's own entry. Its canonical target must exist under
-# the harness home for the reconcile to run at all. The guard is registered in
-# the template's spelling, which the hook runner's shell expands.
-GREP_COST_COMMAND='"$HOME/.claude/hooks/bin/node-hook" "$HOME/.claude/hooks/PreToolUse/grep-cost-guard.js"'
-mkdir -p "$HOME/.claude/hooks/PreToolUse" "$HOME/.claude/hooks/bin"
-cp "$HERE/hooks/PreToolUse/grep-cost-guard.js" "$HOME/.claude/hooks/PreToolUse/grep-cost-guard.js"
-# The registered command runs through the launcher, and reconcile refuses to
-# register a command whose launcher is absent.
-cp "$HERE/hooks/bin/node-hook" "$HOME/.claude/hooks/bin/node-hook"
-"$SYNC" reconcile-grep-cost-guard >"$TMP/grep.out" 2>&1 || fail "reconcile-grep-cost-guard failed on a live file carrying both dcg spellings: $(cat "$TMP/grep.out")"
-jq -e --arg cmd "$RESOLVED" --arg guard "$GREP_COST_COMMAND" '
-  [.hooks.PreToolUse[].hooks[]? | .command] as $cmds
-  | ($cmds | index($cmd)) as $dcg
-  | ($cmds | index($guard)) as $at
-  | $dcg != null and $at == ($dcg + 1)
-  and ($cmds | map(select(. == $guard)) | length == 1)
-' "$HOME/.claude/settings.json" >/dev/null ||
-  fail "grep-cost-guard did not land directly behind the resolved dcg entry when both spellings are live"
+# Dead twins (#509). reconcile_hook_group retires a prior registration that
+# names the same basename as the canonical target only when that target is
+# absent from disk; a present twin and an unrelated basename are kept. dcg is
+# the one caller left (every other tracked hook is placed by apply_settings,
+# hov-stack #479), so the rule is exercised through it.
+TWIN_HOME=$TMP/twin-home
+mkdir -p "$TWIN_HOME/.claude" "$TMP/routing/bin"
+ln -s "$HOME/.local" "$TWIN_HOME/.local"
+printf '#!/bin/sh\nexit 0\n' >"$TMP/routing/bin/dcg"
+chmod +x "$TMP/routing/bin/dcg"
+# The twin home's .local links to the fixture install, so the command resolves
+# through it to the same binary as $RESOLVED.
+TWIN_RESOLVED=$RESOLVED
+# shellcheck disable=SC2016 # literal $HOME spellings, as a live file can carry them
+DEAD_TWIN='$HOME/.claude/emergency-guard/bin/dcg'
+# shellcheck disable=SC2016
+OTHER_BASE='$HOME/.claude/emergency-guard/bin/other-guard'
+jq --arg dead "$DEAD_TWIN" --arg live "$TMP/routing/bin/dcg" --arg other "$OTHER_BASE" '
+  .hooks.PreToolUse += [
+    {"matcher": "Bash", "hooks": [{"type": "command", "command": $dead}]},
+    {"matcher": "Bash", "hooks": [{"type": "command", "command": $live}]},
+    {"matcher": "Bash", "hooks": [{"type": "command", "command": $other}]}
+  ]
+' "$HOME/.claude/settings.json" >"$TWIN_HOME/.claude/settings.json"
+HOME=$TWIN_HOME "$SYNC" reconcile-dcg >"$TMP/twin.out" 2>&1 || fail "reconcile-dcg with dead and live twins failed: $(cat "$TMP/twin.out")"
+jq -e --arg dead "$DEAD_TWIN" --arg live "$TMP/routing/bin/dcg" --arg other "$OTHER_BASE" --arg cmd "$TWIN_RESOLVED" '
+  [.hooks.PreToolUse[].hooks[]? | .command] as $c
+  | ($c | index($dead)) == null
+  and ($c | index($live)) != null
+  and ($c | index($other)) != null
+  and ($c | map(select(. == $cmd)) | length == 1)
+' "$TWIN_HOME/.claude/settings.json" >/dev/null ||
+  fail "dead-twin rule: the missing same-basename twin must go, the present twin and the other basename must stay, the resolved command must appear once"
+grep -qF "retired stale DCG registration at $DEAD_TWIN" "$TMP/twin.out" ||
+  fail "reconcile did not report the dead twin it retired: $(cat "$TMP/twin.out")"
+HOME=$TWIN_HOME "$SYNC" reconcile-dcg >"$TMP/twin2.out" 2>&1 || fail "second reconcile-dcg with twins failed: $(cat "$TMP/twin2.out")"
+grep -q "already reconciled" "$TMP/twin2.out" || fail "dead-twin retirement is not idempotent: $(cat "$TMP/twin2.out")"
+
+# No live settings.json: the reconcile seeds one from the canonical copy, mode
+# 600, carrying the resolved command. It seeds only settings.json.
+FRESH_HOME=$TMP/fresh-home
+mkdir -p "$FRESH_HOME/.claude"
+ln -s "$HOME/.local" "$FRESH_HOME/.local"
+HOME=$FRESH_HOME "$SYNC" reconcile-dcg >"$TMP/fresh.out" 2>&1 || fail "reconcile-dcg on a fresh home failed: $(cat "$TMP/fresh.out")"
+grep -q "seeded settings.json with canonical DCG hook" "$TMP/fresh.out" || fail "fresh home: no seed reported: $(cat "$TMP/fresh.out")"
+[ "$(stat -c '%a' "$FRESH_HOME/.claude/settings.json")" = 600 ] || fail "fresh home: seeded settings.json is not mode 600"
+jq -e --arg cmd "$RESOLVED" '[.. | objects | select(.command? == $cmd)] | length == 1' \
+  "$FRESH_HOME/.claude/settings.json" >/dev/null || fail "fresh home: the seeded file does not carry the resolved dcg command once"
+[ ! -e "$FRESH_HOME/.claude/CLAUDE.md" ] || fail "fresh home: the standalone reconcile entered the full install"
+
+# Missing target: ~/.local/bin exists but holds no dcg, so the foreign-host
+# exception does not apply and the reconcile refuses without touching live.
+MISS_HOME=$TMP/miss-home
+mkdir -p "$MISS_HOME/.claude" "$MISS_HOME/.local/bin"
+cp "$HOME/.claude/settings.json" "$MISS_HOME/.claude/settings.json"
+cp "$MISS_HOME/.claude/settings.json" "$TMP/miss-before.json"
+if HOME=$MISS_HOME "$SYNC" reconcile-dcg >"$TMP/miss.out" 2>&1; then
+  fail "reconcile-dcg registered a dcg that is not on disk"
+fi
+grep -q "does not exist" "$TMP/miss.out" || fail "missing target: the refusal should say the target does not exist: $(cat "$TMP/miss.out")"
+cmp -s "$TMP/miss-before.json" "$MISS_HOME/.claude/settings.json" || fail "missing target: live settings.json changed"
 
 # Superseded twin whose target EXISTS: the previous version is on disk under the
 # stale home (its ~/.local is the fixture install), so only the superseded rule

@@ -53,12 +53,6 @@
 #   sync.sh reconcile-dcg
 #                     Add/update only the canonical DCG PreToolUse hook in an
 #                     existing live settings.json. Backs up before changing it.
-#   sync.sh reconcile-grep-cost-guard
-#                     Add/update the grep OOM guard immediately after DCG.
-#   sync.sh reconcile-heavy-job-admission
-#                     Add/update the global heavy-job gate after grep guard.
-#   sync.sh reconcile-whatsapp-guard
-#                     Add/update the WhatsApp effect gate after resource guards.
 #   sync.sh reconcile-node-launcher
 #                     Move live first-party `node "<home>/hooks/..."` hook commands onto
 #                     hooks/bin/node-hook (skips the version-manager shim). Backs up
@@ -330,10 +324,6 @@ MANAGED_REF=$HERE/managed-settings.json               # canonical source, versio
 # write the identical string, and an upgrade that repoints the symlink is picked
 # up automatically. Falls back to the symlink path if resolution fails.
 DCG_COMMAND=$(readlink -f "$HOME/.local/bin/dcg" 2>/dev/null || echo "$HOME/.local/bin/dcg")
-# Retired in dotfiles#1429: the memory-access ledger had one writer and no
-# reader. The command stays named here so reconcile_memory_hook can take it out
-# of live settings on hosts that still carry it.
-MEMORY_HOOK_COMMAND='python3 "$HOME/.claude/scripts/memory-access-log.py"'
 # PostToolUseFailure is a distinct event from PostToolUse (which fires only on
 # SUCCESS), so the papercut logger cannot ride an existing group and needs its own
 # reconcile — otherwise adopting an already-configured machine would leave the
@@ -345,40 +335,8 @@ PAPERCUT_HOOK_COMMAND='node "$HOME/.claude/hooks/PostToolUseFailure/papercut-log
 # reconcile now removes the registration. hooks/PostToolUse/pr-record.js stays
 # as a no-op until no live settings.json registers it.
 PR_RECORD_HOOK_COMMAND='node "$HOME/.claude/hooks/PostToolUse/pr-record.js"'
-# Retired (move 7, 2026-10-17): the push-tracking-pr hook opened a branch's
-# draft PR on its first content push through pr-open-if-missing.sh. Both are
-# gone. The exact command string stays so reconcile_push_tracking_pr_hook can
-# strip the registration from a live settings.json that still carries it.
-PUSH_TRACKING_PR_HOOK_COMMAND='node "$HOME/.claude/hooks/run-with-flags.js" "post:push:pr" "PostToolUse/push-tracking-pr.js" "standard,strict"'
-# Retired (fleet teardown move 7, 2026-10-17): the worktree-claim-advisory hook
-# (PostToolUse on EnterWorktree) ran the dedup pre-flight; the claim and dedup
-# machinery is gone. The exact command string stays so
-# reconcile_worktree_claim_advisory_hook can strip the registration from a live
-# settings.json that still carries it.
-WORKTREE_CLAIM_ADVISORY_HOOK_COMMAND='node "$HOME/.claude/hooks/PostToolUse/worktree-claim-advisory.js"'
-SKILL_MENTION_HOOK_COMMAND='"$HOME/.claude/hooks/bin/node-hook" "$HOME/.claude/hooks/UserPromptSubmit/skill-mention-resolver.js"'
-GREP_COST_GUARD_HOOK_COMMAND='"$HOME/.claude/hooks/bin/node-hook" "$HOME/.claude/hooks/PreToolUse/grep-cost-guard.js"'
-HEAVY_JOB_ADMISSION_HOOK_COMMAND='"$HOME/.claude/hooks/bin/node-hook" "$HOME/.claude/hooks/PreToolUse/heavy-job-admission.js"'
 STRUCTURED_OUTPUT_UNWRAP_HOOK_COMMAND='node "$HOME/.claude/hooks/PreToolUse/structured-output-unwrap.js"'
 READ_CEILING_CHUNK_HOOK_COMMAND='node "$HOME/.claude/hooks/PreToolUse/read-ceiling-chunk.js"'
-SHAPE_REWRITE_HOOK_COMMAND='"$HOME/.claude/hooks/bin/node-hook" "$HOME/.claude/hooks/PreToolUse/shape-rewrite.js"'
-RUNNER_GUARD_HOOK_COMMAND='"$HOME/.claude/hooks/bin/node-hook" "$HOME/.claude/hooks/PreToolUse/runner-guard.js"'
-# Retired registrations, kept so install removes them from live settings.
-HANDOFF_COMPLIANCE_HOOK_COMMAND='node "$HOME/.claude/hooks/PreToolUse/handoff-compliance.js"'
-# dotfiles#1282's context fence (retired in harness teardown move 5, 2026-10-18).
-CONTEXT_FENCE_HOOK_COMMAND='node "$HOME/.claude/hooks/PreToolUse/context-fence.js"'
-CONTEXT_FENCE_HANDOFF_HOOK_COMMAND='node "$HOME/.claude/hooks/Stop/context-fence-handoff.js"'
-COMPACT_COMPLIANCE_HOOK_COMMAND='node "$HOME/.claude/hooks/PostCompact/compact-compliance-counter.js"'
-FANOUT_ADMISSION_HOOK_COMMAND='node "$HOME/.claude/hooks/PreToolUse/fanout-admission.js"'
-WHATSAPP_GUARD_HOOK_COMMAND='"$HOME/.claude/hooks/bin/node-hook" "$HOME/.claude/hooks/PreToolUse/whatsapp-guard.js"'
-CODEX_QUOTA_HOOK_COMMAND=${CODEX_QUOTA_HOOK_COMMAND:-'"$HOME/.claude/hooks/bin/node-hook" "$HOME/.claude/hooks/PreToolUse/codex-quota-guard.js"'}
-CODEX_LEGACY_PRE_HOOK_COMMAND='node "$HOME/.claude/hooks/PreToolUse/codex-doghouse-guard.js"'
-CODEX_LEGACY_POST_HOOK_COMMAND='node "$HOME/.claude/hooks/PostToolUse/codex-doghouse-trip.js"'
-# Versioned policy is portable and linked; host authority deliberately is not.
-# The host's route record (repo-route.py state_path(): $REPO_ROUTE_STATE, else
-# $XDG_STATE_HOME/repo-routes.json, default ~/.local/state/repo-routes.json) is created
-# only by repo-route.py bootstrap.
-REPO_ROUTE_HOOK_COMMAND=${REPO_ROUTE_HOOK_COMMAND:-'"$HOME/.claude/hooks/bin/node-hook" "$HOME/.claude/hooks/PreToolUse/canonical-worktree-route-guard.js"'}
 MODE=${1:-check}
 
 # Defensive tripwire: this repo is an explicit allowlist copier (never a
@@ -587,8 +545,8 @@ memory_push() {
 # the first non-shim node on PATH instead of paying the version-manager shim's
 # 100-140 ms per hook. A hook command therefore has two spellings, the launcher
 # form and the bare `node "<script>"` form older live files carry. This prints the
-# other spelling of a canonical-home command (nothing for any other command), so an
-# anchor or a retirement matches a live file on either side of the migration.
+# other spelling of a canonical-home command (nothing for any other command), so a
+# retirement matches a live file on either side of the migration.
 NODE_HOOK_LAUNCHER_REF='"$HOME/.claude/hooks/bin/node-hook" '
 hook_command_other_form() {
   local cmd=$1
@@ -602,10 +560,12 @@ hook_command_other_form() {
 # Reconcile only a single named standalone hook group so live-only/runtime-owned
 # fields and every other hook survive. The canonical group is read from the repo
 # copy rather than duplicated here, keeping one source of truth.
-# args: <label> <hook event> <hook command string> [insert-after command]
-#       [canonical settings.json path]
+# args: <label> <hook event> <hook command string> [canonical settings.json path]
+#       [superseded commands to retire, a JSON array]
+# reconcile_dcg_hook is the one caller; every other tracked hook is placed by
+# apply_settings (hov-stack #479), which puts it where the tracked file groups it.
 #
-# The 5th argument exists so a caller can reconcile against a NORMALIZED copy of
+# The 4th argument exists so a caller can reconcile against a NORMALIZED copy of
 # the canonical settings without first mutating the tracked file. `install` must
 # not write anything inside the checkout — see reconcile_dcg_hook.
 #
@@ -728,20 +688,18 @@ plugin_dir_missing_manifest() {
 }
 
 reconcile_hook_group() {
-  local label=$1 event=$2 cmd=$3 after_cmd=${4:-}
-  local after_alt
-  local live=$H/settings.json canonical=${5:-$HERE/settings.json} canonical_group
-  local extra_dead=${6:-[]}
+  local label=$1 event=$2 cmd=$3
+  local live=$H/settings.json canonical=${4:-$HERE/settings.json} canonical_group
+  local extra_dead=${5:-[]}
   local tmp backup mode target checked_target require_target
   local dead_twins canonical_base twin_cmd twin_target twin_checked
   local -a retired_targets respelled_targets
 
   guard_no_credentials || return 1
-  # Harness-owned targets must exist even when their parent tree is absent;
-  # otherwise a fresh/runtime-$HOME reconcile can silently remove the WhatsApp
-  # permission floor. External operator-specific targets (currently DCG) keep
-  # the established foreign-host exception only when their parent itself is
-  # absent; once that parent exists, a missing executable is a real defect.
+  # Harness-owned targets must exist even when their parent tree is absent.
+  # External operator-specific targets (DCG) keep the established foreign-host
+  # exception only when their parent itself is absent; once that parent exists,
+  # a missing executable is a real defect.
   target=$(hook_command_target "$cmd")
   checked_target=$(target_in_harness_home "$target")
   require_target=0
@@ -754,17 +712,6 @@ reconcile_hook_group() {
     echo "  if this hook is still on an unmerged branch, merge it and pull the main checkout first" >&2
     return 1
   fi
-  # The launcher is a second file the command needs; a missing one fails every
-  # event with 127 (non-blocking, so silently unguarded), exactly the failure the
-  # target check above exists to prevent.
-  case $cmd in
-    "$NODE_HOOK_LAUNCHER_REF"*)
-      if [ ! -x "$H/hooks/bin/node-hook" ]; then
-        echo "$label reconcile: launcher $H/hooks/bin/node-hook is missing or not executable (registering $label would fail on every event); live settings were not changed" >&2
-        echo "  merge the launcher change and pull the main checkout first" >&2
-        return 1
-      fi ;;
-  esac
   command -v jq >/dev/null 2>&1 || {
     echo "$label reconcile requires jq; settings.json was not changed" >&2
     return 1
@@ -787,7 +734,6 @@ reconcile_hook_group() {
     return 1
   }
 
-  after_alt=$(hook_command_other_form "$after_cmd")
   mkdir -p "$H" || return 1
   if [ ! -e "$live" ]; then
     command install -m 0600 "$canonical" "$live" || {
@@ -817,8 +763,8 @@ reconcile_hook_group() {
   # registration. Requiring the target to be missing is what makes the removal
   # provable rather than a guess: a registration pointing at nothing has no
   # behaviour to lose. A twin that is present but SUPERSEDED is a different
-  # case and is retired by name by its own reconciler (see
-  # reconcile_codex_quota_hook), never by this generic rule.
+  # case and is retired by name (retire_hook_commands), never by this generic
+  # rule.
   #
   # Two registrations of UNRELATED hooks can share a basename (two index.js).
   # Retiring the missing one is still correct — it could only fail on every
@@ -855,7 +801,7 @@ reconcile_hook_group() {
   fi
 
   tmp=$(mktemp "$H/.settings.json.hook.XXXXXX") || return 1
-  if ! jq --arg event "$event" --arg cmd "$cmd" --arg after "$after_cmd" --arg after_alt "$after_alt" --argjson canonical "$canonical_group" --argjson dead "$dead_twins" '
+  if ! jq --arg event "$event" --arg cmd "$cmd" --argjson canonical "$canonical_group" --argjson dead "$dead_twins" '
     .hooks = (.hooks // {})
     | ([
             (.hooks[$event] // [])[]
@@ -865,19 +811,7 @@ reconcile_hook_group() {
             | .hooks = ((.hooks // []) | map(select(.command as $c | $c != $cmd and ($dead | index($c) == null))))
             | select((.hooks | length) > 0)
        ]) as $groups
-    | .hooks[$event] = (
-        if $after == "" then [$canonical] + $groups
-        else
-          ([
-            range(0; ($groups | length)) as $i
-            | select(any($groups[$i].hooks[]?; .type == "command" and (.command == $after or ($after_alt != "" and .command == $after_alt))))
-            | $i
-          ] | if length > 0 then .[0] else null end) as $anchor
-          | if $anchor == null then [$canonical] + $groups
-            else $groups[:($anchor + 1)] + [$canonical] + $groups[($anchor + 1):]
-            end
-        end
-      )
+    | .hooks[$event] = [$canonical] + $groups
   ' "$live" >"$tmp"; then
     rm -f "$tmp"
     echo "$label reconcile failed; live settings.json was not changed" >&2
@@ -1017,21 +951,13 @@ reconcile_dcg_hook() {
       ' "$H/settings.json" 2>/dev/null) || dead='[]'
   fi
 
-  reconcile_hook_group "DCG" PreToolUse "$DCG_COMMAND" "" "${normalized:-$canonical}" "$dead"
+  reconcile_hook_group "DCG" PreToolUse "$DCG_COMMAND" "${normalized:-$canonical}" "$dead"
   rc=$?
   [ -n "$normalized" ] && rm -f "$normalized"
   if [ "$rc" -eq 0 ] && [ "$dead" != "[]" ]; then
     echo "  retired superseded dcg registration(s): $(printf '%s' "$dead" | jq -r 'join(", ")')"
   fi
   return $rc
-}
-
-# The memory-access ledger hook (PostToolUse on Read) is retired (dotfiles#1429):
-# nothing ever read its ledger. Live settings.json is volatile and never copied
-# over once it exists, so reconciling now means removing the registration. The
-# ledger file already on disk is left in place; nothing here deletes data.
-reconcile_memory_hook() {
-  retire_hook_commands "memory-access" "$MEMORY_HOOK_COMMAND"
 }
 
 # The papercut plugin (papercut@hov) registers papercut-log, structured-output-unwrap
@@ -1143,22 +1069,6 @@ reconcile_pr_record_hook() {
   retire_hook_commands "pr-record" "$PR_RECORD_HOOK_COMMAND"
 }
 
-# The push-tracking-pr hook (PostToolUse on Bash) is retired (fleet teardown
-# move 7, 2026-10-17): agents open their own PR with `gh pr create`, so nothing
-# opens a draft on the first push any more. Live settings.json is volatile and
-# never copied over once it exists, so reconciling now means removing the
-# registration, the same as the memory-access hook above.
-reconcile_push_tracking_pr_hook() {
-  retire_hook_commands "push-tracking-pr" "$PUSH_TRACKING_PR_HOOK_COMMAND"
-}
-
-# The worktree-claim-advisory hook (PostToolUse on EnterWorktree) is retired
-# (fleet teardown move 7b, 2026-10-17) along with the issue-claim and dedup
-# machinery it fronted. Same removal-only reconcile as push-tracking-pr above.
-reconcile_worktree_claim_advisory_hook() {
-  retire_hook_commands "worktree-claim-advisory" "$WORKTREE_CLAIM_ADVISORY_HOOK_COMMAND"
-}
-
 # StructuredOutput unwrap (PreToolUse, issue #844): subagents handed their
 # schema result back wrapped under a top-level `input` key and regenerated the
 # same wrapper up to 16 times per session; the hook rewrites the retry once
@@ -1175,95 +1085,6 @@ reconcile_structured_output_unwrap_hook() {
 # them carried an explicit limit). The papercut plugin registers it too.
 reconcile_read_ceiling_chunk_hook() {
   retire_papercut_settings_hook "read-ceiling-chunk" "$READ_CEILING_CHUNK_HOOK_COMMAND"
-}
-
-# Shape rewrite (PreToolUse on Bash): a verifier-refused Bash shape (a
-# command the CLI would otherwise deny outright) is rewritten to
-# `bash <script>` after a reach check, so the work still runs from a script
-# file instead of dead-ending on a refusal. Anchored after runner-guard so
-# it is registered last among the Bash-matcher groups -- every sibling guard
-# still sees the original command text, since hooks run in parallel and this
-# adjacency is configuration hygiene, not execution order. Same
-# volatile-settings reason as above.
-reconcile_shape_rewrite_hook() {
-  reconcile_hook_group "shape-rewrite" PreToolUse "$SHAPE_REWRITE_HOOK_COMMAND" "$RUNNER_GUARD_HOOK_COMMAND"
-}
-
-# The fanout-admission hook (PreToolUse on Task|Workflow, #1284) is retired:
-# it was warn-only unless CLAUDE_FANOUT_GATE_BLOCK=1, which nothing sets, and
-# its warnings went only to the papercut store (1,030 in the 30 days to
-# 2026-10-17, across 321 sessions) where nothing acted on them. The
-# producer/verifier ratio is back to prose (agent-swarm skill, "Fan-out
-# hygiene", moved out of CLAUDE.md 2026-10-18); wf-pin-audit.py
-# (harness-doctor check 23) still flags uncapped fan-outs. The hook file
-# stays: wf-pin-lex.js loads its lexer. Reconciling now removes the live
-# registration, as reconcile_memory_hook does.
-reconcile_fanout_admission_hook() {
-  retire_hook_commands "fanout-admission" "$FANOUT_ADMISSION_HOOK_COMMAND"
-}
-
-# The skill-mention resolver (UserPromptSubmit): re-attaches a mid-message
-# `/skill` mention to the skill it names. ~100 of this box's ~140 skills are
-# demoted to user-invocable-only and so are absent from the model's roster,
-# and Claude Code only expands a slash command in FIRST position -- so a
-# mid-message mention is invisible to both parties and reads as "my skills are
-# broken". settings.json is volatile, so a canonical-file edit alone would
-# never reach the live harness; this is what installs it.
-reconcile_skill_mention_hook() {
-  reconcile_hook_group "skill-mention" UserPromptSubmit "$SKILL_MENTION_HOOK_COMMAND"
-}
-
-reconcile_grep_cost_guard_hook() {
-  local dcg_anchor
-  # DCG remains the first Bash guard. Keeping the focused cost guard directly
-  # behind it makes the safety order deterministic without disturbing unknown
-  # hook groups owned by the live runtime or other local tooling. The anchor
-  # is whatever dcg registration is ACTUALLY PRESENT in the live file, in
-  # either spelling (dotfiles#1201): the resolved versioned path once
-  # reconcile_dcg_hook has run, or the tracked symlink spelling on a live file
-  # seeded from canonical without a dcg reconcile (CLAUDE_SYNC_SKIP_HOOK_RECONCILE,
-  # a fresh seed). Anchoring on a spelling the live file does not carry made the
-  # generic reconcile fall back to prepending this group AHEAD of dcg.
-  dcg_anchor=$(jq -r --arg re "$DCG_PATH_RE" --arg cmd "$DCG_COMMAND" '
-    [ .hooks.PreToolUse[]?.hooks[]? | (.command // "") | select(test($re)) ]
-    | if index($cmd) != null then $cmd
-      elif length == 1 then .[0]
-      else empty end
-  ' "$H/settings.json" 2>/dev/null)
-  [ -n "$dcg_anchor" ] || dcg_anchor=$(jq -r --arg re "$DCG_PATH_RE" '
-    [ .hooks.PreToolUse[]?.hooks[]? | (.command // "") | select(test($re)) ]
-    | if length == 1 then .[0] else empty end
-  ' "$HERE/settings.json" 2>/dev/null)
-  [ -n "$dcg_anchor" ] || dcg_anchor=$DCG_COMMAND
-  reconcile_hook_group "grep-cost-guard" PreToolUse "$GREP_COST_GUARD_HOOK_COMMAND" "$dcg_anchor"
-}
-
-reconcile_heavy_job_admission_hook() {
-  # The cost guard rejects a known parser-OOM shape before the broader resource
-  # gate rewrites admitted builds. Reconcile the anchor first so the standalone
-  # mode cannot silently prepend this group when grep guard is absent.
-  reconcile_grep_cost_guard_hook || return 1
-  reconcile_hook_group "heavy-job-admission" PreToolUse \
-    "$HEAVY_JOB_ADMISSION_HOOK_COMMAND" "$GREP_COST_GUARD_HOOK_COMMAND"
-}
-
-reconcile_whatsapp_guard_hook() {
-  # Establish the existing groups before inserting this one so settings stay
-  # deterministic and reviewable. Claude Code executes matching command hooks
-  # in parallel; adjacency is configuration hygiene, not execution ordering.
-  reconcile_heavy_job_admission_hook || return 1
-  reconcile_hook_group "whatsapp-guard" PreToolUse \
-    "$WHATSAPP_GUARD_HOOK_COMMAND" "$HEAVY_JOB_ADMISSION_HOOK_COMMAND"
-}
-
-# dotfiles#1282's context fence is retired (harness teardown move 5,
-# 2026-10-18): the PreToolUse fence, its Stop handoff, the PostCompact
-# compliance counter and the earlier-retired handoff-compliance registration
-# are removed from live settings on every install; nothing is seeded.
-reconcile_context_fence_hook() {
-  retire_hook_commands "context-fence" \
-    "$CONTEXT_FENCE_HOOK_COMMAND" "$CONTEXT_FENCE_HANDOFF_HOOK_COMMAND" \
-    "$COMPACT_COMPLIANCE_HOOK_COMMAND" "$HANDOFF_COMPLIANCE_HOOK_COMMAND"
 }
 
 # Node launcher migration (hook-floor #369). settings.json is volatile, so the seed's
@@ -1834,34 +1655,6 @@ retire_hook_commands() {
   echo "  retired $label hook command(s); previous settings backed up to $backup/settings.json"
 }
 
-# Routing-bundle twins of the quota guard (dotfiles#991). The 2026-08-26
-# routing rollout registered ~/.local/share/claude-routing/<sha>/hooks/
-# PreToolUse/codex-quota-guard.js BESIDE the canonical hook, and both ran on
-# every Bash call. Since #991 the canonical guard rewrites an exhausted command
-# through updatedInput; a deny from the older bundle copy wins over that
-# rewrite, so the twin must go whatever its target's presence on disk (the
-# generic reconcile_hook_group rule retires a twin only when its target is
-# absent, which is right for a moved hook and wrong for a superseded one).
-# Enumerated from the live file, never hardcoded: the bundle sha is per host.
-codex_quota_routing_twins() {
-  local live=$H/settings.json
-  [ -f "$live" ] || return 0
-  jq -r '.hooks.PreToolUse[]?.hooks[]? | .command // empty' "$live" 2>/dev/null \
-    | grep -E '/\.local/share/claude-routing/[0-9a-f]+/hooks/PreToolUse/codex-quota-guard\.js"?$' || true
-}
-
-reconcile_codex_quota_hook() {
-  local -a twins=()
-  reconcile_hook_group "codex-quota" PreToolUse "$CODEX_QUOTA_HOOK_COMMAND" || return 1
-  mapfile -t twins < <(codex_quota_routing_twins)
-  retire_hook_commands "legacy codex-doghouse / routing-bundle codex-quota twin" \
-    "$CODEX_LEGACY_PRE_HOOK_COMMAND" "$CODEX_LEGACY_POST_HOOK_COMMAND" "${twins[@]}"
-}
-
-reconcile_repo_route_hook() {
-  reconcile_hook_group "repo-route" PreToolUse "$REPO_ROUTE_HOOK_COMMAND"
-}
-
 # push_shrink_guard <live> <canonical> - refuse a push that would gut a file.
 #
 # Written after doing exactly this by accident on 2026-08-27. The role gate
@@ -2360,23 +2153,25 @@ install() {
       return 1
     fi
   fi
-  # settings.json is volatile, but these hooks must survive adoption of an
-  # already-configured machine. Merge only their groups, backup-first.
-  # Most canonical hook commands embed THIS box's resolved paths (self-heal
-  # writes them, push captures them). The WhatsApp guard deliberately uses the
-  # runtime $HOME so account authority is never published beside a missing hook.
-  # CI sets the foreign-host skip explicitly; it is never auto-detected.
+  # apply_settings below adds and removes the tracked hooks. These reconcilers
+  # do what it cannot (hov-stack #479): respell a live `node "..."` hook onto
+  # the launcher (the apply keys the two spellings as different hooks and would
+  # register the script twice), retire a live hook that no base ever recorded
+  # (the apply removes only what its base names), and retire the papercut
+  # settings copies only once the plugin owns them (the apply has no
+  # conditional removal). dcg keeps its own verb because the apply folds every
+  # dcg path into one identity, so only reconcile_dcg_hook moves live onto this
+  # host's resolved binary. CI sets the foreign-host skip explicitly; it is
+  # never auto-detected.
   if [ "${CLAUDE_SYNC_SKIP_HOOK_RECONCILE:-0}" = 1 ]; then
     echo "  skipped hook reconcile (CLAUDE_SYNC_SKIP_HOOK_RECONCILE=1)"
   else
-    # First, so every per-hook verb below finds its anchors and twins already in
-    # the launcher spelling. install runs it (unlike an opt-in verb) because the
-    # seed alone never reaches a configured host and most first-party hooks have no
-    # per-hook verb; leaving it manual would strand them on the shim path forever.
+    # Before the apply, so the apply finds no `node "..."` spelling of a tracked
+    # hook to register a second time. install runs it (unlike an opt-in verb)
+    # because the seed alone never reaches a configured host; leaving it manual
+    # would strand hooks on the shim path forever.
     reconcile_node_launcher_hooks || return 1
     reconcile_dcg_hook || return 1
-    reconcile_whatsapp_guard_hook || return 1
-    reconcile_memory_hook || return 1
     # Not `|| return 1`: a failed plugin install (offline, marketplace not added)
     # leaves the settings copies in place below, and the links, units and timers
     # after this block still matter. install exits non-zero at its end instead.
@@ -2384,15 +2179,7 @@ install() {
     reconcile_papercut_hook || return 1
     reconcile_structured_output_unwrap_hook || return 1
     reconcile_read_ceiling_chunk_hook || return 1
-    reconcile_shape_rewrite_hook || return 1
     reconcile_pr_record_hook || return 1
-    reconcile_push_tracking_pr_hook || return 1
-    reconcile_worktree_claim_advisory_hook || return 1
-    reconcile_skill_mention_hook || return 1
-    reconcile_codex_quota_hook || return 1
-    reconcile_repo_route_hook || return 1
-    reconcile_fanout_admission_hook || return 1
-    reconcile_context_fence_hook || return 1
   fi
   # Link only the portable policy. Never seed or copy the host-local authority
   # state, because that would manufacture a canonical checkout on another host.
@@ -3137,26 +2924,14 @@ case "$MODE" in
   push) push ;;
   install) install ;;
   reconcile-dcg) reconcile_dcg_hook --write-canonical ;;
-  reconcile-memory-hook) reconcile_memory_hook ;;
   reconcile-papercut-hook) reconcile_papercut_hook ;;
   ensure-papercut-plugin) ensure_papercut_plugin ;;
   reconcile-structured-output-unwrap) reconcile_structured_output_unwrap_hook ;;
   reconcile-read-ceiling-chunk) reconcile_read_ceiling_chunk_hook ;;
-  reconcile-shape-rewrite) reconcile_shape_rewrite_hook ;;
   reconcile-pr-record-hook) reconcile_pr_record_hook ;;
-  reconcile-push-tracking-pr-hook) reconcile_push_tracking_pr_hook ;;
-  reconcile-worktree-claim-advisory-hook) reconcile_worktree_claim_advisory_hook ;;
-  reconcile-skill-mention-hook) reconcile_skill_mention_hook ;;
-  reconcile-grep-cost-guard) reconcile_grep_cost_guard_hook ;;
-  reconcile-heavy-job-admission) reconcile_heavy_job_admission_hook ;;
-  reconcile-whatsapp-guard) reconcile_whatsapp_guard_hook ;;
   reconcile-runtime-env) reconcile_runtime_env ;;
   reconcile-windows-auto-mode) reconcile_windows_auto_mode ;;
-  reconcile-codex-quota-hook) reconcile_codex_quota_hook ;;
-  reconcile-repo-route-hook) reconcile_repo_route_hook ;;
-  reconcile-context-fence) reconcile_context_fence_hook ;;
   reconcile-node-launcher) reconcile_node_launcher_hooks ;;
-  reconcile-fanout-admission) reconcile_fanout_admission_hook ;;
   reconcile-docker-init)
     if [ "$#" -ne 1 ]; then
       echo "usage: sync.sh reconcile-docker-init" >&2
@@ -3186,5 +2961,5 @@ case "$MODE" in
   check) check ;;
   memory-preview|memory-check) memory_preview ;;
   memory-push) memory_push ;;
-  *) echo "usage: sync.sh apply-settings [--plan] [--quiet] [--seed-base <rev>]|push|install|reconcile-docker-init|adopt-docker-init [--allow-existing-false]|rollback-docker-init|reconcile-dcg|reconcile-grep-cost-guard|reconcile-heavy-job-admission|reconcile-whatsapp-guard|reconcile-runtime-env|reconcile-windows-auto-mode|reconcile-memory-hook|reconcile-papercut-hook|ensure-papercut-plugin|reconcile-structured-output-unwrap|reconcile-read-ceiling-chunk|reconcile-shape-rewrite|reconcile-pr-record-hook|reconcile-push-tracking-pr-hook|reconcile-worktree-claim-advisory-hook|reconcile-codex-quota-hook|reconcile-repo-route-hook|reconcile-context-fence|reconcile-fanout-admission|check|memory-preview|memory-check|memory-push" >&2; exit 2 ;;
+  *) echo "usage: sync.sh apply-settings [--plan] [--quiet] [--seed-base <rev>]|push|install|reconcile-docker-init|adopt-docker-init [--allow-existing-false]|rollback-docker-init|reconcile-dcg|reconcile-runtime-env|reconcile-windows-auto-mode|reconcile-papercut-hook|ensure-papercut-plugin|reconcile-structured-output-unwrap|reconcile-read-ceiling-chunk|reconcile-pr-record-hook|check|memory-preview|memory-check|memory-push" >&2; exit 2 ;;
 esac

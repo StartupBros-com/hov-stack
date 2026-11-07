@@ -473,7 +473,14 @@ Where it runs, on workstation and satellite hosts: closeout after freshening the
 
 ### Reconciler
 
-A sync step that merges one canonical, repo-originated entry into a Volatile file on the host: it adds or updates only that entry, proves nothing else changed, replaces the file atomically, and keeps a backup. Reconcilers predate the Settings apply, which now delivers any repo change to `settings.json`, including permission rules that never had a reconciler. The per-entry reconcilers for hook registrations and harness environment keys still run during install, and still own what the apply leaves to them: the dcg hook's versioned path, the Windows settings file and the policy validations. Retiring the ones the apply has made redundant is tracked in #479.
+A sync step that merges one canonical, repo-originated entry into a Volatile file on the host: it adds or updates only that entry, proves nothing else changed, replaces the file atomically, and keeps a backup. Reconcilers predate the Settings apply, which now delivers any repo change to `settings.json`, including every tracked hook registration and permission rules that never had a reconciler. The per-hook reconcilers that only added a tracked hook were deleted in #479. Install still runs the ones that do what the apply cannot:
+- respell a live `node "..."` hook onto the launcher, because the apply keys the two spellings as different hooks and would register the script twice;
+- retire a live hook that no base recorded, because the apply removes only what its base names;
+- retire the papercut settings copies only once the papercut plugin owns them, because the apply has no conditional removal;
+- move the dcg hook onto this host's resolved binary, because the apply folds every dcg path into one identity;
+- the runtime environment, the Windows settings file and the policy validations.
+
+A new tracked hook needs no reconciler. A hook dropped from the tracked file is removed by the apply on every host whose base recorded it, and needs a by-name retirement only for a live file that no base ever covered.
 
 ## Tracking and claims
 
