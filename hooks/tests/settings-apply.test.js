@@ -352,3 +352,44 @@ test("CLI unchanged malformed hooks preserve bytes, mtime and backups", () => {
     assert.equal(fs.existsSync(path.join(tmp,"backups")),false);
   } finally {fs.rmSync(tmp,{recursive:true,force:true});}
 });
+test("added hooks keep desired's grouping and order", () => {
+  const h = (command) => ({ type: "command", command });
+  const g = (cmds, matcher) => ({
+    ...(matcher === undefined ? {} : { matcher }),
+    hooks: cmds.map(h),
+  });
+  // wm after #484: a new matcher-less group ahead of an existing matcher-less one.
+  const before = { SessionStart: [g(["echo a"]), g(["echo b"], "startup|resume")] };
+  const desired = {
+    SessionStart: [g(["echo new"]), g(["echo a"]), g(["echo b"], "startup|resume")],
+  };
+  const r = apply({ hooks: desired }, { hooks: before }, { hooks: before });
+  assert.equal(r.changes.length, 1);
+  assert.deepEqual(r.result.hooks, desired);
+  // Settled: a second run changes nothing.
+  assert.equal(apply({ hooks: desired }, r.nextBase, r.result).changes.length, 0);
+  // A new group after its neighbour, and live's own groups stay where they are.
+  const tail = { SessionStart: [g(["echo a"]), g(["echo new"])] };
+  const mine = { SessionStart: [g(["echo mine"]), g(["echo a"])] };
+  assert.deepEqual(
+    apply({ hooks: tail }, { hooks: { SessionStart: [g(["echo a"])] } }, { hooks: mine })
+      .result.hooks,
+    { SessionStart: [g(["echo mine"]), g(["echo a"]), g(["echo new"])] },
+  );
+  // Joining a group live already has: between its desired neighbours.
+  const joined = { PostToolUse: [g(["echo x", "echo new", "echo z"], "Bash")] };
+  const partial = { PostToolUse: [g(["echo x", "echo z"], "Bash")] };
+  assert.deepEqual(
+    apply({ hooks: joined }, { hooks: partial }, { hooks: partial }).result.hooks,
+    joined,
+  );
+  // Two new hooks of one new group land together, in desired's order.
+  const pair = { Stop: [g(["echo p", "echo q"]), g(["echo old"])] };
+  const old = { Stop: [g(["echo old"])] };
+  assert.deepEqual(
+    apply({ hooks: pair }, { hooks: old }, { hooks: old }).result.hooks,
+    pair,
+  );
+  // An event live lacks entirely still gets desired's groups.
+  assert.deepEqual(apply({ hooks: pair }, {}, {}).result.hooks, pair);
+});
