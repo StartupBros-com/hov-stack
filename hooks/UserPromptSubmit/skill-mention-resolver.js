@@ -20,6 +20,17 @@
  * silently no-ops, NEITHER party can act, and the failure presents to the
  * operator as "my skills are broken".
  *
+ * Skills also ship inside plugins, and a plugin skill is hidden only by the
+ * frontmatter flag: Claude Code's skills docs say "Plugin skills are not
+ * affected by skillOverrides". Three places hold skills (see pluginRoots):
+ *   <config>/skills/<name>/SKILL.md                      a user skill
+ *   <config>/skills/<plugin>/.claude-plugin/plugin.json  a skills-dir plugin,
+ *       its skills at <config>/skills/<plugin>/skills/<name>/SKILL.md
+ *   <installPath>/skills/<name>/SKILL.md                 an installed marketplace
+ *       plugin, from <config>/plugins/installed_plugins.json
+ * Reading only the first left every plugin skill unresolved, which is the
+ * original incident again for any skill that moved into a plugin.
+ *
  * Empirically (scan of the full local transcript store, 2026-08-29): 1829 raw
  * user messages contained a real skill token that was never expanded, and every
  * single one had the token mid-message. Zero position-0 tokens ever failed to
@@ -32,9 +43,11 @@
  * or /og-share-images ?" is a question ABOUT skills, not a request to run one,
  * and the model has to stay free to read it that way.
  *
- * COST: the common path does zero I/O. Tokens are extracted with pure string
- * work; disk is touched only for names that already matched, at most MAX_REPORT
- * of them. A prompt mentioning no skill costs one regex pass and exits silent.
+ * COST: a prompt with no slash token costs one regex pass, does zero I/O and
+ * exits silent. Each token costs one SKILL.md open; a token that is not a user
+ * skill also costs one listing of the skills dir and one read of
+ * installed_plugins.json, both done once per prompt and shared by every token.
+ * At most MAX_REPORT skills are named.
  *
  * Fail-open silent on every error: a broken advisory must never block a prompt.
  */
@@ -54,6 +67,11 @@ const FRONTMATTER_BYTES = 4096;
 // Descriptions run to several sentences of trigger keywords. The model only
 // needs enough to judge relevance, and this note is pure overhead otherwise.
 const MAX_DESC_CHARS = 180;
+
+// The two settings that keep an installed skill out of the roster, as the note
+// states them. A plugin skill can only carry the first.
+const HIDDEN_BY_FLAG = 'disable-model-invocation: true in its frontmatter';
+const HIDDEN_BY_OVERRIDE = 'user-invocable-only in settings.json skillOverrides';
 
 function claudeDir() {
   return process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
@@ -75,28 +93,32 @@ function maskCode(text) {
 }
 
 /**
- * Extract `/name` tokens that plausibly refer to a skill.
+ * Extract `/name` and `/plugin:name` tokens that plausibly refer to a skill.
  *
  * The leading boundary is the load-bearing part. `/supabase` must match in
  * "run /supabase" but NOT in "/home/user/SITES/supabase", not in
  * "https://x.com/verify", and not in "./verify". Requiring the preceding
  * character to be start-of-input, whitespace, or an opening bracket rejects
  * every path- and URL-shaped case without needing to parse either.
+ *
+ * The optional `:name` suffix is how Claude Code names a plugin skill
+ * (`/compound-engineering:ce-plan`). A colon with no name after it ("use
+ * /eli5: it helps") leaves the bare token.
  */
 function extractTokens(prompt) {
   const masked = maskCode(prompt);
-  const re = /(^|[\s(\[{"'])\/([a-z0-9][a-z0-9_-]*)/g;
+  const re = /(^|[\s(\[{"'])\/([a-z0-9][a-z0-9_-]*)(?::([a-z0-9][a-z0-9_-]*))?/g;
   const out = [];
   const seen = new Set();
   let m;
   while ((m = re.exec(masked)) !== null) {
-    const name = m[2];
+    const token = m[3] ? `${m[2]}:${m[3]}` : m[2];
     // A token at index 0 was Claude Code's to expand; if it reached us
     // unexpanded the operator did not type a command, so stay out of it.
     if (m.index === 0 && m[1] === '') continue;
-    if (seen.has(name)) continue;
-    seen.add(name);
-    out.push(name);
+    if (seen.has(token)) continue;
+    seen.add(token);
+    out.push(token);
   }
   return out;
 }
@@ -135,9 +157,9 @@ function parseDescription(head) {
   return body.join(' ').replace(/\s+/g, ' ').trim();
 }
 
-/** Parse the `description:` and demotion flag out of a SKILL.md frontmatter block. */
-function readSkill(dir, name) {
-  const file = path.join(dir, name, 'SKILL.md');
+/** Parse the `description:` and demotion flag out of <skillDir>/SKILL.md. */
+function readSkill(skillDir) {
+  const file = path.join(skillDir, 'SKILL.md');
   let head;
   try {
     const fd = fs.openSync(file, 'r');
@@ -156,21 +178,107 @@ function readSkill(dir, name) {
   if (description.length > MAX_DESC_CHARS) {
     description = `${description.slice(0, MAX_DESC_CHARS - 1).trimEnd()}…`;
   }
-  return { name, flagged, description };
+  return { flagged, description };
+}
+
+function readJson(file) {
+  try {
+    const value = JSON.parse(fs.readFileSync(file, 'utf8'));
+    return value && typeof value === 'object' ? value : null;
+  } catch {
+    return null;
+  }
 }
 
 /** Names demoted to user-invocable-only via settings.json. */
-function overriddenNames(dir) {
+function overriddenNames(settings) {
+  const overrides = settings.skillOverrides;
+  if (!overrides || typeof overrides !== 'object') return new Set();
+  return new Set(
+    Object.keys(overrides).filter((k) => overrides[k] === 'user-invocable-only'),
+  );
+}
+
+/**
+ * Every plugin whose skills this session can load, as { plugin, root }, in a
+ * fixed order: skills-dir plugins by directory name, then marketplace installs
+ * by key.
+ *
+ * Which plugins count as enabled, deliberately conservative where Claude Code's
+ * rule was not measured:
+ *  - a skills-dir plugin is listed nowhere else, so it counts unless
+ *    enabledPlugins["<name>@skills-dir"] is exactly false;
+ *  - a marketplace install counts only when enabledPlugins["<key>"] is exactly
+ *    true and it has a user-scope entry. Project-scope installs depend on the
+ *    session's project and are out of scope here.
+ */
+function pluginRoots(dir, settings) {
+  const enabled = settings.enabledPlugins && typeof settings.enabledPlugins === 'object'
+    ? settings.enabledPlugins : {};
+  const roots = [];
+  const skillsDir = path.join(dir, 'skills');
+  let entries = [];
   try {
-    const raw = fs.readFileSync(path.join(dir, 'settings.json'), 'utf8');
-    const overrides = JSON.parse(raw).skillOverrides;
-    if (!overrides || typeof overrides !== 'object') return new Set();
-    return new Set(
-      Object.keys(overrides).filter((k) => overrides[k] === 'user-invocable-only'),
-    );
+    entries = fs.readdirSync(skillsDir).sort();
   } catch {
-    return new Set();
+    // no skills dir: no skills-dir plugins either
   }
+  for (const entry of entries) {
+    if (entry.startsWith('.')) continue;
+    const root = path.join(skillsDir, entry);
+    const manifest = readJson(path.join(root, '.claude-plugin', 'plugin.json'));
+    if (!manifest) continue;
+    const plugin = typeof manifest.name === 'string' && manifest.name ? manifest.name : entry;
+    if (enabled[`${plugin}@skills-dir`] === false) continue;
+    roots.push({ plugin, root });
+  }
+  const installed = readJson(path.join(dir, 'plugins', 'installed_plugins.json'));
+  const plugins = installed && installed.plugins && typeof installed.plugins === 'object'
+    ? installed.plugins : {};
+  for (const key of Object.keys(plugins).sort()) {
+    if (enabled[key] !== true) continue;
+    const records = Array.isArray(plugins[key]) ? plugins[key] : [plugins[key]];
+    // Manifests before project scope existed carried no scope field.
+    const user = records.find((r) => r && typeof r.installPath === 'string'
+      && (r.scope === 'user' || r.scope === undefined));
+    if (user) roots.push({ plugin: key.split('@')[0], root: user.installPath });
+  }
+  return roots;
+}
+
+/**
+ * Find the skill a token names, or null. A bare name is a user skill first,
+ * then the first plugin that ships it; `/plugin:name` looks in that plugin only.
+ * Returns where it lives and what hides it (hiddenBy null: it is in the roster).
+ */
+function resolveToken(token, ctx) {
+  const colon = token.indexOf(':');
+  if (colon === -1) {
+    const where = path.join(ctx.skillsDir, token);
+    const skill = readSkill(where);
+    if (skill) {
+      let hiddenBy = null;
+      if (skill.flagged) hiddenBy = HIDDEN_BY_FLAG;
+      else if (ctx.overrides().has(token)) hiddenBy = HIDDEN_BY_OVERRIDE;
+      return { ...skill, display: token, key: where, where, hiddenBy };
+    }
+  }
+  const plugin = colon === -1 ? null : token.slice(0, colon);
+  const name = colon === -1 ? token : token.slice(colon + 1);
+  for (const r of ctx.plugins()) {
+    if (plugin !== null && r.plugin !== plugin) continue;
+    const skillDir = path.join(r.root, 'skills', name);
+    const skill = readSkill(skillDir);
+    if (!skill) continue;
+    return {
+      ...skill,
+      display: `${r.plugin}:${name}`,
+      key: skillDir,
+      where: `plugin ${r.plugin}, ${skillDir}`,
+      hiddenBy: skill.flagged ? HIDDEN_BY_FLAG : null,
+    };
+  }
+  return null;
 }
 
 /**
@@ -189,22 +297,22 @@ function overriddenNames(dir) {
  * instead of informing the answer.
  *
  * So this states environment facts and nothing else: what is installed, where,
- * why it is not in the roster, and how expansion works. The standing behavioural
- * rule ("roster absence is not machine absence") is a constant, and the same
- * reference says constants belong in CLAUDE.md, which loads without running a
- * script -- not in a per-prompt injection.
+ * which setting keeps it out of the roster, and how expansion works. The
+ * standing behavioural rule ("roster absence is not machine absence") is a
+ * constant, and the same reference says constants belong in CLAUDE.md, which
+ * loads without running a script -- not in a per-prompt injection.
  */
 function buildContext(hits) {
   const lines = hits.map((h) => {
     const desc = h.description ? ` — ${h.description}` : '';
-    return `  /${h.name}${desc}`;
+    return `  /${h.display}${desc} (${h.where}; hidden by ${h.hiddenBy})`;
   });
   const isOne = hits.length === 1;
   return [
-    `This message contains slash tokens naming ${hits.length} installed ${isOne ? 'skill' : 'skills'}:`,
+    `This message contains slash tokens naming ${hits.length} installed ${isOne ? 'skill that is' : 'skills that are'} absent from the skill roster in this session, each with where it is installed and the setting that hides it:`,
     ...lines,
     '',
-    `${isOne ? 'It is' : 'They are'} installed under ${path.join(claudeDir(), 'skills')} and set to user-invocable-only, which is why ${isOne ? 'it is' : 'they are'} absent from the skill roster in this session. Claude Code expands a slash command only when it is the first thing in a message, so ${isOne ? 'this token' : 'these tokens'} did not expand into a command.`,
+    `${isOne ? 'It stays' : 'They stay'} runnable by the user. Claude Code expands a slash command only when it is the first thing in a message, so ${isOne ? 'this token' : 'these tokens'} did not expand into a command.`,
   ].join('\n');
 }
 
@@ -224,16 +332,37 @@ function run(raw) {
   if (tokens.length === 0) return ''; // common path: zero disk I/O
 
   const dir = claudeDir();
-  const skillsDir = path.join(dir, 'skills');
-  let overrides = null; // resolved lazily, only if a token resolves to a skill
+  // Settings, overrides and plugin roots are each read at most once, and only
+  // when a token needs them.
+  let settings = null;
+  let overrides = null;
+  let plugins = null;
+  const loadSettings = () => {
+    if (settings === null) settings = readJson(path.join(dir, 'settings.json')) || {};
+    return settings;
+  };
+  const ctx = {
+    skillsDir: path.join(dir, 'skills'),
+    overrides: () => {
+      if (overrides === null) overrides = overriddenNames(loadSettings());
+      return overrides;
+    },
+    plugins: () => {
+      if (plugins === null) plugins = pluginRoots(dir, loadSettings());
+      return plugins;
+    },
+  };
+
   const hits = [];
-  for (const name of tokens) {
-    const skill = readSkill(skillsDir, name);
-    if (!skill) continue;
-    if (overrides === null) overrides = overriddenNames(dir);
+  const reported = new Set();
+  for (const token of tokens) {
+    const skill = resolveToken(token, ctx);
     // Only surface skills the model genuinely cannot see. A skill already in
     // the roster needs no introduction, and naming it would be pure noise.
-    if (!skill.flagged && !overrides.has(name)) continue;
+    if (!skill || !skill.hiddenBy) continue;
+    // `/bro` and `/plugin:bro` can name the same skill.
+    if (reported.has(skill.key)) continue;
+    reported.add(skill.key);
     hits.push(skill);
     if (hits.length >= MAX_REPORT) break;
   }
