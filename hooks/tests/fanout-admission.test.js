@@ -1990,8 +1990,9 @@ test('uncappedFanouts(): omitted deadline is unaffected (existing in-process cal
 // Hook-seam test: the registration itself, in settings.json.
 // ===========================================================================
 
-// The registration is retired (sync.sh reconcile_fanout_admission_hook removes
-// it from live settings); the file stays because wf-pin-lex.js loads its lexer.
+// The registration is retired (sync.sh's reconcile_fanout_admission_hook removed
+// it from live settings until hov-stack #479 deleted that verb, once no host
+// registered it); the file stays because wf-pin-lex.js loads its lexer.
 test('hook-seam: settings.json no longer registers fanout-admission.js', () => {
   const settingsPath = path.resolve(__dirname, '..', '..', 'settings.json');
   const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));

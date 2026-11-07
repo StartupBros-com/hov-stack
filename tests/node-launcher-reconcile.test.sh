@@ -23,6 +23,8 @@ cp "$HERE/sync.sh" "$SRC/sync.sh"
 cp "$HERE/settings.json" "$SRC/settings.json"
 cp "$HERE/scripts/lib/floor-assert.sh" "$SRC/scripts/lib/"
 cp -a "$HERE/lib" "$SRC/lib"
+cp "$HERE/managed-settings.json" "$SRC/managed-settings.json"
+printf '%s\tworkstation\n' "$(hostname -s 2>/dev/null || hostname)" >"$SRC/hosts.tsv"
 SYNC=$SRC/sync.sh
 
 # shellcheck disable=SC2016 # the literal $HOME is the template spelling under test
@@ -52,6 +54,16 @@ make_home() {
 run() { # run <home> <verb...>
   local home=$1; shift
   HOME=$home CLAUDE_HOME=$home/.claude "$SYNC" "$@"
+}
+
+# apply <home> [args...]: the settings apply install runs, with its role gate
+# met by the fixture roster and nothing read from this host's overlay.
+apply() {
+  local home=$1; shift
+  env -u XDG_CONFIG_HOME -u DOTFILES_ROLE HOME="$home" CLAUDE_HOME="$home/.claude" \
+    HOV_STACK_OVERLAY="$TMP/overlay" DOTFILES_ROLE_FILE="$SRC/hosts.tsv" \
+    CLAUDE_SYNC_MANAGED_LOCK="$SRC/managed-settings.json" CLAUDE_WINDOWS_HOME="$TMP/windows-absent" \
+    "$SYNC" apply-settings "$@"
 }
 
 nodes() { jq '[.hooks[][].hooks[].command | select(startswith("node "))] | length' "$1"; }
@@ -107,18 +119,13 @@ for spelling in tpl home; do
   [ "$(find "$home/.claude/backups" -name settings.json -type f | wc -l)" = 1 ] && ok || bad "$spelling: second run wrote another backup"
   case $out2 in *"already reconciled"*) ok ;; *) bad "$spelling: second run did not say it was already reconciled: $out2" ;; esac
 
-  # The existing per-hook verbs, run afterwards, add no duplicate and no old-form twin.
-  for verb in reconcile-grep-cost-guard reconcile-heavy-job-admission reconcile-whatsapp-guard \
-              reconcile-pr-record-hook reconcile-shape-rewrite reconcile-skill-mention-hook \
-              reconcile-codex-quota-hook reconcile-repo-route-hook reconcile-context-fence \
-              reconcile-fanout-admission reconcile-memory-hook reconcile-push-tracking-pr-hook \
-              reconcile-worktree-claim-advisory-hook; do
-    out=$(run "$home" "$verb" 2>&1) && ok || bad "$spelling: $verb exited non-zero after migration: $out"
-  done
-  [ "$(dupes "$live")" = 0 ] && ok || bad "$spelling: duplicate command strings after the per-hook verbs"
-  [ "$(script_dupes "$live")" = 0 ] && ok || bad "$spelling: one script registered twice after the per-hook verbs"
-  [ "$(nodes "$live")" = 0 ] && ok || bad "$spelling: per-hook verbs re-introduced a node-form command"
-  # They must also have left the order alone: the guards stay anchored behind dcg.
+  # The apply, run afterwards as install runs it, adds no duplicate and no
+  # old-form twin: every tracked hook is already live in the launcher spelling.
+  out=$(apply "$home" 2>&1) && ok || bad "$spelling: apply-settings exited non-zero after migration: $out"
+  [ "$(dupes "$live")" = 0 ] && ok || bad "$spelling: duplicate command strings after the apply"
+  [ "$(script_dupes "$live")" = 0 ] && ok || bad "$spelling: one script registered twice after the apply"
+  [ "$(nodes "$live")" = 0 ] && ok || bad "$spelling: the apply re-introduced a node-form command"
+  # It left the order alone too: the guards stay behind dcg.
   check "$spelling: guard order after dcg must hold" \
     jq -e '[.hooks.PreToolUse[] | select(.matcher | test("Bash")) | .hooks[].command] as $c
            | ($c | map(contains("dcg")) | index(true)) as $d
@@ -127,23 +134,15 @@ for spelling in tpl home; do
            | $d != null and $g > $d and $h > $g' "$live"
 done
 
-# Reverse order: the per-hook verbs first (a host that runs one before the migration),
-# then the migration. Both orders must converge on the same command set.
+# PLANTED NEGATIVE: the apply on an unmigrated file registers tracked scripts a
+# second time, because it keys `node "..."` and the launcher spelling as two
+# different hooks. That is why install runs reconcile_node_launcher_hooks first
+# (the wiring check below). If this starts failing, the engine folds the two
+# spellings and the migration may be retireable (hov-stack #479).
 home=$(make_home "rev-tpl" tpl)
 live=$home/.claude/settings.json
-for verb in reconcile-grep-cost-guard reconcile-heavy-job-admission reconcile-whatsapp-guard \
-            reconcile-pr-record-hook reconcile-shape-rewrite reconcile-skill-mention-hook \
-            reconcile-repo-route-hook reconcile-codex-quota-hook; do
-  out=$(run "$home" "$verb" 2>&1) && ok || bad "rev: $verb exited non-zero before migration: $out"
-done
-[ "$(dupes "$live")" = 0 ] && ok || bad "rev: duplicate commands after per-hook verbs on an unmigrated file"
-[ "$(script_dupes "$live")" = 0 ] && ok || bad "rev: one script registered twice after per-hook verbs on an unmigrated file"
-out=$(run "$home" reconcile-node-launcher 2>&1) && ok || bad "rev: migration after the verbs exited non-zero: $out"
-[ "$(nodes "$live")" = 0 ] && ok || bad "rev: node-form commands remain after migration"
-[ "$(script_dupes "$live")" = 0 ] && ok || bad "rev: one script registered twice after migration"
-check "rev: both orders must converge on the same commands" \
-  jq -en --slurpfile a "$live" --slurpfile b "$TMP/mig-tpl/.claude/settings.json" '
-    ([$a[0].hooks[][].hooks[].command] | sort) == ([$b[0].hooks[][].hooks[].command] | sort)'
+out=$(apply "$home" 2>&1) && ok || bad "rev: apply-settings exited non-zero on an unmigrated file: $out"
+[ "$(script_dupes "$live")" -gt 0 ] && ok || bad "rev: the apply on an unmigrated file registered no script twice; if the engine now folds the node and launcher spellings, reconcile_node_launcher_hooks may be retireable (hov-stack #479)"
 
 # Refusal: no launcher, no change (a registration whose launcher is absent exits 127,
 # which Claude Code treats as non-blocking, so the guards would silently be off).
@@ -156,15 +155,13 @@ out=$(run "$home" reconcile-node-launcher 2>&1); status=$?
 [ "$status" -ne 0 ] && ok || bad "no launcher: reconcile-node-launcher should exit non-zero"
 cmp -s "$TMP/nl-before.json" "$home/.claude/settings.json" && ok || bad "no launcher: settings.json changed"
 case $out in *"launcher"*"missing"*) ok ;; *) bad "no launcher: refusal should name the missing launcher: $out" ;; esac
-# A per-hook verb that registers a launcher-form command refuses too. The hook script exists, so
-# only the missing launcher can be the reason (the target check runs first and would refuse
-# for a different cause). reconcile-pr-record-hook is a retire verb now and registers nothing.
-mkdir -p "$home/.claude/hooks/PreToolUse"
-: >"$home/.claude/hooks/PreToolUse/shape-rewrite.js"
-out=$(run "$home" reconcile-shape-rewrite 2>&1); status=$?
-[ "$status" -ne 0 ] && ok || bad "no launcher: a per-hook verb must refuse to register an unrunnable launcher command"
-case $out in *"launcher"*"missing"*) ok ;; *) bad "no launcher: the per-hook refusal should name the missing launcher: $out" ;; esac
-cmp -s "$TMP/nl-before.json" "$home/.claude/settings.json" && ok || bad "no launcher: a per-hook verb changed settings.json"
+# The apply refuses too: it would register the tracked hooks in the launcher
+# spelling, and with no launcher it skips each one rather than write a command
+# that exits 127. Skipped hooks are retried on the next run, not an error.
+out=$(apply "$home" 2>&1); status=$?
+[ "$status" -eq 0 ] && ok || bad "no launcher: apply-settings should skip, not fail: $out"
+case $out in *"target missing at $home/.claude/hooks/bin/node-hook"*) ok ;; *) bad "no launcher: the apply should name the missing launcher: $out" ;; esac
+[ "$(launched "$home/.claude/settings.json")" = 0 ] && ok || bad "no launcher: the apply registered a launcher command with no launcher"
 
 # No live settings.json: nothing to migrate, not an error.
 home=$TMP/empty-home
@@ -174,9 +171,11 @@ chmod +x "$home/.claude/hooks/bin/node-hook"
 out=$(run "$home" reconcile-node-launcher 2>&1) && ok || bad "no live file: should succeed: $out"
 [ ! -e "$home/.claude/settings.json" ] && ok || bad "no live file: must not create one"
 
-# Install wiring: the verb is called from install ahead of the per-hook verbs.
+# Install wiring: the verb is called from install ahead of dcg and the apply.
 check "install must run reconcile_node_launcher_hooks before reconcile_dcg_hook" \
   bash -c 'a=$(grep -n "^    reconcile_node_launcher_hooks || return 1" "$1" | cut -d: -f1); b=$(grep -n "^    reconcile_dcg_hook || return 1" "$1" | cut -d: -f1); [ -n "$a" ] && [ -n "$b" ] && [ "$a" -lt "$b" ]' _ "$HERE/sync.sh"
+check "install must run reconcile_node_launcher_hooks before apply_settings" \
+  bash -c 'a=$(grep -n "^    reconcile_node_launcher_hooks || return 1" "$1" | cut -d: -f1); b=$(grep -n "^    apply_settings || settings_apply_failed=1" "$1" | cut -d: -f1); [ -n "$a" ] && [ -n "$b" ] && [ "$a" -lt "$b" ]' _ "$HERE/sync.sh"
 
 if [ "$FAILN" -eq 0 ]; then
   echo "ok - node-launcher reconcile: $PASS assertions passed"

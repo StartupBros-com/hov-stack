@@ -1088,76 +1088,18 @@ else
   bad "Windows reconcile did not skip an absent Windows home:"$'\n'"$win_gone_out"
 fi
 
-# Exercise reconcile_hook_group's fresh-settings branch without allowing the
-# shell function named install() to shadow the external install utility. A
-# standalone hook reconcile must create only settings.json; entering the full
-# installer would also link CLAUDE.md and mutate unrelated harness surfaces.
-fresh_hook_home=$TMP/hook-fresh
-mkdir -p "$fresh_hook_home"
-ln -s "$REPO/hooks" "$fresh_hook_home/hooks"
-fresh_hook_out=$(CLAUDE_HOME="$fresh_hook_home" "$SYNC" reconcile-grep-cost-guard 2>&1); fresh_hook_status=$?
-if [ "$fresh_hook_status" -eq 0 ]; then ok; else bad "fresh reconcile-grep-cost-guard exited $fresh_hook_status:"$'\n'"$fresh_hook_out"; fi
-if jq -e '
-    [.hooks.PreToolUse[]?.hooks[]? | .command]
-    | index("\"$HOME/.claude/hooks/bin/node-hook\" \"$HOME/.claude/hooks/PreToolUse/grep-cost-guard.js\"") != null
-  ' "$fresh_hook_home/settings.json" >/dev/null; then
-  ok
-else
-  bad "fresh reconcile-grep-cost-guard did not seed the canonical guard"
-fi
-
-fresh_heavy_home=$TMP/heavy-hook-fresh
-mkdir -p "$fresh_heavy_home"
-ln -s "$REPO/hooks" "$fresh_heavy_home/hooks"
-fresh_heavy_out=$(CLAUDE_HOME="$fresh_heavy_home" "$SYNC" reconcile-heavy-job-admission 2>&1); fresh_heavy_status=$?
-if [ "$fresh_heavy_status" -eq 0 ]; then ok; else bad "fresh reconcile-heavy-job-admission exited $fresh_heavy_status:"$'\n'"$fresh_heavy_out"; fi
-if jq -e '
-    [.hooks.PreToolUse[]?.hooks[]? | .command]
-    | index("\"$HOME/.claude/hooks/bin/node-hook\" \"$HOME/.claude/hooks/PreToolUse/heavy-job-admission.js\"") != null
-  ' "$fresh_heavy_home/settings.json" >/dev/null; then
-  ok
-else
-  bad "fresh reconcile-heavy-job-admission did not seed the canonical guard"
-fi
-if [ ! -e "$fresh_heavy_home/CLAUDE.md" ]; then
-  ok
-else
-  bad "standalone heavy-job hook reconcile entered the full install() function"
-fi
-
-# A standalone reconcile with no hook tree must fail before even seeding
-# settings. The explicit foreign-host install skip is the only supported bypass.
-parentless_whatsapp_root=$TMP/whatsapp-hook-parentless
-parentless_whatsapp_home=$parentless_whatsapp_root/.claude
-parentless_whatsapp_out=$(HOME="$parentless_whatsapp_root" \
-  CLAUDE_HOME="$parentless_whatsapp_home" "$SYNC" reconcile-whatsapp-guard 2>&1)
-parentless_whatsapp_status=$?
-if [ "$parentless_whatsapp_status" -ne 0 ] \
-   && grep -Fq 'does not exist' <<<"$parentless_whatsapp_out" \
-   && [ ! -e "$parentless_whatsapp_home/settings.json" ]; then
-  ok
-else
-  bad "parentless WhatsApp reconcile registered a missing hook target:"$'\n'"$parentless_whatsapp_out"
-fi
-
-fresh_whatsapp_root=$TMP/whatsapp-hook-fresh
-fresh_whatsapp_home=$fresh_whatsapp_root/.claude
-mkdir -p "$fresh_whatsapp_home"
-ln -s "$REPO/hooks" "$fresh_whatsapp_home/hooks"
-fresh_whatsapp_out=$(HOME="$fresh_whatsapp_root" CLAUDE_HOME="$fresh_whatsapp_home" "$SYNC" reconcile-whatsapp-guard 2>&1); fresh_whatsapp_status=$?
-if [ "$fresh_whatsapp_status" -eq 0 ]; then ok; else bad "fresh reconcile-whatsapp-guard exited $fresh_whatsapp_status:"$'\n'"$fresh_whatsapp_out"; fi
-if jq -e '
-    [.hooks.PreToolUse[]?.hooks[]? | .command]
-    | index("\"$HOME/.claude/hooks/bin/node-hook\" \"$HOME/.claude/hooks/PreToolUse/whatsapp-guard.js\"") != null
-  ' "$fresh_whatsapp_home/settings.json" >/dev/null; then
-  ok
-else
-  bad "fresh reconcile-whatsapp-guard did not seed the canonical guard"
-fi
+# -- The tracked WhatsApp guard command runs the deployed guard ----------------
+# The tracked settings.json spells the guard with the runtime $HOME, so account
+# authority is never published beside a missing hook. Run that exact command,
+# as the hook runner would, from a home whose hooks are this checkout's.
+fresh_whatsapp_root=$TMP/whatsapp-hook-runtime
+mkdir -p "$fresh_whatsapp_root/.claude"
+ln -s "$REPO/hooks" "$fresh_whatsapp_root/.claude/hooks"
 fresh_whatsapp_command=$(jq -r '
   [.hooks.PreToolUse[]?.hooks[]? | select(.command | contains("whatsapp-guard.js")) | .command]
   | if length == 1 then .[0] else empty end
-' "$fresh_whatsapp_home/settings.json")
+' "$REPO/settings.json")
+if [ -n "$fresh_whatsapp_command" ]; then ok; else bad "the tracked settings.json does not register the WhatsApp guard exactly once"; fi
 # A non-wacli Bash call is a no-op for this guard: quiet pass-through means
 # exit 0 and empty stdout (issue #1339), not an echo of the probe input --
 # exit 0 with a crashed/MODULE_NOT_FOUND hook's empty stdout would otherwise
@@ -1183,17 +1125,6 @@ if [ "$fresh_whatsapp_deny_probe_status" -eq 0 ] \
   ok
 else
   bad "runtime-home WhatsApp hook command did not deny a shell-expanded wacli call (status $fresh_whatsapp_deny_probe_status):"$'\n'"$fresh_whatsapp_deny_probe_out"
-fi
-if [ ! -e "$fresh_whatsapp_home/CLAUDE.md" ]; then
-  ok
-else
-  bad "standalone WhatsApp hook reconcile entered the full install() function"
-fi
-
-if [ ! -e "$fresh_hook_home/CLAUDE.md" ]; then
-  ok
-else
-  bad "standalone hook reconcile entered the full install() function"
 fi
 
 # -- StructuredOutput unwrap: the papercut plugin registers it, sync.sh does not
@@ -1241,21 +1172,7 @@ else
   bad "read-ceiling-chunk rewrote a first attempt with no recorded failure (status $fresh_chunk_probe_status):"$'\n'"$fresh_chunk_probe_out"
 fi
 
-# -- Shape rewrite hook reaches a fresh live settings.json -------------------
-fresh_shape_root=$TMP/shape-hook-fresh
-fresh_shape_home=$fresh_shape_root/.claude
-mkdir -p "$fresh_shape_home"
-ln -s "$REPO/hooks" "$fresh_shape_home/hooks"
-fresh_shape_out=$(HOME="$fresh_shape_root" CLAUDE_HOME="$fresh_shape_home" "$SYNC" reconcile-shape-rewrite 2>&1); fresh_shape_status=$?
-if [ "$fresh_shape_status" -eq 0 ]; then ok; else bad "fresh reconcile-shape-rewrite exited $fresh_shape_status:"$'\n'"$fresh_shape_out"; fi
-if jq -e '
-    [.hooks.PreToolUse[]? | select(.matcher == "Bash") | .hooks[]? | .command]
-    | index("\"$HOME/.claude/hooks/bin/node-hook\" \"$HOME/.claude/hooks/PreToolUse/shape-rewrite.js\"") != null
-  ' "$fresh_shape_home/settings.json" >/dev/null; then
-  ok
-else
-  bad "fresh reconcile-shape-rewrite did not seed the Bash matcher group"
-fi
+# -- Shape rewrite passes a non-isolated call through ---------------------------
 # A non-isolated call (cwd carries no .claude/worktrees/ segment) is outside
 # what this hook ever rewrites, so it must quietly pass through (empty
 # stdout, exit 0 -- issue #1339; no longer a byte-for-byte echo).
@@ -1266,129 +1183,6 @@ if [ "$fresh_shape_probe_status" -eq 0 ] && [ -z "$fresh_shape_probe_out" ]; the
 else
   bad "shape-rewrite rewrote a non-isolated call with no worktree cwd (status $fresh_shape_probe_status):"$'\n'"$fresh_shape_probe_out"
 fi
-# reconcile_hook_group anchors shape-rewrite after runner-guard so every
-# sibling Bash guard still sees the original command text; assert the
-# ordering survived the seed, not just that both groups exist.
-fresh_shape_idx=$(jq -r '
-    [.hooks.PreToolUse[] | ([.hooks[]? | select(.command == "\"$HOME/.claude/hooks/bin/node-hook\" \"$HOME/.claude/hooks/PreToolUse/shape-rewrite.js\"")] | length > 0)]
-    | index(true)
-  ' "$fresh_shape_home/settings.json")
-fresh_runner_idx=$(jq -r '
-    [.hooks.PreToolUse[] | ([.hooks[]? | select(.command == "\"$HOME/.claude/hooks/bin/node-hook\" \"$HOME/.claude/hooks/PreToolUse/runner-guard.js\"")] | length > 0)]
-    | index(true)
-  ' "$fresh_shape_home/settings.json")
-if [ "$fresh_runner_idx" = "null" ]; then
-  ok
-elif [ -n "$fresh_shape_idx" ] && [ "$fresh_shape_idx" != "null" ] && [ "$fresh_shape_idx" -gt "$fresh_runner_idx" ]; then
-  ok
-else
-  bad "shape-rewrite group (index $fresh_shape_idx) is not registered after runner-guard (index $fresh_runner_idx)"
-fi
-
-# -- push-tracking-pr registration is retired ---------------------------------
-# dotfiles#1428 added the PostToolUse push-tracking-pr hook, which opened a
-# branch's draft PR on its first content push through pr-open-if-missing.sh.
-# Fleet teardown move 7 (2026-10-17) deleted both; agents open their own PR
-# with `gh pr create`. reconcile now only removes the registration. A fresh
-# host has nothing to remove and must not get a settings.json seeded with it.
-PUSHPR_COMMAND='node "$HOME/.claude/hooks/run-with-flags.js" "post:push:pr" "PostToolUse/push-tracking-pr.js" "standard,strict"'
-PR_RECORD_COMMAND='"$HOME/.claude/hooks/bin/node-hook" "$HOME/.claude/hooks/PostToolUse/pr-record.js"'
-fresh_pushpr_root=$TMP/push-tracking-pr-hook-fresh
-fresh_pushpr_home=$fresh_pushpr_root/.claude
-mkdir -p "$fresh_pushpr_home"
-ln -s "$REPO/hooks" "$fresh_pushpr_home/hooks"
-fresh_pushpr_out=$(HOME="$fresh_pushpr_root" CLAUDE_HOME="$fresh_pushpr_home" "$SYNC" reconcile-push-tracking-pr-hook 2>&1); fresh_pushpr_status=$?
-if [ "$fresh_pushpr_status" -eq 0 ]; then ok; else bad "fresh reconcile-push-tracking-pr-hook exited $fresh_pushpr_status:"$'\n'"$fresh_pushpr_out"; fi
-if [ ! -f "$fresh_pushpr_home/settings.json" ] || ! jq -e --arg c "$PUSHPR_COMMAND" '
-    [.hooks[]?[]?.hooks[]? | .command] | index($c) != null
-  ' "$fresh_pushpr_home/settings.json" >/dev/null; then
-  ok
-else
-  bad "fresh reconcile-push-tracking-pr-hook registered the retired hook"
-fi
-
-# A pre-existing host still carries the registration beside the sibling
-# pr-record group and an unrelated hook; reconcile removes exactly that group,
-# keeps every other hook (pr-record has its own retire, tested below),
-# keeps the file mode, and backs the old settings up.
-echo "=== push-tracking-pr hook retire (pre-existing host) ===" >&2
-PUSHPR_RECON_ROOT=$TMP/push-tracking-pr-recon-existing
-PUSHPR_RECON_HOME=$PUSHPR_RECON_ROOT/.claude
-mkdir -p "$PUSHPR_RECON_HOME"
-ln -s "$REPO/hooks" "$PUSHPR_RECON_HOME/hooks"
-jq -n --arg rec "$PR_RECORD_COMMAND" --arg push "$PUSHPR_COMMAND" '
-  {hooks:{PostToolUse:[
-    {matcher:"Bash",hooks:[{type:"command",command:$rec,timeout:5}]},
-    {matcher:"Bash",hooks:[{type:"command",command:$push,timeout:30}]},
-    {matcher:"*",hooks:[{type:"command",command:"keep-this-unrelated-hook"}]}
-  ]}}
-' >"$PUSHPR_RECON_HOME/settings.json"
-chmod 0640 "$PUSHPR_RECON_HOME/settings.json"
-pushpr_recon_out=$(HOME="$PUSHPR_RECON_ROOT" CLAUDE_HOME="$PUSHPR_RECON_HOME" \
-  "$SYNC" reconcile-push-tracking-pr-hook 2>&1); pushpr_recon_status=$?
-if [ "$pushpr_recon_status" -eq 0 ]; then ok; else bad "push-tracking-pr retire (pre-existing host) exited $pushpr_recon_status:"$'\n'"$pushpr_recon_out"; fi
-if jq -e --arg rec "$PR_RECORD_COMMAND" '
-    [.hooks.PostToolUse[]?.hooks[]? | .command]
-    == [$rec, "keep-this-unrelated-hook"]
-  ' "$PUSHPR_RECON_HOME/settings.json" >/dev/null; then
-  ok
-else
-  bad "push-tracking-pr retire (pre-existing host) did not remove exactly the push-tracking-pr group:"$'\n'"$(jq -c '.hooks.PostToolUse' "$PUSHPR_RECON_HOME/settings.json")"
-fi
-if [ "$(stat -c %a "$PUSHPR_RECON_HOME/settings.json")" = 640 ]; then ok; else bad "push-tracking-pr retire (pre-existing host) changed live settings mode"; fi
-if find "$PUSHPR_RECON_HOME/backups" -path '*hook-retire-*' -name settings.json -type f -print -quit | grep -q .; then ok; else bad "push-tracking-pr retire (pre-existing host) did not back up live settings"; fi
-
-# The same retirement for a live file rendered before the tracked file became a
-# $HOME template: the registration spells this harness home, not the template,
-# and must still be recognised as the retired hook.
-echo "=== push-tracking-pr hook retire (rendered spelling) ===" >&2
-PUSHPR_RENDERED_ROOT=$TMP/push-tracking-pr-recon-rendered
-PUSHPR_RENDERED_HOME=$PUSHPR_RENDERED_ROOT/.claude
-mkdir -p "$PUSHPR_RENDERED_HOME"
-ln -s "$REPO/hooks" "$PUSHPR_RENDERED_HOME/hooks"
-pushpr_rendered_cmd="node \"$PUSHPR_RENDERED_HOME/hooks/run-with-flags.js\" \"post:push:pr\" \"PostToolUse/push-tracking-pr.js\" \"standard,strict\""
-jq -n --arg rec "$PR_RECORD_COMMAND" --arg push "$pushpr_rendered_cmd" '
-  {hooks:{PostToolUse:[
-    {matcher:"Bash",hooks:[{type:"command",command:$rec,timeout:5}]},
-    {matcher:"Bash",hooks:[{type:"command",command:$push,timeout:30}]}
-  ]}}
-' >"$PUSHPR_RENDERED_HOME/settings.json"
-pushpr_rendered_out=$(HOME="$PUSHPR_RENDERED_ROOT" CLAUDE_HOME="$PUSHPR_RENDERED_HOME" \
-  "$SYNC" reconcile-push-tracking-pr-hook 2>&1); pushpr_rendered_status=$?
-if [ "$pushpr_rendered_status" -eq 0 ]; then ok; else bad "push-tracking-pr retire (rendered spelling) exited $pushpr_rendered_status:"$'\n'"$pushpr_rendered_out"; fi
-if jq -e --arg rec "$PR_RECORD_COMMAND" '
-    [.hooks.PostToolUse[]?.hooks[]? | .command] == [$rec]
-  ' "$PUSHPR_RENDERED_HOME/settings.json" >/dev/null; then
-  ok
-else
-  bad "push-tracking-pr retire left the rendered-spelling registration in place:"$'\n'"$(jq -c '.hooks.PostToolUse' "$PUSHPR_RENDERED_HOME/settings.json")"
-fi
-
-# The same retirement for a live file rendered before the tracked file became a
-# $HOME template: the registration spells this harness home, not the template,
-# and must still be recognised as the retired hook.
-echo "=== push-tracking-pr hook retire (rendered spelling) ===" >&2
-PUSHPR_RENDERED_ROOT=$TMP/push-tracking-pr-recon-rendered
-PUSHPR_RENDERED_HOME=$PUSHPR_RENDERED_ROOT/.claude
-mkdir -p "$PUSHPR_RENDERED_HOME"
-ln -s "$REPO/hooks" "$PUSHPR_RENDERED_HOME/hooks"
-pushpr_rendered_cmd="node \"$PUSHPR_RENDERED_HOME/hooks/run-with-flags.js\" \"post:push:pr\" \"PostToolUse/push-tracking-pr.js\" \"standard,strict\""
-jq -n --arg rec "$PR_RECORD_COMMAND" --arg push "$pushpr_rendered_cmd" '
-  {hooks:{PostToolUse:[
-    {matcher:"Bash",hooks:[{type:"command",command:$rec,timeout:5}]},
-    {matcher:"Bash",hooks:[{type:"command",command:$push,timeout:30}]}
-  ]}}
-' >"$PUSHPR_RENDERED_HOME/settings.json"
-pushpr_rendered_out=$(HOME="$PUSHPR_RENDERED_ROOT" CLAUDE_HOME="$PUSHPR_RENDERED_HOME" \
-  "$SYNC" reconcile-push-tracking-pr-hook 2>&1); pushpr_rendered_status=$?
-if [ "$pushpr_rendered_status" -eq 0 ]; then ok; else bad "push-tracking-pr retire (rendered spelling) exited $pushpr_rendered_status:"$'\n'"$pushpr_rendered_out"; fi
-if jq -e --arg rec "$PR_RECORD_COMMAND" '
-    [.hooks.PostToolUse[]?.hooks[]? | .command] == [$rec]
-  ' "$PUSHPR_RENDERED_HOME/settings.json" >/dev/null; then
-  ok
-else
-  bad "push-tracking-pr retire left the rendered-spelling registration in place:"$'\n'"$(jq -c '.hooks.PostToolUse' "$PUSHPR_RENDERED_HOME/settings.json")"
-fi
 
 # -- pr-record registration is retired ----------------------------------------
 # The PostToolUse pr-record hook wrote session->PR rows for the Stop hook's
@@ -1396,6 +1190,7 @@ fi
 # reconcile now only removes the registration, in either spelling; the tracked
 # settings.json no longer carries it, and a fresh host must not get it seeded.
 echo "=== pr-record hook retire ===" >&2
+PR_RECORD_COMMAND='"$HOME/.claude/hooks/bin/node-hook" "$HOME/.claude/hooks/PostToolUse/pr-record.js"'
 if ! grep -qF 'PostToolUse/pr-record.js' "$REPO/settings.json"; then ok; else bad "the tracked settings.json still registers the retired pr-record hook"; fi
 fresh_prrec_root=$TMP/pr-record-hook-fresh
 fresh_prrec_home=$fresh_prrec_root/.claude
@@ -1420,14 +1215,18 @@ jq -n --arg rec "$PR_RECORD_COMMAND" --arg rendered "$prrec_rendered_cmd" '
     {matcher:"Bash",hooks:[{type:"command",command:$rec,timeout:10}]},
     {matcher:"Bash",hooks:[{type:"command",command:$rendered,timeout:10}]},
     {matcher:"*",hooks:[{type:"command",command:"keep-this-unrelated-hook"}]}
-  ]}}
+  ],
+  # A copy under another event: the retire walks every event, and an event it
+  # empties is left as an empty list rather than a group with no hooks.
+  Stop:[{matcher:"*",hooks:[{type:"command",command:$rec,timeout:10}]}]}}
 ' >"$PRREC_RECON_HOME/settings.json"
 chmod 0640 "$PRREC_RECON_HOME/settings.json"
 prrec_recon_out=$(HOME="$PRREC_RECON_ROOT" CLAUDE_HOME="$PRREC_RECON_HOME" \
   "$SYNC" reconcile-pr-record-hook 2>&1); prrec_recon_status=$?
 if [ "$prrec_recon_status" -eq 0 ]; then ok; else bad "pr-record retire (pre-existing host) exited $prrec_recon_status:"$'\n'"$prrec_recon_out"; fi
 if jq -e '
-    [.hooks.PostToolUse[]?.hooks[]? | .command] == ["keep-this-unrelated-hook"]
+    ([.hooks.PostToolUse[]?.hooks[]? | .command] == ["keep-this-unrelated-hook"])
+    and (.hooks.Stop == [])
   ' "$PRREC_RECON_HOME/settings.json" >/dev/null; then
   ok
 else
@@ -1435,276 +1234,15 @@ else
 fi
 if [ "$(stat -c %a "$PRREC_RECON_HOME/settings.json")" = 640 ]; then ok; else bad "pr-record retire (pre-existing host) changed live settings mode"; fi
 if find "$PRREC_RECON_HOME/backups" -path '*hook-retire-*' -name settings.json -type f -print -quit | grep -q .; then ok; else bad "pr-record retire (pre-existing host) did not back up live settings"; fi
-
-# -- worktree-claim-advisory registration is retired -------------------------
-# The PostToolUse EnterWorktree worktree-claim-advisory hook ran the dedup
-# pre-flight. Fleet teardown move 7b (2026-10-17) deleted the claim and dedup
-# machinery and the hook; reconcile only removes a lingering registration.
-WTCLAIM_COMMAND='node "$HOME/.claude/hooks/PostToolUse/worktree-claim-advisory.js"'
-fresh_wtclaim_root=$TMP/worktree-claim-advisory-hook-fresh
-fresh_wtclaim_home=$fresh_wtclaim_root/.claude
-mkdir -p "$fresh_wtclaim_home"
-ln -s "$REPO/hooks" "$fresh_wtclaim_home/hooks"
-fresh_wtclaim_out=$(HOME="$fresh_wtclaim_root" CLAUDE_HOME="$fresh_wtclaim_home" "$SYNC" reconcile-worktree-claim-advisory-hook 2>&1); fresh_wtclaim_status=$?
-if [ "$fresh_wtclaim_status" -eq 0 ]; then ok; else bad "fresh reconcile-worktree-claim-advisory-hook exited $fresh_wtclaim_status:"$'\n'"$fresh_wtclaim_out"; fi
-if [ ! -f "$fresh_wtclaim_home/settings.json" ] || ! jq -e --arg c "$WTCLAIM_COMMAND" '
-    [.hooks[]?[]?.hooks[]? | .command] | index($c) != null
-  ' "$fresh_wtclaim_home/settings.json" >/dev/null; then
+prrec_recon_after=$(jq -S . "$PRREC_RECON_HOME/settings.json")
+prrec_again_out=$(HOME="$PRREC_RECON_ROOT" CLAUDE_HOME="$PRREC_RECON_HOME" \
+  "$SYNC" reconcile-pr-record-hook 2>&1); prrec_again_status=$?
+prrec_backups_n=$(find "$PRREC_RECON_HOME/backups" -path '*hook-retire-*' -name settings.json -type f 2>/dev/null | wc -l)
+if [ "$prrec_again_status" -eq 0 ] && [ "$(jq -S . "$PRREC_RECON_HOME/settings.json")" = "$prrec_recon_after" ] \
+   && [ "$prrec_backups_n" -eq 1 ]; then
   ok
 else
-  bad "fresh reconcile-worktree-claim-advisory-hook registered the retired hook"
-fi
-
-# A pre-existing host carrying the advisory group beside an unrelated hook
-# loses only the advisory group, keeps the file mode, and gets a backup.
-echo "=== worktree-claim-advisory hook retire (pre-existing host) ===" >&2
-WTCLAIM_RECON_ROOT=$TMP/worktree-claim-advisory-recon-existing
-WTCLAIM_RECON_HOME=$WTCLAIM_RECON_ROOT/.claude
-mkdir -p "$WTCLAIM_RECON_HOME"
-ln -s "$REPO/hooks" "$WTCLAIM_RECON_HOME/hooks"
-jq -n --arg adv "$WTCLAIM_COMMAND" '
-  {hooks:{PostToolUse:[
-    {matcher:"EnterWorktree",hooks:[{type:"command",command:$adv,timeout:30}]},
-    {matcher:"*",hooks:[{type:"command",command:"keep-this-unrelated-hook"}]}
-  ]}}
-' >"$WTCLAIM_RECON_HOME/settings.json"
-chmod 0640 "$WTCLAIM_RECON_HOME/settings.json"
-wtclaim_recon_out=$(HOME="$WTCLAIM_RECON_ROOT" CLAUDE_HOME="$WTCLAIM_RECON_HOME" \
-  "$SYNC" reconcile-worktree-claim-advisory-hook 2>&1); wtclaim_recon_status=$?
-if [ "$wtclaim_recon_status" -eq 0 ]; then ok; else bad "worktree-claim-advisory retire (pre-existing host) exited $wtclaim_recon_status:"$'\n'"$wtclaim_recon_out"; fi
-if jq -e '[.hooks.PostToolUse[]?.hooks[]? | .command] == ["keep-this-unrelated-hook"]' "$WTCLAIM_RECON_HOME/settings.json" >/dev/null; then
-  ok
-else
-  bad "worktree-claim-advisory retire (pre-existing host) did not remove exactly the advisory group:"$'\n'"$(jq -c '.hooks.PostToolUse' "$WTCLAIM_RECON_HOME/settings.json")"
-fi
-if [ "$(stat -c %a "$WTCLAIM_RECON_HOME/settings.json")" = 640 ]; then ok; else bad "worktree-claim-advisory retire (pre-existing host) changed live settings mode"; fi
-if find "$WTCLAIM_RECON_HOME/backups" -path '*hook-retire-*' -name settings.json -type f -print -quit | grep -q .; then ok; else bad "worktree-claim-advisory retire (pre-existing host) did not back up live settings"; fi
-
-# -- Context-fence registrations are retired ----------------------------------
-# dotfiles#1282 registered PreToolUse context-fence.js, Stop
-# context-fence-handoff.js and PostCompact compact-compliance-counter.js.
-# Harness teardown move 5 (2026-10-18) deleted all three hooks, and reconcile
-# now only removes their registrations, plus the earlier-retired
-# handoff-compliance.js. A fresh host has nothing to remove and must not get a
-# settings.json seeded with any of them.
-CTXFENCE_RETIRED_COMMANDS='["node \"$HOME/.claude/hooks/PreToolUse/context-fence.js\"","node \"$HOME/.claude/hooks/Stop/context-fence-handoff.js\"","node \"$HOME/.claude/hooks/PostCompact/compact-compliance-counter.js\"","node \"$HOME/.claude/hooks/PreToolUse/handoff-compliance.js\""]'
-fresh_ctxfence_root=$TMP/context-fence-hook-fresh
-fresh_ctxfence_home=$fresh_ctxfence_root/.claude
-mkdir -p "$fresh_ctxfence_home"
-ln -s "$REPO/hooks" "$fresh_ctxfence_home/hooks"
-fresh_ctxfence_out=$(HOME="$fresh_ctxfence_root" CLAUDE_HOME="$fresh_ctxfence_home" "$SYNC" reconcile-context-fence 2>&1); fresh_ctxfence_status=$?
-if [ "$fresh_ctxfence_status" -eq 0 ]; then ok; else bad "fresh reconcile-context-fence exited $fresh_ctxfence_status:"$'\n'"$fresh_ctxfence_out"; fi
-if [ ! -f "$fresh_ctxfence_home/settings.json" ] || ! jq -e --argjson retired "$CTXFENCE_RETIRED_COMMANDS" '
-    [.hooks[]?[]?.hooks[]? | .command] | any(. as $c | $retired | index($c) != null)
-  ' "$fresh_ctxfence_home/settings.json" >/dev/null; then
-  ok
-else
-  bad "fresh reconcile-context-fence registered a retired hook"
-fi
-
-# A pre-existing host still carries all four registrations beside loop-guard,
-# verify-on-stop and two unrelated hooks; reconcile removes exactly those groups
-# across the three events, keeps every other hook and the file mode, backs the
-# old settings up, and changes nothing on a second run.
-echo "=== context-fence hook retire (pre-existing host) ===" >&2
-CTXFENCE_RECON_ROOT=$TMP/context-fence-recon-existing
-CTXFENCE_RECON_HOME=$CTXFENCE_RECON_ROOT/.claude
-mkdir -p "$CTXFENCE_RECON_HOME"
-ln -s "$REPO/hooks" "$CTXFENCE_RECON_HOME/hooks"
-CTXFENCE_LOOP_COMMAND='node "$HOME/.claude/hooks/PreToolUse/loop-guard.js"'
-CTXFENCE_VERIFY_COMMAND='node "$HOME/.claude/hooks/Stop/verify-on-stop.js"'
-jq -n --arg loop "$CTXFENCE_LOOP_COMMAND" --arg verify "$CTXFENCE_VERIFY_COMMAND" --argjson retired "$CTXFENCE_RETIRED_COMMANDS" '
-  {hooks:{
-    PreToolUse:[
-      {matcher:"*",hooks:[{type:"command",command:"keep-this-unrelated-hook-a"}]},
-      {matcher:"*",hooks:[{type:"command",command:$loop}]},
-      {matcher:"*",hooks:[{type:"command",command:$retired[0],timeout:5}]},
-      {matcher:"*",hooks:[{type:"command",command:$retired[3],timeout:5}]},
-      {matcher:"*",hooks:[{type:"command",command:"keep-this-unrelated-hook-b"}]}
-    ],
-    PostCompact:[
-      {hooks:[{type:"command",command:$retired[2],timeout:10}]}
-    ],
-    Stop:[
-      {matcher:"*",hooks:[{type:"command",command:$verify,timeout:190}]},
-      {matcher:"*",hooks:[{type:"command",command:$retired[1],timeout:10}]}
-    ]
-  }}
-' >"$CTXFENCE_RECON_HOME/settings.json"
-chmod 0640 "$CTXFENCE_RECON_HOME/settings.json"
-ctxfence_recon_out=$(HOME="$CTXFENCE_RECON_ROOT" CLAUDE_HOME="$CTXFENCE_RECON_HOME" \
-  "$SYNC" reconcile-context-fence 2>&1); ctxfence_recon_status=$?
-if [ "$ctxfence_recon_status" -eq 0 ]; then ok; else bad "context-fence retire (pre-existing host) exited $ctxfence_recon_status:"$'\n'"$ctxfence_recon_out"; fi
-if jq -e --arg loop "$CTXFENCE_LOOP_COMMAND" --arg verify "$CTXFENCE_VERIFY_COMMAND" '
-    ([.hooks.PreToolUse[]?.hooks[]? | .command] == ["keep-this-unrelated-hook-a", $loop, "keep-this-unrelated-hook-b"])
-    and ([.hooks.Stop[]?.hooks[]? | .command] == [$verify])
-    and ([.hooks.PostCompact[]?.hooks[]? | .command] == [])
-  ' "$CTXFENCE_RECON_HOME/settings.json" >/dev/null; then
-  ok
-else
-  bad "context-fence retire (pre-existing host) did not remove exactly the four retired groups:"$'\n'"$(jq -c '.hooks' "$CTXFENCE_RECON_HOME/settings.json")"
-fi
-if [ "$(stat -c %a "$CTXFENCE_RECON_HOME/settings.json")" = 640 ]; then ok; else bad "context-fence retire (pre-existing host) changed live settings mode"; fi
-ctxfence_backups_n=$(find "$CTXFENCE_RECON_HOME/backups" -path '*hook-retire-*' -name settings.json -type f 2>/dev/null | wc -l)
-if [ "$ctxfence_backups_n" -eq 1 ]; then ok; else bad "context-fence retire (pre-existing host) did not back up live settings exactly once (found $ctxfence_backups_n)"; fi
-ctxfence_recon_after=$(jq -S . "$CTXFENCE_RECON_HOME/settings.json")
-ctxfence_recon_again_out=$(HOME="$CTXFENCE_RECON_ROOT" CLAUDE_HOME="$CTXFENCE_RECON_HOME" \
-  "$SYNC" reconcile-context-fence 2>&1); ctxfence_recon_again_status=$?
-ctxfence_backups_again_n=$(find "$CTXFENCE_RECON_HOME/backups" -path '*hook-retire-*' -name settings.json -type f 2>/dev/null | wc -l)
-if [ "$ctxfence_recon_again_status" -eq 0 ] && [ "$(jq -S . "$CTXFENCE_RECON_HOME/settings.json")" = "$ctxfence_recon_after" ] \
-   && [ "$ctxfence_backups_again_n" -eq 1 ]; then
-  ok
-else
-  bad "context-fence retire was not idempotent on a second run (exit $ctxfence_recon_again_status, backups $ctxfence_backups_again_n):"$'\n'"$ctxfence_recon_again_out"
-fi
-# -- Fanout admission registration is retired ---------------------------------
-# The hook file stays (wf-pin-lex.js loads its lexer), but reconcile now only
-# removes its registration. A fresh host has nothing to remove and must not get
-# a settings.json seeded with it.
-fresh_fanout_root=$TMP/fanout-hook-fresh
-fresh_fanout_home=$fresh_fanout_root/.claude
-mkdir -p "$fresh_fanout_home"
-ln -s "$REPO/hooks" "$fresh_fanout_home/hooks"
-fresh_fanout_out=$(HOME="$fresh_fanout_root" CLAUDE_HOME="$fresh_fanout_home" "$SYNC" reconcile-fanout-admission 2>&1); fresh_fanout_status=$?
-if [ "$fresh_fanout_status" -eq 0 ]; then ok; else bad "fresh reconcile-fanout-admission exited $fresh_fanout_status:"$'\n'"$fresh_fanout_out"; fi
-if [ ! -f "$fresh_fanout_home/settings.json" ] || ! jq -e '
-    [.hooks[]?[]?.hooks[]? | .command] | index("node \"$HOME/.claude/hooks/PreToolUse/fanout-admission.js\"") != null
-  ' "$fresh_fanout_home/settings.json" >/dev/null; then
-  ok
-else
-  bad "fresh reconcile-fanout-admission registered the retired hook"
-fi
-
-# A pre-existing host still carries the registration between loop-guard and an
-# unrelated hook; reconcile removes exactly that group, keeps every other hook
-# and the file mode, and backs the old settings up.
-echo "=== fanout-admission hook retire (pre-existing host) ===" >&2
-FANOUT_RECON_ROOT=$TMP/fanout-recon-existing
-FANOUT_RECON_HOME=$FANOUT_RECON_ROOT/.claude
-mkdir -p "$FANOUT_RECON_HOME"
-ln -s "$REPO/hooks" "$FANOUT_RECON_HOME/hooks"
-LOOP_GUARD_COMMAND='node "$HOME/.claude/hooks/PreToolUse/loop-guard.js"'
-FANOUT_COMMAND='node "$HOME/.claude/hooks/PreToolUse/fanout-admission.js"'
-jq -n --arg loop "$LOOP_GUARD_COMMAND" --arg fanout "$FANOUT_COMMAND" '
-  {hooks:{PreToolUse:[
-    {matcher:"*",hooks:[{type:"command",command:"keep-this-unrelated-hook-a"}]},
-    {matcher:"*",hooks:[{type:"command",command:$loop}]},
-    {matcher:"Task|Workflow",hooks:[{type:"command",command:$fanout,timeout:5}]},
-    {matcher:"*",hooks:[{type:"command",command:"keep-this-unrelated-hook-b"}]}
-  ]}}
-' >"$FANOUT_RECON_HOME/settings.json"
-chmod 0640 "$FANOUT_RECON_HOME/settings.json"
-fanout_recon_out=$(HOME="$FANOUT_RECON_ROOT" CLAUDE_HOME="$FANOUT_RECON_HOME" \
-  "$SYNC" reconcile-fanout-admission 2>&1); fanout_recon_status=$?
-if [ "$fanout_recon_status" -eq 0 ]; then ok; else bad "fanout-admission retire (pre-existing host) exited $fanout_recon_status:"$'\n'"$fanout_recon_out"; fi
-if jq -e --arg loop "$LOOP_GUARD_COMMAND" '
-    [.hooks.PreToolUse[]?.hooks[]? | .command]
-    == ["keep-this-unrelated-hook-a", $loop, "keep-this-unrelated-hook-b"]
-  ' "$FANOUT_RECON_HOME/settings.json" >/dev/null; then
-  ok
-else
-  bad "fanout-admission retire (pre-existing host) did not remove exactly the fanout-admission group:"$'\n'"$(jq -c '.hooks.PreToolUse' "$FANOUT_RECON_HOME/settings.json")"
-fi
-if [ "$(stat -c %a "$FANOUT_RECON_HOME/settings.json")" = 640 ]; then ok; else bad "fanout-admission retire (pre-existing host) changed live settings mode"; fi
-if find "$FANOUT_RECON_HOME/backups" -path '*hook-retire-*' -name settings.json -type f -print -quit | grep -q .; then ok; else bad "fanout-admission retire (pre-existing host) did not back up live settings"; fi
-
-# -- reconcile retires provably-dead hook twins, and only those --------------
-# dotfiles#509: reconcile_hook_group strips prior registrations by exact
-# command-string equality, so a hook that MOVES leaves its old registration
-# behind and the canonical one is inserted BESIDE it. Every matching event then
-# fires a command that cannot run, while settings.json looks correct and
-# install prints success. Measured 2026-08-27 — two such twins survived a
-# textbook-correct cutover and were found only by hand.
-#
-# Rule under test: retire a registration whose target has the same basename as
-# the canonical hook AND is absent from disk. All four cases run against ONE
-# fixture in ONE reconcile, because the property that matters is selectivity —
-# a rule that retires the dead twin but also eats the live one is worse than
-# the bug it fixes.
-echo "=== reconcile retires dead hook twins, preserves live ones ===" >&2
-
-twin_home=$TMP/hook-twins
-mkdir -p "$twin_home"
-ln -s "$REPO/hooks" "$twin_home/hooks"
-
-# Seed the canonical registration through the fresh-settings branch.
-twin_seed_out=$(CLAUDE_HOME="$twin_home" "$SYNC" reconcile-grep-cost-guard 2>&1); twin_seed_status=$?
-if [ "$twin_seed_status" -eq 0 ]; then ok; else bad "twin fixture seed exited $twin_seed_status:"$'\n'"$twin_seed_out"; fi
-
-# The live twin needs a real file behind it, or it is indistinguishable from
-# the dead one. This is the codex-quota-guard.js shape: the same guard
-# legitimately registered a second time out of the per-host routing tree.
-mkdir -p "$twin_home/routing/hooks/PreToolUse"
-: >"$twin_home/routing/hooks/PreToolUse/grep-cost-guard.js"
-
-# The dead twin uses the real incident's path (in the template's spelling) so
-# this is a replay, not an analogue. It resolves through CLAUDE_HOME, where no
-# such directory exists.
-twin_dead='node "$HOME/.claude/emergency-oom-guard/hooks/PreToolUse/grep-cost-guard.js"'
-twin_live="node \"$twin_home/routing/hooks/PreToolUse/grep-cost-guard.js\""
-# Different basename, also missing: the incident's OTHER dead entry. Reconciling
-# grep-cost-guard must not touch it — harness-doctor 8a is what reports it.
-twin_other='node "$HOME/.claude/emergency-oom-guard/hooks/PreToolUse/heavy-job-admission.js"'
-
-twin_settings=$twin_home/settings.json
-jq --arg dead "$twin_dead" --arg live "$twin_live" --arg other "$twin_other" '
-  .hooks.PreToolUse += [
-    {"matcher":"Bash","hooks":[{"type":"command","command":$dead}]},
-    {"matcher":"Bash","hooks":[{"type":"command","command":$live}]},
-    {"matcher":"Bash","hooks":[{"type":"command","command":$other}]}
-  ]' "$twin_settings" >"$TMP/twin-seeded.json" && mv "$TMP/twin-seeded.json" "$twin_settings"
-
-twin_out=$(CLAUDE_HOME="$twin_home" "$SYNC" reconcile-grep-cost-guard 2>&1); twin_status=$?
-if [ "$twin_status" -eq 0 ]; then ok; else bad "reconcile over a twinned settings.json exited $twin_status:"$'\n'"$twin_out"; fi
-
-twin_cmds=$(jq -r '.hooks.PreToolUse[]?.hooks[]? | .command // empty' "$twin_settings")
-
-# PLANTED NEGATIVE — same basename, target absent. Must be gone.
-if grep -Fq 'emergency-oom-guard/hooks/PreToolUse/grep-cost-guard.js' <<<"$twin_cmds"; then
-  bad "planted negative: a dead same-basename twin survived reconcile"
-else
-  ok
-fi
-
-# PLANTED POSITIVE — same basename, target PRESENT. This is the assertion that
-# stops the fix from deleting a working registration.
-if grep -Fq "$twin_home/routing/hooks/PreToolUse/grep-cost-guard.js" <<<"$twin_cmds"; then
-  ok
-else
-  bad "a live same-basename twin (the codex-quota-guard shape) was deleted by reconcile"
-fi
-
-# PLANTED POSITIVE — different basename, target absent. Out of scope here.
-if grep -Fq 'emergency-oom-guard/hooks/PreToolUse/heavy-job-admission.js' <<<"$twin_cmds"; then
-  ok
-else
-  bad "reconcile removed an unrelated hook's registration; the rule is not scoped to the hook being reconciled"
-fi
-
-# The canonical registration must survive exactly once — retirement must not
-# take the real one with it, nor leave a second copy behind.
-twin_canon=$(printf '%s\n' "$twin_cmds" | grep -Fc '"$HOME/.claude/hooks/bin/node-hook" "$HOME/.claude/hooks/PreToolUse/grep-cost-guard.js"')
-if [ "$twin_canon" -eq 1 ]; then
-  ok
-else
-  bad "canonical grep-cost-guard registered $twin_canon time(s) after twin retirement, expected 1"
-fi
-
-# A silent rewrite of the hook set is what made #501 hard to find. Report the
-# removal by path, or the operator has no way to notice or undo it.
-if grep -Fq 'retired stale grep-cost-guard registration at $HOME/.claude/emergency-oom-guard/hooks/PreToolUse/grep-cost-guard.js' <<<"$twin_out"; then
-  ok
-else
-  bad "retirement was not reported by path on stdout:"$'\n'"$twin_out"
-fi
-
-# A fixture with nothing to retire must stay silent and idempotent: the twin
-# rule must not make every reconcile look like it changed something.
-twin_again_out=$(CLAUDE_HOME="$twin_home" "$SYNC" reconcile-grep-cost-guard 2>&1)
-if grep -Fq 'already reconciled' <<<"$twin_again_out"; then
-  ok
-else
-  bad "reconcile was not idempotent after retiring a twin:"$'\n'"$twin_again_out"
+  bad "pr-record retire was not idempotent on a second run (exit $prrec_again_status, backups $prrec_backups_n):"$'\n'"$prrec_again_out"
 fi
 
 # Pulled directly from sync.sh itself so this suite covers whatever units
@@ -2382,8 +1920,7 @@ unset -f sync_smoke_unrelated
 # -- focused live-settings reconciliation preserves unrelated config ---------
 # A configured machine keeps its volatile settings.json. Prove that the runtime
 # OOM defenses and disabled TypeScript LSP are restored without replacing an
-# unrelated env/plugin key, and that
-# the guard is inserted after DCG without dropping an unknown hook group.
+# unrelated env/plugin key or an unknown hook group.
 live_settings="$CLAUDE_HOME/settings.json"
 settings_tmp="$TMP/settings-test.tmp"
 jq '
@@ -2400,27 +1937,8 @@ jq '
   | .enabledPlugins["typescript-lsp@claude-plugins-official"] = true
   | .enabledPlugins["sync-smoke-keep@example"] = true
   | .hooks.PreToolUse = (
-      [{
-        matcher: "Bash",
-        hooks: [{type: "command", command: "node /tmp/unknown-live-hook.js", timeout: 7}]
-      }]
-      + [
-          .hooks.PreToolUse[]
-          | .hooks = ([.hooks[] | select(
-              .command != "\"$HOME/.claude/hooks/bin/node-hook\" \"$HOME/.claude/hooks/PreToolUse/grep-cost-guard.js\""
-              and .command != "\"$HOME/.claude/hooks/bin/node-hook\" \"$HOME/.claude/hooks/PreToolUse/heavy-job-admission.js\""
-              and .command != "\"$HOME/.claude/hooks/bin/node-hook\" \"$HOME/.claude/hooks/PreToolUse/whatsapp-guard.js\""
-            )])
-          | select((.hooks | length) > 0)
-        ]
-      + [{
-          matcher: "Bash",
-          hooks: [{
-            type: "command",
-            command: "\"$HOME/.claude/hooks/bin/node-hook\" \"$HOME/.claude/hooks/PreToolUse/heavy-job-admission.js\"",
-            timeout: 5
-          }]
-        }]
+      [{matcher: "Bash", hooks: [{type: "command", command: "node /tmp/unknown-live-hook.js", timeout: 7}]}]
+      + .hooks.PreToolUse
     )
 ' "$live_settings" >"$settings_tmp" && mv "$settings_tmp" "$live_settings"
 chmod 0640 "$live_settings"
@@ -2479,38 +1997,6 @@ if grep -Fq 'already reconciled' <<<"$env_again_out" \
   ok
 else
   bad "reconcile-runtime-env was not idempotent on a second run:"$'\n'"$env_again_out"
-fi
-
-guard_out=$("$SYNC" reconcile-grep-cost-guard 2>&1); guard_status=$?
-if [ "$guard_status" -eq 0 ]; then ok; else bad "reconcile-grep-cost-guard exited $guard_status:"$'\n'"$guard_out"; fi
-heavy_out=$("$SYNC" reconcile-heavy-job-admission 2>&1); heavy_status=$?
-if [ "$heavy_status" -eq 0 ]; then ok; else bad "reconcile-heavy-job-admission exited $heavy_status:"$'\n'"$heavy_out"; fi
-whatsapp_out=$("$SYNC" reconcile-whatsapp-guard 2>&1); whatsapp_status=$?
-if [ "$whatsapp_status" -eq 0 ]; then ok; else bad "reconcile-whatsapp-guard exited $whatsapp_status:"$'\n'"$whatsapp_out"; fi
-if jq -e --arg realhome "$HOME" '
-    .hooks.PreToolUse as $groups
-    | ([ $groups[] | .hooks[]? | .command
-        | (. == "$HOME/.local/bin/dcg" or (startswith($realhome + "/.local/") and test("/\\.local/(lib/dcg/v[0-9]+\\.[0-9]+\\.[0-9]+|bin)/dcg$"))) ] | index(true)) as $dcg
-    | ([ $groups[] | .hooks[]? | .command ] | index("\"$HOME/.claude/hooks/bin/node-hook\" \"$HOME/.claude/hooks/PreToolUse/grep-cost-guard.js\"")) as $guard
-    | ([ $groups[] | .hooks[]? | .command ] | index("\"$HOME/.claude/hooks/bin/node-hook\" \"$HOME/.claude/hooks/PreToolUse/heavy-job-admission.js\"")) as $heavy
-    | ([ $groups[] | .hooks[]? | .command ] | index("\"$HOME/.claude/hooks/bin/node-hook\" \"$HOME/.claude/hooks/PreToolUse/whatsapp-guard.js\"")) as $whatsapp
-    | $dcg != null and $guard == ($dcg + 1) and $heavy == ($guard + 1) and $whatsapp == ($heavy + 1)
-    and ([ $groups[] | .hooks[]? | .command ] | index("node /tmp/unknown-live-hook.js")) != null
-    and ([ $groups[] | .hooks[]? | select(.command == "\"$HOME/.claude/hooks/bin/node-hook\" \"$HOME/.claude/hooks/PreToolUse/heavy-job-admission.js\"") ] | length) == 1
-    and ([ $groups[] | .hooks[]? | select(.command == "\"$HOME/.claude/hooks/bin/node-hook\" \"$HOME/.claude/hooks/PreToolUse/whatsapp-guard.js\"") ] | length) == 1
-    and ([ $groups[] | .hooks[]? | select(.command == "\"$HOME/.claude/hooks/bin/node-hook\" \"$HOME/.claude/hooks/PreToolUse/heavy-job-admission.js\"") | has("timeout") ] | all(. == false))
-    and ([ $groups[] | .hooks[]? | select(.command == "\"$HOME/.claude/hooks/bin/node-hook\" \"$HOME/.claude/hooks/PreToolUse/whatsapp-guard.js\"") | .timeout ] | all(. == 5))
-  ' "$live_settings" >/dev/null; then
-  ok
-else
-  bad "resource/WhatsApp reconciles lost an unknown hook group or failed DCG-relative ordering"
-fi
-
-whatsapp_again=$("$SYNC" reconcile-whatsapp-guard 2>&1); whatsapp_again_status=$?
-if [ "$whatsapp_again_status" -eq 0 ] && grep -Fq 'whatsapp-guard hook already reconciled' <<<"$whatsapp_again"; then
-  ok
-else
-  bad "reconcile-whatsapp-guard was not idempotent on its second run:"$'\n'"$whatsapp_again"
 fi
 
 # The preservation fixture is deliberately live-only; restore the canonical
@@ -3113,138 +2599,6 @@ if [ ! -e "$REPO/memory" ]; then ok; else bad "sync.sh check with no mirror crea
 mkdir -p "$TMP/optin-empty-mirror"
 optin_check=$(CLAUDE_MEMORY_LIVE_ROOT="$push_memory_live" CLAUDE_MEMORY_MIRROR_ROOT="$TMP/optin-empty-mirror" "$SYNC" check 2>&1)
 if grep -q 'DRIFT: memory differs' <<<"$optin_check"; then ok; else bad "sync.sh check with a named empty mirror did not report the uncopied note as drift:"$'\n'"$optin_check"; fi
-
-# -- hook-target guard: real reconcile refuses an absent canonical hook --------
-# Planted negative for the 2026-08-18 incident: a hook registered from an
-# unmerged branch pointed at a file that did not exist in the MAIN checkout
-# (~/.claude/hooks resolves there, never to a worktree), so it errored on every
-# matching event while settings.json looked correct. Exercise the production
-# reconciler against the copied fixture and prove failure leaves live settings
-# byte-for-byte unchanged.
-echo "=== hook-target guard ===" >&2
-canonical_guard=$REPO/hooks/PreToolUse/grep-cost-guard.js
-held_guard=$TMP/grep-cost-guard.js.held
-cp "$live_settings" "$TMP/settings-before-missing-hook.json"
-mv "$canonical_guard" "$held_guard"
-missing_guard_out=$("$SYNC" reconcile-grep-cost-guard 2>&1); missing_guard_status=$?
-mv "$held_guard" "$canonical_guard"
-if [ "$missing_guard_status" -ne 0 ]; then ok; else bad "grep-cost reconcile accepted an absent canonical hook target"; fi
-if cmp -s "$live_settings" "$TMP/settings-before-missing-hook.json"; then
-  ok
-else
-  bad "failed grep-cost reconcile changed live settings"
-fi
-
-canonical_heavy=$REPO/hooks/PreToolUse/heavy-job-admission.js
-held_heavy=$TMP/heavy-job-admission.js.held
-cp "$live_settings" "$TMP/settings-before-missing-heavy-hook.json"
-mv "$canonical_heavy" "$held_heavy"
-missing_heavy_out=$("$SYNC" reconcile-heavy-job-admission 2>&1); missing_heavy_status=$?
-mv "$held_heavy" "$canonical_heavy"
-if [ "$missing_heavy_status" -ne 0 ]; then ok; else bad "heavy-job reconcile accepted an absent canonical hook target"; fi
-if cmp -s "$live_settings" "$TMP/settings-before-missing-heavy-hook.json"; then
-  ok
-else
-  bad "failed heavy-job reconcile changed live settings"
-fi
-
-canonical_whatsapp=$REPO/hooks/PreToolUse/whatsapp-guard.js
-held_whatsapp=$TMP/whatsapp-guard.js.held
-cp "$live_settings" "$TMP/settings-before-missing-whatsapp-hook.json"
-mv "$canonical_whatsapp" "$held_whatsapp"
-missing_whatsapp_out=$("$SYNC" reconcile-whatsapp-guard 2>&1); missing_whatsapp_status=$?
-mv "$held_whatsapp" "$canonical_whatsapp"
-if [ "$missing_whatsapp_status" -ne 0 ]; then ok; else bad "WhatsApp reconcile accepted an absent canonical hook target"; fi
-if cmp -s "$live_settings" "$TMP/settings-before-missing-whatsapp-hook.json"; then
-  ok
-else
-  bad "failed WhatsApp reconcile changed live settings"
-fi
-
-# -- Codex guard migration registers replacement and retires both legacy hooks --
-echo "=== codex quota hook reconcile ===" >&2
-CODEX_HOME="$TMP/codex-reconcile-home/.claude"
-CODEX_TARGET="$TMP/codex-reconcile-target/codex-quota-guard.js"
-mkdir -p "$CODEX_HOME" "$(dirname "$CODEX_TARGET")"
-: >"$CODEX_TARGET"
-CODEX_COMMAND="node \"$CODEX_TARGET\""
-CANONICAL_CODEX_COMMAND='"$HOME/.claude/hooks/bin/node-hook" "$HOME/.claude/hooks/PreToolUse/codex-quota-guard.js"'
-OLD_CODEX_PRE='node "$HOME/.claude/hooks/PreToolUse/codex-doghouse-guard.js"'
-OLD_CODEX_POST='node "$HOME/.claude/hooks/PostToolUse/codex-doghouse-trip.js"'
-# dotfiles#991: the 2026-08-26 routing bundle's copy of the guard, registered
-# beside the canonical one. Its target file EXISTS (so the generic absent-target
-# twin rule would keep it) and it must still be retired, because its deny would
-# win over the canonical guard's updatedInput rewrite. The sha is per host, so
-# the reconciler matches the path shape, not this literal.
-CODEX_TWIN_TARGET="$TMP/codex-reconcile-routing/.local/share/claude-routing/deadbeef01/hooks/PreToolUse/codex-quota-guard.js"
-mkdir -p "$(dirname "$CODEX_TWIN_TARGET")"
-: >"$CODEX_TWIN_TARGET"
-ROUTING_CODEX_TWIN="node \"$CODEX_TWIN_TARGET\""
-settings_tmp="$REPO/.settings.codex-test.json"
-jq --arg old "$CANONICAL_CODEX_COMMAND" --arg new "$CODEX_COMMAND" '
-  walk(if type == "object" and .command? == $old then .command = $new else . end)
-' "$REPO/settings.json" >"$settings_tmp" && mv "$settings_tmp" "$REPO/settings.json"
-jq -n --arg new "$CODEX_COMMAND" --arg pre "$OLD_CODEX_PRE" --arg post "$OLD_CODEX_POST" --arg twin "$ROUTING_CODEX_TWIN" '
-  {hooks:{
-    PreToolUse:[
-      {matcher:"Bash",hooks:[{type:"command",command:"keep-this-unrelated-hook"}]},
-      {matcher:"Bash",hooks:[{type:"command",command:$pre}]},
-      {matcher:"Bash",hooks:[{type:"command",command:$pre}]},
-      {matcher:"Bash",hooks:[{type:"command",command:$twin,timeout:10}]}
-    ],
-    PostToolUse:[{matcher:"Bash",hooks:[{type:"command",command:$post}]}]
-  }}
-' >"$CODEX_HOME/settings.json"
-chmod 0640 "$CODEX_HOME/settings.json"
-codex_out=$(CLAUDE_HOME="$CODEX_HOME" CODEX_QUOTA_HOOK_COMMAND="$CODEX_COMMAND" \
-  "$SYNC" reconcile-codex-quota-hook 2>&1); codex_status=$?
-if [ "$codex_status" -eq 0 ]; then ok; else bad "codex-quota reconcile exited $codex_status:"$'\n'"$codex_out"; fi
-codex_count=$(jq --arg cmd "$CODEX_COMMAND" '[.hooks.PreToolUse[]?.hooks[]? | select(.command == $cmd)] | length' "$CODEX_HOME/settings.json")
-legacy_count=$(jq --arg pre "$OLD_CODEX_PRE" --arg post "$OLD_CODEX_POST" '[.hooks[][]?.hooks[]? | select(.command == $pre or .command == $post)] | length' "$CODEX_HOME/settings.json")
-twin_count=$(jq --arg twin "$ROUTING_CODEX_TWIN" '[.hooks.PreToolUse[]?.hooks[]? | select(.command == $twin)] | length' "$CODEX_HOME/settings.json")
-if [ "$codex_count" = 1 ]; then ok; else bad "codex reconcile left $codex_count replacement hooks, expected one"; fi
-if [ "$legacy_count" = 0 ]; then ok; else bad "codex reconcile left $legacy_count legacy doghouse hooks"; fi
-if [ "$twin_count" = 0 ]; then ok; else bad "codex reconcile left the routing-bundle twin registered although its deny would beat the canonical rewrite (#991)"; fi
-if [ -f "$CODEX_TWIN_TARGET" ]; then ok; else bad "codex reconcile deleted the routing-bundle FILE; only the registration may go"; fi
-if jq -e '.hooks.PreToolUse[]?.hooks[]? | select(.command == "keep-this-unrelated-hook")' "$CODEX_HOME/settings.json" >/dev/null; then ok; else bad "codex reconcile removed unrelated hook"; fi
-if [ "$(stat -c %a "$CODEX_HOME/settings.json")" = 640 ]; then ok; else bad "codex reconcile changed live settings mode"; fi
-if find "$CODEX_HOME/backups" -name settings.json -type f -print -quit | grep -q .; then ok; else bad "codex reconcile did not back up live settings"; fi
-
-# -- repo-route reconcile preserves volatile live settings --------------------
-# Fresh install above skips all box-specific reconciliation. Exercise the real
-# merge path separately against an existing settings file with duplicate route
-# groups and an unrelated hook that must survive byte-for-byte semantically.
-echo "=== repo-route hook reconcile ===" >&2
-RECON_HOME="$TMP/reconcile-home/.claude"
-RECON_TARGET="$TMP/reconcile-target/canonical-worktree-route-guard.js"
-mkdir -p "$RECON_HOME" "$(dirname "$RECON_TARGET")"
-: >"$RECON_TARGET"
-RECON_COMMAND="node \"$RECON_TARGET\""
-OLD_ROUTE_COMMAND='"$HOME/.claude/hooks/bin/node-hook" "$HOME/.claude/hooks/PreToolUse/canonical-worktree-route-guard.js"'
-settings_tmp="$REPO/.settings.route-test.json"
-jq --arg old "$OLD_ROUTE_COMMAND" --arg new "$RECON_COMMAND" '
-  walk(if type == "object" and .command? == $old then .command = $new else . end)
-' "$REPO/settings.json" >"$settings_tmp" && mv "$settings_tmp" "$REPO/settings.json"
-jq -n --arg route "$RECON_COMMAND" '
-  {hooks:{PreToolUse:[
-    {matcher:"Bash",hooks:[{type:"command",command:"keep-this-unrelated-hook"}]},
-    {matcher:"EnterWorktree",hooks:[{type:"command",command:$route}]},
-    {matcher:"EnterWorktree",hooks:[{type:"command",command:$route}]}
-  ]}}
-' >"$RECON_HOME/settings.json"
-chmod 0640 "$RECON_HOME/settings.json"
-recon_out=$(CLAUDE_HOME="$RECON_HOME" REPO_ROUTE_HOOK_COMMAND="$RECON_COMMAND" \
-  "$SYNC" reconcile-repo-route-hook 2>&1); recon_status=$?
-if [ "$recon_status" -eq 0 ]; then ok; else bad "repo-route reconcile exited $recon_status:"$'\n'"$recon_out"; fi
-recon_count=$(jq --arg cmd "$RECON_COMMAND" '[.hooks.PreToolUse[]?.hooks[]? | select(.command == $cmd)] | length' "$RECON_HOME/settings.json")
-if [ "$recon_count" = 1 ]; then ok; else bad "repo-route reconcile left $recon_count route hooks, expected exactly one"; fi
-if jq -e '.hooks.PreToolUse[]?.hooks[]? | select(.command == "keep-this-unrelated-hook")' "$RECON_HOME/settings.json" >/dev/null; then
-  ok
-else
-  bad "repo-route reconcile removed an unrelated live hook"
-fi
-if [ "$(stat -c %a "$RECON_HOME/settings.json")" = 640 ]; then ok; else bad "repo-route reconcile changed live settings mode"; fi
-if find "$RECON_HOME/backups" -name settings.json -type f -print -quit | grep -q .; then ok; else bad "repo-route reconcile did not back up live settings"; fi
 
 # -- install must not write the tracked source tree --------------------------
 # dotfiles#479: `install` runs unattended from a timer, and
