@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Retired (dotfiles#1429): the memory-access ledger had one writer and no reader. Its registration is gone
-from settings.json, and sync.sh's reconcile_memory_hook removes it from live settings.
+from settings.json, and sync.sh's reconcile_memory_hook removed it from live settings until hov-stack #479
+deleted that verb, once no host registered it.
 
 This no-op stays for one reason. A Claude Code session caches its hook registrations when it starts, so a
 session started before the retirement still runs this path after every Read. If the file were gone,

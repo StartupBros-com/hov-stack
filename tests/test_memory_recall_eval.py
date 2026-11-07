@@ -8,7 +8,6 @@ from pathlib import Path
 
 CLAUDE = Path(__file__).resolve().parents[1]
 EVAL = CLAUDE / "scripts" / "memory-recall-eval.py"
-SYNC = CLAUDE / "sync.sh"
 
 
 def note(name="note", body="Body.", note_type="project", description=None):
@@ -457,12 +456,10 @@ class SampleTests(unittest.TestCase):
 
 class HookRetireTests(unittest.TestCase):
     """The memory-access ledger hook was retired in dotfiles#1429: one writer, no reader. It must be gone
-    from the canonical settings, reconcile must take it out of a live settings file that still registers
-    it, and the path a session cached before the retirement must do nothing."""
+    from the canonical settings, and the path a session cached before the retirement must do nothing.
+    The reconcile verb that took it out of live files was deleted in hov-stack #479, once no host
+    registered it."""
 
-    # The registration as sync.sh rendered it on the machine whose home a fixture stands in
-    # for: the tracked template spells the path with $HOME, the live file carries the home.
-    RETIRED_TEMPLATE = 'python3 "$HOME/.claude/scripts/memory-access-log.py"'
     STUB = CLAUDE / "scripts" / "memory-access-log.py"
 
     def test_canonical_settings_carry_no_memory_access_hook(self):
@@ -491,32 +488,6 @@ class HookRetireTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertFalse(ledger.exists())
             self.assertEqual(list(Path(temp).iterdir()), [])  # nothing written anywhere under HOME
-
-    def test_reconcile_retires_the_live_registration(self):
-        with tempfile.TemporaryDirectory() as temp:
-            home = Path(temp)
-            (home / ".claude").mkdir()
-            live = home / ".claude" / "settings.json"
-            retired = self.RETIRED_TEMPLATE.replace("$HOME", str(home))
-            live.write_text(json.dumps({
-                "hooks": {"PostToolUse": [
-                    {"matcher": "Bash", "hooks": [{"type": "command", "command": "echo hi"}]},
-                    {"matcher": "Read", "hooks": [{"type": "command", "command": retired, "timeout": 10}]},
-                ]},
-                "model": "opus",
-            }))
-            env = {"PATH": "/usr/bin:/bin", "HOME": str(home)}
-            result = subprocess.run(["bash", str(SYNC), "reconcile-memory-hook"], env=env, text=True, capture_output=True, check=False)
-            self.assertEqual(result.returncode, 0, result.stderr)
-            settings = json.loads(live.read_text())
-            matchers = [group["matcher"] for group in settings["hooks"]["PostToolUse"]]
-            self.assertEqual(matchers, ["Bash"])  # the Read group left with its only hook; the other stays
-            self.assertEqual(settings["model"], "opus")  # live-only fields survive
-            self.assertTrue(list((home / ".claude" / "backups").iterdir()))  # backup-first
-            before = live.read_text()
-            again = subprocess.run(["bash", str(SYNC), "reconcile-memory-hook"], env=env, text=True, capture_output=True, check=False)
-            self.assertEqual(again.returncode, 0, again.stderr)
-            self.assertEqual(live.read_text(), before)  # idempotent: nothing left to retire
 
 
 if __name__ == "__main__":

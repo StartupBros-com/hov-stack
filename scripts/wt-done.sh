@@ -591,6 +591,27 @@ close_one() {
 # guards. No --heal: a closeout must not switch an active off-default checkout.
 # The helper deliberately exits 0 even on refusal, so its output is retained and
 # HEAD ancestry, independently re-read afterward, is the only success evidence.
+settings_activation() {
+  local repo=$1 cfg out rc status
+  cfg=${CLAUDE_HOME:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}}
+  [ -x "$repo/sync.sh" ] && [ -f "$repo/lib/settings-apply.js" ] || return 0
+  [ "$(readlink -f "$cfg/hooks")" = "$(readlink -f "$repo/hooks")" ] || return 0
+  if [ "$DRY_RUN" = 1 ]; then
+    echo "      would: $repo/sync.sh apply-settings"
+    return 0
+  fi
+  out=$(CLAUDE_HOME="$cfg" timeout --kill-after=5 "${WT_DONE_SETTINGS_TIMEOUT:-60}" bash "$repo/sync.sh" apply-settings --quiet 2>/dev/null); rc=$?
+  status=$(printf '%s\n' "$out" | sed -n 's/^settings: //p' | tail -1)
+  if [ "$rc" != 0 ] || [ -z "$status" ]; then
+    echo "      !! activation: settings apply failed (rc=$rc; 124 means timeout); sync.sh apply-settings --plan shows why"
+  elif [[ "$status" == unchanged* || "$status" == applied* ]] && [[ "$status" != *'conflict(s)'* && "$status" != *'held deny'* && "$status" != *'skipped'* ]]; then
+    echo "      activation: settings ${status%%;*}"
+  else
+    echo "      !! activation: settings $status"
+  fi
+  return 0
+}
+
 activate_checkout() {
   local repo="$1" mc="$2" head rc freshener
   freshener="$(dirname "$_lib")/../launchpad-freshen.sh"
@@ -600,12 +621,14 @@ activate_checkout() {
   }
   if git -C "$repo" merge-base --is-ancestor "$mc" "$head" 2>/dev/null; then
     echo "      activation: checkout current ($repo at $head; includes $mc)"
+    settings_activation "$repo"
     return 0
   fi
   echo "      activation: checkout NOT current ($repo at $head; merge $mc not applied)"
   if [ "$DRY_RUN" = 1 ]; then
     # Even the freshener's own dry run fetches. Preview must not invoke it at all.
     echo "      would: $freshener --repo '$repo' (safe fast-forward; no branch switch)"
+    settings_activation "$repo"
     return 0
   fi
   if [ ! -x "$freshener" ]; then
@@ -621,6 +644,7 @@ activate_checkout() {
   }
   if git -C "$repo" merge-base --is-ancestor "$mc" "$head" 2>/dev/null; then
     echo "      activation: checkout current ($repo at $head; includes $mc)"
+    settings_activation "$repo"
   else
     echo "      !! activation: checkout not current ($repo still at $head; merge $mc not applied; freshener output above)"
   fi
