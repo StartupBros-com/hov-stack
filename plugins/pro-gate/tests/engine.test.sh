@@ -1740,6 +1740,47 @@ check '#161 gate r1 P1: a missing gh binary leaves a caller-patch run bounded an
 check '#161 gate r1 P1: with no gh available the run installs no binding at all (best-effort, never a guessed one)' \
   "$([ "$CPMISS_BINDINGS" = 0 ]; echo $?)" "bindings=$CPMISS_BINDINGS"
 
+# A bare --pr N in a fork checkout resolves in the checkout's origin, never in gh's default
+# repository. gh's own default for an unscoped `gh pr view N` in a fork is the upstream parent,
+# so the run reviewed and keyed the parent's PR N under the fork's name (2026-11-08, v0.65.6).
+# The stub answers the way gh does there: unscoped lookups name the parent, scoped ones the
+# repository asked for.
+FORKPR_GH="$TDIR/bin/gh-forkpr"
+FORKPR_GH_CALLS="$TDIR/forkpr-gh.calls"
+cat > "$FORKPR_GH" <<'FORKPR_GH_STUB'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "${PG_TEST_GH_CALLS:?}"
+case "$1 $2" in
+  "pr view")
+    repo=github.com/upstream-owner/diverge161
+    [ "${4:-}" = --repo ] && repo="$5"
+    if grep -q -- 'headRefOid' <<<"$*"; then
+      printf '{"state":"OPEN","headRefOid":"%s"}\n' "${PG_TEST_GH_HEAD:?}"
+    else
+      printf 'https://%s/pull/%s\n' "$repo" "$3"
+    fi
+    ;;
+  *) exit 1 ;;
+esac
+FORKPR_GH_STUB
+chmod +x "$FORKPR_GH"
+: > "$FORKPR_GH_CALLS"
+env HOME="$TDIR/user" PRO_GATE_HOME="$TDIR/home-forkpr" PRO_GATE_INPUT_POLICY=connector-enabled \
+  ORACLE_BROWSER_PORT="$PORT" PRO_GATE_MIN_UPTIME=0 PRO_GATE_SELF_HEAL=0 PRO_GATE_RAMP=0 \
+  PRO_GATE_RECONCILE_INTERVAL=3600 PRO_GATE_MAX_RETRIES=0 PRO_GATE_MAX_ROUNDS_PER_PR=1 \
+  PRO_GATE_LOCK_WAIT=2 PRO_GATE_TIMEOUT_GRACE=0 PRO_GATE_TEST_MODE=ci-fixture \
+  PRO_GATE_ORACLE_BIN="$TDIR/bin/oracle-preflight" PG_TEST_ORACLE_COMPLETE=1 NODE_OPTIONS= \
+  PRO_GATE_GH_BIN="$FORKPR_GH" PG_TEST_GH_CALLS="$FORKPR_GH_CALLS" PG_TEST_GH_HEAD="$DIVERGE161_HEAD" \
+  bash "$ENGINE" --pr 94 --repo "$DIVERGE161_REPO" --diff "$TDIR/diverge161.diff" --input bundle --out "$TDIR/forkpr-out.md" --timeout 10s \
+  >"$TDIR/stdout" 2>"$TDIR/stderr"
+FORKPR_RC=$?
+check 'a bare --pr N in a fork checkout resolves its URL in origin, not in gh'"'"'s default (upstream) repository' \
+  "$([ "$FORKPR_RC" -eq 0 ] \
+     && grep -qxF -- 'pr view 94 --repo github.com/acme/diverge161 --json url -q .url' "$FORKPR_GH_CALLS" \
+     && grep -Fq 'url=https://github.com/acme/diverge161/pull/94' "$TDIR/stderr" \
+     && ! grep -Fq 'upstream-owner' "$TDIR/stderr"; echo $?)" \
+  "rc=$FORKPR_RC gh_calls=$(tr '\n' ';' < "$FORKPR_GH_CALLS" 2>/dev/null) stderr=$(grep -F '[oracle-review]' "$TDIR/stderr" | head -3)"
+
 # Lifecycle-only modes remain usable under an invalid policy: the engine reaches their normal
 # handler instead of rejecting an unrelated historical inspection or recovery action.
 PRO_GATE_INPUT_POLICY=invalid-policy PRO_GATE_BROWSER_ATTACHMENTS=invalid-policy PRO_GATE_HOME="$TDIR/policy-lifecycle" ORACLE_BROWSER_PORT="$PORT" PRO_GATE_MIN_UPTIME=0 \
