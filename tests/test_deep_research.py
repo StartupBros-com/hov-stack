@@ -36,8 +36,8 @@ class DeepResearchTests(unittest.TestCase):
     def test_upstream_is_model_invocable_and_owned_is_opt_in(self):
         settings = json.loads((CLAUDE / "settings.json").read_text())
         overrides = settings["skillOverrides"]
-        # Keep the established agent workflow; the owned coordinator is an opt-in trial.
-        self.assertEqual(overrides["anthropic-skills:deep-research"], "on")
+        # The owned coordinator is an opt-in trial. The claude.ai-synced skill's own
+        # override is a host opt-in and lives in the overlay, not in this template.
         self.assertEqual(overrides["deep-research"], "user-invocable-only")
 
     def test_referenced_harness_documents_exist(self):

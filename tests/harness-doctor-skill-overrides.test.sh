@@ -45,8 +45,8 @@ TEST_PATH=$STUBBIN:$JQ_DIR:$NODE_DIR:/usr/bin:/bin
 
 SYNCED_ROOT=acct_org
 
-# make_home <name> [extra-key...]: a fixture home with 60 user skill dirs
-# (fill-00..fill-59, all overridden, so the corpus floor holds), one synced
+# make_home <name> [extra-key...]: a fixture home with 3 user skill dirs
+# (fill-0..fill-2, all overridden), one synced
 # skill 'pdf', and a skillOverrides map of the fillers plus every extra key.
 # Prints the home path.
 make_home() {
@@ -54,11 +54,11 @@ make_home() {
   local home=$TMP/$name i
   mkdir -p "$home/dotfiles" "$home/.claude/skills/synced/$SYNCED_ROOT/pdf"
   printf '# pdf\n' >"$home/.claude/skills/synced/$SYNCED_ROOT/pdf/SKILL.md"
-  for i in $(seq -w 0 59); do
+  for i in $(seq 0 2); do
     mkdir -p "$home/.claude/skills/fill-$i"
     printf '# fill\n' >"$home/.claude/skills/fill-$i/SKILL.md"
   done
-  { for i in $(seq -w 0 59); do printf 'fill-%s\n' "$i"; done; printf '%s\n' "$@"; } \
+  { for i in $(seq 0 2); do printf 'fill-%s\n' "$i"; done; printf '%s\n' "$@"; } \
     | jq -R -s 'split("\n") | map(select(length > 0)) | {skillOverrides: (map({key: ., value: "name-only"}) | from_entries)}' \
     >"$home/.claude/settings.json"
   printf '%s' "$home"

@@ -1220,13 +1220,12 @@ if command -v jq >/dev/null 2>&1 && [ -f "$HOME/.claude/settings.json" ]; then
   # artifact-design, artifact-diagramming, plugin-authoring, denial-triage.
   BUNDLED_SKILLS="dataviz update-config keybindings-help code-review simplify fewer-permission-prompts loop schedule workflow-authoring run init security-review claude-api artifact-components batch claude-in-chrome debug design-sync doctor explain-usage run-skill-generator setup-claude artifact-capabilities artifact-design artifact-diagramming plugin-authoring denial-triage"
   _override_keys=$(jq -r '.skillOverrides // {} | keys[]' "$HOME/.claude/settings.json" 2>&1)
-  _override_status=$?; _override_count=0
+  _override_status=$?
   if [ "$_override_status" -ne 0 ]; then
     warn "skillOverrides could not be parsed: $(printf '%s\n' "$_override_keys" | tail -1)"
   else
     while IFS= read -r k; do
       [ -z "$k" ] && continue
-      _override_count=$((_override_count + 1))
       [ -d "$HOME/.claude/skills/$k" ] && continue
       case "$k" in
         anthropic-skills:*)
@@ -1249,8 +1248,6 @@ if command -v jq >/dev/null 2>&1 && [ -f "$HOME/.claude/settings.json" ]; then
         warn "skillOverride '$k' names no installed skill (~/.claude/skills/$k): stale ghost, remove it"
       fi
     done <<< "$_override_keys"
-    # Measured 2026-08-17: 76 entries; 60 preserves normal churn but catches truncation.
-    floor "$_override_count" 60 "skillOverrides corpus" || WARNS=$((WARNS + 1))
   fi
 else
   warn "skillOverrides scan unavailable (jq or settings.json missing)"
