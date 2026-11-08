@@ -258,6 +258,49 @@ class PluginSourceTests(unittest.TestCase):
             self.assertEqual([(s["id"], s["plugin"]) for s in skills], [("kit:beta", "kit")])
 
 
+class PluginSkillNamesTests(unittest.TestCase):
+    """--plugin-skill-names lists '<skill>TAB<plugin>' for enabled plugins only."""
+
+    def run_names(self, home: Path, *extra: str) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            [sys.executable, str(CHECKER), "--plugin-skill-names",
+             "--claude-dir", str(home / ".claude"),
+             "--settings", str(home / ".claude" / "settings.json"), *extra],
+            env={**os.environ, "HOME": str(home / "elsewhere")},
+            capture_output=True, text=True, check=False)
+
+    def test_lists_both_plugin_kinds_as_tab_separated_pairs(self):
+        with tempfile.TemporaryDirectory() as t:
+            home = Path(t)
+            PluginSourceTests.make_home(self, home, {"tools@mk": True})
+            result = self.run_names(home)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout.splitlines(), ["beta\tkit", "gamma\ttools"])
+
+    def test_disabled_plugins_are_not_listed(self):
+        """PLANTED NEGATIVE: listing every plugin on disk would print both lines."""
+        with tempfile.TemporaryDirectory() as t:
+            home = Path(t)
+            PluginSourceTests.make_home(self, home, {"tools@mk": False, "kit@skills-dir": False})
+            result = self.run_names(home)
+            self.assertEqual((result.returncode, result.stdout), (0, ""))
+
+    def test_installed_plugins_override_and_missing_dir(self):
+        with tempfile.TemporaryDirectory() as t:
+            home = Path(t)
+            PluginSourceTests.make_home(self, home, {"tools@mk": True})
+            empty = home / "none.json"
+            empty.write_text("{}", encoding="utf-8")
+            result = self.run_names(home, "--installed-plugins", str(empty))
+            self.assertEqual(result.stdout.splitlines(), ["beta\tkit"])
+            missing = subprocess.run(
+                [sys.executable, str(CHECKER), "--plugin-skill-names",
+                 "--claude-dir", str(home / "absent")],
+                capture_output=True, text=True, check=False)
+            self.assertEqual(missing.returncode, 2)
+            self.assertIn("no such config dir", missing.stderr)
+
+
 class FrontmatterParsingTests(unittest.TestCase):
     def test_folded_block_description_is_flattened(self):
         with tempfile.TemporaryDirectory() as t:
