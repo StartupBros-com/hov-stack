@@ -132,7 +132,9 @@ test('fetch failure is visible even when cached origin and HEAD match', async ()
     execFileSync('git', ['remote', 'set-url', 'origin', path.join(base, 'missing-origin.git')], { cwd: dir });
     const res = await runHook(HOOK, { cwd: dir, hook_event_name: 'SessionStart' });
     assert.strictEqual(res.code, 0, res.stderr);
-    assert.match(res.stdout, /fetch failed \(offline\?\), skipped/);
+    // The freshener names git's own reason (lib/repo-update.sh repo_fetch_origin), never a guess.
+    assert.match(res.stdout, /fetch failed \(fatal: '[^']*missing-origin\.git' does not appear to be a git repository\), skipped/);
+    assert.doesNotMatch(res.stdout, /offline\?/);
     assert.match(res.stdout, /freshness not confirmed/);
     assert.match(res.stdout, /cached origin refs/i);
     assert.doesNotMatch(res.stdout, /Checkout is now fresh|files on disk just changed|active or dirty state is never touched/i);
@@ -149,7 +151,9 @@ test('successful branch switch followed by failed fetch reports partial success,
     const res = await runHook(HOOK, { cwd: dir, hook_event_name: 'SessionStart' });
     assert.strictEqual(res.code, 0, res.stderr);
     assert.match(res.stdout, /healed, switched 'parked' -> main/);
-    assert.match(res.stdout, /fetch failed \(offline\?\), skipped/);
+    // The freshener names git's own reason (lib/repo-update.sh repo_fetch_origin), never a guess.
+    assert.match(res.stdout, /fetch failed \(fatal: '[^']*missing-origin\.git' does not appear to be a git repository\), skipped/);
+    assert.doesNotMatch(res.stdout, /offline\?/);
     assert.match(res.stdout, /files on disk just changed.*re-read/i);
     assert.match(res.stdout, /freshness not confirmed/);
     assert.doesNotMatch(res.stdout, /Checkout is now fresh|active or dirty state is never touched/);

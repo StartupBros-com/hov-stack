@@ -140,8 +140,13 @@ process_repo() {
     echo "launchpad $name: healed, switched '$state' -> $def (branch left intact)"
   fi
 
-  if ! timeout "$FETCH_T" git -C "$repo" fetch --quiet origin 2>/dev/null; then
-    echo "launchpad $name: fetch failed (offline?), skipped"
+  if declare -F repo_fetch_origin >/dev/null; then
+    if ! repo_fetch_origin "$repo" "$FETCH_T"; then
+      echo "launchpad $name: fetch failed ($REPO_FETCH_WHY), skipped"
+      return
+    fi
+  elif ! timeout "$FETCH_T" git -C "$repo" fetch --quiet origin; then
+    echo "launchpad $name: fetch failed (lib/repo-update.sh not loaded; git's error is above), skipped"
     return
   fi
   behind=$(git -C "$repo" rev-list --count "HEAD..origin/$def" 2>/dev/null || echo 0)
