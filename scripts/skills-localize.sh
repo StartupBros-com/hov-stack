@@ -372,11 +372,11 @@ sync_fork() {
 # that holds $SKILLS. If the helper fails the fork deploys as before, with a WARN.
 # deploy_codex is untouched: Codex has no plugins and still needs the fork.
 plugin_skill_names() {
-  local claude
-  claude=$(dirname "$SKILLS")
+  local cfg_dir
+  cfg_dir=$(dirname "$SKILLS")
   python3 "$HERE/scripts/skill-collision-check.py" --plugin-skill-names \
-    --claude-dir "$claude" --settings "$claude/settings.json" \
-    --installed-plugins "${SKILLS_INSTALLED_PLUGINS:-$claude/plugins/installed_plugins.json}" 2>&1
+    --claude-dir "$cfg_dir" --settings "$cfg_dir/settings.json" \
+    --installed-plugins "${SKILLS_INSTALLED_PLUGINS:-$cfg_dir/plugins/installed_plugins.json}" 2>&1
 }
 
 deploy_forks() {
