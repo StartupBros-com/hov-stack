@@ -5,10 +5,11 @@
 # What this pins:
 #   1. reconcile_runtime_env resolves ANTHROPIC_BASE_URL by profile_role —
 #      workstation -> loopback guard, satellite -> the proxy host's serve URL,
-#      read from CCFLARE_URL_SATELLITE in the environment (the public tree
-#      ships no proxy host) — on both the fresh-seed and merge branches, so a
-#      fresh satellite bootstrap can never inherit the workstation's loopback
-#      URL (AE5), and a satellite with the variable unset fails closed.
+#      read from CCFLARE_URL_SATELLITE in the environment, else from the
+#      overlay env file (the public tree ships no proxy host; an exported value
+#      wins) — on both the fresh-seed and merge branches, so a fresh satellite
+#      bootstrap can never inherit the workstation's loopback URL (AE5), and a
+#      satellite with the variable set nowhere fails closed.
 #   2. An undeclared host fails closed: reconcile errors and writes nothing
 #      instead of guessing either role's URL; check() falls back to a raw
 #      comparison there, so a stale role URL on an undeclared host DRIFTs.
@@ -58,7 +59,7 @@ exit 3
 SH
 chmod +x "$STUB_BIN/systemctl"
 
-FIX_REPO="" FIX_HOME="" FIX_CLAUDE_HOME="" OUT="" RC=0
+FIX_REPO="" FIX_HOME="" FIX_CLAUDE_HOME="" FIX_OVERLAY="" OUT="" RC=0
 
 build_fixture() { # <name> <role|none>
   local name=$1 role=$2 root e
@@ -76,7 +77,10 @@ build_fixture() { # <name> <role|none>
   FIX_REPO=$root/dotfiles
   FIX_HOME=$root/home
   FIX_CLAUDE_HOME=$root/claude-home
-  mkdir -p "$FIX_HOME" "$FIX_CLAUDE_HOME"
+  # Each fixture's own empty overlay: sync.sh reads <overlay>/env, and an
+  # inherited XDG_CONFIG_HOME would otherwise point it at the invoker's real one.
+  FIX_OVERLAY=$root/overlay
+  mkdir -p "$FIX_HOME" "$FIX_CLAUDE_HOME" "$FIX_OVERLAY"
   # reconcile_runtime_env requires the mapped CLAUDE_ENV_FILE target to exist,
   # and a plugin manifest under each mapped CLAUDE_CODE_PLUGIN_DIRS entry;
   # install links ~/.claude/mods into the checkout, so the fixture does too.
@@ -86,7 +90,7 @@ build_fixture() { # <name> <role|none>
 
 run_sync() { # <mode>
   local mode=$1
-  OUT=$(HOME=$FIX_HOME CLAUDE_HOME=$FIX_CLAUDE_HOME \
+  OUT=$(HOME=$FIX_HOME CLAUDE_HOME=$FIX_CLAUDE_HOME HOV_STACK_OVERLAY=$FIX_OVERLAY \
     PATH="$STUB_BIN:$PATH" \
     CLAUDE_SYNC_SKIP_HOOK_RECONCILE=1 \
     CLAUDE_MEMORY_MIRROR_ROOT=$TMP/empty-mirror \
@@ -175,6 +179,23 @@ run_sync check
 grep -q "DRIFT: settings.json differs" <<<"$OUT" \
   && bad "satellite check flags settings DRIFT for the role-correct tailnet URL" \
   || ok
+
+# ---- 2b. satellite fixture, URL only in the overlay env ----------------------
+# The SessionStart settings hook and an ssh-run install carry no session env, so
+# the overlay env file is the only place the URL is; an exported value still wins.
+OVERLAY_URL="https://overlay-proxy.example.net"
+unset CCFLARE_URL_SATELLITE
+build_fixture sat-overlay satellite
+printf 'CCFLARE_URL_SATELLITE=%s\n' "$OVERLAY_URL" > "$FIX_OVERLAY/env"
+run_sync reconcile-runtime-env
+[ "$RC" -eq 0 ] && ok || bad "satellite reconcile with the URL only in the overlay env exited $RC: $(printf '%s' "$OUT" | tail -3)"
+[ "$(live_env ANTHROPIC_BASE_URL)" = "$OVERLAY_URL" ] && ok \
+  || bad "satellite with the URL only in the overlay env seeded ANTHROPIC_BASE_URL='$(live_env ANTHROPIC_BASE_URL)', want $OVERLAY_URL"
+export CCFLARE_URL_SATELLITE=$SATELLITE_URL
+run_sync reconcile-runtime-env
+[ "$(live_env ANTHROPIC_BASE_URL)" = "$SATELLITE_URL" ] && ok \
+  || bad "an exported CCFLARE_URL_SATELLITE did not win over the overlay env (got '$(live_env ANTHROPIC_BASE_URL)')"
+unset CCFLARE_URL_SATELLITE
 
 # ---- 3. unclassified fixture: fail closed ----------------------------------
 unset CCFLARE_URL_SATELLITE
