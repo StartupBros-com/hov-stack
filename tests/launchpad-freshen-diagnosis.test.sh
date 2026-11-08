@@ -187,6 +187,22 @@ out=$(run_freshen_heal "$C")
 case "$out" in *"healed, switched 'parked' -> main"*) ok ;; *) bad "clean parked checkout did not heal: $out" ;; esac
 [ "$(git -C "$C" branch --show-current)" = main ] && ok || bad "--heal did not switch a clean parked checkout"
 
+# A failed fetch names git's reason. The freshener sources repo_fetch_origin
+# fail-soft, so this asserts the wiring: a broken source path would fall back to
+# a sentence without the rejected tag. The 2026-11-08 shape: a local tag that
+# origin moved, under fetch.pruneTags, failed every session as "(offline?)".
+C=$(fixture tagclash)
+git -C "$TMP/tagclash.seed" tag v1
+git -C "$C" tag v1
+git -C "$C" config fetch.prune true
+git -C "$C" config fetch.pruneTags true
+out=$(run_freshen "$C")
+case "$out" in
+  *"fetch failed (! [rejected] v1 -> v1 (would clobber existing tag)), skipped"*) ok ;;
+  *) bad "fetch failure did not name the rejected tag: $out" ;;
+esac
+case "$out" in *"offline?"*) bad "fetch failure still guesses offline: $out" ;; *) ok ;; esac
+
 if [ "$fail" -eq 0 ]; then
   echo "ok — launchpad-freshen diagnosis: $pass/$((pass + fail)) assertions passed"
 else
