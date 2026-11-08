@@ -969,6 +969,51 @@ else
   ok
 fi
 
+# ── repo_fetch_origin: a failed fetch keeps git's reason ──────────────────────────────
+# The 2026-11-08 shapes. A local tag that origin moved, under fetch.pruneTags, fails the
+# fetch with rc 1 and an EMPTY stderr when --quiet is passed; a deleted origin and a
+# hung transport were both reported as "fetch failed (offline?)" too.
+C=$(fixture fetchtag)
+git_q "$C.seed" tag v1
+git_q "$C.seed" push -q origin v1
+git_q "$C" tag v1
+git -C "$C" config fetch.prune true
+git -C "$C" config fetch.pruneTags true
+if repo_fetch_origin "$C"; then rc=0; else rc=$?; fi
+[ "$rc" -eq 1 ] && ok || bad "tag clobber: want rc 1, got $rc"
+case "$REPO_FETCH_WHY" in
+  "! [rejected] v1 -> v1 (would clobber existing tag)") ok ;;
+  *) bad "tag clobber: reason was '$REPO_FETCH_WHY'" ;;
+esac
+
+git -C "$C" remote set-url origin "$TMP/gone.git"
+if repo_fetch_origin "$C"; then rc=0; else rc=$?; fi
+[ "$rc" -ne 0 ] && ok || bad "missing origin: fetch reported success"
+case "$REPO_FETCH_WHY" in
+  "fatal: '$TMP/gone.git' does not appear to be a git repository") ok ;;
+  *) bad "missing origin: reason was '$REPO_FETCH_WHY'" ;;
+esac
+
+# A transport that hangs: the timeout must fire, name itself, and not leave the
+# capture waiting on the orphaned transport (timeout signals the whole group).
+git -C "$C" remote set-url origin "ssh://fetch.invalid/x.git"
+export GIT_SSH_COMMAND='sleep 8; :'
+start=$SECONDS
+if repo_fetch_origin "$C" 1; then rc=0; else rc=$?; fi
+took=$((SECONDS - start))
+unset GIT_SSH_COMMAND
+[ "$rc" -eq 124 ] && ok || bad "hung transport: want rc 124, got $rc"
+[ "$REPO_FETCH_WHY" = "timed out after 1s" ] && ok || bad "hung transport: reason was '$REPO_FETCH_WHY'"
+[ "$took" -lt 5 ] && ok || bad "hung transport: the capture waited ${took}s for the orphaned transport"
+
+# Positive control, after the failures: success returns 0 and clears the reason.
+C=$(fixture fetchok)
+if repo_fetch_origin "$C"; then rc=0; else rc=$?; fi
+[ "$rc" -eq 0 ] && ok || bad "clean fetch: want rc 0, got $rc ($REPO_FETCH_WHY)"
+[ -z "$REPO_FETCH_WHY" ] && ok || bad "clean fetch left a stale reason: '$REPO_FETCH_WHY'"
+[ "$(git -C "$C" rev-parse origin/main)" = "$(git -C "$C.seed" rev-parse HEAD)" ] && ok \
+  || bad "clean fetch did not update origin/main"
+
 if [ "$fail" -eq 0 ]; then
   echo "ok — repo_ff_update: $pass/$((pass + fail)) assertions passed"
 else
