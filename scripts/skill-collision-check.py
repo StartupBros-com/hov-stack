@@ -44,6 +44,14 @@ SCAN SET
 Usage:
     skill-collision-check.py [--threshold 0.75] [--sources DIR ...] [--json]
                              [--include-latent]
+    skill-collision-check.py --plugin-skill-names [--claude-dir DIR]
+                             [--settings FILE] [--installed-plugins FILE]
+
+--plugin-skill-names is a read-only listing, not a scan: one "<skill-name>\t<plugin>"
+line per skill an ENABLED plugin provides, from the same plugin enumeration the scan
+uses. skills-localize.sh deploy_forks reads it so it does not copy a fork into
+~/.claude/skills when a plugin already provides that skill (the copy would collide
+with <plugin>:<name>). Exit 0 (empty output when no plugin skills), 2 on a bad path.
 
 Exit codes: 0 clean (no LIVE collisions), 1 LIVE collisions found, 2 scan
 corpus unavailable (harness-doctor friendly).
@@ -146,7 +154,8 @@ def manifest_name(root: Path) -> str | None:
     return name if isinstance(name, str) and name else root.name
 
 
-def plugin_sources(claude: Path, settings: dict) -> list[tuple[Path, str]]:
+def plugin_sources(claude: Path, settings: dict,
+                   installed_plugins: Path | None = None) -> list[tuple[Path, str]]:
     """(skills dir, plugin name) for each plugin a session loads skills from.
 
     The same rule as hooks/UserPromptSubmit/skill-mention-resolver.js: a
@@ -154,7 +163,7 @@ def plugin_sources(claude: Path, settings: dict) -> list[tuple[Path, str]]:
     unless enabledPlugins["<name>@skills-dir"] is false; an installed
     marketplace plugin counts when enabledPlugins["<key>"] is true and it has a
     user-scope install. Project-scope installs depend on the project and are
-    not scanned.
+    not scanned. `installed_plugins` overrides <claude>/plugins/installed_plugins.json.
     """
     enabled = settings.get("enabledPlugins")
     enabled = enabled if isinstance(enabled, dict) else {}
@@ -170,7 +179,8 @@ def plugin_sources(claude: Path, settings: dict) -> list[tuple[Path, str]]:
             out.append((entry / "skills", name))
     try:
         installed = json.loads(
-            (claude / "plugins" / "installed_plugins.json").read_text(encoding="utf-8")
+            (installed_plugins or claude / "plugins" / "installed_plugins.json")
+            .read_text(encoding="utf-8")
         ).get("plugins") or {}
     except (OSError, ValueError, AttributeError):
         installed = {}
@@ -243,7 +253,26 @@ def main() -> int:
     ap.add_argument("--include-latent", action="store_true",
                     help="also fail (exit 1) on LATENT collisions")
     ap.add_argument("--json", action="store_true", help="machine-readable output")
+    ap.add_argument("--plugin-skill-names", action="store_true",
+                    help="print '<skill-name><TAB><plugin>' for every skill an enabled "
+                         "plugin provides, then exit (read-only; no collision scan)")
+    ap.add_argument("--claude-dir", type=Path, default=None,
+                    help="with --plugin-skill-names: the config dir (default ~/.claude)")
+    ap.add_argument("--installed-plugins", type=Path, default=None,
+                    help="with --plugin-skill-names: installed_plugins.json "
+                         "(default <claude-dir>/plugins/installed_plugins.json)")
     args = ap.parse_args()
+
+    if args.plugin_skill_names:
+        claude = args.claude_dir or home / ".claude"
+        if not claude.is_dir():
+            print(f"skill-collision-check: no such config dir: {claude}", file=sys.stderr)
+            return 2
+        found = plugin_sources(claude, load_settings(args.settings),
+                               args.installed_plugins)
+        for skill in discover([src for src, _ in found], dict(found)):
+            print(f"{skill['dir']}\t{skill['plugin']}")
+        return 0
 
     settings = load_settings(args.settings)
     plugins: dict[Path, str] = {}
