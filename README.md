@@ -178,6 +178,8 @@ from the overlay too, each adding to this repository's. An overlay
 
 MIT. Copyright (c) 2026 StartupBros LLC.
 
+Related: [HoV Router](https://github.com/StartupBros/hov-router) lets Claude Code use several AI accounts from one place, and [synthetic-panel](https://github.com/StartupBros-com/synthetic-panel) tests marketing copy on a synthetic customer panel. Each works without hov-stack.
+
 ---
 
 Built by [Will Mitchell](https://github.com/StartupBros) at [House of Vibe](https://houseofvibe.ai).
