@@ -230,10 +230,12 @@ STABLE_DIRS="hooks scripts bin commands agents workflows mods"
 STABLE_FILES="CLAUDE.md claude-env.sh memory-dream.json"
 VOLATILE_FILES="settings.json keybindings.json"
 # Proxy base URL by host role (better-ccflare tailnet sharing). Single source
-# of truth for reconcile_runtime_env and check(). The workstation runs the
-# proxy, so its URL is loopback; a satellite reaches the workstation's serve
-# URL, which names a private host and therefore comes from the environment
-# (the overlay env file, ~/.config/hov-stack/env), never from this tree.
+# of truth for reconcile_runtime_env, apply-settings and check(). The
+# workstation runs the proxy, so its URL is loopback; a satellite reaches the
+# workstation's serve URL, which names a private host and therefore never
+# comes from this tree: an exported CCFLARE_URL_SATELLITE wins, else the
+# overlay env file (~/.config/hov-stack/env) answers, read below once
+# lib/overlay.sh is loaded.
 CCFLARE_URL_WORKSTATION="http://127.0.0.1:8788"
 CCFLARE_URL_SATELLITE=${CCFLARE_URL_SATELLITE:-}
 # Flat unit names, plus drop-in overrides written as "<unit>.d/<file>.conf". The
@@ -308,6 +310,11 @@ UNITS_FOREIGN=$(foreign_units_with_overlay "$UNITS_FOREIGN")
 # <overlay>/hygiene-posture; install applies it as drop-ins and check reports drift.
 # shellcheck source=lib/hygiene-posture.sh
 . "$HERE/lib/hygiene-posture.sh"
+# The satellite proxy URL from the overlay env when the caller exported none. A
+# session's Bash calls get that file through claude-env.sh, but the SessionStart
+# settings hook, an ssh-run install and a systemd unit run without it; an apply
+# that found no URL there wrote the tracked loopback over a satellite's live one.
+[ -n "$CCFLARE_URL_SATELLITE" ] || CCFLARE_URL_SATELLITE=$(overlay_env_get CCFLARE_URL_SATELLITE)
 
 # Root-owned system units (systemd-system/ -> $SYSTEM_SYS), NOT --user units —
 # see the header comment. Deliberately never enabled/started by `install`; see
@@ -2484,6 +2491,14 @@ apply_settings() (
   value=$(jq -r '.env.CLAUDE_ENV_FILE // empty' "$tmp/desired.json")
   if jq -e '.env | has("CLAUDE_ENV_FILE")' "$tmp/desired.json" >/dev/null 2>&1 && [ ! -f "$value" ]; then
     flags+=(--skip-path "env.CLAUDE_ENV_FILE=target is not a regular file")
+  fi
+  # A satellite with no proxy URL, exported or in the overlay env, keeps live's
+  # ANTHROPIC_BASE_URL: desired would carry the tracked loopback, which no
+  # satellite serves. install refuses outright here (reconcile_runtime_env); the
+  # apply skips only this key, so the rest of the settings still land.
+  if [ "$role" = satellite ] && [ -z "$CCFLARE_URL_SATELLITE" ] \
+     && jq -e '.env | has("ANTHROPIC_BASE_URL")' "$tmp/desired.json" >/dev/null 2>&1; then
+    flags+=(--skip-path "env.ANTHROPIC_BASE_URL=this host is a satellite and CCFLARE_URL_SATELLITE is unset; set it in the overlay env")
   fi
   value=$(jq -r '.env.CLAUDE_CODE_PLUGIN_DIRS // empty' "$tmp/desired.json")
   if jq -e '.env | has("CLAUDE_CODE_PLUGIN_DIRS")' "$tmp/desired.json" >/dev/null 2>&1; then

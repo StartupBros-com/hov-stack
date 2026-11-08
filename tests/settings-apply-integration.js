@@ -532,6 +532,38 @@ const target = (f) =>
     sourceSettings,
     "the suite must not modify the selected checkout",
   );
+  await test("satellite apply reads the overlay URL and never writes loopback", (f) => {
+    // The SessionStart settings hook runs the apply with Claude Code's env, which
+    // carries no CCFLARE_URL_SATELLITE; the apply used to write the tracked
+    // loopback over the satellite's live URL there.
+    fs.writeFileSync(
+      path.join(f.root, "hosts.tsv"),
+      os.hostname().split(".")[0] + "\tsatellite\n",
+    );
+    fs.mkdirSync(f.env.HOV_STACK_OVERLAY, { recursive: true });
+    const sat = "https://satellite-proxy.example.net",
+      moved = "https://moved-proxy.example.net";
+    const url = () => f.read(f.live).env.ANTHROPIC_BASE_URL;
+    const apply = (value) => {
+      const r = f.run(["apply-settings"], { CCFLARE_URL_SATELLITE: value });
+      assert.equal(r.status, 0, r.stderr + r.stdout);
+      return r.stdout;
+    };
+    f.edit(f.live, (v) => {
+      v.env = { ...(v.env || {}), ANTHROPIC_BASE_URL: sat };
+    });
+    apply(sat);
+    assert.equal(url(), sat);
+    const out = apply("");
+    assert.equal(url(), sat, "a satellite with no URL anywhere must keep live's URL\n" + out);
+    assert.match(out, /skipped env\.ANTHROPIC_BASE_URL \(this host is a satellite/);
+    fs.writeFileSync(
+      path.join(f.env.HOV_STACK_OVERLAY, "env"),
+      `CCFLARE_URL_SATELLITE=${moved}\n`,
+    );
+    apply("");
+    assert.equal(url(), moved, "the overlay env's URL must reach live when none is exported");
+  });
   await test("install reaches apply and writes its base", (f) => {
     fs.copyFileSync(
       path.join(tree, "claude-env.sh"),
