@@ -19,7 +19,8 @@ Legs, each reported by name:
   live outside the tree and pass.
 - hooks: every hook the hooks bullet names runs before a tool call.
 - repositories: the only repository under the author's two GitHub owners, in any case,
-  that the README, CONTRIBUTING.md and SECURITY.md name is StartupBros-com/hov-stack.
+  that the README, CONTRIBUTING.md and SECURITY.md name is StartupBros-com/hov-stack,
+  except the public repositories RELATED lists, which the README alone may name.
 - plugin groups: the plugins section lists lib/default-plugins.txt under "Installed
   by ./setup", and offers.json's guided plugins and its tuning plugins under their own
   headings, in their order.
@@ -48,6 +49,9 @@ MANIFEST = Path(".claude-plugin/marketplace.json")
 DOCS = ("README.md", "CONTRIBUTING.md", "SECURITY.md")
 OWNER = "StartupBros-com"
 REPO_NAME = "hov-stack"
+# Public tools the README's "Related" line links to. Each is on .public-safety-repos too; a
+# private repository is never added here.
+RELATED = ("StartupBros/hov-router", "StartupBros-com/synthetic-panel")
 # The public owner and the private one; the docs may name only OWNER/REPO_NAME under either.
 OWNERS = r"(?i)\b(startupbros(?:-com)?)/([A-Za-z0-9._-]+)"
 PACK = "hov-stack"
@@ -341,12 +345,15 @@ def check_hooks(readme: str, facts: dict) -> list[str]:
 
 def check_repositories(docs: dict[str, str]) -> list[str]:
     problems = []
+    related = {tuple(r.lower().split("/")) for r in RELATED}
     for name, text in docs.items():
+        allowed = {(OWNER.lower(), REPO_NAME)} | (related if name == "README.md" else set())
         for owner, repo in re.findall(OWNERS, text):
             repo = repo.removesuffix(".git").rstrip(".")
-            if (owner.lower(), repo.lower()) != (OWNER.lower(), REPO_NAME):
+            if (owner.lower(), repo.lower()) not in allowed:
+                also = f", or in the README one of {', '.join(RELATED)}" if name == "README.md" else ""
                 problems.append(f"repositories: {name} names {owner}/{repo}; the only one it may name "
-                                f"is {OWNER}/{REPO_NAME}")
+                                f"is {OWNER}/{REPO_NAME}{also}")
     return problems
 
 

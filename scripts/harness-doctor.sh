@@ -1756,6 +1756,14 @@ else
   # FAILING WARN every week, dotfiles#1840) says so with a
   # `# harness-doctor-skip: <reason>` line in its leading comment block. Only
   # that block counts, so a suite's own heredoc fixtures cannot skip it.
+  # Suite caps. A cap that fires is exit 124, reported as a timeout, never as a failure.
+  # CLAUDE_BASH_SUITE_TIMEOUT_S / CLAUDE_HOOK_SUITE_TIMEOUT_S override them (the vacuity
+  # suite sets 1s against sleeping stubs). The hook suite is serial by design (#1822):
+  # about 7m15s in CI and 16m08s on a loaded host, so 1800s keeps ~1.8x headroom over
+  # the slowest observed run. The bash default of 1200s is 3x the slowest suite timed alone
+  # (pro-gate-loop 392s, red-first 354s, each timed alone on a loaded host).
+  BASH_SUITE_TIMEOUT_S=${CLAUDE_BASH_SUITE_TIMEOUT_S:-1200}
+  HOOK_SUITE_TIMEOUT_S=${CLAUDE_HOOK_SUITE_TIMEOUT_S:-1800}
   _skip_reason() { awk 'NR == 1 { next } !/^#/ { exit } sub(/^# harness-doctor-skip: /, "") { print; exit }' "$1"; }
   _bash_tests=$(find "$HARNESS_REPO/tests" "$HARNESS_REPO/scripts/tests" -maxdepth 1 -type f -name '*.test.sh' 2>/dev/null | sort)
   _bash_count=$(printf '%s\n' "$_bash_tests" | grep -c . || true)
@@ -1770,11 +1778,18 @@ else
       if [ -n "$_skip" ]; then
         _bash_skipped=$((_bash_skipped + 1))
         echo "  skip: bash: $(basename "$t") — $_skip"
-      elif out=$(cd "$(dirname "$t")" && timeout 300 bash "$(basename "$t")" 2>&1 </dev/null); then
-        ok "bash: $(basename "$t") $(printf '%s' "$out" | grep -oE '[0-9]+ passed' | tail -1)"
       else
-        _bash_fail=$(printf '%s' "$out" | _fail_names '^(FAIL|not ok)')
-        warn "bash test suite FAILING: $(basename "$t") — ${_bash_fail:-$(printf '%s' "$out" | tail -1 | cut -c1-70)}"
+        out=$(cd "$(dirname "$t")" && timeout "$BASH_SUITE_TIMEOUT_S" bash "$(basename "$t")" 2>&1 </dev/null)
+        _bash_rc=$?
+        if [ "$_bash_rc" -eq 0 ]; then
+          ok "bash: $(basename "$t") $(printf '%s' "$out" | grep -oE '[0-9]+ passed' | tail -1)"
+        elif [ "$_bash_rc" -eq 124 ]; then
+          # timeout's own 124 says the cap was too small for this host, not that a test failed.
+          warn "bash test suite $(basename "$t") timed out after ${BASH_SUITE_TIMEOUT_S}s (not a test failure) — run it directly, or raise CLAUDE_BASH_SUITE_TIMEOUT_S"
+        else
+          _bash_fail=$(printf '%s' "$out" | _fail_names '^(FAIL|not ok)')
+          warn "bash test suite FAILING: $(basename "$t") — ${_bash_fail:-$(printf '%s' "$out" | tail -1 | cut -c1-70)}"
+        fi
       fi
     done <<< "$_bash_tests"
     [ "$_bash_ran" -eq "$_bash_count" ] || warn "bash test suites: ran $_bash_ran of $_bash_count listed; the loop ended early"
@@ -1799,8 +1814,12 @@ else
     warn "hook test runner missing: $HARNESS_REPO/hooks/tests/run.sh"
   elif command -v node >/dev/null 2>&1; then
     ok "hook test files examined: $_hook_count"
-    if out=$(timeout 300 bash "$HARNESS_REPO/hooks/tests/run.sh" 2>&1 </dev/null); then
+    out=$(timeout "$HOOK_SUITE_TIMEOUT_S" bash "$HARNESS_REPO/hooks/tests/run.sh" 2>&1 </dev/null)
+    _hook_rc=$?
+    if [ "$_hook_rc" -eq 0 ]; then
       ok "node: hooks $(printf '%s' "$out" | grep -oE 'pass [0-9]+' | tail -1)"
+    elif [ "$_hook_rc" -eq 124 ]; then
+      warn "hook test suite timed out after ${HOOK_SUITE_TIMEOUT_S}s (not a test failure) — run hooks/tests/run.sh directly, or raise CLAUDE_HOOK_SUITE_TIMEOUT_S"
     else
       warn "hook test suite FAILING: $(printf '%s' "$out" | grep -oE 'fail [0-9]+' | tail -1)"
     fi

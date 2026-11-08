@@ -287,6 +287,8 @@ run_doctor() {
   CLAUDE_FF_AUDIT="${CLAUDE_FF_AUDIT:-}" \
   CLAUDE_WF_PIN_AUDIT="${CLAUDE_WF_PIN_AUDIT:-}" \
   CLAUDE_WF_PIN_AUDIT_TIMEOUT_S="${CLAUDE_WF_PIN_AUDIT_TIMEOUT_S:-}" \
+  CLAUDE_BASH_SUITE_TIMEOUT_S="${CLAUDE_BASH_SUITE_TIMEOUT_S:-}" \
+  CLAUDE_HOOK_SUITE_TIMEOUT_S="${CLAUDE_HOOK_SUITE_TIMEOUT_S:-}" \
   CLAUDE_MEMORY_LIVE_ROOT="$home/.claude/projects" \
   CLAUDE_MEMORY_MIRROR_ROOT="$home/dotfiles/memory" \
   CLAUDE_HARNESS_REPO="$harness_repo" \
@@ -627,7 +629,7 @@ MUT_DIR=$TMP/mutant-scripts
 mkdir -p "$MUT_DIR"
 ln -s "$REPO/scripts/"* "$MUT_DIR/"
 rm "$MUT_DIR/harness-doctor.sh"
-sed 's|timeout 300 bash "$(basename "$t")" 2>&1 </dev/null|timeout 300 bash "$(basename "$t")" 2>\&1|' \
+sed 's|timeout "$BASH_SUITE_TIMEOUT_S" bash "$(basename "$t")" 2>&1 </dev/null|timeout "$BASH_SUITE_TIMEOUT_S" bash "$(basename "$t")" 2>\&1|' \
   "$DOCTOR" >"$MUT_DIR/harness-doctor.sh"
 if cmp -s "$DOCTOR" "$MUT_DIR/harness-doctor.sh"; then
   bad "B1 ran-vs-listed: the bash loop's </dev/null line moved; update this mutation"
@@ -665,6 +667,37 @@ contains "$SKIP_OUT" "skip: bash: m-manual.test.sh — needs operator-supplied i
 omits "$SKIP_OUT" "FAILING: m-manual.test.sh" "B1 a skip-header suite is not run"
 contains "$SKIP_OUT" "late-marker-case" "B1 a marker after the header does not skip the suite"
 omits "$SKIP_OUT" "the loop ended early" "B1 a skipped suite counts as handled"
+
+# D6: a suite that outlives its cap is `timeout`'s exit 124 -- a too-small cap for this host,
+# not a failing test. The doctor must say "timed out ... (not a test failure)" and must not
+# print FAILING for it; a suite that really fails keeps the FAILING wording. Caps are the
+# CLAUDE_BASH_SUITE_TIMEOUT_S / CLAUDE_HOOK_SUITE_TIMEOUT_S env overrides (1s here) against
+# stubs that sleep past them.
+TIMEOUT_HARNESS=$TMP/timeout-harness
+make_harness_repo "$TIMEOUT_HARNESS"
+cat >"$TIMEOUT_HARNESS/tests/slow.test.sh" <<'SH'
+#!/usr/bin/env bash
+sleep 5
+echo '1 passed'
+SH
+cat >"$TIMEOUT_HARNESS/tests/broken.test.sh" <<'SH'
+#!/usr/bin/env bash
+echo 'FAIL: really-broken-case'
+exit 1
+SH
+cat >"$TIMEOUT_HARNESS/hooks/tests/run.sh" <<'SH'
+#!/usr/bin/env bash
+sleep 5
+echo 'pass 1'
+SH
+TIMEOUT_OUT=$(CLAUDE_BASH_SUITE_TIMEOUT_S=1 CLAUDE_HOOK_SUITE_TIMEOUT_S=1 \
+  run_doctor "$FULL_HOME" "$TIMEOUT_HARNESS" 0)
+contains "$TIMEOUT_OUT" "bash test suite slow.test.sh timed out after 1s (not a test failure)" "D6 a bash suite past its cap is named as timed out"
+omits "$TIMEOUT_OUT" "FAILING: slow.test.sh" "D6 a timed-out bash suite is not reported as FAILING"
+contains "$TIMEOUT_OUT" "hook test suite timed out after 1s (not a test failure)" "D6 a hook suite past its cap is named as timed out"
+omits "$TIMEOUT_OUT" "hook test suite FAILING" "D6 a timed-out hook suite is not reported as FAILING"
+contains "$TIMEOUT_OUT" "bash test suite FAILING: broken.test.sh — FAIL: really-broken-case" "D6 a real bash failure keeps the FAILING wording"
+omits "$TIMEOUT_OUT" "all harness test suites green" "D6 a timed-out suite never renders the green line"
 
 # B7: skills/synced is skills-sync's container of vendored skills, so it has
 # no SKILL.md of its own; a skill dir that is genuinely empty still warns.

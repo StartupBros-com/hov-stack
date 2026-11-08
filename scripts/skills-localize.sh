@@ -17,6 +17,11 @@
 #                                 installed_plugins.json records that plugin at user scope,
 #                                 so retiring never leaves a host with neither (#358)
 #   plugins/hov-stack/skills/<name>/  full local (non-jsm) skills → deployed into ~/.claude/skills/
+#                                 unless an enabled plugin provides a skill of that name
+#                                 (skill-collision-check.py --plugin-skill-names): that fork
+#                                 is skipped, and check reports an existing real
+#                                 ~/.claude/skills/<name> as a duplicate DRIFT. Codex still
+#                                 gets the fork.
 #   skills-patches/<name>/<rel>   content overlays, 3-way merged onto the installed jsm skill
 #   skills-patches/<name>/.base/  the upstream files each overlay was written against, plus
 #                                 VERSION; never deployed
@@ -359,14 +364,44 @@ sync_fork() {
   else note "ERROR: failed to deploy $label fork '$name'"; errors=1; fi
 }
 
+# A fork whose name an ENABLED plugin also provides is not copied into the Claude tree:
+# the copy would load next to <plugin>:<name> and skill-collision-check.py reports the
+# pair as a COLLISION (papercut, 2026-11-07: plugins/hov-stack/skills/papercut is the
+# upstream source of the papercut plugin's skill). The plugin list comes from the one
+# enumeration skill-collision-check.py owns (--plugin-skill-names), for the config dir
+# that holds $SKILLS. If the helper fails the fork deploys as before, with a WARN.
+# deploy_codex is untouched: Codex has no plugins and still needs the fork.
+plugin_skill_names() {
+  local cfg_dir
+  cfg_dir=$(dirname "$SKILLS")
+  python3 "$HERE/scripts/skill-collision-check.py" --plugin-skill-names \
+    --claude-dir "$cfg_dir" --settings "$cfg_dir/settings.json" \
+    --installed-plugins "${SKILLS_INSTALLED_PLUGINS:-$cfg_dir/plugins/installed_plugins.json}" 2>&1
+}
+
 deploy_forks() {
   [ -d "$LOCAL" ] || return 0
-  local d name
+  local d name plugin provided=""
+  if ! provided=$(plugin_skill_names); then
+    note "WARN: could not list plugin-provided skills ($(printf '%s' "$provided" | head -n1)) — deploying every fork"
+    provided=""
+  fi
   for d in "$LOCAL"/*/; do
     [ -d "$d" ] || continue
     name=$(basename "$d")
     [ -n "$name" ] || continue
     [ -f "$d/SKILL.md" ] || { note "WARN: plugins/hov-stack/skills/$name has no SKILL.md — skipped"; continue; }
+    plugin=$(printf '%s\n' "$provided" | awk -F'\t' -v n="$name" '$1 == n { print $2; exit }')
+    if [ -n "$plugin" ]; then
+      if [ "$MODE" = check ]; then
+        if [ -d "$SKILLS/$name" ] && [ ! -L "$SKILLS/$name" ]; then
+          note "DRIFT: ~/.claude/skills/$name duplicates plugin skill $plugin:$name; remove it"; drift=1
+        fi
+      else
+        note "skip claude fork $name: plugin skill $plugin:$name provides it"
+      fi
+      continue
+    fi
     sync_fork "$d" "$SKILLS" "$name" "claude"
   done
 }

@@ -1,6 +1,6 @@
 # hov-stack
 
-I'm [Will Mitchell](https://x.com/startupbros). I'm not the president of YC and I'm not on the React core team. I'm a marketer who has been vibe coding full time for almost four years, shipping solo on Windows. **hov-stack is my answer.** This is the Claude Code harness I work in every day, not a copy of it. My Codex and Pi setups load skills from it too.
+I'm [Will Mitchell](https://x.com/startupbros). I'm not the president of YC and I'm not on the React core team. I'm a marketer who has been vibe coding full time for almost four years, building solo on Windows. **hov-stack is my answer.** This is the Claude Code harness I work in every day, not a copy of it. My Codex and Pi setups load skills from it too.
 
 Fork it. Improve it. Make it yours.
 
@@ -15,7 +15,7 @@ In the 60 days to 2026-10-19: 4,302 pull requests merged across 17 repos. Everyt
 
 <!-- ![GitHub contributions, 2026](docs/images/github-2026.png) -->
 
-**What nobody else ships:** the permission lists. 292 allow, 75 ask and 70 deny entries, grown from refusals through `/denial-triage`, plus 10 hooks that run before a tool call lands. The other published stacks ship skills; this one ships the part that decides what an agent may run.
+**What nobody else publishes:** the permission lists. 292 allow, 75 ask and 70 deny entries, grown from refusals through `/denial-triage`, plus 10 hooks that run before a tool call lands. The other public stacks hand you skills; this one hands you the part that decides what an agent may run.
 
 ## Who this is for
 
@@ -67,7 +67,7 @@ It leaves alone anything you installed some other way, a program that changed si
 - `hooks/`: 17 hook scripts that `settings.json` registers across 6 hook events; 10 of them run before a tool call (`git-guard`, `settings-guard`, `loop-guard`, `runner-guard` and the rest), and `dcg` runs beside them when it is installed. The papercut plugin registers its own on top: failure capture, the Read ceiling guard and the StructuredOutput unwrap. The hook suite is the 46 test files in `hooks/tests/`.
 - `settings.json`: the allow / ask / deny lists I run under bypass-permissions mode (292 / 75 / 70 entries)
 - `plugins/hov-stack/skills/` (also reachable as `skills/`): 47 skills, 31 of them slash-command only so they never cost tokens until called, plus patches to 3 third-party skills in `skills-patches/` (papers, de-slopify's fact-check scripts, and security-audit-for-saas's lockfile-history, worm-sweep and EOL-check scripts), each with a note of its upstream
-- `skills-stack/`: 2 more slash-command skills (memory-mine, review-adversarial-first) that run this repo's scripts, so `./setup` links them and the plugin does not ship them
+- `skills-stack/`: 2 more slash-command skills (memory-mine, review-adversarial-first) that run this repo's scripts, so `./setup` links them and the plugin does not include them
 - `harnesses/`: my Codex, fx, Pi and pi-lens config, which `install.sh` installs and `./setup` leaves alone. Nothing under it runs in this repo's CI.
 - `windows/`: the Windows side of a WSL2 machine (WezTerm and Windows Terminal config, `.wslconfig`, and the disk and Defender scripts)
 - `install.sh` and `sync.sh` are the full installers for my own machines (systemd units, the destructive-command guard, the managed deny floor). `./setup` is the one for yours. The systemd units that make sense without them are documented, with copy-and-enable commands, in `systemd/README.md`.
@@ -81,7 +81,7 @@ This repository is the `hov` marketplace, and `./setup` adds it. To add it by ha
 - `papercut`: logs every hard tool failure from a hook, ranks them by how many distinct sessions hit each, and carries one family at a time into a tracked work item whose verification refuses to call it fixed on silence alone.
 - `skill-tuner`: tells whether a change to a `SKILL.md`, `AGENTS.md` or `CLAUDE.md` worked, by paired comparison with a confidence interval. `/skill-tuner:tune` fixes what three independent skeptics confirm and checks the description still routes.
 - `memory-dream`: the sleep cycle for Claude Code's auto-memory. `/memory-dream:dream` finds superseded, stale and oversized notes and drafts the fixes, and you approve each change before anything is written. `/memory-dream:eval` measures whether recall improved.
-- `design-rails`: keeps agents on your design system. It checks whether one exists and is enforced, derives a `DESIGN.md` under `design/` from the code you already ship, and ratchets drift budgets that only move down. It never edits application source.
+- `design-rails`: keeps agents on your design system. It checks whether one exists and is enforced, derives a `DESIGN.md` under `design/` from the code you already have, and ratchets drift budgets that only move down. It never edits application source.
 
 ### Set up through `/hov-setup`
 
@@ -151,7 +151,7 @@ from the overlay too, each adding to this repository's. An overlay
   - `foreign-units`, one externally owned unit stem per line, excluded from sync's undeclared-unit findings (blank lines and `#` comments ignored);
   - `hosts.tsv`, this host's copy of the fleet's host-to-role table (`<hostname><TAB><workstation|satellite>` lines), which `lib/profile.sh` reads when the tree carries none. The `workstation` row is the one host allowed to push canonical state, so the operator writes it, and `sync.sh check` reports a host whose live tree has no roster;
   - `hygiene-posture`, the hygiene timers this host runs and their settings (deletion on, schedule), one `<unit-stem> [KEY=value]` per line; `sync.sh install` applies it and `sync.sh check` reports drift (`systemd/README.md`);
-  - `memory-filename-allowlist.txt`, the memory audit's reviewed-name list (the tracked copy ships no entries);
+  - `memory-filename-allowlist.txt`, the memory audit's reviewed-name list (the tracked copy has no entries);
   - `ga4-properties.json`, `posthog-projects.json`, `resend-bws-bindings.json`, `stripe-accounts.json`, `supabase-projects.json` and `migration-targets.json`, whose shapes `config/*.example.json` show;
   - `repo-routes.json`, which replaces the tracked placeholder;
   - `reclaim-sweep-keep`, paths `reclaim-sweep` never removes, one absolute glob per line (`systemd/README.md`). Without it there is no keep list; one that cannot be read or parsed makes the sweep refuse to plan or apply.
@@ -174,6 +174,12 @@ from the overlay too, each adding to this repository's. An overlay
 - The two-hour walkthrough of this setup is the House of Vibe workshop "Steal My Whole Claude Code Setup" (Aug 5, 2026), at [House of Vibe](https://houseofvibe.ai/?utm_source=github&utm_medium=repo&utm_campaign=hov-stack).
 - `dcg`, the third-party destructive-command guard this harness runs alongside its own hooks: https://github.com/Dicklesworthstone/destructive_command_guard
 - `cass`, the third-party coding-agent session search that `scripts/cass-rerank`, `scripts/cass-search-health.sh`, `scripts/cass-release-promote.sh` and `scripts/cass-index-rebuild.sh` drive: https://github.com/Dicklesworthstone/coding_agent_session_search. Those scripts call an installed `cass` and carry none of its code.
-- Both tools are Jeffrey Emanuel's and ship under the MIT License with an OpenAI/Anthropic rider; read each project's `LICENSE` before you install it.
+- Both tools are Jeffrey Emanuel's and are released under the MIT License with an OpenAI/Anthropic rider; read each project's `LICENSE` before you install it.
 
-MIT. Copyright (c) 2026 StartupBros LLC. Built by Will Mitchell for House of Vibe.
+MIT. Copyright (c) 2026 StartupBros LLC.
+
+Related: [HoV Router](https://github.com/StartupBros/hov-router) lets Claude Code use several AI accounts from one place, and [synthetic-panel](https://github.com/StartupBros-com/synthetic-panel) tests marketing copy on a synthetic customer panel. Each works without hov-stack.
+
+---
+
+Built by [Will Mitchell](https://github.com/StartupBros) at [House of Vibe](https://houseofvibe.ai).
