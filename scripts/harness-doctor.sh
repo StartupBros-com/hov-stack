@@ -2198,12 +2198,19 @@ EOF
   for _cs_settings in "$HOME"/SITES/*/.claude/settings.json "$HOME"/SITES/*/.claude/settings.local.json; do
     [ -f "$_cs_settings" ] && _cs_args+=(--repo-settings-json "$_cs_settings")
   done
+  # The memory mirror is opt-in, as in section 4: scan it when it is named or
+  # exists. A checkout without one (every hov-stack checkout) still scans its
+  # harness docs and CLAUDE.md instead of stopping on "doc tree missing".
+  if [ -n "${CLAUDE_MEMORY_MIRROR_ROOT:-}" ] || [ -d "$MEMORY_MIRROR" ]; then
+    _cs_args+=(--doc-tree "$MEMORY_MIRROR")
+  else
+    echo "  note: no memory mirror at $MEMORY_MIRROR, so the retired-MCP scan skips memory notes"
+  fi
   _cs_out=$(python3 "$CLI_AUDIT" \
     --settings "$HOME/.claude/settings.json" \
     --claude-json "$HOME/.claude.json" \
     --doc-dir "$DOTFILES_REPO/harness" \
     --doc "$DOTFILES_REPO/CLAUDE.md" \
-    --doc-tree "$DOTFILES_REPO/memory" \
     "${_cs_args[@]}" 2>&1)
   _cs_status=$?
   case "$_cs_status" in
