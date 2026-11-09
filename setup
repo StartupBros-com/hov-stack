@@ -51,6 +51,8 @@
 #      ours still runs as ~/.claude/bin/<name>. Nothing turns this off: a link you remove is
 #      reported missing by --check. setup installs none of their Python packages; gsc, ga4
 #      and vastai each say how to add theirs when it is missing.
+#      The same way, a "helpers" row links papercut (bin/papercut.py) and open-deliverable,
+#      the commands CLAUDE.md tells agents to run by name (lib/manifest.sh's HELPER_CLIS).
 #   2. Installs dcg, the destructive-command guard, with dcg/install.sh: one pinned release,
 #      checked against its checksum and a minisign signature before it lands. Its licence
 #      is shown first. A platform with no build, a missing tool or no network is a skip; a
@@ -891,14 +893,22 @@ dcg_path=
 # runs as $CFG/bin/<name>. Only a link that could not be made fails the row. --check makes
 # nothing and reports each free path missing.
 CLI_DIR=$HOME/.local/bin
-commands_row() {  # commands_row run|check
-  local mode=$1 name src dst old have=0 kept="" absent="" broken="" detail
+# link_cmds_row <row> <label> <mode> <entry>...: the shared body of the commands and helpers
+# rows. An entry is "name" or "name|file in bin/"; the link at ~/.local/bin/<name> points at
+# $HOV_STACK/bin/<file>.
+link_cmds_row() {
+  local rowname=$1 label=$2 mode=$3 entry name file src dst old have=0 kept="" absent="" broken="" detail total
+  shift 3
+  total=$#
   if [ "$mode" = run ] && ! mkdir -p "$CLI_DIR"; then
-    row commands failed "could not make $(_lf_display "$CLI_DIR"), so no data command was linked; each still runs as $(_lf_display "$CFG")/bin/<name>"
+    row "$rowname" failed "could not make $(_lf_display "$CLI_DIR"), so no $label was linked; each still runs as $(_lf_display "$CFG")/bin/<name>"
     return 0
   fi
-  for name in "${DATA_CLIS[@]}"; do
-    src=$HOV_STACK/bin/$name
+  for entry in "$@"; do
+    name=${entry%%|*}
+    file=$name
+    case "$entry" in *'|'*) file=${entry#*|} ;; esac
+    src=$HOV_STACK/bin/$file
     dst=$CLI_DIR/$name
     if [ -e "$dst" ] && [ "$dst" -ef "$src" ]; then
       have=$((have + 1))
@@ -921,10 +931,10 @@ commands_row() {  # commands_row run|check
       broken="$broken $name"
     fi
   done
-  if [ "$have" -eq "${#DATA_CLIS[@]}" ]; then
-    detail="${#DATA_CLIS[@]} data commands linked into $(_lf_display "$CLI_DIR")"
+  if [ "$have" -eq "$total" ]; then
+    detail="$total ${label}s linked into $(_lf_display "$CLI_DIR")"
   else
-    detail="$have of ${#DATA_CLIS[@]} data commands linked into $(_lf_display "$CLI_DIR")"
+    detail="$have of $total ${label}s linked into $(_lf_display "$CLI_DIR")"
   fi
   [ -z "$absent" ] || detail="$detail; not linked:$absent; run ./setup"
   [ -z "$broken" ] || detail="$detail; could not link:$broken (see above)"
@@ -933,10 +943,17 @@ commands_row() {  # commands_row run|check
     *":$CLI_DIR:"*) ;;
     *) detail="$detail; $(_lf_display "$CLI_DIR") is not on this shell's PATH: a new login shell may add it, else add it yourself" ;;
   esac
-  if [ -n "$broken" ]; then row commands failed "$detail"
-  elif [ -n "$absent" ]; then row commands missing "$detail"
-  else row commands ok "$detail"
+  if [ -n "$broken" ]; then row "$rowname" failed "$detail"
+  elif [ -n "$absent" ]; then row "$rowname" missing "$detail"
+  else row "$rowname" ok "$detail"
   fi
+}
+commands_row() {  # commands_row run|check
+  link_cmds_row commands "data command" "$1" "${DATA_CLIS[@]}"
+}
+# The helper commands CLAUDE.md names (papercut, open-deliverable): HELPER_CLIS in lib/manifest.sh.
+helpers_row() {  # helpers_row run|check
+  link_cmds_row helpers "helper command" "$1" "${HELPER_CLIS[@]}"
 }
 
 if [ "$check" = 1 ]; then
@@ -948,6 +965,7 @@ if [ "$check" = 1 ]; then
   done
   if [ -z "$absent" ]; then row links ok "${#srcs[@]} links in place"; else row links missing "not linked:$absent; run ./setup"; fi
   commands_row check
+  helpers_row check
 
   if [ "$no_dcg" = 1 ]; then
     row dcg off "left out of the check (--no-dcg)"
@@ -1014,6 +1032,7 @@ overlay_import || echo "  could not import $OVERLAY/CLAUDE.md from $(_lf_display
 [ -d "$BACKUP" ] && echo "  replaced files were moved to $BACKUP (nothing was deleted)"
 if [ "$unlinked" -eq 0 ]; then row links ok "$linked links in place"; else row links failed "$unlinked could not be made (see above)"; fi
 commands_row run
+helpers_row run
 
 if [ "$no_dcg" = 1 ]; then
   echo "dcg: skipped (--no-dcg). Run ./dcg/install.sh to add it later, then re-run ./setup."
