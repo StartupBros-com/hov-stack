@@ -106,7 +106,9 @@ HOLD=$STATE_DIR/hold
 STABLE_RE='^(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})$'
 
 say() { "$NOTIFY" "$1" "${2:-default}" >/dev/null 2>&1 || echo "WARN notify failed: $1"; return 0; }
-now_utc() { date -u +%Y-%m-%dT%H:%M:%S.%3NZ; }
+# %N trimmed to milliseconds, not a %3N width: uutils date (Ubuntu 26.04's default) drops the
+# fraction's leading zeros under a width (uutils/coreutils#15697), so .0967 s would read .967.
+now_utc() { local t; t=$(date -u +%Y-%m-%dT%H:%M:%S.%N); printf '%sZ\n' "${t%??????}"; }
 is_stable() { [[ ${1:-} =~ $STABLE_RE ]]; }
 ver_lt() { [ "$1" != "$2" ] && [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | head -n 1)" = "$1" ]; }
 
