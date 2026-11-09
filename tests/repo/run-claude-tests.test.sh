@@ -263,4 +263,74 @@ has '^FAIL   tests/orphan.test.sh  (no result recorded by this run' "the suite w
 has 'the launcher (xargs) exited 125' "the launcher's exit was not reported"
 ok "a suite whose runner child dies is reported as having no result, and the run fails"
 
+echo "== 18: a mise shim for node and python3 is pinned to the real binary under a scratch HOME =="
+# SH stands in for the real HOME: it holds a mise conf.d and the repo, as on a host.
+# The fake shim refuses to run from under a directory with .config/mise/conf.d unless
+# $HOME/.mise-trusted exists, which is what mise does to a scratch HOME ("Config files
+# in ... are not trusted"); the fake `mise which` names the real binaries.
+NODE_REAL=$(command -v node); PY_REAL=$(command -v python3)
+case $NODE_REAL$PY_REAL in *shims*) fail "node and python3 must be real binaries to run this case" ;; esac
+SH=$WORK/shimhome
+mkdir -p "$SH/.config/mise/conf.d" "$SH/.local/share/mise/shims" "$SH/bin" "$SH/repo/tests" "$SH/repo/hooks/tests"
+: >"$SH/.config/mise/conf.d/host.toml"
+for name in node python3; do
+  real=$NODE_REAL; [ "$name" = python3 ] && real=$PY_REAL
+  {
+    echo '#!/usr/bin/env bash'
+    echo 'd=$PWD'
+    echo 'while :; do'
+    echo '  if [ -d "$d/.config/mise/conf.d" ] && [ ! -e "$HOME/.mise-trusted" ]; then'
+    echo '    echo "mise ERROR Config files in $d/.config/mise/conf.d/host.toml are not trusted." >&2; exit 1'
+    echo '  fi'
+    echo '  [ "$d" = / ] && break; d=$(dirname "$d")'
+    echo 'done'
+    echo "exec $real \"\$@\""
+  } >"$SH/.local/share/mise/shims/$name"
+  chmod +x "$SH/.local/share/mise/shims/$name"
+done
+{
+  echo '#!/usr/bin/env bash'
+  echo 'if [ "${1:-}" = which ]; then'
+  echo "  case \"\${2:-}\" in node) echo $NODE_REAL ;; python3) echo $PY_REAL ;; *) exit 1 ;; esac"
+  echo 'else exit 1; fi'
+} >"$SH/bin/mise"
+chmod +x "$SH/bin/mise"
+SHIM_PATH=$SH/.local/share/mise/shims:$SH/bin:$PATH
+NOMISE_PATH=$SH/.local/share/mise/shims:$PATH
+cp "$RUNNER" "$SH/repo/tests/run-claude-tests.sh"
+: >"$SH/repo/tests/claude-tests.skips"
+printf "console.log('probe');\n" >"$SH/repo/tests/probe.js"
+printf '#!/usr/bin/env bash\nnode "$(dirname "$0")/probe.js" || exit 1\npython3 --version || exit 1\nprintf "ceiling=%%s\\n" "${MISE_CEILING_PATHS:-}"\n' >"$SH/repo/tests/uses-tools.test.sh"
+shim_run() { # shim_run <PATH> [extra env assignment]
+  set +e
+  OUT=$(cd "$SH/repo" && env HOME="$SH" PATH="$1" ${2:+"$2"} bash tests/run-claude-tests.sh -j 1 -o "$SH/logs" 2>&1)
+  RC=$?
+  set -e
+}
+shim_run "$NOMISE_PATH"
+[ "$RC" = 1 ] || { printf '%s\n' "$OUT"; fail "control: with no mise to resolve the shim the suite should fail, got exit $RC"; }
+has 'are not trusted' "control: the fake shim did not reproduce the mise trust failure"
+ok "control: the fake shim fails under a scratch HOME when it cannot be resolved"
+shim_run "$SHIM_PATH"
+[ "$RC" = 0 ] || { printf '%s\n' "$OUT"; fail "with mise on PATH the runner should pin node and python3, got exit $RC"; }
+has '^ok     tests/uses-tools.test.sh' "the suite did not pass with the shim pinned"
+ok "the runner resolves the shim through mise which, and a suite calling node and python3 passes"
+grep -q "^ceiling=$SH$" "$SH/logs/tests__uses-tools.test.sh.log" || fail "MISE_CEILING_PATHS was not the real HOME inside the suite"
+shim_run "$SHIM_PATH" MISE_CEILING_PATHS=/preset/ceiling
+grep -q '^ceiling=/preset/ceiling$' "$SH/logs/tests__uses-tools.test.sh.log" || fail "a caller's MISE_CEILING_PATHS was overwritten"
+ok "MISE_CEILING_PATHS defaults to the real HOME and keeps a value the caller set"
+
+echo "== 19: hooks/tests/run.sh pins the same shims before it overrides HOME =="
+cp "$ROOT/hooks/tests/run.sh" "$SH/repo/hooks/tests/run.sh"
+printf "import test from 'node:test';\ntest('planted', () => {});\n" >"$SH/repo/hooks/tests/a.test.js"
+set +e
+OUT=$(cd "$SH/repo" && env HOME="$SH" PATH="$NOMISE_PATH" bash hooks/tests/run.sh 2>&1); RC=$?
+set -e
+[ "$RC" != 0 ] || { printf '%s\n' "$OUT"; fail "control: hooks/tests/run.sh passed through an unresolvable shim"; }
+set +e
+OUT=$(cd "$SH/repo" && env HOME="$SH" PATH="$SHIM_PATH" bash hooks/tests/run.sh 2>&1); RC=$?
+set -e
+[ "$RC" = 0 ] || { printf '%s\n' "$OUT"; fail "hooks/tests/run.sh failed under a node shim with mise on PATH (exit $RC)"; }
+ok "hooks/tests/run.sh runs node --test through a pinned binary where an unpinned shim fails"
+
 echo "all $pass checks passed"

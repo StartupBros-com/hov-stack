@@ -135,6 +135,8 @@ if ! command -v dcg >/dev/null 2>&1 || ! command -v jq >/dev/null 2>&1; then
   exit 0
 fi
 
+# Host dcg settings must not reach the verdicts: DCG_CONFIG is set per call below.
+for _v in $(compgen -e | grep '^DCG_'); do unset "$_v"; done
 SANDBOX=$(mktemp -d "${TMPDIR:-/tmp}/dcg-segment-bound.XXXXXX") || { echo "FAIL: mktemp" >&2; exit 1; }
 trap 'rm -rf "$SANDBOX"' EXIT
 mkdir -p "$SANDBOX/.config" "$SANDBOX/.claude"
@@ -223,15 +225,20 @@ grep -vF 'pattern = "\\bchmod\\b' "$CFG" | grep -vF 'pattern = "\\bchown\\b' \
 removed=$(( $(wc -l < "$CFG") - $(wc -l < "$SANDBOX/no-overrides.toml") ))
 [ "$removed" -eq 5 ] && ok "planted negative removes exactly the five override lines" \
   || bad "planted negative removed $removed lines, want 5"
+# "No built-in rule denies" is asked of an EMPTY config, not of the repo config
+# minus its overrides: any pack the repo (or, via a DCG_* variable, the host)
+# enables is not a built-in rule, and on a host that enables extra packs those
+# denied five of these cases (#356).
+: > "$SANDBOX/empty.toml"
 for c in "${OVERRIDE_ONLY[@]}"; do
-  want ALLOW "no built-in rule denies: ${c//$'\n'/<NL>}" "$c" "$SANDBOX/no-overrides.toml"
+  want ALLOW "no built-in rule denies: ${c//$'\n'/<NL>}" "$c" "$SANDBOX/empty.toml"
 done
 DCG_VER=$(dcg --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
 if [ -z "$DCG_VER" ]; then
   bad "cannot read dcg --version, so the redirect push planted negative cannot be scoped"
 elif [ "$(printf '%s\n0.16.0\n' "$DCG_VER" | sort -V | head -1)" != 0.16.0 ]; then
   for c in "${REDIRECT_PUSH[@]}"; do
-    want ALLOW "no built-in rule denies below 0.16.0: $c" "$c" "$SANDBOX/no-overrides.toml"
+    want ALLOW "no built-in rule denies below 0.16.0: $c" "$c" "$SANDBOX/empty.toml"
   done
 else
   echo "note: dcg $DCG_VER's built-in git rule also denies the ${#REDIRECT_PUSH[@]} redirect push cases, so their planted negative runs only below 0.16.0" >&2

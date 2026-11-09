@@ -1703,98 +1703,151 @@ else
   # without closing the pipe early (check 23's `head -3` printed "Broken pipe"
   # into the weekly report) and drops the indent TAP gives a failing subtest.
   _fail_names() { grep -E "$1" | awk 'n < 3 { sub(/^[[:space:]]+/, ""); print; n++ }' | cut -c1-90 | paste -sd ';' -; }
-  # Measured 2026-08-17 after this batch: 18 Python, 2 node, 18 Bash, 17 hook suites.
-  _python_count=$(find "$HARNESS_REPO/tests" -maxdepth 1 -type f -name 'test_*.py' 2>/dev/null | wc -l)
-  if ! command -v python3 >/dev/null 2>&1; then
-    warn "python3 missing; Python harness tests cannot run"
-  elif floor "$_python_count" 1 "python test modules"; then
-    ok "python test modules examined: $_python_count"
-    if out=$(cd "$HARNESS_REPO" && python3 -m unittest discover -s tests -p 'test_*.py' 2>&1 </dev/null); then
-      ok "python: $(printf '%s' "$out" | grep -oE 'Ran [0-9]+ tests' | tail -1)"
-    else
-      warn "python test suite FAILING: $(printf '%s' "$out" | grep -E '^(FAILED|ERROR)' | tail -1) $(printf '%s' "$out" | _fail_names '^(FAIL|ERROR): ')"
-    fi
-  else
-    WARNS=$((WARNS + 1))
-  fi
-
-  # Every bundled scanner keeps its tests beside it, so discover them rather than
-  # hardcoding a list that silently rots as skills are added.
-  _node_dirs=$(find "$HARNESS_REPO/plugins/hov-stack/skills" -name '*.test.mjs' -printf '%h\n' 2>/dev/null | sort -u)
-  _node_count=$(printf '%s\n' "$_node_dirs" | grep -c . || true)
-  if ! command -v node >/dev/null 2>&1; then
-    warn "node missing; skill and hook suites cannot run"
-  elif floor "$_node_count" 1 "node skill suites"; then
-    ok "node skill suites examined: $_node_count"
-    # Dedupe by directory: `node --test` runs every *.test.mjs in the cwd, so
-    # iterating files would re-run a suite once per test file (design-drift, since
-    # moved to the design-rails plugin, was reported twice before this). The TAP
-    # reporter is pinned because Node 24 prints spec output even when piped,
-    # which has no `not ok` lines to name a failing test by.
-    _node_ran=0
-    while IFS= read -r d; do
-      [ -n "$d" ] || continue
-      _node_ran=$((_node_ran + 1))
-      if out=$(cd "$d" && node --test --test-reporter=tap 2>&1 </dev/null); then
-        ok "node: $(basename "$(dirname "$d")") $(printf '%s' "$out" | grep -oE 'pass [0-9]+' | tail -1)"
-      else
-        warn "node test suite FAILING in $(basename "$(dirname "$d")"): $(printf '%s' "$out" | grep -oE 'fail [0-9]+' | tail -1) $(printf '%s' "$out" | _fail_names '^[[:space:]]*not ok ')"
-      fi
-    done <<< "$_node_dirs"
-    [ "$_node_ran" -eq "$_node_count" ] || warn "node skill suites: ran $_node_ran of $_node_count listed; the loop ended early"
-  else
-    WARNS=$((WARNS + 1))
-  fi
-
-  # Bash suites live in tests/ and scripts/tests/, which neither discovery above reaches — so
-  # they stayed manual even after this section landed, and one of them (dcg-reconcile) has
-  # been failing unnoticed. Key strictly on the EXIT STATUS: these suites print their own
-  # FAIL lines, and a runner that reads stdout instead of the status is the same
-  # zero-run-green trap harness/evidence-regime.md documents.
-  # A suite that cannot run unattended (docker-init-runtime.test.sh needs
-  # operator-supplied images and containers, so its bare run refused with a
-  # FAILING WARN every week, dotfiles#1840) says so with a
-  # `# harness-doctor-skip: <reason>` line in its leading comment block. Only
-  # that block counts, so a suite's own heredoc fixtures cannot skip it.
-  # Suite caps. A cap that fires is exit 124, reported as a timeout, never as a failure.
-  # CLAUDE_BASH_SUITE_TIMEOUT_S / CLAUDE_HOOK_SUITE_TIMEOUT_S override them (the vacuity
-  # suite sets 1s against sleeping stubs). The hook suite is serial by design (#1822):
-  # about 7m15s in CI and 16m08s on a loaded host, so 1800s keeps ~1.8x headroom over
-  # the slowest observed run. The bash default of 1200s is 3x the slowest suite timed alone
-  # (pro-gate-loop 392s, red-first 354s, each timed alone on a loaded host).
+  # The doctor no longer loops over suites itself (#356). It asks the CI runner,
+  # tests/run-claude-tests.sh, which gives every suite a scratch HOME, honours
+  # tests/claude-tests.skips (xfail is signature-checked; a stale entry is exit 2),
+  # and also discovers tests/*.test.py and scripts/tests/*.test.js. One runner
+  # decides isolation and skips, so a host's doctor and CI cannot disagree about a
+  # suite. Until then the doctor's own loops used the caller's live environment and
+  # ignored the skips file, and flagged 11 suites CI passed at the same commit.
+  # What the doctor adds on top of the runner's verdict:
+  #   - it keys on the runner's EXIT STATUS and summary, never on stdout alone (the
+  #     zero-run-green trap harness/evidence-regime.md documents). Exit 2 is a WARN.
+  #   - xfail and skip lines are echoed and counted. A run with any of them says so;
+  #     only a run with none renders "all harness test suites green".
+  #   - the per-file `# harness-doctor-skip: <reason>` header is a doctor-only skip,
+  #     kept deliberately: the doctor drops those suites from the runner's selection
+  #     and names each with its reason, so CI (which has no such header) still runs
+  #     them. A suite that cannot run unattended (docker-init-runtime.test.sh, which
+  #     needs operator-supplied images and containers, dotfiles#1840) belongs in
+  #     tests/claude-tests.skips as `skip`; the header stays for a suite CI should
+  #     run but a host's weekly doctor should not. Only the leading comment block
+  #     counts, so a suite's own heredoc fixtures cannot skip it.
+  #   - the floors: a family (python, node, bash, hook) with zero suites is a WARN.
+  # hooks/tests/run.sh stays a separate invocation, as it is in ci.yml.
+  # Caps. A cap that fires is exit 124, reported as a timeout, never as a failure.
+  # CLAUDE_BASH_SUITE_TIMEOUT_S now caps EVERY suite the runner starts (it is the
+  # runner's CLAUDE_TESTS_TIMEOUT), CLAUDE_TEST_RUNNER_TIMEOUT_S bounds the whole
+  # runner, and CLAUDE_HOOK_SUITE_TIMEOUT_S the hook suite, which is serial by
+  # design (#1822): about 7m15s in CI and 16m08s on a loaded host, so 1800s keeps
+  # ~1.8x headroom. The vacuity suite sets 1s against sleeping stubs.
   BASH_SUITE_TIMEOUT_S=${CLAUDE_BASH_SUITE_TIMEOUT_S:-1200}
   HOOK_SUITE_TIMEOUT_S=${CLAUDE_HOOK_SUITE_TIMEOUT_S:-1800}
+  RUNNER_TOTAL_TIMEOUT_S=${CLAUDE_TEST_RUNNER_TIMEOUT_S:-3600}
+  TEST_RUNNER=$HARNESS_REPO/tests/run-claude-tests.sh
   _skip_reason() { awk 'NR == 1 { next } !/^#/ { exit } sub(/^# harness-doctor-skip: /, "") { print; exit }' "$1"; }
-  _bash_tests=$(find "$HARNESS_REPO/tests" "$HARNESS_REPO/scripts/tests" -maxdepth 1 -type f -name '*.test.sh' 2>/dev/null | sort)
-  _bash_count=$(printf '%s\n' "$_bash_tests" | grep -c . || true)
-  _bash_skipped=0
-  if floor "$_bash_count" 1 "bash test suites"; then
-    ok "bash test suites examined: $_bash_count"
-    _bash_ran=0
-    while IFS= read -r t; do
-      [ -n "$t" ] || continue
-      _bash_ran=$((_bash_ran + 1))
-      _skip=$(_skip_reason "$t")
-      if [ -n "$_skip" ]; then
-        _bash_skipped=$((_bash_skipped + 1))
-        echo "  skip: bash: $(basename "$t") — $_skip"
-      else
-        out=$(cd "$(dirname "$t")" && timeout "$BASH_SUITE_TIMEOUT_S" bash "$(basename "$t")" 2>&1 </dev/null)
-        _bash_rc=$?
-        if [ "$_bash_rc" -eq 0 ]; then
-          ok "bash: $(basename "$t") $(printf '%s' "$out" | grep -oE '[0-9]+ passed' | tail -1)"
-        elif [ "$_bash_rc" -eq 124 ]; then
-          # timeout's own 124 says the cap was too small for this host, not that a test failed.
-          warn "bash test suite $(basename "$t") timed out after ${BASH_SUITE_TIMEOUT_S}s (not a test failure) — run it directly, or raise CLAUDE_BASH_SUITE_TIMEOUT_S"
-        else
-          _bash_fail=$(printf '%s' "$out" | _fail_names '^(FAIL|not ok)')
-          warn "bash test suite FAILING: $(basename "$t") — ${_bash_fail:-$(printf '%s' "$out" | tail -1 | cut -c1-70)}"
-        fi
-      fi
-    done <<< "$_bash_tests"
-    [ "$_bash_ran" -eq "$_bash_count" ] || warn "bash test suites: ran $_bash_ran of $_bash_count listed; the loop ended early"
+  _kind_label() { case "$1" in sh) echo bash ;; py|pys) echo python ;; mjs) echo node ;; *) echo "$1" ;; esac; }
+  _jobs=${CLAUDE_DOCTOR_TEST_JOBS:-$(n=$(nproc 2>/dev/null || echo 2); [ "$n" -gt 4 ] && n=4; echo "$n")}
+
+  _suite_list=
+  if [ ! -f "$TEST_RUNNER" ]; then
+    warn "CI test runner missing: $TEST_RUNNER (the doctor runs the same runner CI does)"
   else
-    WARNS=$((WARNS + 1))
+    _suite_list=$(cd "$HARNESS_REPO" && bash "$TEST_RUNNER" --list 2>&1 </dev/null)
+    _list_rc=$?
+    if [ "$_list_rc" -ne 0 ]; then
+      warn "test runner --list exited $_list_rc, so no suite was selected: $(printf '%s' "$_suite_list" | head -1 | cut -c1-160)"
+      _suite_list=
+    fi
+  fi
+  declare -A _suite_kind=()
+  _python_count=0 _node_count=0 _bash_count=0
+  while read -r _k _state _p; do
+    [ -n "$_p" ] || continue
+    _suite_kind[$_p]=$_k
+    case "$_k" in py|pys) _python_count=$((_python_count + 1)) ;; mjs) _node_count=$((_node_count + 1)) ;; sh) _bash_count=$((_bash_count + 1)) ;; esac
+  done <<< "$_suite_list"
+
+  if ! command -v python3 >/dev/null 2>&1; then
+    warn "python3 missing; Python harness tests cannot run"
+  fi
+  if ! command -v node >/dev/null 2>&1; then
+    warn "node missing; skill and hook suites cannot run"
+  fi
+  _families_ok=1
+  if floor "$_python_count" 1 "python test modules"; then ok "python test modules examined: $_python_count"; else WARNS=$((WARNS + 1)); _families_ok=0; fi
+  if floor "$_node_count" 1 "node skill suites"; then ok "node test suites examined: $_node_count"; else WARNS=$((WARNS + 1)); _families_ok=0; fi
+  if floor "$_bash_count" 1 "bash test suites"; then ok "bash test suites examined: $_bash_count"; else WARNS=$((WARNS + 1)); _families_ok=0; fi
+
+  _doctor_skipped=0 _runner_skipped=0 _runner_xfail=0
+  _run_args=()
+  while read -r _k _state _p; do
+    [ -n "$_p" ] || continue
+    _reason=$(_skip_reason "$HARNESS_REPO/$_p")
+    if [ -n "$_reason" ]; then
+      _doctor_skipped=$((_doctor_skipped + 1))
+      echo "  skip: $(_kind_label "${_suite_kind[$_p]}"): $(basename "$_p") — $_reason"
+    else
+      _run_args+=("$_p")
+    fi
+  done <<< "$_suite_list"
+
+  if [ "${#_run_args[@]}" -gt 0 ]; then
+    _rlog=$(mktemp -d "${TMPDIR:-/tmp}/doctor-tests.XXXXXX")
+    (cd "$HARNESS_REPO" && CLAUDE_TESTS_TIMEOUT=$BASH_SUITE_TIMEOUT_S timeout -k 10 "$RUNNER_TOTAL_TIMEOUT_S" \
+      bash "$TEST_RUNNER" -j "$_jobs" -o "$_rlog/logs" "${_run_args[@]}") >"$_rlog/runner.out" 2>&1 </dev/null
+    _rrc=$?
+    _summary=$(grep -E '^claude-tests: ' "$_rlog/runner.out" | tail -1)
+    # The per-suite status lines come before the echoed failure logs and the summary.
+    _status_lines=$(awk '/^(=====|claude-tests: )/ { exit } { print }' "$_rlog/runner.out")
+    # Explicit skips and expected failures stay visible, whatever the verdict.
+    printf '%s\n' "$_status_lines" | awk '/^(skip|xfail) / { print "  " $0 }'
+    if [ -n "$_summary" ]; then
+      _runner_skipped=$(printf '%s' "$_summary" | sed -n 's/.*; \([0-9][0-9]*\) skipped;.*/\1/p')
+      _runner_xfail=$(printf '%s' "$_summary" | sed -n 's/.* \([0-9][0-9]*\) expected failures;.*/\1/p')
+      _runner_ran=$(printf '%s' "$_summary" | sed -n 's/.*; \([0-9][0-9]*\) ran:.*/\1/p')
+      : "${_runner_skipped:=0}" "${_runner_xfail:=0}" "${_runner_ran:=0}"
+    fi
+    if [ "$_rrc" -eq 124 ]; then
+      warn "test runner timed out after ${RUNNER_TOTAL_TIMEOUT_S}s (not a test failure) — run tests/run-claude-tests.sh directly, or raise CLAUDE_TEST_RUNNER_TIMEOUT_S"
+    elif [ -z "$_summary" ]; then
+      warn "test runner exited $_rrc without a summary, so no suite result is trusted (exit 2 is a stale skips entry or a usage error): $(grep -E '^run-claude-tests: ' "$_rlog/runner.out" | head -1 | cut -c1-200)"
+    else
+      _named=0
+      while IFS= read -r _line; do
+        case "$_line" in
+          FAIL\ *|STALE\ *|ok\ *) ;;
+          *) continue ;;
+        esac
+        _p=$(printf '%s' "$_line" | awk '{ print $2 }')
+        _k=${_suite_kind[$_p]:-}
+        [ -n "$_k" ] || continue
+        _named=$((_named + 1))
+        _lbl=$(_kind_label "$_k")
+        case "$_line" in
+          ok\ *)
+            _named=$((_named - 1))
+            ok "$_lbl: $(basename "$_p") $(printf '%s' "$_line" | awk '{ print $3 }')"
+            ;;
+          STALE\ *)
+            warn "$_lbl test suite $(basename "$_p") passes but tests/claude-tests.skips lists it as xfail (stale entry, runner exit 2) — remove its xfail line"
+            ;;
+          *"killed after"*)
+            warn "$_lbl test suite $(basename "$_p") timed out after ${BASH_SUITE_TIMEOUT_S}s (not a test failure) — run it directly, or raise CLAUDE_BASH_SUITE_TIMEOUT_S"
+            ;;
+          *)
+            _log="$_rlog/logs/${_p//\//__}.log"
+            case "$_k" in
+              sh) _re='^(FAIL|not ok)' ;;
+              mjs) _re='^[[:space:]]*(not ok |✖ )' ;;
+              *) _re='^(FAIL|ERROR): ' ;;
+            esac
+            _names=
+            [ -f "$_log" ] && _names=$(grep -v -F '✖ failing tests' "$_log" | _fail_names "$_re")
+            warn "$_lbl test suite FAILING: $(basename "$_p") — ${_names:-$(printf '%s' "$_line" | cut -c1-120)}"
+            ;;
+        esac
+      done <<< "$_status_lines"
+      if [ "$_rrc" -ne 0 ] && [ "$_named" -eq 0 ]; then
+        warn "test runner exited $_rrc but named no failing suite: $(printf '%s' "$_summary" | cut -c1-200)"
+      fi
+      if [ "$_rrc" -eq 0 ] && [ $((_runner_ran + _runner_skipped)) -ne "${#_run_args[@]}" ]; then
+        warn "test runner reported $((_runner_ran + _runner_skipped)) suites for ${#_run_args[@]} selected; treating the run as not green"
+      fi
+    fi
+    rm -rf -- "$_rlog"
+  elif [ "$_families_ok" -eq 1 ]; then
+    warn "every discovered test suite was doctor-skipped, so none ran"
   fi
 
   # Hook suites live in hooks/tests/*.test.js, which NONE of the three
@@ -1826,10 +1879,12 @@ else
   fi
 
   if [ "$WARNS" -eq "$w0" ]; then
-    if [ "$_bash_skipped" -gt 0 ]; then
-      ok "all harness test suites green ($_bash_skipped bash suite(s) skipped by their own harness-doctor-skip line)"
-    else
+    _not_run=$((_runner_xfail + _runner_skipped + _doctor_skipped))
+    if [ "$_not_run" -eq 0 ]; then
       ok "all harness test suites green"
+    else
+      # Never the all-green line: an xfail failed as listed and a skip did not run.
+      ok "harness test suites: none failing, but $_runner_xfail expected failure(s) (xfail), $_runner_skipped skipped by tests/claude-tests.skips and $_doctor_skipped skipped by harness-doctor-skip did not pass a run (listed above)"
     fi
   fi
 fi
