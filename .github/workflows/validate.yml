@@ -130,8 +130,10 @@ jobs:
         run: bash ./release/tests/root-workflows.test.sh
       - name: Run release pins tests
         run: bash ./release/tests/release-pins.test.sh
+      - name: Run pins PR title tests
+        run: bash ./release/tests/pins-pr-title.test.sh
       - name: Lint root workflows
-        run: actionlint -config-file .github/actionlint.yaml .github/workflows/plugins-ci.yml .github/workflows/auto-release.yml .github/workflows/release.yml .github/workflows/publish-staged-release.yml .github/workflows/release-train.yml .github/workflows/release-pins-refresh.yml
+        run: actionlint -config-file .github/actionlint.yaml .github/workflows/plugins-ci.yml .github/workflows/auto-release.yml .github/workflows/release.yml .github/workflows/publish-staged-release.yml .github/workflows/release-train.yml .github/workflows/release-pins-refresh.yml .github/workflows/ci.yml .github/workflows/hov-tool-drop-announce.yml .github/workflows/validate.yml .github/workflows/repin-reconcile.yml
 
   public-pr-syntax:
     name: Public PR data check

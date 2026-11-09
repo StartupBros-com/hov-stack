@@ -196,6 +196,7 @@ jobs:
             echo "branch $BRANCH exists without an open PR; reusing it"
           fi
 
+          tick=$'\x60' # a literal backtick for the markdown below, kept out of single quotes
           {
             printf 'Opened by the repin reconciler: the marketplace manifest disagreed with what these plugins have released.\n\n'
             printf '| plugin | version | tag | releaseId | sha | release state |\n|---|---|---|---|---|---|\n'
@@ -203,11 +204,12 @@ jobs:
               [ -n "$name" ] || continue
               state=published
               [ "$is_draft" = true ] && state='**draft** (staged; the reconciler publishes it once this merges)'
-              printf '| %s | %s | `%s` | %s | `%s` | %s |\n' \
-                "$name" "$version" "$tag" "$rel_id" "${sha:0:12}" "$state"
+              printf '| %s | %s | %s%s%s | %s | %s%s%s | %s |\n' \
+                "$name" "$version" "$tick" "$tag" "$tick" "$rel_id" "$tick" "${sha:0:12}" "$tick" "$state"
             done < "$PLAN_FILE"
             if [ -n "$MIGRATE_PLUGIN" ]; then
-              printf '\nThis PR migrates `%s` from a `url` entry to a `git-subdir` entry pinned to its newest prefixed release in the shared repository (dispatched by hand; the reconciler never changes an entry'"'"'s shape).\n' "$MIGRATE_PLUGIN"
+              printf '\nThis PR migrates %s%s%s from a %surl%s entry to a %sgit-subdir%s entry pinned to its newest prefixed release in the shared repository (dispatched by hand; the reconciler never changes an entry'"'"'s shape).\n' \
+                "$tick" "$MIGRATE_PLUGIN" "$tick" "$tick" "$tick" "$tick" "$tick"
             fi
             printf '\nRe-running the reconciler on this same drift and main is a no-op: the branch name is derived from both.\n'
             printf '\nThe reconciler requests auto-merge on this PR and merges it once the required checks pass. A plugin listed as **draft** is published by the next reconcile run after the merge.\n'
