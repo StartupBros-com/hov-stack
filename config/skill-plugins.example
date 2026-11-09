@@ -1,0 +1,4 @@
+# One absolute plugin folder per line; blank lines and # comments are ignored.
+# Each folder needs .claude-plugin/plugin.json and skills/<skill>/SKILL.md.
+# Its manifest name, for example my-skills, becomes the link in skills/.
+/srv/my-skills

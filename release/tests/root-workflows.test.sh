@@ -164,6 +164,20 @@ while IFS= read -r script; do
 done <"$TMP/run-scripts"
 pass "every ./release/scripts/ program a workflow runs is executable in git ($(wc -l <"$TMP/run-scripts" | tr -d ' ') scripts)"
 
+# A floating tag or image moves under every open PR at once: on 2026-11-05 ubuntu-latest
+# became ubuntu-26.04 and broke eight suites in ci.yml until #449 pinned it. Every workflow,
+# not only the five above, names each action and reusable workflow by a full commit SHA
+# and runs no job on a -latest image.
+for wf in .github/workflows/*.yml; do
+  yq -o=json '.' "$wf" | jq -e '
+    ([.jobs[] | (.uses // empty), (.steps[]? | .uses // empty)]
+      | all(startswith("./") or test("@[0-9a-f]{40}$")))
+    and ([.jobs[] | .["runs-on"] // empty | if type == "array" then .[] else . end]
+      | all(type != "string" or (test("-latest$") | not)))' >/dev/null ||
+    die "floating action tag or -latest runner in $wf"
+done
+pass 'every workflow pins actions and reusable workflows to a commit SHA and no job runs on a -latest image'
+
 if command -v actionlint >/dev/null; then
   workflows=()
   for file in "${files[@]}" release-pins-refresh.yml; do workflows+=(".github/workflows/$file"); done

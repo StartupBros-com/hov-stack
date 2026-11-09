@@ -1,0 +1,1 @@
+- Delegate implementation batches of 5+ units to Codex with an explicit testing directive; Codex edits, you review the diff. Ad-hoc tasks go to `/codex:rescue`. Worktree work uses `codex exec --cd <worktree>`, never `/codex:rescue`, which writes only to the ambient cwd.

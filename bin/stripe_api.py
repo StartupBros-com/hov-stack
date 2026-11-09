@@ -3,7 +3,11 @@
 
   stripe-api ACCOUNT METHOD PATH [-d key=value ...] [flags]
 
-ACCOUNT is prbot or startupbros. METHOD is GET, POST or DELETE. PATH starts
+ACCOUNT is a name from the host's account map, stripe-accounts.json
+(STRIPE_API_ACCOUNTS_FILE, then $HOV_STACK_OVERLAY, then
+${XDG_CONFIG_HOME:-~/.config}/hov-stack; config/stripe-accounts.example.json
+shows the shape). Without a map no account is configured and every request
+is a usage error. METHOD is GET, POST or DELETE. PATH starts
 with /v1/ or /v2/ and may carry a query string. -d pairs go in the query for
 GET, form-encoded in the body for /v1 writes (Stripe's bracket syntax works:
 -d 'metadata[k]=v' -d 'expand[]=customer'), and as a flat JSON object for /v2
@@ -44,7 +48,10 @@ import uuid
 
 VERSION = "0.1.0"
 API_BASE = "https://api.stripe.com"
-ACCOUNTS = ("prbot", "startupbros")
+ACCOUNTS_ENV = "STRIPE_API_ACCOUNTS_FILE"
+ACCOUNTS_NAME = "stripe-accounts.json"
+# A name becomes the key name STRIPE_RK_<NAME>, so it must be usable in one.
+ACCOUNT_PATTERN = re.compile(r"[a-z][a-z0-9_]{0,31}\Z")
 METHODS = ("GET", "POST", "DELETE")
 BWS_TIMEOUT = 30
 MAX_BODY = 16 * 1024 * 1024
@@ -179,12 +186,13 @@ def build_parser():
     # --confirm-money, or it would slip past the permission ask rules.
     parser = Parser(
         prog="stripe-api", description=__doc__.split("\n\n")[0], allow_abbrev=False,
-        epilog="Examples: stripe-api prbot GET /v1/subscriptions -d status=active --paginate | "
-               "stripe-api startupbros POST /v1/webhook_endpoints/we_123 -d 'enabled_events[]=invoice.paid'",
+        epilog="Examples: stripe-api acme GET /v1/subscriptions -d status=active --paginate | "
+               "stripe-api acme_shop POST /v1/webhook_endpoints/we_123 -d 'enabled_events[]=invoice.paid'",
     )
     parser.add_argument("--version", action="version", version=f"stripe-api {VERSION}")
     parser.add_argument("--where", action="store_true", help="source metadata only; no key reads or network")
-    parser.add_argument("account", nargs="?", choices=ACCOUNTS)
+    # Checked against the account map in plan(), so --help and --version never read it.
+    parser.add_argument("account", nargs="?", help="a name from stripe-accounts.json")
     parser.add_argument("method", nargs="?", type=method)
     parser.add_argument("path", nargs="?", help="/v1/... or /v2/..., optionally with ?query")
     parser.add_argument("-d", "--data", action="append", type=pair, default=[], metavar="KEY=VALUE",
@@ -203,6 +211,52 @@ def build_parser():
 
 def env_name(account):
     return "STRIPE_RK_" + account.upper()
+
+
+def accounts_file():
+    """The account map: the env override, then stripe-accounts.json in the overlay
+    directory, HOV_STACK_OVERLAY or $XDG_CONFIG_HOME/hov-stack (default ~/.config/hov-stack),
+    the directory the other overlay readers use."""
+    override = os.environ.get(ACCOUNTS_ENV)
+    if override:
+        return Path(override)
+    overlay = os.environ.get("HOV_STACK_OVERLAY")
+    if overlay:
+        return Path(overlay) / ACCOUNTS_NAME
+    return Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config") / "hov-stack" / ACCOUNTS_NAME
+
+
+def accounts():
+    """Account name -> key name. The names are the host's own, so they live in the overlay,
+    never in the tree. A missing file is an empty map; a malformed one is a usage error that
+    names the file, never a fall-through to another location."""
+    path = accounts_file()
+    shape = ('expected a UTF-8 JSON object {"accounts": ["name", ...]} of distinct names, each '
+             'lowercase letters, digits or "_" starting with a letter (shape: config/stripe-accounts.example.json)')
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return {}
+    except (OSError, ValueError):
+        raise CliError(f"Cannot read the account map {path}: {shape}.", "usage") from None
+    names = data.get("accounts") if isinstance(data, dict) and list(data) == ["accounts"] else None
+    if not (isinstance(names, list) and all(isinstance(n, str) and ACCOUNT_PATTERN.fullmatch(n) for n in names)
+            and len(set(names)) == len(names)):
+        raise CliError(f"Bad account map {path}: {shape}.", "usage")
+    return {name: env_name(name) for name in names}
+
+
+def account_key_name(account):
+    """The key name for a configured account, or a usage error naming the map."""
+    known = accounts()
+    if account in known:
+        return known[account]
+    path = accounts_file()
+    if not known:
+        raise CliError(f"No Stripe accounts are configured: {path} is missing or lists none. Create it "
+                       f"(shape: config/stripe-accounts.example.json) or point {ACCOUNTS_ENV} at one.", "usage")
+    shown = repr(account) if ACCOUNT_PATTERN.fullmatch(account) else "that name"
+    raise CliError(f"{shown} is not a configured account; {path} lists {', '.join(sorted(known))}.", "usage")
 
 
 def _read(path, maximum):
@@ -226,12 +280,13 @@ def source_metadata():
     }
     return {
         "resolved": False,
+        "accounts_file": str(accounts_file()),
         "accounts": {
             account: {
-                "env:" + env_name(account): bool(os.environ.get(env_name(account))),
-                "bws:" + env_name(account): bws,
+                "env:" + name: bool(os.environ.get(name)),
+                "bws:" + name: bws,
                 "~/.secrets": (home / ".secrets").is_file(),
-            } for account in ACCOUNTS
+            } for account, name in accounts().items()
         },
     }
 
@@ -362,6 +417,7 @@ def plan(args):
     """Validate the whole request before any credential read or network call."""
     if not (args.account and args.method and args.path):
         raise CliError("Usage: stripe-api ACCOUNT METHOD PATH [-d key=value ...]; see --help.", "usage")
+    account_key_name(args.account)
     raw_path, _, raw_query = args.path.partition("?")
     if not PATH_PATTERN.fullmatch(raw_path) or "//" in raw_path or "/../" in raw_path + "/" or "/./" in raw_path + "/":
         raise CliError("PATH must be an API path like /v1/customers or /v2/core/events, not a URL.", "usage")

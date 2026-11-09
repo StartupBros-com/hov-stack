@@ -43,7 +43,11 @@ require a map.
   `migration-targets.json`, overridden by `HOV_STACK_MIGRATION_TARGETS_FILE`.
   It may include `legacy_identities`; see `config/migration-targets.example.json`.
 - `with-gemini-sandbox` gets its BWS record id from `GEMINI_SANDBOX_BWS_ID`.
-- `stripe-api` keeps its existing account routing and credential resolution.
+- `stripe-api ACCOUNT` takes a name from the account map `stripe-accounts.json`,
+  overridden by `STRIPE_API_ACCOUNTS_FILE`; see `config/stripe-accounts.example.json`.
+  Account `acme` reads its key from `STRIPE_RK_ACME`. Without a map no account
+  is configured and every request is a usage error (exit 2); `--where` prints
+  the map path and the configured names.
 
 ## Search Console — `gsc`, never an MCP
 
@@ -132,7 +136,7 @@ installer. The vendor's own errors (`restricted_api_key` for a send-only key,
 
 ## Stripe — `stripe-api`, never the Stripe MCP
 
-`stripe-api prbot|startupbros GET|POST|DELETE /v1/...` is the full REST surface
+`stripe-api ACCOUNT GET|POST|DELETE /v1/...` is the full REST surface
 the account's restricted key grants. `-d key=value` is a query on GET and a form
 field on writes; `--paginate` follows `has_more`. Writes are fail-closed: a
 POST runs without a prompt only on the listed configuration paths (webhook
@@ -188,6 +192,8 @@ retry. Details:
 
 ## Vercel — `vercel`, including `vercel api`
 
+`./setup` does not install vercel; `/hov-setup` offers it.
+
 The whole CLI is allowed, and `vercel api /path` reads the REST API. These
 prompt, and a headless agent cannot answer a prompt, so plan around them:
 
@@ -234,9 +240,11 @@ Put `--json` and other global flags after the subcommand — that's the prompt-f
 
 ## Firecrawl — `firecrawl-cli`
 
-Verbs: fetch, extract, shot, act, agent, interact, search, map, raw. Two or more URLs through the vendor CLI write into the working directory; the wrapper fans out. Verbs, flags, and budgets: `harness/data-source-clis.md`. The Firecrawl MCP is retired; there is no other path.
+Verbs: fetch, extract, shot, act, agent, interact, search, gov, developer, map, raw. `gov` (US law: statutes, regulations, opinions; free, keyless, jurisdiction/court/citation filters) and `developer` (code, issue, PR and docs questions with matched passages; keyless first, 2 credits per 10 results when it runs keyed) are API-direct and work without the vendor binary; routing lives in the `firecrawl-gov-index` and `firecrawl-developer-index` skills. Two or more URLs through the vendor CLI write into the working directory; the wrapper fans out. `raw` is charged the vendor's reported `creditsUsed` when the output shows finished work (a `completed`, `failed` or `cancelled` job, or no job status); any other raw call, keyed `research` included, holds 100 of the session's 300 credits and counts all 100 as spent 30 minutes later, so prefer a shaped verb; add vendor `--json` after `--` for `research` and `search` only, since `crawl` and `monitor` print JSON by default and reject it. Free-first (dotfiles #2118): calls whose keyless answer matched the keyed one (a URL fetched to summary, markdown, links or html, shot, web or images search at `--limit` 10 or less, developer at `--limit` 10 or less, raw `research search-papers` and `search-github`) try Firecrawl's free keyless tier first, key or not, spend nothing, and run keyed once when it refuses; `FIRECRAWL_CLI_KEYLESS=0` opts out. With no `FIRECRAWL_API_KEY` and no stored vendor login, every other vendor-backed call exits 1 with `credentials_missing` at its credit read. Verbs, flags, and budgets: `harness/data-source-clis.md`. The Firecrawl MCP is retired; there is no other path.
 
 ## WhatsApp — direct `wacli` with the canonical store
+
+`./setup` does not install wacli; `/hov-setup` offers it.
 
 Agents should spell reads as `wacli --store <store> --read-only --json ...`, with `<store>` written out as the literal absolute path of the canonical store (`~/.local/state/wacli` with the home directory expanded, since the guard denies shell-expanded values and treats `~` as one); install seeds that path into `WACLI_STORE_DIR`, which the guard reads as canonical when absolute, while the guard also recognizes a caller-supplied truthy `WACLI_READONLY` (sync does not set it globally). Explicit flags keep the effect reviewable. List/search calls need a concrete `--limit` from 1–200. Never inspect/copy `session.db`, export the whole archive into context, or automate bulk/broadcast/auto-reply messaging. Shell-expanded values in recognized literal-`wacli` forms are denied; literal writes are hook-ask-gated.
 

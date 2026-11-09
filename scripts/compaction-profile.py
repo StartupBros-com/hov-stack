@@ -467,7 +467,14 @@ def description_chars(skill_md):
             parts.append(cont.strip())
         return len(' '.join(parts))
     return 0
+def skills_dir_plugin_skill_dirs(skills_root):
+    """Skill dirs of skills-dir plugins: ~/.claude/skills/<dir>/ holding .claude-plugin/plugin.json, skills under <dir>/skills/.
+    A nested skills/ dir without that manifest is not a plugin and loads nothing."""
+    return [os.path.dirname(p) for root in glob.glob(os.path.join(skills_root, '*', ''))
+            if os.path.isfile(os.path.join(root, '.claude-plugin', 'plugin.json'))
+            for p in glob.glob(os.path.join(root, 'skills', '*', 'SKILL.md'))]
 sk = sorted(set(os.path.dirname(p) for p in glob.glob(os.path.expanduser('~/.claude/skills/*/SKILL.md'))) |
+            set(skills_dir_plugin_skill_dirs(os.path.expanduser('~/.claude/skills'))) |
             set(plugin_skill_dirs(os.path.expanduser('~/.claude/plugins/cache'), os.path.expanduser('~/.claude/plugins/installed_plugins.json'))))
 dchars = sum(description_chars(os.path.join(d, 'SKILL.md')) for d in sk)
 sk_tok = dchars // 4 + 10 * len(sk)

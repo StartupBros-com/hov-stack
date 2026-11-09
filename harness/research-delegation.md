@@ -69,7 +69,10 @@ speculation presented as fact; cherry-picked data with no denominator.
 
 Hard minimums, independent of which tool executes the search
 (`exa-cli search`, `firecrawl-cli search`) -- count queries before
-synthesizing, don't stop short. Native `WebSearch` is not one of those tools
+synthesizing, don't stop short. When the routing table sends the question to
+an index first (`firecrawl-cli gov` for US law, `firecrawl-cli developer` for
+library, error and bug-fix questions, the paper index for literature), those
+queries count too. Native `WebSearch` is not one of those tools
 (see "Native WebSearch" below):
 
 | Ask | Minimum queries |

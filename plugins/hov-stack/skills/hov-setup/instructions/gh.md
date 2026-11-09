@@ -1,0 +1,1 @@
+- Use `gh` for GitHub pull requests, issues and reviews.

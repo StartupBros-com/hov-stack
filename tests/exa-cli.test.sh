@@ -25,7 +25,7 @@ set -uo pipefail
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 EXA_PY="$REPO/bin/exa.py"
 FIXTURES_DIR="$REPO/tests/fixtures/exa"
-TMP=$(mktemp -d /tmp/exa-cli-test.XXXXXX)
+TMP=$(mktemp -d /tmp/exa-cli-test.XXXXXX) || exit 1
 trap 'rm -rf "$TMP"' EXIT
 unset EXA_API_KEY
 unset EXA_API_BASE

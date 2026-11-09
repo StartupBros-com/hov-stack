@@ -22,7 +22,7 @@ const path = require('node:path');
 const { runHook, mkTmp, rmTmp } = require('./lib/harness');
 
 const HOOK = 'UserPromptSubmit/skill-mention-resolver.js';
-const { parseDescription } = require('../UserPromptSubmit/skill-mention-resolver.js');
+const { parseDescription, extractTokens } = require('../UserPromptSubmit/skill-mention-resolver.js');
 
 /**
  * Build a throwaway ~/.claude containing skills/ and settings.json.
@@ -82,8 +82,11 @@ test('the exact 2026-08-29 regression: mid-message /eli5 /bro is resolved', asyn
     assert.match(ctx, /\/eli5/);
     assert.match(ctx, /\/bro/);
     // The note must explain WHY they are missing from the roster, not just name
-    // them -- the original failure was concluding they were not installed.
-    assert.match(ctx, /user-invocable-only/);
+    // them -- the original failure was concluding they were not installed. Both
+    // are hidden by their frontmatter, so the note names that setting and not
+    // the settings.json override neither of them carries.
+    assert.match(ctx, /disable-model-invocation: true in its frontmatter/);
+    assert.doesNotMatch(ctx, /user-invocable-only/);
     assert.match(ctx, /first thing in a message/);
   } finally {
     rmTmp(dir);
@@ -135,9 +138,152 @@ test('settings.json skillOverrides demotion is surfaced too, not just the frontm
     const ctx = await inject(dir, 'can you /teach me this');
     assert.ok(ctx, 'skillOverrides-demoted skill must be surfaced');
     assert.match(ctx, /\/teach/);
+    assert.match(ctx, /user-invocable-only in settings\.json skillOverrides/);
+    assert.doesNotMatch(ctx, /disable-model-invocation/);
+    assert.ok(ctx.includes(path.join(dir, 'skills', 'teach')), 'the note names where the skill is installed');
   } finally {
     rmTmp(dir);
   }
+});
+
+// --- plugin skills ---------------------------------------------------------
+
+/** Write <root>/skills/<name>/SKILL.md, hidden by its frontmatter or not. */
+function pluginSkill(root, name, { flagged }) {
+  const d = path.join(root, 'skills', name);
+  fs.mkdirSync(d, { recursive: true });
+  fs.writeFileSync(
+    path.join(d, 'SKILL.md'),
+    `---\nname: ${name}\ndescription: does ${name} things\n${flagged ? 'disable-model-invocation: true\n' : ''}---\n`,
+  );
+}
+
+/**
+ * A config dir holding one skills-dir plugin (`kit`, kept in skills/kit-src)
+ * and one installed marketplace plugin (`tools@mk`). `marketplace` is its
+ * enabledPlugins state: 'enabled', 'disabled' (false) or 'unlisted' (no key).
+ * Each plugin ships one hidden and one visible skill. `overrides` lands in
+ * settings.json to prove plugin skills ignore it.
+ */
+function pluginFixture({ marketplace = 'enabled', skillsDirEnabled = undefined, overrides = {} } = {}) {
+  const dir = mkTmp('smr-plugin-');
+  const kit = path.join(dir, 'skills', 'kit-src');
+  fs.mkdirSync(path.join(kit, '.claude-plugin'), { recursive: true });
+  fs.writeFileSync(path.join(kit, '.claude-plugin', 'plugin.json'), JSON.stringify({ name: 'kit' }));
+  pluginSkill(kit, 'kit-hidden', { flagged: true });
+  pluginSkill(kit, 'kit-open', { flagged: false });
+  const install = path.join(dir, 'plugins', 'cache', 'mk', 'tools', '1.0.0');
+  pluginSkill(install, 'tools-hidden', { flagged: true });
+  pluginSkill(install, 'tools-open', { flagged: false });
+  fs.writeFileSync(
+    path.join(dir, 'plugins', 'installed_plugins.json'),
+    JSON.stringify({ version: 2, plugins: { 'tools@mk': [{ scope: 'user', installPath: install, version: '1.0.0' }] } }),
+  );
+  const enabledPlugins = {};
+  if (marketplace !== 'unlisted') enabledPlugins['tools@mk'] = marketplace === 'enabled';
+  if (skillsDirEnabled !== undefined) enabledPlugins['kit@skills-dir'] = skillsDirEnabled;
+  fs.writeFileSync(path.join(dir, 'settings.json'), JSON.stringify({ enabledPlugins, skillOverrides: overrides }));
+  return { dir, kit, install };
+}
+
+test('a hidden skill of a skills-dir plugin is surfaced under its plugin name', async () => {
+  const { dir, kit } = pluginFixture();
+  try {
+    const ctx = await inject(dir, 'later we could try /kit-hidden on this');
+    assert.ok(ctx, 'expected an injection for a hidden skills-dir plugin skill');
+    assert.match(ctx, /\/kit:kit-hidden — does kit-hidden things/);
+    assert.ok(ctx.includes(`plugin kit, ${path.join(kit, 'skills', 'kit-hidden')}`), ctx);
+    assert.match(ctx, /disable-model-invocation: true in its frontmatter/);
+  } finally {
+    rmTmp(dir);
+  }
+});
+
+test('a hidden skill of an enabled marketplace plugin is surfaced', async () => {
+  const { dir, install } = pluginFixture();
+  try {
+    const ctx = await inject(dir, 'what does /tools-hidden do');
+    assert.ok(ctx, 'expected an injection for a hidden marketplace plugin skill');
+    assert.match(ctx, /\/tools:tools-hidden — does tools-hidden things/);
+    assert.ok(ctx.includes(path.join(install, 'skills', 'tools-hidden')), ctx);
+  } finally {
+    rmTmp(dir);
+  }
+});
+
+test('a namespaced /plugin:name token resolves in that plugin only', async () => {
+  const { dir } = pluginFixture();
+  try {
+    const ctx = await inject(dir, 'compare /kit:kit-hidden with /tools:kit-hidden');
+    assert.ok(ctx, 'expected an injection for the namespaced token');
+    assert.match(ctx, /naming 1 installed skill that is/);
+    assert.match(ctx, /\/kit:kit-hidden/);
+    assert.doesNotMatch(ctx, /\/tools:kit-hidden/, 'tools ships no kit-hidden skill');
+  } finally {
+    rmTmp(dir);
+  }
+});
+
+test('a bare and a namespaced mention of one plugin skill are reported once', async () => {
+  const { dir } = pluginFixture();
+  try {
+    const ctx = await inject(dir, 'either /kit-hidden or /kit:kit-hidden');
+    assert.strictEqual(ctx.match(/\/kit:kit-hidden —/g).length, 1);
+  } finally {
+    rmTmp(dir);
+  }
+});
+
+// PLANTED NEGATIVES: a resolver that surfaces every plugin skill it can find
+// fails these.
+test('a visible plugin skill stays silent, even with a settings.json override naming it', async () => {
+  // skillOverrides do not apply to plugin skills, so the override changes nothing.
+  const { dir } = pluginFixture({ overrides: { 'kit-open': 'user-invocable-only', 'tools-open': 'user-invocable-only' } });
+  try {
+    await assertSilent(dir, 'maybe /kit-open or /tools-open or /kit:kit-open');
+  } finally {
+    rmTmp(dir);
+  }
+});
+
+test('a hidden skill of a disabled or unlisted marketplace plugin stays silent', async () => {
+  for (const marketplace of ['disabled', 'unlisted']) {
+    const { dir } = pluginFixture({ marketplace });
+    try {
+      await assertSilent(dir, 'what does /tools-hidden do');
+    } finally {
+      rmTmp(dir);
+    }
+  }
+});
+
+test('a skills-dir plugin turned off in enabledPlugins stays silent', async () => {
+  const { dir } = pluginFixture({ skillsDirEnabled: false });
+  try {
+    await assertSilent(dir, 'later we could try /kit-hidden on this');
+  } finally {
+    rmTmp(dir);
+  }
+});
+
+test('a user skill wins over a plugin skill of the same bare name', async () => {
+  const { dir } = pluginFixture();
+  try {
+    const own = path.join(dir, 'skills', 'kit-hidden');
+    fs.mkdirSync(own, { recursive: true });
+    fs.writeFileSync(path.join(own, 'SKILL.md'), '---\nname: kit-hidden\ndescription: my own copy\n---\n');
+    // The user skill is visible, so the model already sees /kit-hidden.
+    await assertSilent(dir, 'later we could try /kit-hidden on this');
+  } finally {
+    rmTmp(dir);
+  }
+});
+
+test('extractTokens keeps a /plugin:name token whole and drops a bare trailing colon', () => {
+  assert.deepStrictEqual(
+    extractTokens('run /kit:kit-hidden then /eli5: it helps'),
+    ['kit:kit-hidden', 'eli5'],
+  );
 });
 
 test('the description is carried through so the model can judge relevance', async () => {

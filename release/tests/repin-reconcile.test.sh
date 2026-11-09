@@ -203,6 +203,16 @@ workflow_contract() {
   [ "$(yq -r '.jobs.reconcile.steps[] | select(.run == "./release/scripts/repin-land.sh") | .env.ONLY_PLUGIN' "$workflow")" = '${{ inputs.migrate_plugin || inputs.only_plugin }}' ] || die 'land targeting missing'
   [ "$(yq -r '.jobs.reconcile.steps[] | select(.name == "Publish staged releases the card on main already pins") | .env.ONLY_PLUGIN' "$workflow")" = '${{ inputs.migrate_plugin || inputs.only_plugin }}' ] || die 'publish targeting missing'
   pass 'workflow uses repository configuration, migration dispatch, exact key and targeted land/publish'
+  # The wake-ups (hov-stack#438). workflow_run names its upstream by display name, so a
+  # renamed release.yml would silently stop the staged-draft wake-up; a branches filter
+  # would be matched against Release's tag and never fire; a job-level if would let a
+  # skipped run cancel a pending one through the workflow-level concurrency group.
+  [ "$(yq -o=json -I=0 '.on.workflow_run' "$workflow")" = '{"workflows":["Release"],"types":["completed"]}' ] || die 'staged-draft wake-up missing or filtered'
+  [ "$(yq -r '.name' "$ROOT/.github/workflows/release.yml")" = Release ] || die 'release.yml is no longer named Release'
+  [ "$(yq -o=json -I=0 '.on.push' "$workflow")" = '{"branches":["main"]}' ] || die 'push wake-up narrowed'
+  [ "$(yq -r '.on.schedule[0].cron' "$workflow")" = '8,23,38,53 * * * *' ] || die 'schedule fallback missing'
+  [ "$(yq -r '.jobs.reconcile.if' "$workflow")" = null ] || die 'reconcile job gained a condition'
+  pass 'workflow wakes on a finished Release run, every push to main, and the schedule'
   identity="$(yq -r '.jobs.reconcile.steps[] | select(.id == "identity") | .run' "$workflow")"
   : > "$TMP/github-output"
   if HOV_RELEASE_APP_ID=123 HOV_RELEASE_APP_PRIVATE_KEY=key APP_REPOSITORIES='' GITHUB_OUTPUT="$TMP/github-output" bash -c "$identity" >"$TMP/probe" 2>&1; then die 'empty App repository variable accepted'; fi

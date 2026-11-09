@@ -28,7 +28,7 @@
   },
   "dependencies": {
     "@remotion/bundler": "4.0.518",
-    "@remotion/renderer": "4.0.518",
+    "@remotion/renderer": "4.0.540",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "remotion": "4.0.518",
@@ -36,7 +36,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "@remotion/cli": "4.0.518",
+    "@remotion/cli": "4.0.540",
     "@types/node": "22.10.2",
     "@types/react": "19.2.3",
     "@types/react-dom": "19.2.3",

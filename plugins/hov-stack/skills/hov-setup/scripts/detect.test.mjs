@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import {
-  chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync,
+  chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -18,6 +18,8 @@ const ORDER = ["sign-it", "wsl-cdp", "product-video", "token-eater", "pro-gate"]
 const EXTRA_ORDER = ["harness-vet", "rent-check", "harness-optimizer"];
 const HOV_ALL = [...ORDER, ...EXTRA_ORDER];
 const ALL = offersJson.offers.map((o) => o.name);
+// hov-stack's own commands that run from a Python environment /hov-setup builds; ./setup links them.
+const VENV_NAMES = ["gsc", "ga4", "vastai"];
 const PLATFORMS = ["darwin-arm64", "darwin-x86_64", "linux-x86_64", "linux-aarch64"];
 
 // A fake `claude` that logs each call and answers the two list commands from files. It uses
@@ -83,10 +85,12 @@ function detectEnv(dir, env, ...args) {
   return detectAt(detectPath, dir, env, ...args);
 }
 
+// It runs from the fake's directory, so a relative path a test writes there would resolve.
 function detectAt(script, dir, env, ...args) {
   const preload = join(dir, "platform-preload.mjs");
   return spawnSync(process.execPath, [...(existsSync(preload) ? ["--import", preload] : []), script, ...args], {
     encoding: "utf8",
+    cwd: dir,
     env: {
       PATH: `${dir}:${join(dir, "pbin")}`,
       FAKE_DIR: dir,
@@ -181,7 +185,11 @@ test("with everything absent, lists every offer and helper with the line to run"
     assert.equal(r.stdout.includes("also installed"), false);
     const rep = report(dir);
     assert.equal(rep.marketplace.added, true);
-    assert.deepEqual(rep.plugins.map((p) => [p.name, p.state]), ALL.map((p) => [p, "absent"]));
+    // With none of their commands linked, gsc, ga4 and vastai are not applicable: they come with a checkout.
+    assert.deepEqual(
+      rep.plugins.map((p) => [p.name, p.state]),
+      ALL.map((p) => [p, VENV_NAMES.includes(p) ? "not-applicable" : "absent"]),
+    );
     assert.deepEqual(rep.alsoInstalled, []);
   });
 });
@@ -402,7 +410,7 @@ test("SKILL.md states the credential rule before Step 1, naming where a credenti
 
 test("SKILL.md puts the credential instruction before the first step of each plugin that needs one", () => {
   const all = sections(skillText);
-  for (const name of ["wsl-cdp", "token-eater", "pro-gate", "gh", "codex", "last30days", "jeffreys-skills"]) {
+  for (const name of ["wsl-cdp", "token-eater", "pro-gate", "gh", "wacli", "gsc", "ga4", "vercel", "vastai", "codex", "last30days", "jeffreys-skills"]) {
     const body = all.get(name);
     assert.ok(body, `${name} has no section`);
     const cred = body.indexOf("**Credentials:**");
@@ -596,10 +604,11 @@ test("an unsupported platform makes every tool, paid-skills row and helper not a
     assert.equal(rep.platform, "freebsd-x64");
     const want = (o) => `only offered on ${Object.keys(o.install).join(", ")}`;
     const programs = rep.plugins.filter((x) => x.kind === "tool" || x.kind === "paid-skills");
-    assert.equal(programs.length, 5);
+    assert.equal(programs.length, 10);
     for (const p of programs) {
       const offer = offersJson.offers.find((o) => o.name === p.name);
-      assert.deepEqual([p.state, p.next, p.path], ["not-applicable", want(offer), null], p.name);
+      const next = `only offered on ${Object.keys(offer.install).join(", ")}`;
+      assert.deepEqual([p.name, p.state, p.next, p.path], [p.name, "not-applicable", next, null]);
     }
     assert.deepEqual(rep.helpers.map((h) => [h.state, h.next]), [["not-applicable", want(offersJson.helpers[0])]]);
     assert.equal(row(rep, "sign-it").state, "absent");
@@ -624,6 +633,124 @@ test("it runs nothing but the two claude list commands, never a tool it finds", 
   });
 });
 
+test("wacli is Linux x86_64 only and vercel uses pnpm on all supported platforms", () => {
+  withFake({}, (dir) => {
+    for (const platform of PLATFORMS) {
+      const rep = report(dir, { HOV_SETUP_PLATFORM: platform });
+      const wacli = row(rep, "wacli");
+      assert.deepEqual([wacli.state, wacli.next], platform === "linux-x86_64"
+        ? ["absent", `bash "${skillDir}/scripts/wacli-install.sh"`]
+        : ["not-applicable", "only offered on linux-x86_64"]);
+      assert.deepEqual([row(rep, "vercel").state, row(rep, "vercel").next], ["absent", "pnpm add -g vercel"]);
+    }
+  });
+});
+
+// gsc, ga4 and vastai are hov-stack's own commands: ./setup links them, and /hov-setup builds the
+// Python environment each runs from. HOME is set, so no test reads this machine's own environments.
+const venvLine = (name, uv = "uv") => `bash "${skillDir}/scripts/venv-install.sh" ${name} install --uv "${uv}"`;
+function makeExec(path, body = "#!/bin/sh\n") {
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, body);
+  chmodSync(path, 0o755);
+}
+
+test("a hov-stack command that ./setup has not linked is not applicable, even with its environment built", () => {
+  withFake({}, (dir) => {
+    const home = join(dir, "home");
+    makeExec(join(home, ".local/share/gsc-cli/venv/bin/python"));
+    const rep = report(dir, { HOME: home });
+    for (const n of VENV_NAMES) {
+      const r = row(rep, n);
+      assert.deepEqual([r.state, r.path, r.venv], ["not-applicable", null, null], n);
+      assert.equal(r.next, "comes with a hov-stack checkout: its ./setup links it into ~/.local/bin", n);
+    }
+    assert.equal(row(rep, "gh").venv, null);
+  });
+});
+
+test("a linked command whose Python environment is not built is absent, with the installer's line", () => {
+  withFake({ pathBins: VENV_NAMES }, (dir) => {
+    const home = join(dir, "home");
+    mkdirSync(home);
+    const rep = report(dir, { HOME: home });
+    const gsc = row(rep, "gsc");
+    assert.deepEqual(
+      [gsc.state, gsc.path, gsc.onPath, gsc.venv, gsc.next],
+      ["absent", join(dir, "pbin", "gsc"), true, join(home, ".local/share/gsc-cli/venv"), venvLine("gsc")],
+    );
+    assert.equal(row(rep, "ga4").next, venvLine("gsc"), "ga4 builds gsc's environment");
+    assert.equal(row(rep, "ga4").venv, gsc.venv);
+    assert.deepEqual([row(rep, "vastai").state, row(rep, "vastai").next], ["absent", venvLine("vastai")]);
+    assert.deepEqual(gsc.needs.map((x) => [x.name, x.path]), [["uv", null]]);
+    const t = detectEnv(dir, { HOME: home }).stdout;
+    assert.ok(
+      t.includes(`  gsc: ${join(dir, "pbin", "gsc")} is linked, but its Python environment (${gsc.venv}) is not built. Install: ${venvLine("gsc")}`),
+      t,
+    );
+  });
+  withFake({ pathBins: [...VENV_NAMES, "uv"] }, (dir) => {
+    const rep = report(dir, { HOME: join(dir, "home") });
+    assert.equal(row(rep, "vastai").next, venvLine("vastai", join(dir, "pbin", "uv")));
+  });
+});
+
+test("a built environment makes its command installed, and VASTAI_VENV moves vastai's; nothing is run", () => {
+  withFake({ extraBins: VENV_NAMES }, (dir) => {
+    const home = join(dir, "home");
+    makeExec(join(home, ".local/share/gsc-cli/venv/bin/python"), `#!/bin/sh\n: > "${dir}/ran-python"\n`);
+    makeExec(join(home, ".local/share/vastai-cli/venv/bin/vastai"), `#!/bin/sh\n: > "${dir}/ran-home-vastai"\n`);
+    makeExec(join(dir, "vv", "bin", "vastai"), `#!/bin/sh\n: > "${dir}/ran-vv-vastai"\n`);
+    let rep = report(dir, { HOME: home });
+    for (const n of VENV_NAMES) {
+      const r = row(rep, n);
+      assert.deepEqual([r.state, r.next, r.path, r.onPath], ["installed", null, join(dir, "xbin", n), false], n);
+    }
+    assert.match(detectEnv(dir, { HOME: home }).stdout, /^  gsc: installed \(.*gsc\)\. Not on PATH$/m);
+    rep = report(dir, { HOME: home, VASTAI_VENV: join(dir, "vv") });
+    assert.deepEqual([row(rep, "vastai").state, row(rep, "vastai").venv], ["installed", join(dir, "vv")]);
+    rep = report(dir, { HOME: home, VASTAI_VENV: join(dir, "empty") });
+    assert.deepEqual([row(rep, "vastai").state, row(rep, "vastai").next], ["absent", venvLine("vastai")]);
+    rep = report(dir, { HOME: home, VASTAI_VENV: "vv" });
+    assert.equal(row(rep, "vastai").state, "absent", "a relative VASTAI_VENV is not trusted");
+    assert.deepEqual(readdirSync(dir).filter((f) => f.startsWith("ran-")), []);
+  });
+});
+
+test("an environment file that is not executable, or a link to nothing, does not count as built", () => {
+  withFake({ pathBins: ["gsc", "vastai"] }, (dir) => {
+    const home = join(dir, "home");
+    const py = join(home, ".local/share/gsc-cli/venv/bin/python");
+    makeExec(py);
+    chmodSync(py, 0o644);
+    mkdirSync(join(home, ".local/share/vastai-cli/venv/bin"), { recursive: true });
+    symlinkSync(join(dir, "gone"), join(home, ".local/share/vastai-cli/venv/bin/vastai"));
+    const rep = report(dir, { HOME: home });
+    assert.equal(row(rep, "gsc").state, "absent");
+    assert.equal(row(rep, "vastai").state, "absent");
+  });
+});
+
+test("every script named by an install line exists and is executable or run through bash", () => {
+  for (const offer of [...offersJson.offers, ...offersJson.helpers]) {
+    for (const line of Object.values(offer.install ?? {})) {
+      for (const match of line.matchAll(/<skill-dir>\/scripts\/([^"\s]+)/g)) {
+        const path = join(skillDir, "scripts", match[1]);
+        assert.ok(existsSync(path), path);
+        assert.ok(statSync(path).isFile(), path);
+        assert.ok(statSync(path).mode & 0o111 || line.includes(`bash "<skill-dir>/scripts/${match[1]}"`), line);
+      }
+    }
+  }
+});
+
+test("WhatsApp links in a separate terminal and Vercel checks close stdin", () => {
+  const all = sections(skillText);
+  assert.doesNotMatch(all.get("wacli"), /^\s*!\s*wacli\b/m);
+  assert.doesNotMatch(all.get("wacli"), /--phone/);
+  assert.match(all.get("vercel"), /Check:\s*```bash\nvercel --version\nvercel whoami < \/dev\/null\n```/);
+});
+
 test("offers.json has a valid shape", () => {
   const kinds = ["plugin", "other-plugin", "tool", "paid-skills"];
   const groups = offersJson.groups.map((g) => g.key);
@@ -644,6 +771,14 @@ test("offers.json has a valid shape", () => {
       assert.ok(o.marketplace && o.marketplace.name && o.marketplace.github, `${o.name}: marketplace needs name and github`);
     }
     for (const n of o.needs ?? []) assert.ok(helperNames.includes(n), `${o.name} needs ${n}, which is not a helper`);
+    if (o.venv) {
+      assert.equal(o.kind, "tool", `${o.name}: only a tool has a venv`);
+      assert.ok(typeof o.venv.dir === "string" && o.venv.dir && !o.venv.dir.startsWith("/"), `${o.name}: venv.dir is relative to home`);
+      assert.ok(typeof o.venv.file === "string" && o.venv.file, `${o.name}: venv.file`);
+      assert.ok(o.venv.env === undefined || /^[A-Z_][A-Z0-9_]*$/.test(o.venv.env), `${o.name}: venv.env`);
+      assert.ok((o.needs ?? []).includes("uv"), `${o.name}: a venv offer needs uv`);
+      for (const line of Object.values(o.install)) assert.match(line, /venv-install\.sh" (gsc|vastai) install --uv "<uv>"$/, o.name);
+    }
   }
   for (const h of [...offersJson.helpers, ...offersJson.offers.filter((o) => o.install)]) {
     assert.ok(h.bin, `${h.name}: no bin`);

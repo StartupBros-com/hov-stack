@@ -1,0 +1,1 @@
+- Load the `data-source-clis` skill before the first `vercel` call; deletes, production changes and purchases need prior human approval, which vercel's own terminal confirmation (or `--yes`) is not.

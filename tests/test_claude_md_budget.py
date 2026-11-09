@@ -80,6 +80,13 @@ def dated_citation_offenders(text: str) -> list[int]:
 # dropped: no measurement supported it. Old-vs-new behavior runs:
 # scripts/shape-audit/ablation (README, Sweep 4).
 #
+# Raised 2026-11-04 for the "Run it now; don't wait for a schedule" Autonomy
+# bullet and two clarifying edits (the ungated-effects pause now names
+# schedule edits, not starting a unit; "verify by Y" only when Y can't run
+# now). The operator typed a run-it-now nudge about 21 times in 17 sessions
+# over the prior 60 days (evidence: harness/run-it-now.md). CLAUDE.md went
+# from 15,262 to 15,769 bytes (+507); ceil(15,769 * 1.02) = 16,085.
+#
 # CLAUDE.md only, deliberately. The memory index (MEMORY.md) is the other
 # always-loaded file, but its committed copy under memory/ is a mirror
 # that `sync.sh memory-push` overwrites from the live store, so summing it
@@ -88,7 +95,7 @@ def dated_citation_offenders(text: str) -> list[int]:
 # index was already 557 bytes past the mirrored size on the day this shipped).
 # The index has its own byte cap in scripts/memory-audit.py, which runs
 # against the live store; this test does not duplicate it.
-CEILING_BYTES = 15_434
+CEILING_BYTES = 16_085
 
 
 class ClaudeMdDatedCitationTests(unittest.TestCase):
@@ -212,6 +219,13 @@ class ClaudeMdByteBudgetTests(unittest.TestCase):
 # the session opens the PR itself with `gh pr create`. Harness item 1 and the Merge-and-end bullet must keep the sentences
 # the rest of the doctrine leans on, and the retired ladder/handoff text must
 # not come back.
+#
+# hov-stack #420 (2026-11-04) moved each offered tool's lines out of
+# CLAUDE.md into that tool's file under the hov-setup skill's instructions/
+# directory, which ./setup writes into rules/hov-stack-tools.md only when the
+# tool is installed. The pro-gate gating sentence and the Pro-stop rule now
+# live in pro-gate.md, so they are pinned there; the Merge-and-end bullet
+# keeps "A diff gets no other review tier".
 ITEM_ONE_KEEPS = (
     "ends with `result:` once the Merge-and-end rule below has run",
     "`merged at <sha>`, or `blocked on <reason>` with the PR left open",
@@ -223,11 +237,19 @@ ITEM_ONE_KEEPS = (
 
 MERGE_AND_END_KEEPS = (
     "open the PR with `gh pr create` (not draft",
-    "One `/pro-gate` review runs only when the diff touches billing, auth, migrations or CI",
-    "Every other diff gets no review tier",
+    "A diff gets no other review tier",
     "Merge with `gh pr merge --auto --squash`, wait for the merge",
     "Nothing runs after the session ends: no `pr-handoff.sh`, no pr-owner unit, no dispatcher pickup",
     "`/review-adversarial-first`, `/ce-code-review` and `/codex:adversarial-review` run only when the operator names them",
+)
+
+PRO_GATE_MD = CLAUDE_DIR / "plugins" / "hov-stack" / "skills" / "hov-setup" / "instructions" / "pro-gate.md"
+
+PRO_GATE_KEEPS = (
+    "One `/pro-gate` review runs only when the diff touches billing, auth, migrations or CI",
+    "A Pro stop (governor, delivery failure, loop cap) is reported, never re-queried",
+    "never report that merge as a Pro pass",
+    "`PRO_GATE_ROUNDS_CONTINUE=1` and `PRO_GATE_FORCE_ROUND=1` are operator-only",
 )
 
 # Retired by the ruling; any of these returning means the ladder or the
@@ -261,6 +283,11 @@ class ClaudeMdMergeAndEndTests(unittest.TestCase):
         self.assertLess(rule.index("open the PR with `gh pr create` (not draft"), rule.index("wait for CI"))
         self.assertLess(rule.index("wait for CI"), rule.index("gh pr merge --auto --squash"))
         self.assertLess(rule.index("gh pr merge --auto --squash"), rule.index("Nothing runs after the session ends"))
+
+    def test_pro_gate_instructions_keep_the_gate_and_stop_rules(self) -> None:
+        text = PRO_GATE_MD.read_text(encoding="utf-8")
+        missing = [phrase for phrase in PRO_GATE_KEEPS if phrase not in text]
+        self.assertEqual(missing, [], "pro-gate.md lost a sentence the merge-and-end rule depends on")
 
     def test_retired_ladder_and_handoff_text_does_not_return(self) -> None:
         text = CLAUDE_MD.read_text(encoding="utf-8")

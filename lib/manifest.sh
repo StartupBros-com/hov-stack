@@ -29,6 +29,7 @@
 # Consumers:
 #   install.sh                       — creates the links (via lib/link.sh)
 #   scripts/harness-doctor.sh — §10c verifies them, read-only
+#   setup                            — DATA_CLIS only, linked into ~/.local/bin
 #
 # Paths are repo-relative on the left, $HOME-relative on the right. No leading
 # slashes, no ~, no $HOME — both consumers prefix their own roots so the whole
@@ -70,31 +71,10 @@ DOTFILES_LINKS=(
   # Self-healing local-champion SSH tunnel used by pi-local.
   "harnesses/pi/systemd/user/pi-local-champion-tunnel.service|.config/systemd/user/pi-local-champion-tunnel.service"
   "harnesses/pi-lens/config.json|.pi-lens/config.json"
-  # gsc and dfs. This comment used to claim they were already
-  # "versioned-then-symlinked". They were not, and neither was the claim in
-  # CLAUDE.md or in the dfs wrapper's own header. Both wrappers existed
-  # only as loose files in ~/.local/bin, and bin/dfs.py was untracked
-  # entirely, so a rebuild lost dfs outright and left gsc's impl without a
-  # launcher. That is this file's own defect class read backwards: not repo
-  # content nothing installs, but $HOME content the repo never had. Found
-  # 2026-08-07 while checking whether dfs survived a machine loss. It did not.
   # One read-only pre-commit/review snapshot for the three Git commands agents
   # assembled explicitly 357 times in the 90-day transcript sample.
   "bin/git-preflight|.local/bin/git-preflight"
   "scripts/unit-health.sh|.local/bin/unit-health"
-  "bin/gsc|.local/bin/gsc"
-  "bin/ga4|.local/bin/ga4"
-  "bin/discord-cli|.local/bin/discord-cli"
-  "bin/resend-cli|.local/bin/resend-cli"
-  "bin/stripe-api|.local/bin/stripe-api"
-  "bin/posthog-api|.local/bin/posthog-api"
-  "bin/supabase-api|.local/bin/supabase-api"
-  "bin/fal-api|.local/bin/fal-api"
-  "bin/dfs|.local/bin/dfs"
-  "bin/exa-cli|.local/bin/exa-cli"
-  "bin/firecrawl-cli|.local/bin/firecrawl-cli"
-  "bin/vastai|.local/bin/vastai"
-  "bin/vast-ssh|.local/bin/vast-ssh"
   # codex-pick: the Codex best-available-model resolver for scripts, cron, and
   # the Codex host, none of which pass through Claude Code's PreToolUse guard
   # (dotfiles#991). Node, no deps; reaches hooks/lib through its own
@@ -141,6 +121,39 @@ DOTFILES_LINKS=(
   # install-smoke probe steps are the fail-if-absent gates, not manifest_check.
   "bin/python|.local/bin/python"
 )
+
+# The data CLIs: one wrapper each in bin/, run by name. ./setup links these same
+# names into ~/.local/bin for everyone who installs hov-stack (leaving alone a path that
+# holds anything else); install.sh links them through the rows built below. One list,
+# so the two installers cannot drift apart.
+#
+# gsc and dfs. This comment used to claim they were already
+# "versioned-then-symlinked". They were not, and neither was the claim in
+# CLAUDE.md or in the dfs wrapper's own header. Both wrappers existed
+# only as loose files in ~/.local/bin, and bin/dfs.py was untracked
+# entirely, so a rebuild lost dfs outright and left gsc's impl without a
+# launcher. That is this file's own defect class read backwards: not repo
+# content nothing installs, but $HOME content the repo never had. Found
+# 2026-08-07 while checking whether dfs survived a machine loss. It did not.
+DATA_CLIS=(
+  gsc
+  ga4
+  discord-cli
+  resend-cli
+  stripe-api
+  posthog-api
+  supabase-api
+  fal-api
+  dfs
+  exa-cli
+  firecrawl-cli
+  vastai
+  vast-ssh
+)
+for _data_cli in "${DATA_CLIS[@]}"; do
+  DOTFILES_LINKS+=("bin/$_data_cli|.local/bin/$_data_cli")
+done
+unset _data_cli
 
 # Destinations whose mode must be tightened after linking: "<dst>|<mode>".
 # chmod follows the symlink, so this sets the mode of the file IN THE REPO —

@@ -33,6 +33,13 @@ DESIGN
   argv (shared check in lib/proc_liveness.py, issue #378): a 22 GB directory that
   some process still holds is not residue, it is live state.
 
+  The operator's keep list is asked before anything else: a path one of its
+  patterns names, a path under one, or a directory above one is never a
+  candidate, whatever a rule or a floor says. It lives in the private overlay
+  (<overlay>/reclaim-sweep-keep; systemd/README.md gives the format). An
+  unreadable or invalid list refuses the whole run, plan included: a list that
+  cannot be read cannot say what it protects.
+
 Usage:
   reclaim-sweep.py              # plan only (default)
   reclaim-sweep.py --apply      # actually remove
@@ -280,7 +287,8 @@ def _beyond_keep(rule, dated: list):
         yield path, displaced.get(path, mtime)
 
 
-def plan(now: float, snap) -> list[dict]:
+def plan(now: float, snap, keep: Optional[KeepList] = None) -> list[dict]:
+    keep = load_keep_list() if keep is None else keep
     out = []
     # A path two globs match is the first rule's: planned twice, its second
     # removal would fail on a file already gone.
@@ -307,8 +315,10 @@ def plan(now: float, snap) -> list[dict]:
                 continue
             if not is_safe_target(path):
                 continue
-            holder = snap.holder(path)
-            skip = f"held by a live process ({holder.signal}, pid {holder.pid})" if holder else None
+            skip = keep.keeper(path)
+            if not skip:
+                holder = snap.holder(path)
+                skip = f"held by a live process ({holder.signal}, pid {holder.pid})" if holder else None
             if not skip and any(c == path or c.startswith(path + "/") for c in cited):
                 skip = "cited by a memory note"
             out.append({
@@ -347,9 +357,15 @@ def human(n: int) -> str:
 #                its session is not in the live registry, and it has been
 #                quiet for the floor. "done" is per-turn — 2b5a4195 went done
 #                at 04:30Z and was resumed at 05:46Z on 2026-10-25, and seven
-#                done jobs sat waiting on the operator that day — so state.json
-#                and the registry are read again right before removal, and
-#                tmp/ itself stays for a resumed job to write into.
+#                done jobs sat waiting on the operator that day — so state.json,
+#                the timeline and the registry are read again right before
+#                removal, and tmp/ itself stays for a resumed job to write into.
+#                A done job whose last turn delivered no result (no `result:`
+#                or `failed:` line, DELIVERED_LINE) is mid-task: pressure never
+#                shortens its floor below the normal one (issue #451: on
+#                2026-10-27 the 6h critical floor took 33.1 GB from 7e5fe6ab,
+#                whose last turn was a plain checkpoint, 20 minutes before the
+#                operator resumed it).
 #   tmp-scratch  a direct child of /tmp or /tmp/claude-<uid> (Claude Code's
 #                TMPDIR) that this user owns, nothing holds, and whose whole
 #                tree has been write-idle for the floor. Claude Code's own
@@ -412,6 +428,11 @@ DAEMON_NAMES = ("claude-{uid}", "cc-daemon-{uid}", "tmux-{uid}",
 
 # Most severe first: (level, below this many GB free on /, job floor h, tmp floor h).
 # The job floor never drops under 6h: the 76-minute resume above, with margin.
+# Remeasured 2026-11-05 over the 46 job timelines on this host: from a done turn
+# to the next one, p50 0.01h, p99 2h, max 14h; 5 of 1,000 came after more than
+# 6h (4 of them after a delivered turn), none after 24h. Those are jobs whose
+# dirs survived, so 7e5fe6ab's 7h gap is not among them. The floor applies
+# only to jobs whose last turn delivered (see DELIVERED_LINE).
 # /tmp never drops under 24h: 6h instead of 24h measured only ~14 GiB more du on
 # 2026-10-25, and would take scratch a session left that morning.
 PRESSURE_LEVELS = (
@@ -480,6 +501,21 @@ UNPARSED_ENTRY_STALE_S = 3 * 24 * HOUR
 
 SETTLED_STATES = frozenset({"done", "failed", "stopped"})
 
+# A background job's turn that delivers ends on a line of its own reading
+# `result:` (or `failed:`), the harness's completion convention; a turn that
+# ends without one is a checkpoint and the job will be resumed. Measured
+# 2026-11-05 over this host's 46 job timelines, runs of one state collapsed: a
+# done run whose text has no such line was followed by more work 153 of 153
+# times; one with it, 843 of 864. Line starts seen: `result:` 966, `` `result:``
+# 9, `failed:` 1, `**Failed:` 1, and one `- **Result:` list item, which is
+# prose; the last two do not match. If the convention drifts, fewer turns read
+# as delivered and the sweep only waits longer, the safe way to fail.
+DELIVERED_LINE = re.compile(r"(?m)^[ \t`*]*(?:result|failed):")
+
+# How much of timeline.jsonl's tail is read for the last turn. An entry's text
+# is capped at 4,000 characters (the tail is kept), so this holds a dozen.
+TIMELINE_TAIL_BYTES = 64 * 1024
+
 # Below this many bytes an entry (or a job's tmp child) is not this sweep's to
 # take: 2026-10-25's 6,032 candidates of 1 MiB or more held 97.6% of the bytes.
 BULK_MIN_BYTES = 1024 ** 2
@@ -488,6 +524,93 @@ BULK_MIN_BYTES = 1024 ** 2
 MEMORY_ROOT = f"{HOME}/.claude/projects"
 # What ends a cited path: whitespace, quotes, brackets, and shell or Markdown punctuation.
 CITED_PATH_CHARS = r"[^\s'\"`()\[\]<>,;|*${}]"
+
+
+def _keep_list_path() -> str:
+    """<overlay>/reclaim-sweep-keep, the overlay resolved the way setup and
+    lib/overlay.sh resolve it: $HOV_STACK_OVERLAY, else $XDG_CONFIG_HOME/hov-stack
+    when that is absolute, else ~/.config/hov-stack. A relative overlay comes back
+    relative, and load_keep_list() refuses it: overlay.sh ignores one, but a list
+    that protects things must not go quiet on a typo."""
+    xdg = os.environ.get("XDG_CONFIG_HOME") or ""
+    if not os.path.isabs(xdg):
+        xdg = os.path.join(HOME, ".config")
+    overlay = os.environ.get("HOV_STACK_OVERLAY") or os.path.join(xdg, "hov-stack")
+    return os.path.join(overlay, "reclaim-sweep-keep")
+
+
+# The operator's keep list; see load_keep_list().
+KEEP_LIST_PATH = _keep_list_path()
+KEEP_REASON = "on the keep list"
+
+
+class KeepList(NamedTuple):
+    path: str
+    read: bool            # the file existed and was read
+    patterns: tuple       # (pattern as written, its path segments)
+    error: Optional[str]  # set when unreadable or invalid; then every path is kept
+
+    def keeper(self, path: str) -> Optional[str]:
+        """Why the list keeps `path`, or None. A pattern keeps what it matches,
+        everything under that, and every directory above it: removing a parent
+        removes the child. Matching is per segment, so `*` never crosses a /, and
+        `*` is the only wildcard: load_keep_list() makes every other character,
+        ? and [ included, match itself."""
+        if self.error:
+            return "keep list unreadable"
+        segs = [s for s in os.path.normpath(path).split("/") if s]
+        for written, pat in self.patterns:
+            if all(fnmatch.fnmatchcase(s, p) for s, p in zip(segs, pat)):
+                return f"{KEEP_REASON}: {written}"
+        return None
+
+
+def _only_star_is_wild(segment: str) -> str:
+    """`segment` as an fnmatch pattern in which only * is a wildcard: a name the
+    operator spells with ? or [ (a dynamic-route directory, a dated backup?) must
+    keep that name, not a character class that misses it."""
+    return "".join({"[": "[[]", "?": "[?]"}.get(c, c) for c in segment)
+
+
+def load_keep_list(path: Optional[str] = None) -> KeepList:
+    """Read the keep list: one absolute glob per line (a leading ~/ is $HOME),
+    blank lines and # comment lines skipped; * is the only wildcard. No file is
+    an empty list, but only when the nearest existing directory above it is a
+    real directory. A file that cannot be read, a broken symlink at it, at the
+    overlay directory or anywhere above, a relative pattern, or a . or ..
+    segment is an error, never an empty list."""
+    path = KEEP_LIST_PATH if path is None else path
+    if not os.path.isabs(path):
+        return KeepList(path, False, (), "the overlay directory is not an absolute path")
+    try:
+        with open(path, encoding="utf-8") as fh:
+            text = fh.read()
+    except FileNotFoundError:
+        if os.path.lexists(path):
+            return KeepList(path, False, (), "it is a broken symlink")
+        # A broken link above the file hides the list rather than removing it:
+        # walk up to the first entry that exists and ask whether it is a directory.
+        above = os.path.dirname(path)
+        while not os.path.lexists(above):
+            above = os.path.dirname(above)
+        if not os.path.isdir(above):
+            return KeepList(path, False, (), f"{above}, above it, is a broken symlink")
+        return KeepList(path, False, (), None)
+    except (OSError, UnicodeDecodeError) as e:
+        return KeepList(path, False, (), f"cannot read it: {e}")
+    patterns = []
+    for n, line in enumerate(text.splitlines(), 1):
+        written = line.strip()
+        if not written or written.startswith("#"):
+            continue
+        expanded = HOME + written[1:] if written == "~" or written.startswith("~/") else written
+        if not expanded.startswith("/"):
+            return KeepList(path, True, (), f"line {n}: {written!r} is not an absolute or ~/ path")
+        segs = [s for s in expanded.split("/") if s]
+        if any(s in (".", "..") for s in segs):
+            return KeepList(path, True, (), f"line {n}: {written!r} has a . or .. segment")
+        patterns.append((written, tuple(_only_star_is_wild(s) for s in segs)))
+    return KeepList(path, True, tuple(patterns), None)
 
 DOCKER = "docker"
 DOCKER_TIMEOUT_S = 30
@@ -1028,7 +1151,8 @@ def _iso_epoch(value) -> float:
 
 
 def _job_state(job: str):
-    """(fingerprint, state.json) — the fingerprint moves on any rewrite."""
+    """(fingerprint, state.json) — the fingerprint moves on any rewrite of
+    state.json and on any line added to timeline.jsonl."""
     p = os.path.join(job, "state.json")
     try:
         st = os.stat(p)
@@ -1038,8 +1162,43 @@ def _job_state(job: str):
         return None, None
     if not isinstance(doc, dict):
         return None, None
+    try:
+        tl = os.stat(os.path.join(job, "timeline.jsonl"))
+        timeline = (tl.st_ino, tl.st_mtime_ns, tl.st_size)
+    except OSError:
+        timeline = None
     return (st.st_ino, st.st_mtime_ns, st.st_size,
-            doc.get("state"), doc.get("tempo"), doc.get("lastTerminalAt")), doc
+            doc.get("state"), doc.get("tempo"), doc.get("lastTerminalAt"), timeline), doc
+
+
+def _last_turn_delivered(job: str) -> bool:
+    """Whether the job's last done turn delivered: DELIVERED_LINE in the text of
+    the newest done entry that has text. A turn writes several done entries and
+    most carry none, so the trailing run is walked back to one that does; an
+    entry of another state first means the job is not in a done turn. Anything
+    unreadable counts as not delivered."""
+    try:
+        with open(os.path.join(job, "timeline.jsonl"), "rb") as fh:
+            size = fh.seek(0, os.SEEK_END)
+            fh.seek(max(0, size - TIMELINE_TAIL_BYTES))
+            lines = fh.read().split(b"\n")
+    except OSError:
+        return False
+    if size > TIMELINE_TAIL_BYTES:
+        lines = lines[1:]  # cut mid-line
+    for raw in reversed(lines):
+        if not raw.strip():
+            continue
+        try:
+            entry = json.loads(raw)
+        except ValueError:
+            return False
+        if not isinstance(entry, dict) or entry.get("state") != "done":
+            return False
+        text = entry.get("text")
+        if isinstance(text, str) and text.strip():
+            return bool(DELIVERED_LINE.search(text))
+    return False
 
 
 def _pins_text(jobs_root: str) -> Optional[str]:
@@ -1227,8 +1386,10 @@ class ScratchPlan(NamedTuple):
 
 
 def plan_scratch(now: float, snap, job_floor_h: float, tmp_floor_h: float,
-                 budget_s: float = PLAN_BUDGET_S, uid: Optional[int] = None) -> ScratchPlan:
+                 budget_s: float = PLAN_BUDGET_S, uid: Optional[int] = None,
+                 keep: Optional[KeepList] = None) -> ScratchPlan:
     uid = os.getuid() if uid is None else uid
+    keep = load_keep_list() if keep is None else keep
     deadline = time.monotonic() + budget_s
     items: list = []
     kept: Counter = Counter()
@@ -1253,8 +1414,11 @@ def plan_scratch(now: float, snap, job_floor_h: float, tmp_floor_h: float,
         return None
 
     # job-scratch: cheap checks first (state, pins, registry, liveness, quiet,
-    # owners), then the walk.
+    # owners), then the walk. A done job whose last turn delivered no result
+    # waits out the normal floor however full / is.
     job_cutoff = now - job_floor_h * HOUR
+    awaiting_floor_h = max(job_floor_h, NORMAL_FLOORS_H[0])
+    awaiting_cutoff = now - awaiting_floor_h * HOUR
     try:
         job_ids = sorted(e.name for e in os.scandir(JOBS_ROOT) if e.is_dir(follow_symlinks=False))
     except OSError:
@@ -1301,6 +1465,11 @@ def plan_scratch(now: float, snap, job_floor_h: float, tmp_floor_h: float,
         if newest > job_cutoff:
             kept["job not quiet"] += 1
             continue
+        delivered = state.get("state") != "done" or _last_turn_delivered(job)
+        floor_h, cutoff = (job_floor_h, job_cutoff) if delivered else (awaiting_floor_h, awaiting_cutoff)
+        if newest > cutoff:
+            kept[f"job's last turn delivered no result: kept to the {awaiting_floor_h}h floor"] += 1
+            continue
         why = owner(job)
         if why:
             kept[why] += 1
@@ -1311,7 +1480,11 @@ def plan_scratch(now: float, snap, job_floor_h: float, tmp_floor_h: float,
         scans, fresh = [], False
         for name in children:
             path = os.path.join(tmp, name)
-            scan = scan_tree(path, job_cutoff, uid)
+            listed = keep.keeper(path)
+            if listed:
+                kept[listed] += 1
+                continue
+            scan = scan_tree(path, cutoff, uid)
             if scan.veto:
                 kept[scan.veto] += 1
                 continue
@@ -1352,10 +1525,11 @@ def plan_scratch(now: float, snap, job_floor_h: float, tmp_floor_h: float,
                 "unshared_bytes": unshared, "entries": len(targets),
                 "idle_hours": round(idle_h, 1), "age_days": round(idle_h / 24, 1),
                 "why": f"scratch of a job Claude Code reports {state.get('state')} and no live "
-                       f"session owns, quiet past the {job_floor_h}h floor; tmp/ itself is kept"
-                       + _clean_repos(clean) + let_go,
+                       f"session owns, quiet past the {floor_h}h floor"
+                       + ("" if delivered else " (its last turn delivered no result)")
+                       + "; tmp/ itself is kept" + _clean_repos(clean) + let_go,
                 "skip": None, "_job": job, "_state_fp": fp, "_targets": targets,
-                "_sessions": sessions, "_cutoff": job_cutoff,
+                "_sessions": sessions, "_cutoff": cutoff,
             })
 
     # tmp-scratch: one lstat and an index lookup per entry; walks go oldest first.
@@ -1367,6 +1541,11 @@ def plan_scratch(now: float, snap, job_floor_h: float, tmp_floor_h: float,
     def consider(path, name, st, held, dev, session=None):
         why = None
         if st is None:
+            return
+        # The list first, so its count covers every entry it names, fresh ones too.
+        listed = keep.keeper(path)
+        if listed:
+            kept[listed] += 1
             return
         if stat.S_ISLNK(st.st_mode):
             why = "symlink"
@@ -1616,6 +1795,13 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
 
     now = args.now if args.now is not None else time.time()
+    # A keep list that cannot be read cannot say what it protects: refuse both
+    # modes, as for an answerless liveness scan below.
+    keep = load_keep_list()
+    if keep.error:
+        print(f"reclaim-sweep: keep list {keep.path}: {keep.error} — refusing to plan or apply",
+              file=sys.stderr)
+        return 1
     # An answerless liveness scan must abort BOTH modes, not degrade to
     # "nothing is held": an apply would delete live state, and a plan would
     # print a lie that later graduates to an apply. Fail closed (issue #378).
@@ -1630,13 +1816,13 @@ def main(argv: list[str] | None = None) -> int:
         print("reclaim-sweep: liveness scan saw no processes — refusing to plan or apply",
               file=sys.stderr)
         return 1
-    items = plan(now, snap)
+    items = plan(now, snap, keep)
     actionable = [i for i in items if not i["skip"]]
     skipped = [i for i in items if i["skip"]]
 
     free = free_bytes() if args.free_gb is None else int(args.free_gb * GB)
     level, job_h, tmp_h = pressure(free)
-    scratch = plan_scratch(now, snap, job_h, tmp_h)
+    scratch = plan_scratch(now, snap, job_h, tmp_h, keep=keep)
     actionable += scratch.items
     total = sum(i["bytes"] for i in actionable)
 
@@ -1675,6 +1861,8 @@ def main(argv: list[str] | None = None) -> int:
             "actionable": [_public(i) for i in actionable], "skipped": skipped,
             "total_bytes": total, "removed": removed, "failed": failed,
             "applied": args.apply, "freed_bytes": freed,
+            "keep_list": {"path": keep.path, "read": keep.read,
+                          "patterns": [w for w, _ in keep.patterns]},
             "scratch": {
                 "pressure": level, "free_bytes": free, "free_measured": args.free_gb is None,
                 "floors_h": {"job": job_h, "tmp": tmp_h},
@@ -1714,6 +1902,10 @@ def main(argv: list[str] | None = None) -> int:
         ev = scratch.evidence
         print(f"  scratch evidence: docker {ev['docker']}; {ev['memory notes read']} memory note(s) read, "
               f"{ev['memory notes unreadable']} unreadable; git: {ev['git']}")
+        if keep.read:
+            print(f"  keep list: {len(keep.patterns)} pattern(s) read from {keep.path}")
+        else:
+            print(f"  keep list: none ({keep.path} does not exist)")
         if scratch.unexamined:
             print(f"  scratch unexamined: {scratch.unexamined} entr(ies) left for the next run "
                   f"(plan budget {PLAN_BUDGET_S}s spent)")

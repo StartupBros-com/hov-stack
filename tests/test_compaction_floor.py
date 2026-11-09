@@ -77,6 +77,23 @@ class FloorComposition(unittest.TestCase):
         # (17 + 12) // 4 + 10 * 2 skill dirs
         self.assertIn('skill listing: 27 tokens (estimate: 2 skill dirs', out, out)
 
+    def test_skill_listing_counts_skills_dir_plugin_skills(self):
+        """A plugin kept in ~/.claude/skills/<dir>/ loads its skills/<name>/SKILL.md.
+        Planted negative: the same layout without .claude-plugin/plugin.json is not a plugin and adds nothing."""
+        def skill(home, rel, desc):
+            p = home / rel / 'SKILL.md'
+            p.parent.mkdir(parents=True)
+            p.write_text(f'---\nname: {p.parent.name}\ndescription: {desc}\n---\n', encoding='utf-8')
+        def plant(home):
+            skill(home, '.claude/skills/own', 'own skill')  # 9 chars
+            (home / '.claude/skills/kit/.claude-plugin').mkdir(parents=True)
+            (home / '.claude/skills/kit/.claude-plugin/plugin.json').write_text('{"name": "kit"}', encoding='utf-8')
+            skill(home, '.claude/skills/kit/skills/a', 'kit skill a')  # 11 chars
+            skill(home, '.claude/skills/notaplugin/skills/b', 'not loaded')
+        out = self.run_profile([request('a', 50_000)], plant=plant)
+        # (9 + 11) // 4 + 10 * 2 skill dirs
+        self.assertIn('skill listing: 25 tokens (estimate: 2 skill dirs', out, out)
+
     def test_skill_listing_falls_back_to_the_newest_cached_version(self):
         """No manifest: the newest version dir by mtime stands in for the installed one."""
         def plant(home):

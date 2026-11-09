@@ -449,6 +449,7 @@ class Ga4CliTests(unittest.TestCase):
             ga4.access_token("/fake/unused.json", 3)
         self.assertIn("uv pip install", str(caught.exception))
         self.assertIn("google-auth", str(caught.exception))
+        self.assertIn("venv-install.sh gsc", str(caught.exception))
 
     def test_invalid_api_json_and_rows_fail_cleanly(self):
         for raw in (b"secret invalid data", b"\xff", b"[]", b'{"rows":42}'):

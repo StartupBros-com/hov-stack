@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# On-demand GA4 reads. Reuses gsc's disposable google-auth environment.
+# On-demand GA4 reads. Reuses gsc's disposable google-auth environment;
+# build it with /hov-setup or `bash plugins/hov-stack/skills/hov-setup/scripts/venv-install.sh gsc`. By hand:
 # uv venv ~/.local/share/gsc-cli/venv --python 3.12
 # uv pip install --python ~/.local/share/gsc-cli/venv/bin/python google-auth
 set -euo pipefail

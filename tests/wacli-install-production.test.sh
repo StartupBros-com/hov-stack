@@ -10,7 +10,7 @@ set -euo pipefail
 
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 SELF=$REPO/tests/wacli-install-production.test.sh
-INSTALLER=$REPO/scripts/wacli-install.sh
+INSTALLER=$REPO/plugins/hov-stack/skills/hov-setup/scripts/wacli-install.sh
 
 if [ "${1:-}" = --in-namespace ]; then
   # Internal re-exec marker. It is honoured only as PID 1 of a fresh PID

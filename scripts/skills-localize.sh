@@ -10,13 +10,18 @@
 #     • local forks stay deployed
 #     • the local layer stays applied over kept jsm skills (LOCAL LAYER below)
 #
-# SOURCES OF TRUTH (version-controlled in this repository, except the host's patches)
+# SOURCES OF TRUTH (version-controlled here, except the overlay's additions)
 #   retired-skills.txt           one skill name per line (# comments ok) → kept uninstalled.
 #                                 `<name> replaced-by=<plugin>@<marketplace>` holds the
 #                                 retirement (DRIFT, skill left in place) until
 #                                 installed_plugins.json records that plugin at user scope,
 #                                 so retiring never leaves a host with neither (#358)
 #   plugins/hov-stack/skills/<name>/  full local (non-jsm) skills → deployed into ~/.claude/skills/
+#                                 unless an enabled plugin provides a skill of that name
+#                                 (skill-collision-check.py --plugin-skill-names): that fork
+#                                 is skipped, and check reports an existing real
+#                                 ~/.claude/skills/<name> as a duplicate DRIFT. Codex still
+#                                 gets the fork.
 #   skills-patches/<name>/<rel>   content overlays, 3-way merged onto the installed jsm skill
 #   skills-patches/<name>/.base/  the upstream files each overlay was written against, plus
 #                                 VERSION; never deployed
@@ -31,6 +36,12 @@
 #                                 idea-wizard (none installed here); the Codex trees get the
 #                                 .codex one
 #   codex-skills.txt             subset of plugins/hov-stack/skills/ that ALSO deploys to ~/.codex/skills/
+#   <overlay>/codex-skills.txt   extra Codex names, from local forks or listed plugin skills;
+#                                 CODEX_SKILLS_HOST_LIST overrides it (empty means none)
+#   <overlay>/retired-skills.txt extra retirements; RETIRED_SKILLS_HOST_LIST overrides it
+#                                 (empty means none), with the same replaced-by= rules
+#   <overlay>/skill-plugins      absolute plugin folders, one per line, # comments allowed;
+#                                 SKILL_PLUGINS_LIST overrides it (empty means none)
 #   skills-legacy-overlays.txt   hashes of the files the pre-#2091 layer wrote; a skill that
 #                                 still holds one is reinstalled, never taken as pristine, and
 #                                 only listed bytes let an overlay's .base stand in for pristine
@@ -126,6 +137,28 @@ CODEX_SKILLS="${CODEX_SKILLS_DIR:-$HOME/.codex/skills}"
 CODEX_LIST="${CODEX_SKILLS_LIST:-$HERE/codex-skills.txt}"
 AGENTS_SKILLS="${AGENTS_SKILLS_DIR:-$HOME/.agents/skills}"
 LEGACY="${SKILLS_LEGACY_LIST:-$HERE/skills-legacy-overlays.txt}"
+# These inputs also apply to audit, independently of the host patch opt-out.
+# A missing lib/overlay.sh is reported where the host's patches are read, below.
+OVERLAY=
+if [ -f "$HERE/lib/overlay.sh" ]; then
+  # shellcheck source=lib/overlay.sh
+  . "$HERE/lib/overlay.sh"
+  OVERLAY=$(overlay_dir) || OVERLAY=
+fi
+CODEX_HOST_LIST=${CODEX_SKILLS_HOST_LIST-${OVERLAY:+$OVERLAY/codex-skills.txt}}
+RETIRED_HOST_LIST=${RETIRED_SKILLS_HOST_LIST-${OVERLAY:+$OVERLAY/retired-skills.txt}}
+PLUGIN_LIST=${SKILL_PLUGINS_LIST-${OVERLAY:+$OVERLAY/skill-plugins}}
+PLUGIN_FOLDERS=()
+if [ -f "$PLUGIN_LIST" ]; then
+  while IFS= read -r line || [ -n "$line" ]; do
+    line=${line%%#*}
+    line="${line#"${line%%[![:space:]]*}"}"
+    line="${line%"${line##*[![:space:]]}"}"
+    case $line in /*)
+      if [ -d "$line" ] && [ -f "$line/.claude-plugin/plugin.json" ]; then PLUGIN_FOLDERS+=("$line"); fi ;;
+    esac
+  done < "$PLUGIN_LIST"
+fi
 
 # The note's opening words: a line starting with them right after the frontmatter is ours.
 MARKER='> **Local tooling on this machine.**'
@@ -233,6 +266,7 @@ plugin_installed() {
 # is DRIFT in every mode, so harness-doctor's `check` surfaces it (#358).
 retire_one() {
   local name="$1" replacement="${2:-}"; local dir="$SKILLS/$name"
+  if [ -L "$dir" ] && [ -f "$dir/.claude-plugin/plugin.json" ]; then return 0; fi
   [ -n "$name" ] || return 0                      # never operate on an empty name
   valid_skill_name "$name" || { reject_name "$name" "retired-skills.txt"; return 0; }
   [ -e "$dir" ] || return 0                       # already gone → idempotent no-op
@@ -263,15 +297,20 @@ retire_one() {
 # Each line is `<name> [replaced-by=<plugin>@<marketplace>]`, # comments allowed. Any
 # other field, or a malformed replacement, is an ERROR and the entry is left alone: a
 # typo must never retire a skill under looser rules than the line meant.
+# This reads the list; retire_one only moves entries in the skills tree.
+# shellcheck disable=SC2094
 enforce_retired() {
-  [ -f "$RETIRED" ] || return 0
+  # No argument reads retired-skills.txt; an empty one (no overlay list) reads nothing.
+  local file=${1-$RETIRED} label=${2-retired-skills.txt}
+  [ -n "$file" ] && [ -f "$file" ] || return 0
   local line name rest tok replacement
   local -a fields
-  while IFS= read -r line; do
+  while IFS= read -r line || [ -n "$line" ]; do
     line="${line%%#*}"
     name=""; rest=""
     read -r name rest <<<"$line"
     [ -n "$name" ] || continue
+    valid_skill_name "$name" || { reject_name "$name" "$label"; continue; }
     replacement=""
     fields=()
     read -r -a fields <<<"$rest"
@@ -279,19 +318,20 @@ enforce_retired() {
       case "$tok" in
         replaced-by=*)
           [ -z "$replacement" ] || {
-            note "ERROR: retired-skills.txt entry '$name' names more than one replaced-by= — refusing to touch it"
+            note "ERROR: $label entry '$name' names more than one replaced-by= — refusing to touch it"
             errors=1; drift=1; continue 2; }
           replacement="${tok#replaced-by=}"
           [[ "$replacement" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*@[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || {
-            note "ERROR: retired-skills.txt entry '$name' has a malformed '$tok' (want replaced-by=<plugin>@<marketplace>) — refusing to touch it"
+            note "ERROR: $label entry '$name' has a malformed '$tok' (want replaced-by=<plugin>@<marketplace>) — refusing to touch it"
             errors=1; drift=1; continue 2; } ;;
         *)
-          note "ERROR: retired-skills.txt entry '$name' has an unknown field '$tok' — refusing to touch it"
+          note "ERROR: $label entry '$name' has an unknown field '$tok' — refusing to touch it"
           errors=1; drift=1; continue 2 ;;
       esac
     done
+    [ "$file" = "$RETIRED" ] || note "retirement from $label: $name"
     retire_one "$name" "$replacement"
-  done < "$RETIRED"
+  done < "$file"
 }
 
 # Deploy ONE fork dir into ONE target skills tree. Shared by the Claude tree and the
@@ -324,47 +364,123 @@ sync_fork() {
   else note "ERROR: failed to deploy $label fork '$name'"; errors=1; fi
 }
 
+# A fork whose name an ENABLED plugin also provides is not copied into the Claude tree:
+# the copy would load next to <plugin>:<name> and skill-collision-check.py reports the
+# pair as a COLLISION (papercut, 2026-11-07: plugins/hov-stack/skills/papercut is the
+# upstream source of the papercut plugin's skill). The plugin list comes from the one
+# enumeration skill-collision-check.py owns (--plugin-skill-names), for the config dir
+# that holds $SKILLS. If the helper fails the fork deploys as before, with a WARN.
+# deploy_codex is untouched: Codex has no plugins and still needs the fork.
+plugin_skill_names() {
+  local cfg_dir
+  cfg_dir=$(dirname "$SKILLS")
+  python3 "$HERE/scripts/skill-collision-check.py" --plugin-skill-names \
+    --claude-dir "$cfg_dir" --settings "$cfg_dir/settings.json" \
+    --installed-plugins "${SKILLS_INSTALLED_PLUGINS:-$cfg_dir/plugins/installed_plugins.json}" 2>&1
+}
+
 deploy_forks() {
   [ -d "$LOCAL" ] || return 0
-  local d name
+  local d name plugin provided=""
+  if ! provided=$(plugin_skill_names); then
+    note "WARN: could not list plugin-provided skills ($(printf '%s' "$provided" | head -n1)) — deploying every fork"
+    provided=""
+  fi
   for d in "$LOCAL"/*/; do
     [ -d "$d" ] || continue
     name=$(basename "$d")
     [ -n "$name" ] || continue
     [ -f "$d/SKILL.md" ] || { note "WARN: plugins/hov-stack/skills/$name has no SKILL.md — skipped"; continue; }
+    plugin=$(printf '%s\n' "$provided" | awk -F'\t' -v n="$name" '$1 == n { print $2; exit }')
+    if [ -n "$plugin" ]; then
+      if [ "$MODE" = check ]; then
+        if [ -d "$SKILLS/$name" ] && [ ! -L "$SKILLS/$name" ]; then
+          note "DRIFT: ~/.claude/skills/$name duplicates plugin skill $plugin:$name; remove it"; drift=1
+        fi
+      else
+        note "skip claude fork $name: plugin skill $plugin:$name provides it"
+      fi
+      continue
+    fi
     sync_fork "$d" "$SKILLS" "$name" "claude"
   done
 }
 
 # Codex keeps its own skills tree; jsm installs into it independently and nothing here
 # reached it before codex-skills.txt existed. Allowlist only — see that file.
+# sync_fork writes the deployment, never this list.
+# shellcheck disable=SC2094
 deploy_codex() {
-  [ -f "$CODEX_LIST" ] || return 0
   if [ ! -d "$CODEX_SKILLS" ]; then
     say "codex: $CODEX_SKILLS absent — skipping (Codex not installed here)"
     return 0
   fi
-  local line name
-  while IFS= read -r line; do
+  local line name file src folder label deployed=" "
+  for file in "$CODEX_LIST" "$CODEX_HOST_LIST"; do
+  [ -f "$file" ] || continue
+  label=$file
+  [ "$file" != "$CODEX_LIST" ] || label=codex-skills.txt
+  while IFS= read -r line || [ -n "$line" ]; do
     line="${line%%#*}"; line="${line//[[:space:]]/}"
     [ -n "$line" ] || continue
     name="$line"
-    valid_skill_name "$name" || { reject_name "$name" "codex-skills.txt"; continue; }
-    if [ ! -d "$LOCAL/$name" ]; then
-      note "WARN: codex-skills.txt lists '$name' but plugins/hov-stack/skills/$name does not exist"
+    valid_skill_name "$name" || { reject_name "$name" "$label"; continue; }
+    case $deployed in *" $name "*) continue ;; esac
+    src=$LOCAL/$name
+    if [ ! -d "$src" ]; then
+      src=
+      for folder in ${PLUGIN_FOLDERS[@]+"${PLUGIN_FOLDERS[@]}"}; do
+        if [ -d "$folder/skills/$name" ]; then src=$folder/skills/$name; break; fi
+      done
+    fi
+    if [ -z "$src" ]; then
+      note "WARN: $label lists '$name' but plugins/hov-stack/skills/$name does not exist ($LOCAL/$name or skills/$name in plugin folders listed in $PLUGIN_LIST)"
       continue
     fi
+    deployed="$deployed$name "
     # Codex ignores Claude's `disable-model-invocation`; its gate is agents/openai.yaml
     # (see codex-skills.txt). A fork demoted in Claude but missing that file is silently
     # model-invocable in Codex — the exact gap #219 fixed for six forks. Advisory ONLY:
     # this is a repo-level policy omission, not live-tree drift, and harness-doctor
     # consumes check's exit code, so it must never set drift=1.
-    if [ ! -f "$LOCAL/$name/agents/openai.yaml" ] &&
-       grep -qs '^disable-model-invocation:[[:space:]]*true' "$LOCAL/$name/SKILL.md"; then
+    if [ ! -f "$src/agents/openai.yaml" ] &&
+       grep -qs '^disable-model-invocation:[[:space:]]*true' "$src/SKILL.md"; then
       note "WARN: codex fork '$name' is invoke-only in Claude but ships no agents/openai.yaml — it is model-invocable in Codex"
     fi
-    sync_fork "$LOCAL/$name/" "$CODEX_SKILLS" "$name" "codex"
-  done < "$CODEX_LIST"
+    sync_fork "$src/" "$CODEX_SKILLS" "$name" "codex"
+  done < "$file"
+  done
+}
+
+# A plain copy has no updater; only check mode reports it, when plugins are in use.
+check_unowned() {
+  [ "$MODE" = check ] && [ "${#PLUGIN_FOLDERS[@]}" -gt 0 ] || return 0
+  local owned=" " output name d folder suffix plugin
+  if command -v jsm >/dev/null 2>&1; then
+    if ! output=$(JSM_OFFLINE=true jsm list 2>/dev/null); then
+      note 'WARN: jsm list failed; skipping the unowned-copy check'; return 0
+    fi
+    owned=" $(printf '%s\n' "$output" | awk '{print $1}' | tr '\n' ' ') "
+  fi
+  for d in "$SKILLS"/*; do
+    [ -d "$d" ] && [ ! -L "$d" ] || continue
+    name=$(basename "$d")
+    case $name in .*|synced) continue ;; esac
+    # sbh's install.sh writes ~/.claude/skills/sbh on every run, so its installer owns the
+    # copy while sbh is installed (`sbh update` replaces only the binary).
+    if [ "$name" = sbh ] && command -v sbh >/dev/null 2>&1; then continue; fi
+    [ ! -f "$d/.claude-plugin/plugin.json" ] || continue  # a plugin folder made in place
+    [ ! -d "$LOCAL/$name" ] || continue
+    case $owned in *" $name "*) continue ;; esac
+    suffix=
+    for folder in "${PLUGIN_FOLDERS[@]}"; do
+      [ -d "$folder/skills/$name" ] || continue
+      plugin=$(node -e 'try {console.log(JSON.parse(require("fs").readFileSync(process.argv[1])).name)} catch {}' "$folder/.claude-plugin/plugin.json")
+      suffix=" (it shares its name with $plugin's skill)"; break
+    done
+    note "DRIFT: ~/.claude/skills/$name is a plain copy nothing owns (not jsm's, not the skill pack's, not a skill plugin's): move it into a skill-plugins folder or remove it$suffix"
+    drift=1
+  done
 }
 
 # A dangling symlink in a skills tree is pure breakage: the skill cannot load, and the
@@ -745,12 +861,24 @@ drop_state() {
   rm -rf "${STATE:?}/$label/manifest/$skill" "$STATE/$label/pristine/$skill" && say "dropped $label layer state: $skill"
 }
 
+# codex_plugin_fork <label> <skill> — deploy_codex copies this skill from a skill-plugins
+# folder, so, like a skill-pack fork, it carries its own text. Layering it anyway never
+# settles: deploy_codex copies the fork back over the layered SKILL.md on every apply.
+codex_plugin_fork() {
+  local folder
+  [ "$1" = codex ] && [ ! -d "$LOCAL/$2" ] && codex_wants "$2" || return 1
+  for folder in ${PLUGIN_FOLDERS[@]+"${PLUGIN_FOLDERS[@]}"}; do
+    [ -d "$folder/skills/$2" ] && return 0
+  done
+  return 1
+}
+
 # layer_skill <label> <root> <skill> <note> — apply, dry-run or check one skill.
 layer_skill() {
   local label="$1" root="$2" skill="$3" noteline="$4" dir="$2/$3" rel live old stale=0
   local -a towrite=()
   valid_skill_name "$skill" || return 0
-  if [ ! -d "$dir" ] || [ -L "$dir" ] || [ -f "$LOCAL/$skill/SKILL.md" ]; then
+  if [ ! -d "$dir" ] || [ -L "$dir" ] || [ -f "$LOCAL/$skill/SKILL.md" ] || codex_plugin_fork "$label" "$skill"; then
     drop_state "$label" "$skill"; return 0
   fi
   if [ ! -e "$STATE/$label/manifest/$skill" ] && legacy_hits "$label" "$dir" "$skill"; then
@@ -994,12 +1122,14 @@ audit_compare() {
 
 # codex_wants <name> -> true if codex-skills.txt allowlists this skill for the Codex tree
 codex_wants() {
-  local name="$1" line entry
-  [ -f "$CODEX_LIST" ] || return 1
-  while IFS= read -r line; do
+  local name="$1" line entry file
+  for file in "$CODEX_LIST" "$CODEX_HOST_LIST"; do
+  [ -f "$file" ] || continue
+  while IFS= read -r line || [ -n "$line" ]; do
     entry="${line%%#*}"; entry="${entry//[[:space:]]/}"
     [ "$entry" = "$name" ] && return 0
-  done < "$CODEX_LIST"
+  done < "$file"
+  done
   return 1
 }
 
@@ -1050,7 +1180,8 @@ if [ "$MODE" = check ] || [ "$DRY" = 1 ]; then take_lock shared; else take_lock 
 WORK=$(mktemp -d) || { note "ERROR: mktemp failed"; exit 1; }
 load_legacy
 say "skills-localize: $MODE  (skills=$SKILLS, codex=$CODEX_SKILLS, agents=$AGENTS_SKILLS)"
-enforce_retired
+enforce_retired "$RETIRED" retired-skills.txt
+enforce_retired "$RETIRED_HOST_LIST" "$RETIRED_HOST_LIST"
 # Reap BEFORE deploying, so a run converges in one pass. sync_fork skips any entry that
 # is a symlink — including a DANGLING one — so a fork whose symlink target vanished
 # (the documented `sync.sh install` from a temp worktree trap) would otherwise stay
@@ -1061,6 +1192,7 @@ deploy_forks
 report_shadowed
 apply_layer
 deploy_codex
+check_unowned
 if [ "$MODE" = check ]; then
   [ "$drift" -eq 0 ] && echo "skills policy in sync" || true
   exit "$drift"

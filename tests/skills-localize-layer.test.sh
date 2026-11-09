@@ -4,6 +4,8 @@
 # pristine state, and unapply / forget / rebase / check. Runs the real script
 # against fixture trees with every path it could touch pinned into a temp dir.
 set -uo pipefail
+unset HOV_STACK_OVERLAY XDG_CONFIG_HOME
+export CODEX_SKILLS_HOST_LIST="" RETIRED_SKILLS_HOST_LIST="" SKILL_PLUGINS_LIST=""
 
 CLAUDE_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 SCRIPT=$CLAUDE_DIR/scripts/skills-localize.sh

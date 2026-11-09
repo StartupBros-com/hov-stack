@@ -24,7 +24,7 @@ description: >-
 | `beads` — shared task pool + dependency graph | **The Workflow tool**: deterministic `pipeline`/`parallel`, fan-out, loop-until-dry, adversarial-verify, budget-scaled |
 | `agent-mail` — file-reservation coordination | **Worktree isolation** (`isolation:"worktree"` / `codex exec --cd <wt>`): physical isolation ⇒ no protocol |
 | `bv` / triage | plain code in a Workflow script, or a judgment subagent |
-| multi-model peer scoring | **`/multi-model-triangulation`** (compose, don't re-implement) |
+| multi-model peer scoring | **`/ce-pov oracle`** (compound-engineering cross-model panel), or `/ce-pov` with a named peer such as `codex` (compose, don't re-implement) |
 
 ## Pick the lightest engine that fits
 

@@ -31,11 +31,27 @@ SEVERITY MODEL (the part a generic linter gets wrong)
 
     A skill is model-invisible when it is `user-invocable-only` or `off` in
     settings.json skillOverrides, or carries `disable-model-invocation: true`
-    in its own frontmatter.
+    in its own frontmatter. Only the frontmatter flag hides a plugin skill:
+    Claude Code does not apply skillOverrides to plugin skills.
+
+SCAN SET
+    By default: ~/.claude/skills, the skills of each skills-dir plugin kept
+    there (~/.claude/skills/<dir>/.claude-plugin/plugin.json), and the skills
+    of each enabled user-scope marketplace install in
+    ~/.claude/plugins/installed_plugins.json. A plugin skill is reported as
+    <plugin>:<dir>. --sources replaces the whole set.
 
 Usage:
     skill-collision-check.py [--threshold 0.75] [--sources DIR ...] [--json]
                              [--include-latent]
+    skill-collision-check.py --plugin-skill-names [--claude-dir DIR]
+                             [--settings FILE] [--installed-plugins FILE]
+
+--plugin-skill-names is a read-only listing, not a scan: one "<skill-name>\t<plugin>"
+line per skill an ENABLED plugin provides, from the same plugin enumeration the scan
+uses. skills-localize.sh deploy_forks reads it so it does not copy a fork into
+~/.claude/skills when a plugin already provides that skill (the copy would collide
+with <plugin>:<name>). Exit 0 (empty output when no plugin skills), 2 on a bad path.
 
 Exit codes: 0 clean (no LIVE collisions), 1 LIVE collisions found, 2 scan
 corpus unavailable (harness-doctor friendly).
@@ -115,18 +131,84 @@ def jaccard(a: frozenset[str], b: frozenset[str]) -> float:
     return len(a & b) / len(a | b)
 
 
-def load_overrides(settings: Path) -> dict[str, str]:
+def load_settings(settings: Path) -> dict:
     try:
-        return json.loads(settings.read_text(encoding="utf-8")).get("skillOverrides", {})
+        data = json.loads(settings.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
+    return data if isinstance(data, dict) else {}
 
 
-def discover(sources: list[Path]) -> list[dict]:
+def load_overrides(settings: Path) -> dict[str, str]:
+    overrides = load_settings(settings).get("skillOverrides", {})
+    return overrides if isinstance(overrides, dict) else {}
+
+
+def manifest_name(root: Path) -> str | None:
+    """The plugin name `root` declares in .claude-plugin/plugin.json, else None."""
+    try:
+        data = json.loads((root / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    name = data.get("name") if isinstance(data, dict) else None
+    return name if isinstance(name, str) and name else root.name
+
+
+def plugin_sources(claude: Path, settings: dict,
+                   installed_plugins: Path | None = None) -> list[tuple[Path, str]]:
+    """(skills dir, plugin name) for each plugin a session loads skills from.
+
+    The same rule as hooks/UserPromptSubmit/skill-mention-resolver.js: a
+    skills-dir plugin (<claude>/skills/<dir>/.claude-plugin/plugin.json) counts
+    unless enabledPlugins["<name>@skills-dir"] is false; an installed
+    marketplace plugin counts when enabledPlugins["<key>"] is true and it has a
+    user-scope install. Project-scope installs depend on the project and are
+    not scanned. `installed_plugins` overrides <claude>/plugins/installed_plugins.json.
+    """
+    enabled = settings.get("enabledPlugins")
+    enabled = enabled if isinstance(enabled, dict) else {}
+    out: list[tuple[Path, str]] = []
+    skills = claude / "skills"
+    if skills.is_dir():
+        for entry in sorted(skills.iterdir()):
+            if entry.name.startswith("."):
+                continue
+            name = manifest_name(entry)
+            if name is None or enabled.get(f"{name}@skills-dir") is False:
+                continue
+            out.append((entry / "skills", name))
+    try:
+        installed = json.loads(
+            (installed_plugins or claude / "plugins" / "installed_plugins.json")
+            .read_text(encoding="utf-8")
+        ).get("plugins") or {}
+    except (OSError, ValueError, AttributeError):
+        installed = {}
+    if not isinstance(installed, dict):
+        installed = {}
+    for key in sorted(installed):
+        if enabled.get(key) is not True:
+            continue
+        records = installed[key] if isinstance(installed[key], list) else [installed[key]]
+        for r in records:
+            # Manifests from before project scope existed carry no scope field.
+            if (isinstance(r, dict) and isinstance(r.get("installPath"), str)
+                    and r.get("scope", "user") == "user"):
+                out.append((Path(r["installPath"]) / "skills", key.split("@")[0]))
+                break
+    return out
+
+
+def discover(sources: list[Path], plugins: dict[Path, str] | None = None) -> list[dict]:
+    """Parse every skill under `sources`. A source that is a plugin's skills dir
+    (named in `plugins`, or whose parent carries a plugin manifest) tags its
+    skills with that plugin."""
+    plugins = plugins or {}
     skills, seen = [], set()
     for src in sources:
         if not src.is_dir():
             continue
+        plugin = plugins.get(src) or manifest_name(src.parent)
         for entry in sorted(src.iterdir()):
             # Skip jsm's .trash/ archive and any other dot-dir bookkeeping.
             if entry.name.startswith(".") or not entry.is_dir():
@@ -140,6 +222,8 @@ def discover(sources: list[Path]) -> list[dict]:
             if real in seen:
                 continue
             seen.add(real)
+            parsed["plugin"] = plugin
+            parsed["id"] = f"{plugin}:{parsed['dir']}" if plugin else parsed["dir"]
             skills.append(parsed)
     return skills
 
@@ -148,6 +232,9 @@ def visibility(skill: dict, overrides: dict[str, str]) -> tuple[bool, str]:
     """(model_visible, reason)."""
     if skill["self_disabled"]:
         return False, "disable-model-invocation"
+    # Claude Code's skills docs: "Plugin skills are not affected by skillOverrides".
+    if skill.get("plugin"):
+        return True, "on"
     ov = overrides.get(skill["dir"]) or overrides.get(skill["name"])
     if ov in ("user-invocable-only", "off"):
         return False, ov
@@ -159,16 +246,42 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--threshold", type=float, default=0.75,
                     help="Jaccard similarity at or above which a pair collides (default 0.75)")
-    ap.add_argument("--sources", nargs="*", type=Path,
-                    default=[home / ".claude" / "skills"],
-                    help="skill roots to scan (default ~/.claude/skills)")
+    ap.add_argument("--sources", nargs="*", type=Path, default=None,
+                    help="skill roots to scan (default ~/.claude/skills plus the skills "
+                         "of every plugin a session loads)")
     ap.add_argument("--settings", type=Path, default=home / ".claude" / "settings.json")
     ap.add_argument("--include-latent", action="store_true",
                     help="also fail (exit 1) on LATENT collisions")
     ap.add_argument("--json", action="store_true", help="machine-readable output")
+    ap.add_argument("--plugin-skill-names", action="store_true",
+                    help="print '<skill-name><TAB><plugin>' for every skill an enabled "
+                         "plugin provides, then exit (read-only; no collision scan)")
+    ap.add_argument("--claude-dir", type=Path, default=None,
+                    help="with --plugin-skill-names: the config dir (default ~/.claude)")
+    ap.add_argument("--installed-plugins", type=Path, default=None,
+                    help="with --plugin-skill-names: installed_plugins.json "
+                         "(default <claude-dir>/plugins/installed_plugins.json)")
     args = ap.parse_args()
 
-    skills = discover(args.sources)
+    if args.plugin_skill_names:
+        claude = args.claude_dir or home / ".claude"
+        if not claude.is_dir():
+            print(f"skill-collision-check: no such config dir: {claude}", file=sys.stderr)
+            return 2
+        found = plugin_sources(claude, load_settings(args.settings),
+                               args.installed_plugins)
+        for skill in discover([src for src, _ in found], dict(found)):
+            print(f"{skill['dir']}\t{skill['plugin']}")
+        return 0
+
+    settings = load_settings(args.settings)
+    plugins: dict[Path, str] = {}
+    if args.sources is None:
+        found = plugin_sources(home / ".claude", settings)
+        plugins = dict(found)
+        args.sources = [home / ".claude" / "skills"] + [src for src, _ in found]
+
+    skills = discover(args.sources, plugins)
     try:
         require_floor(len(skills), 1, "skill collision corpus")
     except FloorNotMet as error:
@@ -193,7 +306,7 @@ def main() -> int:
                 "kind": "duplicate-name",
                 "severity": "LIVE",
                 "score": 1.0,
-                "skills": [g["dir"] for g in group],
+                "skills": [g["id"] for g in group],
                 "detail": f"{len(group)} dirs declare name '{name}'",
             })
 
@@ -211,8 +324,8 @@ def main() -> int:
             "severity": "LIVE" if both_visible else "LATENT",
             "score": round(score, 3),
             "exact": exact,
-            "skills": [a["dir"], b["dir"]],
-            "visibility": {a["dir"]: a["visibility_reason"], b["dir"]: b["visibility_reason"]},
+            "skills": [a["id"], b["id"]],
+            "visibility": {a["id"]: a["visibility_reason"], b["id"]: b["visibility_reason"]},
             "detail": ("byte-identical descriptions" if exact
                        else f"description similarity {score:.2f}"),
         })

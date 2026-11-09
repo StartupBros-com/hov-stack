@@ -15,6 +15,13 @@
 #     the checkout sits at ~/dotfiles (tests and fixtures aside)
 #   - the dfs and gsc wrappers run the sibling implementation next to their own location
 #   - the old repository token appears in no tracked file outside the two history docs
+#   - the data commands (lib/manifest.sh's DATA_CLIS): a run links each into ~/.local/bin and
+#     is the only thing setup leaves under ~/.local offline; a rerun moves nothing; a file or
+#     a link of the user's own at one of those paths is left byte-identical, with no backup,
+#     and named with ~/.claude/bin/<name>; a link to nothing is replaced and its old target
+#     shown; --check on a never-run HOME names each one missing and makes no ~/.local; a
+#     ~/.local/bin that is a file fails the row and the run; the PATH note shows only when
+#     ~/.local/bin is not on PATH
 #   - dcg (#57, restructure plan U15): its licence is shown before anything is fetched; with
 #     no network it is reported skipped and the run goes on; --no-dcg fetches nothing and
 #     says so; a platform with no build is a skip naming the release page; an archive that
@@ -28,6 +35,10 @@
 #     neither; a CLI below the floor, or offline, is reported and the run goes on; --check is
 #     green after a full run, names a default plugin removed since and a rerun installs only
 #     that one, and names each missing step after a partial run, changing nothing
+#   - tool instructions (#420): a tool on PATH gets its line in rules/hov-stack-tools.md,
+#     a rerun moves nothing, a refresh drops a removed tool's line, and --check reports
+#     stale and missing without writing; with ~/.local/bin on PATH the linked data commands
+#     get their line (#440)
 #   - auto-update (#395): the fake claude writes what Claude Code writes on an add and an
 #     install; setup then turns auto-update on for hov in its own unedited seed and says
 #     how to turn it off, a rerun leaves it on and writes nothing, and a settings.json of
@@ -49,6 +60,23 @@ trap 'rm -rf "$WORK"' EXIT
 fail() { echo "FAIL: $*" >&2; exit 1; }
 pass=0
 ok() { pass=$((pass + 1)); echo "ok $pass - $*"; }
+# The data commands setup links into ~/.local/bin (DATA_CLIS), from the file setup reads.
+# shellcheck source=lib/manifest.sh
+. "$ROOT/lib/manifest.sh"
+[ "${#DATA_CLIS[@]}" -ge 13 ] && [[ " ${DATA_CLIS[*]} " == *" gsc "* ]] && [[ " ${DATA_CLIS[*]} " == *" vastai "* ]] \
+  || fail "lib/manifest.sh's DATA_CLIS lost the data commands: ${DATA_CLIS[*]}"
+# stray_local <home> <checkout>: anything under <home>/.local but bin/ and the data commands'
+# links into <checkout>/bin, one per line.
+stray_local() {
+  local h=$1 r=$2 e name
+  [ -d "$h/.local" ] || return 0
+  find "$h/.local" -mindepth 1 | while IFS= read -r e; do
+    [ "$e" != "$h/.local/bin" ] || continue
+    name=${e#"$h/.local/bin/"}
+    if [[ " ${DATA_CLIS[*]} " == *" $name "* ]] && [ -L "$e" ] && [ "$(readlink "$e")" = "$r/bin/$name" ]; then continue; fi
+    echo "$e"
+  done
+}
 
 mkdir -p "$WORK/bin"
 real_node=$(mise which node 2>/dev/null || command -v node)
@@ -106,11 +134,12 @@ grep -q -F "To leave dcg out, run ./setup --no-dcg instead." "$WORK/run1.log" ||
 ok "dcg's licence, its link and --no-dcg are shown before anything is downloaded"
 grep -q -F "dcg: skipped: could not download " "$WORK/run1.log" || fail "an offline dcg download was not reported skipped"
 [ "$(curl_calls)" = 1 ] || fail "expected one download attempt, got $(curl_calls)"
-[ ! -e "$HOME/.local" ] || fail "an offline dcg run left files under ~/.local"
-for want_row in 'links +ok ' 'dcg +skipped ' 'settings +ok ' 'claude +missing ' 'marketplace +skipped ' 'plugins +skipped '; do
+stray=$(stray_local "$HOME" "$ROOT")
+[ -z "$stray" ] || fail "an offline run left files under ~/.local besides the data commands' links: $stray"
+for want_row in 'links +ok ' 'commands +ok ' 'dcg +skipped ' 'settings +ok ' 'claude +missing ' 'marketplace +skipped ' 'plugins +skipped '; do
   grep -q -E "^  $want_row" "$WORK/run1.log" || fail "the status block has no '$want_row' row"
 done
-ok "offline: one download attempt, dcg reported skipped, nothing under ~/.local, and every step has its status row"
+ok "offline: one download attempt, dcg reported skipped, nothing under ~/.local but the data commands' links, and every step has its status row"
 
 [ "$(cat "$HOME/.claude/projects/-home-someone-app/memory/MEMORY.md" "$HOME/.claude/memory/notes.md" | sha256sum)" = "$mem_before" ] || fail "memory changed"
 ok "memory untouched"
@@ -419,6 +448,61 @@ W=$HOME/.claude/settings.hov-stack.json
 grep -q -F '"allow"' "$W" && ! grep -q -F 'theirOwnKey' "$W" || fail "settings.hov-stack.json is not the seed"
 ok "second run moved nothing; a customized settings.json survived byte-for-byte with the seed beside it"
 
+# The data commands (DATA_CLIS) in ~/.local/bin. Both runs above linked each one to this
+# checkout; the second changed none and replaced nothing.
+n_cli=${#DATA_CLIS[@]}
+for name in "${DATA_CLIS[@]}"; do
+  [ -L "$HOME/.local/bin/$name" ] && [ "$(readlink "$HOME/.local/bin/$name")" = "$ROOT/bin/$name" ] \
+    || fail "$HOME/.local/bin/$name is not a link to $ROOT/bin/$name"
+done
+for log in run1 run2; do
+  grep -q -E "^  commands +ok +$n_cli data commands linked into ~/\.local/bin; ~/\.local/bin is not on this shell's PATH" "$WORK/$log.log" \
+    || { cat "$WORK/$log.log"; fail "$log has no 'commands ok' row with the PATH note"; }
+done
+! grep -q -F 'which is gone; it now runs' "$WORK/run2.log" || fail "the second run replaced a link"
+ok "each of the $n_cli data commands is linked into ~/.local/bin, the row says ~/.local/bin is not on PATH, and a rerun replaces nothing"
+# A file of the user's own, a link of theirs and a link to nothing, each at one of those paths.
+HCL=$WORK/home-cmds
+mkdir -p "$HCL/.local/bin" "$HCL/elsewhere"
+printf '#!/bin/sh\necho my-own-vastai\n' > "$HCL/.local/bin/vastai"
+printf '#!/bin/sh\necho my-own-gsc\n' > "$HCL/elsewhere/gsc"
+ln -s "$HCL/elsewhere/gsc" "$HCL/.local/bin/gsc"
+ln -s "$HCL/gone/dfs" "$HCL/.local/bin/dfs"
+vastai_before=$(sha256sum < "$HCL/.local/bin/vastai")
+HOME=$HCL PATH=$HCL/.local/bin:$PATH bash "$ROOT/setup" --no-dcg > "$WORK/run-cmds.log" 2>&1 || { cat "$WORK/run-cmds.log"; fail "setup with commands of the user's own exited non-zero"; }
+[ -f "$HCL/.local/bin/vastai" ] && [ ! -L "$HCL/.local/bin/vastai" ] && [ "$(sha256sum < "$HCL/.local/bin/vastai")" = "$vastai_before" ] \
+  || fail "the user's own vastai was moved or changed"
+[ "$(readlink "$HCL/.local/bin/gsc")" = "$HCL/elsewhere/gsc" ] || fail "the user's own gsc link was replaced"
+[ "$(readlink "$HCL/.local/bin/dfs")" = "$ROOT/bin/dfs" ] || fail "a link to nothing was not replaced with hov-stack's dfs"
+grep -q -x -F "  ~/.local/bin/dfs pointed at $HCL/gone/dfs, which is gone; it now runs hov-stack's" "$WORK/run-cmds.log" \
+  || { cat "$WORK/run-cmds.log"; fail "the replaced link's old target was not shown"; }
+[ ! -e "$HCL/.hov-stack-backups" ] || fail "leaving the user's commands alone made a backup"
+grep -q -x -E "  commands +ok +$((n_cli - 2)) of $n_cli data commands linked into ~/\.local/bin; left alone, not hov-stack's: gsc, vastai \(ours runs as ~/\.claude/bin/<name>\)" "$WORK/run-cmds.log" \
+  || { cat "$WORK/run-cmds.log"; fail "the commands row does not name gsc and vastai as left alone with the fallback, or still has the PATH note"; }
+rc=0; HOME=$HCL PATH=$HCL/.local/bin:$PATH bash "$ROOT/setup" --check --no-dcg > "$WORK/check-cmds.log" 2>&1 || rc=$?
+grep -q -E "^  commands +ok +$((n_cli - 2)) of $n_cli .*left alone, not hov-stack's: gsc, vastai" "$WORK/check-cmds.log" \
+  || { cat "$WORK/check-cmds.log"; fail "--check does not count the commands left alone as in place"; }
+ok "a vastai file and a gsc link of the user's own are left byte-identical, unbacked-up and named with ~/.claude/bin/<name>; a link to nothing is replaced and its old target shown; --check counts them in place"
+# --check on a HOME setup never ran in: every one is named missing, and nothing is made.
+HCN=$WORK/home-cmds-never
+rc=0; HOME=$HCN bash "$ROOT/setup" --check --no-dcg > "$WORK/check-cmds-never.log" 2>&1 || rc=$?
+[ "$rc" = 1 ] || { cat "$WORK/check-cmds-never.log"; fail "--check on a never-run HOME exited $rc, not 1"; }
+grep -q -E "^  commands +missing +0 of $n_cli data commands linked into ~/\.local/bin; not linked: ${DATA_CLIS[*]}; run \./setup" "$WORK/check-cmds-never.log" \
+  || { cat "$WORK/check-cmds-never.log"; fail "--check on a never-run HOME did not name every data command missing"; }
+[ ! -e "$HCN/.local" ] || fail "--check made ~/.local"
+ok "--check on a never-run HOME names all $n_cli data commands missing and makes no ~/.local"
+# A ~/.local/bin that is a file: the row fails, the run exits 1, and the file is untouched.
+HCF=$WORK/home-cmds-file
+mkdir -p "$HCF/.local"
+echo "not a directory" > "$HCF/.local/bin"
+rc=0; HOME=$HCF bash "$ROOT/setup" --no-dcg > "$WORK/run-cmds-file.log" 2>&1 || rc=$?
+[ "$rc" = 1 ] || { cat "$WORK/run-cmds-file.log"; fail "a ~/.local/bin that is a file exited $rc, not 1"; }
+grep -q -E "^  commands +failed +could not make ~/\.local/bin, so no data command was linked; each still runs as ~/\.claude/bin/<name>" "$WORK/run-cmds-file.log" \
+  || { cat "$WORK/run-cmds-file.log"; fail "a ~/.local/bin that is a file has no 'commands failed' row naming it"; }
+[ "$(cat "$HCF/.local/bin")" = "not a directory" ] || fail "the file at ~/.local/bin was changed"
+[ -L "$HCF/.claude/hooks" ] || fail "a failed commands step stopped the other links"
+ok "a ~/.local/bin that is a file fails the commands row and the run, is left as it was, and the other steps still run"
+
 # The command line: --help prints the header and an unknown option is refused, both
 # before anything is made.
 bash "$ROOT/setup" --help > "$WORK/help.log" 2>&1 || { cat "$WORK/help.log"; fail "./setup --help exited non-zero"; }
@@ -451,7 +535,8 @@ rc=0; CURL_MODE=garbage HOME=$WORK/home-bad bash "$ROOT/setup" > "$WORK/run-bad.
 [ "$rc" = 1 ] || { cat "$WORK/run-bad.log"; fail "an archive that fails its checksum exited $rc, not 1"; }
 grep -q -F 'dcg: error: checksum mismatch for ' "$WORK/run-bad.log" || { cat "$WORK/run-bad.log"; fail "the checksum failure was not reported"; }
 grep -q -E '^  dcg +failed ' "$WORK/run-bad.log" || fail "the checksum failure has no 'dcg failed' status row"
-[ ! -e "$WORK/home-bad/.local" ] || fail "a refused archive left files under ~/.local"
+stray=$(stray_local "$WORK/home-bad" "$ROOT")
+[ -z "$stray" ] || fail "a refused archive left files under ~/.local: $stray"
 [ -L "$WORK/home-bad/.claude/hooks" ] && [ -f "$WORK/home-bad/.claude/settings.json" ] || fail "a refused archive stopped the links or the seed"
 grep -q -F 'hov-stack: status' "$WORK/run-bad.log" || fail "a refused archive cut the run short"
 ok "an archive that fails its checksum exits 1, installs nothing, and the links and seed are still made"
@@ -685,6 +770,12 @@ case "$*" in
       printf '%s{"id":"%s","version":"%s","scope":"%s","enabled":true}' "$sep" "$id" "$v" "$scope"
       sep=,
     done < "$F/plugins"
+    if [ -f "$F/skills-dir" ]; then
+      while read -r id; do
+        printf '%s{"id":"%s","version":"1.0.0","scope":"user","enabled":true}' "$sep" "$id"
+        sep=,
+      done < "$F/skills-dir"
+    fi
     echo ']' ;;
   'plugin install '*'@hov --scope user')
     if [ -f "$F/offline" ]; then echo "fake claude: could not reach github.com" >&2; exit 1; fi
@@ -724,7 +815,48 @@ new_fake "$FK" 2.1.310
   || fail "the fake hov marketplace does not serve exactly lib/default-plugins.txt's plugins; update new_fake"
 cp "$ROOT/lib/default-plugin-skills.txt" "$copy/lib/default-plugin-skills.txt"
 HF=$WORK/home-fake
-fake_setup "$FK" "$HF" "$WORK/run-fake.log" --no-dcg || { cat "$WORK/run-fake.log"; fail "setup with a fake claude exited non-zero"; }
+mkdir -p "$WORK/tool-bin"
+printf '#!/bin/sh\nexit 0\n' > "$WORK/tool-bin/cass"
+chmod +x "$WORK/tool-bin/cass"
+# cass on PATH, and no extra install dirs, for these runs only: a tool off PATH gets no line.
+tools_setup() { HOV_SETUP_EXTRA_BIN_DIRS='' PATH=$WORK/tool-bin:$PATH fake_setup "$@"; }
+tools_setup "$FK" "$HF" "$WORK/run-fake.log" --no-dcg || { cat "$WORK/run-fake.log"; fail "setup with a fake claude exited non-zero"; }
+TOOLS=$HF/.claude/rules/hov-stack-tools.md
+[ -f "$TOOLS" ] && [ ! -L "$TOOLS" ] || fail "no regular generated tool rules file"
+grep -q -F 'Search past agent sessions with' "$TOOLS" || fail "installed cass has no instruction"
+grep -q -E '^  instructions +ok +rules/hov-stack-tools.md updated; mentions .*cass' "$WORK/run-fake.log" || fail "the instructions row does not say the file was written for cass"
+tools_before=$(sha256sum < "$TOOLS")
+tools_mtime=$(stat -c %y "$TOOLS")
+tools_setup "$FK" "$HF" "$WORK/tools-rerun.log" --no-dcg || fail "tool rules rerun exited non-zero"
+! grep -q 'backed up' "$WORK/tools-rerun.log" || fail "tool rules rerun moved something"
+[ "$(sha256sum < "$TOOLS")" = "$tools_before" ] && [ "$(stat -c %y "$TOOLS")" = "$tools_mtime" ] || fail "tool rules rerun changed bytes or mtime"
+tools_setup "$FK" "$HF" "$WORK/tools-check.log" --check --no-dcg || fail "tool rules check is not green"
+rm "$WORK/tool-bin/cass"
+rc=0; tools_setup "$FK" "$HF" "$WORK/tools-stale.log" --check --no-dcg || rc=$?
+[ "$rc" = 1 ] || fail "removed tool did not fail check"
+grep -q -E '^  instructions +stale +rules/hov-stack-tools.md ' "$WORK/tools-stale.log" || fail "check did not name stale tool rules"
+[ "$(sha256sum < "$TOOLS")" = "$tools_before" ] && [ "$(stat -c %y "$TOOLS")" = "$tools_mtime" ] || fail "stale check wrote tool rules"
+tools_setup "$FK" "$HF" "$WORK/tools-refresh.log" --no-dcg || fail "tool rules refresh exited non-zero"
+! grep -q -F 'Search past agent sessions with' "$TOOLS" 2>/dev/null || fail "the refresh kept the removed tool's line"
+printf '#!/bin/sh\nexit 0\n' > "$WORK/tool-bin/cass"
+chmod +x "$WORK/tool-bin/cass"
+rm -f "$TOOLS"
+rc=0; tools_setup "$FK" "$HF" "$WORK/tools-missing.log" --check --no-dcg || rc=$?
+[ "$rc" = 1 ] || fail "a missing tool rules file did not fail check"
+grep -q -E '^  instructions +missing +rules/hov-stack-tools.md is not written yet' "$WORK/tools-missing.log" || fail "check did not name the missing tool rules"
+[ ! -e "$TOOLS" ] || fail "the missing check wrote tool rules"
+rm "$WORK/tool-bin/cass"
+ok "tool rules follow installed tools, reruns move nothing, and check reports stale and missing without writing"
+# The data commands those runs linked into ~/.local/bin get one line once it is on PATH (#440).
+HOV_SETUP_EXTRA_BIN_DIRS='' PATH=$HF/.local/bin:$PATH fake_setup "$FK" "$HF" "$WORK/tools-data.log" --no-dcg \
+  || { cat "$WORK/tools-data.log"; fail "setup with the data commands on PATH exited non-zero"; }
+grep -q -E '^  instructions +ok +rules/hov-stack-tools.md updated; mentions .*data-commands$' "$WORK/tools-data.log" \
+  || { cat "$WORK/tools-data.log"; fail "the instructions row does not name the data commands"; }
+grep -q -F -e '- Data sources: use these CLIs before an MCP server' "$TOOLS" || fail "the data commands have no line"
+for name in "${DATA_CLIS[@]}"; do
+  grep -q -F -e "\`$name\`" "$TOOLS" || fail "the data commands' line does not name $name"
+done
+ok "with ~/.local/bin on PATH, the data commands setup linked get their line, naming each of them"
 sed 's/^/    | /' "$WORK/run-fake.log"
 [ "$(calls_of "$FK" 'plugin marketplace add StartupBros-com/hov-stack')" = 1 ] || { cat "$FK/calls"; fail "the hov marketplace was not added exactly once"; }
 while read -r p; do
@@ -828,7 +960,7 @@ ok "--check names a removed default plugin (skill-tuner); a rerun installs only 
 rm "$WORK/home-plain/.claude/hooks"
 rc=0; HOME=$WORK/home-plain bash "$copy/setup" --check > "$WORK/check-partial.log" 2>&1 || rc=$?
 [ "$rc" = 1 ] || { cat "$WORK/check-partial.log"; fail "--check after a partial run exited $rc, not 1"; }
-for want_row in 'links +missing +not linked: hooks; run \./setup$' 'dcg +missing ' 'claude +missing '; do
+for want_row in 'links +missing +not linked: hooks; run \./setup$' 'commands +ok ' 'dcg +missing ' 'claude +missing '; do
   grep -q -E "^  $want_row" "$WORK/check-partial.log" || { cat "$WORK/check-partial.log"; fail "--check after a partial run has no '$want_row' row"; }
 done
 [ ! -e "$WORK/home-plain/.claude/hooks" ] || fail "--check made the missing link"
@@ -1174,6 +1306,126 @@ printf '{ "model": "home-default" }\n' > "$HX/.config/hov-stack/settings.json"
 node -e 'process.exit(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).model === "home-default" ? 0 : 1)' "$HX/.claude/settings.json" \
   || fail "a relative XDG_CONFIG_HOME was not ignored for ~/.config/hov-stack"
 ok "a relative HOV_STACK_OVERLAY is named and read by nothing, and a relative XDG_CONFIG_HOME is ignored for ~/.config"
+# Own plugin folders use manifest names and never adopt unrelated skills (#476).
+OSP=$WORK/overlay-skill-plugins
+HSP=$WORK/home-skill-plugins
+FSP=$WORK/fake-skill-plugins
+P1=$WORK/folder-basename
+mkdir -p "$OSP" "$P1/.claude-plugin" "$P1/skills/alpha" "$HSP/.claude/skills/foreign" "$WORK/foreign-target"
+printf '{"name":"my-skills"}\n' > "$P1/.claude-plugin/plugin.json"
+printf '# alpha\n' > "$P1/skills/alpha/SKILL.md"
+printf '# foreign\n' > "$HSP/.claude/skills/foreign/SKILL.md"
+printf 'note\n' > "$HSP/.claude/skills/note.md"
+ln -s "$WORK/foreign-target" "$HSP/.claude/skills/foreign-link"
+printf '  %s # comment, no final newline' "$P1" > "$OSP/skill-plugins"
+new_fake "$FSP" 2.1.310
+printf 'my-skills@skills-dir\n' > "$FSP/skills-dir"
+HOV_STACK_OVERLAY=$OSP fake_setup "$FSP" "$HSP" "$WORK/sp-run.log" --no-dcg || { cat "$WORK/sp-run.log"; fail 'plugin setup failed'; }
+[ "$(readlink -f "$HSP/.claude/skills/my-skills")" = "$P1" ] || fail 'plugin link does not use manifest name'
+grep -Eq '^  skill-plugins +ok ' "$WORK/sp-run.log" || fail 'plugin row not ok'
+[ "$(cat "$HSP/.claude/skills/foreign/SKILL.md")" = '# foreign' ] || fail 'foreign skill changed'
+[ "$(cat "$HSP/.claude/skills/note.md")" = note ] || fail 'foreign file changed'
+[ "$(readlink "$HSP/.claude/skills/foreign-link")" = "$WORK/foreign-target" ] || fail 'foreign link changed'
+[ ! -e "$HSP/.hov-stack-backups" ] || fail 'foreign entries backed up'
+before=$(tree_state "$HSP/.claude/skills")
+HOV_STACK_OVERLAY=$OSP fake_setup "$FSP" "$HSP" "$WORK/sp-rerun.log" --no-dcg || fail 'plugin rerun failed'
+[ "$before" = "$(tree_state "$HSP/.claude/skills")" ] || fail 'plugin rerun changed skills tree'
+[ ! -e "$HSP/.hov-stack-backups" ] || fail 'plugin rerun made a backup'
+before=$(tree_state "$HSP")
+HOV_STACK_OVERLAY=$OSP fake_setup "$FSP" "$HSP" "$WORK/sp-green.log" --check --no-dcg || { cat "$WORK/sp-green.log"; fail 'plugin check not green'; }
+[ "$before" = "$(tree_state "$HSP")" ] || fail 'green check changed tree'
+mkdir "$P1/skills/my-skills"
+printf '# self\n' > "$P1/skills/my-skills/SKILL.md"
+HOV_STACK_OVERLAY=$OSP fake_setup "$FSP" "$HSP" "$WORK/sp-self.log" --check --no-dcg || { cat "$WORK/sp-self.log"; fail 'an inner skill named like its plugin was reported as a clash with its own link'; }
+rm "$P1/skills/my-skills/SKILL.md"
+rmdir "$P1/skills/my-skills"
+ok 'own plugin linked by manifest name, rerun stable, unrelated entries left alone, an inner skill may share the plugin name'
+
+sp_check_bad() {
+  local needle=$1 before rc=0
+  before=$(tree_state "$HSP")
+  HOV_STACK_OVERLAY=$OSP fake_setup "$FSP" "$HSP" "$WORK/sp-check.log" --check --no-dcg || rc=$?
+  [ "$rc" = 1 ] || { cat "$WORK/sp-check.log"; fail "plugin check expected 1: $needle"; }
+  grep -F "$needle" "$WORK/sp-check.log" >/dev/null || { cat "$WORK/sp-check.log"; fail "plugin check missing: $needle"; }
+  [ "$before" = "$(tree_state "$HSP")" ] || fail 'plugin check changed tree'
+}
+rm "$HSP/.claude/skills/my-skills"
+sp_check_bad 'skills/my-skills is not linked: run ./setup'
+ln -s "$WORK/foreign-target" "$HSP/.claude/skills/my-skills"
+sp_check_bad 'skills/my-skills points at'
+HOV_STACK_OVERLAY=$OSP fake_setup "$FSP" "$HSP" "$WORK/sp-relink.log" --no-dcg || fail 'wrong plugin link not replaced'
+[ ! -e "$HSP/.hov-stack-backups" ] || fail 'wrong link backed up'
+rm "$HSP/.claude/skills/my-skills"
+mkdir "$HSP/.claude/skills/my-skills"
+printf 'keep\n' > "$HSP/.claude/skills/my-skills/keep"
+sp_check_bad 'which moves it to the backup first'
+HOV_STACK_OVERLAY=$OSP fake_setup "$FSP" "$HSP" "$WORK/sp-adopt.log" --no-dcg || fail 'plugin folder not adopted'
+bk=("$HSP"/.hov-stack-backups/*/.claude/skills/my-skills/keep)
+[ "$(cat "${bk[0]}")" = keep ] || fail 'plugin folder data not backed up'
+mkdir "$HSP/.claude/skills/alpha"
+printf '# plain\n' > "$HSP/.claude/skills/alpha/SKILL.md"
+sp_check_bad "skills/alpha shares the bare name /alpha with my-skills's skill (which one /alpha runs is not established)"
+rm "$HSP/.claude/skills/alpha/SKILL.md"
+rmdir "$HSP/.claude/skills/alpha"
+cp "$HSP/.claude/settings.json" "$WORK/sp-settings.json"
+node -e 'const fs=require("fs"),p=process.argv[1],x=JSON.parse(fs.readFileSync(p)); x.enabledPlugins["my-skills@skills-dir"]=false; fs.writeFileSync(p,JSON.stringify(x))' "$HSP/.claude/settings.json"
+sp_check_bad 'my-skills@skills-dir is turned off in settings.json'
+cp "$WORK/sp-settings.json" "$HSP/.claude/settings.json"
+: > "$FSP/skills-dir"
+sp_check_bad 'Claude Code does not list my-skills@skills-dir'
+ok 'plugin check names missing/wrong/real links, shared names, disabled and unlisted plugins without writes'
+
+# Each refusal coexists with a valid entry, which must still link.
+pack_name=$(basename "$(printf '%s\n' "$copy"/plugins/hov-stack/skills/*/ | head -1)")
+default_name=$(awk '!/^#/ && NF {print $1; exit}' "$copy/lib/default-plugin-skills.txt")
+retired_name=$(awk '!/^#/ && NF {print $1; exit}' "$copy/retired-skills.txt")
+market_name=$(node -e 'console.log(require(process.argv[1]).plugins[0].name)' "$copy/.claude-plugin/marketplace.json")
+mod_manifest=$(printf '%s\n' "$copy"/mods/*/.claude-plugin/plugin.json | head -1)
+mod_name=$(node -e 'console.log(require(process.argv[1]).name)' "$mod_manifest")
+for kind in relative absent manifest json object invalid-name pack default retired synced marketplace mod duplicate overlay-retired; do
+  badpath=$WORK/sp-bad-$kind
+  reason="" name=bad-skills
+  mkdir -p "$badpath/.claude-plugin"
+  case $kind in
+    relative) badpath=relative/plugin; reason='not an absolute path' ;;
+    absent) badpath=$WORK/does-not-exist; reason='no folder there' ;;
+    manifest) reason='no .claude-plugin/plugin.json' ;;
+    json) printf 'not json\n' > "$badpath/.claude-plugin/plugin.json"; reason='JSON object with a valid name' ;;
+    object) printf '[]\n' > "$badpath/.claude-plugin/plugin.json"; reason='JSON object with a valid name' ;;
+    invalid-name) name='../bad'; reason='JSON object with a valid name' ;;
+    pack) name=$pack_name; reason='skill-pack' ;;
+    default) name=$default_name; reason='default-plugin-skills.txt' ;;
+    retired) name=$retired_name; reason='retired-skills.txt' ;;
+    synced) name=synced; reason='synced' ;;
+    marketplace) name=$market_name; reason='marketplace' ;;
+    mod) name=$mod_name; reason='mods' ;;
+    duplicate) name=my-skills; reason='earlier accepted entry' ;;
+    overlay-retired) name=old-own; reason='retired-skills.txt'; printf 'old-own # retired\n' > "$OSP/retired-skills.txt" ;;
+  esac
+  case $kind in relative|absent|manifest|json|object) ;; *) printf '{"name":"%s"}\n' "$name" > "$badpath/.claude-plugin/plugin.json" ;; esac
+  printf '%s\n%s\n' "$P1" "$badpath" > "$OSP/skill-plugins"
+  rc=0
+  hp=$WORK/home-sp-refuse-$kind
+  HOV_STACK_OVERLAY=$OSP fake_setup "$FSP" "$hp" "$WORK/sp-refuse.log" --no-dcg || rc=$?
+  [ "$rc" = 1 ] || { cat "$WORK/sp-refuse.log"; fail "refusal $kind exited $rc"; }
+  grep -F "skill-plugins: refused $badpath:" "$WORK/sp-refuse.log" | grep -F "$reason" >/dev/null || { cat "$WORK/sp-refuse.log"; fail "refusal $kind missing reason"; }
+  [ "$(readlink -f "$hp/.claude/skills/my-skills")" = "$P1" ] || fail "refusal $kind prevented valid link"
+  [ ! -e "$hp/.claude/skills/bad-skills" ] || fail "refused $kind linked"
+done
+ok 'plugin refusals name all conflicting lists and invalid paths/manifests, and valid entries still link'
+
+# A missing fixed source is not a successful setup link.
+missing_copy=$WORK/missing-source-copy
+cp -a "$copy" "$missing_copy"
+rm "$missing_copy/memory-dream.json"
+rc=0
+HOME=$WORK/home-sp-missing HOV_STACK_OVERLAY=$WORK/no-overlay bash "$missing_copy/setup" --no-dcg > "$WORK/sp-missing.log" 2>&1 || rc=$?
+[ "$rc" = 1 ] || fail 'missing setup source did not fail'
+grep -Eq '^  links +failed ' "$WORK/sp-missing.log" || fail 'missing source links row not failed'
+grep -F "skip (source missing): $missing_copy/memory-dream.json" "$WORK/sp-missing.log" >/dev/null || fail 'missing source not named'
+if grep -F 'links in place' "$WORK/sp-missing.log"; then fail 'missing source claimed links in place'; fi
+ok 'missing setup source fails the link row and the run'
+
 # The tracked examples are overlays that work as they stand.
 node "$ROOT/lib/settings-seed.js" "$ROOT/settings.json" "$WORK/seed-example.json" "$WORK/cfg-example" "$WORK/home-example" "" "$ROOT/config/settings.example.json" > "$WORK/seed-example.log" \
   || { cat "$WORK/seed-example.log"; fail "config/settings.example.json is refused as an overlay"; }

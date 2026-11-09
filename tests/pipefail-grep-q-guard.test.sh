@@ -20,7 +20,8 @@
 #   array, `printf -v joined '%s\n' "${arr[@]}"` first, then the here-string.
 #
 # SCOPE
-#   Every tracked file that contains `pipefail` and is a shell script (a .sh
+#   Every tracked file (at the top of a git work tree; a plain directory is grepped
+#   recursively, which the planted-negative fixture relies on) that contains `pipefail` and is a shell script (a .sh
 #   extension, or a sh/bash shebang on line 1 for extensionless tools such as
 #   bin/*). Comment lines are skipped, because the rule is documented in code
 #   next to the sites it replaced, and the writer must carry a `$` expansion, so a
@@ -47,10 +48,27 @@ bad() { fail=$((fail + 1)); echo "FAIL: $*" >&2; }
 # bare-grep regex.)
 SHAPE='(printf|echo)[[:space:]][^|]*\$[^|]*\|[[:space:]]*(command[[:space:]]+)?(\\|[^[:space:]|]*/)?grep[[:space:]]+(-[A-Za-z]*q|-[A-Za-z]+[[:space:]]+-[A-Za-z]*q|--quiet|--silent)'
 
+# candidates <dir>: files that contain `pipefail`. At the top of a git work tree this is the
+# TRACKED files only (git ls-files), so untracked nested checkouts such as a gitignored
+# .claude/worktrees/<branch> on a dev host cannot fail the guard on another branch's file.
+# Anywhere else (the planted-negative fixture is a plain temp dir) it is a recursive grep;
+# without that fallback the planted negatives would go vacuous.
+candidates() {
+  local top f
+  if top=$(git -C "$1" rev-parse --show-toplevel 2>/dev/null) &&
+    [ "$(cd "$top" && pwd -P)" = "$(cd "$1" && pwd -P)" ]; then
+    git -C "$1" ls-files -z | while IFS= read -r -d '' f; do
+      [ -f "$1/$f" ] && printf '%s\0' "$1/$f"
+    done | xargs -0 -r grep -l -- 'pipefail' 2>/dev/null
+  else
+    grep -rl --exclude-dir=node_modules --exclude-dir=.git -- 'pipefail' "$1" 2>/dev/null
+  fi
+}
+
 # shell_files <dir>: pipefail-bearing files that are shell scripts, sorted.
 shell_files() {
   local f
-  grep -rl --exclude-dir=node_modules --exclude-dir=.git -- 'pipefail' "$1" 2>/dev/null | sort | while IFS= read -r f; do
+  candidates "$1" | sort | while IFS= read -r f; do
     case $f in
       *.sh) ;;
       *) head -n1 -- "$f" 2>/dev/null | grep -qE '^#!.*(ba)?sh([[:space:]]|$)' || continue ;;
@@ -121,6 +139,28 @@ $FX_HITS"
 
 FX_FILES=$(shell_files "$FX" | wc -l)
 [ "$FX_FILES" -eq 5 ] && ok || bad "fixture file discovery: expected 5 pipefail shell files (4 positives + neg-safe-forms.sh; no-pipefail, .md and no-shebang files stay out), got $FX_FILES"
+
+# ---- 1b. Tracked-only discovery at the top of a git work tree ------------------
+# A git repo fixture with one tracked offender and one untracked nested checkout (the
+# .claude/worktrees shape) holding another offender: only the tracked file may be seen.
+GX="$TMP/gx"
+mkdir -p "$GX/.claude/worktrees/other-branch"
+git -C "$GX" init -q 2>/dev/null
+{
+  echo 'set -uo pipefail'
+  echo 'printf '"'"'%s'"'"' "$out" '"$P"' grep -q needle && ok'
+} > "$GX/tracked-pos.sh"
+cp "$GX/tracked-pos.sh" "$GX/.claude/worktrees/other-branch/untracked-pos.sh"
+git -C "$GX" add tracked-pos.sh
+GX_HITS=$(scan "$GX")
+GX_EXPECT="$GX/tracked-pos.sh:2:printf '%s' \"\$out\" $P grep -q needle && ok"
+[ "$GX_HITS" = "$GX_EXPECT" ] && ok || bad "git fixture scan: expected only the tracked offender, not the untracked nested worktree file; got:
+$GX_HITS"
+[ "$(shell_files "$GX" | wc -l)" -eq 1 ] && ok || bad "git fixture discovery: expected exactly the one tracked file"
+# The same files in a plain directory (no git) must both be found: the fallback stays recursive.
+mkdir -p "$TMP/plain"
+cp -R "$GX/.claude" "$GX/tracked-pos.sh" "$TMP/plain/"
+[ "$(shell_files "$TMP/plain" | wc -l)" -eq 2 ] && ok || bad "non-git fallback: expected both files found by recursive grep"
 
 # ---- 2. The live tree ---------------------------------------------------------
 LIVE_FILES=$(shell_files "$ROOT" | wc -l)

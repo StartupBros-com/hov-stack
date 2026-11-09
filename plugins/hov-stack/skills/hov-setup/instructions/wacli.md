@@ -1,0 +1,1 @@
+- For WhatsApp reads, load the `data-source-clis` skill first and use `wacli --store <store> --read-only --json ...`, with the store's absolute path written out in full (no `~` or `$`) and `--limit` of 1–200 on list and search calls; never inspect or copy its `session.db`, export the whole archive into context, or automate bulk, broadcast or auto-reply messaging.

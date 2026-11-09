@@ -2,6 +2,7 @@
 title: "A pathname lock's reclaim cannot be fenced; lock a stable file's open descriptor instead"
 module: "pro-gate"
 date: "2026-09-21"
+last_updated: "2026-11-06"
 category: "conventions"
 problem_type: "design_pattern"
 component: "development_workflow"
@@ -166,9 +167,10 @@ cost purchased in exchange for eliminating an entire class of lost-write and dou
   literal one-lock-file-per-key scheme would itself become an unbounded resource the sidecar's own
   prune has to scan.
 - `flock` availability is not guaranteed on every target platform (macOS ships no `flock`
-  binary by default) — the fail-open behavior, not a portability shim, is the intended answer; see
-  `lib/pro-gate-lib.sh`'s `pg_lock` for the sibling case that already branches on `flock`
-  availability with a still-reclaim-based fallback.
+  binary by default). For this best-effort sidecar, failing open is the intended answer. Where a
+  lock must hold on macOS too, take the same `flock(2)` through perl, which macOS does ship:
+  `lib/pro-gate-lib.sh`'s `pg_fd_lock` runs `flock(1)` when present, else perl's `flock()` on the
+  inherited descriptor, and refuses rather than running unlocked when neither exists (#322).
 
 ## Examples
 
@@ -216,7 +218,7 @@ exercise.
   sidecar and its locking exist to solve.
 - Issue #217 (open) — follow-on design work for retire-on-healthy stale-fingerprint handling,
   tracking constraints this PR's attempt surfaced.
-- `lib/pro-gate-lib.sh` `pg_lock` (`lib/pro-gate-lib.sh:306-313`) — the project's other cross-process
-  lock helper: uses `flock` when present exactly like this fix, but its no-`flock` fallback is still
-  a reclaim-based `mkdir` spinlock governed by the sibling doc above, not this file's slot-pool
-  approach.
+- `lib/pro-gate-lib.sh` `pg_fd_lock`, `pg_lock`, `pg_lock_n` and `pg_fd_lock_busy` — the engine's
+  cross-process locks follow this convention on every platform since #322 (v0.65.6). They replaced
+  a reclaim-based `mkdir` fallback that admitted two contenders after a SIGKILLed owner in about 5
+  of 100 races; `tests/fd-lock.test.sh` runs them under both `flock(1)` and perl.

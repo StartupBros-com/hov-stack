@@ -29,10 +29,13 @@ Only package and publish extensions that are broadly reusable.
 - `~/.claude/skills` is intentionally loaded in Pi for shared-skill compatibility.
 - Treat that as a compatibility bridge, not as StartupBros package dogfooding.
 - Avoid duplicating the same skill/package in multiple places unless explicitly testing precedence.
+- Research routing comes with those skills. A US statute, regulation, court-opinion or agency-guidance question goes to `firecrawl-cli gov` (the `firecrawl-gov-index` skill; free, keyless) before `WebSearch`. A library, API, error-string or "which release fixed it" question goes to `firecrawl-cli developer` (the `firecrawl-developer-index` skill) before `CodeContextSearch`. The full table is the "Web retrieval routing" section of `harness/cc-mcp-architecture.md` in the hov-stack checkout.
 
 ## Working rule
 
 When changing a StartupBros Pi package, the local Pi environment should use that repo directly so daily usage exercises the real package source.
+
+Run it now; don't wait for a schedule. When a step or its check is left to a timer, cron line, queue tick, nightly run or a date you set, start it yourself now and read the result; use the plan or dry-run form if the live run deletes or sends off-host. Wait only on a run already going, elapsed time a measurement needs, rate limits and human steps.
 
 ## Third-party runtime dependencies
 

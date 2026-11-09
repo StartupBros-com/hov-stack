@@ -35,25 +35,28 @@ output — a silent provider swap is the failure this table exists to stop.
 
 | Request shape | First choice | Escalate to | Trigger |
 |---|---|---|---|
-| Code, repo, issue, or PR-shaped question | Firecrawl Developer Index: `firecrawl-cli search "<q>" --categories developer --json` (repos, issues, PRs, READMEs, and curated doc sites; answered by the API directly, needs `FIRECRAWL_API_KEY`) | `firecrawl-cli raw -- research search-github "<q>" --json` (GitHub history only), then `exa-cli search` with the repo name in the query | no Developer Index hit, or no key in the lane |
-| Plain web search (discovery, who-says-what) | `exa-cli search "<q>" --json` | `firecrawl-cli search "<q>" --json`; add `--tbs qdr:w` for time bounds, `--categories github,research,pdf` or `--sources news` to narrow | zero results, HTTP 429 (Exa's 10 QPS), or a time-bounded query (`--tbs`) |
+| Code, repo, issue, or PR-shaped question | `firecrawl-cli developer "<q>" --json` (free without `FIRECRAWL_API_KEY`, and with it at `--limit` 10 or less, which tries keyless first; a keyed run costs 2 credits per 10 results and is refused while the account is below its floor, and that refusal names the `env -u FIRECRAWL_API_KEY` rerun unless keyless was just refused; `--types issue,pull_request` for error strings and bug reports, `--repos owner/name` to scope, `--passages 3` to read further into one page; results carry `doc:` / `issue:` / `pull_request:` / `readme:` ids, possibly plus `web:` pages when no `--types` is given, and matched passages; `search --categories developer` is only the way to weigh developer sources inside a web search) | `firecrawl-cli raw -- research search-github "<q>" --json` (GitHub history only), then `exa-cli search` with the repo name in the query | no Developer Index hit, or the echoed `indexed: false` for a scoped repo or source |
+| US statute, regulation, code, court opinion, or agency publication | `firecrawl-cli gov "<q>" --json` (free, keyless; narrow with `--jurisdiction us-ca`, `--court-type state-supreme`, `--court ca9`, `--cites "42 U.S.C. § 1983"`, `--domain irs.gov`; routing: `firecrawl-gov-index` skill) | `exa-cli search "<q>" --json`, then `firecrawl-cli search "<q>" --json` | non-US jurisdiction, no hit (no results does not mean no law), or the user supplied a source URL (then `firecrawl-cli fetch <url> --json` directly) |
+| Plain web search (discovery, who-says-what) | `exa-cli search "<q>" --json` | `firecrawl-cli search "<q>" --json`; add `--tbs qdr:w` for time bounds, `--categories github,pdf` or `--sources news` to narrow (not `research`: from 2026-11-16 it searches the paper index and returns paper records under `data.research`, so paper questions take the papers row) | zero results, HTTP 429 (Exa's 10 QPS), or a time-bounded query (`--tbs`) |
 | Bounded single-fact lookup with no attribution, comparison or discovery intent, inside an operator-started Claude Code session (its main loop or a subagent it spawns; never anything a script, timer, cron job, daemon or loop launched, nor that run's subagents) | native `WebSearch` (better-ccflare serves it on a first-party Anthropic account, better-ccflare#441) | `exa-cli search "<q>" --json` | any `WebSearch` tool error (a 400 or 503 naming server-tool semantics, or a 503 `force_route_unavailable` in an exact-account route-profile session), or the per-session search-cap notice |
 | One page, static or text-heavy | `exa-cli contents <url> --json` (highlights by default; `--text` for the full page) | `firecrawl-cli fetch <url> --json` | body under ~3 KB, an app shell (`<div id="root">`), or 403/503 |
 | Rendered or JS-only page, screenshot | `firecrawl-cli fetch <url> --json`; `firecrawl-cli shot <url> --json` for a screenshot | — | — |
 | Local document (PDF, DOCX, XLSX, and the other parse formats) | PDFs: `papers` skill's local extraction first; every other local document format: `firecrawl-cli fetch <path> --json` first | PDFs only: `firecrawl-cli fetch <path> --json` | local PDF extraction failed |
-| Many pages of one site | `firecrawl-cli map <url> --json`, then `firecrawl-cli fetch <url> --json` only for the URLs you chose | `firecrawl-cli raw -- crawl <url> --json` (credits per page) | map did not surface the pages — never crawl for discovery |
+| Many pages of one site | `firecrawl-cli map <url> --json`, then `firecrawl-cli fetch <url> --json` only for the URLs you chose | `firecrawl-cli raw --json -- crawl <url> --limit 10 --wait` (no vendor `--json`, which crawl rejects; the vendor bills per page, and with `--wait` the ledger charges the finished crawl's reported `creditsUsed`, while a crawl started without it holds 100 credits) | map did not surface the pages — never crawl for discovery |
 | Structured fields from a page | `firecrawl-cli extract <url> --schema '<json-schema>' --json` or `firecrawl-cli extract <url> -Q "<question>" --json` | — | — |
 | Papers and preprints | `firecrawl-cli raw -- research search-papers "<q>" --json`; `related-papers` and `read-paper` through `firecrawl-cli raw -- research` (routing: `firecrawl-research-index` skill) | `papers` skill (PDFs, local extraction); `firecrawl-cli fetch <path> --json` only if local PDF extraction fails | that skill's own routing section |
-| Library, SDK, framework docs | Context7 (MCP) | `firecrawl-cli fetch <canonical-docs-url> --json` | no Context7 entry, or the wrong version |
+| Library, SDK, framework docs | Context7 (MCP) | `firecrawl-cli developer "<q>" --types doc,readme --json` (routing: `firecrawl-developer-index` skill), then `firecrawl-cli fetch <canonical-docs-url> --json` | no Context7 entry, or the wrong version; an error string, a bug report, or "which release fixed it" goes to the code/repo row first |
 
 Rules that apply to every row:
 
 - **Attribution and discovery outrank brevity.** A request for who said
   something, competing statements, a source comparison, or landscape
   discovery takes the plain web search row, even when it asks for one fact.
-- **Cite stable identifiers, never scraped text.** Developer Index answers
-  carry `doc:` / `issue:` / `pull_request:` / `readme:` IDs plus the canonical
-  URL; every other row cites the canonical URL. Search results never feed a
+- **Cite stable identifiers, never scraped text.** `firecrawl-cli developer`
+  answers carry `doc:` / `issue:` / `pull_request:` / `readme:` / `web:` IDs
+  plus the canonical URL; every other row cites the canonical URL. Gov answers
+  cite the result `url` and the controlling section, after verifying issuer,
+  jurisdiction, effective status, and version. Search results never feed a
   search corpus (the GitHub-dedup incident).
 - **Discovery stays bounded.** Highlights first; hydrate a full page only for
   the pages you will actually read. Firecrawl search with full-page hydration
@@ -62,9 +65,10 @@ Rules that apply to every row:
   body never becomes the next call's URL without a stated reason.
 - **Flags go after the verb** (`exa-cli search "<q>" --json`); the flag-first
   form is not on the prompt-free allow list.
-- **Gate scope:** the CLI's budget and code-mode gate cover every Firecrawl
-  call. Claude Code's Firecrawl MCP was retired on 2026-09-13 (#1178), so no
-  ungated Firecrawl tool surface remains in sessions.
+- **Gate scope:** the CLI's budget gate covers every paid Firecrawl call
+  (`gov` and keyless `developer` are free and outside the ledger) and its
+  code-mode gate every code call. Claude Code's Firecrawl MCP was retired on
+  2026-09-13 (#1178), so no ungated Firecrawl tool surface remains in sessions.
 - **Budget and code consent:** the session credit budget refuses with exit 3;
   use `--raise-budget <credits> --reason "<reason>"` for a bounded raise.
   Code mode requires `--allow-code-exec --reason "<reason>"` on each call,
@@ -83,7 +87,7 @@ Dogfooding on 2026-07-15 verified all three Exa tools and Firecrawl scrape throu
 
 `~/.claude.json` is machine-local runtime state and is deliberately excluded from `sync.sh`; it can contain credential-bearing URLs, OAuth metadata, and project approvals. Never copy that file or provider credentials into tracked dotfiles. Tracked documentation may record server names, placement rules, tool allowlists, and redacted reconstruction commands only.
 
-Recreate the providers on a new machine after obtaining the keys from the external credential source. Exa is not part of this recovery: `exa-cli` arrives through `install.sh`'s `DOTFILES_LINKS` manifest, which symlinks `bin/exa-cli` into `~/.local/bin/` — no MCP registration step — and `EXA_API_KEY` resolves through the CLI's own credential chain (env, then Bitwarden Secrets Manager, then `~/.secrets`).
+Recreate the providers on a new machine after obtaining the keys from the external credential source. Exa is not part of this recovery: `exa-cli` arrives through `./setup`, which symlinks `bin/exa-cli` into `~/.local/bin/` (it is in `lib/manifest.sh`'s `DATA_CLIS`) — no MCP registration step — and `EXA_API_KEY` resolves through the CLI's own credential chain (env, then Bitwarden Secrets Manager, then `~/.secrets`).
 
 ```bash
 claude mcp add --scope user --transport http firecrawl \

@@ -2220,6 +2220,7 @@ const TERMINAL_INFRA_LINES = new Set([
   'A network error occurred',
   'Something went wrong while generating the response',
   'There was an error generating a response',
+  'Selected model is at capacity. Please try a different model.',
 ]);
 function terminalInfrastructureAfterPrompt(text, structuredError = null) {
   if (!TERMINAL_INFRA_LINES.has(structuredError)) return null;

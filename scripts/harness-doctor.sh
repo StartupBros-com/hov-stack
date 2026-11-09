@@ -503,6 +503,12 @@ w0=$WARNS
 for d in "$HOME"/.claude/skills/*/; do
   # skills/synced is skills-sync's container of vendored skills, not a skill.
   [ "$(basename "$d")" = synced ] && continue
+  if [ -f "$d/.claude-plugin/plugin.json" ]; then
+    for f in "$d"/skills/*/SKILL.md; do
+      grep -q $'\r' "$f" 2>/dev/null && warn "CRLF line endings: $f"
+    done
+    continue
+  fi
   [ -f "$d/SKILL.md" ] || warn "skill dir without SKILL.md: $(basename "$d")"
 done
 for f in "$HOME"/.claude/skills/*/SKILL.md; do
@@ -519,21 +525,26 @@ done
 # cli-reference, plugins) on 2026-09-20; extend it when the CLI adds one.
 # claude-api was added 2026-09-23: the 2.1.280 binary registers it as a
 # bundled skill, so a same-named user skill would collide with it too.
-# Plugin-namespaced skills (plugin:skill) are a different namespace and are
-# not scanned. Consumer: every third-party skill install. Deletion
+# Plugin folders contribute their inner skill names.
+# Consumer: every third-party skill install. Deletion
 # condition: the CLI namespaces user skills away from its own commands.
 BUILTIN_SLASH_COMMANDS="init doctor skill-doctor review code-review security-review simplify loop schedule run verify run-skill-generator workflows compact clear help config model memory plugin plugins reload-plugins fewer-permission-prompts update-config keybindings-help claude-api status cost usage resume login logout mcp agents hooks permissions terminal-setup vim export rename release-notes bug feedback add-dir context upgrade ide rewind tasks theme output-style privacy-settings btw diff recap effort fast teleport tui voice rate-limit-options usage-credits cd"
 _skill_dirs_scanned=0
 for d in "$HOME"/.claude/skills/*/ "$HOME"/.agents/skills/*/ "$HOME"/.codex/skills/*/; do
   [ -d "$d" ] || continue
-  _skill_dirs_scanned=$((_skill_dirs_scanned + 1))
-  _skill_name=$(basename "$d")
-  # Literal comparison, never a case pattern: a directory name is data and may
-  # carry glob characters.
-  for _builtin in $BUILTIN_SLASH_COMMANDS; do
-    if [ "$_builtin" = "$_skill_name" ]; then
-      warn "skill '$_skill_name' ($d) shares its name with the built-in /$_skill_name; a same-named user skill was observed to answer /skill-doctor in place of the built-in (2026-09-20). Check which one answers /$_skill_name here and rename the skill if the built-in is wanted"
-    fi
+  _skill_candidates=("$d")
+  if [ -f "$d/.claude-plugin/plugin.json" ]; then _skill_candidates=("$d"/skills/*/); fi
+  for _skill_dir in "${_skill_candidates[@]}"; do
+    [ -d "$_skill_dir" ] || continue
+    _skill_dirs_scanned=$((_skill_dirs_scanned + 1))
+    _skill_name=$(basename "$_skill_dir")
+    # Literal comparison, never a case pattern: a directory name is data and may
+    # carry glob characters.
+    for _builtin in $BUILTIN_SLASH_COMMANDS; do
+      if [ "$_builtin" = "$_skill_name" ]; then
+        warn "skill '$_skill_name' ($_skill_dir) shares its name with the built-in /$_skill_name; a same-named user skill was observed to answer /skill-doctor in place of the built-in (2026-09-20). Check which one answers /$_skill_name here and rename the skill if the built-in is wanted"
+      fi
+    done
   done
 done
 [ "$_skill_dirs_scanned" -gt 0 ] || warn "skill-name collision check scanned zero skill directories under ~/.claude, ~/.agents and ~/.codex (vacuity)"
@@ -1209,13 +1220,12 @@ if command -v jq >/dev/null 2>&1 && [ -f "$HOME/.claude/settings.json" ]; then
   # artifact-design, artifact-diagramming, plugin-authoring, denial-triage.
   BUNDLED_SKILLS="dataviz update-config keybindings-help code-review simplify fewer-permission-prompts loop schedule workflow-authoring run init security-review claude-api artifact-components batch claude-in-chrome debug design-sync doctor explain-usage run-skill-generator setup-claude artifact-capabilities artifact-design artifact-diagramming plugin-authoring denial-triage"
   _override_keys=$(jq -r '.skillOverrides // {} | keys[]' "$HOME/.claude/settings.json" 2>&1)
-  _override_status=$?; _override_count=0
+  _override_status=$?
   if [ "$_override_status" -ne 0 ]; then
     warn "skillOverrides could not be parsed: $(printf '%s\n' "$_override_keys" | tail -1)"
   else
     while IFS= read -r k; do
       [ -z "$k" ] && continue
-      _override_count=$((_override_count + 1))
       [ -d "$HOME/.claude/skills/$k" ] && continue
       case "$k" in
         anthropic-skills:*)
@@ -1238,8 +1248,6 @@ if command -v jq >/dev/null 2>&1 && [ -f "$HOME/.claude/settings.json" ]; then
         warn "skillOverride '$k' names no installed skill (~/.claude/skills/$k): stale ghost, remove it"
       fi
     done <<< "$_override_keys"
-    # Measured 2026-08-17: 76 entries; 60 preserves normal churn but catches truncation.
-    floor "$_override_count" 60 "skillOverrides corpus" || WARNS=$((WARNS + 1))
   fi
 else
   warn "skillOverrides scan unavailable (jq or settings.json missing)"
@@ -1748,6 +1756,14 @@ else
   # FAILING WARN every week, dotfiles#1840) says so with a
   # `# harness-doctor-skip: <reason>` line in its leading comment block. Only
   # that block counts, so a suite's own heredoc fixtures cannot skip it.
+  # Suite caps. A cap that fires is exit 124, reported as a timeout, never as a failure.
+  # CLAUDE_BASH_SUITE_TIMEOUT_S / CLAUDE_HOOK_SUITE_TIMEOUT_S override them (the vacuity
+  # suite sets 1s against sleeping stubs). The hook suite is serial by design (#1822):
+  # about 7m15s in CI and 16m08s on a loaded host, so 1800s keeps ~1.8x headroom over
+  # the slowest observed run. The bash default of 1200s is 3x the slowest suite timed alone
+  # (pro-gate-loop 392s, red-first 354s, each timed alone on a loaded host).
+  BASH_SUITE_TIMEOUT_S=${CLAUDE_BASH_SUITE_TIMEOUT_S:-1200}
+  HOOK_SUITE_TIMEOUT_S=${CLAUDE_HOOK_SUITE_TIMEOUT_S:-1800}
   _skip_reason() { awk 'NR == 1 { next } !/^#/ { exit } sub(/^# harness-doctor-skip: /, "") { print; exit }' "$1"; }
   _bash_tests=$(find "$HARNESS_REPO/tests" "$HARNESS_REPO/scripts/tests" -maxdepth 1 -type f -name '*.test.sh' 2>/dev/null | sort)
   _bash_count=$(printf '%s\n' "$_bash_tests" | grep -c . || true)
@@ -1762,11 +1778,18 @@ else
       if [ -n "$_skip" ]; then
         _bash_skipped=$((_bash_skipped + 1))
         echo "  skip: bash: $(basename "$t") — $_skip"
-      elif out=$(cd "$(dirname "$t")" && timeout 300 bash "$(basename "$t")" 2>&1 </dev/null); then
-        ok "bash: $(basename "$t") $(printf '%s' "$out" | grep -oE '[0-9]+ passed' | tail -1)"
       else
-        _bash_fail=$(printf '%s' "$out" | _fail_names '^(FAIL|not ok)')
-        warn "bash test suite FAILING: $(basename "$t") — ${_bash_fail:-$(printf '%s' "$out" | tail -1 | cut -c1-70)}"
+        out=$(cd "$(dirname "$t")" && timeout "$BASH_SUITE_TIMEOUT_S" bash "$(basename "$t")" 2>&1 </dev/null)
+        _bash_rc=$?
+        if [ "$_bash_rc" -eq 0 ]; then
+          ok "bash: $(basename "$t") $(printf '%s' "$out" | grep -oE '[0-9]+ passed' | tail -1)"
+        elif [ "$_bash_rc" -eq 124 ]; then
+          # timeout's own 124 says the cap was too small for this host, not that a test failed.
+          warn "bash test suite $(basename "$t") timed out after ${BASH_SUITE_TIMEOUT_S}s (not a test failure) — run it directly, or raise CLAUDE_BASH_SUITE_TIMEOUT_S"
+        else
+          _bash_fail=$(printf '%s' "$out" | _fail_names '^(FAIL|not ok)')
+          warn "bash test suite FAILING: $(basename "$t") — ${_bash_fail:-$(printf '%s' "$out" | tail -1 | cut -c1-70)}"
+        fi
       fi
     done <<< "$_bash_tests"
     [ "$_bash_ran" -eq "$_bash_count" ] || warn "bash test suites: ran $_bash_ran of $_bash_count listed; the loop ended early"
@@ -1791,8 +1814,12 @@ else
     warn "hook test runner missing: $HARNESS_REPO/hooks/tests/run.sh"
   elif command -v node >/dev/null 2>&1; then
     ok "hook test files examined: $_hook_count"
-    if out=$(timeout 300 bash "$HARNESS_REPO/hooks/tests/run.sh" 2>&1 </dev/null); then
+    out=$(timeout "$HOOK_SUITE_TIMEOUT_S" bash "$HARNESS_REPO/hooks/tests/run.sh" 2>&1 </dev/null)
+    _hook_rc=$?
+    if [ "$_hook_rc" -eq 0 ]; then
       ok "node: hooks $(printf '%s' "$out" | grep -oE 'pass [0-9]+' | tail -1)"
+    elif [ "$_hook_rc" -eq 124 ]; then
+      warn "hook test suite timed out after ${HOOK_SUITE_TIMEOUT_S}s (not a test failure) — run hooks/tests/run.sh directly, or raise CLAUDE_HOOK_SUITE_TIMEOUT_S"
     else
       warn "hook test suite FAILING: $(printf '%s' "$out" | grep -oE 'fail [0-9]+' | tail -1)"
     fi

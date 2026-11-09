@@ -43,7 +43,7 @@ It reads `claude plugin marketplace list --json` and `claude plugin list --json`
 
 - `plugin`: a hov plugin. It also has `version`, `installPath` and `otherScopes`.
 - `other-plugin`: a plugin from another publisher's plugin list. It also has `id`, `version`, `installPath`, `otherScopes` and `marketplaceAdd`: the line that adds that publisher's list to Claude Code, or null when the user already has it (under any name).
-- `tool` or `paid-skills`: a program. It also has `bin`, `path` (where it was found, or null), `onPath` (whether that folder is on PATH) and `needs`: the helper programs it needs, each with `name`, `path`, `onPath` and `next`.
+- `tool` or `paid-skills`: a program. It also has `bin`, `path` (where it was found, or null), `onPath` (whether that folder is on PATH), `venv` (for gsc, ga4 and vastai, the folder of the Python environment the command runs from, else null) and `needs`: the helper programs it needs, each with `name`, `path`, `onPath` and `next`.
 
 `helpers` lists those helper programs the same way (today just uv). `platform` names this computer's system, and `alsoInstalled` lists the other hov plugins already installed, each with `name`, `version`, `enabled`, `what` and `start` (the command that starts it).
 
@@ -97,9 +97,9 @@ Take the picked and installed entries in the detector's order, one at a time:
 
 In the commands below, `<install-path>` is the entry's `installPath`, `<version>` is its `version` and `<skill-dir>` is the directory that holds this `SKILL.md`.
 
-Programs: a program's `next` line installs it into `~/.local/bin` without a password. Either it runs `install-release.sh` from this skill, which downloads the one version hov-stack checked, compares it with the checksum written in that file, installs nothing if they differ and removes what it installed if the program then fails to start; or it runs uv. If an entry's `needs` names a helper whose `path` is null, install the helper first with that helper's `next` line, after one line saying what it is: uv installs Python programs, and Python itself, without touching the system's own copy. Then run the detector again, so the program's `next` line names the uv it found. When `install-release.sh` prints `on PATH: no`, or uv warns that `~/.local/bin` is not on PATH, use full paths in this session's commands. Tell the user once that new terminal windows won't find these programs by name until that folder is on their PATH, and offer to add it to their shell's startup file; change that file only after a yes.
+Programs: a program's `next` line installs it into `~/.local/bin` without a password. Either it runs `install-release.sh` from this skill, which downloads the one version hov-stack checked, compares it with the checksum written in that file, installs nothing if they differ and removes what it installed if the program then fails to start; or it runs uv. Two have their own line: wacli runs `wacli-install.sh` from this skill, which checks its one release the same way, and vercel runs `pnpm add -g vercel`, which puts it in pnpm's global folder, `~/.local/bin` once pnpm is set up as the vercel section says. gsc, ga4 and vastai are hov-stack's own commands, which `./setup` links into `~/.local/bin`; their `next` line runs `venv-install.sh` from this skill, which builds the Python environment each one runs from with uv and the package versions written in that file, and removes what it built if that fails. If an entry's `needs` names a helper whose `path` is null, install the helper first with that helper's `next` line, after one line saying what it is: uv installs Python programs, and Python itself, without touching the system's own copy. Then run the detector again, so the program's `next` line names the uv it found. When `install-release.sh` prints `on PATH: no`, or uv warns that `~/.local/bin` is not on PATH, use full paths in this session's commands. Tell the user once that new terminal windows won't find these programs by name until that folder is on their PATH, and offer to add it to their shell's startup file; change that file only after a yes.
 
-Updates: `./setup --update`, run in the hov-stack checkout, updates the checkout and then everything this skill installed: the plugins, and each program `install-release.sh` or uv installed. It replaces a program `install-release.sh` installed only when the copy on disk is still the one it put there, and only after the new version matches its checksum and starts. jsm updates itself, and `cass upgrade` updates cass; after either, `./setup --update` leaves that program to its own updater and says so. A copy installed some other way, such as through Homebrew or apt, updates through that instead; `./setup --update` leaves it and says so. When it says a copy has no install record, an earlier run of this skill probably put it there: `install-release.sh <tool> --force` from this skill replaces it and starts the record. When the user asks how to update, offer to run `./setup --update`, and run it after a yes.
+Updates: `./setup --update`, run in the hov-stack checkout, updates the checkout and then everything this skill installed except wacli, vercel and the Python environments of gsc, ga4 and vastai, whose sections give their own update step: the plugins, and each program `install-release.sh` or uv installed. It replaces a program `install-release.sh` installed only when the copy on disk is still the one it put there, and only after the new version matches its checksum and starts. jsm updates itself, and `cass upgrade` updates cass; after either, `./setup --update` leaves that program to its own updater and says so. A copy installed some other way, such as through Homebrew or apt, updates through that instead; `./setup --update` leaves it and says so. When it says a copy has no install record, an earlier run of this skill probably put it there: `install-release.sh <tool> --force` from this skill replaces it and starts the record. When the user asks how to update, offer to run `./setup --update`, and run it after a yes.
 
 System tools: on macOS, `brew install` needs no password, so you run it after a yes. A Mac without Homebrew needs it installed first, from brew.sh, in a separate terminal window; it asks for their password. On Debian or Ubuntu, `sudo apt install` asks for a password, so the user pastes it into a separate terminal window.
 
@@ -167,6 +167,73 @@ Ready means the first prints its commands (`emit-prompts` and `score-reactions`)
 4. Run the check.
 5. Ask the user to type `/reload-skills` so this window picks up the new skill. Then tell them how to use it: type `/ce-synthetic-panel-beta`, and it asks about their customer and the options to compare. Its skill warns that the first scoring run downloads about 1.5 GB; the model it uses by default is about 90 MB, already counted above.
 
+### wacli
+
+**Card:** Lets Claude read and search your WhatsApp messages. Free and open source, from OpenClaw. It links as a WhatsApp linked device and keeps a copy of your messages on this computer in `~/.local/state/wacli`. It is not made or approved by WhatsApp or Meta. Only on Linux computers with an Intel or AMD processor. Good for people who want Claude to find things in their chats.
+
+**Credentials:** the user links on their phone by scanning a QR code shown in a separate terminal window. The code never goes into this chat, the phone number never goes on a command line, and nobody reads, copies or prints the store's `session.db`.
+
+Check:
+
+```bash
+bash "<skill-dir>/scripts/wacli-install.sh" check
+wacli --store <store> auth status --json
+```
+
+Here and below, replace `<store>` with the store's absolute path written out in full, with no `~` or `$`: use `$WACLI_STORE_DIR` if it is set to an absolute path, otherwise `~/.local/state/wacli` with the home directory written out, e.g. `/home/you/.local/state/wacli`. The WhatsApp guard refuses a path it cannot read before the command runs.
+
+Ready means the first prints `installed and verified` and the second's `data.authenticated` is `true`.
+
+1. If the detector reports wacli `absent`, run its `next` line. Without a password, it downloads about 9 MB, verifies the checked release and installs it under `~/.local/lib/wacli/v<version>/wacli`, with a link at `~/.local/bin/wacli`. If it refuses because another wacli or the wacli-sync service is running a different binary, explain that and let the user stop it.
+2. The user opens a separate terminal window, outside Claude Code, and runs `wacli --store <store> auth`, with the store path written out as above. If wacli is not on PATH, use its full path, e.g. `/home/you/.local/bin/wacli --store <store> auth`. Never run this through Claude Code's `!`: the QR code needs a real terminal to draw, the command stays running for the sync, and the code stays out of the chat. On their phone, open WhatsApp → Linked devices → Link a device (Linked devices is in Settings on iPhone and the ⋮ menu on Android), then scan the QR code. It downloads recent messages and exits on its own after 30 seconds without new ones.
+3. Run the check.
+4. Updates: `./setup --update` does not update wacli. After a hov-stack update, run `bash "<skill-dir>/scripts/wacli-install.sh"` again; the detector gives no `next` line once wacli is installed. It changes nothing when the checked version is already there.
+
+Keeping it synced in the background with `wacli --store <store> sync --follow` as a service is a separate choice left to the user.
+
+### gsc
+
+**Card:** Lets Claude read your Google Search Console data: which searches show your site, clicks, positions, indexing and sitemaps. Free, and it comes with hov-stack. It runs from its own Python environment, about 140 MB on this computer. It reads through a Google service account, a separate Google login for programs that you create in Google Cloud and add to each site. Good for anyone who runs a website and watches its search traffic.
+
+**Credentials:** gsc reads a Google service-account key file that the user creates in Google Cloud and saves on this computer themselves, readable only by them (`chmod 600`). Only its path is ever named: the file's contents never go into this chat, a command argument, a log, `env` or `settings.json`. gsc looks for it at `--credentials <path>`, then the path in `HOV_STACK_GOOGLE_CREDENTIALS`, then `GOOGLE_APPLICATION_CREDENTIALS`, then `google-service-account.json` in the Claude Code config dir (`$CLAUDE_CONFIG_DIR`, else `~/.claude`). ga4 uses the same file.
+
+Check:
+
+```bash
+bash "<skill-dir>/scripts/venv-install.sh" gsc check
+gsc sites --json
+```
+
+Ready means the first prints `gsc venv holds` and the second lists at least one site.
+
+1. uv. If its `needs` entry for uv has no `path`, install uv first with that entry's `next` line, then run the detector again.
+2. If the detector reports gsc `absent`, run its `next` line. Without a password, it builds gsc's Python environment in `~/.local/share/gsc-cli/venv` with the package versions hov-stack checked, and removes what it built if that fails.
+3. The key. If `gsc sites --json` cannot open the key file, the user sets it up in their browser: in Google Cloud, turn on the Search Console API, create a service account and download a JSON key for it, and save the key as `google-service-account.json` in `~/.claude` (or anywhere, with that path in `HOV_STACK_GOOGLE_CREDENTIALS`). Then, in Search Console, add the service account's email address to each site under Settings → Users and permissions, as an owner, which is what gsc's own notes ask for. If it lists no sites, that last part is the one missing.
+4. Run the check.
+5. Updates: `./setup --update` does not rebuild this environment. After a hov-stack update, run `bash "<skill-dir>/scripts/venv-install.sh" gsc install`, adding `--uv` with uv's full path when uv is not on PATH. The detector gives no `next` line once the environment is built, so use this one. It changes nothing when the environment already holds the versions hov-stack names.
+
+### ga4
+
+**Card:** Lets Claude read your Google Analytics 4 reports, such as visitors, pages and conversions, and your property settings. Free, and it comes with hov-stack. It shares gsc's Python environment and Google service account, so once gsc works, ga4 needs only access to your properties. Good for anyone who checks their site's analytics.
+
+**Credentials:** the same service-account key file as gsc, found the same way. Only its path is ever named: its contents never go into this chat, a command argument, a log, `env` or `settings.json`.
+
+Check:
+
+```bash
+bash "<skill-dir>/scripts/venv-install.sh" gsc check
+ga4 accounts
+```
+
+Ready means the first prints `gsc venv holds` and the second lists at least one account.
+
+1. uv, as in gsc's step 1.
+2. If the detector reports ga4 `absent`, run its `next` line. It is gsc's line, and it changes nothing when gsc's environment is already built.
+3. The key. If `ga4 accounts` cannot open the key file, set it up as in gsc's step 3, turning on the Google Analytics Data API and the Google Analytics Admin API. Then, in Google Analytics, add the service account's email address to each property under Admin → Property access management, as a Viewer.
+4. `ga4 --property` takes a property's number, or a short name from `ga4-properties.json` in `~/.config/hov-stack`, whose shape `config/ga4-properties.example.json` in the checkout shows. `ga4 where` shows where it looks, without reading the key.
+5. Run the check.
+6. Updates: gsc's update line updates ga4 too.
+
 ### gh
 
 **Card:** GitHub's own program. It lets Claude open pull requests, read issues and check reviews in your GitHub projects, and token-eater and pro-gate need it. Free, from GitHub. You sign in once in your browser. Good for anyone with code on GitHub.
@@ -193,6 +260,33 @@ Ready means both succeed. `gh auth status` fails when nobody is signed in.
 3. Run the check.
 4. Updates: as in Step 4's "Updates" paragraph.
 
+### vercel
+
+**Card:** Vercel's own program lets Claude check your Vercel projects, deployments, logs and settings, and deploy when you ask. Free, from Vercel. Sign in once in your browser. It installs through pnpm, with about a 60 MB download and about 400 MB on disk. Good for anyone whose sites run on Vercel.
+
+**Credentials:** the sign-in happens on vercel.com in the user's browser, through a link with a one-time code the login line shows here. The code never goes into this chat and no token goes on a command line.
+
+Check:
+
+```bash
+vercel --version
+vercel whoami < /dev/null
+```
+
+Ready means both succeed. `< /dev/null` closes the input so `vercel whoami` answers without waiting; signed out, it prints `Logged out.`.
+
+1. Run `pnpm --version`. If missing, explain that vercel installs through pnpm and point to https://pnpm.io. Run `node --version`; it needs Node 20 or later.
+2. Run `pnpm bin -g`. On `ERR_PNPM_GLOBAL_BIN_DIR_NOT_IN_PATH`, offer `pnpm config set global-bin-dir ~/.local/bin` after a yes: this is a lasting pnpm setting for every later `pnpm add -g`, stored in `~/.config/pnpm/config.yaml`, and touches no shell startup file. Do not use `pnpm setup`, which edits the shell startup file.
+3. Explain that it downloads about 60 MB, then run its `next` line after a yes. `Ignored build scripts: esbuild...` is expected; vercel works without them, so do not run `pnpm approve-builds`. If the detector still reports `absent`, use the folder `pnpm bin -g` prints for this session's commands.
+4. The user types this login line here (with vercel's full path if it is not on PATH), opens the link it shows and approves it in their browser. Never ask for the code in chat.
+
+   ```
+   ! vercel login
+   ```
+
+5. Run the check.
+6. Updates: run `pnpm update -g --latest vercel` after a yes. `./setup --update` does not update it.
+
 ### ast-grep
 
 **Card:** Lets Claude find and change code by its structure, such as every call to one function, instead of by matching text, so a change across many files is safer. Free and open source, by Herrington Darkholme. Claude reaches for it on its own when it searches code. Good for anyone who has Claude change code.
@@ -206,6 +300,28 @@ ast-grep --version
 1. uv. If its `needs` entry for uv has no `path`, install uv first with that entry's `next` line, then run the detector again.
 2. Run its `next` line. It takes a few seconds.
 3. Run the check. There is nothing else to set up: the rules hov-stack installed already tell Claude to use it.
+
+### vastai
+
+**Card:** Lets Claude rent a GPU computer on vast.ai by the hour for a job that needs one, run the work on it and shut it down. The program is free and comes with hov-stack; it runs vast.ai's own program from a Python environment of about 150 MB on this computer. Renting costs real money: it bills your vast.ai account, which tops itself up with no spending limit, so Claude rents only when you ask and checks that each computer is gone when the job ends. You need a vast.ai account and an API key. Good for people who train or run AI models.
+
+**Credentials:** the user creates an API key on cloud.vast.ai and saves it themselves, in their own editor, as a line `VAST_API_KEY=<key>` in `~/.secrets`, readable only by them (`chmod 600 ~/.secrets`), or in Bitwarden Secrets Manager. The key never goes into this chat, a command argument, a log, `env` or `settings.json`. `vastai --where` names where it found the key, never the key.
+
+Check:
+
+```bash
+bash "<skill-dir>/scripts/venv-install.sh" vastai check
+vastai --where
+vastai show instances --raw
+```
+
+Ready means the first prints `vastai venv holds`, the second names where the key came from, and the third succeeds; it lists the computers rented now, normally none.
+
+1. uv. If its `needs` entry for uv has no `path`, install uv first with that entry's `next` line, then run the detector again.
+2. If the detector reports vastai `absent`, run its `next` line. Without a password, it builds the environment in `~/.local/share/vastai-cli/venv` (or `$VASTAI_VENV`) with the vast.ai version hov-stack checked, and never runs the vast.ai program while it installs.
+3. The key. If `vastai --where` says it found no key, hand the user the step in **Credentials**. If it says the place the key is kept could not be read, the key may still be there: do not make a new one; try again later.
+4. Run the check.
+5. Updates: as in gsc's last step, with `vastai` in place of `gsc`: `bash "<skill-dir>/scripts/venv-install.sh" vastai install`.
 
 ### compound-engineering
 
@@ -394,11 +510,18 @@ Ready means `jsm whoami` shows them signed in with an active subscription.
 
 ## Finish
 
-Run Step 1's detector again. Then wrap up in a few short lines, with no table:
+Run Step 1's detector again. Refresh Claude's tool instructions with the same config dir (`$CLAUDE_CONFIG_DIR`, else `~/.claude`):
+
+```bash
+node "<skill-dir>/scripts/instructions.mjs" --json
+```
+
+Use the absolute skill path as in Step 1. When its `state` is `ok`, say in one plain line which tools Claude now has instructions for (its `tools` list), or that none of the installed tools needs any; `data-commands` is hov-stack's own data commands, such as `gsc` and `stripe-api`, which `./setup` links into `~/.local/bin`. Otherwise tell the user its `reason` in plain words; the file stays as it was. If `leftOut` names a tool, say why it got no line (its `why`). For a program that is not on PATH, that is the PATH change in Step 4's "Programs" paragraph; for codex, it is the Codex program `/codex:setup` installs; for a data command that PATH runs from somewhere else, a copy of the user's own comes first on PATH; removing it, or moving its directory later on PATH, lets hov-stack's run. The next `/hov-setup` or `./setup` adds its line once that is done. Then wrap up in a few short lines, with no table:
 
 - What's ready now, each with how to start it ("sign-it: type /sign-it:sign-it and give it a PDF").
 - Anything skipped or still waiting, and the one thing left for the user, if any.
 - What setup already gave them: each `alsoInstalled` plugin with its `what` and `start`, and the skill pack's slash commands. Typing `/` lists them all. Three to try first: `/bro` re-explains Claude's last answer in plain words, `/eli5 <topic>` explains any topic simply with a picture, and `/deep-research <question>` digs into a question across many sources.
 - Whether the plugins update themselves, from the detector's `marketplace.autoUpdate`, in one line: "The hov plugins update themselves", or that they stay at these versions and what it said to do.
-- How to update later, in one line: `./setup --update` in the hov-stack checkout updates it and everything installed here.
+- How to check it later, in one line: `./setup --check` in the hov-stack checkout changes nothing and lists each setup step as in place or not, with the fix.
+- How to update later, in one line: `./setup --update` in the hov-stack checkout updates it and everything installed here except wacli, vercel and the Python environments of gsc, ga4 and vastai; for each of those installed, add the update line from its section.
 - They can type `/hov-setup` again any time to add the rest.

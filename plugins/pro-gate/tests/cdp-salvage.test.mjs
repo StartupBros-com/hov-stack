@@ -925,6 +925,7 @@ const MIXED_MARKER = 'pg-run-Test-Case-1234567890-43';
     'A network error occurred',
     'Something went wrong while generating the response',
     'There was an error generating a response',
+    'Selected model is at capacity. Please try a different model.',
   ];
   for (const message of messages) {
     const cdp = await mockCdp(`run marker: ${MARKER}\n${message}`, [], { infrastructureError: message });
@@ -946,6 +947,7 @@ const MIXED_MARKER = 'pg-run-Test-Case-1234567890-43';
     'A network error occurred',
     'Something went wrong while generating the response',
     'There was an error generating a response',
+    'Selected model is at capacity. Please try a different model.',
   ];
   for (const message of messages) {
     const assistantText = await mockCdp(`run marker: ${MARKER}\n${message}`);

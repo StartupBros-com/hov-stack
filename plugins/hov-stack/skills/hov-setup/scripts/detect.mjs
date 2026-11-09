@@ -11,7 +11,10 @@
   from an Intel Mac. It reads settings.json and plugins/known_marketplaces.json in the
   Claude Code config dir ($CLAUDE_CONFIG_DIR, else ~/.claude) for each marketplace's
   auto-update setting, the way autoupdate.mjs beside it does: a tool is found by looking for an executable file of its name in the
-  PATH directories and a few usual install directories, never by running it. A plugin counts
+  PATH directories and a few usual install directories, never by running it. One of hov-stack's
+  own commands that runs from a Python environment (`venv` in offers.json) counts as installed
+  only once that environment's file is there too, checked the same way, and is not applicable
+  where ./setup has not linked the command. A plugin counts
   only when it is installed at user scope, the rule ./setup uses; a project-scope copy is named
   in `otherScopes` and does not count. A plugin from another publisher's marketplace is found
   by where its marketplace comes from (its GitHub repository), not by the name the user gave
@@ -31,7 +34,7 @@
 */
 import { accessSync, constants, readFileSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { delimiter, dirname, join } from "node:path";
+import { delimiter, dirname, isAbsolute, join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { configDir, readFiles, stateOf, updatesOffBy } from "./autoupdate.mjs";
@@ -113,7 +116,7 @@ export function platformName() {
 
 // Where to look for a program: the PATH directories in order, then the usual install
 // directories, with no repeats.
-function searchDirs() {
+export function searchDirs() {
   const pathDirs = (process.env.PATH || "").split(delimiter).filter(Boolean);
   const extraEnv = process.env.HOV_SETUP_EXTRA_BIN_DIRS;
   const extra =
@@ -136,7 +139,7 @@ function isExecutableFile(p) {
 
 // Finds `bin` without running it: the first candidate directory holding an executable regular
 // file of that name.
-function findBin(bin, search) {
+export function findBin(bin, search) {
   for (const d of search.dirs) {
     const p = join(d, bin);
     if (isExecutableFile(p)) return { path: p, onPath: search.onPath.has(d) };
@@ -202,7 +205,16 @@ function fill(line, uvPath) {
   return line.split("<skill-dir>").join(SKILL_DIR).split("<uv>").join(uvPath);
 }
 
+// The folder of the Python environment a hov-stack command runs from: the path in its
+// override variable when that is set, else its folder under the home directory.
+function venvDir(v) {
+  const override = v.env ? process.env[v.env] : undefined;
+  return override || join(homedir(), v.dir);
+}
+
 // Shared by tools, paid-skills and helpers: where the program is and what to run if it is not.
+// A hov-stack command with a venv is ready only once that environment is built, and is not
+// applicable where ./setup has not linked it.
 function toolFields(o, platform, search, uvPath) {
   const keys = Object.keys(o.install);
   if (!keys.includes(platform)) {
@@ -210,15 +222,32 @@ function toolFields(o, platform, search, uvPath) {
       bin: o.bin,
       path: null,
       onPath: false,
+      venv: null,
       state: "not-applicable",
       next: `only offered on ${keys.join(", ")}`,
     };
   }
   const found = findBin(o.bin, search);
+  if (o.venv) {
+    if (!found.path) {
+      return { bin: o.bin, path: null, onPath: false, venv: null, state: "not-applicable", next: "comes with a hov-stack checkout: its ./setup links it into ~/.local/bin" };
+    }
+    const dir = venvDir(o.venv);
+    const built = isAbsolute(dir) && isExecutableFile(join(dir, o.venv.file));
+    return {
+      bin: o.bin,
+      path: found.path,
+      onPath: found.onPath,
+      venv: dir,
+      state: built ? "installed" : "absent",
+      next: built ? null : fill(o.install[platform], uvPath),
+    };
+  }
   return {
     bin: o.bin,
     path: found.path,
     onPath: found.onPath,
+    venv: null,
     state: found.path ? "installed" : "absent",
     next: found.path ? null : fill(o.install[platform], uvPath),
   };
@@ -290,7 +319,7 @@ export function detect() {
       const h = helpers.find((x) => x.name === n);
       return { name: n, path: h ? h.path : null, onPath: h ? h.onPath : false, next: h ? h.next : null };
     });
-    return { ...head, state: f.state, next: f.next, bin: f.bin, path: f.path, onPath: f.onPath, needs };
+    return { ...head, state: f.state, next: f.next, bin: f.bin, path: f.path, onPath: f.onPath, venv: f.venv, needs };
   });
 
   const offeredNames = new Set(OFFERS.map((p) => p.name));
@@ -331,6 +360,7 @@ function line(p) {
   if (p.state === "not-applicable") return `  ${p.name}: not applicable here: ${p.next}`;
   const only = scopes ? ` (installed at ${scopes} scope only, which does not count)` : "";
   if (p.marketplaceAdd) return `  ${p.name}: absent${only}. Add its marketplace first: ${p.marketplaceAdd}. Then install: ${p.next}`;
+  if (p.venv && p.path) return `  ${p.name}: ${p.path} is linked, but its Python environment (${p.venv}) is not built. Install: ${p.next}`;
   return `  ${p.name}: absent${only}. Install: ${p.next}`;
 }
 

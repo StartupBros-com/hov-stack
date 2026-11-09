@@ -8,7 +8,7 @@ set -uo pipefail
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 INSTALLER=$REPO/scripts/resend-cli-install.sh
 PIN=$(sed -n 's/^PIN_VERSION=//p' "$INSTALLER" | head -1)
-TMP=$(mktemp -d /tmp/resend-cli-install-test.XXXXXX)
+TMP=$(mktemp -d /tmp/resend-cli-install-test.XXXXXX) || exit 1
 trap 'rm -rf "$TMP"' EXIT
 
 pass=0

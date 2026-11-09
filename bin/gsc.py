@@ -36,7 +36,8 @@ USAGE
   gsc sitemap list --site willmitchell.com
   gsc sitemap submit --site willmitchell.com --url https://willmitchell.com/sitemap.xml
 
-Add --json for machine-readable output; the default is a padded table.
+Add --json, before or after the subcommand, for machine-readable output; the
+default is a padded table.
 """
 
 from __future__ import annotations
@@ -287,7 +288,7 @@ def cmd_sitemap_submit(args) -> int:
     return 0
 
 
-def main(argv=None) -> int:
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="gsc", description="Agent-native Google Search Console access."
     )
@@ -298,24 +299,44 @@ def main(argv=None) -> int:
     parser.add_argument(
         "--credentials", default=credentials_path(), help=credentials_help
     )
-    parser.add_argument("--json", action="store_true", help="machine-readable output")
+    parser.add_argument(
+        "--json", action="store_true", default=False, help="machine-readable output"
+    )
     sub = parser.add_subparsers(dest="command", required=True)
 
-    sites_p = sub.add_parser("sites", help="list properties this account can read")
-    sites_p.add_argument("--json", action="store_true", help="machine-readable output")
-    sites_p.set_defaults(func=cmd_sites)
-
-    # --json is accepted both before and after the subcommand. Argparse would
-    # otherwise only honour `gsc --json query`, and `gsc query --json` is the
-    # form everyone reaches for first. A flag that silently does nothing in the
-    # obvious position is worse than no flag.
+    # --json works both before and after the subcommand. Each subcommand
+    # repeats the flag so `gsc query --json` parses, and each copy defaults
+    # to SUPPRESS, so a subcommand where --json is absent sets nothing.
+    # A plain False default there overwrites the parent's True when argparse
+    # merges the namespaces: until 2026-11-05, `gsc --json sites` printed
+    # the table. A flag that silently does nothing in one position is worse
+    # than no flag. --credentials below works the same way.
     def add_json(p):
-        p.add_argument("--json", action="store_true", help="machine-readable output")
+        p.add_argument(
+            "--json",
+            action="store_true",
+            default=argparse.SUPPRESS,
+            help="machine-readable output",
+        )
+
+    sites_p = sub.add_parser("sites", help="list properties this account can read")
+    add_json(sites_p)
+    sites_p.set_defaults(func=cmd_sites)
 
     def add_query_args(p):
         add_json(p)
         p.add_argument("--site", required=True, help="domain, URL, or sc-domain: property")
-        p.add_argument("--days", type=int, default=28)
+        # The window is [today - lag - days, today - lag], both ends
+        # inclusive, so it spans days + 1 calendar days. Scripts that pull
+        # baselines or compare periods depend on that span, so change it
+        # only together with them.
+        p.add_argument(
+            "--days",
+            type=int,
+            default=28,
+            help="days back from the end date; the window spans days+1 "
+            "inclusive days ending today minus --lag",
+        )
         # Search Console data lags roughly 2 days; querying up to today silently
         # returns a partial final day and makes trends look like a cliff.
         p.add_argument("--lag", type=int, default=2, help="days to back off from today")
@@ -338,7 +359,7 @@ def main(argv=None) -> int:
     p.set_defaults(func=cmd_pages)
 
     u = sub.add_parser("url", help="URL inspection for one URL")
-    u.add_argument("--json", action="store_true", help="machine-readable output")
+    add_json(u)
     u.add_argument("--site", required=True)
     u.add_argument("--url", required=True)
     u.set_defaults(func=cmd_url)
@@ -363,7 +384,11 @@ def main(argv=None) -> int:
         child.add_argument(
             "--credentials", default=argparse.SUPPRESS, help=credentials_help
         )
-    args = parser.parse_args(argv)
+    return parser
+
+
+def main(argv=None) -> int:
+    args = build_parser().parse_args(argv)
     return args.func(args)
 
 

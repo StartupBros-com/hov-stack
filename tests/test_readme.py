@@ -130,6 +130,14 @@ class PlantedFailures(unittest.TestCase):
         changed = self.changed("`StartupBros-com/hov-stack`", "`StartupBros-com/hov-marketplace`", contributing)
         self.assertNamed(problems({"CONTRIBUTING.md": changed}), "repositories", "hov-marketplace")
 
+    def test_a_related_repository_passes_in_the_readme_only(self):
+        for repo in counts.RELATED:
+            with self.subTest(repo=repo):
+                cited = "\nSee https://github.com/" + repo + ".\n"
+                self.assertFalse([p for p in problems({"README.md": README + cited}) if p.startswith("repositories")])
+                contributing = (CLAUDE / "CONTRIBUTING.md").read_text(encoding="utf-8")
+                self.assertNamed(problems({"CONTRIBUTING.md": contributing + cited}), "repositories", repo)
+
     def test_a_repository_under_the_private_owner_fails_in_any_case(self):
         # Built from parts so the public-safety scan does not read the test itself as a citation.
         security = (CLAUDE / "SECURITY.md").read_text(encoding="utf-8")
@@ -145,6 +153,12 @@ class PlantedFailures(unittest.TestCase):
     def test_a_file_name_without_a_slash_not_in_the_tree_fails(self):
         readme = self.changed("`sync.sh`", "`sink.sh`")
         self.assertNamed(problems({"README.md": readme}), "paths", "'sink.sh'", "at the top level")
+
+    def test_an_overlay_file_passes_only_when_listed(self):
+        # stripe-accounts.json lives in the overlay, outside the tree; OVERLAY_FILES lists it.
+        self.assertFalse([p for p in problems() if "stripe-accounts.json" in p])
+        readme = self.changed("`stripe-accounts.json`", "`stripe-account.json`")
+        self.assertNamed(problems({"README.md": readme}), "paths", "'stripe-account.json'", "at the top level")
 
     def test_a_dotfile_is_looked_up_under_its_bullets_directory(self):
         # .wslconfig is under windows/, not the top level; moved to a bullet with no directory it fails.

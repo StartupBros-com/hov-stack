@@ -231,7 +231,7 @@ The vocabulary for finishing a PR after its author stops. Settled by the 2026-10
 The rule that the session which authored a PR also finishes it: it opens the PR ready for review, waits for CI, merges once the checks are green, and ends by reporting the merge commit, or leaves the PR open with the reason when CI stays red or the merge is refused.
 *Replaced:* Owned PR, Parked PR
 
-Only a diff touching billing, auth, migrations or CI gets a terminal review, one round, whose P0 and P1 findings are fixed before the merge; every other diff merges on CI alone. A red check the diff did not cause gets one failed-only rerun before it counts as blocking. Nothing runs after the session ends, so a PR left open is ordinary work for the next session.
+Only a diff touching billing, auth, migrations or CI gets a terminal review, one round, whose P0 and P1 findings are fixed before the merge; every other diff merges on CI alone. A red check the diff did not cause gets one retrigger before it counts as blocking: a merge of main into the branch when main has moved, since a rerun replays the branch's own workflow, else a failed-only rerun. Nothing runs after the session ends, so a PR left open is ordinary work for the next session.
 
 ### Owned PR
 
@@ -418,7 +418,7 @@ A copy of live agent memory that the memory tools compare against, byte for byte
 
 A thin, hand-rolled command-line wrapper over one external data API (`gsc`, `dfs`, `exa-cli`, `firecrawl-cli`), or over a vendor's own CLI when that CLI's surface is unsafe to expose directly (`vastai`, which refuses the vendor's key-printing and key-redirecting invocations before any exec and keeps the vendor's own output flag), that agents call through Bash instead of an MCP server: `--help` is the authority for its surface, `--json` is accepted after the subcommand where the wrapper defines the output, and where the wrapper owns a credential it resolves env, then Bitwarden Secrets Manager, then `~/.secrets`, unless it holds an Exact-record binding, which resolves that one record and nothing else, with `--where` naming the source that resolved without calling the provider wherever the source can vary (`firecrawl-cli` leaves credentials to the vendor's own configuration and has no `--where`, except its API-only `search --categories developer` path, which reads `FIRECRAWL_API_KEY` from the environment and sends it itself).
 
-It exists because a command on PATH reaches every lane — sessions, subagents, Codex, cron — while an MCP server reaches only the client that registered it. Each one deploys as a `DOTFILES_LINKS` symlink into `~/.local/bin`, probes offline in `tool-smoke.sh`, and, where an MCP server preceded it, either retires that server or records the pairing as a documented coexistence in the CLI-supersedes-MCP doctor check; a retirement's surviving allow entries are the drift that check exists to catch.
+It exists because a command on PATH reaches every lane — sessions, subagents, Codex, cron — while an MCP server reaches only the client that registered it. Each one is named in `lib/manifest.sh`'s `DATA_CLIS`, which `./setup` links into `~/.local/bin`, probes offline in `tool-smoke.sh`, and, where an MCP server preceded it, either retires that server or records the pairing as a documented coexistence in the CLI-supersedes-MCP doctor check; a retirement's surviving allow entries are the drift that check exists to catch.
 
 ### Exact-record binding
 
@@ -432,18 +432,55 @@ The reasoning-stream mode a Claude Code session requests at launch, which decide
 
 It matters because the gateway judges a stream alive by content-bearing frames only: a long reasoning phase in the content-free mode is indistinguishable from a dead stream, is failed over to another account from the start, and is retried by the client until the session looks hung.
 
+## Browser bridge
+
+The vocabulary for wsl-cdp, which lets a session inside WSL drive a browser on the Windows side over the DevTools protocol.
+
+### Agent profile
+
+The dedicated browser profile wsl-cdp launches for agents, run as its own instance of the user's installed Windows browser, beside the user's daily browser and never inside it.
+*Avoid:* "the user's real browser", which reads as the daily window
+
+A human signs it into each site once, and it keeps those sessions across restarts and reboots but never saved passwords, which every launch scrubs. It should hold only the logins agents need, because anything that can reach its debug port can act as it. It stays bound to the browser vendor that first launched it.
+
 ## Config sync
 
 The vocabulary for how the harness's tracked configuration reaches a host's live Claude Code configuration, and why the direction differs by file.
 
 ### Volatile file
 
-A live configuration file that the running client rewrites in place, so the repo can hold only a copy of it rather than a link to it. The live copy is authoritative once a host has one: installing seeds it only on a host that lacks it, pushing captures live into the repo, and a difference between the two reads as drift to be captured, never as a change waiting to be delivered. A change that originates in the repo therefore reaches live automatically only through a Reconciler, and otherwise only through a deliberate apply on each host, which for the permission surface goes through that surface's approval gate; an edit to the tracked copy alone is dead on every host that already has the file, and the capture step would remove it from the repo.
+A live configuration file that the running client rewrites in place, so the repo can hold only a copy of it rather than a link to it. For `settings.json` the direction is now both ways. A change that originates in the repo reaches live through the Settings apply. A key, entry or value that live changed on its own stays in live, and pushing captures it into the repo. Installing still only seeds the file on a host that lacks it. `keybindings.json` has no apply: for it, the live copy is authoritative and a repo edit reaches a host only by a deliberate change there.
 *Avoid:* copy-synced file, unlinked file
+
+### Settings apply
+
+The three-way merge (`sync.sh apply-settings`, engine `lib/settings-apply.js`) that carries repo changes into a host's live `settings.json`. It compares three versions:
+- desired: the tracked file rendered for this host, with the overlay;
+- base: what the last apply delivered, kept at `~/.claude/.hov-stack/settings-base.json`;
+- live.
+
+What it does with a key or entry:
+- the repo changed it since the base and live did not: it takes the repo's version;
+- live changed it and the repo did not: live is left alone;
+- both changed it: that is a conflict, live is kept, and the conflict is reported on every run until it is resolved.
+
+Two kinds of path are never touched: live-owned paths (`model`, `statusLine` and the proxy credentials) and keys only live has.
+
+Deny entries are asymmetric. A tracked deny entry missing from live is put back. A deny entry the repo drops is held and reported, never removed.
+
+Where it runs, on workstation and satellite hosts: closeout after freshening the harness checkout, a hash-gated SessionStart hook, and install. `sync.sh apply-settings --plan` and `sync.sh check` show the conflicts and held removals.
+*Avoid:* settings sync, settings push
 
 ### Reconciler
 
-A sync step that merges one canonical, repo-originated entry into a Volatile file on the host: it adds or updates only that entry, proves nothing else changed, replaces the file atomically, and keeps a backup. Reconcilers exist per entry because the volatile file's default direction is live-to-repo. Hook registrations and harness environment keys have them; ordinary permission rules currently do not, so a permission rule added in the repo reaches a host only by a deliberate per-host apply. An entry with neither a Reconciler nor that apply is not deployed, however green its merge.
+A sync step that merges one canonical, repo-originated entry into a Volatile file on the host: it adds or updates only that entry, proves nothing else changed, replaces the file atomically, and keeps a backup. Reconcilers predate the Settings apply, which now delivers any repo change to `settings.json`, including every tracked hook registration and permission rules that never had a reconciler. The per-hook reconcilers that only added a tracked hook were deleted in #479. Install still runs the ones that do what the apply cannot:
+- respell a live `node "..."` hook onto the launcher, because the apply keys the two spellings as different hooks and would register the script twice;
+- retire a live hook that no base recorded, because the apply removes only what its base names;
+- retire the papercut settings copies only once the papercut plugin owns them, because the apply has no conditional removal;
+- move the dcg hook onto this host's resolved binary, because the apply folds every dcg path into one identity;
+- the runtime environment, the Windows settings file and the policy validations.
+
+A new tracked hook needs no reconciler. A hook dropped from the tracked file is removed by the apply on every host whose base recorded it, and needs a by-name retirement only for a live file that no base ever covered.
 
 ## Tracking and claims
 
@@ -498,7 +535,7 @@ Moving a card to a newer release is a *repin*. The release train opens and lands
 - *Claim boundary* (the stored, machine-enforced scope on a family signature) and *No-Claim Boundary* (the dossier's prose statement of what a green result does not prove) are distinct: the second is written first and is the source the first is encoded from. See `docs/solutions/best-practices/verify-loop-breaking-remedies-by-counting-repeats-not-occurrences.md`.
 - An *event ledger* and a *State surface* are not interchangeable sources for "how many are outstanding": the ledger is history and the state surface is inventory. See `docs/solutions/best-practices/verify-a-ledger-inferred-backlog-against-the-engines-state-surface.md`.
 - A *Merge anchor* (a reference recording a proven-merged tip so worktree closers treat it as shipped) and a *Pinned anchor* (a string a structural test locates in source) share only the word. The older name "merge-anchored closeout", like the sweep's "merge-anchored reconcile" line, is a third sense: shipment proven from the PR's merge record, whichever proof held, not the reference.
-- A *Reconciler* (the host sync step that merges one repo entry into a Volatile file) and the release train's repin reconciler (the scheduled job that keeps each *Marketplace card* on its plugin's newest release) share only the word.
+- A *Reconciler* (the host sync step that merges one repo entry into a Volatile file) and the release train's repin reconciler (the job that keeps each *Marketplace card* on its plugin's newest release) share only the word.
 - A *Pin bump* (one vendor version pin in the leaderboard submission fleet) and a *repin* (a *Marketplace card* moved to a newer release) are different changes with different gates.
 - A *staged draft* (a release the train built and holds unpublished only until the *Marketplace card* that pins it merges, after which the train publishes it with no human step) and a *Review-ready draft* (a PR state) are different objects, and neither implies the code behind it was reviewed: a merged, tagged and staged version can still carry defects that only a review finds, and since nothing after the version-bump merge waits for a person, that merge is when it ships. See `docs/solutions/best-practices/merging-a-plugin-version-bump-is-the-ship-moment.md`.
 - A *reap* of a Claim (the claim reaper retiring an expired tracking unit), Claude Code's *pressure reap* (the client itself stopping a session's running background command when host memory pressure coincides with a long stretch without human input) and the *memory watchdog* (the harness process that removes orphaned and oversized processes) share only the verb; an earlier learning attributed the second to the third. See `docs/solutions/best-practices/poll-long-waits-from-a-monitor-running-a-script-file-not-a-sleeping-background-shell.md`.

@@ -42,7 +42,11 @@ require a map.
   `migration-targets.json`, overridden by `HOV_STACK_MIGRATION_TARGETS_FILE`.
   It may include `legacy_identities`; see `config/migration-targets.example.json`.
 - `with-gemini-sandbox` gets its BWS record id from `GEMINI_SANDBOX_BWS_ID`.
-- `stripe-api` keeps its existing account routing and credential resolution.
+- `stripe-api ACCOUNT` takes a name from the account map `stripe-accounts.json`,
+  overridden by `STRIPE_API_ACCOUNTS_FILE`; see `config/stripe-accounts.example.json`.
+  Account `acme` reads its key from `STRIPE_RK_ACME`. Without a map no account
+  is configured and every request is a usage error (exit 2); `--where` prints
+  the map path and the configured names.
 
 ## Why a CLI and not an MCP server
 
@@ -125,14 +129,16 @@ exit dictionary; it makes no vendor request.
 | Verb | Use |
 |---|---|
 | `fetch <path-or-url>` | Parse a local document or scrape a URL; optional `--schema`, `--schema-file`, or `-Q` / `--query` for extraction; `--max-age <ms>` bounds staleness (0 forces a live fetch; URLs only); `--format <list>` replaces the default summary with vendor formats |
-| `extract <path-or-url>` | Fetch with a required schema or question |
+| `extract <path-or-url>` | Fetch with a required schema or question; a `-Q` question returns the vendor's plain-text answer as `data.answer`, charged the 5-credit extraction estimate (25 for a local file) and corrected from the balance read (a URL question billed 5 on 2026-10-30, dotfiles #2123) |
 | `shot <url>` | Capture a screenshot |
 | `act <url>` | Scrape after browser actions supplied with `--actions` or `--actions-file` |
 | `agent <prompt-or-job-id>` | Run extraction, or use `--status`, `--wait`, or `--cancel` for a job; try cheaper `fetch --schema` first and bound jobs with `--max-credits` |
 | `interact <text-or-stop>` | Prompt or stop a browser session; always pass an explicit `--scrape-id <id>` returned by `fetch` |
-| `search <query>` | Discover pages; bound results with `--limit` (1–100); filter with `--categories github,research,pdf,developer`, `--sources web,images,news`, `--tbs qdr:h\|d\|w\|m\|y`, and `--location "<place>"`; the envelope's `search_id` feeds `raw -- search-feedback <id>` |
+| `search <query>` | Discover pages; bound results with `--limit` (1–100); filter with `--categories github,pdf,developer` (`research` is accepted, but from 2026-11-16 it searches the paper index and returns paper records under `data.research`; papers go to `raw -- research search-papers`), `--sources web,images,news`, `--tbs qdr:h\|d\|w\|m\|y`, and `--location "<place>"`; the envelope's `search_id` feeds `raw -- search-feedback <id>`; no results exits 0 with empty buckets and a stderr hint (an empty news search billed 0 on 2026-10-30, dotfiles #2123) |
+| `gov <query>` | Search US statutes, regulations, codes, court opinions, and agency publications; filters `--jurisdiction`, `--court`, `--court-type`, `--cites`, `--domain`; `--limit` 1–100; free and keyless |
+| `developer <query>` | Search issues, merged PRs, READMEs, and curated docs with matched passages; filters `--types`, `--repos`, `--sources`, `--skills-only`, `--passages`, and the repository attribute flags; `--limit` 1–100; free without a key; with one, `--limit` 10 or less tries keyless first and a keyed run costs 2 credits per 10 results |
 | `map <url>` | Discover site URLs; bound results with `--limit` |
-| `raw -- <vendor-args>` | Pass vendor arguments unchanged; includes research, crawl, and monitor; request vendor `--json` after `--` |
+| `raw -- <vendor-args>` | Pass vendor arguments unchanged; includes research, crawl, and monitor; add vendor `--json` after `--` for `research` and `search`, never for `crawl` or `monitor`, which print JSON by default and reject `--json` |
 | `capabilities` | Inspect the contract without vendor contact |
 | `budget` | Inspect budget availability without vendor contact |
 
@@ -140,20 +146,78 @@ exit dictionary; it makes no vendor request.
   `firecrawl-cli fetch <url> --json --timeout 60`. For passthrough, put wrapper
   flags before the separator and vendor flags after it:
   `firecrawl-cli raw --json -- research search-github "<query>" --json`.
-  Crawl and monitor are raw-only; credits scale with work, and raw cost is
-  unknown until accounting settles.
-- **Developer index:** `firecrawl-cli search "<q>" --categories developer --json`
-  is answered by `POST /v2/search` directly, because vendor CLI 1.19.26 rejects
-  that category client-side (firecrawl/cli#222). It needs `FIRECRAWL_API_KEY` in
-  the environment (Claude lanes inherit it; a Codex lane may not), honors
-  `FIRECRAWL_API_URL` only over https or to a loopback host, and shares the
-  envelope, budget, failure shapes, and redaction with every other verb. Without
-  the key it refuses with exit 4 and names
-  `raw -- research search-github "<q>"` (repos, issues, PRs, READMEs) as the
-  alternative. Every other category goes through the vendor CLI. A redirect
-  from the API is refused, never followed with the key. Without the vendor
-  binary on PATH the call still runs under the local session and day caps, but
-  the account floor is unchecked and the envelope's `degraded` list says so.
+  Crawl and monitor are raw-only and take no vendor `--json`:
+  `firecrawl-cli raw --json -- crawl <url> --limit 10 --wait`.
+- **Raw cost:** a raw call whose output reports `creditsUsed` for finished work
+  is charged that amount, 0 included: the job status is `completed`, `failed` or
+  `cancelled`, or the output names no job status (a synchronous scrape or
+  search). The amount is held for 30 minutes, then settles as reported. A
+  two-page `crawl --wait` billed 2 credits on 2026-10-30 and now costs the
+  session 2 (dotfiles #2117). Every other raw call holds 100 credits (the bounded-crawl
+  reservation) of the 300-credit session allowance and counts all 100 as spent
+  30 minutes later: a started or still-running job, a status the wrapper cannot
+  read, and output with no reported cost, which includes keyed `research` (a
+  `search-papers` call billed nothing that day and still took 100). Three such
+  calls exhaust a session, so use a shaped verb where one exists.
+  `research search-papers` and `search-github` go keyless first and hold
+  nothing when the free tier answers (next bullet).
+- **Free-first keyless routing (dotfiles #2118):** an eligible call tries Firecrawl's
+  free keyless tier first, with or without `FIRECRAWL_API_KEY`: the vendor runs
+  with `FIRECRAWL_API_KEY` and `FIRECRAWL_API_URL` removed from its
+  environment, and API-direct `developer` sends no Bearer. Eligible: `fetch` or
+  `extract` of a URL to `summary`, `markdown`, `links`, or `html`, a schema
+  alone, or a `-Q` question alone; `shot`; a PDF to `summary` or `markdown`
+  with no question; `search` over `web` or `images` sources and `github` or
+  `research` categories at `--limit` 10 or less; `developer` at `--limit` 10
+  or less (any limit without a key); and `raw -- research search-papers` or
+  `search-github`. The 2026-10-30 probes found those answers equal to keyed
+  ones; format combinations and a nonzero `--max-age` were admitted by design,
+  not probed. A keyless answer spends nothing, takes no reservation, and adds a
+  `degraded` note starting `keyless: ` (plain output stays bare; `developer`
+  keeps its `keyless developer search:` note, which wraps plain output as it
+  always has). When the free
+  tier refuses (rate limit, auth, quota, or the vendor login menu), a keyed
+  call runs once through the normal budget, and a rate-limit refusal keeps
+  eligible keyed calls keyed for the window it states (`keyless_cooldown`,
+  default 3600 seconds, when it states none; 6 hours at most), recorded in
+  `~/.claude/state/firecrawl-cli/keyless-cooldown.json`. Without a key, the
+  refusal exits 1 as `keyless_rate_limited` with the retry time. The allowance
+  is small: about 15 calls on 2026-10-30, then a refusal whose `Retry-After`
+  was about 3.8 hours. `FIRECRAWL_CLI_KEYLESS=0` turns routing off; a stored
+  vendor login or a non-default `FIRECRAWL_API_URL` keeps vendor calls keyed.
+  A keyless `fetch` scrape_id may not resolve in keyed `interact`, so refetch
+  with `FIRECRAWL_CLI_KEYLESS=0` before an interact session.
+- **Government and Developer indexes:** `firecrawl-cli gov` and `firecrawl-cli developer`
+  are API-direct (`POST /v2/search/gov` and `/v2/search/developer`). They need no
+  vendor binary or version, work keyless, send `FIRECRAWL_API_KEY` as a Bearer
+  header when it is present (higher rate limits), honor `FIRECRAWL_API_URL` only
+  over https or to a loopback host, refuse redirects, and share the envelope,
+  failure shapes, and redaction with every other verb. `gov` is free
+  (`credits_spent` 0, no credit read, no reservation). `developer` keyed
+  reserves 2 credits per 10 results and reads credit-usage before and after;
+  keyless is ledger-free and the envelope's `degraded` names the unchecked
+  account floor. Enum and bounds errors exit 4 before any network call; an API
+  400 exits 1 and carries the API's own message. Results live in
+  `data.data.web[]` for `gov`, and in `data.results[]` plus `partial` for
+  `developer`; the `repos` / `sources` echoes appear only when `--repos` or
+  `--sources` is passed. Developer ids are `doc:`, `issue:`, `pull_request:`,
+  `readme:`, and, with no `--types`, possibly `web:` pages (forum threads,
+  blogs, docs mirrors): on 2026-10-30 they were 14 of the 40 results from four
+  untyped calls and none from five typed ones. `coverage`, when the API sends it,
+  says why a type is missing; it was absent from all 12 responses observed on
+  2026-10-30, so infer a missing type from `--types` and the id kinds returned.
+  `gov` covers US material only; an excerpt can be a historical version or bill
+  text, so verify before citing, and no results does not mean no law.
+- **`search --categories developer`:** still goes through `POST /v2/search`
+  (vendor CLI 1.19.26 rejects the category client-side, firecrawl/cli#222),
+  still needs `FIRECRAWL_API_KEY`, and returns the web-result shape with no
+  filters or passages. Prefer the `developer` verb; keep the category for
+  weighing developer sources inside a web search. Every other category goes
+  through the vendor CLI.
+- **Alexandria:** Firecrawl's provider catalogue (SEC EDGAR, FRED, CourtListener,
+  FEC, SAM.gov, Companies House, and about 380 more) is not wrapped. Discovery
+  needs an API key and vendor 1.26.x, and execution bills per capability; it
+  waits on the vendor pin move (#473).
 - **JSON envelope:** `ok`, `surface`, `verb`, `credits_spent`,
   `credits_remaining`, `budget_remaining`, `degraded`, `error`, and `data`.
   Unavailable credit values may be null; `error` supplies a code, message,
@@ -167,14 +231,34 @@ exit dictionary; it makes no vendor request.
   within the cumulative daily raise bound (default 500). Ledger state lives
   under `~/.claude/state/firecrawl-cli/`; `capabilities --json` lists the
   budget settings and their environment overrides.
+- **Account balance:** a refusal because the Firecrawl account is below the
+  floor (an overdrawn account reports a negative `remainingCredits`) names the
+  balance and the operator remedy, a top-up or the billing-cycle reset, never
+  `--raise-budget`, which lifts only the session or day bucket. A keyed
+  `developer` refusal also names the keyless rerun,
+  `env -u FIRECRAWL_API_KEY firecrawl-cli developer ...` (dotfiles #2105), except after
+  a keyless refusal or during its cooldown, when that rerun would fail too.
+- **Vendor binary:** the vendor-backed verbs (fetch, extract, shot, act, agent,
+  interact, search, map, raw) and the pre-call credit read run the vendor
+  `firecrawl` CLI, pinned at 1.19.26. Nothing in this repo installs it; reinstall
+  with `pnpm add -g firecrawl-cli@1.19.26`, with pnpm's global bin directory
+  (`pnpm bin -g`) on PATH. The 2026-10-28 wipe removed it without a trace (dotfiles #2105).
+  With no `FIRECRAWL_API_KEY` and no stored vendor login, the vendor prints its
+  interactive login menu instead of JSON; the wrapper reports
+  `credentials_missing` (exit 1, not retryable) and names the remedy: set the
+  key in that process's environment, or run `firecrawl login` once on the host.
+  Free-first-eligible calls never reach that read: they run keyless.
 - **Interaction:** never rely on an implicit last session. Both
   `firecrawl-cli interact "<prompt>" --scrape-id <id> --json` and
   `firecrawl-cli interact stop --scrape-id <id> --json` require the ID.
   Code mode (`--code` with optional `--node`, `--python`, or `--bash`) needs
   `--allow-code-exec --reason "<reason>"` on that invocation; consent is never
   persisted. The same gate applies to raw interact code calls.
-- **Gate scope:** budget and code-mode gates cover every Firecrawl call; the
-  MCP that once bypassed them is retired (#1178).
+- **Gate scope:** the budget gate covers every paid Firecrawl call (`gov`,
+  keyless `developer`, and every free-first keyless call are free and outside
+  the ledger by design) and the
+  code-mode gate every code call; the MCP that once bypassed them is retired
+  (#1178).
 - **Local documents and output:** PDFs use the `papers` skill's local
   extraction first and `firecrawl-cli fetch <path>` only on failure; all
   other local document formats use `firecrawl-cli fetch <path>` first.
@@ -606,15 +690,15 @@ the pre-existing `Bash(python3:*)` allow. A flag held in a variable or a raw
 API call with the key goes around the rules the same way. Agents spell
 confirm flags plainly and call the installed command, never the module.
 
-**`stripe-api ACCOUNT METHOD PATH`** (ACCOUNT is a configured public product alias) calls the
+**`stripe-api ACCOUNT METHOD PATH`** (ACCOUNT is a name from the account map, `stripe-accounts.json`) calls the
 Stripe REST API directly with that account's restricted live key. Whatever the
 key grants is reachable. A 403 means the key lacks that resource; grant it in
 the dashboard rather than switching keys.
 
 ```bash
-stripe-api prbot GET /v1/subscriptions -d status=active -d limit=100 --paginate
-stripe-api startupbros GET /v1/customers/search -d "query=email:'a@example.com'"
-stripe-api startupbros POST /v1/webhook_endpoints/we_123 -d 'enabled_events[]=invoice.paid'
+stripe-api acme GET /v1/subscriptions -d status=active -d limit=100 --paginate
+stripe-api acme_shop GET /v1/customers/search -d "query=email:'a@example.com'"
+stripe-api acme_shop POST /v1/webhook_endpoints/we_123 -d 'enabled_events[]=invoice.paid'
 ```
 
 - Keys resolve env `STRIPE_RK_<ACCOUNT>`, then BWS (same
@@ -1179,33 +1263,39 @@ The secrets runbook keeps credentials out of ambient state on purpose. A
 ## Install mechanics
 
 Every deployed copy is a **symlink**, so edits to the versioned source take
-effect immediately — no re-install step. `lib/manifest.sh`'s
-`DOTFILES_LINKS` maps each wrapper (`bin/gsc`, `bin/dfs`,
+effect immediately — no re-install step. `./setup` links each wrapper that
+`lib/manifest.sh`'s `DATA_CLIS` names (`bin/gsc`, `bin/dfs`,
 `bin/exa-cli`, `bin/firecrawl-cli`, `bin/ga4`,
-`bin/discord-cli`, `bin/resend-cli`, `bin/stripe-api`, `bin/posthog-api`, `bin/supabase-api`, `bin/fal-api`, `bin/vastai`, `bin/vast-ssh`) to `~/.local/bin/`, applied by `install.sh` through
-`lib/link.sh` as a direct symlink into the repo checkout. Separately,
-`sync.sh` symlinks the whole `bin` directory to
-`~/.claude/bin` (not on PATH), so `gsc.py`, `ga4.py`, `discord_cli.py`, `resend_cli.py`, `stripe_api.py`, `posthog_api.py`, `supabase_api.py`, `fal_api.py`, `dfs.py`, and `exa.py` resolve
+`bin/discord-cli`, `bin/resend-cli`, `bin/stripe-api`, `bin/posthog-api`, `bin/supabase-api`, `bin/fal-api`, `bin/vastai`, `bin/vast-ssh`) into `~/.local/bin/` as a direct symlink into the checkout.
+A path there that already holds something else (a `vastai` of your own, a link
+into another copy) is left alone and named in setup's `commands` row, and that
+wrapper still runs as `~/.claude/bin/<name>`; `./setup --check` names any not yet
+linked. `install.sh` links the same list on the maintainer's machines, through
+`DOTFILES_LINKS` rows built from `DATA_CLIS`. Separately, `./setup` links the
+whole `bin` directory to `~/.claude/bin` (not on PATH), so `gsc.py`, `ga4.py`, `discord_cli.py`, `resend_cli.py`, `stripe_api.py`, `posthog_api.py`, `supabase_api.py`, `fal_api.py`, `dfs.py`, and `exa.py` resolve
 back into the checkout the same way. `resend-cli` additionally needs the
 pinned vendor prefix from `scripts/resend-cli-install.sh install`
 (see "Resend" above); the wrapper's `--where` says whether it is converged.
 
-`gsc` needs a venv (local and disposable — recreate per the wrapper header).
+`gsc` needs a venv (local and disposable): `/hov-setup` offers to build it, or run
+`bash plugins/hov-stack/skills/hov-setup/scripts/venv-install.sh gsc`, which installs the pinned
+google-api-python-client and google-auth (`ga4` uses the same venv).
 `dfs`, `exa-cli`, and `firecrawl-cli` are stdlib-only (HTTP Basic, an `x-api-key`
 header, and a subprocess of the vendor CLI respectively), so none has a venv to rot.
 
-`vastai` needs a venv as well: `uv venv ~/.local/share/vastai-cli/venv --python 3.12`
+`vastai` needs a venv as well: `/hov-setup` offers it, or `bash plugins/hov-stack/skills/hov-setup/scripts/venv-install.sh vastai`;
+by hand, `uv venv ~/.local/share/vastai-cli/venv --python 3.12`
 then `uv pip install --python ~/.local/share/vastai-cli/venv/bin/python vastai==1.8.3`
 (the wrapper prints both on exit 3; `VASTAI_VENV` relocates it). The vendor
 binary stays off PATH on purpose: only the wrapper's name is in the
 `settings.json` allow list, and the vendor's `update` and `install.sh` paths are
-never used. To roll back, revert the two `DOTFILES_LINKS` rows
-(`bin/vastai`, `bin/vast-ssh`) and the two allow entries, run
-`dotup`, and remove the venv directory; the API key and the ssh key are deleted
+never used. To roll back, drop `vastai` and `vast-ssh` from `DATA_CLIS` and
+the two allow entries, delete the two links in `~/.local/bin` (setup never
+removes one), and remove the venv directory; the API key and the ssh key are deleted
 in the vast.ai console, since the agent key cannot delete keys.
 
-To roll back `firecrawl-cli`, revert its `DOTFILES_LINKS` manifest row and
-re-run activation (`dotup`) to remove the command. Rollback is complete when
+To roll back `firecrawl-cli`, drop it from `DATA_CLIS` and delete
+`~/.local/bin/firecrawl-cli`. Rollback is complete when
 `firecrawl-cli --version` reports command-not-found and harness-doctor checks
 31 and 32 read dormant for it. Orphaned ledger reservations expire by their
 lifetime and need no cleanup.

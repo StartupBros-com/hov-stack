@@ -38,16 +38,26 @@ name: Repin reconcile
 # PR to open by hand.
 
 on:
-  # A merged repin publishes its draft at once instead of at the next scheduled run.
+  # Every push to main. A merged repin publishes its draft at once, and a push that
+  # leaves an open card BEHIND gets a fresh card at once: main's sha is part of the
+  # card's key, so this run opens a new card and repin-land.sh closes the stale one.
+  # A run with no drift opens nothing and takes under a minute.
   push:
     branches: [main]
-    paths: ['.claude-plugin/marketplace.json']
+  # A finished Release run: release.yml has just staged a plugin's draft (hov-stack#438).
+  # Release runs on a tag, so there is no branches filter; one would be matched against
+  # the tag and never fire. The run still checks out main, never the tag. There is no
+  # conclusion gate either: concurrency is per workflow, so a run whose job was skipped
+  # would still take the pending slot and cancel a pending push run, and reconciling
+  # after a failed stage is as safe as any other run.
+  workflow_run:
+    workflows: [Release]
+    types: [completed]
   schedule:
-    # Nothing wakes this workflow when a plugin stages a draft, so the schedule sets
-    # how long a draft waits for its card. GitHub delays and drops scheduled runs: on
-    # 2026-10-17 the hourly '23 * * * *' ran seven times, 2.2-5.3 hours apart. Four ticks
-    # an hour, all off :00 (where every scheduled job on GitHub piles up), give it
-    # more chances. A run with no drift opens nothing and takes about 30 seconds.
+    # The fallback when neither event above arrives. GitHub delays and drops scheduled
+    # runs: on 2026-10-17 the hourly '23 * * * *' ran seven times, 2.2-5.3 hours apart,
+    # and from 2026-10-29 to 2026-11-05 four ticks an hour delivered 27 runs of about 670.
+    # The ticks stay off :00, where every scheduled job on GitHub piles up.
     - cron: '8,23,38,53 * * * *'
   workflow_dispatch:
     inputs:
