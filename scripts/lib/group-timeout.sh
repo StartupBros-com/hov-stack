@@ -18,7 +18,7 @@
 #   command, and 125 after stopping it if the deadline timer itself failed.
 #   Without setsid (not Linux), falls back to `timeout`.
 group_timeout() {
-  local grace='' kill_after=0 secs secs_ms grace_ms=0 secs_arg ticks='' pid watcher rc=0 fired
+  local grace='' kill_after=0 secs secs_ms grace_ms=0 secs_arg ticks='' pid watcher ready rc=0 fired
   # Read here: in the arguments of a backgrounded command, $BASHPID is the child's own pid.
   local caller=$BASHPID
   while [ $# -gt 0 ]; do
@@ -58,15 +58,19 @@ group_timeout() {
   # would die with the caller when something cancels that group (an enclosing timeout, a
   # Ctrl-C), while the command, safe in its own session, ran on with no deadline at all.
   # Plain `timeout` keeps a process group of its own for the same reason.
-  setsid "$BASH" -c "$(declare -f _group_timeout_watch)"'
+  # The watcher writes its pid on the pipe once its TERM trap is set, and the pipe ends
+  # when it exits. It is never signalled before that line: until it execs it is a fork of
+  # this shell, and bash runs this shell's EXIT trap in a fork that a signal kills (or drops
+  # the signal, leaving the deadline to run out). #509's CI saw the test's `rm -rf` run so.
+  exec {ready}< <(exec setsid "$BASH" -c "$(declare -f _group_timeout_watch)"'
 _group_timeout_watch "$@"' group-timeout "$secs_arg" "$ticks" "$pid" "$fired" "$caller" \
-    >/dev/null 2>&1 </dev/null &
-  watcher=$!
+    2>/dev/null </dev/null)
   wait "$pid" || rc=$?
   # Once the command is gone a pending grace still runs out (it reaps stragglers); an
   # unfired watcher is stopped.
-  if [ ! -e "$fired.term" ]; then kill "$watcher" 2>/dev/null; fi
-  wait "$watcher" 2>/dev/null || true
+  if [ ! -e "$fired.term" ] && read -r -u "$ready" watcher; then kill "$watcher" 2>/dev/null; fi
+  while read -r -u "$ready" _; do :; done
+  exec {ready}<&-
   if [ -e "$fired.err" ]; then
     echo 'group_timeout: the deadline timer failed, so the command was stopped' >&2
     rc=125
@@ -107,9 +111,15 @@ _group_timeout_ms() {
 _group_timeout_watch() {
   local secs=$1 ticks=$2 pid=$3 fired=$4 caller=$5 s=''
   trap 'kill "$s" 2>/dev/null; exit 0' TERM
-  sleep "$secs" & s=$!
+  # A cancelled caller has closed the pipe; writing to it must not end the deadline.
+  trap '' PIPE
+  sleep "$secs" >/dev/null & s=$!
+  # Safe to signal from here (see group_timeout).
+  echo "$$"
   # A timer that fails must not leave the command unbounded: record it and stop the group.
   wait "$s" || : >"$fired.err"
+  # Firing: a late stop from group_timeout must not cut the grace short.
+  trap '' TERM
   : >"$fired.term"
   kill -TERM -- "-$pid" 2>/dev/null
   if [ -n "$ticks" ]; then

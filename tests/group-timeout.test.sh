@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # group-timeout.test.sh: scripts/lib/group-timeout.sh behaves as a drop-in for `timeout`,
 # bounds the command's whole process group, and keeps its deadline when the caller is
-# cancelled (#450; the outer-cancellation and duration cases come from #509's review).
+# cancelled (#450; the outer-cancellation and duration cases come from #509's review, the
+# caller-fork case from its CI).
 #
 # Timing cases put bounds of seconds around sub-second deadlines, so a loaded runner does
 # not flake them.
@@ -101,6 +102,24 @@ if command -v setsid >/dev/null 2>&1; then
   within 'a failed timer stops the command' 3000 $((t1 - t0))
   if grep -qF 'timer failed' "$TMP/err"; then ok; else bad 'a failed timer: no diagnostic'; fi
 fi
+
+# A call never signals a fork of its caller. Until the deadline watcher execs it is one, and
+# bash runs the caller's EXIT trap in a fork that a signal kills, or drops the signal and
+# leaves the deadline to run out (in #509's CI, this test's own `rm -rf "$TMP"` ran mid-run).
+# The watcher's fork runs `declare -f` before it execs, so a slow `declare` holds that window
+# open on every call: the helper before the fix failed 20 of 20. Should the helper stop
+# calling `declare` there, this case loses its grip but cannot fail falsely.
+cat >"$TMP/fast.sh" <<'EOF'
+. "$1"
+out=$2 main=$BASHPID
+trap '[ "$BASHPID" = "$main" ] || echo x >>"$out/foreign"' EXIT
+declare() { sleep 0.05; builtin declare "$@"; }
+for ((i = 0; i < 10; i++)); do group_timeout 2 true || echo "$?" >>"$out/status"; done
+EOF
+timeout 60 bash "$TMP/fast.sh" "$LIB" "$TMP"
+check 'a run of fast calls finishes' 0 $?
+check "no call ran the caller's EXIT trap in a fork" 0 "$(cat "$TMP/foreign" 2>/dev/null | wc -l)"
+check 'every fast call returned the command status' 0 "$(cat "$TMP/status" 2>/dev/null | wc -l)"
 
 leftover=$(find "$TMP" -maxdepth 1 -name 'group-timeout.*' | wc -l)
 check 'no scratch files are left behind' 0 "$leftover"
