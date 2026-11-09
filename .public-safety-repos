@@ -9,6 +9,7 @@
 # StartupBros-com/hov-marketplace, the marketplace's name before the rename: dated
 # records and workflow-path fixtures keep it as history, and GitHub redirects it.
 # A public repository the tree never cites need not be listed.
+StartupBros-com/.github   # the organization's default community health files (created 2026-11-09)
 StartupBros-com/compound-engineering-pi
 StartupBros-com/design-rails
 StartupBros-com/discord-leaver
