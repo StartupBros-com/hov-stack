@@ -222,11 +222,17 @@ Never start a delete without approval. vercel's own delete confirmation
 (skipped only by `rm --yes` or `api --dangerously-skip-permissions`) is a
 terminal prompt that a headless agent cannot answer.
 
-Read traps (vercel 51.2.1): with `--format json`, progress lines go to stderr,
-so never merge the streams into the JSON parse (send stderr to a file, e.g.
-`2>vercel.err`, and read it on failure); `vercel inspect <url> --logs`
-writes the build log to stderr with an empty stdout, so capture `2>&1`; and
-`vercel logs` shows only the current git branch unless given `--no-branch`.
+Read traps (rechecked read-only on vercel 65.4.0): with `--format json`,
+stdout is clean JSON and the `Vercel CLI 65.4.0` banner goes to stderr, so never
+merge the streams into the JSON parse (send stderr to a file, e.g.
+`2>vercel.err`, and read it on failure); `vercel inspect <url> --logs` writes
+the build log to stderr with an empty stdout, so capture `2>&1`. In
+non-interactive mode a command with no linked project and no `--scope` exits
+with `missing_scope` and a team list, so pass `--scope <team>` (and `--project
+<name>` for `vercel logs`). The 51.2.1 trap that `vercel logs` shows only the
+current git branch is gone: it lists all environments by default, and
+`--no-branch` is now rejected with exit 2 ("was removed and has no effect"), so
+do not pass it.
 `vercel ls <name>` takes the project name (`prbot`), not a directory name.
 
 ## DataForSEO — `dfs`
@@ -240,7 +246,7 @@ Put `--json` and other global flags after the subcommand — that's the prompt-f
 
 ## Firecrawl — `firecrawl-cli`
 
-Verbs: fetch, extract, shot, act, agent, interact, search, gov, developer, map, raw. `gov` (US law: statutes, regulations, opinions; free, keyless, jurisdiction/court/citation filters) and `developer` (code, issue, PR and docs questions with matched passages; keyless first, 2 credits per 10 results when it runs keyed) are API-direct and work without the vendor binary; routing lives in the `firecrawl-gov-index` and `firecrawl-developer-index` skills. Two or more URLs through the vendor CLI write into the working directory; the wrapper fans out. `raw` is charged the vendor's reported `creditsUsed` when the output shows finished work (a `completed`, `failed` or `cancelled` job, or no job status); any other raw call, keyed `research` included, holds 100 of the session's 300 credits and counts all 100 as spent 30 minutes later, so prefer a shaped verb; add vendor `--json` after `--` for `research` and `search` only, since `crawl` and `monitor` print JSON by default and reject it. Free-first (dotfiles #2118): calls whose keyless answer matched the keyed one (a URL fetched to summary, markdown, links or html, shot, web or images search at `--limit` 10 or less, developer at `--limit` 10 or less, raw `research search-papers` and `search-github`) try Firecrawl's free keyless tier first, key or not, spend nothing, and run keyed once when it refuses; `FIRECRAWL_CLI_KEYLESS=0` opts out. With no `FIRECRAWL_API_KEY` and no stored vendor login, every other vendor-backed call exits 1 with `credentials_missing` at its credit read. Verbs, flags, and budgets: `harness/data-source-clis.md`. The Firecrawl MCP is retired; there is no other path.
+Verbs: fetch, extract, shot, act, agent, interact, search, gov, developer, map, raw. `gov` (US law: statutes, regulations, opinions; free, keyless, jurisdiction/court/citation filters) and `developer` (code, issue, PR and docs questions with matched passages; keyless first, 2 credits per 10 results when it runs keyed) are API-direct and work without the vendor binary; routing lives in the `firecrawl-gov-index` and `firecrawl-developer-index` skills. Two or more URLs through the vendor CLI write into the working directory; the wrapper fans out. `raw` is charged the vendor's reported `creditsUsed` when the output shows finished work (a `completed`, `failed` or `cancelled` job, or no job status); any other raw call, keyed `research` included, holds 100 of the session's 300 credits and counts all 100 as spent 30 minutes later, so prefer a shaped verb (discovery-only Alexandria calls such as `find-tools` and `list` are charged 0; `search --sources alexandria` needs a key and `search --categories` takes `research`, `pdf`, `developer` and `gov`, the last alone); add vendor `--json` after `--` for `research` and `search` only, since `crawl` and `monitor` print JSON by default and reject it. Free-first (dotfiles #2118): calls whose keyless answer matched the keyed one (a URL fetched to summary, markdown, links or html, shot, web or images search at `--limit` 10 or less, developer at `--limit` 10 or less, raw `research search-papers`) try Firecrawl's free keyless tier first, key or not, spend nothing, and run keyed once when it refuses; `FIRECRAWL_CLI_KEYLESS=0` opts out. With no `FIRECRAWL_API_KEY` and no stored vendor login, every other vendor-backed call exits 1 with `credentials_missing` at its credit read. Verbs, flags, and budgets: `harness/data-source-clis.md`. The Firecrawl MCP is retired; there is no other path.
 
 ## WhatsApp — direct `wacli` with the canonical store
 

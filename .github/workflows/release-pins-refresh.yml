@@ -208,12 +208,13 @@ jobs:
             fi
           } > "$RUNNER_TEMP/pr-body.md"
 
+          subject="$(./release/scripts/pins-pr-title.sh "$PLAN_FILE")"
           if [ "$branch_exists" = false ]; then
             git config user.name 'github-actions[bot]'
             git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
             git checkout -b "$BRANCH"
             git add "$INSTALL_RELEASE"
-            git commit -m 'chore(hov-setup): move install-release pins to current releases'
+            git commit -m "$subject"
             git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "$BRANCH"
           fi
           if [ "$HAVE_BOT" != true ]; then
@@ -221,7 +222,7 @@ jobs:
             exit 0
           fi
           gh pr create --base main --head "$BRANCH" \
-            --title 'chore(hov-setup): move install-release pins to current releases' \
+            --title "$subject" \
             --body-file "$RUNNER_TEMP/pr-body.md"
 
       - name: Prove the pins PR and close superseded ones

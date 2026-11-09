@@ -16,6 +16,23 @@ export CLAUDE_SEAM_DIR
 # not-yet-set SANDBOX_HOME instead of tripping set -u.
 trap 'rm -rf "$CLAUDE_SEAM_DIR" ${SANDBOX_HOME:+"$SANDBOX_HOME"}' EXIT
 
+# A mise shim for node or python3 cannot survive the HOME override below: from this
+# directory (under the real HOME) it finds the real ~/.config/mise/conf.d, looks
+# its trust up under the scratch HOME and exits non-zero. Resolve both to real
+# binaries first, and cap mise's config walk at the real HOME. Same pin as
+# tests/run-claude-tests.sh (pin_real_binaries); keep the two in step.
+PIN_BIN="$(mktemp -d)" || exit 1
+trap 'rm -rf "$CLAUDE_SEAM_DIR" "$PIN_BIN" ${SANDBOX_HOME:+"$SANDBOX_HOME"}' EXIT
+for _name in node python3; do
+  _found=$(command -v "$_name" 2>/dev/null) || continue
+  case $_found in */shims/*) ;; *) continue ;; esac
+  _real=$(mise which "$_name" 2>/dev/null) || continue
+  if [ -n "$_real" ] && [ -x "$_real" ] && [ "$_real" != "$_found" ]; then
+    ln -sf "$_real" "$PIN_BIN/$_name" && export PATH="$PIN_BIN:$PATH"
+  fi
+done
+export MISE_CEILING_PATHS="${MISE_CEILING_PATHS:-$HOME}"
+
 # Same leak class for $HOME (issue #526): guard denials append papercut records
 # under os.homedir(), so a test file that neither spawns through lib/harness
 # nor requires it would write them into the REAL ~/.claude/papercuts. The

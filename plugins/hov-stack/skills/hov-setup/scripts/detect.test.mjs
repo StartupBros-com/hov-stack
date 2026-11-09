@@ -20,7 +20,7 @@ const HOV_ALL = [...ORDER, ...EXTRA_ORDER];
 const ALL = offersJson.offers.map((o) => o.name);
 // hov-stack's own commands that run from a Python environment /hov-setup builds; ./setup links them.
 const VENV_NAMES = ["gsc", "ga4", "vastai"];
-const PLATFORMS = ["darwin-arm64", "linux-x86_64", "linux-aarch64"];
+const PLATFORMS = ["darwin-arm64", "darwin-x86_64", "linux-x86_64", "linux-aarch64"];
 
 // A fake `claude` that logs each call and answers the two list commands from files. It uses
 // /bin/cat because the tests give it a PATH that holds no system directories.
@@ -87,7 +87,8 @@ function detectEnv(dir, env, ...args) {
 
 // It runs from the fake's directory, so a relative path a test writes there would resolve.
 function detectAt(script, dir, env, ...args) {
-  return spawnSync(process.execPath, [script, ...args], {
+  const preload = join(dir, "platform-preload.mjs");
+  return spawnSync(process.execPath, [...(existsSync(preload) ? ["--import", preload] : []), script, ...args], {
     encoding: "utf8",
     cwd: dir,
     env: {
@@ -109,6 +110,50 @@ function report(dir, env = {}) {
 }
 
 const row = (rep, name) => rep.plugins.find((p) => p.name === name);
+const fakeMac = (dir, { arch = "x64", output = "0", status = 0, missing = false } = {}) => {
+  writeFileSync(join(dir, "platform-preload.mjs"), `
+    Object.defineProperty(process, "platform", { value: "darwin" });
+    Object.defineProperty(process, "arch", { value: ${JSON.stringify(arch)} });
+  `);
+  if (!missing) {
+    writeFileSync(join(dir, "sysctl"), `#!/bin/sh
+printf '%s\\n' "$*" >> "$FAKE_DIR/sysctl-calls"
+printf '%s\\n' '${output}'
+exit ${status}
+`);
+    chmodSync(join(dir, "sysctl"), 0o755);
+  }
+};
+
+for (const [label, probe, expected] of [
+  ["Intel", { output: "0" }, "darwin-x86_64"],
+  ["Rosetta", { output: " \n\t1 \n" }, "darwin-arm64"],
+  ["missing sysctl", { missing: true }, "darwin-x86_64"],
+  ["failed sysctl with misleading output", { output: "1", status: 1 }, "darwin-x86_64"],
+  ["unexpected sysctl output", { output: "2" }, "darwin-x86_64"],
+  ["malformed Rosetta output", { output: "1 extra" }, "darwin-x86_64"],
+]) {
+  test(`native macOS detection distinguishes ${label}`, () => {
+    withFake({}, (dir) => {
+      fakeMac(dir, probe);
+      const rep = report(dir, { HOV_SETUP_PLATFORM: "" });
+      assert.equal(rep.platform, expected);
+      if (!probe.missing) assert.equal(readFileSync(join(dir, "sysctl-calls"), "utf8"), "-n sysctl.proc_translated\n");
+    });
+  });
+}
+
+test("native ARM macOS and an explicit platform override do not probe Rosetta", () => {
+  withFake({}, (dir) => {
+    fakeMac(dir, { arch: "arm64", output: "1" });
+    assert.equal(report(dir, { HOV_SETUP_PLATFORM: "" }).platform, "darwin-arm64");
+    assert.equal(existsSync(join(dir, "sysctl-calls")), false);
+    fakeMac(dir, { output: "1" });
+    assert.equal(report(dir, { HOV_SETUP_PLATFORM: "darwin-x86_64" }).platform, "darwin-x86_64");
+    assert.equal(existsSync(join(dir, "sysctl-calls")), false);
+  });
+});
+
 const user = (name, extra = {}) => ({
   id: `${name}@hov`,
   scope: "user",
@@ -533,12 +578,31 @@ test("linux platforms install synthetic-panel with the CPU torch backend; macOS 
   });
 });
 
+test("Intel Macs offer supported tools and keep cass and synthetic-panel unavailable", () => {
+  withFake({ pathBins: ["cass", "synthetic-panel"] }, (dir) => {
+    const rep = report(dir, { HOV_SETUP_PLATFORM: "darwin-x86_64" });
+    for (const [name, line] of [
+      ["gh", `bash "${join(here, "install-release.sh")}" gh`],
+      ["jeffreys-skills", `bash "${join(here, "install-release.sh")}" jsm`],
+      ["ast-grep", "uv tool install ast-grep-cli"],
+    ]) {
+      assert.deepEqual([row(rep, name).state, row(rep, name).next], ["absent", line], name);
+    }
+    assert.deepEqual([rep.helpers[0].state, rep.helpers[0].next], ["absent", `bash "${join(here, "install-release.sh")}" uv`]);
+    for (const name of ["cass", "synthetic-panel"]) {
+      const p = row(rep, name);
+      assert.deepEqual([p.state, p.path], ["not-applicable", null], name);
+      assert.equal(p.next, "only offered on darwin-arm64, linux-x86_64, linux-aarch64", name);
+    }
+  });
+});
+
 test("an unsupported platform makes every tool, paid-skills row and helper not applicable; plugins are unaffected", () => {
   withFake({ pathBins: ["gh"] }, (dir) => {
-    const env = { HOV_SETUP_PLATFORM: "darwin-x86_64" };
+    const env = { HOV_SETUP_PLATFORM: "freebsd-x64" };
     const rep = report(dir, env);
-    assert.equal(rep.platform, "darwin-x86_64");
-    const want = `only offered on ${PLATFORMS.join(", ")}`;
+    assert.equal(rep.platform, "freebsd-x64");
+    const want = (o) => `only offered on ${Object.keys(o.install).join(", ")}`;
     const programs = rep.plugins.filter((x) => x.kind === "tool" || x.kind === "paid-skills");
     assert.equal(programs.length, 10);
     for (const p of programs) {
@@ -546,11 +610,11 @@ test("an unsupported platform makes every tool, paid-skills row and helper not a
       const next = `only offered on ${Object.keys(offer.install).join(", ")}`;
       assert.deepEqual([p.name, p.state, p.next, p.path], [p.name, "not-applicable", next, null]);
     }
-    assert.deepEqual(rep.helpers.map((h) => [h.state, h.next]), [["not-applicable", want]]);
+    assert.deepEqual(rep.helpers.map((h) => [h.state, h.next]), [["not-applicable", want(offersJson.helpers[0])]]);
     assert.equal(row(rep, "sign-it").state, "absent");
     assert.equal(row(rep, CE).state, "absent");
     const t = detectEnv(dir, env);
-    assert.match(t.stdout, /^  gh: not applicable here: only offered on darwin-arm64, linux-x86_64, linux-aarch64$/m);
+    assert.match(t.stdout, /^  gh: not applicable here: only offered on darwin-arm64, darwin-x86_64, linux-x86_64, linux-aarch64$/m);
   });
 });
 
@@ -838,3 +902,4 @@ test("a marketplace Claude Code lists but these files do not, or that settings.j
     assert.equal(r.autoUpdate.next, null);
   });
 });
+

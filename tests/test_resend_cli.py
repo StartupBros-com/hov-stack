@@ -846,9 +846,13 @@ class LocalVendorTests(unittest.TestCase):
         root = Path(self.temp.name)
         bindings = root / "bindings.json"
         bindings.write_text(json.dumps({"project_id": PROJECT, "records": {}}))
+        # HOME is isolated so the vendor cannot write the operator's config,
+        # which also moves the wrapper's default prefix ($HOME/.local/lib/...)
+        # off the install setUp found: name that install explicitly.
         self.env = {
             "PATH": ORIGINAL_PATH,
             "HOME": str(root),
+            "RESEND_CLI_VENDOR_PREFIX": str(self.prefix),
             "RESEND_CLI_BINDINGS_FILE": str(bindings),
             "RESEND_CLI_STATE_DIR": str(root / "state"),
             "BWS_TOKEN_FILE": str(root / "no-token"),

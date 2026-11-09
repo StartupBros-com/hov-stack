@@ -4,8 +4,8 @@
 Consumer: harness-doctor check 32 and its planted-negative shell suite.
 Help-text drift only: silent Spark 1 -> spark-2 routing and the parse format
 undercount pass unchanged help. Billing and model routing need manual review.
-The parse --only-main-content API-side default is true, but CLI 1.19.26 help
-states false; the map deliberately records the CLI text. The injection check
+CLI 1.26.25 scrape/parse --only-main-content names the API default without
+stating a CLI default; the map records null. The injection check
 has no exposed CLI option (see the map's notes), so no default can be checked.
 Settings are read for permissions.allow keys only; no values elsewhere in the
 settings or vendor diagnostics are printed. No data command or network call.
