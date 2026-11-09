@@ -68,6 +68,48 @@ all_argv_is() {
 }
 no_calls() { [[ ! -s "$FIRECRAWL_TEST_LOG" ]] && ok || bad "$1: vendor invoked"; }
 
+# Vendor 1.26.25 category, discovery and Alexandria accounting contracts.
+fixture search-id
+run_cli search query --categories github --json
+status_is 4 'removed github category rejected'
+contains "$ERR" 'valid categories: research, pdf, developer, gov' 'removed category names valid list'
+no_calls 'removed category rejected before vendor contact'
+run_cli search query --categories gov,pdf --json
+status_is 4 'gov cannot combine with pdf'
+contains "$ERR" 'gov cannot be combined' 'gov combination explanation'
+no_calls 'gov combination rejected before vendor contact'
+run_cli search query --sources alexandria --json
+status_is 4 'alexandria without key or login refused'
+contains "$OUT$ERR" 'FIRECRAWL_API_KEY' 'alexandria remedy names key'
+no_calls 'alexandria refused before credit read or reservation'
+
+export CLAUDE_CODE_SESSION_ID='vendor-126-accounting'
+configure '{"default":{"text":"{\"data\":{\"tools\":[]}}"}}'
+run_cli raw --json -- find-tools query
+status_is 0 'discovery succeeds without reported cost'
+jcheck 'discovery envelope is free' "$OUT" "assert d['credits_spent']==0 and d['budget_remaining']==300"
+run_cli budget --json
+jcheck 'discovery ledger reserves and charges zero' "$OUT" "assert not d['data']['reservations'] and d['data']['session']['spent']==0 and d['data']['day_state']['spent']==0"
+
+for charge in 0 7; do
+  configure "{\"default\":{\"text\":\"{\\\"data\\\":{\\\"creditsCost\\\":$charge}}\"}}"
+  run_cli raw --json -- scrape --alexandria provider/cap --options '{}'
+  status_is 0 'alexandria execution succeeds'
+  jcheck 'alexandria execution uses exact creditsCost' "$OUT" "assert d['credits_spent']==$charge and d['budget_remaining']==300-$charge"
+  run_cli budget --json
+  jcheck 'alexandria execution holds only final charge' "$OUT" "r=list(d['data']['reservations'].values()); assert len(r)==1 and r[0]['amount']==$charge and r[0]['state']=='held'"
+done
+configure '{"default":{"text":"{\"data\":{}}"}}'
+run_cli raw --json -- unknown-vendor-command
+status_is 0 'unknown raw remains bounded'
+run_cli budget --json
+jcheck 'unknown raw retains 100-credit hold' "$OUT" "r=list(d['data']['reservations'].values()); assert len(r)==1 and r[0]['amount']==100 and r[0]['state']=='held'"
+run_cli raw --json -- alexandria feedback
+status_is 0 'alexandria feedback remains bounded'
+run_cli budget --json
+jcheck 'alexandria feedback adds its own bounded hold' "$OUT" "r=list(d['data']['reservations'].values()); assert len(r)==2 and all(x['amount']==100 and x['state']=='held' for x in r)"
+unset CLAUDE_CODE_SESSION_ID
+
 # U5/KTD9: status first, substring second; stdout is one JSON envelope.
 for scenario in quota injected rate-limit concurrency-limit unauthorized provider-failure; do
   case "$scenario" in
@@ -226,6 +268,13 @@ jcheck 'login menu names the missing credential' "$OUT" "e=d['error']; assert e[
 [[ "$(wc -l <"$FIRECRAWL_TEST_LOG")" -eq 1 ]] && ok || bad 'login menu preflight retried'
 omits "$ERR" 'failed transiently' 'login menu is not transient'
 omits "$ERR" 'harness-doctor check 32' 'login menu is not vendor drift'
+# Probed 2026-11-08 on vendor 1.26.25 with an empty HOME and no key: credit-usage exits 1
+# with this stderr and prints nothing on stdout; it must read as a missing credential.
+configure '{"credit-usage":{"stderr_text":"Error: Not authenticated. Set FIRECRAWL_API_KEY, pass --api-key, or run \"firecrawl login\" in a terminal.\n","exit":1}}'
+run_cli fetch https://x --json
+status_is 1 'not-authenticated error during credit preflight'
+jcheck 'not-authenticated names the missing credential' "$OUT" "e=d['error']; assert e['code']=='credentials_missing' and not e['retryable'], e"
+[[ "$(wc -l <"$FIRECRAWL_TEST_LOG")" -eq 1 ]] && ok || bad 'not-authenticated preflight retried'
 
 # Date-valued Retry-After and shell quoting are deterministic without a provider.
 RESULT=$(PYTHONDONTWRITEBYTECODE=1 python3 - "$MODULE" "$TMP/bin" "$TMP/work" <<'PY'
@@ -389,7 +438,7 @@ contains "$ERR" 'hint' 'empty result hint'
 ST=0
 HOME="$TMP/home" PATH="$TMP/no-vendor" "$CLI" fetch https://x --json >"$TMP/out" 2>"$TMP/err" || ST=$?
 status_is 4 'missing vendor'
-contains "$(cat "$TMP/err")" 'pnpm add -g firecrawl-cli@1.19.26' 'pinned reinstall remedy'
+contains "$(cat "$TMP/err")" 'pnpm add -g firecrawl-cli@1.26.25' 'pinned reinstall remedy'
 # Issue #2105: nothing installs the vendor under mise, so that path was a dead end.
 omits "$(cat "$TMP/err")" 'mise/installs/node' 'no dead mise remedy'
 
@@ -486,7 +535,7 @@ fixture scrape-json
 run_cli extract https://x -Q 'What is the title?' --json
 status_is 0 'extract prompt'
 argv_is 'extract prompt argv' "assert d==['scrape','https://x','--only-main-content','--query','What is the title?','--json']"
-# #2123: vendor 1.19.26 prints a --query answer, and an empty search, as text despite --json.
+# #2123: vendor 1.19.26 printed a --query answer, and an empty search, as text despite --json.
 configure '{"default":{"text":"Example Domain is a reserved page.\n","stderr_text":"Scrape ID: s-1\n"}}'
 run_cli extract https://x -Q 'What is this page?' --json
 status_is 0 'text query answer'
@@ -692,7 +741,7 @@ status_is 0 'full body'
 jcheck 'full body unbounded' "$OUT" "assert len(d['data']['data']['markdown'])==30000 and d['degraded']==['cost estimated, not measured']"
 argv_is 'full format' "assert '--full' not in d and d[d.index('--format')+1]=='markdown'"
 run_cli capabilities --json
-jcheck 'injection limitation' "$OUT" "assert d['data']['injection_check']=='unavailable through the vendor CLI v1.19.26; the API json-format option is not exposed'"
+jcheck 'injection limitation' "$OUT" "assert d['data']['injection_check']=='unavailable through the vendor CLI v1.26.25; the API json-format option is not exposed'"
 for verb in fetch extract; do
   run_cli "$verb" --help
   contains "$OUT" 'Injection check unavailable' "$verb injection help"
@@ -826,7 +875,7 @@ status_is 4 'research help without vendor is a normal missing-vendor error'
 jcheck 'missing research vendor envelope' "$OUT" "assert not d['ok'] and d['error']['code']==4 and d['credits_spent']==0 and d['credits_remaining'] is None"
 contains "$ERR" 'vendor firecrawl is missing from PATH' 'research help missing vendor detail'
 # Issue #2105: nothing installs the vendor into mise; name the pinned reinstall.
-contains "$ERR" 'pnpm add -g firecrawl-cli@1.19.26' 'missing vendor names the pinned reinstall'
+contains "$ERR" 'pnpm add -g firecrawl-cli@1.26.25' 'missing vendor names the pinned reinstall'
 no_calls 'missing research vendor invokes nothing'
 run_cli budget --json
 jcheck 'missing research vendor creates no reservation' "$OUT" "assert not d['data']['reservations'] and d['data']['session']['spent']==0"
@@ -1468,9 +1517,9 @@ PY
 # Issue #1175: search filters, search_id, fetch freshness and formats, and the API
 # transport for the one category the vendor CLI refuses client-side.
 fixture search-id
-run_cli search 'example query' --categories github,pdf --sources web,news --tbs qdr:w --limit 3 --json
+run_cli search 'example query' --categories research,pdf --sources web,news --tbs qdr:w --limit 3 --json
 status_is 0 'search filters accepted'
-argv_is 'search filters forwarded' "assert d==['search','example query','--limit','3','--categories','github,pdf','--sources','web,news','--tbs','qdr:w','--json'], d"
+argv_is 'search filters forwarded' "assert d==['search','example query','--limit','3','--categories','research,pdf','--sources','web,news','--tbs','qdr:w','--json'], d"
 jcheck 'search_id and measured cost' "$OUT" "assert d['ok'] and d['search_id']=='srch_fixture_1' and d['credits_spent']==2 and d['degraded'] is None"
 fixture search-id
 run_cli search 'example query' --location Germany --json
@@ -1479,7 +1528,7 @@ argv_is 'location forwarded to the vendor' "assert d[d.index('--location')+1]=='
 fixture search
 run_cli search 'example query' --json
 jcheck 'no search_id without a vendor id' "$OUT" "assert 'search_id' not in d and d['ok']"
-for bad in '--categories github,bogus' '--categories github,github' '--sources rss' '--tbs qdr:x' '--tbs yesterday'; do
+for bad in '--categories research,bogus' '--categories research,research' '--sources rss' '--tbs qdr:x' '--tbs yesterday'; do
   fixture search-id
   # shellcheck disable=SC2086
   run_cli search 'example query' $bad --json
@@ -1488,7 +1537,7 @@ for bad in '--categories github,bogus' '--categories github,github' '--sources r
 done
 run_cli search 'example query' --categories '' --json
 status_is 4 'empty categories refused'
-contains "$ERR" 'valid categories: github, research, pdf, developer' 'category list named'
+contains "$ERR" 'valid categories: research, pdf, developer, gov' 'category list named'
 run_cli search 'example query' --tbs qdr:x --json
 contains "$ERR" 'valid values: qdr:h, qdr:d, qdr:w, qdr:m, qdr:y' 'tbs values named'
 
@@ -1523,7 +1572,7 @@ status_is 4 'scrape-only format refused for a local parse'
 contains "$ERR" 'parse formats: markdown, html' 'parse format list named'
 
 run_cli capabilities --json
-jcheck 'capabilities search and format contract' "$OUT" "c=d['data']; assert c['search_categories']==['github','research','pdf','developer'] and c['api_only_categories']==['developer']; assert c['search_sources']==['web','images','news'] and c['search_tbs'][0]=='qdr:h'; assert 'site:host' in c['search_operators']; assert 'changeTracking' in c['fetch_formats']['scrape'] and 'changeTracking' not in c['fetch_formats']['parse']; assert {'--categories','--sources','--tbs'} <= set(c['verbs']['search']['flags']); assert {'--max-age','--format'} <= set(c['verbs']['fetch']['flags']); assert any('search_id' in w for w in c['warnings']) and any('--max-age 0' in w for w in c['warnings'])"
+jcheck 'capabilities search and format contract' "$OUT" "c=d['data']; assert c['search_categories']==['research','pdf','developer','gov'] and c['api_only_categories']==['developer']; assert c['search_sources']==['web','images','news','alexandria'] and c['search_tbs'][0]=='qdr:h'; assert 'site:host' in c['search_operators']; assert 'changeTracking' in c['fetch_formats']['scrape'] and 'changeTracking' not in c['fetch_formats']['parse']; assert {'--categories','--sources','--tbs'} <= set(c['verbs']['search']['flags']); assert {'--max-age','--format'} <= set(c['verbs']['fetch']['flags']); assert any('search_id' in w for w in c['warnings']) and any('--max-age 0' in w for w in c['warnings'])"
 contains "$(cd "$TMP/work" && HOME="$TMP/home" PATH="$TMP/bin" COLUMNS=400 "$CLI" search --help)" 'site:host' 'search help names the operators'
 contains "$(cd "$TMP/work" && HOME="$TMP/home" PATH="$TMP/bin" COLUMNS=400 "$CLI" fetch --help)" '--max-age 0 forces a live fetch' 'fetch help names the max-age rule'
 
@@ -1558,16 +1607,16 @@ jcheck 'vendor search never invoked for developer' "$(vendor_verbs)" "assert d a
 omits "$OUT$ERR" "$API_KEY" 'key never printed on success'
 fixture search-dev
 api_control "{\"status\":200,\"body\":$(cat "$TMP/fixtures/search-dev.json")}"
-run_api search 'example query' --categories github,developer --sources news --tbs qdr:d
+run_api search 'example query' --categories research,developer --sources news --tbs qdr:d
 status_is 0 'mixed categories go to the API without --json'
-api_request 'mixed request carries every filter' "assert d['body']=={'query':'example query','categories':['github','developer'],'sources':[{'type':'news'}],'tbs':'qdr:d'}"
+api_request 'mixed request carries every filter' "assert d['body']=={'query':'example query','categories':['research','developer'],'sources':[{'type':'news'}],'tbs':'qdr:d'}"
 jcheck 'bare developer output is the vendor payload' "$OUT" "assert d['id']=='srch_dev_1' and 'ok' not in d"
 fixture search-dev
 api_control "{\"status\":200,\"body\":$(cat "$TMP/fixtures/search-dev.json")}"
-run_api search 'example query' --categories github,developer --location Germany --json
+run_api search 'example query' --categories research,developer --location Germany --json
 status_is 0 'mixed categories with --json'
 jcheck 'mixed categories envelope' "$OUT" "assert d['ok'] and d['surface']=='search' and d['search_id']=='srch_dev_1' and d['credits_spent']==2"
-api_request 'location reaches the API body' "assert d['body']['location']=='Germany' and d['body']['categories']==['github','developer']"
+api_request 'location reaches the API body' "assert d['body']['location']=='Germany' and d['body']['categories']==['research','developer']"
 api_control '{"status":402,"body":{"success":false,"error":"Insufficient credits to perform this request."}}'
 run_api search 'example query' --categories developer --json
 status_is 1 'API 402 maps to quota'
@@ -1613,9 +1662,9 @@ no_api_calls 'bad base refused before the API'
 no_calls 'bad base refused before the vendor'
 fixture search-id
 api_control '{"status":200,"body":{}}'
-run_api search 'example query' --categories github --json
-status_is 0 'github category stays on the vendor CLI'
-argv_is 'github category forwarded to the vendor' "assert d[:2]==['search','example query'] and d[d.index('--categories')+1]=='github'"
+run_api search 'example query' --categories research --json
+status_is 0 'research category stays on the vendor CLI'
+argv_is 'research category forwarded to the vendor' "assert d[:2]==['search','example query'] and d[d.index('--categories')+1]=='research'"
 no_api_calls 'vendor category never hits the API'
 # A 3xx is a failure, never a hop: the key must not travel to a Location host.
 fixture search-dev
@@ -1970,16 +2019,20 @@ kl_shape 'schema plus markdown' keyed scrape-json extract https://x --schema '{"
 kl_shape 'question plus markdown' keyed scrape extract https://x -Q 'What is this page?' --format markdown
 kl_shape 'schema plus question' keyed scrape-json extract https://x --schema '{"type":"object"}' -Q 'What is this page?'
 kl_shape 'raw research help' keyed search-research raw -- research search-papers --help
-kl_shape 'raw research -h' keyed search-research raw -- research search-github -h
+kl_shape 'raw research -h' keyed search-research raw -- research search-papers -h
 kl_shape 'PDF summary' keyless parse fetch report.pdf
 kl_shape 'PDF markdown' keyless parse fetch report.pdf --full
 touch "$TMP/work/page.docx"
 kl_shape 'docx parse' keyed parse fetch page.docx
 kl_shape 'search' keyless search-id search 'example query'
-kl_shape 'search github,research web,images limit 10' keyless search-id search 'example query' --categories github,research --sources web,images --limit 10
+kl_shape 'search research web,images limit 10' keyless search-id search 'example query' --categories research --sources web,images --limit 10
 kl_shape 'search limit 11' keyed search-id search 'example query' --limit 11
 kl_shape 'search pdf category' keyed search-id search 'example query' --categories pdf
 kl_shape 'search news source' keyed search-id search 'example query' --sources news
+kl_shape 'search gov category' keyed search-id search 'example query' --categories gov
+kl_shape 'search alexandria source' keyed search-id search 'example query' --sources alexandria
+argv_is 'alexandria source forwarded' "assert d[d.index('--sources')+1]=='alexandria'"
+kl_shape 'removed research search-github is never keyless' keyed search-research raw -- research search-github query
 kl_configure '{"default":{"text":"Example Domain is a reserved page.\n","stderr_text":"Scrape ID: s-1\n"}}'
 run_kl_keyed extract https://x -Q 'What is this page?' --json
 status_is 0 'question alone keyless'

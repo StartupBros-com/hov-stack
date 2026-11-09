@@ -55,6 +55,8 @@ RAW_VALUE_FLAGS = frozenset({
     "--scrape-options", "--scrape-options-file", "--webhook",
     "--categories", "--sources", "--tbs", "--scrape-formats", "--max-age",
     "--location", "--country",
+    "--alexandria", "--options", "--request", "--request-id",
+    "--tool-detail", "--max-pages", "--formats",
     # Vendor 1.26.x gov filters; a host on that version passes them through raw.
     "--jurisdiction", "--court", "--court-type", "--cites", "--domain",
     # Wrapper developer filters (vendor 1.26.24's `firecrawl developer` dropped them).
@@ -82,15 +84,14 @@ PARSE_EXTENSIONS = {
     ".html", ".htm", ".pdf", ".docx", ".doc", ".odt", ".rtf", ".xlsx", ".xls",
 }
 INJECTION_CHECK = (
-    "unavailable through the vendor CLI v1.19.26; "
+    "unavailable through the vendor CLI v1.26.25; "
     "the API json-format option is not exposed"
 )
-SEARCH_CATEGORIES = ("github", "research", "pdf", "developer")
-# Vendor CLI 1.19.26 validates categories client-side and omits developer
-# (firecrawl/cli#222) while POST /v2/search accepts it, so that category is
-# answered by the API directly, through the same envelope and budget.
+SEARCH_CATEGORIES = ("research", "pdf", "developer", "gov")
+# The wrapper keeps developer API-direct through the same envelope and budget;
+# this path requires FIRECRAWL_API_KEY even though the vendor now accepts it.
 API_ONLY_CATEGORIES = frozenset({"developer"})
-SEARCH_SOURCES = ("web", "images", "news")
+SEARCH_SOURCES = ("web", "images", "news", "alexandria")
 TBS_VALUES = ("qdr:h", "qdr:d", "qdr:w", "qdr:m", "qdr:y")
 # API-direct verbs: the wrapper POSTs to these paths itself, so they need neither
 # the vendor binary nor its version (the vendor's own gov and developer commands
@@ -150,18 +151,19 @@ KEYLESS_COOLDOWN_CAP = 6 * 3600
 KEYLESS_SCRAPE_FORMATS = frozenset({"summary", "markdown", "links", "html"})
 KEYLESS_PARSE_FORMATS = frozenset({"summary", "markdown"})
 KEYLESS_SEARCH_SOURCES = frozenset({"web", "images"})
-KEYLESS_SEARCH_CATEGORIES = frozenset({"github", "research"})
-KEYLESS_RESEARCH_COMMANDS = frozenset({"search-papers", "search-github"})
+KEYLESS_SEARCH_CATEGORIES = frozenset({"research"})
+KEYLESS_RESEARCH_COMMANDS = frozenset({"search-papers"})
 KEYLESS_LIMIT = 10
 # Set by the first keyless refusal with no key to fall back on, so later targets
 # of the same call fail without sending another refused request.
 KEYLESS_REFUSED = None
 # This process's own copy of the cooldown, for when the marker cannot be written.
 KEYLESS_UNTIL = None
-# Vendor 1.19.26 prints these successes as text whatever --json says (#2123):
+# Vendor 1.19.26 printed these successes as text whatever --json says (#2123):
 # a --query answer (scrape.js:191-194, parse.js:212-215), and for a search whose
 # web, images and news buckets are all empty, "No results found." or nothing
-# (search.js:207-213).
+# (search.js:207-213). Rechecked on 1.26.25: search.js:319 still prints the text;
+# the scrape and parse --query paths were not rechecked.
 VENDOR_NO_RESULTS = "No results found."
 RESEARCH_BUCKET_NOTE = (
     "vendor counts only web, images and news results, so research-bucket "
@@ -170,7 +172,7 @@ RESEARCH_BUCKET_NOTE = (
 SEARCH_OPERATORS = (
     "quoted phrases, -term, site:host, inurl:term, intitle:term, related:host"
 )
-# Vendor help 1.19.26 lists these per surface; json needs a schema.
+# Vendor help 1.26.25 lists these per surface; json needs a schema.
 SCRAPE_FORMATS = (
     "markdown", "html", "rawHtml", "links", "images", "screenshot", "summary",
     "changeTracking", "json", "attributes", "branding",
@@ -559,7 +561,7 @@ class Budget:
 def reported_cost(payload):
     if not isinstance(payload, dict):
         return None
-    for key in ("creditsUsed", "credits_spent"):
+    for key in ("creditsUsed", "credits_spent", "creditsCost"):
         if credit_number(payload.get(key)):
             return payload[key]
     # Scrape and parse report their charge inside the page metadata.
@@ -587,7 +589,7 @@ def cost_final(payload, running=False):
     if "status" in payload:
         status = payload["status"]
         running = running or not (isinstance(status, str) and status in TERMINAL_JOB_STATES)
-    if any(credit_number(payload.get(key)) for key in ("creditsUsed", "credits_spent")):
+    if any(credit_number(payload.get(key)) for key in ("creditsUsed", "credits_spent", "creditsCost")):
         return not running
     metadata = payload.get("metadata")
     if isinstance(metadata, dict) and credit_number(metadata.get("creditsUsed")):
@@ -631,6 +633,8 @@ def read_credits(budget, timeout):
 def reservation_cost(args, surface):
     c = BUDGET.constants
     if args.verb == "raw":
+        if raw_discovery(args.vendor_args):
+            return 0, False
         return max(c["raw_estimate"], c["bounded_crawl"]), True
     if surface == "parse":
         return c["parse"], False
@@ -908,7 +912,9 @@ def keyed_invoke(args, surface, command, api, vendor_present, fallback):
         BUDGET.finish(key)
         return payload, notes
     reported = reported_cost(payload)
-    free_read = args.verb == "agent" and getattr(args, "status", False)
+    free_read = (args.verb == "agent" and getattr(args, "status", False)) or (
+        args.verb == "raw" and raw_discovery(command)
+    )
     cost = 0 if free_read else (reported if reported is not None else estimate)
     # Raw holds the bounded-crawl reservation unless the vendor reported a final
     # cost; a finished job's creditsUsed is the charge (#2117).
@@ -931,7 +937,7 @@ def keyed_invoke(args, surface, command, api, vendor_present, fallback):
     if not lag and vendor_present:
         try:
             after = read_credits(BUDGET, args.timeout)
-            if reported is None and before > after and entry is not None:
+            if not free_read and reported is None and before > after and entry is not None:
                 delta = before - after - cost
                 BUDGET.adjust(entry, delta)
                 BUDGET.spent += delta
@@ -1038,11 +1044,13 @@ FAILURE_SHAPES = (
      2, "provider_failure", "Firecrawl provider failure. {backoff}", "{retry}", True),
     (set(), ("we do not support this site",), 1, "unsupported_site",
      "Firecrawl does not support this site.", "{contents}", True),
-    # With no key and no stored login the vendor prints its interactive login
-    # menu and exits 0; neither a retry nor the drift check can fix that.
-    (set(), ("authenticate with your firecrawl account",), 1, "credentials_missing",
+    # With no key and no stored login, vendor 1.19.26 prints its interactive login
+    # menu and exits 0; 1.26.25 exits 1 with "Not authenticated" on stderr (no tty).
+    # Neither a retry nor the drift check can fix that.
+    (set(), ("authenticate with your firecrawl account", "not authenticated. set firecrawl_api_key"),
+     1, "credentials_missing",
      "The vendor CLI found no Firecrawl credential (FIRECRAWL_API_KEY unset, no "
-     "stored login) and printed its interactive login menu instead of JSON.",
+     "stored login) and printed its login menu or a not-authenticated error instead of JSON.",
      "set FIRECRAWL_API_KEY in this process's environment, or run firecrawl login "
      "once on this host; then check: firecrawl --status", False),
     (set(), (), 2, "vendor_output_changed",
@@ -1382,12 +1390,13 @@ def build_parser():
     p.add_argument(
         "--categories", metavar="LIST",
         help="comma-separated: " + ", ".join(SEARCH_CATEGORIES)
-        + " (developer is answered by the API directly and needs FIRECRAWL_API_KEY; "
+        + " (gov cannot be combined with other categories; developer is answered by the API directly and needs FIRECRAWL_API_KEY; "
         "the developer verb is the keyless, filtered path)",
     )
     p.add_argument(
         "--sources", metavar="LIST",
-        help="comma-separated: " + ", ".join(SEARCH_SOURCES) + " (vendor default: web)",
+        help="comma-separated: " + ", ".join(SEARCH_SOURCES)
+        + " (alexandria needs a key and adds tool discovery; with a key the vendor automatically adds alexandria to every search)",
     )
     p.add_argument(
         "--tbs", metavar="QDR",
@@ -1402,7 +1411,7 @@ def build_parser():
         "Operators: " + SEARCH_OPERATORS + ". Results are titles, URLs, and "
         "descriptions; fetch a chosen URL for its content. The envelope's search_id "
         "feeds raw -- search-feedback <id> when a result is wrong. Web or images "
-        "sources, github or research categories, and --limit 10 or less go keyless "
+        "sources, research categories, and --limit 10 or less go keyless "
         "first and spend no credits."
     )
     p = verb(
@@ -1502,8 +1511,8 @@ def build_parser():
     p.add_argument("vendor_args", nargs=argparse.REMAINDER, metavar="-- vendor-args")
     p.epilog = (
         "Writes are reported using a best-effort, non-exclusive "
-        "working-directory snapshot. raw -- research search-papers and "
-        "search-github go keyless first, outside the ledger."
+        "working-directory snapshot. raw -- research search-papers "
+        "goes keyless first, outside the ledger."
     )
     verb(
         "capabilities",
@@ -1654,6 +1663,21 @@ def raw_subcommand(raw):
     return None
 
 
+def raw_discovery(raw):
+    """Only discovery commands are free; execution retains its bounded hold."""
+    verb = raw_subcommand(raw)
+    if verb in {"find-tools", "list", "list-tools", "find-skills", "read-skill"}:
+        return True
+    # Alexandria also has refund-bearing feedback. Only explicitly read-only
+    # list/terms/help forms qualify; unclassified category paths stay bounded.
+    if verb == "alexandria":
+        tail = list(raw)[list(raw).index(verb) + 1:]
+        if tail and tail[0] == "terms":
+            return len(tail) == 1 or tail[1] in {"show", "help", "--help", "-h"}
+        return not tail or tail[0] in {"list", "list-tools", "--help", "-h"}
+    return False
+
+
 def raw_arguments(args, parser, registry):
     raw = list(args.vendor_args)
     if raw and raw[0] == "--":
@@ -1772,7 +1796,7 @@ def prepare_interact(args):
 
 
 def vendor_arguments(args, parser, registry):
-    """KTD2/KTD13: translate one validated target to official v1.19.26 argv."""
+    """KTD2/KTD13: translate one validated target to official v1.26.25 argv."""
     verb = args.verb
     if verb == "raw":
         return "raw", raw_arguments(args, parser, registry)
@@ -1941,6 +1965,13 @@ def vendor_arguments(args, parser, registry):
                 command.extend(["--" + name, ",".join(filters[name])])
         if args.location:
             command.extend(["--location", args.location])
+        if "alexandria" in filters["sources"] and not (
+            os.environ.get("FIRECRAWL_API_KEY") or vendor_login()
+        ):
+            raise CliError(
+                "Alexandria requires a Firecrawl API key",
+                "set FIRECRAWL_API_KEY and retry the search",
+            )
         if API_ONLY_CATEGORIES & set(filters["categories"]):
             api_preflight(args)  # Refuse before any credit read or reservation.
     return surface, [*command, "--json"]
@@ -1982,6 +2013,11 @@ def search_filters(args):
                 "firecrawl-cli search --help",
             )
         filters[name] = values
+    if "gov" in filters["categories"] and len(filters["categories"]) > 1:
+        raise CliError(
+            "gov cannot be combined with other categories",
+            "use --categories gov alone; firecrawl-cli search --help",
+        )
     tbs = getattr(args, "tbs", None)
     if tbs is not None and tbs not in TBS_VALUES:
         raise CliError(
@@ -2192,8 +2228,8 @@ def api_preflight(args):
     """The developer category bypasses the vendor CLI; refuse before any spend."""
     if not os.environ.get("FIRECRAWL_API_KEY"):
         raise CliError(
-            "search --categories developer is answered by the API directly (vendor CLI "
-            "1.19.26 rejects the category; firecrawl/cli#222) and needs "
+            "search --categories developer is answered by the API directly through "
+            "the same envelope and budget and needs "
             "FIRECRAWL_API_KEY in the environment; the developer verb is the keyless, "
             "filtered path",
             shlex.join(["firecrawl-cli", "developer", args.target, "--json"]),
@@ -2327,7 +2363,7 @@ def capabilities(registry):
             "fetch --max-age 0 forces a live fetch; Firecrawl may otherwise serve recently indexed content",
             "search --country has no shaped equivalent; it is raw -- search <q> --country DE --json",
             "gov and developer are API-direct (POST /v2/search/gov and /v2/search/developer): no vendor binary, no key needed; gov is free with no credit read or reservation; developer without FIRECRAWL_API_KEY is keyless at any limit and runs outside the ledger with a degraded note; with the key, limit 10 or less goes keyless first, and a keyed run costs 2 credits per 10 results",
-            "free-first (#2118): with or without FIRECRAWL_API_KEY, an eligible call tries Firecrawl's free keyless tier first, spends no credits, and carries a degraded note starting 'keyless: ' that never wraps plain output (developer keeps its 'keyless developer search:' note, which wraps plain output as it always has). Eligible: fetch or extract of a URL to summary, markdown, links, or html, a schema alone, or a question alone; shot; a PDF to summary or markdown; search over web or images sources and github or research categories with limit 10 or less; developer with limit 10 or less; raw -- research search-papers or search-github. A keyless refusal runs the call keyed once and keeps eligible keyed calls off the keyless tier for its stated window (keyless_cooldown seconds when none is stated, 6 hours at most); without a key the refusal exits 1 as keyless_rate_limited. FIRECRAWL_CLI_KEYLESS=0, a stored vendor login, or a non-default FIRECRAWL_API_URL keeps vendor calls keyed. A keyless fetch's scrape_id may not resolve in keyed interact",
+            "free-first (#2118): with or without FIRECRAWL_API_KEY, an eligible call tries Firecrawl's free keyless tier first, spends no credits, and carries a degraded note starting 'keyless: ' that never wraps plain output (developer keeps its 'keyless developer search:' note, which wraps plain output as it always has). Eligible: fetch or extract of a URL to summary, markdown, links, or html, a schema alone, or a question alone; shot; a PDF to summary or markdown; search over web or images sources and research categories with limit 10 or less; developer with limit 10 or less; raw -- research search-papers. A keyless refusal runs the call keyed once and keeps eligible keyed calls off the keyless tier for its stated window (keyless_cooldown seconds when none is stated, 6 hours at most); without a key the refusal exits 1 as keyless_rate_limited. FIRECRAWL_CLI_KEYLESS=0, a stored vendor login, or a non-default FIRECRAWL_API_URL keeps vendor calls keyed. A keyless fetch's scrape_id may not resolve in keyed interact",
             "without the vendor firecrawl binary, keyed API-direct calls (search --categories developer, developer with a key) still run under the local session and day caps, but the account floor is unchecked",
             "gov filters combine with AND over labeled pages only; no results does not mean no law; US material only; verify issuer, jurisdiction, and effective status before citing",
         ],
@@ -2478,7 +2514,7 @@ def invoke_vendor(command, timeout=120, raw=False, retry=None, keyless=False):
         raise CliError(
             "vendor firecrawl is missing from PATH",
             # Nothing in this repo installs the vendor; this is the pinned reinstall (#2105).
-            "reinstall the pinned vendor: pnpm add -g firecrawl-cli@1.19.26; "
+            "reinstall the pinned vendor: pnpm add -g firecrawl-cli@1.26.25; "
             "pnpm's global bin directory (pnpm bin -g) must be on PATH",
         )
     binary = str(Path(binary).absolute())
