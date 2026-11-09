@@ -809,6 +809,14 @@ supabase-api api GET /v1/projects/{ref}/config/auth --project "$PROJECT"
   `scripts/lib/supabase-access-token.sh`) take the same env → bws →
   `~/.secrets` order but never retry, so run them with
   `env -u SUPABASE_ACCESS_TOKEN` from such a shell.
+- The `supabase` CLI picks its output format from its environment: v2.122.0
+  prints one-line JSON when `CLAUDECODE` or `AI_AGENT` is set, and otherwise
+  a table whose cells are wrapped in backticks. A script that parses its
+  output must pin the format (`--output-format json`; `-o json` still prints
+  the table) or it reads one shape under an agent and another under systemd.
+  In JSON mode a failure is JSON on stdout too
+  (`{"_tag":"Error","error":{"code":…,"message":…}}`, exit 1, stderr empty or
+  progress text only), so read the reason from stdout, not stderr.
   Output and errors redact `sbp_` tokens, `sb_secret_` keys, every JWT whose
   role is not `anon`, and string values under secret-named keys (`smtp_pass`,
   `jwt_secret`, `*_secret`, passwords, tokens, `*_api_key`, `*_access_key`,
