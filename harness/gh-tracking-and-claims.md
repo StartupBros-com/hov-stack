@@ -67,7 +67,7 @@ reusable workflow each repository would adopt.
 |---|---|---|
 | Read-only default `GITHUB_TOKEN`; workflows cannot approve pull requests; a first-time contributor's fork runs wait for approval | Organization Actions settings | inherits it |
 | Default branch: no deletion, no force-push, changes through pull requests | Organization ruleset `protect-main`, all repositories | inherits it |
-| Secret scanning with push protection, CodeQL default setup (it analyzes GitHub Actions workflows too), Dependabot alerts, private vulnerability reporting | GitHub's recommended code security configuration (org configuration 17), attached to every public repository and the default for new public ones once the operator runs the enable (hov-stack#521). Until then only private vulnerability reporting is on, set per repository on 2026-11-09 | gets it when created public, once the default is set; see below otherwise |
+| Secret scanning with push protection, CodeQL default setup (it analyzes GitHub Actions workflows too), Dependabot alerts, private vulnerability reporting | GitHub's recommended code security configuration (org configuration 17), attached to every public repository and the default for new public ones since the operator ran the enable on 2026-11-09 (hov-stack#521) | gets it when created public; see below otherwise |
 | Default `CONTRIBUTING.md` and `SECURITY.md` | `StartupBros-com/.github` | shows them unless it has its own |
 | Fork pull requests never reach owned runners | Owned runner groups deny public repositories; only the hosted scale-set groups allow them, and nothing local sits behind those | inherits it |
 
@@ -78,7 +78,7 @@ enable. Agents verify with two reads:
 
 ```bash
 gh api orgs/StartupBros-com/code-security/configurations/defaults --jq '.[] | {default_for_new_repos, name: .configuration.name}'
-gh api orgs/StartupBros-com/code-security/configurations/17/repositories --jq '.[] | {status, repo: .repository.name}'
+gh api --paginate orgs/StartupBros-com/code-security/configurations/17/repositories --jq '.[] | {status, repo: .repository.name}'
 ```
 
 GitHub applies a default configuration only when a repository is created. A
@@ -95,7 +95,7 @@ leaves the repository's own settings on, so detaching alone is not enough:
 ```bash
 gh api --method DELETE orgs/StartupBros-com/code-security/configurations/detach --input - <<<'{"selected_repository_ids":[<repo id>]}'
 gh api --method PATCH repos/StartupBros-com/<repo>/code-scanning/default-setup -f state=not-configured
-gh api --method PATCH repos/StartupBros-com/<repo> -f 'security_and_analysis[secret_scanning][status]=disabled' -f 'security_and_analysis[secret_scanning_push_protection][status]=disabled'
+gh api --method PATCH repos/StartupBros-com/<repo> -f 'security_and_analysis[secret_scanning][status]=disabled' -f 'security_and_analysis[secret_scanning_push_protection][status]=disabled' -f 'security_and_analysis[secret_scanning_non_provider_patterns][status]=disabled' -f 'security_and_analysis[secret_scanning_validity_checks][status]=disabled'
 gh api repos/StartupBros-com/<repo> --jq .security_and_analysis
 ```
 
