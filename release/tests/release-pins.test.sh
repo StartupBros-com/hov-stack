@@ -60,6 +60,24 @@ esac
 STUBGH
 chmod +x "$TMP/bin/gh"
 
+# Native commands remain untouched; these opt-in stubs exercise Darwin detection offline.
+REAL_UNAME=$(command -v uname)
+cat > "$TMP/bin/uname" <<'STUBUNAME'
+#!/usr/bin/env bash
+if [ "${FAKE_DARWIN:-}" = 1 ]; then
+  case "$1" in -s) echo Darwin ;; -m) echo x86_64 ;; *) exit 2 ;; esac
+else
+  exec "$REAL_UNAME" "$@"
+fi
+STUBUNAME
+cat > "$TMP/bin/sysctl" <<'STUBSYSCTL'
+#!/usr/bin/env bash
+[ "$*" = '-n sysctl.proc_translated' ] || exit 2
+printf '%s\n' "${FAKE_TRANSLATED:-0}"
+exit "${FAKE_SYSCTL_RC:-0}"
+STUBSYSCTL
+chmod +x "$TMP/bin/uname" "$TMP/bin/sysctl"
+
 # --- fixtures ------------------------------------------------------------------------------
 # Independent of the script under test: the real asset names, written out again here.
 spec() { # tool version -> platform|asset|members
@@ -68,10 +86,11 @@ spec() { # tool version -> platform|asset|members
     gh)
       echo "linux-x86_64|gh_${v}_linux_amd64.tar.gz|gh_${v}_linux_amd64/bin/gh"
       echo "linux-aarch64|gh_${v}_linux_arm64.tar.gz|gh_${v}_linux_arm64/bin/gh"
-      echo "darwin-arm64|gh_${v}_macOS_arm64.zip|gh_${v}_macOS_arm64/bin/gh" ;;
+      echo "darwin-arm64|gh_${v}_macOS_arm64.zip|gh_${v}_macOS_arm64/bin/gh"
+      echo "darwin-x86_64|gh_${v}_macOS_amd64.zip|gh_${v}_macOS_amd64/bin/gh" ;;
     uv)
       for p in linux-x86_64:x86_64-unknown-linux-gnu linux-aarch64:aarch64-unknown-linux-gnu \
-               darwin-arm64:aarch64-apple-darwin; do
+               darwin-arm64:aarch64-apple-darwin darwin-x86_64:x86_64-apple-darwin; do
         tr_=${p#*:}
         echo "${p%%:*}|uv-$tr_.tar.gz|uv-$tr_/uv,uv-$tr_/uvx"
       done ;;
@@ -82,7 +101,8 @@ spec() { # tool version -> platform|asset|members
     jsm)
       echo "linux-x86_64|jsm-x86_64-unknown-linux-musl.tar.gz|jsm"
       echo "linux-aarch64|jsm-aarch64-unknown-linux-gnu.tar.gz|jsm"
-      echo "darwin-arm64|jsm-aarch64-apple-darwin.tar.gz|jsm" ;;
+      echo "darwin-arm64|jsm-aarch64-apple-darwin.tar.gz|jsm"
+      echo "darwin-x86_64|jsm-x86_64-apple-darwin.tar.gz|jsm" ;;
   esac
 }
 reldir() { # tool version
@@ -122,7 +142,7 @@ write_member() { # path tool version platform
 case "\$XDG_CONFIG_HOME\$XDG_DATA_HOME\$XDG_CACHE_HOME\$XDG_STATE_HOME" in
   *"$TMP/canary"*) echo "$t runs with the caller's XDG dirs" >&2; exit 3 ;;
 esac
-if [ "\$1" = --version ]; then echo "$t $v"; echo $t >> "$RANLOG"; exit 0; fi
+if [ "\$1" = --version ]; then echo "$t $v"; echo $t >> "$RANLOG"; echo "$t $p" >> "$RANLOG.platform"; exit 0; fi
 EOF
   if [ "$t" = jsm ]; then
     cat >> "$f" <<EOF
@@ -253,10 +273,11 @@ K=0
 # program that sees any of them fails (see write_member). ALLOWFILE=0 drops the test-only
 # switch that lets downloads read file:// urls.
 runenv() {
-  env PATH="$TMP/bin:$PATH" FIX="$FIX" CALLS="$CALLS" \
+  env PATH="$TMP/bin:$PATH" FIX="$FIX" CALLS="$CALLS" REAL_UNAME="$REAL_UNAME" \
+    FAKE_DARWIN="${FAKE_DARWIN:-}" FAKE_TRANSLATED="${FAKE_TRANSLATED:-0}" FAKE_SYSCTL_RC="${FAKE_SYSCTL_RC:-0}" \
     GH_TOKEN=canary-token HOV_TEST_CANARY=1 XDG_CONFIG_HOME="$TMP/canary/config" \
     XDG_DATA_HOME="$TMP/canary/data" XDG_CACHE_HOME="$TMP/canary/cache" XDG_STATE_HOME="$TMP/canary/state" \
-    HOV_PINS_PLATFORM=linux-x86_64 HOV_PINS_NOW="$NOW" HOV_PINS_TEST_ALLOW_FILE="${ALLOWFILE:-1}" \
+    HOV_PINS_PLATFORM="${TEST_PLATFORM-linux-x86_64}" HOV_PINS_NOW="$NOW" HOV_PINS_TEST_ALLOW_FILE="${ALLOWFILE:-1}" \
     HOV_PINS_GITHUB_DOWNLOAD_BASE="file://$FIX/github" HOV_PINS_JSM_BASE="file://$FIX/jsm" \
     "$@"
 }
@@ -278,12 +299,37 @@ run_apply() { # rows-file
 new_world
 run_verify --table-from "$IR"
 expect_rc 0 'verify passes on a good table'
-[ "$(printf '%s\n' "$OUT" | grep -c '^ok ')" -eq 12 ] || die 'verify prints one ok line per row (12)'
+[ "$(printf '%s\n' "$OUT" | grep -c '^ok ')" -eq 15 ] || die 'verify prints one ok line per row (15)'
 expect_out 'ok cass linux-x86_64 3.0.0' 'verify names the row'
 expect_out 'ok jsm darwin-arm64 4.0.0' 'verify covers rows of other platforms'
 [ "$(sort "$RANLOG" | tr '\n' ' ')" = 'cass gh jsm uv ' ] \
   || die "verify installs each tool for this machine's platform and only that (ran: $(tr '\n' ' ' < "$RANLOG"))"
 pass 'verify passes on a good file:// table, installs only this platform, and runs each program in the scratch environment'
+
+# Verify actually executes the selected fixture, not merely a platform label.
+check_darwin_execution() { # sysctl output status expected-platform [override]
+  new_world
+  FAKE_DARWIN=1 FAKE_TRANSLATED="$1" FAKE_SYSCTL_RC="$2" TEST_PLATFORM="${4-}" run_verify --table-from "$IR"
+  expect_rc 0 'Darwin detection verifies the offline table'
+  case "$3" in
+    darwin-arm64) printf 'cass darwin-arm64\ngh darwin-arm64\njsm darwin-arm64\nuv darwin-arm64\n' > "$FIX/ran.want" ;;
+    darwin-x86_64) printf 'gh darwin-x86_64\njsm darwin-x86_64\nuv darwin-x86_64\n' > "$FIX/ran.want" ;;
+    *) die 'unsupported expected Darwin fixture platform' ;;
+  esac
+  sort "$RANLOG.platform" > "$FIX/ran.got"
+  expect_same "$FIX/ran.got" "$FIX/ran.want" 'verify executes exactly the detected platform fixtures (cass absent on Intel)'
+}
+check_darwin_execution 0 0 darwin-x86_64
+pass 'native Intel Darwin executes only Intel fixtures'
+check_darwin_execution $' \n\t1 \n' 0 darwin-arm64
+pass 'Rosetta Darwin executes ARM fixtures when successful sysctl output trims to exactly 1'
+check_darwin_execution 1 1 darwin-x86_64
+pass 'failed sysctl cannot select Rosetta even when its output is 1'
+check_darwin_execution 11 0 darwin-x86_64
+check_darwin_execution '1 extra' 0 darwin-x86_64
+pass 'unexpected successful sysctl output remains Intel'
+check_darwin_execution 1 0 darwin-x86_64 darwin-x86_64
+pass 'the explicit platform override wins over Rosetta detection'
 
 new_world
 ALLOWFILE=0 run_verify --table-from "$IR"
@@ -365,7 +411,7 @@ newrel gh 2.1.0 2026-10-30T00:00:00Z
 newrel uv 1.1.0 2026-10-30T00:00:00Z
 run_refresh
 expect_rc 0 'refresh moves pins past the cooldown'
-printf 'gh\t2.0.0\t2.1.0\tlinux-x86_64,linux-aarch64,darwin-arm64\nuv\t1.0.0\t1.1.0\tlinux-x86_64,linux-aarch64,darwin-arm64\n' > "$FIX/plan.want"
+printf 'gh\t2.0.0\t2.1.0\tlinux-x86_64,linux-aarch64,darwin-arm64,darwin-x86_64\nuv\t1.0.0\t1.1.0\tlinux-x86_64,linux-aarch64,darwin-arm64,darwin-x86_64\n' > "$FIX/plan.want"
 expect_same "$PLAN" "$FIX/plan.want" 'the plan has one TSV line per moved tool, with " *name" checksum lines parsed for uv'
 expect_same "$IR" "$FIX/ir.orig" 'without --write the table is untouched'
 grep -q 'attestation verify .*--repo cli/cli' "$CALLS" || die 'gh is attestation-verified'
@@ -443,7 +489,7 @@ pass 'refresh never moves backwards (gh and jsm) and ignores drafts and prerelea
 
 new_world
 grep -v '^gh|2.0.0|darwin-arm64|' "$IR" | grep -v '^jsm|4.0.0|darwin-arm64|' > "$IR.new"; mv "$IR.new" "$IR"
-[ "$(rows_of "$IR" | wc -l)" -eq 10 ] || die 'fixture: two rows removed'
+[ "$(rows_of "$IR" | wc -l)" -eq 13 ] || die 'fixture: two rows removed'
 run_refresh --write
 expect_rc 0 'refresh adds missing platform rows'
 printf 'gh\t2.0.0\t2.0.0\tdarwin-arm64\njsm\t4.0.0\t4.0.0\tdarwin-arm64\n' > "$FIX/plan.want"
@@ -451,7 +497,39 @@ expect_same "$PLAN" "$FIX/plan.want" 'the plan names the added platform at the s
 expect_same "$IR" "$FIX/ir.orig" 'the added rows land in their ordered places'
 pass 'refresh adds a missing platform row at the current version'
 
+# The table used before Intel support must gain only the three supported rows.
+new_world
+awk -F'|' '$3 != "darwin-x86_64"' "$FIX/rows" > "$FIX/legacy.rows"
+[ "$(wc -l < "$FIX/legacy.rows")" -eq 12 ] || die 'fixture: legacy table has exactly 12 rows'
+mkir "$IR" "$FIX/legacy.rows"
+run_refresh --write
+expect_rc 0 'refresh upgrades the legacy table without a version move'
+printf 'gh\t2.0.0\t2.0.0\tdarwin-x86_64\nuv\t1.0.0\t1.0.0\tdarwin-x86_64\njsm\t4.0.0\t4.0.0\tdarwin-x86_64\n' > "$FIX/plan.want"
+expect_same "$PLAN" "$FIX/plan.want" 'exactly three Intel additions are planned at the current versions'
+expect_same "$IR" "$FIX/ir.orig" 'only the three Intel rows are inserted in metadata order'
+[ "$(rows_of "$IR" | wc -l)" -eq 15 ] || die 'upgraded table has exactly 15 rows'
+! grep -q '^cass|[^|]*|darwin-x86_64|' "$IR" || die 'cass must not gain an unsupported Intel row'
+pass 'refresh upgrades a legacy 12-row table with exactly three Intel rows at current versions'
+
 # fail closed
+for intel_failure in missing checksum member; do
+  new_world
+  awk -F'|' '$3 != "darwin-x86_64"' "$FIX/rows" > "$FIX/legacy.rows"
+  mkir "$IR" "$FIX/legacy.rows"
+  cp "$IR" "$FIX/legacy.ir"
+  case "$intel_failure" in
+    missing) rm "$(reldir uv 1.0.0)/uv-x86_64-apple-darwin.tar.gz"; reason='download failed:' ;;
+    checksum) printf corrupt >> "$(reldir uv 1.0.0)/uv-x86_64-apple-darwin.tar.gz"; reason='sha256 is ' ;;
+    member) OMIT_PLAT=darwin-x86_64 mkrelease uv 1.0.0; reason='archive lacks member uv-x86_64-apple-darwin/uv' ;;
+  esac
+  run_refresh --write
+  expect_rc 1 "Intel $intel_failure fails the whole refresh"
+  expect_out "FAIL uv darwin-x86_64: $reason" 'failure names the Intel asset and exact verification stage'
+  [ ! -s "$PLAN" ] || die 'no partial plan after an Intel asset failure'
+  [ ! -s "$ROWSOUT" ] || die 'no partial rows output after an Intel asset failure'
+  expect_same "$IR" "$FIX/legacy.ir" 'Intel failure leaves the original legacy table unchanged'
+  pass "refresh fails closed on an Intel asset $intel_failure"
+done
 new_world
 newrel gh 2.1.0 2026-10-30T00:00:00Z
 newrel uv 1.1.0 2026-10-30T00:00:00Z
@@ -526,7 +604,7 @@ new_world
 newrel jsm 5.0.0 2026-10-30T00:00:00Z
 JT=5.0.0 run_refresh
 expect_rc 0 'jsm check runs from a read-only copy in the scratch environment, with no GH_TOKEN (the fake exits non-zero otherwise)'
-grep -q "^jsm${TAB}4.0.0${TAB}5.0.0${TAB}linux-x86_64,linux-aarch64,darwin-arm64\$" "$PLAN" \
+grep -q "^jsm${TAB}4.0.0${TAB}5.0.0${TAB}linux-x86_64,linux-aarch64,darwin-arm64,darwin-x86_64\$" "$PLAN" \
   || die 'jsm moves to the version update --check reports'
 newrel jsm 5.1.0 2026-11-02T12:00:00Z
 JT=5.1.0 run_refresh
@@ -604,3 +682,4 @@ expect_same "$FIX/rows.got" "$FIX/rows.want" 'the last row still ends its own li
 pass 'apply ends the last row with a newline'
 
 printf '%s tests passed\n' "$PASS"
+
