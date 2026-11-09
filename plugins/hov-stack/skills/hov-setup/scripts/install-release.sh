@@ -9,7 +9,8 @@
 #   consumer    — /hov-setup's gh, uv, cass and jeffreys-skills sections, run after the
 #                 user says yes.
 #   gate        — the sha256 pinned in this file, computed from the downloaded bytes on
-#                 2026-11-03 and matching each maker's published checksum, fail-closed;
+#                 2026-11-03 (Intel Mac rows: 2026-11-04), matching each maker's published
+#                 checksum, fail-closed;
 #                 plus a `--version` check on the staged copy, run before anything is
 #                 renamed into place, so a failed check leaves the previous copy untouched.
 #   defect      — vendor installers fail open or edit shell startup files. tool-update.sh's
@@ -47,7 +48,8 @@
 # Env:    HOV_SETUP_BIN_DIR        destination directory (default ~/.local/bin)
 #         HOV_SETUP_STATE_DIR      test-only: directory holding the install records
 #                                  (default ~/.local/state/hov-stack/install-release)
-#         HOV_SETUP_PLATFORM       test-only: darwin-arm64 | linux-x86_64 | linux-aarch64
+#         HOV_SETUP_PLATFORM       test-only: darwin-arm64 | darwin-x86_64 |
+#                                  linux-x86_64 | linux-aarch64
 #         HOV_SETUP_RELEASE_TABLE  test-only: replaces the table below. Production never
 #                                  sets it; a table swappable from the environment is a place
 #                                  to hide an install source, so it exists solely so
@@ -66,15 +68,18 @@ TABLE=${HOV_SETUP_RELEASE_TABLE:-'
 gh|2.103.3|linux-x86_64|https://github.com/cli/cli/releases/download/v2.103.3/gh_2.103.3_linux_amd64.tar.gz|4c806978ffce1cec70853302a56d70ac6da4f19bae7adca4e1a8ab00633dd91d|gh_2.103.3_linux_amd64/bin/gh
 gh|2.103.3|linux-aarch64|https://github.com/cli/cli/releases/download/v2.103.3/gh_2.103.3_linux_arm64.tar.gz|ee32df2323c8847f5fac6cb6b4b69ca75828e9329a8f22f677021f7b3306ce63|gh_2.103.3_linux_arm64/bin/gh
 gh|2.103.3|darwin-arm64|https://github.com/cli/cli/releases/download/v2.103.3/gh_2.103.3_macOS_arm64.zip|d700207eae9ae98fe2b89535c2c087c07823d4628c56364695a5a07ef311c062|gh_2.103.3_macOS_arm64/bin/gh
+gh|2.103.3|darwin-x86_64|https://github.com/cli/cli/releases/download/v2.103.3/gh_2.103.3_macOS_amd64.zip|a2f86418f4350ae6e9ec60d5000bdf7665728436946a97fc27fe50e6ae752682|gh_2.103.3_macOS_amd64/bin/gh
 uv|0.13.7|linux-x86_64|https://github.com/astral-sh/uv/releases/download/0.13.7/uv-x86_64-unknown-linux-gnu.tar.gz|c5221ff41b7892bfc223543883600125f6a47fe845093e0f5bdff4f359196d83|uv-x86_64-unknown-linux-gnu/uv,uv-x86_64-unknown-linux-gnu/uvx
 uv|0.13.7|linux-aarch64|https://github.com/astral-sh/uv/releases/download/0.13.7/uv-aarch64-unknown-linux-gnu.tar.gz|71279f8d3c67241e807b9d8db872d1bf541579fb9f08b7d1eb1682196d1e57dc|uv-aarch64-unknown-linux-gnu/uv,uv-aarch64-unknown-linux-gnu/uvx
 uv|0.13.7|darwin-arm64|https://github.com/astral-sh/uv/releases/download/0.13.7/uv-aarch64-apple-darwin.tar.gz|81b811b57e4624df7ed3aac148e0359100d9962f3d9dce00aec533dc2e086731|uv-aarch64-apple-darwin/uv,uv-aarch64-apple-darwin/uvx
+uv|0.13.7|darwin-x86_64|https://github.com/astral-sh/uv/releases/download/0.13.7/uv-x86_64-apple-darwin.tar.gz|20c47e4c1f630b8abaff8c291fa9b9aa300fef92c4fbff95adf198b55287cda7|uv-x86_64-apple-darwin/uv,uv-x86_64-apple-darwin/uvx
 cass|0.10.0|linux-x86_64|https://github.com/Dicklesworthstone/coding_agent_session_search/releases/download/v0.10.0/cass-linux-amd64.tar.gz|638ea8a8a9023c2e046bf8868392e6191218b89cf006e81af3ca205b546c4681|cass
 cass|0.10.0|linux-aarch64|https://github.com/Dicklesworthstone/coding_agent_session_search/releases/download/v0.10.0/cass-linux-arm64.tar.gz|529412e7e1f85f5a2c8f5e5fda1604b65ca90ed8acd68dbf286f63384b4baf09|cass
 cass|0.10.0|darwin-arm64|https://github.com/Dicklesworthstone/coding_agent_session_search/releases/download/v0.10.0/cass-darwin-arm64.tar.gz|1d922fd59b252bc3b4af63dbce5e4007c2f505ba1d6a8cec0a7280b169200580|cass
 jsm|0.3.46|linux-x86_64|https://jeffreys-skills.md/api/v1/downloads/jsm/v0.3.46/jsm-x86_64-unknown-linux-musl.tar.gz|57bf04440db6e3fed7e518c9cda4b0dbdcc87ab9fc20050b86132f91be511b70|jsm
 jsm|0.3.46|linux-aarch64|https://jeffreys-skills.md/api/v1/downloads/jsm/v0.3.46/jsm-aarch64-unknown-linux-gnu.tar.gz|157dcf73a67660cdac5edf7c68d857625adfce85292abc2604c2f8f6f92a211b|jsm
 jsm|0.3.46|darwin-arm64|https://jeffreys-skills.md/api/v1/downloads/jsm/v0.3.46/jsm-aarch64-apple-darwin.tar.gz|6617ef809c2827307fe1e848aa94224bbf2c103739527f5b5f930e388646ed99|jsm
+jsm|0.3.46|darwin-x86_64|https://jeffreys-skills.md/api/v1/downloads/jsm/v0.3.46/jsm-x86_64-apple-darwin.tar.gz|740cb0859fe1b10ee0ab430b54f853c4ebd716967abe2ac0aa7a2707da0b29d3|jsm
 '}
 
 usage() {
@@ -106,6 +111,14 @@ else
   arch=$(uname -m)
   case "$os/$arch" in
     Darwin/arm64) platform=darwin-arm64 ;;
+    Darwin/x86_64)
+      if translated=$(sysctl -n sysctl.proc_translated 2>/dev/null) &&
+        [[ "$translated" =~ ^[[:space:]]*1[[:space:]]*$ ]]; then
+        platform=darwin-arm64
+      else
+        platform=darwin-x86_64
+      fi
+      ;;
     Linux/x86_64) platform=linux-x86_64 ;;
     Linux/aarch64 | Linux/arm64) platform=linux-aarch64 ;;
     *) platform="$os-$arch" ;;
@@ -427,3 +440,4 @@ else
   echo "on PATH: no ($dest is not on PATH)"
 fi
 exit 0
+

@@ -243,11 +243,11 @@ print("RuntimeError: fixture crash", file=sys.stderr)
 sys.exit(1)
 PY
 run_doctor() {
-  HOME="$HOMEFIX" PATH="$BASE_PATH" DOTFILES_REPO="$HOMEFIX/dotfiles" \
+  HOME="$HOMEFIX" PATH="$BASE_PATH" DOTFILES_REPO="${DOCTOR_REPO:-$HOMEFIX/dotfiles}" \
   CLAUDE_CLI_SUPERSEDES_AUDIT="${CLAUDE_CLI_SUPERSEDES_AUDIT:-}" \
   CLAUDE_MEMORY_LIVE_ROOT="$HOMEFIX/.claude/projects" \
-  CLAUDE_MEMORY_MIRROR_ROOT="$HOMEFIX/dotfiles/memory" \
-  CLAUDE_HARNESS_REPO="$HOMEFIX/dotfiles" \
+  CLAUDE_MEMORY_MIRROR_ROOT="${DOCTOR_MIRROR-$HOMEFIX/dotfiles/memory}" \
+  CLAUDE_HARNESS_REPO="${DOCTOR_REPO:-$HOMEFIX/dotfiles}" \
   CLAUDE_WINDOWS_HOME="$HOMEFIX/windows-home" \
   HARNESS_DOCTOR_SKIP_TESTS=1 \
     timeout 600 bash "$DOCTOR" 2>&1
@@ -262,6 +262,18 @@ contains "$LIVE_OUT" "WARN: $HOMEFIX/SITES/fixture-repo/.mcp.json: mcpServers.go
 contains "$LIVE_OUT" "info: exa-cli not on PATH; exa row dormant" "N6 doctor passes info lines through"
 omits "$LIVE_OUT" "firecrawl row excepted" "N6 doctor no longer excepts Firecrawl (#1178)"
 omits "$LIVE_OUT" "no retired MCP server survives its CLI" "N6 finding is not also a clean"
+
+# N7 (doctor level): the memory mirror is opt-in (section 4), so a checkout
+# with no memory/ and no CLAUDE_MEMORY_MIRROR_ROOT still runs the scan over
+# its harness docs and CLAUDE.md. Pass memory/ unconditionally again and this
+# run reports "doc tree missing" instead of the live-drift finding: the shape
+# of every hov-stack checkout, which has no memory/ directory.
+cp -R "$HOMEFIX/dotfiles" "$HOMEFIX/hov-stack"
+rmdir "$HOMEFIX/hov-stack/memory"
+NOMIRROR_OUT=$(DOCTOR_REPO="$HOMEFIX/hov-stack" DOCTOR_MIRROR='' run_doctor)
+omits "$NOMIRROR_OUT" "doc tree missing" "N7 absent memory mirror does not stop the scan"
+contains "$NOMIRROR_OUT" "WARN: $HOMEFIX/.claude/settings.json: allow entry 'mcp__google-search-console__*' survives the google-search-console -> gsc retirement" "N7 scan still runs without a mirror"
+contains "$NOMIRROR_OUT" "note: no memory mirror at $HOMEFIX/hov-stack/memory, so the retired-MCP scan skips memory notes" "N7 skipped mirror is named"
 
 echo "cli-supersedes-mcp-audit: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]
