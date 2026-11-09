@@ -67,7 +67,7 @@ reusable workflow each repository would adopt.
 |---|---|---|
 | Read-only default `GITHUB_TOKEN`; workflows cannot approve pull requests; a first-time contributor's fork runs wait for approval | Organization Actions settings | inherits it |
 | Default branch: no deletion, no force-push, changes through pull requests | Organization ruleset `protect-main`, all repositories | inherits it |
-| Secret scanning with push protection, CodeQL default setup (it analyzes GitHub Actions workflows too), Dependabot alerts, private vulnerability reporting | GitHub's recommended code security configuration (org configuration 17), attached to every public repository and the default for new public ones | gets it when created public; see below otherwise |
+| Secret scanning with push protection, CodeQL default setup (it analyzes GitHub Actions workflows too), Dependabot alerts, private vulnerability reporting | GitHub's recommended code security configuration (org configuration 17), attached to every public repository and the default for new public ones once the operator runs the enable (hov-stack#521). Until then only private vulnerability reporting is on, set per repository on 2026-11-09 | gets it when created public, once the default is set; see below otherwise |
 | Default `CONTRIBUTING.md` and `SECURITY.md` | `StartupBros-com/.github` | shows them unless it has its own |
 | Fork pull requests never reach owned runners | Owned runner groups deny public repositories; only the hosted scale-set groups allow them, and nothing local sits behind those | inherits it |
 
@@ -86,6 +86,21 @@ repository that turns public, or is transferred in, needs the operator to
 attach configuration 17 again with `scope=public`: one idempotent call that
 touches public repositories only. Run `gh-repo-settings.sh` with
 `ONLY=<repo>` at the same time.
+
+Before a public repository turns private, take it out of the baseline first.
+Those features bill per active committer on a private repository from the
+first day, and the $0 budgets do not block them. Detaching a configuration
+leaves the repository's own settings on, so detaching alone is not enough:
+
+```bash
+gh api --method DELETE orgs/StartupBros-com/code-security/configurations/detach --input - <<<'{"selected_repository_ids":[<repo id>]}'
+gh api --method PATCH repos/StartupBros-com/<repo>/code-scanning/default-setup -f state=not-configured
+gh api --method PATCH repos/StartupBros-com/<repo> -f 'security_and_analysis[secret_scanning][status]=disabled' -f 'security_and_analysis[secret_scanning_push_protection][status]=disabled'
+gh api repos/StartupBros-com/<repo> --jq .security_and_analysis
+```
+
+Change the visibility only once the last read shows nothing enabled except
+Dependabot security updates, which are free everywhere.
 
 Personal-account repositories sit outside these settings. Turn on CodeQL
 default setup and private vulnerability reporting per public repository
