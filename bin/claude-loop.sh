@@ -100,6 +100,12 @@ LIVE_SESSIONS_BIN="${LIVE_SESSIONS_BIN:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../
 # shellcheck source=../scripts/lib/headless-gateway-model.sh
 . "$SCRIPTS_DIR/lib/headless-gateway-model.sh"
 
+# Epoch milliseconds for the run window. %N, trimmed to three digits, rather than a %3N width:
+# uutils date (rust-coreutils 0.10.0-1ubuntu2~26.04.1, Ubuntu 26.04's default) drops the
+# fraction's leading zeros under a width, so %3N reads up to 900 ms high during the first tenth
+# of each second (uutils/coreutils#15697) and the window can miss the run's own gateway rows.
+epoch_ms() { local ns; ns=$(date +%s%N); printf '%s\n' "${ns%??????}"; }
+
 # Vars finish() reads — initialized so the trap is safe on an early exit, then
 # reassigned to their real values further down as each becomes known.
 REPO=""
@@ -295,7 +301,7 @@ finish() {
   # the log and never touches $rc — a ledger outage must not turn a good run
   # into a reported failure, or vice versa.
   if [ -n "${RUN_ID:-}" ]; then
-    END_MS=$(date +%s%3N)
+    END_MS=$(epoch_ms)
     COST_JSON='{"window_cost_usd": null, "tokens": null}'
     if OUT=$(python3 "$DISPATCHER_COST_BIN" "${START_MS:-$END_MS}" "$END_MS" 2>>"${LOG:-/dev/null}"); then
       COST_JSON="$OUT"
@@ -596,7 +602,7 @@ echo "==> launching headless Claude Code (bypassPermissions, deny-list + loop-gu
 # is already included — "no commits beyond the start commit" means beyond
 # THIS sha.
 START_SHA=$(git -C "$WT" rev-parse HEAD 2>/dev/null) || START_SHA=""
-START_MS=$(date +%s%3N)
+START_MS=$(epoch_ms)
 CLAUDE_RC=0
 # Truncate once before launch; tee appends the child output below.
 : >"$LOG"
