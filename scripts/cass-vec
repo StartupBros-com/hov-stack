@@ -1,0 +1,509 @@
+#!/usr/bin/env python3
+"""cass-vec — semantic sidecar index over the cass session corpus.
+
+cass 0.6.26 can only embed with all-MiniLM-L6-v2 (`--embedder hash|fastembed`),
+and its native vector index is not built. This sidecar indexes the same
+conversation corpus with an endpoint-served embedder instead, so session search
+can retrieve with the model that won a cass-sessions embedding bake-off
+(Octen-Embedding-4B, nDCG@10 0.5336 vs 0.4640 for the incumbent).
+
+Documents are built by importing the eval harness's `cass_sessions_export.py`
+rather than reimplementing it, so this index is the same corpus the eval scored.
+The exporter's digest is recorded in the manifest; if it changes, those eval
+numbers no longer transfer and `status` reports the drift.
+
+Configuration (environment):
+  CASS_VEC_EXPORTER  path to `cass_sessions_export.py` (required for build and
+                     status drift; no default, it is not shipped here)
+  CASS_VEC_ENDPOINT  OpenAI-style embeddings URL
+                     (default http://localhost:8000/v1/embeddings)
+  CASS_VEC_MODEL     model name sent to the endpoint
+                     (default Octen-Embedding-4B)
+"""
+
+from __future__ import annotations
+
+import argparse
+import contextlib
+import fcntl
+import hashlib
+import importlib.util
+import json
+import os
+import sqlite3
+import sys
+import time
+import urllib.error
+import urllib.request
+from dataclasses import dataclass
+from pathlib import Path
+
+import numpy as np
+
+DEFAULT_ENDPOINT = os.environ.get(
+    "CASS_VEC_ENDPOINT", "http://localhost:8000/v1/embeddings"
+)
+DEFAULT_MODEL = os.environ.get("CASS_VEC_MODEL", "Octen-Embedding-4B")
+DEFAULT_CORPUS = Path.home() / ".local/share/coding-agent-search/agent_search.db"
+DEFAULT_STATE = Path.home() / ".local/share/cass-vec"
+# No default: the exporter lives in the eval harness, not in this repo. An unset
+# variable gives a path that is not a file, so every use reports it as missing.
+EXPORTER = Path(os.environ.get("CASS_VEC_EXPORTER") or "cass_sessions_export.py.unset")
+
+VECTORS = "vectors.f32"
+DOCS = "docs.jsonl"
+MANIFEST = "manifest.json"
+
+
+class CassVecError(RuntimeError):
+    pass
+
+
+@dataclass(frozen=True)
+class Row:
+    doc_id: str
+    conversation_id: str
+    title: str
+    workspace_path: str
+    source_path: str
+    text: str
+
+
+def _load_exporter():
+    """Import the eval harness's corpus builder so docs match the evaluated corpus."""
+    if not EXPORTER.is_file():
+        raise CassVecError(
+            f"corpus builder not found at {EXPORTER}. Set CASS_VEC_EXPORTER to "
+            "the eval harness's cass_sessions_export.py. cass-vec reuses that "
+            "exporter on purpose, so this index matches the corpus the embedder "
+            "was scored on."
+        )
+    spec = importlib.util.spec_from_file_location("cass_sessions_export", str(EXPORTER))
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["cass_sessions_export"] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _digest(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()[:16]
+
+
+def _quiescent_stat(db_path: Path) -> tuple[int, int, int] | None:
+    """The DB file's identity, or None while its WAL holds frames.
+
+    A -wal of 32 bytes or less is a bare header: every commit is in the main
+    file. cass leaves exactly that between runs.
+    """
+    wal = db_path.with_name(db_path.name + "-wal")
+    with contextlib.suppress(FileNotFoundError):
+        if wal.stat().st_size > 32:
+            return None
+    st = db_path.stat()
+    return (st.st_ino, st.st_size, st.st_mtime_ns)
+
+
+def _corpus_fingerprint(db_path: Path) -> str | None:
+    # immutable=1 reads the DB file without touching cass's -wal/-shm. A stock
+    # reader, even mode=ro, rebuilds a -shm it does not recognise, and cass 0.9.0
+    # (fsqlite 0.4.4) then fails every read-only open ("strict readonly open
+    # failed") until a stock wal_checkpoint(TRUNCATE); a stock `sqlite3 -readonly`
+    # did that to the live archive on 2026-09-29.
+    # immutable=1 also skips locking, so a read that overlaps a checkpoint sees a
+    # torn file: wrong counts, not just errors. Count only while the WAL is empty
+    # and the file stays unchanged across the read; otherwise the fingerprint is
+    # unknown (None), never a guess.
+    before = _quiescent_stat(db_path)
+    if before is None:
+        return None
+    conn = sqlite3.connect(
+        db_path.resolve().as_uri() + "?mode=ro&immutable=1", uri=True
+    )
+    try:
+        convs, msgs = conn.execute(
+            "SELECT (SELECT COUNT(*) FROM conversations), (SELECT COUNT(*) FROM messages)"
+        ).fetchone()
+    except sqlite3.DatabaseError:
+        if _quiescent_stat(db_path) == before:
+            raise
+        return None
+    finally:
+        conn.close()
+    if _quiescent_stat(db_path) != before:
+        return None
+    return f"conv:{convs}:msg:{msgs}"
+
+
+def _load_docs(db_path: Path, workspace_prefixes: tuple[str, ...]) -> list[Row]:
+    exporter = _load_exporter()
+    rows: list[Row] = []
+    # The exporter keeps a conversation when its workspace startswith any prefix,
+    # so ("/",) means "every absolute workspace" and () would exclude everything.
+    for doc in exporter._load_all_conversation_docs(
+        db_path=db_path, workspace_prefixes=workspace_prefixes
+    ):
+        rows.append(
+            Row(
+                doc_id=doc.doc_id,
+                conversation_id=str(doc.conversation_id),
+                title=doc.title or "",
+                workspace_path=doc.workspace_path or "",
+                source_path=doc.source_path or "",
+                text=doc.text,
+            )
+        )
+    return rows
+
+
+def _embed(
+    texts: list[str], *, endpoint: str, model: str, timeout: int = 600
+) -> list[list[float]]:
+    body = json.dumps(
+        {"model": model, "input": texts, "encoding_format": "float"}
+    ).encode("utf-8")
+    request = urllib.request.Request(
+        endpoint,
+        data=body,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    key = os.environ.get("CASS_VEC_API_KEY")
+    if key:
+        request.add_header("Authorization", f"Bearer {key}")
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        payload = json.loads(response.read())
+    data = sorted(payload["data"], key=lambda row: row.get("index", 0))
+    if len(data) != len(texts):
+        raise CassVecError(
+            f"embedder returned {len(data)} vectors for {len(texts)} inputs"
+        )
+    return [row["embedding"] for row in data]
+
+
+def _normalize(matrix: np.ndarray) -> np.ndarray:
+    norms = np.linalg.norm(matrix, axis=1, keepdims=True)
+    # A zero vector would divide to NaN and silently poison every later score.
+    norms[norms == 0] = 1.0
+    return matrix / norms
+
+
+def _state_paths(state: Path) -> tuple[Path, Path, Path]:
+    return state / VECTORS, state / DOCS, state / MANIFEST
+
+
+@contextlib.contextmanager
+def _build_lock(state: Path):
+    """Serialize builds; two appenders would interleave vectors and docs.
+
+    flock is released by the kernel when the holder dies, so a killed build
+    leaves no stale lock to clear by hand.
+    """
+    state.mkdir(parents=True, exist_ok=True)
+    lock_path = state / "build.lock"
+    with lock_path.open("a+") as handle:
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise CassVecError(
+                f"another cass-vec build already holds {lock_path}. Appending "
+                "concurrently would interleave vectors and docs; wait for it or "
+                "stop it first."
+            ) from None
+        try:
+            yield
+        finally:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
+def _indexed_doc_ids(doc_path: Path) -> list[str]:
+    if not doc_path.is_file():
+        return []
+    ids: list[str] = []
+    with doc_path.open() as handle:
+        for line in handle:
+            if line.strip():
+                ids.append(json.loads(line)["doc_id"])
+    return ids
+
+
+def _read_index(state: Path) -> tuple[np.ndarray, list[dict], dict]:
+    vec_path, doc_path, man_path = _state_paths(state)
+    if not (vec_path.is_file() and doc_path.is_file() and man_path.is_file()):
+        raise CassVecError(f"no index at {state}; run `cass-vec build` first")
+    manifest = json.loads(man_path.read_text())
+    dim = int(manifest["dim"])
+    raw = np.fromfile(vec_path, dtype=np.float32)
+    if dim <= 0 or raw.size % dim:
+        raise CassVecError(
+            f"corrupt vector file: {raw.size} floats is not a multiple of dim {dim}"
+        )
+    matrix = raw.reshape(-1, dim)
+    docs = [
+        json.loads(line) for line in doc_path.read_text().splitlines() if line.strip()
+    ]
+    if len(docs) != matrix.shape[0]:
+        raise CassVecError(
+            f"index skew: {matrix.shape[0]} vectors vs {len(docs)} docs"
+        )
+    return matrix, docs, manifest
+
+
+def cmd_build(args) -> int:
+    state = Path(args.state)
+    state.mkdir(parents=True, exist_ok=True)
+    with _build_lock(state):
+        return _build_locked(args, state)
+
+
+def _build_locked(args, state: Path) -> int:
+    vec_path, doc_path, man_path = _state_paths(state)
+
+    prefixes = tuple(args.workspace_prefix)
+    # Fingerprint the corpus before loading it: a full build embeds for hours
+    # while cass keeps committing, and a fingerprint taken at the end would name
+    # conversations this build never loaded, so `status` would call it current.
+    # A commit landing between this read and the load leaves the fingerprint
+    # older than the docs, which `status` reports as stale: the safe direction.
+    corpus_fingerprint = _corpus_fingerprint(Path(args.corpus))
+    rows = _load_docs(Path(args.corpus), prefixes)
+    if args.limit:
+        rows = rows[: args.limit]
+
+    indexed: set[str] = set()
+    if not args.rebuild and man_path.is_file():
+        prior = json.loads(man_path.read_text())
+        if prior.get("model") != args.model:
+            raise CassVecError(
+                f"existing index was built with model {prior.get('model')!r}; refusing "
+                f"to mix embeddings from {args.model!r}. Use --rebuild."
+            )
+        prior_prefixes = prior.get("workspace_prefixes")
+        if prior_prefixes is not None and tuple(prior_prefixes) != prefixes:
+            raise CassVecError(
+                f"existing index covers workspaces {prior_prefixes}; refusing to "
+                f"extend it with {list(prefixes)}. Use --rebuild."
+            )
+        indexed = set(_indexed_doc_ids(doc_path))
+
+    pending = [row for row in rows if row.doc_id not in indexed]
+    print(
+        json.dumps(
+            {
+                "corpus_docs": len(rows),
+                "already_indexed": len(indexed),
+                "pending": len(pending),
+            }
+        ),
+        flush=True,
+    )
+    if not pending:
+        print(json.dumps({"status": "up-to-date"}))
+        return 0
+
+    fresh = args.rebuild or not vec_path.is_file()
+    dim = 0
+    done = 0
+    started = time.time()
+    with open(vec_path, "wb" if fresh else "ab") as vec_file, open(
+        doc_path, "w" if fresh else "a"
+    ) as doc_file:
+        for start in range(0, len(pending), args.batch):
+            chunk = pending[start : start + args.batch]
+            try:
+                vectors = _embed(
+                    [row.text for row in chunk],
+                    endpoint=args.endpoint,
+                    model=args.model,
+                )
+            except (urllib.error.URLError, TimeoutError, OSError) as exc:
+                # Vectors and docs are flushed per batch, so a re-run resumes
+                # from here instead of re-embedding everything.
+                vec_file.flush()
+                doc_file.flush()
+                raise CassVecError(
+                    f"embedding failed after {done} docs: {exc}"
+                ) from exc
+            matrix = _normalize(np.asarray(vectors, dtype=np.float32))
+            if dim == 0:
+                dim = matrix.shape[1]
+            elif matrix.shape[1] != dim:
+                raise CassVecError(
+                    f"embedder changed dimension mid-build: {dim} -> {matrix.shape[1]}"
+                )
+            matrix.tofile(vec_file)
+            for row in chunk:
+                doc_file.write(
+                    json.dumps(
+                        {
+                            "doc_id": row.doc_id,
+                            "conversation_id": row.conversation_id,
+                            "title": row.title,
+                            "workspace_path": row.workspace_path,
+                            "source_path": row.source_path,
+                        },
+                        sort_keys=True,
+                    )
+                    + "\n"
+                )
+            done += len(chunk)
+            vec_file.flush()
+            doc_file.flush()
+            elapsed = time.time() - started
+            print(
+                json.dumps(
+                    {
+                        "progress": f"{done}/{len(pending)}",
+                        "elapsed_s": round(elapsed, 1),
+                        "per_doc_s": round(elapsed / max(done, 1), 3),
+                        "eta_s": round(
+                            (len(pending) - done) * elapsed / max(done, 1), 1
+                        ),
+                    }
+                ),
+                flush=True,
+            )
+
+    if dim == 0:
+        prior = json.loads(man_path.read_text()) if man_path.is_file() else {}
+        dim = int(prior.get("dim", 0))
+    total = len(_indexed_doc_ids(doc_path))
+    man_path.write_text(
+        json.dumps(
+            {
+                "model": args.model,
+                "endpoint": args.endpoint,
+                "dim": dim,
+                "count": total,
+                "built_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                "corpus_fingerprint": corpus_fingerprint,
+                "exporter_digest": _digest(EXPORTER),
+                "workspace_prefixes": list(prefixes),
+                "normalized": True,
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n"
+    )
+    print(json.dumps({"status": "built", "count": total, "dim": dim}))
+    return 0
+
+
+def cmd_search(args) -> int:
+    matrix, docs, manifest = _read_index(Path(args.state))
+    query = _embed(
+        [args.query], endpoint=manifest["endpoint"], model=manifest["model"]
+    )
+    vector = _normalize(np.asarray(query, dtype=np.float32))[0]
+    if vector.shape[0] != matrix.shape[1]:
+        raise CassVecError(
+            f"query dim {vector.shape[0]} != index dim {matrix.shape[1]}; the index "
+            f"was built with {manifest['model']}"
+        )
+    scores = matrix @ vector
+    top = np.argsort(-scores)[: args.limit]
+    hits = [
+        {
+            "score": round(float(scores[i]), 4),
+            "conversation_id": docs[i]["conversation_id"],
+            "title": docs[i]["title"],
+            "workspace_path": docs[i]["workspace_path"],
+            "source_path": docs[i]["source_path"],
+        }
+        for i in top
+    ]
+    if args.json:
+        print(
+            json.dumps(
+                {"query": args.query, "model": manifest["model"], "hits": hits},
+                indent=2,
+            )
+        )
+    else:
+        for rank, hit in enumerate(hits, 1):
+            print(f"{rank:2d}. {hit['score']:.4f}  {hit['title'][:78]}")
+            print(f"     {hit['source_path']}")
+    return 0
+
+
+def cmd_status(args) -> int:
+    state = Path(args.state)
+    try:
+        matrix, _docs, manifest = _read_index(state)
+    except CassVecError as exc:
+        print(json.dumps({"built": False, "reason": str(exc)}, indent=2))
+        return 1
+    corpus_now = _corpus_fingerprint(Path(args.corpus))
+    exporter_now = _digest(EXPORTER) if EXPORTER.is_file() else None
+    print(
+        json.dumps(
+            {
+                "built": True,
+                "count": int(matrix.shape[0]),
+                "dim": int(matrix.shape[1]),
+                "model": manifest["model"],
+                "built_at": manifest.get("built_at"),
+                "bytes": (state / VECTORS).stat().st_size,
+                "corpus_fingerprint_at_build": manifest.get("corpus_fingerprint"),
+                "corpus_fingerprint_now": corpus_now,
+                "corpus_stale": None
+                if corpus_now is None
+                else corpus_now != manifest.get("corpus_fingerprint"),
+                "exporter_digest_at_build": manifest.get("exporter_digest"),
+                "exporter_digest_now": exporter_now,
+                "exporter_drifted": exporter_now != manifest.get("exporter_digest"),
+            },
+            indent=2,
+            sort_keys=True,
+        )
+    )
+    return 0
+
+
+def main(argv=None) -> int:
+    parser = argparse.ArgumentParser(
+        prog="cass-vec", description=__doc__.split("\n")[0]
+    )
+    parser.add_argument("--state", default=str(DEFAULT_STATE))
+    parser.add_argument("--corpus", default=str(DEFAULT_CORPUS))
+    sub = parser.add_subparsers(dest="cmd", required=True)
+
+    build = sub.add_parser("build", help="embed new conversations (incremental)")
+    build.add_argument("--endpoint", default=DEFAULT_ENDPOINT)
+    build.add_argument("--model", default=DEFAULT_MODEL)
+    build.add_argument("--batch", type=int, default=16)
+    build.add_argument("--limit", type=int, default=0)
+    build.add_argument("--rebuild", action="store_true")
+    build.add_argument(
+        "--workspace-prefix",
+        action="append",
+        default=None,
+        help=(
+            "only index conversations whose workspace starts with this prefix "
+            "(repeatable). Default '/' indexes every workspace; pass "
+            "a project root (for example ~/projects) to restrict the index to it."
+        ),
+    )
+    build.set_defaults(func=cmd_build)
+
+    search = sub.add_parser("search", help="nearest-neighbour search")
+    search.add_argument("query")
+    search.add_argument("--limit", type=int, default=10)
+    search.add_argument("--json", action="store_true")
+    search.set_defaults(func=cmd_search)
+
+    status = sub.add_parser("status", help="index health and drift")
+    status.set_defaults(func=cmd_status)
+
+    args = parser.parse_args(argv)
+    if getattr(args, "workspace_prefix", None) is None:
+        args.workspace_prefix = ["/"]
+    try:
+        return args.func(args)
+    except CassVecError as exc:
+        print(json.dumps({"error": str(exc)}), file=sys.stderr)
+        return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
