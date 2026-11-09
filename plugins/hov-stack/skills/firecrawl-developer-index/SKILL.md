@@ -15,8 +15,8 @@ the approach below.
 
 ## Tools
 
-One verb, called through the harness wrapper (not the vendor binary, which
-lacks `developer` on the pinned 1.19.26, and not MCP):
+One verb, called through the harness wrapper (not the vendor binary, whose
+`developer` command is not used here, and not MCP):
 
 `firecrawl-cli developer "<question>" [filters] --json`
 
@@ -104,6 +104,7 @@ is an API 400 (exit 1).
   index for issues, PRs, and READMEs, or when Context7 lacks the library.
 - **Papers** → `firecrawl-research-index`.
 - **GitHub-history fallback** (the index misses a repo) →
-  `firecrawl-cli raw -- research search-github`, only then.
+  `firecrawl-cli search "<repo and issue query>" --categories developer --json`
+  (needs FIRECRAWL_API_KEY), only then.
 - **Comparisons, opinion, news, unindexed projects** → the open web.
 - **US law** → `firecrawl-gov-index`.

@@ -16,7 +16,7 @@ collections.
 ## Tools
 
 One verb, called through the harness wrapper (the Firecrawl MCP is retired and
-the vendor `firecrawl gov` command does not exist on the pinned 1.19.26):
+the wrapper verb is API-direct and does not use the vendor `firecrawl gov` command):
 
 `firecrawl-cli gov "<question, jurisdiction, date>" [filters] --json`
 

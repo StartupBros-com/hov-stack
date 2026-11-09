@@ -15,8 +15,9 @@ or in a niche venue may not be indexed; general web search is the fallback.
 
 Every tool is a vendor CLI subcommand (`firecrawl research ...`); call it as
 `firecrawl-cli raw --json -- research <subcommand> ... --json` so the harness
-budget and envelope apply (the Firecrawl MCP is retired). `search-papers` and
-`search-github` go to the vendor's keyless tier first, key or not: no
+budget and envelope apply (the Firecrawl MCP is retired). `search-papers`
+goes to the vendor's keyless tier first, key or not (`search-github` is gone
+from vendor 1.26.25): no
 credential, no credits, no hold, and a keyed call only when the free tier
 refuses. The other subcommands need a credential: they read the account
 balance first, so with no `FIRECRAWL_API_KEY` and no stored vendor login they

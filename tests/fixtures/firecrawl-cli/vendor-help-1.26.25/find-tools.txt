@@ -1,0 +1,26 @@
+Usage: firecrawl find-tools [options] [urls...]
+
+Find workflows, data APIs, and indexes for structured records and listings.
+Match URLs or use --options for semantic queries; discovery does not execute
+providers
+
+Arguments:
+  urls                 Known HTTP(S) URLs to find tools for
+
+Options:
+  --options <json>     Discovery options: query, urls, providers, categories,
+                       groups, capabilities; level: providers|groups|tools;
+                       limit: 1-100; expand: ["options","response","examples"]
+                       (a comma-separated string is also accepted for list
+                       selectors other than urls). Use provider and capability
+                       IDs returned by discovery.
+  --request <json>     A complete next request returned by Find Tools
+  --include-costs      Include per-capability credit prices
+  --request-id <id>    Reuse to recover the same execution; completed results
+                       replay
+  -k, --api-key <key>  Firecrawl API key
+  --api-url <url>      Firecrawl API URL
+  -o, --output <path>  Output file
+  --json               Output JSON
+  --pretty             Format JSON
+  -h, --help           display help for command
