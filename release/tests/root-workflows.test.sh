@@ -96,7 +96,7 @@ cat >"$TMP/public-ci.jq" <<'PUBLICCI'
   and .jobs.test.name == "setup, hooks, suites, secrets"
   and .jobs["public-safety"].name == "public-safety scan"
   and all(.jobs[];
-    .["runs-on"] == "ubuntu-24.04" and (has("if") | not)
+    .["runs-on"] == "ubuntu-26.04" and (has("if") | not)
     and (has("permissions") | not) and (has("environment") | not)
     and ([.steps[] | select((.uses // "") | startswith("actions/checkout@"))] | length == 1)
     and all(.steps[] | select((.uses // "") | startswith("actions/checkout@"));
