@@ -142,7 +142,7 @@ STUB
 make_sysbin() {
   local dir=$1 skip=${2:-} t
   mkdir -p "$dir"
-  for t in bash env timeout grep head tail cut cat jq mktemp rm; do
+  for t in bash env timeout setsid sleep grep head tail cut cat jq mktemp rm; do
     [ "$t" = "$skip" ] && continue
     ln -s "$(command -v "$t")" "$dir/$t" || return 1
   done

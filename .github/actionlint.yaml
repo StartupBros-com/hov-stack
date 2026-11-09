@@ -1,6 +1,9 @@
 self-hosted-runner:
   labels:
     - ci
+    # A GitHub-hosted image newer than actionlint 1.7.12's label list (its last Ubuntu label
+    # is ubuntu-24.04); ci.yml runs on it (#450). Drop it when the pinned actionlint knows it.
+    - ubuntu-26.04
 # actionlint 1.7.12 predates the job.workflow_repository and job.workflow_sha contexts
 # that GitHub documents for reusable workflows, so it rejects these two lines. Scoped to
 # this one file and these two property names; drop it when the pinned actionlint knows them.
