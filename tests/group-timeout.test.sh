@@ -2,7 +2,7 @@
 # group-timeout.test.sh: scripts/lib/group-timeout.sh behaves as a drop-in for `timeout`,
 # bounds the command's whole process group, and keeps its deadline when the caller is
 # cancelled (#450; the outer-cancellation and duration cases come from #509's review, the
-# caller-fork case from its CI).
+# caller-fork case from its CI, the sub-millisecond and quoted durations from its Codex review).
 #
 # Timing cases put bounds of seconds around sub-second deadlines, so a loaded runner does
 # not flake them.
@@ -60,8 +60,9 @@ if [ ! -e "$TMP/late" ]; then ok; else bad 'outer cancellation: the command outl
 leftover=$(find "$TMP" -maxdepth 1 -name 'group-timeout.*' | wc -l)
 check 'a cancelled call leaves no scratch files' 0 "$leftover"
 
-# A bad duration is refused before the command starts, as `timeout` refuses it.
-for d in invalid '' -1 5S nan 5x; do
+# A bad duration is refused before the command starts, as `timeout` refuses it. A leading
+# quote is a character code to printf ('1 is 49), not a duration.
+for d in invalid '' -1 5S nan 5x "'1" '"1'; do
   rm -f "$TMP/ran"
   # shellcheck disable=SC2016 # $1 belongs to the inner bash
   group_timeout "$d" bash -c ': >"$1/ran"' _ "$TMP" 2>"$TMP/err"
@@ -69,11 +70,13 @@ for d in invalid '' -1 5S nan 5x; do
   if [ ! -e "$TMP/ran" ]; then ok; else bad "SECS '$d': the command ran"; fi
   if grep -qF 'invalid time interval' "$TMP/err"; then ok; else bad "SECS '$d': no diagnostic"; fi
 done
-rm -f "$TMP/ran"
-# shellcheck disable=SC2016 # $1 belongs to the inner bash
-group_timeout -k bogus 5 bash -c ': >"$1/ran"' _ "$TMP" 2>/dev/null
-check "GRACE 'bogus' is refused" 125 $?
-if [ ! -e "$TMP/ran" ]; then ok; else bad "GRACE 'bogus': the command ran"; fi
+for d in bogus "'1" '"1'; do
+  rm -f "$TMP/ran"
+  # shellcheck disable=SC2016 # $1 belongs to the inner bash
+  group_timeout -k "$d" 5 bash -c ': >"$1/ran"' _ "$TMP" 2>/dev/null
+  check "GRACE '$d' is refused" 125 $?
+  if [ ! -e "$TMP/ran" ]; then ok; else bad "GRACE '$d': the command ran"; fi
+done
 group_timeout 5 2>/dev/null
 check 'a missing command is refused' 125 $?
 
@@ -88,6 +91,27 @@ group_timeout 0 bash -c 'sleep 0.5; exit 7'
 check 'SECS 0 sets no deadline' 7 $?
 group_timeout -k 0 0.3 bash -c 'trap "" TERM; sleep 1; exit 5'
 check 'GRACE 0 sends no KILL, so the TERM-ignoring command finishes (124)' 124 $?
+
+# Only 0 is zero: a positive duration under a millisecond still sets its limit, as in
+# `timeout`, rather than rounding to 0 and running the command unbounded.
+for d in 0.0001 1e-10; do
+  group_timeout "$d" bash -c 'sleep 1; exit 7'
+  check "SECS '$d' sets a deadline" 124 $?
+done
+group_timeout -k 0.0001 0.3 bash -c 'trap "" TERM; sleep 1; exit 5'
+check "GRACE '0.0001' sends the KILL" 137 $?
+# Durations count up to the next millisecond after the suffix, never down to a shorter one.
+ms=''
+while read -r d want; do
+  _group_timeout_ms ms "$d"
+  check "'$d' is $want ms" "$want" "$ms"
+done <<'EOF'
+0 0
+0.0011 2
+1e-10 1
+0.1m 6000
+0.0004d 34560
+EOF
 
 # A timer that cannot run stops the command and reports 125 rather than leaving it unbounded.
 if command -v setsid >/dev/null 2>&1; then

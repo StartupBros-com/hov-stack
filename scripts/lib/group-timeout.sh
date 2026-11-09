@@ -11,7 +11,8 @@
 #
 # group_timeout [-k GRACE | --kill-after=GRACE | --kill-after GRACE] SECS CMD [ARG...]
 #   SECS and GRACE take what `timeout` takes: a non-negative number as strtod reads it
-#   (5, 2.5, .5, 1e2, inf) with an optional s, m, h or d suffix. 0 disables that limit.
+#   (5, 2.5, .5, 1e2, inf) with an optional s, m, h or d suffix. 0 disables that limit;
+#   any positive duration, however small, sets one (counted up to the next millisecond).
 #   exit: the command's own status; 124 when SECS elapsed (whatever status the command
 #   chose on TERM, as `timeout` reports); 137 when the grace elapsed and the group had to
 #   be killed; 125 without running the command for an invalid duration or a missing
@@ -89,21 +90,32 @@ _group_timeout_watch "$@"' group-timeout "$secs_arg" "$ticks" "$pid" "$fired" "$
 # _group_timeout_ms VAR DURATION: set VAR to DURATION in whole milliseconds, or to "inf"
 # when it is too long to count; fail for anything `timeout` rejects.
 _group_timeout_ms() {
-  local d=$2 mult=1 n
+  local d=$2 mult=1 n s f g
   case "$d" in
     *s) d=${d%s} ;;
     *m) d=${d%m}; mult=60 ;;
     *h) d=${d%h}; mult=3600 ;;
     *d) d=${d%d}; mult=86400 ;;
   esac
-  [ -n "$d" ] || return 1
-  LC_ALL=C printf -v n '%.3f' "$d" 2>/dev/null || return 1
+  # printf reads a leading quote as a character code ('1 is 49); timeout refuses it.
+  case "$d" in '' | [\'\"]*) return 1 ;; esac
+  LC_ALL=C printf -v n '%.9f' "$d" 2>/dev/null || return 1
   case "$n" in
     -* | *nan*) return 1 ;;
-    # inf, or past about 30 years: no limit.
-    *[!0-9.]* | ??????????????*) printf -v "$1" '%s' inf ;;
-    *) n=${n/./}; printf -v "$1" '%s' "$((10#$n * mult))" ;;
+    *[!0-9.]*) printf -v "$1" '%s' inf; return ;;
   esac
+  s=${n%.*} f=${n#*.}
+  # Past about 30 years: no limit.
+  [ "${#s}" -lt 10 ] || { printf -v "$1" '%s' inf; return; }
+  # Count up to the next millisecond, after the suffix, as timeout counts up to the next
+  # nanosecond: a positive duration must never become 0, which would mean no deadline.
+  n=$((10#$s * mult * 1000 + (10#$f * mult + 999999) / 1000000))
+  # Below 1e-9 the printed digits are all zero, but only a zero duration is zero.
+  if [ "$n" = 0 ]; then
+    LC_ALL=C printf -v g '%g' "$d"
+    [ "$g" = 0 ] || n=1
+  fi
+  printf -v "$1" '%s' "$n"
 }
 
 # _group_timeout_watch SECS TICKS PID FIRED CALLER: the deadline for one group_timeout call,
