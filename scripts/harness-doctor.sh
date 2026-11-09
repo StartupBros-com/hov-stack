@@ -614,6 +614,13 @@ else
       _hook_base=$(basename "$f")
       _hook_stem=${_hook_base%.*}
       hook_registered "$_hook_base" && continue
+      # Deliberate unregistered no-op: sync.sh removed the pr-record registration
+      # on 2026-11-03, but the file stays so a live session that snapshotted the
+      # old registration does not error after every Bash call (see the header of
+      # hooks/PostToolUse/pr-record.js). Keyed to this one path only; any other
+      # unreferenced hook still warns. DELETE this exception when
+      # hooks/PostToolUse/pr-record.js itself is deleted.
+      [ "${f#"$HOOKS_ROOT"/}" = "PostToolUse/pr-record.js" ] && continue
       hook_required_by_script "${f#"$HOOKS_ROOT"/}" && continue
       _hook_requirers=$(grep -lsF -e "require('./$_hook_stem')" -e "require('./$_hook_base')" \
         -e "require(\"./$_hook_stem\")" -e "require(\"./$_hook_base\")" "$(dirname "$f")"/*.js)
