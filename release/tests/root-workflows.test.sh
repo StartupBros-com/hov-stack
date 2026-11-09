@@ -84,6 +84,37 @@ for file in "${files[@]}"; do
       and (.run | test("^(bash )?(\\./)?release/scripts/")))' "$TMP/$file.json" >/dev/null || die "scripts/action pins/permissions: $file"
 done
 pass 'every run is a short script call; runners, pins and checkouts are hardened'
+
+# General CI executes contributed code on hosted runners. Keep submissions and
+# feedback open without leaving the checkout token in either job's git config.
+yq -o=json '.' .github/workflows/ci.yml >"$TMP/ci.yml.json"
+cat >"$TMP/public-ci.jq" <<'PUBLICCI'
+  (.on | keys == ["pull_request","push"])
+  and .on.pull_request == null and .on.push == null
+  and .permissions == {"contents":"read"}
+  and (.jobs | keys == ["public-safety","test"])
+  and .jobs.test.name == "setup, hooks, suites, secrets"
+  and .jobs["public-safety"].name == "public-safety scan"
+  and all(.jobs[];
+    .["runs-on"] == "ubuntu-24.04" and (has("if") | not)
+    and (has("permissions") | not) and (has("environment") | not)
+    and ([.steps[] | select((.uses // "") | startswith("actions/checkout@"))] | length == 1)
+    and all(.steps[] | select((.uses // "") | startswith("actions/checkout@"));
+      .with["persist-credentials"] == false))
+PUBLICCI
+jq -e -f "$TMP/public-ci.jq" "$TMP/ci.yml.json" >/dev/null || die 'public CI checkout/permission/participation contract'
+pass 'general CI stays open on hosted read-only runners without persisted checkout credentials'
+for job in test public-safety; do
+  for mutation in 'del(.with["persist-credentials"])' '.with["persist-credentials"] = true'; do
+    jq --arg job "$job" ".jobs[\$job].steps |= map(if ((.uses // \"\") | startswith(\"actions/checkout@\")) then $mutation else . end)" \
+      "$TMP/ci.yml.json" >"$TMP/ci-mutant.json"
+    if jq -e -f "$TMP/public-ci.jq" "$TMP/ci-mutant.json" >/dev/null; then
+      die "accepted persisted checkout credentials in $job: $mutation"
+    fi
+  done
+done
+pass 'both general CI jobs reject missing and enabled credential persistence'
+
 # The pins refresh runs downloaded programs, so only a read-only job with no secret may
 # run them, and the job holding the bot's key takes nothing from it but rows that apply
 # checks against the default branch it checked out itself.
