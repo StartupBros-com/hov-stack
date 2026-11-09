@@ -48,15 +48,30 @@ dotfiles › wt statusline-hud ±1 │ last session route ● acct-c 5h 24% 7d 8
 5h  ▕██░░░░░░░░▏ 23%→15:52 │ 7d ▕████░░░░░░▏ 41%→Sun 14:22 │ PR #1673 #1682 │ a6eda6ea
 ```
 
-- **cache** reads Claude Code's own `prompt_cache` status-line field (read from
-  the 2.1.292 bundle; a build without the field renders no segment). It covers
-  the main conversation only, so subagent traffic cannot move it. Warm shows the time left on the TTL and its absolute expiry, green
-  until the last fifth of the TTL and orange after. Cold shows the idle time and
-  the tokens the next turn writes again (`re-cache ~155k`). It is blue, not red,
-  because a cold cache is a cost, not an error. For ten minutes after a miss
-  that idle time did not cause, the segment names the cause in Claude Code's
-  wording. The segment is absent before the first request and when the API
-  reports no caching.
+- **cache** reads Claude Code's own `prompt_cache` status-line field (originally
+  inspected in 2.1.292; partial-usage behavior checked in 2.1.312). A build
+  without the field renders no segment. In the inspected native implementation,
+  the field covers the main conversation rather than subagent traffic. Warm
+  shows the time left and absolute expiry when supplied, green until the last
+  fifth of the native TTL and orange after; without expiry it displays `warm`.
+  Cold shows idle time and the native re-cache estimate (`re-cache ~155k`) when
+  available. It is blue, not red, because a cold cache is a cost, not an error.
+  On warm frames, space permitting, a recognized non-idle miss cause appears in
+  Claude Code's wording for up to ten minutes. The segment is absent when
+  `prompt_cache` is missing or not an object, `caching_observed` is not true, or
+  `warm` is not boolean. Absence alone does not prove that the provider disabled
+  caching.
+  **Unavailable usage (2026-10-27):** explicit numeric zero in all four
+  `current_usage` counters, zero `total_input_tokens`, and no positive finite
+  percentage render `ctx usage unavailable`. In that state, an otherwise
+  eligible cold cache frame without a finite numeric expiry or positive finite
+  re-cache estimate renders `cache unknown`. Independent warmth, expiry, and
+  positive estimates retain their existing display; an old miss timestamp alone
+  does not settle this attempt. Positive measurements and fresh/legacy payloads
+  without a complete four-zero usage object are unchanged. Unknown is not proof
+  of a provider miss, and unavailable does not mean generation is still running.
+  No prior transcript counts are substituted; native TTL labels do not measure
+  upstream retention.
 - `statusLine.refreshInterval: 30` re-renders every 30 seconds so the countdown
   moves while the session is idle. `sync.sh` never writes `statusLine`:
   settings.json is volatile and `check` excludes the key. The tracked value only
