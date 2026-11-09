@@ -40,6 +40,16 @@
 # them (docker-hygiene's unit-PATH check wants supabase there); CI has no such
 # tools and that check skips itself.
 #
+# A mise shim is worse than a missing tool: with the scratch HOME and a checkout
+# under the real HOME, the shim walks up from the working directory, finds the
+# real ~/.config/mise/conf.d/*.toml, looks its trust up under the empty scratch
+# HOME and exits non-zero ("Config files in ... are not trusted"), so `node -e 1`
+# fails. Before HOME is overridden the runner therefore resolves node and python3
+# to the real binaries (`mise which`) and puts them first on PATH, and sets
+# MISE_CEILING_PATHS to the real HOME (unless the caller set one) so any other
+# shim stops short of the host config. A PATH with no shim is left untouched.
+# hooks/tests/run.sh carries the same pin; keep the two in step.
+#
 #   bash tests/run-claude-tests.sh [-j N] [-o DIR] [--list] [suite...]
 set -uo pipefail
 
@@ -49,6 +59,24 @@ SKIPS=$ROOT/tests/claude-tests.skips
 TIMEOUT=${CLAUDE_TESTS_TIMEOUT:-600}
 
 usage() { echo "usage: bash tests/run-claude-tests.sh [-j N] [-o DIR] [--list]"; }
+
+# pin_real_binaries <bindir>: for node and python3, when `command -v` finds a mise
+# shim, link what `mise which` names into <bindir> and put <bindir> first on PATH.
+# Must run while HOME is still the real one. Silent when nothing is a shim.
+pin_real_binaries() {
+  local bindir=$1 name found real pinned=0
+  for name in node python3; do
+    found=$(command -v "$name" 2>/dev/null) || continue
+    case $found in */shims/*) ;; *) continue ;; esac
+    real=$(mise which "$name" 2>/dev/null) || continue
+    if [ -n "$real" ] && [ -x "$real" ] && [ "$real" != "$found" ]; then
+      mkdir -p "$bindir" && ln -sf "$real" "$bindir/$name" && pinned=1
+    fi
+  done
+  if [ "$pinned" = 1 ]; then export PATH="$bindir:$PATH"; fi
+  export MISE_CEILING_PATHS="${MISE_CEILING_PATHS:-$HOME}"
+  return 0
+}
 
 # ---- one suite (child mode: bash run-claude-tests.sh --one "<kind> <path> <pass|fail>") ----
 # Writes $CLAUDE_TESTS_LOGDIR/<slug>.log and .meta, prints the suite's one status line.
@@ -249,6 +277,7 @@ else
   logdir=$(cd "$logdir" && pwd -P)
 fi
 export CLAUDE_TESTS_LOGDIR=$logdir
+pin_real_binaries "$logdir/real-bin"
 # One token per run; a .meta that carries another one is a previous run's, not a result.
 CLAUDE_TESTS_RUN="$$.$(date +%s)"
 export CLAUDE_TESTS_RUN

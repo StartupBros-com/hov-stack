@@ -209,6 +209,8 @@ make_harness_repo() {
     "$root/scripts/tests" \
     "$root/plugins/hov-stack/skills/fixture/test" \
     "$root/hooks/tests"
+  # The doctor runs the CI runner (#356), so a planted tree carries the real one.
+  cp "$REPO/tests/run-claude-tests.sh" "$root/tests/run-claude-tests.sh"
   cat >"$root/tests/test_smoke.py" <<'PY'
 import unittest
 class Smoke(unittest.TestCase):
@@ -550,7 +552,7 @@ SYNC_EXAMINED=1 CODEX_STATUS=0 COLLISION_STATUS=0 SWEEP_STATUS=0 \
   FULL_OUT=$(run_doctor "$FULL_HOME" "$FULL_HARNESS" 0)
 
 contains "$FULL_OUT" "python test modules examined: 1" "B1 python disclosure"
-contains "$FULL_OUT" "node skill suites examined: 1" "B1 node disclosure"
+contains "$FULL_OUT" "node test suites examined: 1" "B1 node disclosure"
 contains "$FULL_OUT" "bash test suites examined: 2" "B1 bash disclosure"
 contains "$FULL_OUT" "bash: nested.test.sh" "B1 nested bash discovery"
 contains "$FULL_OUT" "hook test files examined: 1" "B1 hook disclosure"
@@ -617,27 +619,7 @@ contains "$DRAIN_OUT" "test_named_python_failure" "B1 python WARN names the fail
 contains "$DRAIN_OUT" "named node failure" "B1 node WARN names the failing test"
 contains "$DRAIN_OUT" "nested subtest failure" "B1 node WARN names a failing subtest"
 omits "$DRAIN_OUT" "Broken pipe" "B1 the failing-name cap drains its input"
-omits "$DRAIN_OUT" "the loop ended early" "B1 every listed suite ran"
 omits "$DRAIN_OUT" "all harness test suites green" "B1 drain fixture is not green"
-
-# B1 ran-vs-listed: with every suite on </dev/null nothing above can end the
-# loop early, so the guard is checked against a copy of the doctor whose bash
-# loop still hands each suite its stdin; a-drain then swallows the rest of the
-# list. The node guard has no such check: node --test gives each test file its
-# own stdin, so no node suite can drain the list.
-MUT_DIR=$TMP/mutant-scripts
-mkdir -p "$MUT_DIR"
-ln -s "$REPO/scripts/"* "$MUT_DIR/"
-rm "$MUT_DIR/harness-doctor.sh"
-sed 's|timeout "$BASH_SUITE_TIMEOUT_S" bash "$(basename "$t")" 2>&1 </dev/null|timeout "$BASH_SUITE_TIMEOUT_S" bash "$(basename "$t")" 2>\&1|' \
-  "$DOCTOR" >"$MUT_DIR/harness-doctor.sh"
-if cmp -s "$DOCTOR" "$MUT_DIR/harness-doctor.sh"; then
-  bad "B1 ran-vs-listed: the bash loop's </dev/null line moved; update this mutation"
-else
-  MUT_OUT=$(DOCTOR="$MUT_DIR/harness-doctor.sh" run_doctor "$FULL_HOME" "$DRAIN_HARNESS" 0)
-  contains "$MUT_OUT" "bash test suites: ran 2 of 5 listed; the loop ended early" \
-    "B1 ran-vs-listed guard reports a loop a suite cut short"
-fi
 
 # B1 skip header: docker-init-runtime.test.sh needs operator-supplied images,
 # containers and a socket, so the bare weekly run always refused (exit 64) and
@@ -666,7 +648,128 @@ contains "$SKIP_OUT" "bash test suites examined: 4" "B1 skip fixture lists four 
 contains "$SKIP_OUT" "skip: bash: m-manual.test.sh — needs operator-supplied images and containers" "B1 a skip header names the suite and its reason"
 omits "$SKIP_OUT" "FAILING: m-manual.test.sh" "B1 a skip-header suite is not run"
 contains "$SKIP_OUT" "late-marker-case" "B1 a marker after the header does not skip the suite"
-omits "$SKIP_OUT" "the loop ended early" "B1 a skipped suite counts as handled"
+
+# B1 runner (#356): the doctor runs tests/run-claude-tests.sh instead of looping over
+# suites itself, so it and CI cannot disagree. Planted trees below carry the real
+# runner (make_harness_repo copies it). Every case that is not green asserts the
+# green line is absent as well as the specific WARN present.
+RUN_HARNESS=$TMP/runner-harness
+make_harness_repo "$RUN_HARNESS"
+mkdir -p "$RUN_HARNESS/scripts/tests"
+# One suite per discovery kind the old loops missed: tests/*.test.py and scripts/tests/*.test.js.
+printf 'print("pys ok")\n' >"$RUN_HARNESS/tests/planted-py.test.py"
+printf "console.log('js ok');\n" >"$RUN_HARNESS/scripts/tests/planted-js.test.js"
+RUN_OUT=$(run_doctor "$FULL_HOME" "$RUN_HARNESS" 0)
+contains "$RUN_OUT" "python: planted-py.test.py" "B1r a tests/*.test.py suite is discovered and run"
+contains "$RUN_OUT" "node: planted-js.test.js" "B1r a scripts/tests/*.test.js suite is discovered and run"
+contains "$RUN_OUT" "python: test_smoke.py" "B1r a tests/test_*.py suite runs"
+contains "$RUN_OUT" "node: smoke.test.mjs" "B1r a skill .test.mjs suite runs"
+contains "$RUN_OUT" "bash: nested.test.sh" "B1r a scripts/tests/*.test.sh suite runs"
+contains "$RUN_OUT" "python test modules examined: 2" "B1r python family counts both kinds"
+contains "$RUN_OUT" "node test suites examined: 2" "B1r node family counts both kinds"
+contains "$RUN_OUT" "all harness test suites green" "B1r every discovery kind passing is green"
+
+# A failing suite of each new kind is named and is not green.
+printf 'import sys\nprint("FAIL: planted-py-case")\nsys.exit(1)\n' >"$RUN_HARNESS/tests/planted-py.test.py"
+printf "console.log('x'); process.exit(1);\n" >"$RUN_HARNESS/scripts/tests/planted-js.test.js"
+FAILK_OUT=$(run_doctor "$FULL_HOME" "$RUN_HARNESS" 0)
+contains "$FAILK_OUT" "python test suite FAILING: planted-py.test.py" "B1r a failing tests/*.test.py suite is named"
+contains "$FAILK_OUT" "node test suite FAILING: planted-js.test.js" "B1r a failing scripts/tests/*.test.js suite is named"
+omits "$FAILK_OUT" "all harness test suites green" "B1r failing suites are not green"
+printf 'print("pys ok")\n' >"$RUN_HARNESS/tests/planted-py.test.py"
+printf "console.log('js ok');\n" >"$RUN_HARNESS/scripts/tests/planted-js.test.js"
+
+# xfail: a matching one is visible and expected, a mismatching one is a failure, and a
+# passing one is a stale entry (runner exit 2). None of them renders the all-green line.
+XF_HARNESS=$TMP/xfail-harness
+make_harness_repo "$XF_HARNESS"
+printf '#!/usr/bin/env bash\necho "FAIL: expected-reason"\nexit 1\n' >"$XF_HARNESS/tests/xf.test.sh"
+printf 'xfail\ttests/xf.test.sh\tneeds a private file\t^FAIL: expected-reason\n' >"$XF_HARNESS/tests/claude-tests.skips"
+XF_OUT=$(run_doctor "$FULL_HOME" "$XF_HARNESS" 0)
+contains "$XF_OUT" "  xfail  tests/xf.test.sh" "B1r a matching xfail stays visible in the doctor's output"
+omits "$XF_OUT" "FAILING: xf.test.sh" "B1r a matching xfail is not a failure"
+omits "$XF_OUT" "all harness test suites green" "B1r an xfail run is never the all-green line"
+contains "$XF_OUT" "1 expected failure(s) (xfail)" "B1r the xfail count is stated"
+printf 'xfail\ttests/xf.test.sh\tneeds a private file\t^FAIL: some-other-reason\n' >"$XF_HARNESS/tests/claude-tests.skips"
+XFM_OUT=$(run_doctor "$FULL_HOME" "$XF_HARNESS" 0)
+contains "$XFM_OUT" "bash test suite FAILING: xf.test.sh" "B1r an xfail whose log lacks its signature is a failure"
+omits "$XFM_OUT" "all harness test suites green" "B1r a mismatching xfail is not green"
+printf '#!/usr/bin/env bash\nexit 0\n' >"$XF_HARNESS/tests/xf.test.sh"
+printf 'xfail\ttests/xf.test.sh\tused to fail\t^FAIL\n' >"$XF_HARNESS/tests/claude-tests.skips"
+XFS_OUT=$(run_doctor "$FULL_HOME" "$XF_HARNESS" 0)
+contains "$XFS_OUT" "bash test suite xf.test.sh passes but tests/claude-tests.skips lists it as xfail" "B1r a passing xfail is a stale entry"
+omits "$XFS_OUT" "all harness test suites green" "B1r a stale entry (runner exit 2) is not green"
+
+# A stale skips path (not a discovered suite) makes the runner exit 2 before anything runs.
+printf 'skip\ttests/no-such.test.sh\tgone\n' >"$XF_HARNESS/tests/claude-tests.skips"
+XS2_OUT=$(run_doctor "$FULL_HOME" "$XF_HARNESS" 0)
+contains "$XS2_OUT" "test runner --list exited 2" "B1r a stale skips path is a WARN, not a pass"
+omits "$XS2_OUT" "all harness test suites green" "B1r runner exit 2 is not green"
+
+# A skip from the skips file is reported, and a doctor-only skip (the per-file header)
+# is reported too, and neither lets the run claim every suite ran.
+SK_HARNESS=$TMP/skipfile-harness
+make_harness_repo "$SK_HARNESS"
+printf '#!/usr/bin/env bash\nexit 7\n' >"$SK_HARNESS/tests/unattended.test.sh"
+printf '#!/usr/bin/env bash\n# harness-doctor-skip: host-only manual proof\nexit 7\n' >"$SK_HARNESS/tests/manual.test.sh"
+printf 'skip\ttests/unattended.test.sh\tneeds a live machine\n' >"$SK_HARNESS/tests/claude-tests.skips"
+SK_OUT=$(run_doctor "$FULL_HOME" "$SK_HARNESS" 0)
+contains "$SK_OUT" "skip   tests/unattended.test.sh" "B1r a skips-file skip stays visible"
+contains "$SK_OUT" "skip: bash: manual.test.sh — host-only manual proof" "B1r a doctor-only skip stays visible with its reason"
+contains "$SK_OUT" "1 skipped by tests/claude-tests.skips and 1 skipped by harness-doctor-skip" "B1r both skip counts are stated"
+omits "$SK_OUT" "FAILING: manual.test.sh" "B1r a doctor-only skip is not run by the doctor"
+omits "$SK_OUT" "all harness test suites green" "B1r skipped suites never render the all-green line"
+
+# A hook-runner failure is a WARN and not green.
+HK_HARNESS=$TMP/hookfail-harness
+make_harness_repo "$HK_HARNESS"
+printf '#!/usr/bin/env bash\necho "fail 2"\nexit 1\n' >"$HK_HARNESS/hooks/tests/run.sh"
+HK_OUT=$(run_doctor "$FULL_HOME" "$HK_HARNESS" 0)
+contains "$HK_OUT" "hook test suite FAILING: fail 2" "B1r hooks/tests/run.sh still runs and its failure is a WARN"
+omits "$HK_OUT" "all harness test suites green" "B1r a hook-runner failure is not green"
+
+# A mise shim for node with the repo under the real HOME: the old loops ran suites with
+# the caller's HOME and passed this on a host; the runner's scratch HOME must not trip
+# the shim. The fake shim trusts only a HOME holding .mise-trusted, which the fixture's
+# real home has and the runner's scratch HOMEs do not. The fake `mise which` is what
+# the runner's pin resolves through.
+SHIMHOME=$(make_home shimhome 0 0)
+mkdir -p "$SHIMHOME/.config/mise/conf.d" "$SHIMHOME/.local/share/mise/shims" "$SHIMHOME/misebin"
+: >"$SHIMHOME/.config/mise/conf.d/host.toml"
+: >"$SHIMHOME/.mise-trusted"
+SHIM_NODE_REAL=$(command -v node)
+{
+  echo '#!/usr/bin/env bash'
+  echo 'd=$PWD'
+  echo 'while :; do'
+  echo '  if [ -d "$d/.config/mise/conf.d" ] && [ ! -e "$HOME/.mise-trusted" ]; then'
+  echo '    echo "mise ERROR Config files in $d/.config/mise/conf.d/host.toml are not trusted." >&2; exit 1'
+  echo '  fi'
+  echo '  [ "$d" = / ] && break; d=$(dirname "$d")'
+  echo 'done'
+  echo "exec $SHIM_NODE_REAL \"\$@\""
+} >"$SHIMHOME/.local/share/mise/shims/node"
+chmod +x "$SHIMHOME/.local/share/mise/shims/node"
+printf '#!/usr/bin/env bash\n[ "${1:-}" = which ] && [ "${2:-}" = node ] && echo %s\n' "$SHIM_NODE_REAL" >"$SHIMHOME/misebin/mise"
+chmod +x "$SHIMHOME/misebin/mise"
+SHIM_HARNESS=$SHIMHOME/harness
+make_harness_repo "$SHIM_HARNESS"
+printf "console.log('probe');\n" >"$SHIM_HARNESS/tests/probe.js"
+printf '#!/usr/bin/env bash\nnode "$(dirname "$0")/probe.js"\n' >"$SHIM_HARNESS/tests/uses-node.test.sh"
+SHIM_PATH_WITH_MISE=$SHIMHOME/.local/share/mise/shims:$SHIMHOME/misebin:$STUBBIN:$JQ_DIR:/usr/bin:/bin
+SHIM_OUT=$(DOCTOR_TEST_PATH=$SHIM_PATH_WITH_MISE run_doctor "$SHIMHOME" "$SHIM_HARNESS" 0)
+contains "$SHIM_OUT" "bash: uses-node.test.sh" "B1r a suite calling a mise-shimmed node passes under the runner's scratch HOME"
+omits "$SHIM_OUT" "are not trusted" "B1r the shim never reads the host config under a scratch HOME"
+omits "$SHIM_OUT" "bash test suite FAILING" "B1r the repo-under-real-HOME case has no failing suite"
+contains "$SHIM_OUT" "all harness test suites green" "B1r the shim case is green"
+
+# An isolated HOME with the repo outside it never involved the shim: same planted tree
+# copied outside the real home, same PATH, same result.
+ISO_HARNESS=$TMP/iso-harness
+cp -r "$SHIM_HARNESS" "$ISO_HARNESS"
+ISO_OUT=$(DOCTOR_TEST_PATH=$SHIM_PATH_WITH_MISE run_doctor "$SHIMHOME" "$ISO_HARNESS" 0)
+contains "$ISO_OUT" "bash: uses-node.test.sh" "B1r the same suite passes with the repo outside the real HOME"
+contains "$ISO_OUT" "all harness test suites green" "B1r the isolated-HOME case is green"
 
 # D6: a suite that outlives its cap is `timeout`'s exit 124 -- a too-small cap for this host,
 # not a failing test. The doctor must say "timed out ... (not a test failure)" and must not
