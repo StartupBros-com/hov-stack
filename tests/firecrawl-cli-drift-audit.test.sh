@@ -87,7 +87,7 @@ if mode == "malformed":
 if mode == "renamed" and command == "scrape":
     text = text.replace("--only-main-content", "--renamed-content")
 if mode == "default" and command == "parse":
-    text = text.replace("--only-main-content <value>  Description mentioning --not-a-real-option (default:\n                             false)",
+    text = text.replace("--only-main-content <value>  Description mentioning --not-a-real-option",
                         "--only-main-content <value>  Description (default: true)")
 if mode == "unstated" and command == "agent":
     text = text.replace("--max-credits <value>", "--max-credits <value> (default: 2500)")
@@ -107,7 +107,7 @@ run_scanner() {
 }
 OUT=$(run_scanner); ST=$?
 status_is "$ST" 0 "matching help"
-contains "$OUT" "firecrawl-cli-drift: 26 subcommand(s), 41 flag(s), 18 default(s) checked, 0 finding(s)" "summary"
+contains "$OUT" "firecrawl-cli-drift: 37 subcommand(s), 41 flag(s), 18 default(s) checked, 0 finding(s)" "summary"
 omits "$OUT" "WARN" "matching help"
 omits "$OUT" "DO-NOT-PRINT" "settings values stay private"
 OUT=$(DRIFT_FIXTURE="alias" run_scanner); ST=$?
@@ -118,7 +118,7 @@ for mode in renamed default unstated new removed nested; do
   count_is "$OUT" 1 "$mode exactly one warning"
   case "$mode" in
     renamed) contains "$OUT" "scrape: missing flag --only-main-content" "renamed flag" ;;
-    default) contains "$OUT" "parse --only-main-content: default changed from 'false' to 'true'" "AE14 both texts" ;;
+    default) contains "$OUT" "parse --only-main-content: default changed from <not stated> to 'true'" "AE14 both texts" ;;
     unstated) contains "$OUT" "agent --max-credits: default changed from <not stated> to '2500'" "newly stated default" ;;
     new) contains "$OUT" "new subcommand 'brand-new'; update the verb map" "new command" ;;
     removed) contains "$OUT" "missing subcommand 'parse'" "removed command" ;;
@@ -178,7 +178,7 @@ OUT=$(CLAUDE_FIRECRAWL_DRIFT_AUDIT="$TMP/dormant.py" run_doctor)
 contains "$OUT" "info: fixture dormant" "doctor info pass-through"
 contains "$OUT" "ok: fixture summary" "doctor summary"
 OUT=$(DRIFT_FIXTURE=default run_doctor)
-contains "$OUT" "WARN: firecrawl-cli-drift: parse --only-main-content: default changed from 'false' to 'true'" "doctor WARN pass-through"
+contains "$OUT" "WARN: firecrawl-cli-drift: parse --only-main-content: default changed from <not stated> to 'true'" "doctor WARN pass-through"
 omits "$OUT" "three-tool MCP allow list checked" "finding never clean"
 
 # Review 2026-09-13: a deployed wrapper whose vendor is missing is a finding, never dormant.
@@ -192,9 +192,9 @@ OUT=$(PATH="$TMP/empty" "$PYTHON" "$SCANNER" --settings "$SETTINGS" 2>&1); ST=$?
 status_is "$ST" 0 'neither wrapper nor vendor stays dormant'
 contains "$OUT" 'dormant' 'dormant when nothing is deployed'
 
-# The tokenizer reads the vendor's real help (captured from firecrawl 1.19.26), so the
+# The tokenizer reads the vendor's real help (captured from firecrawl 1.26.25), so the
 # generated fixtures above are not the only format it is ever proven against.
-OUT=$("$PYTHON" - "$SCANNER" "$REPO/tests/fixtures/firecrawl-cli/vendor-help-1.19.26" <<'PY'
+OUT=$("$PYTHON" - "$SCANNER" "$REPO/tests/fixtures/firecrawl-cli/vendor-help-1.26.25" <<'PY'
 import importlib.util, pathlib, sys
 spec = importlib.util.spec_from_file_location("drift", sys.argv[1])
 mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)
@@ -202,7 +202,7 @@ d = pathlib.Path(sys.argv[2])
 commands, _ = mod.tokenize((d / "root.txt").read_text(), "root")
 assert {"scrape", "crawl", "map", "parse", "search", "agent", "interact", "credit-usage"} <= commands, commands
 _, scrape = mod.tokenize((d / "scrape.txt").read_text(), "scrape")
-assert scrape.get("--only-main-content") == "false", scrape.get("--only-main-content")
+assert scrape.get("--only-main-content") is None, scrape.get("--only-main-content")
 assert "--format" in scrape and "--screenshot" in scrape, sorted(scrape)
 _, parse = mod.tokenize((d / "parse.txt").read_text(), "parse")
 assert "--only-main-content" in parse and "--timeout" in parse, sorted(parse)
@@ -212,7 +212,22 @@ assert interact.get("--timeout") == "30" and "--scrape-id" in interact, interact
 # against help generated from the verb map (review 2026-09-13).
 _, search = mod.tokenize((d / "search.txt").read_text(), "search")
 assert {"--limit", "--categories", "--sources", "--tbs", "--location"} <= set(search), sorted(search)
-assert search.get("--sources") == "web", search.get("--sources")
+assert search.get("--sources") == "web; with an API key, alexandria is always added", search.get("--sources")
+assert {"gov", "developer", "find-tools", "alexandria", "batch-scrape"} <= commands, commands
+required = {
+    "scrape": "--only-main-content --format --max-age --screenshot --query --schema --schema-file --actions --actions-file",
+    "parse": "--only-main-content --format --query --timeout",
+    "interact": "--scrape-id --prompt --code --node --python --bash --timeout",
+    "agent": "--max-credits --model --status --wait --cancel",
+    "map": "--limit", "crawl": "--limit", "research": "--help",
+    "search": "--limit --categories --sources --tbs --location",
+    "credit-usage": "--json",
+}
+for name, flags in required.items():
+    _, declared = mod.tokenize((d / (name + ".txt")).read_text(), name)
+    assert set(flags.split()) <= set(declared), (name, set(flags.split()) - set(declared))
+text = (d / "interact.txt").read_text()
+assert "-s, --scrape-id" in text and "-c, --code" in text, text
 print("OK")
 PY
 ); ST=$?

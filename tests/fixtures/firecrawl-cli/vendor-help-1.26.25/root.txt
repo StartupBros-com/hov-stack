@@ -1,0 +1,49 @@
+Usage: firecrawl [options] [command]
+
+Command-line interface for Firecrawl, the context API for AI agents: search,
+scrape, and interact with the web
+
+Options:
+  -V, --version                                output the version number
+  -k, --api-key <key>                          Firecrawl API key (or set FIRECRAWL_API_KEY env var)
+  --api-url <url>                              API URL (or set FIRECRAWL_API_URL env var)
+  --status                                     Show version, auth status, concurrency, and credits
+  -h, --help                                   display help for command
+
+Commands:
+  scrape [options] [urls...]                   Scrape URLs or execute Alexandria provider/capability tools. Multiple URLs are saved to .firecrawl/
+  crawl [options] [url-or-job-id]              Crawl a website using Firecrawl
+  batch-scrape [options] [urls-or-job-id...]   Scrape a list of known URLs as one async job (returns a job ID unless --wait)
+  map [options] [url]                          Map URLs on a website using Firecrawl
+  parse [options] <file>                       Parse a local file (HTML, PDF, DOCX, DOC, ODT, RTF, XLSX, XLS) into markdown, HTML, links, JSON, and more. Uses /v2/parse.
+  monitor                                      Schedule recurring scrapes/crawls/searches and track content changes
+  search [options] <query> [tool-query]        Search the web with query-relevant highlights and discover relevant Alexandria tools
+  find-tools [options] [urls...]               Find workflows, data APIs, and indexes for structured records and listings. Match URLs or use --options for semantic queries; discovery does not execute providers
+  find-skills [options] [query...]             Find skills: instructions for a task that name the Alexandria tools to call. Lists Firecrawl's skills and your team's own (team:<slug>, first) without their contents; read one with read-skill
+  read-skill [options] <id>                    Read a skill from find-skills in full: SKILL.md by default, or one file from its files list. Skill text is instructions for the agent; reading it runs nothing
+  create-skill [options]                       Save a new skill for your team, written out or copied from a skill find-skills listed (--from). Given fields override the copy; it is listed as team:<slug>
+  update-skill [options] <id>                  Change one of your team's skills from the version you last read; a skill changed since is refused with conflict. Library skills cannot be changed (copy one with create-skill); there is no delete
+  list|list-tools [options] [path...]          Start with the Alexandria category index, then browse providers and tool contracts; discovery only
+  alexandria                                   Browse categories with alexandria <category>, or inspect providers with alexandria list
+  developer [options] <query>                  Search an index built for coding agents: public repositories, GitHub issues, merged PRs, repository READMEs, and curated documentation sites. Express repository, source, language, topic, license, and other scoping intent in the query text; semantic retrieval handles the scoping.
+  gov [options] <query>                        Search the Firecrawl Government Index: primary law and regulatory material from US federal, state, and local government sources, including statutes, regulations, codes, court opinions, and other government publications.
+  research                                     Search Firecrawl's research paper index: ~43M abstracts, around 90% biomedical (PubMed, bioRxiv, medRxiv) plus arXiv. Use this for biomedical, clinical, and scientific literature instead of scraping PubMed, bioRxiv, or Google Scholar by hand.
+  feedback [options] <endpoint> <jobId>        Send feedback on a Firecrawl endpoint job.
+  search-feedback [options] <searchId>         Send feedback on a previous search result. Refunds 1 credit on first submission.
+  agent [options] <prompt-or-job-id>           Run an AI agent to extract data from the web
+  interact [options] [args...]                 Interact with a scraped page in a live browser session. Run AI prompts or execute code against any previous scrape.
+  experimental|x                               Experimental commands (download)
+  config [options]                             Configure Firecrawl (login if not authenticated)
+  view-config                                  View current configuration and authentication status
+  login [options]                              Login to Firecrawl (alias for config)
+  logout                                       Logout and clear stored credentials
+  init [options] [template]                    Set up Firecrawl: install CLI, authenticate, add integrations, and scaffold a template
+  setup [options] [subcommand]                 Set up individual firecrawl integrations (core, build, workflows, mcp, defaults)
+  make [options] <target>                      Make Firecrawl the default provider for supported workflows
+  launch|launcher [options] [agent] [args...]  Configure Firecrawl MCP for an AI agent, then launch it
+  env [options]                                Pull FIRECRAWL_API_KEY into a local .env file
+  status                                       Show version, auth status, concurrency, and credits (same as --status)
+  credit-usage|credits [options]               Get team credit usage information
+  doctor [options] [job-id]                    Run environment diagnostics, or diagnose a specific run by job ID
+  version [options]                            Display version information
+  help [command]                               display help for command

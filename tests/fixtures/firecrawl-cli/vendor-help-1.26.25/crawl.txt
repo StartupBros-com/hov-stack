@@ -1,0 +1,46 @@
+Usage: firecrawl crawl [options] [url-or-job-id]
+
+Crawl a website using Firecrawl
+
+Arguments:
+  url-or-job-id                 URL to crawl, or job ID to read its status and
+                                pages
+
+Options:
+  -u, --url <url>               URL to crawl (alternative to positional
+                                argument)
+  --status                      Read the status and pages of an existing crawl
+                                job (default: false)
+  --wait                        Wait for the crawl (new or by job ID) to finish
+                                before returning results; exits 1 if it fails or
+                                is cancelled (default: false)
+  --poll-interval <seconds>     Polling interval in seconds when waiting
+                                (default: 5)
+  --timeout <seconds>           Timeout in seconds when waiting (default: no
+                                timeout)
+  --progress                    Show progress dots while waiting (default:
+                                false)
+  --limit <number>              Maximum number of pages to crawl
+  --max-depth <number>          Maximum crawl depth
+  --exclude-paths <paths>       Comma-separated list of paths to exclude
+  --include-paths <paths>       Comma-separated list of paths to include
+  --sitemap <mode>              Sitemap handling: skip, include (default:
+                                "include")
+  --ignore-query-parameters     Ignore query parameters when crawling (default:
+                                false)
+  --crawl-entire-domain         Crawl entire domain (default: false)
+  --allow-external-links        Allow external links (default: false)
+  --allow-subdomains            Allow subdomains (default: false)
+  --delay <ms>                  Delay between requests in milliseconds, 1 to
+                                60000 (sent to the API in seconds)
+  --max-concurrency <number>    Maximum concurrent requests
+  --scrape-options <json>       JSON scrape options passed to each page crawl
+  --scrape-options-file <path>  Path to scrape options JSON file
+  --webhook <url-or-json>       Webhook URL or webhook configuration
+  --cancel                      Cancel active crawl job by job ID (default:
+                                false)
+  -k, --api-key <key>           Firecrawl API key (overrides global --api-key)
+  --api-url <url>               API URL (overrides global --api-url)
+  -o, --output <path>           Output file path (default: stdout)
+  --pretty                      Pretty print JSON output (default: false)
+  -h, --help                    display help for command
