@@ -101,7 +101,7 @@
  *               FORECLOSED, so nobody re-proposes it: this hook cannot be made
  *               to write a memory note (or call any tool) at compaction time.
  *               The compaction request is built with an unconditional tool-use
- *               denial — the installed 2.1.224 bundle wires a canUseTool that
+ *               denial — the 2.1.224 bundle wires a canUseTool that
  *               returns {behavior:"deny", message:"Tool use is not allowed
  *               during compaction", reason:"compaction agent should only
  *               produce text summary"}, and the reactive path adds a "Do NOT
@@ -115,8 +115,11 @@
  *               the ledger shows no category losses without steering; or CC
  *               ships documented compaction-instruction config (upstream
  *               anthropics/claude-code#55905).
- * verified-at — 2.1.224 (re-run the marker test and bump this stamp when
- *               doctor check 24 flags a version change).
+ * verified-at — 2.1.321 (re-run the marker test and bump this stamp when
+ *               doctor check 24 flags a version change). 2.1.321: marker test
+ *               re-run live (XYZZY-MARKER-7734 reached the summary); the hook-help
+ *               string and the deny message/reason strings are still in the
+ *               binary. The deny wiring itself is not re-derived from the bundle.
  *
  * WHY: compaction is the one place session state is rewritten by a model with
  * no standing guidance from this harness. The summarizer guesses what matters;
