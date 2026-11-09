@@ -1,6 +1,6 @@
 ---
 name: gh-tracking-and-claims
-description: "GH-native work tracking: issue/PR templates, wt-new.sh worktree helper (prints the gh pr create command; the agent opens its own PR), gh-ready.sh. Claims, dedup and the claim reaper were retired 2026-10-17"
+description: "GH-native work tracking: issue/PR templates, wt-new.sh worktree helper (prints the gh pr create command; the agent opens its own PR), gh-ready.sh, and the org-level public repository baseline. Claims, dedup and the claim reaper were retired 2026-10-17"
 metadata:
   node_type: memory
   type: project
@@ -30,9 +30,12 @@ the PR template carrying Definition of Done, rejected approaches, and a
 pre-completion checklist). Seed per repo with
 `scripts/gh-templates-install.sh` (`DRY_RUN=1` default; `ONLY=<repo>`
 for one repo). Each install lands as its own draft PR. Repos with their own
-`ISSUE_TEMPLATE` are never clobbered. An org-level `.github` repo is
-deliberately not used: org-wide template inheritance requires the org repo to
-be public, a visibility call not made here.
+`ISSUE_TEMPLATE` are never clobbered. The public org-level
+`StartupBros-com/.github` repository (created 2026-11-09) holds only a default
+`CONTRIBUTING.md` and `SECURITY.md`, no issue or PR templates, so this payload
+still decides templates. GitHub also shows those two defaults in private org
+repositories that lack their own, so they stay generic and carry no private
+details. See [Public repository baseline](#public-repository-baseline).
 
 ## Repo settings
 
@@ -50,6 +53,51 @@ settings, so run `ONLY=<fork>` after forking (smaug had issues off, which
 blocks `wt-new.sh`). The fleet-wide `DRY_RUN=0` run is an operator action; the
 script does not run on a timer. Nothing else is touched: wiki, projects,
 rulesets and templates stay as they are.
+
+## Public repository baseline
+
+Every public repository in the organization gets its protections from
+organization-level settings. Nothing is adopted, copied or repinned per
+repository, and issue and pull request submission stays open to everyone,
+AI-assisted contributions included. Decided 2026-11-09 in
+StartupBros-com/shared-workflows#32, which replaced a design built on a
+reusable workflow each repository would adopt.
+
+| Protection | Where it lives | A new repository |
+|---|---|---|
+| Read-only default `GITHUB_TOKEN`; workflows cannot approve pull requests; a first-time contributor's fork runs wait for approval | Organization Actions settings | inherits it |
+| Default branch: no deletion, no force-push, changes through pull requests | Organization ruleset `protect-main`, all repositories | inherits it |
+| Secret scanning with push protection, CodeQL default setup (it analyzes GitHub Actions workflows too), Dependabot alerts, private vulnerability reporting | GitHub's recommended code security configuration (org configuration 17), attached to every public repository and the default for new public ones | gets it when created public; see below otherwise |
+| Default `CONTRIBUTING.md` and `SECURITY.md` | `StartupBros-com/.github` | shows them unless it has its own |
+| Fork pull requests never reach owned runners | Owned runner groups deny public repositories; only the hosted scale-set groups allow them, and nothing local sits behind those | inherits it |
+
+The code security features are free on public repositories and billed per
+active committer on private ones, so agents cannot turn them on: dcg denies
+every enable form (operator decision 2026-10-28), and the operator runs the
+enable. Agents verify with two reads:
+
+```bash
+gh api orgs/StartupBros-com/code-security/configurations/defaults --jq '.[] | {default_for_new_repos, name: .configuration.name}'
+gh api orgs/StartupBros-com/code-security/configurations/17/repositories --jq '.[] | {status, repo: .repository.name}'
+```
+
+GitHub applies a default configuration only when a repository is created. A
+repository that turns public, or is transferred in, needs the operator to
+attach configuration 17 again with `scope=public`: one idempotent call that
+touches public repositories only. Run `gh-repo-settings.sh` with
+`ONLY=<repo>` at the same time.
+
+Personal-account repositories sit outside these settings. Turn on CodeQL
+default setup and private vulnerability reporting per public repository
+there; secret scanning and push protection were already on for its newer
+public repositories.
+
+Scanners report findings; they do not sandbox untrusted code. Triage alerts
+privately in each repository's Security tab, never in a public issue. Spam
+stays a targeted maintainer action: hide or delete the comment, and block a
+repeat account at the organization level. Interaction limits, pull request
+caps, contributor allowlists and moderation bots are out, because they turn
+away legitimate newcomers and AI agents.
 
 ### Bodies: write a file, pass `--body-file`
 
