@@ -1,0 +1,12 @@
+Usage: firecrawl credit-usage|credits [options]
+
+Get team credit usage information
+
+Options:
+  -k, --api-key <key>  Firecrawl API key (overrides global --api-key)
+  --api-url <url>      API URL (overrides global --api-url)
+  -o, --output <path>  Output file path (default: stdout)
+  --json               Output as JSON format (default: false)
+  --pretty             Pretty print JSON output (only applies with --json)
+                       (default: false)
+  -h, --help           display help for command

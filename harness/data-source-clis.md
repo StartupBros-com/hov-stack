@@ -134,7 +134,7 @@ exit dictionary; it makes no vendor request.
 | `act <url>` | Scrape after browser actions supplied with `--actions` or `--actions-file` |
 | `agent <prompt-or-job-id>` | Run extraction, or use `--status`, `--wait`, or `--cancel` for a job; try cheaper `fetch --schema` first and bound jobs with `--max-credits` |
 | `interact <text-or-stop>` | Prompt or stop a browser session; always pass an explicit `--scrape-id <id>` returned by `fetch` |
-| `search <query>` | Discover pages; bound results with `--limit` (1–100); filter with `--categories github,pdf,developer` (`research` is accepted, but from 2026-11-16 it searches the paper index and returns paper records under `data.research`; papers go to `raw -- research search-papers`), `--sources web,images,news`, `--tbs qdr:h\|d\|w\|m\|y`, and `--location "<place>"`; the envelope's `search_id` feeds `raw -- search-feedback <id>`; no results exits 0 with empty buckets and a stderr hint (an empty news search billed 0 on 2026-10-30, dotfiles #2123) |
+| `search <query>` | Discover pages; bound results with `--limit` (1–100); filter with `--categories pdf,developer,gov` (`github` was removed in vendor 1.26.x; `gov` cannot be combined with another category; `research` is accepted, but from 2026-11-16 it searches the paper index and returns paper records under `data.research`; papers go to `raw -- research search-papers`), `--sources web,images,news,alexandria` (`alexandria` needs a key, see Alexandria below), `--tbs qdr:h\|d\|w\|m\|y`, and `--location "<place>"`; the envelope's `search_id` feeds `raw -- search-feedback <id>`; no results exits 0 with empty buckets and a stderr hint (an empty news search billed 0 on 2026-10-30, dotfiles #2123) |
 | `gov <query>` | Search US statutes, regulations, codes, court opinions, and agency publications; filters `--jurisdiction`, `--court`, `--court-type`, `--cites`, `--domain`; `--limit` 1–100; free and keyless |
 | `developer <query>` | Search issues, merged PRs, READMEs, and curated docs with matched passages; filters `--types`, `--repos`, `--sources`, `--skills-only`, `--passages`, and the repository attribute flags; `--limit` 1–100; free without a key; with one, `--limit` 10 or less tries keyless first and a keyed run costs 2 credits per 10 results |
 | `map <url>` | Discover site URLs; bound results with `--limit` |
@@ -145,7 +145,7 @@ exit dictionary; it makes no vendor request.
 - **Canonical flag order:** global flags go after the verb, for example
   `firecrawl-cli fetch <url> --json --timeout 60`. For passthrough, put wrapper
   flags before the separator and vendor flags after it:
-  `firecrawl-cli raw --json -- research search-github "<query>" --json`.
+  `firecrawl-cli raw --json -- research search-papers "<query>" --json`.
   Crawl and monitor are raw-only and take no vendor `--json`:
   `firecrawl-cli raw --json -- crawl <url> --limit 10 --wait`.
 - **Raw cost:** a raw call whose output reports `creditsUsed` for finished work
@@ -159,7 +159,7 @@ exit dictionary; it makes no vendor request.
   read, and output with no reported cost, which includes keyed `research` (a
   `search-papers` call billed nothing that day and still took 100). Three such
   calls exhaust a session, so use a shaped verb where one exists.
-  `research search-papers` and `search-github` go keyless first and hold
+  `research search-papers` goes keyless first (`search-github` no longer exists in vendor 1.26.25) and holds
   nothing when the free tier answers (next bullet).
 - **Free-first keyless routing (dotfiles #2118):** an eligible call tries Firecrawl's
   free keyless tier first, with or without `FIRECRAWL_API_KEY`: the vendor runs
@@ -167,10 +167,9 @@ exit dictionary; it makes no vendor request.
   environment, and API-direct `developer` sends no Bearer. Eligible: `fetch` or
   `extract` of a URL to `summary`, `markdown`, `links`, or `html`, a schema
   alone, or a `-Q` question alone; `shot`; a PDF to `summary` or `markdown`
-  with no question; `search` over `web` or `images` sources and `github` or
-  `research` categories at `--limit` 10 or less; `developer` at `--limit` 10
-  or less (any limit without a key); and `raw -- research search-papers` or
-  `search-github`. The 2026-10-30 probes found those answers equal to keyed
+  with no question; `search` over `web` or `images` sources and the `research`
+  category at `--limit` 10 or less; `developer` at `--limit` 10
+  or less (any limit without a key); and `raw -- research search-papers`. The 2026-10-30 probes found those answers equal to keyed
   ones; format combinations and a nonzero `--max-age` were admitted by design,
   not probed. A keyless answer spends nothing, takes no reservation, and adds a
   `degraded` note starting `keyless: ` (plain output stays bare; `developer`
@@ -209,15 +208,28 @@ exit dictionary; it makes no vendor request.
   `gov` covers US material only; an excerpt can be a historical version or bill
   text, so verify before citing, and no results does not mean no law.
 - **`search --categories developer`:** still goes through `POST /v2/search`
-  (vendor CLI 1.19.26 rejects the category client-side, firecrawl/cli#222),
+  (the wrapper's choice; vendor 1.26.25 accepts the category itself, so firecrawl/cli#222 is moot),
   still needs `FIRECRAWL_API_KEY`, and returns the web-result shape with no
   filters or passages. Prefer the `developer` verb; keep the category for
   weighing developer sources inside a web search. Every other category goes
   through the vendor CLI.
 - **Alexandria:** Firecrawl's provider catalogue (SEC EDGAR, FRED, CourtListener,
-  FEC, SAM.gov, Companies House, and about 380 more) is not wrapped. Discovery
-  needs an API key and vendor 1.26.x, and execution bills per capability; it
-  waits on the vendor pin move (#473).
+  FEC, SAM.gov, Companies House, and about 380 more) is reachable on vendor
+  1.26.25 through `raw` and `search --sources alexandria`; no dedicated verb
+  wraps it. Discovery needs an API key and execution bills per capability.
+  `search --sources alexandria` is refused before any credit read when there is
+  no `FIRECRAWL_API_KEY` and no stored vendor login, and is never tried keyless.
+  With a key, every vendor `search` also adds alexandria and its tool discovery
+  on its own. Discovery-only raw calls (`find-tools`, `list`, `list-tools`,
+  `find-skills`, `read-skill`, `alexandria list`, `alexandria terms` and its
+  `show`) are charged 0 and hold nothing: a live `find-tools` on 2026-11-08
+  reported `receipt.creditsUsed` 0 and no `creditsCost`. An executing raw call
+  (`raw -- scrape --alexandria <provider>/<capability> --options '{...}'`) is
+  charged the `data.creditsCost` it reports, else the bounded-crawl hold;
+  `alexandria feedback` also keeps the hold. Not verified: an executing call
+  against a live provider, and what the automatic alexandria source adds to a
+  keyed search (the account sat below the 200-credit floor on 2026-11-08, so
+  the wrapper refused every keyed call before spending).
 - **JSON envelope:** `ok`, `surface`, `verb`, `credits_spent`,
   `credits_remaining`, `budget_remaining`, `degraded`, `error`, and `data`.
   Unavailable credit values may be null; `error` supplies a code, message,
@@ -240,11 +252,15 @@ exit dictionary; it makes no vendor request.
   a keyless refusal or during its cooldown, when that rerun would fail too.
 - **Vendor binary:** the vendor-backed verbs (fetch, extract, shot, act, agent,
   interact, search, map, raw) and the pre-call credit read run the vendor
-  `firecrawl` CLI, pinned at 1.19.26. Nothing in this repo installs it; reinstall
-  with `pnpm add -g firecrawl-cli@1.19.26`, with pnpm's global bin directory
-  (`pnpm bin -g`) on PATH. The 2026-10-28 wipe removed it without a trace (dotfiles #2105).
+  `firecrawl` CLI, pinned at 1.26.25. Nothing in this repo installs it; reinstall
+  with `pnpm add -g firecrawl-cli@1.26.25`, with pnpm's global bin directory
+  (`pnpm bin -g`) on PATH. Install order on a fresh host: vendor first, wrapper
+  second. Harness-doctor check 32 WARNs when `firecrawl-cli` is on PATH and
+  `firecrawl` is not, and stays dormant when neither is; with both, it compares
+  the verb map to the vendor's live help. The 2026-10-28 wipe removed it without a trace (dotfiles #2105).
   With no `FIRECRAWL_API_KEY` and no stored vendor login, the vendor prints its
-  interactive login menu instead of JSON; the wrapper reports
+  interactive login menu instead of JSON (1.19.26) or exits 1 with `Not
+  authenticated` on stderr (1.26.25, probed 2026-11-08); the wrapper reports
   `credentials_missing` (exit 1, not retryable) and names the remedy: set the
   key in that process's environment, or run `firecrawl login` once on the host.
   Free-first-eligible calls never reach that read: they run keyless.
@@ -809,6 +825,14 @@ supabase-api api GET /v1/projects/{ref}/config/auth --project "$PROJECT"
   `scripts/lib/supabase-access-token.sh`) take the same env → bws →
   `~/.secrets` order but never retry, so run them with
   `env -u SUPABASE_ACCESS_TOKEN` from such a shell.
+- The `supabase` CLI picks its output format from its environment: v2.122.0
+  prints one-line JSON when `CLAUDECODE` or `AI_AGENT` is set, and otherwise
+  a table whose cells are wrapped in backticks. A script that parses its
+  output must pin the format (`--output-format json`; `-o json` still prints
+  the table) or it reads one shape under an agent and another under systemd.
+  In JSON mode a failure is JSON on stdout too
+  (`{"_tag":"Error","error":{"code":…,"message":…}}`, exit 1, stderr empty or
+  progress text only), so read the reason from stdout, not stderr.
   Output and errors redact `sbp_` tokens, `sb_secret_` keys, every JWT whose
   role is not `anon`, and string values under secret-named keys (`smtp_pass`,
   `jwt_secret`, `*_secret`, passwords, tokens, `*_api_key`, `*_access_key`,
