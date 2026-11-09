@@ -7,7 +7,8 @@
   with its manager program, and the helper programs some of those need.
 
   Read-only. It runs `claude plugin marketplace list --json` and `claude plugin list --json`
-  and no other program, and reads settings.json and plugins/known_marketplaces.json in the
+  and, on x64 macOS, probes `sysctl -n sysctl.proc_translated` to distinguish Rosetta
+  from an Intel Mac. It reads settings.json and plugins/known_marketplaces.json in the
   Claude Code config dir ($CLAUDE_CONFIG_DIR, else ~/.claude) for each marketplace's
   auto-update setting, the way autoupdate.mjs beside it does: a tool is found by looking for an executable file of its name in the
   PATH directories and a few usual install directories, never by running it. One of hov-stack's
@@ -99,11 +100,15 @@ function onWsl() {
   }
 }
 
-function platformName() {
+export function platformName() {
   const override = process.env.HOV_SETUP_PLATFORM;
   if (override) return override;
   const { platform, arch } = process;
   if (platform === "darwin" && arch === "arm64") return "darwin-arm64";
+  if (platform === "darwin" && arch === "x64") {
+    const translated = spawnSync("sysctl", ["-n", "sysctl.proc_translated"], { encoding: "utf8", timeout: 1000 });
+    return translated.status === 0 && translated.stdout.trim() === "1" ? "darwin-arm64" : "darwin-x86_64";
+  }
   if (platform === "linux" && arch === "x64") return "linux-x86_64";
   if (platform === "linux" && arch === "arm64") return "linux-aarch64";
   return `${platform}-${arch}`;
@@ -424,3 +429,4 @@ function isMain() {
 if (process.argv[1] && isMain()) {
   process.exitCode = main(process.argv.slice(2));
 }
+
