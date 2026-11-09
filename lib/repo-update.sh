@@ -34,6 +34,39 @@ repo_default_branch() {
   echo "${d:-main}"
 }
 
+# repo_fetch_origin <repo_dir> [timeout_seconds]
+#
+# `git fetch origin` that keeps git's reason when it fails. Success returns 0 and
+# prints nothing. Failure returns git's status (124 when the timeout fired) and
+# sets REPO_FETCH_WHY to one line: "timed out after Ns", the first rejected ref or
+# error line git printed, or "git fetch exited N" when git printed neither.
+#
+# Not --quiet: under --quiet a rejected ref (a local tag that the global
+# fetch.pruneTags refspec would clobber) fails with rc 1 and an EMPTY stderr, so
+# the reason would be lost before it could be shown.
+#
+# Defect (observed 2026-11-08): every fetch site discarded stderr and printed
+# "fetch failed (offline?)". That one sentence hid a deleted origin (a fork whose
+# remote had returned 404 for weeks) and a tag clobber (a launch pad that had not
+# fast-forwarded since its tags diverged), both reported on every session start.
+repo_fetch_origin() {
+  local repo=$1 t=${2:-} out rc
+  REPO_FETCH_WHY=""
+  if [ -n "$t" ]; then
+    out=$(timeout "$t" git -C "$repo" fetch origin 2>&1) && rc=0 || rc=$?
+  else
+    out=$(git -C "$repo" fetch origin 2>&1) && rc=0 || rc=$?
+  fi
+  [ "$rc" -eq 0 ] && return 0
+  if [ -n "$t" ] && [ "$rc" -eq 124 ]; then
+    REPO_FETCH_WHY="timed out after ${t}s"
+  else
+    REPO_FETCH_WHY=$(printf '%s\n' "$out" | grep -m1 -E '^ ! |^(fatal|error|ERROR|remote|ssh):' | tr -s ' ' | sed 's/^ //') || true
+    [ -n "$REPO_FETCH_WHY" ] || REPO_FETCH_WHY="git fetch exited $rc"
+  fi
+  return "$rc"
+}
+
 # repo_ff_blockers <repo_dir> <default_branch>
 #
 # Emits one NUL-terminated "<kind><TAB><path>" record per working-tree path that
@@ -281,8 +314,8 @@ repo_ff_update() {
     return 1
   fi
 
-  if ! git -C "$repo" fetch origin --quiet 2>/dev/null; then
-    echo "  WARN: fetch failed (offline?); continuing with the local tree"
+  if ! repo_fetch_origin "$repo"; then
+    echo "  WARN: fetch failed ($REPO_FETCH_WHY); continuing with the local tree"
     return 2
   fi
 

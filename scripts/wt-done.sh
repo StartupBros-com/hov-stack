@@ -104,6 +104,10 @@ _unlock="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/wt-unlock.sh"
 _plib="$(dirname "$_lib")/wt-preserve.sh"
 # shellcheck source=SCRIPTDIR/lib/wt-preserve.sh
 . "$_plib" 2>/dev/null || { echo "wt-done: cannot load $_plib" >&2; exit 1; }
+# repo_fetch_origin keeps git's reason when the closeout fetch fails. Fail-soft:
+# without it the fetch still runs and git's own stderr is left visible.
+# shellcheck source=SCRIPTDIR/../lib/repo-update.sh
+. "$(dirname "$(dirname "$_lib")")/../lib/repo-update.sh" 2>/dev/null || true
 RECONCILE_ONLY=0
 ALL=0
 REPO_ARG=""
@@ -396,8 +400,13 @@ close_one() {
     if [ "$DRY_RUN" = 1 ]; then
       echo "      note: dry run uses cached refs (no fetch)"
     else
-      git -C "$repo" fetch --quiet origin 2>/dev/null || \
-        echo "      note: fetch failed (offline?); proceeding on cached refs"
+      if declare -F repo_fetch_origin >/dev/null; then
+        repo_fetch_origin "$repo" || \
+          echo "      note: fetch failed ($REPO_FETCH_WHY); proceeding on cached refs"
+      else
+        git -C "$repo" fetch --quiet origin || \
+          echo "      note: fetch failed (git's error is above); proceeding on cached refs"
+      fi
     fi
     _fetched[$repo]=1
   fi

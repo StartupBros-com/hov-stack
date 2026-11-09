@@ -3255,9 +3255,24 @@ case "$REPO" in /*) ;; *) REPO="$(pwd)" ;; esac
 # unconditional system `gh` while the rest of the file honors an operator- or test-supplied
 # override binary would let this one call silently answer from a different GitHub identity
 # than every other lookup in the run, corrupting PG_META_* for anything downstream that trusts it.
-[ -n "$PR_URL" ] || { pr_url_gh_bin="${PRO_GATE_GH_BIN:-gh}";
-  command -v "$pr_url_gh_bin" >/dev/null 2>&1 \
-    && PR_URL="$("$pr_url_gh_bin" pr view "$PR_NUM" --json url -q .url 2>/dev/null || echo "")"; }
+# A bare PR number resolves in the checkout's origin repository, the one the REPO_SLUG and
+# PG_META_IDENT fallbacks below already assume. Unscoped, `gh pr view N` follows gh's own
+# default-repository choice, which in a fork is the upstream parent: the run then reviewed and
+# keyed the parent's PR N under the fork's name (2026-11-08, v0.65.6). A checkout whose origin
+# names no GitHub repository keeps the unscoped lookup; an empty PR_NUM (a --diff run) does too,
+# since gh refuses --repo without a PR argument.
+[ -n "$PR_URL" ] || { pr_url_gh_bin="${PRO_GATE_GH_BIN:-gh}"; pr_url_repo=""
+  if [ -n "$PR_NUM" ]; then
+    pr_url_repo="$(pg_repo_identity_from_url "$(git -C "$REPO" remote get-url origin 2>/dev/null || true)" 2>/dev/null \
+      | tr '\t' '/' || true)"
+  fi
+  if ! command -v "$pr_url_gh_bin" >/dev/null 2>&1; then
+    :
+  elif [ -n "$pr_url_repo" ]; then
+    PR_URL="$("$pr_url_gh_bin" pr view "$PR_NUM" --repo "$pr_url_repo" --json url -q .url 2>/dev/null || echo "")"
+  else
+    PR_URL="$("$pr_url_gh_bin" pr view "$PR_NUM" --json url -q .url 2>/dev/null || echo "")"
+  fi; }
 
 # PR_KEY: repo-scoped identity for locks, reservations, and markers. PR numbers repeat across
 # repositories; keying on the bare number let an in-progress repo-A#77 redirect a repo-B#77 gate

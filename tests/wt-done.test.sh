@@ -1307,6 +1307,18 @@ out=$(runordinary)
 chk 'non-harness repo does not apply' '' "$(cat "$SETTINGS_CALLS")"
 hasnot 'non-harness repo has no settings activation line' "$out" 'activation: settings'
 unset CLAUDE_HOME SETTINGS_CALLS
+
+# --- 54. a failed closeout fetch names git's reason, not "(offline?)" -----------
+# repo_fetch_origin is sourced fail-soft from ../lib/repo-update.sh, so a wrong
+# source path would quietly fall back; this asserts the wiring, not only the lib.
+S=$(mkfix fetchwhy); export STUB_GH_OUT="7 $S"
+git -C "$TMP/fetchwhy/repo" remote set-url origin "$TMP/fetchwhy/gone.git"
+out=$(DRY_RUN=0 bash "$SCRIPT" --reconcile-only "$TMP/fetchwhy/wt" 2>&1); rc=$?
+has "a failed fetch names git's reason" "$out" \
+    "fetch failed (fatal: '$TMP/fetchwhy/gone.git' does not appear to be a git repository); proceeding on cached refs"
+hasnot "a failed fetch no longer guesses offline" "$out" "fetch failed (offline?)"
+chk "reconciliation still proceeds on cached refs" 0 "$rc"
+
 echo "wt-done: $pass passed, $fail failed"
 [ "$fail" = 0 ] || exit 1
 exit 0
