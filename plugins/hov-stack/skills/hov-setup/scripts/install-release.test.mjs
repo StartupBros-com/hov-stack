@@ -102,6 +102,33 @@ function world(run) {
   }
 }
 
+for (const [label, output, status, expected] of [
+  ["Intel", "0", 0, "darwin-x86_64"],
+  ["Rosetta", " \n\t1 \n", 0, "darwin-arm64"],
+  ["failed sysctl with misleading output", "1", 1, "darwin-x86_64"],
+  ["unexpected sysctl output", "2", 0, "darwin-x86_64"],
+  ["malformed Rosetta output", "1 extra", 0, "darwin-x86_64"],
+]) {
+  test(`native macOS installer selects the ${label} archive`, () => {
+    world((w) => {
+      for (const platform of ["darwin-arm64", "darwin-x86_64"]) {
+        w.archive({ tool: "gh", platform, name: `${platform}.tar.gz`, files: { "bin/gh": script_ver(platform) }, members: ["bin/gh"] });
+      }
+      writeFileSync(join(w.bin, "uname"), '#!/bin/sh\ncase "$1" in -s) echo Darwin ;; -m) echo x86_64 ;; *) exit 1 ;; esac\n');
+      writeFileSync(join(w.bin, "sysctl"), `#!/bin/sh\nprintf '%s\\n' "$*" > "$FAKE_DIR/sysctl-calls"\nprintf '%s\\n' '${output}'\nexit ${status}\n`);
+      chmodSync(join(w.bin, "uname"), 0o755);
+      chmodSync(join(w.bin, "sysctl"), 0o755);
+      const r = w.go(["gh"], { platform: "" });
+      assert.equal(r.status, 0, r.stderr);
+      assert.match(w.receipt("gh"), new RegExp(`^platform=${expected}$`, "m"));
+      assert.match(readFileSync(join(w.dest, "gh"), "utf8"), new RegExp(expected));
+      assert.equal(w.curlCalls().includes(`${expected}.tar.gz`), true);
+      assert.equal(w.curlCalls().trim().split("\n").length, 1);
+      assert.equal(readFileSync(join(w.dir, "sysctl-calls"), "utf8"), "-n sysctl.proc_translated\n");
+    });
+  });
+}
+
 test("installs, then prints installed: and on PATH: lines", () => {
   world((w) => {
     w.archive({ tool: "gh", name: "gh_1.0.0.tar.gz", files: { "pkg/bin/gh": script_ver("gh version 1.0.0") }, members: ["pkg/bin/gh"] });
@@ -282,8 +309,9 @@ function realRows() {
 
 test("the real table has well-formed rows", () => {
   const rows = realRows();
-  assert.equal(rows.length, 12);
-  const platforms = ["darwin-arm64", "linux-x86_64", "linux-aarch64"];
+  assert.equal(rows.length, 15);
+  assert.deepEqual(rows.filter((r) => r.platform === "darwin-x86_64").map((r) => r.tool).sort(), ["gh", "jsm", "uv"]);
+  const platforms = ["darwin-arm64", "darwin-x86_64", "linux-x86_64", "linux-aarch64"];
   const seen = new Set();
   for (const r of rows) {
     const id = `${r.tool}/${r.platform}`;
@@ -312,7 +340,7 @@ test("every install-release.sh install line in offers.json has a table row per p
       );
     }
   }
-  assert.ok(checked >= 12, `expected at least 12 install-release lines, saw ${checked}`);
+  assert.ok(checked >= 15, `expected at least 15 install-release lines, saw ${checked}`);
 });
 
 test("the script's header documents both env vars, the exit codes and the bash 3.2 rule", () => {
@@ -674,3 +702,4 @@ test("--update exits 5 when a recorded file is now a symlink, and leaves it", ()
     assert.match(readFileSync(join(w.dest, "gh"), "utf8"), /gh version 1\.0\.0/);
   });
 });
+
