@@ -100,7 +100,7 @@ $OUT"
 # test (review finding on PR 1186: deriving the expected count from the same
 # file made an accidental resolve or a dropped row invisible). Resolving or
 # adding a row must update this list on purpose.
-T5_EXPECTED="arena-crontab-rot ce-upstream-1711 linear-adoption-triggers"
+T5_EXPECTED="arena-crontab-rot linear-adoption-triggers"
 T5_GOT=$(printf '%s\n' "$OUT" | cut -f1 | sort | tr '\n' ' ' | sed 's/ $//')
 [ "$T5_GOT" = "$T5_EXPECTED" ] && ok || bad "T5 active rows differ from the pinned set: got [$T5_GOT] want [$T5_EXPECTED]"
 grep -q "broken" <<<"$OUT" && bad "T5 committed watchlist has a BROKEN check under stubbed env:
