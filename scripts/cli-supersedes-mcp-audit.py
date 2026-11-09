@@ -51,8 +51,9 @@ survivor is one WARN line:
              only, on purpose: harness/vet-fixtures/ holds third-party
              skill fixtures under review, not harness reference docs.
              --doc-tree scans recursively; the doctor passes the memory
-             mirror (memory), whose notes are loaded into sessions
-             and can steer an agent at a retired tool as surely as a doc.
+             mirror when one is named or exists (opt-in, as in its memory
+             audit), whose notes are loaded into sessions and can steer an
+             agent at a retired tool as surely as a doc.
 
 Optional --repo-settings-json scans project permission and approval lists.
 Global project approval lists are also scanned; values are never printed.
