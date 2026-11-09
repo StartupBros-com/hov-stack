@@ -1,0 +1,8 @@
+# Only esbuild may run its install script, and only at the versions the lockfile
+# resolves. Any other dependency's build script stays blocked (pnpm fails the
+# install with ERR_PNPM_IGNORED_BUILDS). Keep these in step with pnpm-lock.yaml:
+# tests/ci.sh runs a frozen install, which fails when a locked esbuild version is
+# not listed here.
+allowBuilds:
+  esbuild@0.28.1: true
+  esbuild@0.28.2: true
