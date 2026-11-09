@@ -102,6 +102,10 @@
 #   }
 set -euo pipefail
 
+# shellcheck source=lib/group-timeout.sh
+_here=${BASH_SOURCE[0]%/*}; [ "$_here" != "${BASH_SOURCE[0]}" ] || _here=.
+. "$_here/lib/group-timeout.sh"
+
 usage() {
   echo "usage: red-first.sh <repo-path> --head <sha> (--manifest FILE | --pre-fix <rev>) --files FILE|- [--base-branch NAME] [--timeout SECONDS]" >&2
   exit 2
@@ -702,7 +706,7 @@ PY
 run_family() {
   local family=$1 file=$2 checkout_dir=$3 workdir=$4 timeout_s=$5
   local rc=0
-  local deadline=(timeout --kill-after=2s "$timeout_s")
+  local deadline=(group_timeout --kill-after=2s "$timeout_s")
   case "$family" in
     bash-suite)
       echo "COMMAND	bash $file"

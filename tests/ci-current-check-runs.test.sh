@@ -272,7 +272,7 @@ rm -f "$SEQ/n"; cp "$TMP/4284-short.json" "$SEQ/last.json"
 OUT=$(GH_CHECKS="$C4284" GH_RUNS_SEQ="$SEQ" CI_CURRENT_READ_TRIES=three PATH="$TMP/bin:$PATH" timeout 20 \
   bash -c 'source "$1/ci-current-check-runs.sh" && ci_current_check_runs Org/repo 7f734ce' _ "$LIB_DIR" 2>"$TMP/err"); RC=$?
 check 'PLANTED helper: a read count that is not a number fails after one read' is "$RC:$(grep -c 'actions/runs' "$GH_CALLS"):${OUT:-none}" '1:1:none'
-check 'PLANTED helper: the malformed count is named on stderr' grep -q 'three: integer expression expected' "$TMP/err"
+check 'PLANTED helper: the malformed count is named on stderr' grep -Eq 'three: integer( expression)? expected' "$TMP/err"
 
 # --- a draft head's local suite record (dotfiles#1598) ---------------------------
 # The runner is a stub answering --read from $FAKE/rec.json and recording each
