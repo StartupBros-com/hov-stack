@@ -29,11 +29,9 @@ expand eagerly into every session's context).
   Plugin skills are not demotable through `skillOverrides` (only the whole plugin,
   which a repo's `.claude/settings.json` `enabledPlugins` can switch off per project),
   so they stay auto-firing. Demoted skills worth reaching for on purpose:
-  - SaaS work: `/security-audit-for-saas`, `/saas-billing-patterns-for-stripe-and-paypal`,
-    `/saas-customer-analytics`, `/seo-for-saas-businesses`.
+  - SaaS work: `/saas-customer-analytics`, `/seo-for-saas-businesses`.
   - Security ladder: `/security-review` (built-in, quick diff pass), then
-    `/security-audit-for-saas` (deep SaaS audit), then `/pro-gate` (terminal
-    cross-model gate).
+    `/pro-gate` (terminal cross-model gate).
   - Design and motion: find with `/design-rails` (drift + `propose.mjs` → DESIGN.md,
     written under `design/`, not the repo root, since CE claims that name for HTML
     styling), `/improve-animations` or `/find-animation-opportunities`; build with
