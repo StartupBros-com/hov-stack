@@ -1,3 +1,10 @@
 self-hosted-runner:
   labels:
     - ci
+# actionlint 1.7.12 predates the job.workflow_repository and job.workflow_sha contexts
+# that GitHub documents for reusable workflows, so it rejects these two lines. Scoped to
+# this one file and these two property names; drop it when the pinned actionlint knows them.
+paths:
+  .github/workflows/hov-tool-drop-announce.yml:
+    ignore:
+      - 'property "workflow_(repository|sha)" is not defined in object type'
