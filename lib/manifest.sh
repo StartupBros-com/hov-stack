@@ -155,6 +155,20 @@ for _data_cli in "${DATA_CLIS[@]}"; do
 done
 unset _data_cli
 
+# The harness's own helper commands that CLAUDE.md tells agents to run by name:
+# "<name>|<file in bin/>". papercut is bin/papercut.py, so its link name differs from
+# its file. ./setup links these into ~/.local/bin (the "helpers" row) the same way as
+# DATA_CLIS, not through a plugin bin/, which reaches only sessions with that plugin
+# enabled while a ~/.local/bin link also serves cron, scripts and subagents (#440).
+HELPER_CLIS=(
+  "papercut|papercut.py"
+  "open-deliverable|open-deliverable"
+)
+for _helper in "${HELPER_CLIS[@]}"; do
+  DOTFILES_LINKS+=("bin/${_helper#*|}|.local/bin/${_helper%%|*}")
+done
+unset _helper
+
 # Destinations whose mode must be tightened after linking: "<dst>|<mode>".
 # chmod follows the symlink, so this sets the mode of the file IN THE REPO —
 # which is the pre-existing behavior for ssh/config and is intentional.
