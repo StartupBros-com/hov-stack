@@ -222,11 +222,17 @@ Never start a delete without approval. vercel's own delete confirmation
 (skipped only by `rm --yes` or `api --dangerously-skip-permissions`) is a
 terminal prompt that a headless agent cannot answer.
 
-Read traps (vercel 51.2.1): with `--format json`, progress lines go to stderr,
-so never merge the streams into the JSON parse (send stderr to a file, e.g.
-`2>vercel.err`, and read it on failure); `vercel inspect <url> --logs`
-writes the build log to stderr with an empty stdout, so capture `2>&1`; and
-`vercel logs` shows only the current git branch unless given `--no-branch`.
+Read traps (rechecked read-only on vercel 65.4.0): with `--format json`,
+stdout is clean JSON and the `Vercel CLI 65.4.0` banner goes to stderr, so never
+merge the streams into the JSON parse (send stderr to a file, e.g.
+`2>vercel.err`, and read it on failure); `vercel inspect <url> --logs` writes
+the build log to stderr with an empty stdout, so capture `2>&1`. In
+non-interactive mode a command with no linked project and no `--scope` exits
+with `missing_scope` and a team list, so pass `--scope <team>` (and `--project
+<name>` for `vercel logs`). The 51.2.1 trap that `vercel logs` shows only the
+current git branch is gone: it lists all environments by default, and
+`--no-branch` is now rejected with exit 2 ("was removed and has no effect"), so
+do not pass it.
 `vercel ls <name>` takes the project name (`prbot`), not a directory name.
 
 ## DataForSEO — `dfs`

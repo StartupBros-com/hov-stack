@@ -98,10 +98,8 @@ JSM_BASE="${HOV_PINS_JSM_BASE:-https://jeffreys-skills.md/api/v1/downloads/jsm}"
 #   source jsm:    assets are <JSM_BASE>/v<V>/<asset>; repo is unused
 # ASSETS  tool|platform|asset|members (comma-separated paths inside the archive)
 #   Row order in the table follows this order: tools as listed, platforms as listed.
-#   Only the platforms install-release.sh detects are listed. darwin-x86_64 waits for
-#   Intel Mac support there and in detect.mjs; once that lands, adding its lines here is
-#   enough, since refresh adds a missing platform row at the current version (cass has
-#   no darwin-x86_64 build).
+#   Only supported release platforms are listed. Refresh adds a missing platform row
+#   at the current version. cass has no darwin-x86_64 build.
 # ---------------------------------------------------------------------------
 META='
 gh|github|cli/cli|v|gh_{V}_checksums.txt|yes
@@ -113,15 +111,18 @@ ASSETS='
 gh|linux-x86_64|gh_{V}_linux_amd64.tar.gz|gh_{V}_linux_amd64/bin/gh
 gh|linux-aarch64|gh_{V}_linux_arm64.tar.gz|gh_{V}_linux_arm64/bin/gh
 gh|darwin-arm64|gh_{V}_macOS_arm64.zip|gh_{V}_macOS_arm64/bin/gh
+gh|darwin-x86_64|gh_{V}_macOS_amd64.zip|gh_{V}_macOS_amd64/bin/gh
 uv|linux-x86_64|uv-x86_64-unknown-linux-gnu.tar.gz|uv-x86_64-unknown-linux-gnu/uv,uv-x86_64-unknown-linux-gnu/uvx
 uv|linux-aarch64|uv-aarch64-unknown-linux-gnu.tar.gz|uv-aarch64-unknown-linux-gnu/uv,uv-aarch64-unknown-linux-gnu/uvx
 uv|darwin-arm64|uv-aarch64-apple-darwin.tar.gz|uv-aarch64-apple-darwin/uv,uv-aarch64-apple-darwin/uvx
+uv|darwin-x86_64|uv-x86_64-apple-darwin.tar.gz|uv-x86_64-apple-darwin/uv,uv-x86_64-apple-darwin/uvx
 cass|linux-x86_64|cass-linux-amd64.tar.gz|cass
 cass|linux-aarch64|cass-linux-arm64.tar.gz|cass
 cass|darwin-arm64|cass-darwin-arm64.tar.gz|cass
 jsm|linux-x86_64|jsm-x86_64-unknown-linux-musl.tar.gz|jsm
 jsm|linux-aarch64|jsm-aarch64-unknown-linux-gnu.tar.gz|jsm
 jsm|darwin-arm64|jsm-aarch64-apple-darwin.tar.gz|jsm
+jsm|darwin-x86_64|jsm-x86_64-apple-darwin.tar.gz|jsm
 '
 
 TABLE_OPEN="TABLE=\${HOV_SETUP_RELEASE_TABLE:-'"
@@ -175,7 +176,14 @@ detect_platform() {
   if [ -n "${HOV_PINS_PLATFORM:-}" ]; then printf '%s' "$HOV_PINS_PLATFORM"; return; fi
   case "$(uname -s)/$(uname -m)" in
     Darwin/arm64) printf 'darwin-arm64' ;;
-    Darwin/x86_64) printf 'darwin-x86_64' ;;
+    Darwin/x86_64)
+      local translated
+      if translated=$(sysctl -n sysctl.proc_translated 2>/dev/null) &&
+        [[ "$translated" =~ ^[[:space:]]*1[[:space:]]*$ ]]; then
+        printf 'darwin-arm64'
+      else
+        printf 'darwin-x86_64'
+      fi ;;
     Linux/x86_64) printf 'linux-x86_64' ;;
     Linux/aarch64 | Linux/arm64) printf 'linux-aarch64' ;;
     *) printf '%s-%s' "$(uname -s)" "$(uname -m)" ;;
@@ -650,3 +658,4 @@ case $cmd in
   apply) cmd_apply "$@" ;;
   *) usage ;;
 esac
+
