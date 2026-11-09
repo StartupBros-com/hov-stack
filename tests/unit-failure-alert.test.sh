@@ -242,8 +242,10 @@ grep -q 'UNIT_ALERT_COOLDOWN' <<<"$msg" \
 # and asserts the sibling stub was executed. It therefore fails if HERE breaks,
 # if the default becomes a bare PATH name (the tokscale bug), or if the sibling
 # filename changes — none of which source-text parsing can detect.
-mkdir -p "$TMP/deploy"
+mkdir -p "$TMP/deploy/lib"
 cp "$SCRIPT" "$TMP/deploy/unit-failure-alert.sh"
+# The deploy dir is a copy of scripts/, so the sourced timeout helper sits in lib/ beside it.
+cp scripts/lib/group-timeout.sh "$TMP/deploy/lib/"
 cat > "$TMP/deploy/discord-notify.sh" <<'EOF'
 #!/usr/bin/env bash
 printf 'SIBLING-NOTIFIER-RAN\n' >>"${TEST_CALLS:?}"
@@ -259,6 +261,11 @@ PATH="$TMP/bin:$PATH" UNIT_ALERT_TEST_MODE=1 UNIT_ALERT_STAMP_DIR="$TMP/stamps" 
 grep -q 'SIBLING-NOTIFIER-RAN' "$TMP/calls" \
   && ok "8b: default resolved to the sibling discord-notify.sh (HERE works)" \
   || bad "8b: default notifier did NOT resolve to the script's own directory"
+# Without lib/group-timeout.sh beside it the script still pages, but its bounded journal read
+# fails (command not found) and the page loses the unit's last lines; only the tail shows it.
+grep -qF 'memory push refused: sensitive indicator or symlink found' "$TMP/calls" \
+  && ok "8b: deploy-dir page carries the journal tail (lib/ helper sourced beside the script)" \
+  || bad "8b: deploy-dir page lost the journal tail; lib/group-timeout.sh did not load beside the script"
 # Same run, through a symlink: units invoke ~/.claude/scripts/... which is a
 # symlink into the checkout, so readlink -f in HERE is load-bearing.
 mkdir -p "$TMP/linkdir"
@@ -273,6 +280,9 @@ grep -q 'SIBLING-NOTIFIER-RAN' "$TMP/calls" \
 [ -x scripts/discord-notify.sh ] \
   && ok "8d: scripts/discord-notify.sh exists and is executable" \
   || bad "8d: the real sibling notifier is missing from the repo"
+[ -f scripts/lib/group-timeout.sh ] \
+  && ok "8d: scripts/lib/group-timeout.sh exists beside the script" \
+  || bad "8d: the sourced timeout helper is missing from the repo"
 
 # ── 8e. the journal tail cannot break out of the Discord code fence ──────────
 # The tail is whatever the failing unit last wrote to stdout — attacker-
