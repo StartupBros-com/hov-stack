@@ -63,17 +63,22 @@ ok() { pass=$((pass + 1)); echo "ok $pass - $*"; }
 # The data commands setup links into ~/.local/bin (DATA_CLIS), from the file setup reads.
 # shellcheck source=lib/manifest.sh
 . "$ROOT/lib/manifest.sh"
+[ "${#HELPER_CLIS[@]}" -eq 2 ] && [[ " ${HELPER_CLIS[*]} " == *" papercut|papercut.py "* ]] && [[ " ${HELPER_CLIS[*]} " == *" open-deliverable|open-deliverable "* ]] \
+  || fail "lib/manifest.sh's HELPER_CLIS lost papercut or open-deliverable: ${HELPER_CLIS[*]}"
 [ "${#DATA_CLIS[@]}" -ge 13 ] && [[ " ${DATA_CLIS[*]} " == *" gsc "* ]] && [[ " ${DATA_CLIS[*]} " == *" vastai "* ]] \
   || fail "lib/manifest.sh's DATA_CLIS lost the data commands: ${DATA_CLIS[*]}"
 # stray_local <home> <checkout>: anything under <home>/.local but bin/ and the data commands'
 # links into <checkout>/bin, one per line.
 stray_local() {
-  local h=$1 r=$2 e name
+  local h=$1 r=$2 e name hc
   [ -d "$h/.local" ] || return 0
   find "$h/.local" -mindepth 1 | while IFS= read -r e; do
     [ "$e" != "$h/.local/bin" ] || continue
     name=${e#"$h/.local/bin/"}
     if [[ " ${DATA_CLIS[*]} " == *" $name "* ]] && [ -L "$e" ] && [ "$(readlink "$e")" = "$r/bin/$name" ]; then continue; fi
+    for hc in "${HELPER_CLIS[@]}"; do
+      if [ "$name" = "${hc%%|*}" ] && [ -L "$e" ] && [ "$(readlink "$e")" = "$r/bin/${hc#*|}" ]; then continue 2; fi
+    done
     echo "$e"
   done
 }
@@ -136,7 +141,7 @@ grep -q -F "dcg: skipped: could not download " "$WORK/run1.log" || fail "an offl
 [ "$(curl_calls)" = 1 ] || fail "expected one download attempt, got $(curl_calls)"
 stray=$(stray_local "$HOME" "$ROOT")
 [ -z "$stray" ] || fail "an offline run left files under ~/.local besides the data commands' links: $stray"
-for want_row in 'links +ok ' 'commands +ok ' 'dcg +skipped ' 'settings +ok ' 'claude +missing ' 'marketplace +skipped ' 'plugins +skipped '; do
+for want_row in 'links +ok ' 'commands +ok ' 'helpers +ok ' 'dcg +skipped ' 'settings +ok ' 'claude +missing ' 'marketplace +skipped ' 'plugins +skipped '; do
   grep -q -E "^  $want_row" "$WORK/run1.log" || fail "the status block has no '$want_row' row"
 done
 ok "offline: one download attempt, dcg reported skipped, nothing under ~/.local but the data commands' links, and every step has its status row"
@@ -502,6 +507,44 @@ grep -q -E "^  commands +failed +could not make ~/\.local/bin, so no data comman
 [ "$(cat "$HCF/.local/bin")" = "not a directory" ] || fail "the file at ~/.local/bin was changed"
 [ -L "$HCF/.claude/hooks" ] || fail "a failed commands step stopped the other links"
 ok "a ~/.local/bin that is a file fails the commands row and the run, is left as it was, and the other steps still run"
+# The helper commands (HELPER_CLIS): papercut is bin/papercut.py, open-deliverable is bin/open-deliverable.
+for hc in "${HELPER_CLIS[@]}"; do
+  hname=${hc%%|*}; hfile=${hc#*|}
+  [ -L "$HOME/.local/bin/$hname" ] && [ "$(readlink "$HOME/.local/bin/$hname")" = "$ROOT/bin/$hfile" ] \
+    || fail "$HOME/.local/bin/$hname is not a link to $ROOT/bin/$hfile"
+  [ -x "$ROOT/bin/$hfile" ] || fail "$ROOT/bin/$hfile is not executable, so the link would not run"
+done
+for log in run1 run2; do
+  grep -q -E "^  helpers +ok +2 helper commands linked into ~/\.local/bin; ~/\.local/bin is not on this shell's PATH" "$WORK/$log.log" \
+    || { cat "$WORK/$log.log"; fail "$log has no 'helpers ok' row with the PATH note"; }
+done
+ok "papercut and open-deliverable are linked into ~/.local/bin to bin/papercut.py and bin/open-deliverable, and a rerun replaces nothing"
+# A foreign open-deliverable file and a papercut link of the user's own are left alone.
+HHL=$WORK/home-helpers
+mkdir -p "$HHL/.local/bin" "$HHL/elsewhere"
+printf '#!/bin/sh\necho my-own-open-deliverable\n' > "$HHL/.local/bin/open-deliverable"
+printf '#!/bin/sh\necho my-own-papercut\n' > "$HHL/elsewhere/papercut"
+ln -s "$HHL/elsewhere/papercut" "$HHL/.local/bin/papercut"
+od_before=$(sha256sum < "$HHL/.local/bin/open-deliverable")
+HOME=$HHL PATH=$HHL/.local/bin:$PATH bash "$ROOT/setup" --no-dcg > "$WORK/run-helpers.log" 2>&1 || { cat "$WORK/run-helpers.log"; fail "setup with helper commands of the user's own exited non-zero"; }
+[ -f "$HHL/.local/bin/open-deliverable" ] && [ ! -L "$HHL/.local/bin/open-deliverable" ] && [ "$(sha256sum < "$HHL/.local/bin/open-deliverable")" = "$od_before" ] \
+  || fail "the user's own open-deliverable was moved or changed"
+[ "$(readlink "$HHL/.local/bin/papercut")" = "$HHL/elsewhere/papercut" ] || fail "the user's own papercut link was replaced"
+grep -q -x -E "  helpers +ok +0 of 2 helper commands linked into ~/\.local/bin; left alone, not hov-stack's: papercut, open-deliverable \(ours runs as ~/\.claude/bin/<name>\)" "$WORK/run-helpers.log" \
+  || { cat "$WORK/run-helpers.log"; fail "the helpers row does not name papercut and open-deliverable as left alone"; }
+# A papercut link to nothing is replaced, and --check on a never-run HOME names both missing.
+HHB=$WORK/home-helpers-broken
+mkdir -p "$HHB/.local/bin"
+ln -s "$HHB/gone/papercut" "$HHB/.local/bin/papercut"
+HOME=$HHB bash "$ROOT/setup" --no-dcg > "$WORK/run-helpers-broken.log" 2>&1 || { cat "$WORK/run-helpers-broken.log"; fail "setup over a papercut link to nothing exited non-zero"; }
+[ "$(readlink "$HHB/.local/bin/papercut")" = "$ROOT/bin/papercut.py" ] || fail "a papercut link to nothing was not replaced with hov-stack's"
+grep -q -x -F "  ~/.local/bin/papercut pointed at $HHB/gone/papercut, which is gone; it now runs hov-stack's" "$WORK/run-helpers-broken.log" \
+  || { cat "$WORK/run-helpers-broken.log"; fail "the replaced papercut link's old target was not shown"; }
+rc=0; HOME=$WORK/home-helpers-never bash "$ROOT/setup" --check --no-dcg > "$WORK/check-helpers-never.log" 2>&1 || rc=$?
+grep -q -E "^  helpers +missing +0 of 2 helper commands linked into ~/\.local/bin; not linked: papercut open-deliverable; run \./setup" "$WORK/check-helpers-never.log" \
+  || { cat "$WORK/check-helpers-never.log"; fail "--check on a never-run HOME did not name both helper commands missing"; }
+[ ! -e "$WORK/home-helpers-never/.local" ] || fail "--check made ~/.local"
+ok "a foreign open-deliverable file and a papercut link of the user's own are left alone and named; a papercut link to nothing is replaced; --check names both helpers missing without writing"
 
 # The command line: --help prints the header and an unknown option is refused, both
 # before anything is made.
