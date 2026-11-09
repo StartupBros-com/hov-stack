@@ -54,6 +54,10 @@
 # read as a pass -- that is the same defect class as doctor's false green.
 set -uo pipefail
 
+# shellcheck source=lib/group-timeout.sh
+_here=${BASH_SOURCE[0]%/*}; [ "$_here" != "${BASH_SOURCE[0]}" ] || _here=.
+. "$_here/lib/group-timeout.sh"
+
 # WHICH cass. An explicit CASS_HEALTH_BIN wins and is never second-guessed: an
 # override that points nowhere is a broken setup and exits 2. Without one, use
 # ~/.local/bin/cass, the binary cass-index.service's own ExecStart runs
@@ -105,7 +109,7 @@ for term in $TERMS; do
   total=$((total + 1))
   # -k: a cass that ignores SIGTERM must not hold the unit past the budget.
   # Operation-local safety: direct callers need the same protection as the unit.
-  out=$(CASS_AUTO_REFRESH=0 timeout -k 5 "$PER_QUERY_TIMEOUT" "$CASS_BIN" \
+  out=$(CASS_AUTO_REFRESH=0 group_timeout -k 5 "$PER_QUERY_TIMEOUT" "$CASS_BIN" \
     search "$term" --no-maintenance --mode lexical --limit 3 --json 2>"$ERR")
   rc=$?
   diag=$(cat "$ERR"; printf '%s' "$out")

@@ -37,6 +37,8 @@ else
 fi
 
 HERE=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)
+# shellcheck source=lib/group-timeout.sh
+. "$HERE/lib/group-timeout.sh"
 
 SELF_TEMPLATE="harness-unit-failure-alert@"
 # Resolved as an absolute sibling path, never as a bare PATH lookup. There is no
@@ -227,7 +229,7 @@ fi
 JOURNAL_TIMEOUT="${UNIT_ALERT_JOURNAL_TIMEOUT:-10}"
 read_journal() {
   if command -v timeout >/dev/null 2>&1; then
-    timeout "$JOURNAL_TIMEOUT" journalctl "${JOURNAL_ARGS[@]}" -n "$JOURNAL_LINES" --no-pager -o cat 2>/dev/null | tail -c 1200
+    group_timeout "$JOURNAL_TIMEOUT" journalctl "${JOURNAL_ARGS[@]}" -n "$JOURNAL_LINES" --no-pager -o cat 2>/dev/null | tail -c 1200
   else
     journalctl "${JOURNAL_ARGS[@]}" -n "$JOURNAL_LINES" --no-pager -o cat 2>/dev/null | tail -c 1200
   fi
@@ -238,7 +240,7 @@ read_jsm_summary() {
   local fields stage cause skills
   # Native fields survive stdout attribution loss and later cleanup. Never
   # search unit history for a marker or copy its arbitrary MESSAGE field.
-  fields=$(timeout --kill-after=1 "$JOURNAL_TIMEOUT" journalctl --user \
+  fields=$(group_timeout --kill-after=1 "$JOURNAL_TIMEOUT" journalctl --user \
     MESSAGE_ID=8e4f3a61b7c24df0a9d6502e1384c5ab "JSM_INVOCATION_ID=$INVOCATION" \
     -n 1 --no-pager -o json \
     --output-fields=MESSAGE_ID,JSM_INVOCATION_ID,JSM_STAGE,JSM_CAUSE,JSM_SKILLS \

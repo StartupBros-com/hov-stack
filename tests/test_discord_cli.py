@@ -360,10 +360,24 @@ class DiscordTests(unittest.TestCase):
             cli.request("GET", "/channels/1", {}, None, TOKEN, 3)
         self.assertEqual(result.exception.code, "response_invalid")
         self.assertLessEqual(opener.open.call_args.kwargs["timeout"], 3)
-        self.fake_request([Response(raw=b"[" * 100000 + b"]" * 100000)])
-        with self.assertRaises(cli.CliError) as result:
-            cli.request("GET", "/channels/1", {}, None, TOKEN, 3)
-        self.assertEqual(result.exception.code, "response_invalid")
+        # 100,000 balanced brackets: whether CPython's decoder finishes depends on the
+        # interpreter build and the process stack (RecursionError on a small one, a
+        # nested list on a larger one). The old assertion encoded the first as a product
+        # contract; the contract is "classify what the decoder did", so the expectation
+        # comes from the same decoder. test_recursion_error_* pins the classification
+        # deterministically.
+        deep = b"[" * 100000 + b"]" * 100000
+        try:
+            native = json.loads(deep.decode())
+        except RecursionError:
+            native = None
+        self.fake_request([Response(raw=deep)])
+        if native is None:
+            with self.assertRaises(cli.CliError) as result:
+                cli.request("GET", "/channels/1", {}, None, TOKEN, 3)
+            self.assertEqual(result.exception.code, "response_invalid")
+        else:
+            self.assertEqual(cli.request("GET", "/channels/1", {}, None, TOKEN, 3), native)
         self.fake_request([Response(raw=b"x" * (cli.MAX_BODY + 1))])
         with self.assertRaises(cli.CliError) as result:
             cli.request("GET", "/channels/1", {}, None, TOKEN, 3)
@@ -584,13 +598,82 @@ class DiscordTests(unittest.TestCase):
         os.environ["DISCORD_BOT_TOKEN"] = TOKEN
         opener = self.fake_request(AssertionError)
         for raw in [b"nope", b"1", b'"text"', b"null", b"", b'{"a": NaN}', b"\xff", b"[" * 10 + b"]" * 10 + b" " * cli.MAX_API_BODY,
-                    b"[" * 100000 + b"]" * 100000, b'["\\ud800"]', b'{"\\udc00": 1}', b'{"a": 1e400}', b"[-1e400]"]:
+                    b'["\\ud800"]', b'{"\\udc00": 1}', b'{"a": 1e400}', b"[-1e400]"]:
             body = self.home / "bad.json"
             body.write_bytes(raw)
             with self.subTest(raw=raw[:20]):
                 code, result = self.main("api", "POST", "/channels/1/messages", "--body", str(body), "--confirm-write")
                 self.assertEqual((code, result["error"]["code"]), (2, "usage"))
         self.assertEqual(opener.open.call_count, 0)
+
+    def test_api_body_nested_100000_deep_follows_the_native_codec(self):
+        # See test_timeout_budget_and_response_size_invalid_json: the decoder and encoder
+        # either run out of stack (the body is refused as usage) or handle the nesting
+        # (the body is a valid array and is accepted). The expectation comes from the same
+        # codec rather than assuming the stack of the machine that wrote the test.
+        deep = b"[" * 100000 + b"]" * 100000
+        body = self.home / "deep.json"
+        body.write_bytes(deep)
+        try:
+            native = json.loads(deep.decode())
+            json.dumps(native, ensure_ascii=False, allow_nan=False).encode("utf-8")
+        except RecursionError:
+            native = None
+        if native is None:
+            opener = self.fake_request(AssertionError)
+            code, result = self.main("api", "POST", "/channels/1/messages", "--body", str(body), "--confirm-write")
+            self.assertEqual((code, result["error"]["code"]), (2, "usage"))
+            self.assertEqual(opener.open.call_count, 0)
+        else:
+            self.assertEqual(cli.operation(self.args("api", "POST", "/channels/1/messages", "--body", str(body), "--confirm-write"))[3], native)
+
+    def test_recursion_error_in_the_body_codec_is_refused_before_credentials_and_network(self):
+        # Deterministic stand-ins for a codec that runs out of stack, independent of the
+        # host's limits: refused as usage, before any credential read or request.
+        real = {name: getattr(json, name) for name in ("loads", "dumps")}
+
+        def loads(text, *args, **kwargs):
+            if "parse_constant" in kwargs:
+                raise RecursionError("fixture")
+            return real["loads"](text, *args, **kwargs)
+
+        def dumps(value, *args, **kwargs):
+            if kwargs.get("allow_nan") is False:
+                raise RecursionError("fixture")
+            return real["dumps"](value, *args, **kwargs)
+
+        body = self.file("body.json", '{"a": 1}')
+        for name, replacement in (("loads", loads), ("dumps", dumps)):
+            opener = self.fake_request(AssertionError)
+            with self.subTest(codec=name), mock.patch.object(cli.json, name, side_effect=replacement), \
+                    mock.patch.object(cli, "credentials", side_effect=AssertionError("credentials read")):
+                code, result = self.main("api", "POST", "/channels/1/messages", "--body", body, "--confirm-write")
+            self.assertEqual((code, result["error"]["code"]), (2, "usage"))
+            self.assertEqual(opener.open.call_count, 0)
+
+    def test_recursion_error_decoding_a_response_is_classified_and_a_write_is_not_retried(self):
+        os.environ["DISCORD_BOT_TOKEN"] = TOKEN
+        trigger = '{"recursion": "fixture"}'
+        real_loads = json.loads
+
+        def loads(text, *args, **kwargs):
+            if text == trigger:
+                raise RecursionError("fixture")
+            return real_loads(text, *args, **kwargs)
+
+        for method in ("POST", "PUT", "PATCH", "DELETE"):
+            opener = self.fake_request([Response(raw=trigger.encode()), Response({})])
+            with self.subTest(method=method), mock.patch.object(cli.json, "loads", side_effect=loads), \
+                    mock.patch.object(cli.time, "sleep", side_effect=AssertionError):
+                code, result = self.main("api", method, "/channels/1/pins/2", "--confirm-write")
+            self.assertEqual((code, result["error"]["code"]), (1, "response_invalid"))
+            self.assertIn(f"may already have applied this {method}", result["error"]["message"])
+            self.assertEqual(opener.open.call_count, 1)
+        opener = self.fake_request([Response(raw=trigger.encode())])
+        with mock.patch.object(cli.json, "loads", side_effect=loads):
+            code, result = self.main("api", "GET", "/channels/1")
+        self.assertEqual((code, result["error"]["code"]), (1, "response_invalid"))
+        self.assertNotIn("may already have applied", result["error"]["message"])
 
     def test_api_success_envelope_and_204(self):
         os.environ["DISCORD_BOT_TOKEN"] = TOKEN

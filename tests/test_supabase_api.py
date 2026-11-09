@@ -538,7 +538,6 @@ class SupabaseTests(unittest.TestCase):
     def test_unreadable_write_responses_are_uncertain_outcomes(self):
         self.token()
         for raw, limit, expected in ((b'\xff{}', cli.MAX_BODY, "response_invalid"),
-                                     (b"[" * 100000, cli.MAX_BODY, "response_invalid"),
                                      (b"[" + b"1," * 64 + b"1]", 64, "response_too_large")):
             with self.subTest(expected=expected, size=len(raw)), mock.patch.object(cli, "MAX_BODY", limit):
                 self.opener.open.reset_mock()
@@ -547,6 +546,58 @@ class SupabaseTests(unittest.TestCase):
                 self.assertEqual((code, out["error"]["code"]), (1, expected))
                 self.assertIn("may already have applied this PATCH", out["error"]["message"])
                 self.assertEqual(self.opener.open.call_count, 1)
+
+    def test_write_response_nested_100000_deep_follows_the_native_decoder(self):
+        # 100,000 unclosed brackets. Whether CPython's decoder reaches the end of the text
+        # depends on the interpreter build and the process stack: a small one raises
+        # RecursionError (response_invalid, an uncertain outcome); a larger one raises
+        # JSONDecodeError, which _parse takes as a plain-text answer. The old assertion
+        # encoded the first as a product contract; the contract is "classify what the
+        # decoder did", so the expectation comes from the same decoder.
+        self.token()
+        raw = b"[" * 100000
+        try:
+            json.loads(raw.decode())
+            native = "value"
+        except RecursionError:
+            native = "recursion"
+        except ValueError:
+            native = "text"
+        self.respond(Response(raw=raw), Response({}))
+        code, out = self.main("api", "PATCH", "/v1/projects/prbot/actions/run_1/status")
+        self.assertEqual(self.opener.open.call_count, 1)
+        self.assertNotEqual(native, "value")
+        if native == "recursion":
+            self.assertEqual((code, out["error"]["code"]), (1, "response_invalid"))
+            self.assertIn("may already have applied this PATCH", out["error"]["message"])
+        else:
+            self.assertEqual((code, out["data"]), (0, raw.decode()))
+
+    def test_recursion_error_while_decoding_a_write_response_is_an_uncertain_outcome(self):
+        # Deterministic stand-in for a decoder that runs out of stack: the same
+        # classification, warning and single attempt whatever the host's limits.
+        self.token()
+        trigger = '{"recursion": "fixture"}'
+        real_loads = json.loads
+
+        def loads(text, *args, **kwargs):
+            if text == trigger:
+                raise RecursionError("fixture")
+            return real_loads(text, *args, **kwargs)
+
+        self.respond(Response(raw=trigger.encode()), Response({}))
+        with mock.patch.object(cli.json, "loads", side_effect=loads):
+            code, out = self.main("api", "PATCH", "/v1/projects/prbot/actions/run_1/status")
+        self.assertEqual((code, out["error"]["code"]), (1, "response_invalid"))
+        self.assertIn("may already have applied this PATCH", out["error"]["message"])
+        self.assertEqual(self.opener.open.call_count, 1)
+        # A read classifies the same way.
+        self.opener.open.reset_mock()
+        self.respond(Response(raw=trigger.encode()))
+        with mock.patch.object(cli.json, "loads", side_effect=loads):
+            code, out = self.main("projects")
+        self.assertEqual((code, out["error"]["code"]), (1, "response_invalid"))
+        self.assertNotIn("may already have applied", out["error"]["message"])
 
     def test_truncated_error_body_on_a_read_still_retries(self):
         self.token()

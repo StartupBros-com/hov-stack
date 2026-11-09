@@ -11,9 +11,19 @@ ok() { pass=$((pass + 1)); }
 bad() { fail=$((fail + 1)); echo "FAIL: $*" >&2; }
 
 # Never run beside the real notify.sh, or inherit the operator's archive/unit dirs.
-mkdir -p "$TMP/bin" "$TMP/lib" "$TMP/state" "$TMP/release/root" "$TMP/scripts" \
+mkdir -p "$TMP/bin" "$TMP/lib" "$TMP/state" "$TMP/release/root" "$TMP/scripts/lib" \
   "$TMP/home" "$TMP/config" "$TMP/units" "$TMP/scratch"
 cp "$REPO/scripts/cass-release-promote.sh" "$REPO/scripts/cass-search-health.sh" "$TMP/scripts/"
+# cass-search-health.sh sources lib/group-timeout.sh from beside it, as in ~/.claude/scripts,
+# and bounds each query with that shell function, which a PATH stub cannot see. The copy in
+# lib/ records its argv into the same log as the timeout stub below, then runs the real helper.
+cp "$REPO/scripts/lib/group-timeout.sh" "$TMP/scripts/lib/group-timeout.real.sh"
+cat >"$TMP/scripts/lib/group-timeout.sh" <<EOF
+group_timeout() {
+  printf '%s\n' "\$*" >> "$TMP/timeouts"
+  ( . "$TMP/scripts/lib/group-timeout.real.sh" && group_timeout "\$@" )
+}
+EOF
 SCRIPT=$TMP/scripts/cass-release-promote.sh
 export HOME=$TMP/home XDG_CONFIG_HOME=$TMP/config XDG_STATE_HOME=$TMP/state TMPDIR=$TMP/scratch
 cat >"$TMP/scripts/notify.sh" <<EOF
