@@ -438,6 +438,27 @@ test('memory limit normalizer rejects explicit invalid values with exit 75', asy
   }
 });
 
+test('swap normalizer defaults to the RAM cap, honours sizes and off words, rejects junk', async () => {
+  for (const [raw, out] of [['', '4294967296\n'], [' ', '4294967296\n'], ['2G', '2147483648\n'],
+    ['1.5M', '1572864\n'], ['off', ''], ['none', ''], ['0', ''], [' FALSE ', '']]) {
+    const res = await spawnNode(HEADROOM, { argv: ['--normalize-swap-limit', raw, '4294967296'] });
+    assert.strictEqual(res.code, 0, `${raw}: ${res.stderr}`);
+    assert.strictEqual(res.stdout, out, raw);
+  }
+  for (const raw of ['lots', '-1G', '0G']) {
+    const res = await spawnNode(HEADROOM, { argv: ['--normalize-swap-limit', raw, '4294967296'] });
+    assert.strictEqual(res.code, 75, raw);
+    assert.match(res.stderr, /HOV_STACK_TOOL_SWAP_LIMIT/, raw);
+    assert.doesNotMatch(res.stderr, /CLAUDE_CODE_TOOL_MEMORY_LIMIT/, raw);
+  }
+  for (const argv of [['--normalize-swap-limit', '1G'], ['--normalize-swap-limit', '1G', '0'],
+    ['--normalize-swap-limit', '1G', '4G']]) {
+    const res = await spawnNode(HEADROOM, { argv });
+    assert.strictEqual(res.code, 75, argv.join(' '));
+    assert.match(res.stderr, /failed closed/i, argv.join(' '));
+  }
+});
+
 test('production headroom ignores test overrides without the explicit gate', async () => {
   const tmp = mkTmp('heavy-headroom-test-gate-');
   try {
@@ -549,14 +570,71 @@ test('enabled memory limit runs the original command in a capped transient scope
     assert.strictEqual(res.code, 0, res.stderr);
     assert.strictEqual(fs.readFileSync(commandMarker, 'utf8'), 'started');
     const systemdArgv = fs.readFileSync(argvMarker, 'utf8').trim().split('\n');
-    assert.deepStrictEqual(systemdArgv.slice(0, 6), [
+    assert.deepStrictEqual(systemdArgv.slice(0, 8), [
       '--user', '--scope', '--quiet', '--collect', '--property', 'MemoryMax=4294967296',
+      '--property', 'MemorySwapMax=4294967296',
     ]);
-    assert.strictEqual(systemdArgv[6], '--');
+    assert.strictEqual(systemdArgv[8], '--');
     assert.strictEqual(systemdArgv.at(-2), '-c');
     assert.strictEqual(systemdArgv.at(-1), 'pnpm build');
     assert.strictEqual(systemdArgv.some((arg) => arg.startsWith('MemoryHigh=')), false);
-    assert.strictEqual(systemdArgv.some((arg) => arg.startsWith('MemorySwapMax=')), false);
+  } finally {
+    rmTmp(tmp);
+  }
+});
+
+test('the scoped command takes its swap bound from HOV_STACK_TOOL_SWAP_LIMIT', async () => {
+  const tmp = mkTmp('heavy-memory-swap-');
+  try {
+    const proc = path.join(tmp, 'proc');
+    const bin = path.join(tmp, 'bin');
+    const runtime = path.join(tmp, 'runtime');
+    const argvMarker = path.join(tmp, 'systemd-argv');
+    const commandMarker = path.join(tmp, 'started');
+    fs.mkdirSync(bin);
+    fs.mkdirSync(runtime, { mode: 0o700 });
+    writeProc(proc);
+    writeFakeSystemdRun(bin);
+    fs.writeFileSync(path.join(bin, 'pnpm'), '#!/bin/sh\nprintf started >"$HEAVY_MARKER"\n');
+    fs.chmodSync(path.join(bin, 'pnpm'), 0o755);
+    const command = updatedCommand(await runHook(HOOK, bash('pnpm build')));
+    const baseEnv = {
+      PATH: `${bin}:${process.env.PATH}`,
+      SYSTEMD_ARGV_MARKER: argvMarker,
+      HEAVY_MARKER: commandMarker,
+      CLAUDE_CODE_TOOL_MEMORY_LIMIT: '4G',
+      CLAUDE_HEAVY_JOB_TEST_MODE: '1',
+      CLAUDE_HEAVY_JOB_TEST_PROC_ROOT: proc,
+      CLAUDE_HEAVY_JOB_TEST_RUNTIME_DIR: runtime,
+    };
+
+    for (const [raw, property] of [
+      ['', 'MemorySwapMax=4294967296'],
+      ['  ', 'MemorySwapMax=4294967296'],
+      ['1G', 'MemorySwapMax=1073741824'],
+      ['512MiB', 'MemorySwapMax=536870912'],
+      ['off', 'MemorySwapMax=infinity'],
+      ['0', 'MemorySwapMax=infinity'],
+    ]) {
+      fs.rmSync(argvMarker, { force: true });
+      fs.rmSync(commandMarker, { force: true });
+      const res = await runShell(command, { ...baseEnv, HOV_STACK_TOOL_SWAP_LIMIT: raw });
+      assert.strictEqual(res.code, 0, `${raw}: ${res.stderr}`);
+      assert.strictEqual(fs.readFileSync(commandMarker, 'utf8'), 'started', raw);
+      const systemdArgv = fs.readFileSync(argvMarker, 'utf8').trim().split('\n');
+      assert.deepStrictEqual(systemdArgv.slice(4, 8), [
+        '--property', 'MemoryMax=4294967296', '--property', property,
+      ], raw);
+    }
+
+    fs.rmSync(argvMarker, { force: true });
+    fs.rmSync(commandMarker, { force: true });
+    const res = await runShell(command, { ...baseEnv, HOV_STACK_TOOL_SWAP_LIMIT: 'lots' });
+    assert.strictEqual(res.code, 75, res.stderr);
+    assert.match(res.stderr, /HOV_STACK_TOOL_SWAP_LIMIT is malformed/);
+    assert.match(res.stderr, /failed closed/i);
+    assert.strictEqual(fs.existsSync(argvMarker), false, 'malformed swap value still invoked systemd-run');
+    assert.strictEqual(fs.existsSync(commandMarker), false, 'malformed swap value still ran the command');
   } finally {
     rmTmp(tmp);
   }

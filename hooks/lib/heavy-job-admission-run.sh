@@ -13,7 +13,8 @@
 # quoted operands as arguments). The wrapper retains the original fail-closed
 # tool resolution, user-owned 0700 runtime directory, lock guards, and
 # process-group drain; an enabled native memory-limit value also puts only the
-# admitted command in a transient user scope with a finite MemoryMax.
+# admitted command in a transient user scope with a finite MemoryMax and a swap
+# bound (MemorySwapMax, the RAM cap unless HOV_STACK_TOOL_SWAP_LIMIT says otherwise).
 #
 # Runner-generated exit 75 means failed closed / deferred. An admitted command's
 # own exit 75 is preserved unchanged.
@@ -98,17 +99,27 @@ __claude_heavy_limit="$("$__claude_heavy_node" "$__claude_heavy_headroom" --norm
 __claude_heavy_limit_status=$?
 [ "$__claude_heavy_cancel_pending" -eq 0 ] || exit "$__claude_heavy_cancel_status"
 [ "$__claude_heavy_limit_status" -eq 0 ] || exit 75
+# The scope's swap bound defaults to the RAM cap; HOV_STACK_TOOL_SWAP_LIMIT overrides it, and an
+# off word there leaves swap unbounded (harness/wsl-memory-bounds.md, "Agent tool commands").
+__claude_heavy_swap_property=
+if [ -n "$__claude_heavy_limit" ]; then
+  __claude_heavy_swap="$("$__claude_heavy_node" "$__claude_heavy_headroom" --normalize-swap-limit "${HOV_STACK_TOOL_SWAP_LIMIT-}" "$__claude_heavy_limit")"
+  __claude_heavy_swap_status=$?
+  [ "$__claude_heavy_cancel_pending" -eq 0 ] || exit "$__claude_heavy_cancel_status"
+  [ "$__claude_heavy_swap_status" -eq 0 ] || exit 75
+  __claude_heavy_swap_property="MemorySwapMax=${__claude_heavy_swap:-infinity}"
+fi
 exec {__claude_heavy_stdin_fd}<&0 || __claude_heavy_fail "cannot preserve command stdin"
 [ "$__claude_heavy_cancel_pending" -eq 0 ] || exit "$__claude_heavy_cancel_status"
 
 __claude_heavy_direct_bootstrap='builtin kill -STOP "$BASHPID"; exec "$1" -c "$2"'
-__claude_heavy_scoped_bootstrap='builtin kill -STOP "$BASHPID"; exec "$1" --user --scope --quiet --collect --property "$2" -- "$3" -c "$4"'
+__claude_heavy_scoped_bootstrap='builtin kill -STOP "$BASHPID"; exec "$1" --user --scope --quiet --collect --property "$2" --property "$3" -- "$4" -c "$5"'
 if [ -n "$__claude_heavy_limit" ]; then
   [ -x "$__claude_heavy_systemd_run" ] || __claude_heavy_fail "systemd-run is required for the configured memory limit"
   [ "$__claude_heavy_cancel_pending" -eq 0 ] || exit "$__claude_heavy_cancel_status"
   (
     exec {__claude_heavy_lock_fd}>&-
-    exec "$__claude_heavy_setsid" "$__claude_heavy_bash" -c "$__claude_heavy_scoped_bootstrap" claude-heavy-bootstrap "$__claude_heavy_systemd_run" "MemoryMax=$__claude_heavy_limit" "$__claude_heavy_bash" "$__claude_heavy_cmd" <&"$__claude_heavy_stdin_fd" {__claude_heavy_stdin_fd}<&-
+    exec "$__claude_heavy_setsid" "$__claude_heavy_bash" -c "$__claude_heavy_scoped_bootstrap" claude-heavy-bootstrap "$__claude_heavy_systemd_run" "MemoryMax=$__claude_heavy_limit" "$__claude_heavy_swap_property" "$__claude_heavy_bash" "$__claude_heavy_cmd" <&"$__claude_heavy_stdin_fd" {__claude_heavy_stdin_fd}<&-
   ) &
 else
   [ "$__claude_heavy_cancel_pending" -eq 0 ] || exit "$__claude_heavy_cancel_status"

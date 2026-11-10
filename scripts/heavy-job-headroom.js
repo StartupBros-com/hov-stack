@@ -60,21 +60,30 @@ function parsePressure(text) {
   return { some: values.get('some'), full: values.get('full') };
 }
 
-function parseMemoryLimit(raw) {
+function parseMemoryLimit(raw, name = 'CLAUDE_CODE_TOOL_MEMORY_LIMIT') {
   if (raw === undefined || raw.trim() === '') return null;
   const value = raw.trim().toLowerCase();
   if (['0', 'false', 'no', 'off', 'none'].includes(value)) return null;
 
   const match = /^(\d+(?:\.\d+)?)\s*([kmgt]?)(?:i?b)?$/i.exec(value);
-  if (!match) malformed('CLAUDE_CODE_TOOL_MEMORY_LIMIT is malformed');
+  if (!match) malformed(`${name} is malformed`);
   const [whole, fraction = ''] = match[1].split('.');
   const exponent = ' kmgt'.indexOf(match[2].toLowerCase());
   const scale = 1024n ** BigInt(exponent);
   const numerator = BigInt(`${whole}${fraction}`) * scale;
   const denominator = 10n ** BigInt(fraction.length);
   const bytes = numerator / denominator;
-  if (bytes < 1n) malformed('CLAUDE_CODE_TOOL_MEMORY_LIMIT must resolve to at least one byte');
+  if (bytes < 1n) malformed(`${name} must resolve to at least one byte`);
   return bytes.toString();
+}
+
+// The swap bound for a scoped heavy command (harness/wsl-memory-bounds.md, "Agent tool
+// commands"): unset or empty means "the same as the RAM cap", an off word means no bound
+// (null), and anything else must be a size, as for CLAUDE_CODE_TOOL_MEMORY_LIMIT.
+function normalizeSwapLimit(raw, limitBytes) {
+  if (!/^[1-9][0-9]*$/.test(limitBytes ?? '')) malformed('swap normalization needs the RAM cap in bytes');
+  if (raw === undefined || raw.trim() === '') return limitBytes;
+  return parseMemoryLimit(raw, 'HOV_STACK_TOOL_SWAP_LIMIT');
 }
 
 function checkHeadroom() {
@@ -115,6 +124,14 @@ function main(argv = process.argv.slice(2)) {
       if (limit !== null) process.stdout.write(`${limit}\n`);
       return;
     }
+    if (argv[0] === '--normalize-swap-limit') {
+      if (argv.length !== 3) {
+        malformed('usage: heavy-job-headroom.js --normalize-swap-limit <value> <limit-bytes>');
+      }
+      const swap = normalizeSwapLimit(argv[1], argv[2]);
+      if (swap !== null) process.stdout.write(`${swap}\n`);
+      return;
+    }
     if (argv.length !== 0) malformed('unexpected heavy-job-headroom argument');
     checkHeadroom();
   } catch (error) {
@@ -129,4 +146,4 @@ function main(argv = process.argv.slice(2)) {
 
 if (require.main === module) main();
 
-module.exports = { checkHeadroom, parseMeminfo, parsePressure, parseMemoryLimit };
+module.exports = { checkHeadroom, normalizeSwapLimit, parseMeminfo, parsePressure, parseMemoryLimit };

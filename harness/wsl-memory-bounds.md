@@ -185,6 +185,73 @@ the reap notices occur and read afterwards. Point-in-time `ps`, the journal's
 that lives under a minute, and an `init.scope` process leaves no cgroup
 accounting behind.
 
+## Agent tool commands
+
+`CLAUDE_CODE_TOOL_MEMORY_LIMIT=4G` asks Claude Code to run each Bash command
+in a `claude-code-bash` cgroup beside its own, with that `memory.max`. It has
+two gaps. It bounds RAM only: on 2.1.322, `rg -a -c -F memory.swap` over the
+binary counts 0, against 6 for `memory.max` and 2 for `claude-code-bash`. And
+it needs a parent the user can write to. A session launched from a WSL
+terminal runs in `/init.scope`, so its pool would sit at the cgroup root,
+which a user cannot create, and every command runs uncapped with no warning.
+
+The RAM-only gap is the expensive one. At 23:41:12Z on 2026-11-09 the
+kernel's OOM report for a pool read `memory: usage 4194304kB, limit
+4194304kB` and `swap: usage 71502200kB` with no limit: 68.2 GiB in swap,
+66.8 GiB of it one process. The OOM killer fired only after that; until then
+the host paged, and the gateway on the same host stalled 14-21 s. A RAM cap
+with unbounded swap does not stop a runaway; it moves the runaway into swap.
+
+`claude-env.sh` closes both gaps from inside the command's own shell, since
+`CLAUDE_ENV_FILE` is sourced inline before every Bash call (foreground,
+`run_in_background` and Monitor scripts alike, observed on 2.1.321):
+
+- **In `/init.scope`**, when `CLAUDE_CODE_TOOL_MEMORY_LIMIT` is a size,
+  `init.scope`'s own `memory.max` is `max`, and the user bus socket and
+  `busctl` exist, the shell asks the user manager (`StartTransientUnit`,
+  2 s timeout) to move its own PID into `hov-tool-<pid>-<n>.scope` with
+  `MemoryMax=` the cap, `MemorySwapMax=` the swap bound, `TasksMax=infinity`,
+  `OOMPolicy=continue` and `CollectMode=inactive-or-failed`, then waits up to
+  250 ms for the move to land. `systemd-run --scope` would not do: it starts
+  a new process, and the command to bound is the rest of this shell. Anything
+  the command leaves running in the background stays in that scope, under
+  its cap, and the scope is collected when the last process exits.
+- **In a native pool** (the shell's cgroup ends in `/claude-code-bash`), it
+  writes the pool's `memory.swap.max` when the value differs. The pool is
+  shared by every session using it, so the last value written wins.
+
+The swap bound defaults to the RAM cap, so a command can hold at most twice
+its cap before the OOM killer ends it with exit 137.
+`HOV_STACK_TOOL_SWAP_LIMIT` takes the same size syntax for a different bound,
+or `0`/`false`/`no`/`off`/`none` for none; in a pool an off word leaves the
+current bound alone. `HOV_STACK_TOOL_RESCOPE=off` skips the `/init.scope`
+move and nothing else. A heavy command that `heavy-job-admission-run.sh`
+admits still moves into its own scope, now with the same swap bound.
+
+This is a kill bound, unlike the throttling bounds above, and the reasons for
+leaving anon-heavy batch jobs unbounded do not carry over: those jobs' failure
+paths handle a kill badly, as described above. An agent sees exit 137 on
+the call that overran and can rerun it with a larger
+`CLAUDE_CODE_TOOL_MEMORY_LIMIT` or `HOV_STACK_TOOL_SWAP_LIMIT=off`.
+
+The prelude fails open and never writes to stdout. Without cgroup v2, a bus,
+`busctl`, a limit, or a writable pool, the command runs where it was. A
+malformed limit, a failed `busctl` call (its first error line is quoted) or a
+move that did not land in 250 ms each print one `hov-stack:` line to stderr.
+Bash only; dash and other shells skip it. It covers Bash tool commands
+only: Claude Code itself, and MCP servers in an `/init.scope` session, stay
+where they are.
+
+`tests/claude-env-tool-scope.test.sh` checks the logic through a fake
+`busctl` and test-only path overrides. Those cases prove the decision and the
+D-Bus call, not that systemd honours it. Its live cases run only where the
+host allows and otherwise skip, naming what is missing: a real move, a 200 MB
+allocation under a 64 MB cap killed with exit 137 while the swap-off control
+survives, and a native pool emulated in a `Delegate=yes` user service, where
+a command that enters it by writing `0` to its `cgroup.procs` is killed with
+`memory.swap.peak` at or under the bound. On the author's WSL host on
+2026-11-09 every live case ran and passed, with 0 skipped.
+
 ## What this does not fix
 
 `vmmemWSL` on the Windows side keeps its high-water mark
