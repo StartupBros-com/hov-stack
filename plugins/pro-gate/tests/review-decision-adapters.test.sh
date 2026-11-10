@@ -443,6 +443,163 @@ deferral_case() { (
 DEFERRAL_PREDICATE='.action=="allow-existing-merge-workflow" and .reason=="fix-first-deferred-p2-only" and .facts.open_blocking==0 and .facts.deferred_count==1 and .facts.deferred_findings==[{severity:"P2",text:"docs.md:7 — Clarify the example."}]'
 DEFERRAL_RC=0; DEFERRAL_DETAIL="$(deferral_case p2 "$DEFERRAL_BODY" "$DEFERRAL_PREDICATE")" || DEFERRAL_RC=$?
 check '#274 P2-only FIX-FIRST allows the merge workflow and emits deferred facts (planted negative)' "$DEFERRAL_RC" "$DEFERRAL_DETAIL"
+# Retained foreign history must not multiply full validation work. Instrument only the
+# installed reader wrapper; its canonical/schema/proof implementation is unchanged.
+decision_lookup_scale() { (
+  local name_env marker template record i start elapsed baseline reads
+  while IFS='=' read -r name_env _; do
+    case "$name_env" in PRO_GATE_*|ORACLE_*) unset "$name_env" ;; esac
+  done < <(env)
+  export HOME="$TMP/lookup-home" PRO_GATE_HOME="$TMP/lookup-state" PRO_GATE_RUN_LOGS=0
+  export PG_LOOKUP_LOG="$TMP/lookup-reads" PG_LOOKUP_EFFECTS="$TMP/lookup-effects"
+  export PRO_GATE_REVIEW_PR_EVIDENCE="$TMP/deferral-pr.json" PRO_GATE_REVIEW_ENDPOINT_PATCH="$TMP/deferral.patch"
+  mkdir -p "$HOME/.local/bin" "$TMP/lookup-installed"
+  cp -R "$TMP/deferral-p2" "$PRO_GATE_HOME"
+  cp "$ENGINE" "$TMP/lookup-installed/oracle-review.sh"
+  cp "$LIB" "$TMP/lookup-installed/lib.sh"
+  cat > "$HOME/.local/bin/forbidden" <<'LOOKUP_EFFECT'
+#!/usr/bin/env bash
+printf '%s\n' "$0 $*" >> "$PG_LOOKUP_EFFECTS"
+exit 99
+LOOKUP_EFFECT
+  chmod +x "$HOME/.local/bin/forbidden"
+  for name_env in gh oracle node curl wget; do ln -s forbidden "$HOME/.local/bin/$name_env"; done
+  cat >> "$TMP/lookup-installed/lib.sh" <<'LOOKUP_TRACE'
+eval "$(declare -f pg_review_input_binding_read | sed '1s/pg_review_input_binding_read/lookup_original_read/')"
+pg_review_input_binding_read() {
+  local start=${EPOCHREALTIME:-$SECONDS} rc=0
+  lookup_original_read "$@" || rc=$?
+  printf '%s %s\n' "$start" "${EPOCHREALTIME:-$SECONDS}" >> "$PG_LOOKUP_LOG"
+  return "$rc"
+}
+pg_round_record() { printf 'round-record\n' >> "$PG_LOOKUP_EFFECTS"; return 99; }
+pg_lock() { printf 'lock\n' >> "$PG_LOOKUP_EFFECTS"; return 99; }
+pg_pr_metadata_fetch() { printf 'network\n' >> "$PG_LOOKUP_EFFECTS"; return 99; }
+LOOKUP_TRACE
+  lookup_query() {
+    bash "$TMP/lookup-installed/oracle-review.sh" --review-decision --json --repo "$DEFERRAL_REPO" --pr 1983 --diff "$TMP/deferral.patch" --input bundle
+  }
+  start=${EPOCHREALTIME:-$SECONDS}
+  lookup_query > "$TMP/lookup-baseline.json" || exit 1
+  baseline="$(awk -v a="$start" -v b="${EPOCHREALTIME:-$SECONDS}" 'BEGIN{print b-a}')"
+  : > "$PG_LOOKUP_LOG"
+  template="$(jq -cS '.marker="@MARKER@" | .repository.owner="foreign"' "$PRO_GATE_HOME/review-input-bindings/pg-run-acme-widgets-1983-1700000700-1")"
+  for ((i=0; i<2213; i++)); do
+    marker="pg-run-foreign-$i"
+    record="${template/@MARKER@/$marker}"
+    printf '%s' "$record" > "$PRO_GATE_HOME/review-input-bindings/$marker"
+  done
+  pg_review_input_binding_read pg-run-foreign-0 >/dev/null || exit 1
+  pg_review_input_binding_read pg-run-foreign-2212 >/dev/null || exit 1
+  start=${EPOCHREALTIME:-$SECONDS}
+  lookup_query > "$TMP/lookup-scale.json" || exit 1
+  elapsed="$(awk -v a="$start" -v b="${EPOCHREALTIME:-$SECONDS}" 'BEGIN{print b-a}')"
+  reads="$(wc -l < "$PG_LOOKUP_LOG")"
+  printf 'lookup scale: baseline=%ss history=%ss readers=%s reader-seconds=%s\n' "$baseline" "$elapsed" "$reads" "$(awk '{n+=$2-$1} END{print n}' "$PG_LOOKUP_LOG")"
+  cmp "$TMP/lookup-baseline.json" "$TMP/lookup-scale.json" || exit 1
+  [ ! -e "$PG_LOOKUP_EFFECTS" ] || exit 1
+  [ "$reads" -le 16 ] && awk -v seconds="$elapsed" 'BEGIN{exit !(seconds<30)}' || exit 1
+  # A later failed batch must also undo exclusions from the first 200 records.
+  local all_markers restored
+  all_markers="$(find "$PRO_GATE_HOME/review-input-bindings" -type f -printf '%f\n' | LC_ALL=C sort)"
+  restored="$(
+    eval "$(declare -f pg_review_decision_relevance_batch | sed '1s/pg_review_decision_relevance_batch/lookup_original_batch/')"
+    pg_review_decision_relevance_batch() {
+      local arg
+      for arg in "$@"; do [ "$arg" != i200 ] || return 1; done
+      lookup_original_batch "$@"
+    }
+    printf '%s\n' "$all_markers" | pg_review_decision_prefilter github.com acme widgets 1983 "$DEFERRAL_HEAD"
+  )"
+  [ "$restored" = "$all_markers" ] || exit 1
+  # Exercise conservative retention directly, then the public boundary with forged
+  # matches. This separate directory also checks the existing override surface.
+  export PRO_GATE_REVIEW_INPUT_BINDING_DIR="$TMP/lookup-adversarial"
+  mkdir -p "$PRO_GATE_REVIEW_INPUT_BINDING_DIR"
+  local original sample field selected expected mode
+  original="$(cat "$PRO_GATE_HOME/review-input-bindings/pg-run-acme-widgets-1983-1700000700-1")"
+  for field in host owner repo pr head; do
+    case "$field" in
+      host) sample="$(jq -cS '.repository.host="GitHub.com"' <<<"$original")" ;;
+      owner) sample="$(jq -cS '.repository.owner="Acme"' <<<"$original")" ;;
+      repo) sample="$(jq -cS '.repository.repo="Widgets"' <<<"$original")" ;;
+      pr) sample="$(jq -cS '.target.pr=1984' <<<"$original")" ;;
+      head) sample="$(jq -cS '.target.head_oid=("a"*40)' <<<"$original")" ;;
+    esac
+    printf '%s' "$sample" > "$PRO_GATE_REVIEW_INPUT_BINDING_DIR/pg-run-mismatch-$field"
+  done
+  for marker in pg-run-generic pg-run-other-repo-99-123-1; do
+    jq -cjS --arg marker "$marker" '.marker=$marker' <<<"$original" > "$PRO_GATE_REVIEW_INPUT_BINDING_DIR/$marker"
+  done
+  printf '{broken' > "$PRO_GATE_REVIEW_INPUT_BINDING_DIR/pg-run-malformed"
+  printf '%s\n%s' "$original" "$original" > "$PRO_GATE_REVIEW_INPUT_BINDING_DIR/pg-run-multidoc"
+  printf ' %s ' "$template" > "$PRO_GATE_REVIEW_INPUT_BINDING_DIR/pg-run-whitespace"
+  jq -cjS '.contract_digest=("0"*64)' <<<"$original" > "$PRO_GATE_REVIEW_INPUT_BINDING_DIR/pg-run-contract"
+  jq -cjS '.evidence.identity="other-evidence"' <<<"$original" > "$PRO_GATE_REVIEW_INPUT_BINDING_DIR/pg-run-evidence"
+  printf '%65537s' ' ' > "$PRO_GATE_REVIEW_INPUT_BINDING_DIR/pg-run-large"
+  printf '%s' "$template" > "$PRO_GATE_REVIEW_INPUT_BINDING_DIR/pg-run-unreadable"
+  chmod 000 "$PRO_GATE_REVIEW_INPUT_BINDING_DIR/pg-run-unreadable"
+  ln -s "$PRO_GATE_REVIEW_INPUT_BINDING_DIR/pg-run-generic" "$PRO_GATE_REVIEW_INPUT_BINDING_DIR/pg-run-symlink"
+  mkfifo "$PRO_GATE_REVIEW_INPUT_BINDING_DIR/pg-run-fifo"
+  mkdir "$PRO_GATE_REVIEW_INPUT_BINDING_DIR/pg-run-directory"
+  local markers
+  markers="$(find "$PRO_GATE_REVIEW_INPUT_BINDING_DIR" -mindepth 1 -maxdepth 1 -printf '%f\n' | LC_ALL=C sort)"
+  expected="$(printf '%s\n' "$markers" | grep -v '^pg-run-mismatch-')"
+  selected="$(printf '%s\n' "$markers" | pg_review_decision_prefilter github.com acme widgets 1983 "$DEFERRAL_HEAD")"
+  [ "$selected" = "$expected" ] || { printf 'adversarial retention differs\n%s\n' "$selected"; exit 1; }
+  # Failed, incomplete, duplicated and invalid batch responses must restore all
+  # markers, including ones excluded by an earlier successful batch.
+  for mode in failure incomplete duplicate malformed; do
+    selected="$(
+      pg_review_decision_relevance_batch() {
+        case "$mode" in
+          failure) return 1 ;; incomplete) return 0 ;;
+          duplicate) printf '0\t0\n0\t0\n' ;; malformed) printf 'invalid\t0\n' ;;
+        esac
+      }
+      printf '%s\n' "$markers" | pg_review_decision_prefilter github.com acme widgets 1983 "$DEFERRAL_HEAD"
+    )"
+    [ "$selected" = "$markers" ] || exit 1
+  done
+  chmod 600 "$PRO_GATE_REVIEW_INPUT_BINDING_DIR/pg-run-unreadable"
+  # Public enumeration excludes FIFO/symlink/directory; every forged matching
+  # record still encounters full validation and cannot supply completed authority.
+  lookup_query > "$TMP/lookup-adversarial.json" || exit 1
+  jq -e '.facts.completed_results==[]' "$TMP/lookup-adversarial.json" >/dev/null || exit 1
+  [ ! -e "$PG_LOOKUP_EFFECTS" ] || exit 1
+  # Now give generic and foreign-looking names authentic result/artifact siblings.
+  # Same-code/different-evidence remains prior context, never current authority.
+  local candidate_result candidate_input scenario state
+  state="$PRO_GATE_HOME"
+  for scenario in generic foreign-name evidence contract; do
+    export PRO_GATE_HOME="$TMP/lookup-$scenario"
+    export PRO_GATE_REVIEW_INPUT_BINDING_DIR="$PRO_GATE_HOME/custom-input"
+    mkdir -p "$PRO_GATE_REVIEW_INPUT_BINDING_DIR" "$PRO_GATE_HOME/review-result-bindings" "$PRO_GATE_HOME/completed"
+    marker=pg-run-generic
+    [ "$scenario" != foreign-name ] || marker=pg-run-other-repo-99-123-1
+    candidate_input="$(jq -cS --arg marker "$marker" '.marker=$marker' <<<"$original")"
+    [ "$scenario" != evidence ] || candidate_input="$(jq -cS '.evidence.identity="different-evidence"' <<<"$candidate_input")"
+    [ "$scenario" != contract ] || candidate_input="$(jq -cS '.contract_digest=("0"*64)' <<<"$candidate_input")"
+    printf '%s' "$candidate_input" > "$PRO_GATE_REVIEW_INPUT_BINDING_DIR/$marker"
+    candidate_result="$(jq -cS --arg marker "$marker" --arg digest "$(pg_review_sha256_text "$candidate_input")" \
+      '.marker=$marker | .input_binding_identity=$marker | .input_binding_digest=$digest | .artifact.path=("completed/"+$marker)' \
+      "$state/review-result-bindings/pg-run-acme-widgets-1983-1700000700-1")"
+    printf '%s' "$candidate_result" > "$PRO_GATE_HOME/review-result-bindings/$marker"
+    cp "$state/completed/pg-run-acme-widgets-1983-1700000700-1" "$PRO_GATE_HOME/completed/$marker"
+    pg_review_tokens_write "$marker" "$TMP/deferral.patch" || exit 1
+    lookup_query > "$TMP/lookup-$scenario.json" || exit 1
+    case "$scenario" in
+      generic|foreign-name) jq -e --arg marker "$marker" '.action=="allow-existing-merge-workflow" and .facts.completed_results[0].marker==$marker' "$TMP/lookup-$scenario.json" >/dev/null || exit 1 ;;
+      evidence) jq -e --arg marker "$marker" '.facts.completed_results==[] and .facts.prior_review.marker==$marker and .facts.prior_review.applicable==false' "$TMP/lookup-$scenario.json" >/dev/null || exit 1 ;;
+      contract) jq -e '.facts.completed_results==[] and .action!="allow-existing-merge-workflow"' "$TMP/lookup-$scenario.json" >/dev/null || exit 1 ;;
+    esac
+  done
+  [ ! -e "$PG_LOOKUP_EFFECTS" ] || exit 1
+  printf 'lookup adversarial: exact targets, ambiguous bytes, special files, overrides, bound generic results, prior evidence and batch fallback passed\n'
+); }
+LOOKUP_RC=0; LOOKUP_DETAIL="$(decision_lookup_scale)" || LOOKUP_RC=$?
+check 'decision lookup preserves the envelope with 2213 foreign bindings within bounded validation work' "$LOOKUP_RC" "$LOOKUP_DETAIL"
+printf '%s\n' "$LOOKUP_DETAIL"
 DEFERRAL_RC=0; DEFERRAL_DETAIL="$(deferral_case p1 $'[P1] runtime.sh:1 — Fix the race.\n'"$DEFERRAL_BODY" '.action=="fix-review-findings" and .reason=="review-findings-require-fix"')" || DEFERRAL_RC=$?
 check '#274 an open P1 still requires a fix (control)' "$DEFERRAL_RC" "$DEFERRAL_DETAIL"
 DEFERRAL_RC=0; DEFERRAL_DETAIL="$(deferral_case p0 $'[P0] runtime.sh:1 — Fix data loss.\n'"$DEFERRAL_BODY" '.action=="fix-review-findings" and .reason=="review-findings-require-fix"')" || DEFERRAL_RC=$?

@@ -4836,6 +4836,77 @@ pg_review_facts_target_matches() { # input-json host owner repo pr
     <<<"$1" >/dev/null 2>&1
 }
 
+# This is only a negative target/head test, never binding authority. Ambiguous bytes
+# and noncompact JSON go to the existing reader, as do every possible match.
+pg_review_decision_relevance_batch() { # host owner repo pr head [--rawfile iN input]...
+  local host="$1" owner="$2" repo="$3" pr="$4" head="$5"
+  shift 5
+  jq -nr --arg h "$host" --arg o "$owner" --arg r "$repo" --argjson p "$pr" --arg head "$head" "$@" '
+    def needed($s):
+      if ($s | test("[^ -~]")) then true else
+        try ($s | fromjson | . as $v |
+          if type!="object" or ($v|tojson)!=$s or
+            (.repository|type)!="object" or (.target|type)!="object" or
+            (.repository.host|type)!="string" or (.repository.owner|type)!="string" or
+            (.repository.repo|type)!="string" or (.target.pr|type)!="number" or
+            (.target.head_oid|type)!="string"
+          then true else
+            .repository.host==$h and .repository.owner==$o and .repository.repo==$r and
+            .target.pr==$p and .target.head_oid==$head
+          end) catch true
+      end;
+    $ARGS.named | to_entries[] | select(.key|test("^i[0-9]+$")) |
+    "\(.key[1:])\t\(if needed(.value) then 1 else 0 end)"'
+}
+
+# Bound jq startup cost to one process per 200 regular inputs (at most 64 KiB
+# each). Preserve the supplied enumeration domain and order, including generic
+# marker names and directory overrides. Any incomplete batch restores the WHOLE
+# list; nothing is emitted until every response has been checked.
+pg_review_decision_prefilter() { # host owner repo pr head < sorted markers
+  local host="$1" owner="$2" repo="$3" pr="$4" head="$5" dir big marker f i n=0 sent=0 out='' idx flag extra
+  local markers=() need=() args=()
+  while IFS= read -r marker; do markers+=("$marker"); n=$((n + 1)); done
+  [ "$n" -gt 0 ] || return 0
+  dir="$(pg_review_input_binding_dir)"
+  if ! big="$(find -H "$dir" -mindepth 1 -maxdepth 1 -type f -size +65536c)"; then
+    printf '%s\n' "${markers[@]}"; return 0
+  fi
+  big=$'\n'"$big"$'\n'
+  for ((i=0; i<n; i++)); do
+    marker="${markers[i]}"; need[i]=1; f="$dir/$marker"
+    pg_reservation_marker_ok "$marker" || continue
+    [ -f "$f" ] && [ ! -L "$f" ] && [ -r "$f" ] || continue
+    case "$big" in *"/$marker"$'\n'*) continue ;; esac
+    need[i]=''
+    args+=(--rawfile "i$i" "$f"); sent=$((sent + 1))
+    if [ "$sent" -eq 200 ]; then
+      out="$out$(pg_review_decision_relevance_batch "$host" "$owner" "$repo" "$pr" "$head" "${args[@]}")"$'\n' \
+        || { printf '%s\n' "${markers[@]}"; return 0; }
+      args=(); sent=0
+    fi
+  done
+  if [ "$sent" -gt 0 ]; then
+    out="$out$(pg_review_decision_relevance_batch "$host" "$owner" "$repo" "$pr" "$head" "${args[@]}")"$'\n' \
+      || { printf '%s\n' "${markers[@]}"; return 0; }
+  fi
+  while IFS=$'\t' read -r idx flag extra; do
+    [ -n "$idx$flag$extra" ] || continue
+    # Canonical decimal indices only; prevent arithmetic interpretation and overflow.
+    if ! [[ "$idx" =~ ^(0|[1-9][0-9]*)$ ]] || [ "${#idx}" -gt "${#n}" ] || [ -n "$extra" ]; then
+      printf '%s\n' "${markers[@]}"; return 0
+    fi
+    if [ "$idx" -ge "$n" ] || [ -n "${need[idx]}" ]; then printf '%s\n' "${markers[@]}"; return 0; fi
+    case "$flag" in 0|1) need[idx]="$flag" ;; *) printf '%s\n' "${markers[@]}"; return 0 ;; esac
+  done <<<"$out"
+  for ((i=0; i<n; i++)); do
+    [ -n "${need[i]}" ] || { printf '%s\n' "${markers[@]}"; return 0; }
+  done
+  for ((i=0; i<n; i++)); do
+    [ "${need[i]}" = 0 ] || printf '%s\n' "${markers[i]}"
+  done
+}
+
 # One batch of the candidate prefilter. Prints "<index><TAB>1" for each marker that could still be
 # relevant, or "<index><TAB>0" for one the per-marker scan would skip. Ownership mirrors that scan:
 # the input binding's sole JSON object through pg_review_facts_target_matches, the sidecar's first

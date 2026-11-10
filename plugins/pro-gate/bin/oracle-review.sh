@@ -687,7 +687,7 @@ pg_review_decision_cli() {
         --arg verdict "$(jq -r .verdict <<<"$result")" \
         '. + [{canonical_identity:$canonical,charged_spend_epoch:$epoch,code_identity:$code,evidence_identity:$evidence,marker:$marker,verdict:$verdict}]' <<<"$prior_candidates")"
     fi
-  done < <(find "$(pg_review_input_binding_dir)" -mindepth 1 -maxdepth 1 -type f -name 'pg-run-*' -printf '%f\n' 2>/dev/null | LC_ALL=C sort)
+  done < <(find "$(pg_review_input_binding_dir)" -mindepth 1 -maxdepth 1 -type f -name 'pg-run-*' -printf '%f\n' 2>/dev/null | LC_ALL=C sort | pg_review_decision_prefilter "$host" "$owner" "$repo_name" "$pr_num" "$head")
 
   # A persisted exact relation is preferred over its equivalent prospective template. Pick it
   # deterministically so recover/repair effects never depend on directory enumeration order.
