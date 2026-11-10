@@ -865,7 +865,11 @@ What the official docs and issue tracker add on top of the probes:
   rewritten call the verifier still refuses counts under
   `guard_blocked:shape-rewrite-refused:<shapes>`. It fails open: unknown isolation, no
   scratch directory, a reach, or any internal error leaves the call for the verifier
-  exactly as before. `SHAPE_REWRITE_DISABLE=1` in the hook's own environment is the
+  exactly as before. It also leaves a call unrewritten when a Bash deny or ask rule
+  in a settings file could match it (`hooks/lib/permission-rule-overlap.js`): Claude
+  Code checks those rules against the command a hook returns, and `bash <script>`
+  would hide every subcommand from them. That check fails closed, so an unreadable
+  settings file also leaves the call for the verifier. `SHAPE_REWRITE_DISABLE=1` in the hook's own environment is the
   only switch; there is no per-call opt-out. Plan and rationale:
   `docs/plans/2026-09-20-2120-feat-rewrite-not-deny-hook-plan.md`.
 - **Delete when:** the next 30-day counts (read as the friction record below says)

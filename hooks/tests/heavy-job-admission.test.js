@@ -1478,3 +1478,59 @@ test('turbo-backed pnpm build is serialized globally with Turbo concurrency one 
     rmTmp(tmp);
   }
 });
+
+// Claude Code checks deny and ask rules against the command a hook returns.
+// Wrapping `pnpm build && pnpm publish` in the supervisor would hide the
+// publish from a `Bash(pnpm publish:*)` deny, so the hook must leave it alone.
+function rulesHome(settings) {
+  const home = mkTmp('heavy-rules-home-');
+  fs.mkdirSync(path.join(home, '.claude'), { recursive: true });
+  fs.writeFileSync(path.join(home, '.claude', 'settings.json'),
+    typeof settings === 'string' ? settings : JSON.stringify(settings));
+  return home;
+}
+
+test('a heavy command chained to a rule-matched command is left unwrapped so the rule still applies', async () => {
+  const home = rulesHome({ permissions: { deny: ['Bash(pnpm publish:*)'], ask: ['Bash(git push --force:*)'] } });
+  try {
+    const env = { HOME: home };
+    assertQuietPassThrough(await runHook(HOOK, bash('pnpm build && pnpm publish'), { env }));
+    assertQuietPassThrough(await runHook(HOOK, bash('pnpm build; git push --force origin topic'), { env }));
+    assert.ok(updatedCommand(await runHook(HOOK, bash('pnpm build'), { env })).startsWith('bash '));
+    assert.ok(updatedCommand(await runHook(HOOK, bash('pnpm build && pnpm format'), { env })).startsWith('bash '));
+  } finally {
+    rmTmp(home);
+  }
+});
+
+test('managed policy rules are honoured the same way', async () => {
+  const managed = mkTmp('heavy-rules-managed-');
+  try {
+    fs.writeFileSync(path.join(managed, 'managed-settings.json'), JSON.stringify({ permissions: { deny: ['Bash(wget:*)'] } }));
+    const env = { CLAUDE_HOOK_MANAGED_SETTINGS_DIR: managed };
+    assertQuietPassThrough(await runHook(HOOK, bash('pnpm build && wget https://example.test/x'), { env }));
+    assert.ok(updatedCommand(await runHook(HOOK, bash('pnpm build'), { env })).startsWith('bash '));
+  } finally {
+    rmTmp(managed);
+  }
+});
+
+test('an unreadable settings file leaves heavy commands unwrapped rather than risk hiding a rule', async () => {
+  const home = rulesHome('{ "permissions": ');
+  try {
+    assertQuietPassThrough(await runHook(HOOK, bash('pnpm build'), { env: { HOME: home } }));
+  } finally {
+    rmTmp(home);
+  }
+});
+
+test('a rule-visible pass-through still denies what admission always denied', async () => {
+  const home = rulesHome({ permissions: { deny: ['Bash(pnpm publish:*)'] } });
+  try {
+    const res = await runHook(HOOK, bash('pnpm build & pnpm publish'), { env: { HOME: home } });
+    assertPreToolUseDeny(res);
+    assert.match(JSON.parse(res.stdout).hookSpecificOutput.permissionDecisionReason, /foreground/);
+  } finally {
+    rmTmp(home);
+  }
+});

@@ -84,6 +84,9 @@ const NEUTRALIZE = [
   // fixture's repositories at the real ~/.claude.json.
   'CLAUDE_CONFIG_DIR',
   'CLAUDE_CODE_CUSTOM_OAUTH_URL',
+  // lib/permission-rule-overlap reads project settings from here; a runner
+  // launched inside a Claude session would otherwise lend fixtures its rules.
+  'CLAUDE_PROJECT_DIR',
 ];
 
 // One throwaway home per test process, shared by every spawn AND by the test
@@ -123,6 +126,19 @@ function testFsRoot() {
 }
 process.env.STRAY_DOT_GIT_FS_ROOT = testFsRoot();
 
+// And the host's managed policy: lib/permission-rule-overlap reads
+// /etc/claude-code (Linux) by default, which differs between a developer host
+// and CI. Every test sees an empty managed directory unless it passes its own.
+let sandboxManaged = null;
+function testManagedDir() {
+  if (!sandboxManaged) {
+    sandboxManaged = path.join(testHome(), 'managed-settings');
+    fs.mkdirSync(sandboxManaged, { recursive: true });
+  }
+  return sandboxManaged;
+}
+process.env.CLAUDE_HOOK_MANAGED_SETTINGS_DIR = testManagedDir();
+
 function buildEnv(overrides = {}) {
   const env = { ...process.env };
   for (const k of NEUTRALIZE) delete env[k];
@@ -130,6 +146,7 @@ function buildEnv(overrides = {}) {
   env.HOME = testHome();
   env.USERPROFILE = testHome(); // os.homedir() on Windows
   env.STRAY_DOT_GIT_FS_ROOT = testFsRoot();
+  env.CLAUDE_HOOK_MANAGED_SETTINGS_DIR = testManagedDir();
   return { ...env, ...overrides };
 }
 

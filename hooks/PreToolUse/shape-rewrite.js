@@ -35,6 +35,7 @@ const path = require('path');
 const { shellTokens, analyzeCommand } = require('./heavy-job-admission.js');
 const { logDenial } = require('../PostToolUseFailure/papercut-log.js');
 const { writeHookOutput } = require('../lib/hook-output');
+const { permissionRuleMayApply } = require('../lib/permission-rule-overlap');
 const {
   wordLiteralText, wordHasDynamic, wordDynamicPayloads,
   toLiteralTokens, hasNonFlagOperand: sharedHasNonFlagOperand,
@@ -2079,6 +2080,12 @@ function run(rawInput) {
     const roots = [worktreeRoot, scratchReal, tmpReal, jobsReal];
 
     if (reaches(command, roots, { deadline })) return rawInput;
+
+    // `bash <script>` hides every subcommand from Claude Code's deny and ask
+    // rules, which it checks against the rewritten text. When a rule could
+    // match part of the original, pass it through so the rule applies.
+    const overlap = permissionRuleMayApply(command, { cwd: input.cwd, deadline });
+    if (overlap.applies) return rawInput;
 
     const shapeName = shapes.join('+');
     const toolUseId = sanitizeId(input.tool_use_id || input.id);

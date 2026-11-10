@@ -2153,6 +2153,28 @@ test('run: AE1 a plain command-substitution call is rewritten to bash <script>, 
   });
 });
 
+test('run: a shape whose command a deny or ask rule names is left unrewritten so the rule still applies', () => {
+  withScratch(({ root, wt, scratch }) => {
+    // The owning checkout's project settings, as in a real .claude/worktrees/<name> session.
+    fs.mkdirSync(path.join(root, '.claude'), { recursive: true });
+    fs.writeFileSync(path.join(root, '.claude', 'settings.json'),
+      JSON.stringify({ permissions: { deny: ['Bash(date:*)'] } }));
+    const raw = JSON.stringify(payload('echo $(date)', { cwd: wt, scratchpad_dir: scratch }));
+    assert.strictEqual(run(raw), raw);
+    assert.deepStrictEqual(fs.readdirSync(scratch).filter((n) => n.startsWith('shape-rewrite-')), []);
+  });
+});
+
+test('run: a rule that names no command in the call does not stop the rewrite', () => {
+  withScratch(({ root, wt, scratch }) => {
+    fs.mkdirSync(path.join(root, '.claude'), { recursive: true });
+    fs.writeFileSync(path.join(root, '.claude', 'settings.json'),
+      JSON.stringify({ permissions: { deny: ['Bash(wget:*)'] } }));
+    const out = JSON.parse(run(JSON.stringify(payload('echo $(date)', { cwd: wt, scratchpad_dir: scratch }))));
+    assert.match(out.hookSpecificOutput.updatedInput.command, /^bash .*shape-rewrite-cmdsub-/);
+  });
+});
+
 test('run: AE6 a rewritten script executes and its stdout starts with the receipt line', () => {
   withScratch(({ wt, scratch }) => {
     const p = payload('echo hello-shape-rewrite', { cwd: wt, scratchpad_dir: scratch });

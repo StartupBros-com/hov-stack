@@ -204,7 +204,9 @@ with unbounded swap does not stop a runaway; it moves the runaway into swap.
 
 `claude-env.sh` closes both gaps from inside the command's own shell, since
 `CLAUDE_ENV_FILE` is sourced inline before every Bash call (foreground,
-`run_in_background` and Monitor scripts alike, observed on 2.1.321):
+`run_in_background` and Monitor scripts alike, observed on 2.1.321). Claude
+Code captures the file's text once per process, so a session that was already
+running when the file changed keeps the old text until it restarts:
 
 - **In `/init.scope`**, when `CLAUDE_CODE_TOOL_MEMORY_LIMIT` is a size,
   `init.scope`'s own `memory.max` is `max`, and the user bus socket and
@@ -215,7 +217,10 @@ with unbounded swap does not stop a runaway; it moves the runaway into swap.
   250 ms for the move to land. `systemd-run --scope` would not do: it starts
   a new process, and the command to bound is the rest of this shell. Anything
   the command leaves running in the background stays in that scope, under
-  its cap, and the scope is collected when the last process exits.
+  its cap, and the scope is collected when the last process exits. So a
+  look through cgroupfs after the call finds nothing; to confirm a call was
+  bounded, read the user journal, which records each scope starting and
+  stopping (`journalctl --user | rg -F hov-tool`).
 - **In a native pool** (the shell's cgroup ends in `/claude-code-bash`), it
   writes the pool's `memory.swap.max` when the value differs. The pool is
   shared by every session using it, so the last value written wins.
@@ -226,7 +231,10 @@ its cap before the OOM killer ends it with exit 137.
 or `0`/`false`/`no`/`off`/`none` for none; in a pool an off word leaves the
 current bound alone. `HOV_STACK_TOOL_RESCOPE=off` skips the `/init.scope`
 move and nothing else. A heavy command that `heavy-job-admission-run.sh`
-admits still moves into its own scope, now with the same swap bound.
+admits still moves into its own scope, now with the same swap bound. One that
+a Bash deny or ask rule in a settings file could match skips admission, so
+Claude Code can still apply the rule, and runs under the per-command bound
+above instead.
 
 This is a kill bound, unlike the throttling bounds above, and the reasons for
 leaving anon-heavy batch jobs unbounded do not carry over: those jobs' failure
