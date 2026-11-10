@@ -39,7 +39,7 @@ non-empty value counts, including `0`/`false` — only *unsetting* re-enables.
   investigation, the fleet was mixed: interactive sessions defaulted to
   `acceptEdits` (settings `defaultMode`; not sampled live),
   `claude-loop.sh` workers ran `bypassPermissions` (the
-  `claude -p` launch at `bin/claude-loop.sh:1585-1586`), and most sampled
+  `claude -p` launch at `bin/claude-loop.sh:626`), and most sampled
   `claude --bg` jobs did too (five of six live background sessions on
   2026-09-28; one `acceptEdits`). So under the default every message between
   an interactive session and a background job or loop worker was held for an
