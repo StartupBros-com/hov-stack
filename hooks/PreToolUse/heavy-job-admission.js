@@ -5,6 +5,7 @@ const path = require('node:path');
 const { deny, setDenyContext } = require('../lib/pretooluse-decision');
 const { writeHookOutput } = require('../lib/hook-output');
 const { executedPieces, NestingTooDeep, MAX_NESTING } = require('../lib/heredoc-scan');
+const { permissionRuleMayApply } = require('../lib/permission-rule-overlap');
 
 const HEADROOM_SCRIPT = path.resolve(__dirname, '..', '..', 'scripts', 'heavy-job-headroom.js');
 const HEAVY_SCRIPTS = new Set(['build', 'typecheck', 'compile']);
@@ -424,6 +425,12 @@ function run(rawInput) {
     if (shape.background) {
       return deny('Blocked: heavy build and typecheck commands must run in the foreground so global admission remains effective. Retry without backgrounding or deferral.');
     }
+    // The supervisor wrapper turns the whole command into one quoted argument,
+    // and Claude Code checks deny and ask rules against the wrapped text. When
+    // a rule could match part of the original, run it unadmitted instead (still
+    // under the per-command scope claude-env.sh applies) so the rule applies.
+    const overlap = permissionRuleMayApply(command, { cwd: input.cwd });
+    if (overlap.applies) return rawInput;
     return JSON.stringify({
       hookSpecificOutput: {
         hookEventName: 'PreToolUse',
