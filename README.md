@@ -64,7 +64,7 @@ It leaves alone anything you installed some other way, a program that changed si
 ## What's here
 
 - `CLAUDE.md`, the global rules file every session and subagent loads (14 KB), and `HARNESS.md` with 35 detail docs in `harness/` explaining the decisions behind it
-- `hooks/`: 17 hook scripts that `settings.json` registers across 6 hook events; 10 of them run before a tool call (`git-guard`, `settings-guard`, `loop-guard`, `runner-guard` and the rest), and `dcg` runs beside them when it is installed. The papercut plugin registers its own on top: failure capture, the Read ceiling guard and the StructuredOutput unwrap. The hook suite is the 46 test files in `hooks/tests/`.
+- `hooks/`: 17 hook scripts that `settings.json` registers across 6 hook events; 10 of them run before a tool call (`git-guard`, `settings-guard`, `loop-guard`, `runner-guard` and the rest), and `dcg` runs beside them when it is installed. The papercut plugin registers its own on top: failure capture, the Read ceiling guard and the StructuredOutput unwrap. The hook suite is the 47 test files in `hooks/tests/`.
 - `settings.json`: the allow / ask / deny lists I run under bypass-permissions mode (292 / 75 / 70 entries)
 - `plugins/hov-stack/skills/` (also reachable as `skills/`): 47 skills, 31 of them slash-command only so they never cost tokens until called, plus patches to 3 third-party skills in `skills-patches/` (papers, de-slopify's fact-check scripts, and security-audit-for-saas's lockfile-history, worm-sweep and EOL-check scripts), each with a note of its upstream
 - `skills-stack/`: 2 more slash-command skills (memory-mine, review-adversarial-first) that run this repo's scripts, so `./setup` links them and the plugin does not include them
