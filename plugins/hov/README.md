@@ -12,11 +12,13 @@ plugins/hov/scripts/hov send --to hov-spike --subject "ping" "hello from the ope
 plugins/hov/scripts/hov ls
 ```
 
-`--plugin-dir` loads the plugin for that session only. A `--bg` session starts idle (Claude Code 2.1.322 drops the positional prompt there), so hand it its first task from a peer session with the SendMessage tool, or with `claude attach`. The message reaches the session at its next hook event (prompt, tool call, or session start) as a `<hov-mail>` block in `additionalContext`.
+`--plugin-dir` loads the plugin for that session only. A `--bg` session starts idle (Claude Code 2.1.322 drops the positional prompt there), so hand it its first task from a peer session with the SendMessage tool, or with `claude attach`. The message reaches the session at its next prompt or tool call as a `<hov-mail>` block in `additionalContext`. The session-start event only resolves the session's name: Claude Code's `SessionStart` payload carries no `permission_mode`, so the hook cannot know there whether bodies may be injected.
 
 The launcher lives in `scripts/`, not `bin/`, because claude.ai plugin distribution rejects a top-level `bin/` (see papercut). Link it into `~/.local/bin` as `hov` when the plugin is enabled.
 
 Observed on 2026-11-11 in two `--bg` sessions loaded through `--plugin-dir`, both with permissions bypassed. The first had a peer's message waiting before its first prompt and got the `<hov-mail host="<host>" to="hov-spike" count="1" mode="count">` block as a `hook_additional_context` attachment at `UserPromptSubmit`. The second sent itself a message as a Bash tool call and got the block at `PostToolUse` of that same call, then ran the inbox command the block named (`python3 -I` plus the script's absolute path, since `hov` was not on `PATH`) and read the body back under the untrusted-peer framing line. A trivial tool call after that had nothing attached: each message reaches a session once. `hov.log` carries the matching `deliver event=... mode=count n=1` lines. A session that bypasses permissions only ever gets the count; the block always names a runnable inbox command.
+
+Observed the same day, with the plugin enabled through settings on two hosts: a session launched with mail already waiting got the bodies at `SessionStart` although it bypassed permissions, because that event's payload has no `permission_mode` and 0.1.0 treated an unknown mode as full. Since 0.1.1 an event that states no mode delivers nothing and records nothing, and the first prompt or tool call delivers in the mode it states (`UserPromptSubmit` and `PostToolUse` both carry it).
 
 ## Commands
 
@@ -39,6 +41,7 @@ State: `$HOV_STATE_DIR`, else `$XDG_STATE_HOME/hov`, else `~/.local/state/hov`. 
 - Returns `{"hookSpecificOutput": {"hookEventName": ..., "additionalContext": ...}}` and nothing else. Never `permissionDecision`, `decision` or `continue`. `tests/test_hov.py` asserts the key set.
 - Frames mail as untrusted peer text, caps bodies at 4,000 characters, removes slash-command-shaped lines and neutralises `<hov-mail>` tags inside a body.
 - In a session whose hook stdin says `permission_mode: bypassPermissions`, injects sender and count only; the body arrives through `hov inbox`.
+- When the hook stdin states no `permission_mode` at all (Claude Code's `SessionStart` payload), delivers nothing and records nothing, so the first event that states the mode delivers in it.
 - Delivers each message to a session once (`deliveries` table), and marks it read for the recipient name when the body was injected.
 - Stays silent (empty stdout) when there is no mail or no session id, and logs rather than fails on a database error.
 
@@ -50,7 +53,7 @@ plugins/hov/tests/ci.sh
 
 That is what `release/scripts/plugin-ci.sh plugins/hov` runs in CI: the hook manifest check (three events, commands pointing at `scripts/hov`, a timeout on each), the VERSION match, then the unit tests.
 
-Seventeen tests: mailbox round trip, threads, FTS5 search, ULID ordering, `ls`, the hook's output shape, once-per-session delivery, name resolution at SessionStart, count-only in bypass sessions with its default-mode twin, slash-line stripping and the body cap, tag escaping, silence without a session id, the one-second hook budget at 1,000 messages, the log line per delivery, the untrusted-peer framing on `hov inbox` output, and a runnable command in every hook hint (plain `hov` when it is on `PATH`, else `python3 -I` and the script's absolute path).
+Twenty tests: mailbox round trip, threads, FTS5 search, ULID ordering, `ls`, the hook's output shape, once-per-session delivery, name resolution at SessionStart with delivery held until the first prompt, the session-name cache surviving a `whoami` with no agents list (it was never committed before 0.1.1), the cached name following a retitle at the next SessionStart or once the lookup throttle lapses while a dropped listing keeps the last name, nothing delivered when the payload states no mode (the 0.1.0 fail-open as a planted negative), count-only in bypass sessions with its default-mode twin, slash-line stripping and the body cap, tag escaping, silence without a session id, the one-second hook budget at 1,000 messages, the log line per delivery, the untrusted-peer framing on `hov inbox` output, and a runnable command in every hook hint (plain `hov` when it is on `PATH`, else `python3 -I` and the script's absolute path).
 
 ## Not in this PR
 

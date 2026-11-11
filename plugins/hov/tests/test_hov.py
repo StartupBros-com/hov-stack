@@ -6,6 +6,7 @@ Run: python3 -m unittest discover -s plugins/hov/tests -v
 import json
 import os
 import shutil
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -47,9 +48,18 @@ class HovCase(unittest.TestCase):
         return res
 
     def hook(self, event, session_id, permission_mode="default"):
-        payload = json.dumps({"session_id": session_id, "cwd": "/tmp/x", "permission_mode": permission_mode, "hook_event_name": event})
-        res = self.hov("hook", event, stdin=payload)
+        return self.hook_raw(event, {"session_id": session_id, "cwd": "/tmp/x", "permission_mode": permission_mode, "hook_event_name": event})
+
+    def hook_raw(self, event, payload, env_extra=None):
+        res = self.hov("hook", event, stdin=json.dumps(payload), env_extra=env_extra)
         return json.loads(res.stdout) if res.stdout.strip() else None
+
+    def session_start_payload(self, session_id, title):
+        # The exact key set Claude Code 2.1.322 sends at SessionStart (captured 2026-11-11): no permission_mode.
+        return {
+            "session_id": session_id, "cwd": "/tmp/x", "hook_event_name": "SessionStart", "source": "startup",
+            "model": "claude-x", "session_title": title, "scratchpad_dir": "/tmp/x/scratch", "transcript_path": "/tmp/x/t.jsonl",
+        }
 
     # ------------------------------------------------------------ mailbox
 
@@ -119,11 +129,81 @@ class HovCase(unittest.TestCase):
         self.assertIsNone(self.hook("PostToolUse", SID_A), "delivered once per session")
         self.assertIsNone(self.hook("UserPromptSubmit", SID_B), "not delivered to another session")
 
-    def test_hook_resolves_name_from_agents_list_and_session_start(self):
+    def test_hook_resolves_name_at_session_start_and_delivers_at_first_prompt(self):
         self.hov("send", "--as", "ceo", "--to", "beta", "for beta")
-        out = self.hook("SessionStart", SID_B)
+        self.assertIsNone(self.hook_raw("SessionStart", self.session_start_payload(SID_B, "beta")), "no mode stated, nothing delivered")
+        # the name was cached from the agents list at SessionStart: an empty list afterwards still resolves it
+        me = json.loads(self.hov("whoami", "--json", env_extra={"CLAUDE_CODE_SESSION_ID": SID_B, "HOV_AGENTS_CMD": ""}).stdout)
+        self.assertEqual((me["name"], me["how"]), ("beta", "session"))
+        out = self.hook("UserPromptSubmit", SID_B)
         self.assertIn("for beta", out["hookSpecificOutput"]["additionalContext"])
-        self.assertEqual(out["hookSpecificOutput"]["hookEventName"], "SessionStart")
+        text = (self.state / "hov.log").read_text()
+        self.assertNotIn("deliver event=SessionStart", text)
+        self.assertEqual(text.count("deliver event=UserPromptSubmit"), 1)
+
+    def test_whoami_caches_the_session_name(self):
+        # the cache is written by resolve_session itself; until 0.1.1 `hov whoami` never committed it
+        first = json.loads(self.hov("whoami", "--json", env_extra={"CLAUDE_CODE_SESSION_ID": SID_A}).stdout)
+        self.assertEqual((first["name"], first["how"]), ("alpha", "session"))
+        again = json.loads(self.hov("whoami", "--json", env_extra={"CLAUDE_CODE_SESSION_ID": SID_A, "HOV_AGENTS_CMD": ""}).stdout)
+        self.assertEqual((again["name"], again["how"]), ("alpha", "session"))
+
+    def age_lookup(self, session_id):
+        con = sqlite3.connect(self.state / "mail.db")
+        with con:
+            con.execute("UPDATE sessions SET last_lookup=0 WHERE session_id=?", (session_id,))
+        con.close()
+
+    def test_cached_session_name_follows_a_retitle(self):
+        # Claude Code retitles a session after its first exchange; the cache must follow, on force (SessionStart)
+        # and once the lookup throttle lapses, and must keep the last name when the listing drops the session.
+        first = json.loads(self.hov("whoami", "--json", env_extra={"CLAUDE_CODE_SESSION_ID": SID_A}).stdout)
+        self.assertEqual(first["name"], "alpha")
+        listing = Path(self.tmp.name) / "agents-retitled.json"
+        listing.write_text(json.dumps([{"sessionId": SID_A, "name": "alpha renamed", "cwd": "/tmp/a"}]))
+        cmd = f"{shutil.which('cat')} {listing}"
+        # within the throttle a non-forcing event (any hook event but SessionStart) does not re-read; `hov whoami`
+        # always forces, so the cache is read back through an empty listing, which keeps the cached name
+        prompt = {"session_id": SID_A, "cwd": "/tmp/a", "permission_mode": "default", "hook_event_name": "UserPromptSubmit"}
+        self.assertIsNone(self.hook_raw("UserPromptSubmit", prompt, env_extra={"HOV_AGENTS_CMD": cmd}))
+        held = json.loads(self.hov("whoami", "--json", env_extra={"CLAUDE_CODE_SESSION_ID": SID_A, "HOV_AGENTS_CMD": ""}).stdout)
+        self.assertEqual(held["name"], "alpha")
+        # force (SessionStart) re-reads
+        res = self.hov("hook", "SessionStart", stdin=json.dumps(self.session_start_payload(SID_A, "alpha renamed")), env_extra={"HOV_AGENTS_CMD": cmd})
+        self.assertEqual(res.stdout.strip(), "")
+        forced = json.loads(self.hov("whoami", "--json", env_extra={"CLAUDE_CODE_SESSION_ID": SID_A, "HOV_AGENTS_CMD": ""}).stdout)
+        self.assertEqual((forced["name"], forced["how"]), ("alpha renamed", "session"))
+        # once the throttle lapses the same non-forcing event re-reads
+        self.age_lookup(SID_A)
+        listing.write_text(json.dumps([{"sessionId": SID_A, "name": "alpha final", "cwd": "/tmp/a"}]))
+        self.assertIsNone(self.hook_raw("UserPromptSubmit", prompt, env_extra={"HOV_AGENTS_CMD": cmd}))
+        lapsed = json.loads(self.hov("whoami", "--json", env_extra={"CLAUDE_CODE_SESSION_ID": SID_A, "HOV_AGENTS_CMD": ""}).stdout)
+        self.assertEqual(lapsed["name"], "alpha final")
+        # the listing dropping the session keeps the last name
+        self.age_lookup(SID_A)
+        kept = json.loads(self.hov("whoami", "--json", env_extra={"CLAUDE_CODE_SESSION_ID": SID_A, "HOV_AGENTS_CMD": ""}).stdout)
+        self.assertEqual((kept["name"], kept["how"]), ("alpha final", "session"))
+        # mail to the new title reaches the session; mail to the short id still does
+        self.hov("send", "--as", "sender", "--to", "alpha final", "after the retitle", env_extra={"HOV_AGENTS_CMD": cmd})
+        self.hov("send", "--as", "sender", "--to", SID_A[:8], "by short id", env_extra={"HOV_AGENTS_CMD": cmd})
+        out = json.dumps(self.hook_raw("UserPromptSubmit", prompt, env_extra={"HOV_AGENTS_CMD": cmd}))
+        self.assertIn("after the retitle", out)
+        self.assertIn("by short id", out)
+
+    def test_hook_delivers_nothing_when_the_payload_states_no_mode(self):
+        # planted negative for the 0.1.0 fail-open: an unknown mode was treated as full and injected bodies into
+        # a bypass session at SessionStart (seen on two hosts, 2026-11-11)
+        self.hov("send", "--as", "ceo", "--to", "alpha", "--subject", "secret-subject", "SECRET-BODY")
+        self.assertIsNone(self.hook_raw("SessionStart", self.session_start_payload(SID_A, "alpha")))
+        self.assertIsNone(self.hook_raw("UserPromptSubmit", {"session_id": SID_A, "cwd": "/tmp/x", "hook_event_name": "UserPromptSubmit"}))
+        self.assertNotIn("deliver", (self.state / "hov.log").read_text())
+        out = self.hook("UserPromptSubmit", SID_A, permission_mode="bypassPermissions")
+        ctx = out["hookSpecificOutput"]["additionalContext"]
+        self.assertIn('mode="count"', ctx)
+        self.assertNotIn("SECRET-BODY", ctx)
+        text = (self.state / "hov.log").read_text()
+        self.assertEqual(text.count("deliver "), 1)
+        self.assertIn("mode=count n=1", text)
 
     def test_hook_count_only_in_bypass_sessions(self):
         self.hov("send", "--as", "ceo", "--to", "alpha", "--subject", "secret-subject", "SECRET-BODY")
