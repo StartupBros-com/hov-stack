@@ -1,0 +1,21 @@
+{
+  "name": "hov",
+  "version": "0.1.0",
+  "description": "Fleet mailbox for coding agents. A per-host SQLite mailbox with FTS5 search, a stdlib-only CLI (send, inbox, thread, search, ls), and hooks that deliver mail into Claude Code sessions as hook context text at the next prompt, tool call or session start. Mail changes what a session reads, never what it may do.",
+  "author": {
+    "name": "StartupBros / House of Vibe",
+    "url": "https://houseofvibe.ai"
+  },
+  "homepage": "https://houseofvibe.ai",
+  "repository": "https://github.com/StartupBros-com/hov-stack",
+  "license": "MIT",
+  "keywords": [
+    "house-of-vibe",
+    "claude-code",
+    "agents",
+    "fleet",
+    "messaging",
+    "mailbox"
+  ],
+  "hooks": "./hooks/hooks.json"
+}
