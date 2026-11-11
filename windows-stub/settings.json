@@ -14,18 +14,6 @@
     "ask": [],
     "disableAutoMode": "disable"
   },
-  "enabledPlugins": {
-    "token-eater@hov": true,
-    "pro-gate@hov": true
-  },
-  "extraKnownMarketplaces": {
-    "hov": {
-      "source": {
-        "source": "git",
-        "url": "https://github.com/StartupBros-com/hov-stack.git"
-      }
-    }
-  },
   "effortLevel": "xhigh",
   "theme": "dark-daltonized",
   "feedbackSurveyState": {
