@@ -16,7 +16,7 @@ plugins/hov/scripts/hov ls
 
 The launcher lives in `scripts/`, not `bin/`, because claude.ai plugin distribution rejects a top-level `bin/` (see papercut). Link it into `~/.local/bin` as `hov` when the plugin is enabled.
 
-Observed on 2026-11-11 with exactly that sequence: the spike session's transcript carries a `hook_additional_context` attachment from `UserPromptSubmit` whose content is the `<hov-mail host="wm" to="hov-spike" count="1" mode="count">` block (count mode because the host's default permission mode is bypass), and `hov.log` shows the matching `deliver event=UserPromptSubmit ... mode=count n=1` line.
+Observed on 2026-11-11 in two `--bg` sessions loaded through `--plugin-dir`, both with permissions bypassed (this host's default). The first had a peer's message waiting before its first prompt and got the `<hov-mail host="<host>" to="hov-spike" count="1" mode="count">` block as a `hook_additional_context` attachment at `UserPromptSubmit`. The second sent itself a message as a Bash tool call and got the block at `PostToolUse` of that same call, then ran the inbox command the block named (`python3 -I` plus the script's absolute path, since `hov` was not on `PATH`) and read the body back under the untrusted-peer framing line. A trivial tool call after that had nothing attached: each message reaches a session once. `hov.log` carries the matching `deliver event=... mode=count n=1` lines. A session that bypasses permissions only ever gets the count; the block always names a runnable inbox command.
 
 ## Commands
 
@@ -50,7 +50,7 @@ plugins/hov/tests/ci.sh
 
 That is what `release/scripts/plugin-ci.sh plugins/hov` runs in CI: the hook manifest check (three events, commands pointing at `scripts/hov`, a timeout on each), the VERSION match, then the unit tests.
 
-Fifteen tests: mailbox round trip, threads, FTS5 search, ULID ordering, `ls`, the hook's output shape, once-per-session delivery, name resolution at SessionStart, count-only in bypass sessions with its default-mode twin, slash-line stripping and the body cap, tag escaping, silence without a session id, the one-second hook budget at 1,000 messages, and the log line per delivery.
+Seventeen tests: mailbox round trip, threads, FTS5 search, ULID ordering, `ls`, the hook's output shape, once-per-session delivery, name resolution at SessionStart, count-only in bypass sessions with its default-mode twin, slash-line stripping and the body cap, tag escaping, silence without a session id, the one-second hook budget at 1,000 messages, the log line per delivery, the untrusted-peer framing on `hov inbox` output, and a runnable command in every hook hint (plain `hov` when it is on `PATH`, else `python3 -I` and the script's absolute path).
 
 ## Not in this PR
 

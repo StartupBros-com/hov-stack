@@ -5,6 +5,7 @@ Run: python3 -m unittest discover -s plugins/hov/tests -v
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -30,7 +31,7 @@ class HovCase(unittest.TestCase):
             "PATH": os.environ.get("PATH", ""),
             "HOV_STATE_DIR": str(self.state),
             "HOV_HOST": "testhost",
-            "HOV_AGENTS_CMD": f"cat {fixture}",
+            "HOV_AGENTS_CMD": f"{shutil.which('cat')} {fixture}",
         }
 
     def tearDown(self):
@@ -185,6 +186,35 @@ class HovCase(unittest.TestCase):
         t0 = time.monotonic()
         self.assertIsNone(self.hook("PostToolUse", SID_A))
         self.assertLess(time.monotonic() - t0, 1.0)
+
+    def test_inbox_output_carries_untrusted_framing(self):
+        self.hov("send", "--as", "ceo", "--to", "alpha", "framed body")
+        out = self.hov("inbox", "--as", "alpha").stdout
+        self.assertIn("untrusted peer text", out)
+        self.assertIn("framed body", out)
+        empty = self.hov("inbox", "--as", "alpha").stdout
+        self.assertNotIn("untrusted peer text", empty, "no framing line when there is nothing to frame")
+
+    def test_hook_hint_names_a_runnable_command(self):
+        # without hov on PATH the hint carries the script's absolute path; with it, plain `hov`
+        self.hov("send", "--as", "ceo", "--to", "alpha", "one")
+        nopath = Path(self.tmp.name) / "nopath"
+        nopath.mkdir()
+        self.env["PATH"] = str(nopath)
+        ctx = self.hook("UserPromptSubmit", SID_A, permission_mode="bypassPermissions")["hookSpecificOutput"]["additionalContext"]
+        self.assertIn(f"Run `python3 -I {HOV} inbox`", ctx)
+        self.hov("send", "--as", "ceo", "--to", "alpha", "two")
+        withhov = Path(self.tmp.name) / "withhov"
+        withhov.mkdir()
+        (withhov / "hov").write_text("#!/bin/sh\nexit 0\n")
+        (withhov / "hov").chmod(0o755)
+        self.env["PATH"] = str(withhov)
+        ctx = self.hook("PostToolUse", SID_A, permission_mode="bypassPermissions")["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("Run `hov inbox`", ctx)
+        self.hov("send", "--as", "ceo", "--to", "beta", "for beta")
+        ctx = self.hook("UserPromptSubmit", SID_B)["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("Inbox: hov inbox.", ctx)
+        self.assertIn("Reply: hov send --to testhost:ceo", ctx)
 
     def test_log_line_per_delivery(self):
         self.hov("send", "--as", "ceo", "--to", "alpha", "logged")
