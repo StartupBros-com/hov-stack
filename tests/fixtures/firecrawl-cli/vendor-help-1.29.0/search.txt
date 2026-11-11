@@ -1,0 +1,59 @@
+Usage: firecrawl search [options] <query> [tool-query]
+
+Search the web with query-relevant highlights and discover relevant Alexandria
+tools
+
+Arguments:
+  query                       Search query, or alexandria for semantic tool
+                              search
+  tool-query                  Query for search alexandria
+
+Options:
+  --limit <number>            Maximum number of results (default: 5, max: 100)
+  --sources <sources>         Comma-separated sources: web, images, news,
+                              alexandria (default: web; with an API key,
+                              alexandria is always added)
+  --categories <categories>   Comma-separated categories to filter: research,
+                              pdf, developer, gov (research filters web results
+                              to research-affiliated websites -- it is NOT the
+                              paper index; for papers use `firecrawl research
+                              search-papers`. developer searches an index of
+                              public repositories, GitHub issues, merged PRs,
+                              READMEs, and docs. gov searches US federal, state,
+                              and local government legal and regulatory sources
+                              and cannot be combined with other categories)
+  --tbs <value>               Time-based search: qdr:h (hour), qdr:d (day),
+                              qdr:w (week), qdr:m (month), qdr:y (year)
+  --location <location>       Location for geo-targeting (e.g., "Germany", "San
+                              Francisco,California,United States")
+  --country <code>            ISO country code for geo-targeting (default: US)
+  --timeout <ms>              Timeout in milliseconds (default: 60000)
+  --ignore-invalid-urls       Exclude URLs invalid for other Firecrawl endpoints
+                              (default: false)
+  --highlights                Return query-relevant page excerpts for web and
+                              news results when available (default).
+  --no-highlights             Keep the original search snippets instead of
+                              returning highlights
+  --scrape                    Enable scraping of search results (default: false)
+  --scrape-formats <formats>  Comma-separated scrape formats when --scrape is
+                              enabled: markdown, html, rawHtml, links, etc.
+                              (default: markdown)
+  --only-main-content         Include only the main content when scraping (the
+                              API default)
+  --full-page                 Keep the whole page when scraping, including
+                              navigation, headers and footers
+  -k, --api-key <key>         Firecrawl API key (overrides global --api-key)
+  --api-url <url>             API URL (overrides global --api-url)
+  -o, --output <path>         Output file path (default: stdout)
+  --json                      Output as compact JSON (default: false)
+  --tool-detail <detail>      Tool detail: compact identities/descriptions
+                              (default), summary metadata, full contracts
+                              (choices: "compact", "summary", "full")
+  --domain-tools              Include tools for domains in web results (on by
+                              default with Alexandria)
+  --no-domain-tools           Disable domain matching; source selection still
+                              controls semantic tools
+  -h, --help                  display help for command
+
+Semantic tool search: firecrawl search alexandria "find company contacts"
+

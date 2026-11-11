@@ -1,0 +1,9 @@
+Usage: firecrawl update [options]
+
+Update the Firecrawl CLI to the latest release
+
+Options:
+  --enable-auto   Turn automatic background updates on
+  --disable-auto  Turn automatic background updates off
+  --rollback      Restore the previous version and disable automatic updates
+  -h, --help      display help for command

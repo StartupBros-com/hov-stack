@@ -1,0 +1,18 @@
+Usage: firecrawl interact stop [options] [scrape-id]
+
+Stop the interactive browser session for a scrape
+
+Arguments:
+  scrape-id            Scrape job ID (default: last scrape)
+
+Options:
+  -k, --api-key <key>  Firecrawl API key (overrides global --api-key)
+  --api-url <url>      API URL (overrides global --api-url)
+  -o, --output <path>  Output file path (default: stdout)
+  --json               Output as JSON format (default: false)
+  -h, --help           display help for command
+
+Examples:
+  $ firecrawl interact stop
+  $ firecrawl interact stop <scrape-id>
+
