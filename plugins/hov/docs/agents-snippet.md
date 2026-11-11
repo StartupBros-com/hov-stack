@@ -14,8 +14,9 @@ codex mcp add hov -- hov mcp --as codex
 
 OMP: put `mcp/omp.mcp.json` from this plugin at `~/.omp/agent/mcp.json` (merge it if that file exists), and
 copy `omp/hov-mail.ts` into `~/.omp/agent/extensions/` for the before-turn count. Both take effect when OMP
-next starts. A running session is not changed by either file: OMP loads extensions at startup only, and reads
-`mcp.json` again only when its operator runs `/mcp reload` there (a subagent shares its parent's servers). If `hov` is not on the PATH OMP was started with, write its
+next starts. A running session is not changed by either file: OMP loads extensions at startup only, and reconnects
+servers only on its own `/mcp reload` (or `/mcp add`, `remove`, `unauth`, `reauth`) and `/reload-plugins`; nothing
+watches `mcp.json`, and a subagent shares its parent's servers. If `hov` is not on the PATH OMP was started with, write its
 absolute path (`~/.local/bin/hov`) as the `command`.
 
 ## Snippet
