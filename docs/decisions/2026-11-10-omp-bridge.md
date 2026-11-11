@@ -1,5 +1,7 @@
 # Claude Code and OMP: the bridge decisions
 
+> Superseded the same day by `2026-11-10-fleet-interaction-layer.md`. The survey and the scope quotes below still stand; the gates and Milestone 1 do not.
+
 Date 2026-11-10. Settled after a survey of the open-source options, a verification pass against the sources at pinned commits, three independent designs scored by a judge panel, one synthesis and five refutation passes against it. The decisions are the author's. Nothing here has been built or installed yet; this file carries the shape, and Milestone 1 carries the first slice.
 
 The setting: two hosts. The workstation (`wm`) runs Claude Code CLI 2.1.322, which is the daily driver, with its Agents view as the one control plane. The laptop (`xps-omarchy`, "the XPS") runs oh-my-pi (`omp`) 18.12.5, including a long-lived interactive session that owns a device project and must not be disturbed. The workstation already reaches the XPS over an SSH alias on the tailnet. The approved scope, chosen by the author from the options offered, is quoted verbatim where it binds a decision.
