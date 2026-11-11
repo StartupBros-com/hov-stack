@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "hov": {
+      "type": "stdio",
+      "command": "hov",
+      "args": ["mcp", "--as", "omp"]
+    }
+  }
+}

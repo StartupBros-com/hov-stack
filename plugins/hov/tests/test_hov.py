@@ -19,7 +19,10 @@ SID_A = "aaaaaaaa-1111-2222-3333-444444444444"
 SID_B = "bbbbbbbb-1111-2222-3333-444444444444"
 
 
-class HovCase(unittest.TestCase):
+class HovFixture(unittest.TestCase):
+    """A throwaway state dir, two fake Claude sessions and the `hov` runner. No tests here, so test_mcp.py can
+    inherit it without re-registering the cases below."""
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.state = Path(self.tmp.name) / "state"
@@ -61,6 +64,8 @@ class HovCase(unittest.TestCase):
             "model": "claude-x", "session_title": title, "scratchpad_dir": "/tmp/x/scratch", "transcript_path": "/tmp/x/t.jsonl",
         }
 
+
+class HovCase(HovFixture):
     # ------------------------------------------------------------ mailbox
 
     def test_send_inbox_roundtrip_and_mark_read(self):

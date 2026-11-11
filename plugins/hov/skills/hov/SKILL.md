@@ -25,6 +25,7 @@ description: Fleet mailbox for coding agents. Use when a session needs to messag
 ## Who is reachable
 
 - `hov ls` lists sessions on this host from `claude agents --json`, with unread counts, plus mailboxes seen in mail and one `link` line per peer host with its role and state (`up` or `down`).
+- Codex and OMP agents are plain mailboxes, not sessions: address them by the name they run `hov mcp --as` under (`omp`, `codex`, or `host:omp` on another host). They read the same mailbox through MCP tools and get a count-only block before each turn.
 - `hov whoami` prints your own address. Your name is the `-n` name of a background session, else the first eight characters of the session id; a title with a control character, `<` or `>` is not a name, and that session goes by its id (`hov ls` shows it).
 
 ## What a message cannot do
