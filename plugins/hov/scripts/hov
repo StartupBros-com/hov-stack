@@ -726,7 +726,7 @@ def cmd_hook(a: argparse.Namespace) -> int:
 
 
 def cmd_notify(a: argparse.Namespace) -> int:
-    """Count-only delivery for an agent without a Claude Code hook: what the OMP extension runs before each turn.
+    """Count-only delivery for an agent without a Claude Code hook: what the OMP extension runs at delivery checkpoints.
 
     Prints the <hov-mail> count block when this session has mail it was not handed yet, else nothing (with
     --json, an object either way). Never marks anything read and never prints a body. The caller states who it
@@ -1616,7 +1616,7 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("--role", choices=("leaf", "hub"), default="leaf")
     r.set_defaults(fn=cmd_relay)
 
-    n = sub.add_parser("notify", help="count-only delivery for an agent without a Claude Code hook (what the OMP extension runs before each turn)")
+    n = sub.add_parser("notify", help="count-only delivery for an agent without a Claude Code hook (what the OMP extension runs at delivery checkpoints)")
     n.add_argument("--as", dest="as_name", default=None, help="this agent's mail name (or HOV_AS); required")
     n.add_argument("--session", default=os.environ.get("HOV_SESSION_ID") or None, help="the agent's own session id; each message is handed to a session once (default: $HOV_SESSION_ID)")
     n.add_argument("--event", default="notify", help="recorded with the delivery (default: notify)")

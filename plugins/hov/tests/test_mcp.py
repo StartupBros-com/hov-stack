@@ -611,33 +611,55 @@ class McpCase(HovFixture):
 import { spawnSync } from "node:child_process";
 import ext from "./hov-mail.mjs";
 const scenarios = JSON.parse(process.argv[2]);
-const events = [];
-const calls = [];
-let next = null;  // set by a scenario: the next exec returns this instead of running anything
-let handler = null;
+const events = [], calls = [], sent = [], schedules = [];
+const handlers = new Map(), timers = new Map();
+let next = null, deferred = null, release = null, pending = null, sid = "";
+let timerId = 0, active = 0, maxActive = 0;
 const pi = {
-  on(event, fn) { events.push(event); if (event === "before_agent_start") handler = fn; },
+  on(event, fn) { events.push(event); handlers.set(event, fn); },
+  sendMessage(message, options) { sent.push({ message, options, sid }); },
   async exec(cmd, args, opts) {
     calls.push({ cmd, args, timeout: opts && opts.timeout });
-    if (next) { const r = next; next = null; return r; }
-    const r = spawnSync(cmd, args, { encoding: "utf8", timeout: opts && opts.timeout, env: process.env });
-    if (r.error) throw r.error;
-    return { stdout: r.stdout, stderr: r.stderr, code: r.status, killed: r.signal != null };
+    active++; maxActive = Math.max(maxActive, active);
+    try {
+      if (deferred) { const wait = deferred; deferred = null; await wait; }
+      if (next) { const r = next; next = null; return r; }
+      const r = spawnSync(cmd, args, { encoding: "utf8", timeout: opts && opts.timeout, env: process.env });
+      if (r.error) throw r.error;
+      return { stdout: r.stdout, stderr: r.stderr, code: r.status, killed: r.signal != null };
+    } finally { active--; }
   },
 };
 ext(pi);
 const out = [];
 for (const s of scenarios) {
+  sid = s.sid;
   let ctx;
   if (s.sid === null) ctx = {};
   else if (s.sid === "THROW") ctx = { sessionManager: { getSessionId() { throw new Error("no session"); } } };
-  else ctx = { sessionManager: { getSessionId: () => s.sid } };
+  else ctx = { sessionManager: { getSessionId: () => sid } };
+  ctx.setInterval = (fn, ms) => { const id = ++timerId; schedules.push(ms); timers.set(id, fn); return id; };
+  ctx.clearTimer = id => timers.delete(id);
+  ctx.isIdle = () => !!s.idle;
   if (s.kind) ctx.agent = { kind: s.kind, id: s.sid, name: "x", depth: s.kind === "sub" ? 1 : 0 };
+  if (s.send) {
+    const r = spawnSync(process.env.HOV_BIN, ["send", "--as", "coach", "--to", process.env.HOV_AS || "omp", s.send],
+                        { encoding: "utf8", env: process.env });
+    if (r.status !== 0) throw new Error(r.stderr);
+  }
   if (s.execResult === "killed") next = { stdout: "", stderr: "", code: -1, killed: true };
-  const r = await handler({ prompt: "x", systemPrompt: "" }, ctx);
+  if (s.defer) deferred = new Promise(resolve => { release = resolve; });
+  const invoke = async () => {
+    if (s.event === "tick") { await Promise.all([...timers.values()].map(fn => fn())); return; }
+    if (s.event === "release") { release(); await pending; return; }
+    return handlers.get(s.event || "before_agent_start")?.({ prompt: "x", systemPrompt: "" }, ctx);
+  };
+  let r;
+  if (s.defer) { pending = invoke(); await Promise.resolve(); }
+  else r = await invoke();
   out.push(r === undefined ? null : r);
 }
-process.stdout.write(JSON.stringify({ events, calls, out }));
+process.stdout.write(JSON.stringify({ events, calls, out, sent, schedules, timerCount: timers.size, maxActive }));
 """
 
     def run_extension(self, scenarios, env_extra=None):
@@ -657,7 +679,7 @@ process.stdout.write(JSON.stringify({ events, calls, out }));
     def test_extension_puts_the_count_block_into_the_run_once_per_session(self):
         self.hov("send", "--as", "alpha", "--to", "omp", "--subject", "hidden-subject", BODY)
         got = self.run_extension([{"sid": "omp-node-1"}, {"sid": "omp-node-1"}, {"sid": "omp-node-2"}])
-        self.assertEqual(got["events"], ["before_agent_start"], "the extension registers one handler and nothing else")
+        self.assertIn("before_agent_start", got["events"])
         first, again, other = got["out"]
         self.assertEqual(set(first["message"]), {"customType", "content", "display", "attribution"})
         self.assertEqual((first["message"]["customType"], first["message"]["display"], first["message"]["attribution"]), ("hov-mail", True, "agent"))
@@ -738,6 +760,100 @@ process.stdout.write(JSON.stringify({ events, calls, out }));
             self.assertEqual(c["args"][:4], ["notify", "--as", "omp", "--session"])
             self.assertEqual(c["timeout"], 5000)
         self.assertEqual([r[0] for r in self.db().execute("SELECT session_id FROM deliveries")], ["omp-main-1"])
+
+
+    @unittest.skipUnless(NODE, "node is not on PATH: the OMP extension test needs it")
+    def test_extension_delivers_mail_arriving_during_a_turn_at_tool_result(self):
+        got = self.run_extension([
+            {"sid": "working", "event": "session_start"},
+            {"sid": "working"},
+            {"sid": "working", "event": "tool_result", "send": BODY},
+            {"sid": "working", "event": "tool_result"},
+        ])
+        self.assertIn("<hov-mail", got["out"][2]["additionalContext"])
+        self.assertNotIn(BODY, got["out"][2]["additionalContext"])
+        self.assertIsNone(got["out"][3])
+        self.assertEqual(self.db().execute("SELECT count(*) FROM reads").fetchone()[0], 0)
+
+    @unittest.skipUnless(NODE, "node is not on PATH: the OMP extension test needs it")
+    def test_extension_timer_notifies_busy_and_idle_sessions_without_a_user_turn(self):
+        got = self.run_extension([
+            {"sid": "active", "event": "session_start"},
+            {"sid": "active", "event": "tick", "send": BODY},
+            {"sid": "active", "event": "tick"},
+            {"sid": "active", "event": "tick", "idle": True, "send": "second-body"},
+            {"sid": "active", "event": "tick", "idle": True},
+        ])
+        self.assertEqual(len(got["sent"]), 2, got)
+        for item in got["sent"]:
+            self.assertEqual(item["options"], {"deliverAs": "aside"})
+            self.assertEqual(item["message"]["attribution"], "agent")
+            self.assertEqual(item["message"]["customType"], "hov-mail")
+            self.assertNotIn(BODY, item["message"]["content"])
+            self.assertNotIn("second-body", item["message"]["content"])
+        self.assertEqual(got["schedules"], [3000])
+        self.assertEqual(self.db().execute("SELECT count(*) FROM reads").fetchone()[0], 0)
+
+    @unittest.skipUnless(NODE, "node is not on PATH: the OMP extension test needs it")
+    def test_extension_serializes_timer_and_tool_polls(self):
+        got = self.run_extension([
+            {"sid": "active", "event": "session_start"},
+            {"sid": "active", "event": "tick", "send": BODY, "defer": True},
+            {"sid": "active", "event": "tick"},
+            {"sid": "active", "event": "tool_result"},
+            {"sid": "active", "event": "release"},
+            {"sid": "active", "event": "tool_result"},
+        ])
+        self.assertEqual(got["maxActive"], 1)
+        self.assertEqual(len(got["sent"]), 1)
+        self.assertTrue(all(item is None for item in got["out"]))
+
+    @unittest.skipUnless(NODE, "node is not on PATH: the OMP extension test needs it")
+    def test_extension_switch_and_shutdown_drop_stale_poll_results(self):
+        got = self.run_extension([
+            {"sid": "old", "event": "session_start"},
+            {"sid": "old", "event": "tick", "send": BODY, "defer": True},
+            {"sid": "new", "event": "session_switch"},
+            {"sid": "new", "event": "release"},
+            {"sid": "new", "event": "tick"},
+            {"sid": "new", "event": "tick", "send": "shutdown-body", "defer": True},
+            {"sid": "new", "event": "session_shutdown"},
+            {"sid": "new", "event": "release"},
+            {"sid": "new", "event": "tick"},
+        ])
+        self.assertEqual(len(got["sent"]), 1, got)
+        self.assertEqual(got["sent"][0]["sid"], "new")
+        self.assertNotIn("shutdown-body", got["sent"][0]["message"]["content"])
+        self.assertEqual(got["timerCount"], 0)
+
+    @unittest.skipUnless(NODE, "node is not on PATH: the OMP extension test needs it")
+    def test_extension_subagents_never_start_polling_or_claim_mail(self):
+        self.hov("send", "--as", "alpha", "--to", "omp", BODY)
+        got = self.run_extension([
+            {"sid": "sub", "kind": "sub", "event": "session_start"},
+            {"sid": "sub", "kind": "sub", "event": "tick"},
+            {"sid": "sub", "kind": "sub", "event": "tool_result"},
+        ])
+        self.assertEqual(got["calls"], [])
+        self.assertEqual(got["sent"], [])
+        self.assertEqual(got["timerCount"], 0)
+        self.assertEqual(self.db().execute("SELECT count(*) FROM deliveries").fetchone()[0], 0)
+
+
+    @unittest.skipUnless(NODE, "node is not on PATH: the OMP extension test needs it")
+    def test_extension_timer_recovers_from_failed_poll_and_restarts_only_once(self):
+        got = self.run_extension([
+            {"sid": "active", "event": "session_start"},
+            {"sid": "active", "event": "session_start"},
+            {"sid": "active", "event": "tick", "send": BODY, "execResult": "killed"},
+            {"sid": "active", "event": "tick"},
+            {"sid": "active", "event": "tick"},
+            {"sid": "active", "event": "session_shutdown"},
+            {"sid": "active", "event": "tick"},
+        ])
+        self.assertEqual(len(got["calls"]), 3, "only one interval survives repeated session_start")
+        self.assertEqual(len(got["sent"]), 1, "a failed poll neither claims mail nor disables the next poll")
+        self.assertEqual(got["timerCount"], 0)
 
 
 if __name__ == "__main__":
