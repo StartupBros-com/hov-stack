@@ -118,6 +118,12 @@ def shown(v: object, cap: int = 200) -> str:
 # not get to choose a sentence there: a name is shown in it only as a short token (a letter or digit, then up to
 # 31 letters, digits, dots, underscores or dashes), and any other name as '?'. `hov inbox` shows the full name,
 # inside the untrusted-peer framing, once the model asks. At most SENDERS_SHOWN senders are named per block.
+# The cost: a Claude Code session is named by its title, and a title is words with spaces, so a titled session
+# is '?' in every count block it is named in (its host still shows, and `hov inbox` names it). A token can still
+# spell a slug such as do-this-now; it sits in a name slot inside the frame the skill calls untrusted peer text.
+# The host half goes through the same rule: it is what a linked peer asserts, validated at the link to a slug of
+# at most 64 characters, and a stored value from before validation is a sentence at worst, so it is a token or
+# '?' here like the name.
 BRIEF_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,31}\Z")
 SENDERS_SHOWN = 5
 
@@ -231,11 +237,20 @@ CREATE TABLE IF NOT EXISTS peers (
 """
 
 
-def db() -> sqlite3.Connection:
-    con = sqlite3.connect(state_dir() / "mail.db", timeout=5)
+# How long the hook and `notify` wait for the write lock. hooks.json gives the prompt and tool hooks 5 s, and
+# the OMP extension gives `notify` 5 s; a write that cannot take the lock in this time raises, which main()
+# turns into one hook-error log line and exit 0 with no output (the hook) or one stderr line and exit 1
+# (`notify`, which the extension treats as no mail), inside the caller's budget. Waiting the 5 s default would
+# have the caller kill the process at its budget instead, with a warning in the session.
+HOOK_BUSY_MS = 2000
+
+
+def db(busy_ms: int = 5000) -> sqlite3.Connection:
+    """Open the mailbox; `busy_ms` is how long a statement waits for the write lock (see HOOK_BUSY_MS)."""
+    con = sqlite3.connect(state_dir() / "mail.db", timeout=busy_ms / 1000)
     con.row_factory = sqlite3.Row
     con.execute("PRAGMA journal_mode=WAL")
-    con.execute("PRAGMA busy_timeout=5000")
+    con.execute(f"PRAGMA busy_timeout={int(busy_ms)}")
     con.executescript(SCHEMA)
     return con
 
@@ -681,7 +696,9 @@ def cmd_hook(a: argparse.Namespace) -> int:
     sid = payload.get("session_id") or os.environ.get("CLAUDE_CODE_SESSION_ID")
     if not sid:
         return 0
-    con = db()
+    # Every event writes once (`sessions.last_seen`, since 0.1.1) and a delivery claims rows, both under the
+    # write lock; a locked database is given up on quietly inside the hook's budget (HOOK_BUSY_MS).
+    con = db(HOOK_BUSY_MS)
     me = whoami(con, None, session_id=sid, cwd=payload.get("cwd"), force=(event == "SessionStart"))
     if "permission_mode" not in payload:
         # Claude Code's SessionStart payload carries no permission_mode (2.1.322, seen 2026-11-11), so the mode
@@ -729,7 +746,7 @@ def cmd_notify(a: argparse.Namespace) -> int:
         if err:
             print(f"hov notify: {what} {v!r} refused: {err}", file=sys.stderr)
             return 2
-    con = db()
+    con = db(HOOK_BUSY_MS)  # the extension's exec budget is 5 s; a locked database is one stderr line, exit 1
     me = Me(local_host(), name, sid, "--as" if a.as_name else "HOV_AS")
     rows = pending_for(con, me, sid)
     text = None

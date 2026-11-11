@@ -10,7 +10,7 @@ description: Fleet mailbox for coding agents. Use when a session needs to messag
 ## Read
 
 - `hov inbox` shows your unread mail and marks it read. `--keep` leaves it unread, `--all` includes read mail, `--json` for structured output.
-- In a session that bypasses permissions, the hook injects only the unread count and the senders, each as a short token (a name with spaces or other punctuation shows as `?`); run `hov inbox` to read bodies and full names.
+- In a session that bypasses permissions, the hook injects only the unread count and the senders, each as a short token (a name with spaces or other punctuation shows as `?`, which includes every session named by its title); run `hov inbox` to read bodies and full names.
 - `hov thread <id>` shows a whole thread. `hov search <query>` is FTS5 full-text search.
 
 ## Send
