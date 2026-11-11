@@ -176,7 +176,8 @@ def agents_rows() -> list[dict]:
 
 
 def resolve_session(con: sqlite3.Connection, session_id: str, cwd: str | None, force: bool) -> str | None:
-    """Return the session's name, caching the agents-list lookup in `sessions`.
+    """Return the session's name, caching the agents-list lookup in `sessions` and re-reading it on `force` or once
+    LOOKUP_INTERVAL_MS has passed since the last lookup.
 
     Commits its own writes: the connection runs implicit transactions, and until 0.1.1 the cached name and the
     lookup throttle only reached the database when the caller happened to commit something else afterwards
@@ -195,17 +196,19 @@ def resolve_session(con: sqlite3.Connection, session_id: str, cwd: str | None, f
         else:
             name, last_lookup = row["name"], row["last_lookup"]
             con.execute("UPDATE sessions SET last_seen=?, cwd=COALESCE(?, cwd) WHERE session_id=?", (ts, cwd, session_id))
-        if name:
-            return name
         if not force and ts - last_lookup < LOOKUP_INTERVAL_MS:
-            return None
+            return name
+        # A cached name is refreshed, not frozen: Claude Code can retitle a session after its first exchange (an
+        # interactive session gets an auto-title), so the name listed at SessionStart can be a short id it outgrows. Re-read on force and whenever the
+        # throttle lapses; keep the cached name when the listing has no row or no name for this session.
         con.execute("UPDATE sessions SET last_lookup=? WHERE session_id=?", (ts, session_id))
         for r in agents_rows():
             if r.get("sessionId") == session_id and r.get("name"):
-                name = str(r["name"])
-                con.execute("UPDATE sessions SET name=?, cwd=COALESCE(?, cwd) WHERE session_id=?", (name, r.get("cwd"), session_id))
-                return name
-        return None
+                fresh = str(r["name"])
+                if fresh != name:
+                    con.execute("UPDATE sessions SET name=?, cwd=COALESCE(?, cwd) WHERE session_id=?", (fresh, r.get("cwd"), session_id))
+                return fresh
+        return name
 
 
 def whoami(con: sqlite3.Connection, as_name: str | None = None, session_id: str | None = None, cwd: str | None = None, force: bool = False) -> Me:
