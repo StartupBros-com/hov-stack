@@ -434,11 +434,13 @@ status_is 0 'empty search'
 jcheck 'empty list' "$OUT" "assert d['ok'] and d['data']==[]"
 contains "$ERR" 'hint' 'empty result hint'
 
-# No vendor on PATH: offline still works; paid verb names the pinned reinstall.
+# No vendor on PATH: offline still works; paid verb names the latest reinstall
+# (from 1.27.0 a global install updates itself, so nothing pins a release).
 ST=0
 HOME="$TMP/home" PATH="$TMP/no-vendor" "$CLI" fetch https://x --json >"$TMP/out" 2>"$TMP/err" || ST=$?
 status_is 4 'missing vendor'
-contains "$(cat "$TMP/err")" 'pnpm add -g firecrawl-cli@1.26.25' 'pinned reinstall remedy'
+contains "$(cat "$TMP/err")" 'pnpm add -g firecrawl-cli@latest' 'latest reinstall remedy'
+omits "$(cat "$TMP/err")" 'firecrawl-cli@1.' 'remedy pins no release'
 # Issue #2105: nothing installs the vendor under mise, so that path was a dead end.
 omits "$(cat "$TMP/err")" 'mise/installs/node' 'no dead mise remedy'
 
@@ -460,6 +462,23 @@ for subcommand in login logout config view-config env setup init launch launcher
   contains "$ERR" 'credential' 'credential refusal reason'
   contains "$ERR" 'firecrawl --status' 'auth remedy'
 done
+# The vendor's self-updater (1.27.0+) stays the operator's: update --rollback and
+# --disable-auto turn background updates off, so raw refuses the subcommand
+# wherever it sits, while the same word as a positional value still passes.
+fixture plain-success
+run_cli raw -- update --rollback
+status_is 4 'raw update --rollback'
+no_calls 'raw update --rollback'
+contains "$ERR" "refuses the vendor's self-update command" 'raw update refusal reason'
+contains "$ERR" 'firecrawl update --help' 'raw update remedy'
+fixture plain-success
+run_cli raw -- --timeout 5 update --disable-auto
+status_is 4 'raw update behind a value flag'
+no_calls 'raw update behind a value flag'
+fixture plain-success
+run_cli raw -- scrape https://x update
+status_is 0 'raw update as a positional value'
+argv_is 'raw update as data unchanged' "assert d == ['scrape','https://x','update']"
 for flag in --api-key --api-key=SECRET --api-url --api-url=https://evil -k -kSECRET; do
   fixture plain-success
   run_cli raw -- scrape https://x "$flag" SECRET
@@ -874,8 +893,8 @@ OUT=$(cat "$TMP/out") ERR=$(cat "$TMP/err")
 status_is 4 'research help without vendor is a normal missing-vendor error'
 jcheck 'missing research vendor envelope' "$OUT" "assert not d['ok'] and d['error']['code']==4 and d['credits_spent']==0 and d['credits_remaining'] is None"
 contains "$ERR" 'vendor firecrawl is missing from PATH' 'research help missing vendor detail'
-# Issue #2105: nothing installs the vendor into mise; name the pinned reinstall.
-contains "$ERR" 'pnpm add -g firecrawl-cli@1.26.25' 'missing vendor names the pinned reinstall'
+# Issue #2105: nothing installs the vendor into mise; name the latest reinstall.
+contains "$ERR" 'pnpm add -g firecrawl-cli@latest' 'missing vendor names the latest reinstall'
 no_calls 'missing research vendor invokes nothing'
 run_cli budget --json
 jcheck 'missing research vendor creates no reservation' "$OUT" "assert not d['data']['reservations'] and d['data']['session']['spent']==0"

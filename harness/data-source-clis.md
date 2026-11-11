@@ -252,10 +252,11 @@ exit dictionary; it makes no vendor request.
   a keyless refusal or during its cooldown, when that rerun would fail too.
 - **Vendor binary:** the vendor-backed verbs (fetch, extract, shot, act, agent,
   interact, search, map, raw) and the pre-call credit read run the vendor
-  `firecrawl` CLI, pinned at 1.26.25. Nothing in this repo installs it; reinstall
-  with `pnpm add -g firecrawl-cli@1.26.25`, with pnpm's global bin directory
-  (`pnpm bin -g`) on PATH. Install order on a fresh host: vendor first, wrapper
-  second. Harness-doctor check 32 WARNs when `firecrawl-cli` is on PATH and
+  `firecrawl` CLI, last checked against 1.29.0 (`vendor_version` in
+  `bin/firecrawl-cli-verbmap.json`, a record, not a pin). Nothing in this repo
+  installs it; reinstall with `pnpm add -g firecrawl-cli@latest`, with pnpm's
+  global bin directory (`pnpm bin -g`) on PATH. Install order on a fresh host:
+  vendor first, wrapper second. Harness-doctor check 32 WARNs when `firecrawl-cli` is on PATH and
   `firecrawl` is not, and stays dormant when neither is; with both, it compares
   the verb map to the vendor's live help. The 2026-10-28 wipe removed it without a trace (dotfiles #2105).
   With no `FIRECRAWL_API_KEY` and no stored vendor login, the vendor prints its
@@ -264,6 +265,20 @@ exit dictionary; it makes no vendor request.
   `credentials_missing` (exit 1, not retryable) and names the remedy: set the
   key in that process's environment, or run `firecrawl login` once on the host.
   Free-first-eligible calls never reach that read: they run keyless.
+- **Vendor self-update:** from 1.27.0 a global install updates itself
+  (firecrawl/cli#359). Any command except `update` can start a detached worker
+  when its cached release check is stale; the worker installs a new release 24
+  hours after this host first sees it, within the installed major version
+  only, into `~/.firecrawl/versions/` with `npm install --ignore-scripts`, so
+  npm must be on PATH, and the next run uses it. `pnpm ls -g` keeps showing the
+  release pnpm installed; `firecrawl --version` shows the one that runs. A new
+  major needs the reinstall above. It stays off under `FIRECRAWL_NO_AUTO_UPDATE`,
+  `FIRECRAWL_NO_UPDATE_CHECK`, `CI`, or after `firecrawl update --disable-auto`;
+  `firecrawl update --rollback` restores the previous release and also turns
+  updates off. `firecrawl-cli raw` refuses `update`, so an agent cannot roll
+  back or stop updates unseen; the operator runs it directly. When a release
+  changes the help the verb map covers, check 32 reports the drift until the map
+  is updated.
 - **Interaction:** never rely on an implicit last session. Both
   `firecrawl-cli interact "<prompt>" --scrape-id <id> --json` and
   `firecrawl-cli interact stop --scrape-id <id> --json` require the ID.

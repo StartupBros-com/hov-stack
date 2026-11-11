@@ -1,0 +1,23 @@
+Usage: firecrawl map [options] [url]
+
+Map URLs on a website using Firecrawl
+
+Arguments:
+  url                        URL to map
+
+Options:
+  -u, --url <url>            URL to map (alternative to positional argument)
+  --wait                     Wait for map to complete (default: false)
+  --limit <number>           Maximum URLs to discover
+  --search <query>           Search query to filter URLs
+  --sitemap <mode>           Sitemap handling: only, include, skip (default:
+                             "include")
+  --include-subdomains       Include subdomains (default: false)
+  --ignore-query-parameters  Ignore query parameters (default: false)
+  --timeout <seconds>        Timeout in seconds
+  -k, --api-key <key>        Firecrawl API key (overrides global --api-key)
+  --api-url <url>            API URL (overrides global --api-url)
+  -o, --output <path>        Output file path (default: stdout)
+  --json                     Output as JSON format (default: false)
+  --pretty                   Pretty print JSON output (default: false)
+  -h, --help                 display help for command

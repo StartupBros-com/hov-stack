@@ -1,0 +1,25 @@
+Usage: firecrawl research [options] [command]
+
+Search Firecrawl's research paper index: ~43M abstracts, around 90% biomedical
+(PubMed, bioRxiv, medRxiv) plus arXiv. Use this for biomedical, clinical, and
+scientific literature instead of scraping PubMed, bioRxiv, or Google Scholar by
+hand.
+
+Options:
+  -h, --help                             display help for command
+
+Commands:
+  search-papers [options] <query>        Primary entry point for finding research papers by topic. Semantic (HyDE) search over ~43M paper abstracts, around 90% biomedical (PubMed, bioRxiv, medRxiv) plus arXiv; returns ranked papers with a source id (pmid:, pmcid:, doi:, or arxiv:), title, and abstract. Use this instead of web-searching or scraping PubMed, bioRxiv, medRxiv, or Google Scholar. The query should be a natural-language description of what you want. Run several distinct framings of the question rather than one query. Returns up to k results (default 40).
+  inspect-paper [options] <paperId>      Fetch canonical metadata for one paper by primaryId or canonical paperId. Use this after search/related results when you need the full title, abstract, authors, categories, source ids, and dates rendered as markdown.
+  related-papers [options] <seedIds...>  Expand from anchor papers you have already found, via the citation graph, ranked and filtered to a natural-language intent. Pass the ids of your strongest hits as seed ids, in any supported form (pmid:, pmcid:, doi:, arxiv:, or a canonical paperId). Modes: similar, citers, references. This reaches relevant papers that plain search misses. A similar call already runs a deep multi-round expansion internally.
+  read-paper [options] <paperId>         Read the most relevant in-body full-text passages of one specific paper for a question. Use this to verify whether a candidate actually satisfies a constraint before you include or reject it. Returns the best-matching passages, or a notice if the paper full text is unavailable.
+  help [command]                         display help for command
+
+Examples:
+  $ firecrawl research search-papers "CRISPR base editing off-target effects" --limit 20
+  $ firecrawl research search-papers "diffusion image synthesis" --limit 20
+  $ firecrawl research inspect-paper pmid:40953549
+  $ firecrawl research related-papers pmcid:PMC12530322 --intent "in vivo delivery"
+  $ firecrawl research read-paper doi:10.1016/j.neunet.2025.108095 --question "What was the sample size?"
+  $ firecrawl research read-paper arxiv:1706.03762 --question "What is the attention mechanism?"
+

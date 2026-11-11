@@ -1696,6 +1696,13 @@ def raw_arguments(args, parser, registry):
             "raw refuses account administration and flags that expose or redirect the credential",
             "firecrawl --status",
         )
+    # The vendor's self-updater (1.27.0+): its --rollback and --disable-auto turn
+    # background updates off, which an agent's raw call must not do unseen.
+    if raw_subcommand(raw) == "update":
+        raise CliError(
+            "raw refuses the vendor's self-update command; the operator runs it directly",
+            "firecrawl update --help",
+        )
     known = set(flags(parser)) | PROTECTED_FLAGS
     for entry in registry.values():
         known.update(flags(entry["parser"]))
@@ -2513,8 +2520,9 @@ def invoke_vendor(command, timeout=120, raw=False, retry=None, keyless=False):
     if binary is None:
         raise CliError(
             "vendor firecrawl is missing from PATH",
-            # Nothing in this repo installs the vendor; this is the pinned reinstall (#2105).
-            "reinstall the pinned vendor: pnpm add -g firecrawl-cli@1.26.25; "
+            # Nothing in this repo installs the vendor (#2105). From 1.27.0 a global
+            # install updates itself in the background, so the reinstall takes latest.
+            "reinstall the vendor: pnpm add -g firecrawl-cli@latest (it then updates itself); "
             "pnpm's global bin directory (pnpm bin -g) must be on PATH",
         )
     binary = str(Path(binary).absolute())

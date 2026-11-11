@@ -1,0 +1,45 @@
+Usage: firecrawl interact [options] [command] [args...]
+
+Interact with a scraped page in a live browser session. Run AI prompts or
+execute code against any previous scrape.
+
+Arguments:
+  args                        Prompt text, or scrape-id followed by prompt text
+
+Options:
+  -c, --code <code>           Code to execute in the browser sandbox
+  -p, --prompt <text>         AI prompt (alternative to positional argument)
+  -s, --scrape-id <id>        Scrape job ID (default: last scrape)
+  --node                      Execute code as Node.js/Playwright (default)
+                              (default: false)
+  --python                    Execute code as Python/Playwright (default: false)
+  --bash                      Execute code as Bash (default: false)
+  --timeout <seconds>         Timeout in seconds (1-300, default: 30)
+  -k, --api-key <key>         Firecrawl API key (overrides global --api-key)
+  --api-url <url>             API URL (overrides global --api-url)
+  -o, --output <path>         Output file path (default: stdout)
+  --json                      Output as JSON format (default: false)
+  -h, --help                  display help for command
+
+Commands:
+  stop [options] [scrape-id]  Stop the interactive browser session for a scrape
+
+  The scrape ID is saved automatically after every scrape, so you
+  don't need to pass it explicitly. Just scrape and interact:
+
+    $ firecrawl scrape https://example.com
+    $ firecrawl interact "Click the pricing tab"
+    $ firecrawl interact "What is the price of the Pro plan?"
+    $ firecrawl interact stop
+
+  You can also pass a scrape ID explicitly:
+
+    $ firecrawl interact <scrape-id> "Click the pricing tab"
+    $ firecrawl interact -s <scrape-id> "Click the pricing tab"
+
+  Code execution:
+
+    $ firecrawl interact -c "await page.title()"
+    $ firecrawl interact -c "print(await page.title())" --python
+    $ firecrawl interact -c "snapshot" --bash
+
