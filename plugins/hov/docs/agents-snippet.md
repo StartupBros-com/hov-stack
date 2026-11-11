@@ -12,6 +12,13 @@ Codex, on the host where it runs:
 codex mcp add hov -- hov mcp --as codex
 ```
 
+then add `default_tools_approval_mode = "approve"` to the `[mcp_servers.hov]` stanza that command writes in
+`~/.codex/config.toml`. Headless `codex exec` runs with `approval_policy = never` and refused the hov `inbox`
+call without that line ("requires approval, but approval policy is never"; the tools carry no read-only
+annotation). With it, this server's six tools are pre-approved, `send` included, and nothing else in Codex's
+approvals changes, so pre-approving a server whose `send` tool posts mail is the operator's call. Only `inbox`
+has been run under it.
+
 OMP: put `mcp/omp.mcp.json` from this plugin at `~/.omp/agent/mcp.json` (merge it if that file exists), and
 copy `omp/hov-mail.ts` into `~/.omp/agent/extensions/` for the before-turn count. Both take effect when OMP
 next starts. A running session is not changed by either file: OMP loads extensions at startup only, and reconnects
