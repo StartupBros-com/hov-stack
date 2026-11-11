@@ -85,12 +85,14 @@ for file in "${files[@]}"; do
 done
 pass 'every run is a short script call; runners, pins and checkouts are hardened'
 
-# General CI executes contributed code on hosted runners. Keep submissions and
-# feedback open without leaving the checkout token in either job's git config.
+# General CI executes contributed code on hosted runners. Every pull request, a
+# fork's included, gets its feedback through `pull_request`; a push runs it only on
+# main, since a branch with a pull request got every run twice. Neither job leaves
+# the checkout token in its git config.
 yq -o=json '.' .github/workflows/ci.yml >"$TMP/ci.yml.json"
 cat >"$TMP/public-ci.jq" <<'PUBLICCI'
   (.on | keys == ["pull_request","push"])
-  and .on.pull_request == null and .on.push == null
+  and .on.pull_request == null and .on.push == {"branches":["main"]}
   and .permissions == {"contents":"read"}
   and (.jobs | keys == ["public-safety","test"])
   and .jobs.test.name == "setup, hooks, suites, secrets"
@@ -114,6 +116,44 @@ for job in test public-safety; do
   done
 done
 pass 'both general CI jobs reject missing and enabled credential persistence'
+
+# The three CI workflows. A pull request's runs share one group per pull request, so
+# a newer push cancels the run it supersedes. A push runs them only on main, in a
+# group of its own commit, so the run the release gate reads at a release commit is
+# never queued behind or cancelled by the next merge (a pending run in a shared group
+# is cancelled even without cancel-in-progress). GitHub compares group names
+# case-insensitively across workflows, so each file keeps a literal prefix of its
+# own: a `github.workflow` key would put ci.yml's `CI` and plugins-ci.yml's `ci` in
+# one group, each cancelling the other on every push.
+yq -o=json '.' .github/workflows/validate.yml >"$TMP/validate.yml.json"
+ci_trigger_contract() { # <workflow json> <group prefix>
+  jq -e --arg group "$2-\${{ github.event.pull_request.number || github.sha }}" \
+    --arg cancel "\${{ github.event_name == 'pull_request' }}" '
+    (.on | keys == ["pull_request","push"]) and .on.pull_request == null
+    and .on.push == {"branches":["main"]}
+    and .concurrency == {"group":$group,"cancel-in-progress":$cancel}' "$1" >/dev/null
+}
+for row in ci.yml:ci-yml plugins-ci.yml:plugins-ci-yml validate.yml:validate-yml; do
+  ci_trigger_contract "$TMP/${row%%:*}.json" "${row#*:}" || die "CI trigger/concurrency contract: ${row%%:*}"
+done
+pass 'the three CI workflows push only on main and cancel only a superseded pull request run, each in a group of its own'
+ci_mutants=(
+  'unfiltered push|.on.push = null'
+  'push on every branch|.on.push = {"branches":["**"]}'
+  'missing concurrency|del(.concurrency)'
+  'group keyed on the ref|.concurrency.group = "ci-yml-${{ github.ref }}"'
+  'main pushes sharing one group|.concurrency.group = "ci-yml-${{ github.event.pull_request.number || github.ref }}"'
+  'group keyed on the workflow name|.concurrency.group = "${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}"'
+  'another workflow prefix|.concurrency.group = "plugins-ci-yml-${{ github.event.pull_request.number || github.sha }}"'
+  'cancel-in-progress not limited to pull requests|.concurrency["cancel-in-progress"] = true'
+)
+for mutant in "${ci_mutants[@]}"; do
+  jq "${mutant#*|}" "$TMP/ci.yml.json" >"$TMP/ci-trigger-mutant.json"
+  if ci_trigger_contract "$TMP/ci-trigger-mutant.json" ci-yml; then die "accepted CI trigger mutant: ${mutant%%|*}"; fi
+done
+jq '.on.push = null' "$TMP/ci.yml.json" >"$TMP/ci-trigger-mutant.json"
+if jq -e -f "$TMP/public-ci.jq" "$TMP/ci-trigger-mutant.json" >/dev/null; then die 'public CI contract accepted an unfiltered push'; fi
+pass 'the CI trigger contract rejects an unfiltered or every-branch push, a missing, shared or ref-keyed group, and cancelling outside pull requests'
 
 # The pins refresh runs downloaded programs, so only a read-only job with no secret may
 # run them, and the job holding the bot's key takes nothing from it but rows that apply
