@@ -358,7 +358,8 @@ class McpCase(HovFixture):
         res = self.hov("notify", "--as", "omp", "--session", "s1")
         self.assertEqual(res.stdout, "")
         res = self.hov("notify", "--as", "omp", "--session", "s1", "--json")
-        self.assertEqual(json.loads(res.stdout), {"me": "testhost:omp", "session": "s1", "new": 0, "count": 0, "text": None})
+        self.assertEqual(json.loads(res.stdout), {"me": "testhost:omp", "session": "s1", "new": 0, "count": 0, "text": None,
+                                                  "db": str(self.state / "mail.db")})
         self.assertNotIn("deliver", self.log_text())
 
     def test_notify_hands_each_message_to_a_session_once_and_never_reads_or_injects_it(self):
@@ -854,6 +855,69 @@ process.stdout.write(JSON.stringify({ events, calls, out, sent, schedules, timer
         self.assertEqual(len(got["calls"]), 3, "only one interval survives repeated session_start")
         self.assertEqual(len(got["sent"]), 1, "a failed poll neither claims mail nor disables the next poll")
         self.assertEqual(got["timerCount"], 0)
+
+    @unittest.skipUnless(NODE, "node is not on PATH: the OMP extension test needs it")
+    def test_extension_skips_polls_while_the_mailbox_file_is_unchanged(self):
+        """An empty poll writes nothing, so after the path is learned and one clean poll is recorded, a tick on an
+        unchanged mailbox costs a stat; a send changes the file and the next tick polls and claims."""
+        ticks = [{"sid": "active", "event": "tick"} for _ in range(5)]
+        got = self.run_extension([
+            {"sid": "active", "event": "session_start"},
+            *ticks,
+            {"sid": "active", "event": "tick", "send": BODY},
+            {"sid": "active", "event": "tick"},
+            {"sid": "active", "event": "tick"},
+            {"sid": "active", "event": "tool_result"},
+        ])
+        self.assertEqual(len(got["calls"]), 4, "learn the path, record a clean poll, skip three; claim, see the claim's own write, skip")
+        self.assertEqual(len(got["sent"]), 1)
+        self.assertNotIn(BODY, got["sent"][0]["message"]["content"])
+        self.assertIsNone(got["out"][-1], "the gated tool_result check adds nothing")
+        self.assertEqual(self.db().execute("SELECT count(*) FROM deliveries").fetchone()[0], 1)
+
+    @unittest.skipUnless(NODE, "node is not on PATH: the OMP extension test needs it")
+    def test_extension_backstop_polls_an_unchanged_mailbox_every_twentieth_check(self):
+        got = self.run_extension([
+            {"sid": "active", "event": "session_start"},
+            *[{"sid": "active", "event": "tick"} for _ in range(2 + 19)],
+        ])
+        self.assertEqual(len(got["calls"]), 2, "19 unchanged checks after the two priming polls are all skipped")
+        got = self.run_extension([
+            {"sid": "active", "event": "session_start"},
+            *[{"sid": "active", "event": "tick"} for _ in range(2 + 20)],
+        ])
+        self.assertEqual(len(got["calls"]), 3, "the 20th unchanged check polls anyway")
+
+    @unittest.skipUnless(NODE, "node is not on PATH: the OMP extension test needs it")
+    def test_extension_switch_polls_again_for_the_new_session_on_an_unchanged_file(self):
+        """Claims are per session: mail the old session was told about is still news to the new one, though the
+        file has not changed since."""
+        self.hov("send", "--as", "alpha", "--to", "omp", BODY)
+        got = self.run_extension([
+            {"sid": "first", "event": "session_start"},
+            {"sid": "first", "event": "tick"},
+            {"sid": "first", "event": "tick"},
+            {"sid": "first", "event": "tick"},
+            {"sid": "second", "event": "session_switch"},
+            {"sid": "second", "event": "tick"},
+        ])
+        self.assertEqual([item["sid"] for item in got["sent"]], ["first", "second"])
+        self.assertEqual(len(got["calls"]), 3, "first: claim and learn the path, record a clean poll, skip; second: poll")
+        self.assertEqual([tuple(r) for r in self.db().execute("SELECT session_id FROM deliveries ORDER BY session_id")],
+                         [("first",), ("second",)])
+
+    @unittest.skipUnless(NODE, "node is not on PATH: the OMP extension test needs it")
+    def test_extension_polls_every_check_when_hov_names_no_mailbox_file(self):
+        """The extension is copied by hand and the CLI updates on its own, so an older hov without `db` in its JSON
+        is the normal skew: it keeps the ungated behaviour."""
+        older = Path(self.tmp.name) / "older-hov"
+        older.write_text('#!/bin/sh\necho \'{"me": "testhost:omp", "new": 0, "count": 0, "text": null}\'\n')
+        older.chmod(0o755)
+        got = self.run_extension([
+            {"sid": "active", "event": "session_start"},
+            *[{"sid": "active", "event": "tick"} for _ in range(4)],
+        ], env_extra={"HOV_BIN": str(older)})
+        self.assertEqual(len(got["calls"]), 4)
 
 
 if __name__ == "__main__":
