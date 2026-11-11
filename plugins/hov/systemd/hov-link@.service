@@ -4,8 +4,11 @@
 #   ln -s <plugin root>/systemd/hov-link@.service ~/.config/systemd/user/
 #   systemctl --user daemon-reload
 #   systemctl --user enable --now hov-link@HOST.service
-# HOST is an ssh destination (a Host alias in ~/.ssh/config). The peer announces its own mail label in its
-# hello, so the alias and the label need not match. The far end needs `~/.local/bin/hov` at this version.
+# HOST is an ssh destination (a Host alias in ~/.ssh/config) and the mail label the peer must announce (its
+# short hostname, or $HOV_HOST there); a peer announcing any other label is refused. When the alias and the
+# label differ, override ExecStart in a drop-in and add `--expect-host LABEL`. The far end needs
+# `~/.local/bin/hov` at this version. `%i` is the instance name as written after the `@` (`%I` would unescape a
+# hyphen into a slash).
 #
 # network-online.target does not exist in the user manager, so there is no readiness target to order after;
 # the link retries with capped backoff (1 s doubling to 60 s) until ssh connects.

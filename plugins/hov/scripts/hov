@@ -69,7 +69,44 @@ def now_ms() -> int:
 
 
 def iso(ms: int) -> str:
-    return datetime.fromtimestamp(ms / 1000, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    try:
+        return datetime.fromtimestamp(ms / 1000, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    except (ValueError, OverflowError, OSError, TypeError):
+        return f"ts={ms!r}"
+
+
+# Identity fields (hosts, names, ids, thread ids) are shown to a model inside the hook's `<hov-mail>` frame and
+# quoted into its Reply hint, so no control character and no angle bracket may ever reach a row. Validated at
+# `hov send` and again on every row that arrives over a link; `shown()` is the last line of defence in the hook.
+TS_MAX = 253_402_300_799_999  # 9999-12-31T23:59:59.999Z, the last instant datetime can render
+
+
+def ident_error(v: object, kind: str) -> str | None:
+    """None when `v` may be stored as a host, name, id or thread id; else the reason it may not."""
+    if not isinstance(v, str):
+        return "not a string"
+    cap = 64 if kind in ("host", "id") else 200
+    if not 1 <= len(v) <= cap:
+        return f"length not in 1..{cap}"
+    if v != v.strip():
+        return "leading or trailing whitespace"
+    if any(c < " " or c == "\x7f" or c in "<>" for c in v):
+        return "control character, '<' or '>'"
+    if kind in ("host", "id") and any(c.isspace() for c in v):
+        return "whitespace"
+    if kind == "host" and ":" in v:
+        return "':'"
+    try:
+        v.encode("utf-8")
+    except UnicodeEncodeError:
+        return "not encodable"
+    return None
+
+
+def shown(v: object, cap: int = 200) -> str:
+    """A stored identity field as hook text: anything the validator refuses becomes '?'."""
+    s = str(v)
+    return "".join("?" if (c < " " or c == "\x7f" or c in "<>") else c for c in s)[:cap]
 
 
 def log(line: str) -> None:
@@ -255,9 +292,12 @@ def whoami(con: sqlite3.Connection, as_name: str | None = None, session_id: str 
     sid = session_id or os.environ.get("CLAUDE_CODE_SESSION_ID")
     if sid:
         name = resolve_session(con, sid, cwd, force)
-        if name:
+        if name and ident_error(name, "name") is None:
             return Me(host, name, sid, "session")
-        return Me(host, sid[:8], sid, "session-id")
+        # A title the identity rules refuse (a control character, '<' or '>', over 200 characters) cannot be a mail
+        # name, since the hook frame shows names. The session keeps its 8-character id as its name, which is one of
+        # its aliases in every case, so it still sends without --as and is still reached by that id.
+        return Me(host, sid[:8], sid, "session-id" if not name else "session-id, title refused")
     return Me(host, "shell", None, "fallback")
 
 # ---------------------------------------------------------------- addressing
@@ -284,6 +324,24 @@ def cmd_send(a: argparse.Namespace) -> int:
         print("hov send: empty message (give BODY, '-' for stdin, or --subject)", file=sys.stderr)
         return 2
     subject = a.subject or (body.splitlines()[0][:80] if body else "")
+    checks = [("sender name", me.name, "name")]
+    if a.thread:
+        checks.append(("--thread", a.thread, "name"))
+    for addr in a.to:
+        to_host, to_name = parse_addr(addr)
+        checks.append((f"--to {addr!r} host", to_host, "host" if to_host != "*" else "name"))
+        checks.append((f"--to {addr!r} name", to_name, "name"))
+    for what, v, kind in checks:
+        err = ident_error(v, kind)
+        if err:
+            if what == "sender name":
+                hint = "pass --as with a plain name, or unset HOV_AS"
+            elif what.endswith(" name"):
+                hint = "address the session by its 8-character id instead (`hov ls` shows it)"
+            else:
+                hint = "use a plain value"
+            print(f"hov send: {what} {v!r} refused: {err}; {hint}", file=sys.stderr)
+            return 2
     ts = now_ms()
     ids = []
     with con:
@@ -403,9 +461,12 @@ def cmd_ls(a: argparse.Namespace) -> int:
     out = []
     seen = set()
     for r in agents_rows():
-        name = r.get("name") or (r.get("sessionId") or "")[:8]
+        sid = r.get("sessionId") or ""
+        title = r.get("name")
+        # the same rule as whoami: a title the identity rules refuse is not this session's mail name
+        name = title if title and ident_error(title, "name") is None else sid[:8]
         seen.add(name)
-        me = Me(host, name, r.get("sessionId"), "agents")
+        me = Me(host, name, sid or None, "agents")
         out.append({"kind": "session", "addr": me.addr, "session_id": r.get("sessionId"), "state": r.get("state"), "status": r.get("status"), "cwd": r.get("cwd"), "unread": len(unread_for(con, me))})
     for r in con.execute("SELECT DISTINCT to_host AS h, to_name AS n FROM messages UNION SELECT DISTINCT from_host, from_name FROM messages"):
         if r["n"] in ("*",) or (r["h"] == host and r["n"] in seen):
@@ -426,7 +487,8 @@ def cmd_ls(a: argparse.Namespace) -> int:
         for o in out:
             st = f"{o['state']}/{o['status']}" if o["state"] else "-"
             un = "-" if o["unread"] is None else str(o["unread"])
-            print(f"{o['addr']:40} {st:18} unread={un}")
+            sid8 = f"  id={o['session_id'][:8]}" if o["session_id"] else ""
+            print(f"{o['addr']:40} {st:18} unread={un}{sid8}")
         for o in links:
             print(f"link {o['host']:35} {o['role']}/{o['state']:13} hello={o['last_hello']} ack={o['last_ack'] or '-'} in={o['last_in'] or '-'}")
     return 0
@@ -508,9 +570,9 @@ def cmd_hook(a: argparse.Namespace) -> int:
     H = hov_cmd()
     if bypass:
         total = len(unread_for(con, me))
-        senders = sorted({f"{r['from_host']}:{r['from_name']}" for r in rows})
+        senders = sorted({f"{shown(r['from_host'])}:{shown(r['from_name'])}" for r in rows})
         text = (
-            f'<{TAG} host="{me.host}" to="{me.name}" count="{total}" mode="count">\n'
+            f'<{TAG} host="{shown(me.host)}" to="{shown(me.name)}" count="{total}" mode="count">\n'
             f"{total} unread message(s) from other agents ({len(rows)} new, from {', '.join(senders)}). "
             f"This session bypasses permissions, so bodies are not injected. Run `{H} inbox` to read them.\n"
             f"</{TAG}>"
@@ -518,16 +580,18 @@ def cmd_hook(a: argparse.Namespace) -> int:
     else:
         mark_read(con, me, rows)
         parts = [
-            f'<{TAG} host="{me.host}" to="{me.name}" count="{len(rows)}">',
+            f'<{TAG} host="{shown(me.host)}" to="{shown(me.name)}" count="{len(rows)}">',
             FRAMING,
         ]
         for r in rows:
-            parts.append(f"[{r['id']}] from {r['from_host']}:{r['from_name']} · {r['kind']} · {r['importance']} · thread {r['thread_id']} · {iso(r['ts'])}")
+            parts.append(f"[{shown(r['id'])}] from {shown(r['from_host'])}:{shown(r['from_name'])} · {shown(r['kind'])} · {shown(r['importance'])}"
+                         f" · thread {shown(r['thread_id'])} · {iso(r['ts'])}")
             parts.append(f"subject: {sanitize(r['subject'])}")
             parts.append(sanitize(r["body"]))
             parts.append("---")
         first = rows[0]
-        parts.append(f"You are {me.addr}. Reply: {H} send --to {first['from_host']}:{first['from_name']} --thread {first['thread_id']} \"text\". Inbox: {H} inbox.")
+        reply_to = shlex.quote(f"{shown(first['from_host'])}:{shown(first['from_name'])}")
+        parts.append(f"You are {shown(me.addr)}. Reply: {H} send --to {reply_to} --thread {shlex.quote(shown(first['thread_id']))} \"text\". Inbox: {H} inbox.")
         parts.append(f"</{TAG}>")
         text = "\n".join(parts)
     log(f"deliver event={event} session={sid} me={me.addr} mode={mode} n={len(rows)} ids={','.join(r['id'] for r in rows)}")
@@ -569,6 +633,23 @@ def _env_number(name: str, default: float, floor: float) -> float:
         return default
 
 
+def encodable(s: str) -> bool:
+    try:
+        s.encode("utf-8")
+        return True
+    except UnicodeEncodeError:
+        return False
+
+
+def encode_line(obj: dict) -> bytes | None:
+    """One wire line, or None when it cannot be written (a lone surrogate) or would exceed LINE_CAP on the peer."""
+    try:
+        data = (json.dumps(obj, separators=(",", ":"), ensure_ascii=False) + "\n").encode("utf-8")
+    except (ValueError, UnicodeError):
+        return None
+    return data if len(data) <= LINE_CAP else None
+
+
 def coerce_msg(m: object) -> tuple[tuple | None, str | None]:
     """A wire row as a tuple in MSG_FIELDS order, or the reason it is refused. Unknown kinds and importances fold
     to the defaults, an over-long subject is cut; a refused row is nacked so the sender stops offering it."""
@@ -578,21 +659,25 @@ def coerce_msg(m: object) -> tuple[tuple | None, str | None]:
     for k in MSG_FIELDS:
         v = m.get(k)
         if k == "ts":
-            if isinstance(v, bool) or not isinstance(v, int) or v < 0:
+            if isinstance(v, bool) or not isinstance(v, int) or not 0 <= v <= TS_MAX:
                 return None, "bad-ts"
         elif k == "meta":
             if v is None:
                 v = "{}"
             elif isinstance(v, dict):
                 v = json.dumps(v)
-            if not isinstance(v, str) or len(v) > 65536:
+            if not isinstance(v, str) or len(v) > 65536 or not encodable(v):
                 return None, "bad-meta"
         else:
-            if not isinstance(v, str):
+            if not isinstance(v, str) or not encodable(v):
                 return None, f"bad-{k}"
-            if k in ("id", "origin_host", "from_host", "to_host") and not 1 <= len(v) <= 64:
+            if k == "id" and ident_error(v, "id"):
                 return None, f"bad-{k}"
-            if k in ("from_name", "to_name", "thread_id") and not 1 <= len(v) <= 200:
+            if k in ("origin_host", "from_host") and ident_error(v, "host"):
+                return None, f"bad-{k}"
+            if k == "to_host" and v != "*" and ident_error(v, "host"):
+                return None, f"bad-{k}"
+            if k in ("from_name", "to_name", "thread_id") and ident_error(v, "name"):
                 return None, f"bad-{k}"
             if k == "kind" and v not in KINDS:
                 v = "note"
@@ -611,8 +696,9 @@ class Wire:
     All database work runs on the thread that calls run(); the reader thread only queues raw lines, so no
     write transaction is ever open across pipe I/O."""
 
-    def __init__(self, con: sqlite3.Connection, role: str, via: str, inp, out, once: bool, tag: str):
+    def __init__(self, con: sqlite3.Connection, role: str, via: str, inp, out, once: bool, tag: str, expect: str | None = None):
         self.con, self.role, self.via, self.inp, self.out, self.once, self.tag = con, role, via, inp, out, once, tag
+        self.expect = expect  # the label the peer must announce; None on the relay end, whose caller ssh already authenticated
         self.me = local_host()
         self.peer: str | None = None
         self.peer_role: str | None = None
@@ -660,8 +746,13 @@ class Wire:
         self.q.put(("eof", None))
 
     def send(self, obj: dict) -> bool:
+        data = encode_line(obj)
+        if data is None:
+            # control frames are small ASCII; a row that cannot be encoded is caught in pump() before it gets here
+            self.fail("write-failed", f"unencodable frame t={obj.get('t')!r}")
+            return False
         try:
-            self.out.write((json.dumps(obj, separators=(",", ":")) + "\n").encode("utf-8"))
+            self.out.write(data)
             self.out.flush()
             self.last_tx = now_ms()
             return True
@@ -696,8 +787,8 @@ class Wire:
                 self.fail("oversize-line", f"over {LINE_CAP} bytes")
                 break
             if kind == "line":
-                self.last_rx = now_ms()
-                self.handle(raw)
+                if self.handle(raw):
+                    self.last_rx = now_ms()  # junk never counts as traffic: a noisy peer still hits hello-timeout and peer-silent
                 if self.stop.is_set() or not self.q.empty():
                     continue
             if self.peer is None:
@@ -719,10 +810,11 @@ class Wire:
                 self.send({"t": "ping"})
         return self.reason
 
-    def handle(self, raw: bytes) -> None:
+    def handle(self, raw: bytes) -> bool:
+        """One line from the peer; True when it was a frame (valid JSON object), False for junk."""
         line = raw.decode("utf-8", "replace").strip()
         if not line:
-            return
+            return False
         try:
             obj = json.loads(line)
             if not isinstance(obj, dict):
@@ -730,12 +822,12 @@ class Wire:
         except ValueError:
             # before hello: login banners, shell noise, a runtime manager's warnings; after it: logged and skipped
             log(f"{self.tag} peer={self.peer or '?'} skipped-junk via={self.via} line={line[:200]!r}")
-            return
+            return False
         t = obj.get("t")
         if self.peer is None:
             if t != "hello":
                 self.fail("no-hello", f"first message was {t!r}")
-                return
+                return True
             self.on_hello(obj)
         elif t == "msg":
             self.on_msg(obj.get("m"))
@@ -752,6 +844,7 @@ class Wire:
             self.stop.set()
         elif t not in ("pong", "hello"):
             log(f"{self.tag} peer={self.peer} unknown-type t={t!r}")
+        return True
 
     def on_hello(self, obj: dict) -> None:
         host, proto, role = obj.get("host"), obj.get("proto"), obj.get("role") or "leaf"
@@ -763,6 +856,10 @@ class Wire:
             return
         if host == self.me:
             self.fail("loop", f"peer announced our own label {host!r}; a link must not point at this host")
+            return
+        if self.expect is not None and host != self.expect:
+            # the label decides which rows the peer is handed, so it is bound to the host that was dialed
+            self.fail("label-mismatch", f"peer announced {host!r}, expected {self.expect!r} (the ssh alias, or --expect-host)")
             return
         self.peer, self.peer_role = host, role if role in ("hub", "leaf") else "leaf"
         ts = now_ms()
@@ -798,7 +895,15 @@ class Wire:
             return
         self.self_idle = False
         for r in rows[:room]:
-            if not self.send({"t": "msg", "m": {k: r[k] for k in MSG_FIELDS}}):
+            frame = {"t": "msg", "m": {k: r[k] for k in MSG_FIELDS}}
+            if encode_line(frame) is None:
+                # too large for one wire line, or not encodable: recorded as a local nack so it is never offered again
+                # and never closes the link; the rows behind it still cross
+                with self.con:
+                    self.con.execute("INSERT OR IGNORE INTO relay_log(msg_id, peer, direction, ts) VALUES (?,?,'nack',?)", (r["id"], self.peer, ts))
+                log(f"{self.tag} out-refused id={r['id']} peer={self.peer} reason=too-large")
+                continue
+            if not self.send(frame):
                 return
             self.inflight[r["id"]] = ts
 
@@ -809,16 +914,32 @@ class Wire:
             log(f"{self.tag} peer={self.peer} nack id={mid!r} reason={err}")
             self.send({"t": "nack", "id": mid if isinstance(mid, str) else None, "reason": err})
             return
+        if self.me in (row[2], row[3]):
+            # origin_host and from_host are what the peer asserts; a row claiming this host as its source never
+            # legitimately arrives here (the echo guard keeps our own rows off the wire back to us)
+            log(f"{self.tag} peer={self.peer} nack id={row[0]} reason=spoof from={row[3]} origin={row[2]}")
+            self.send({"t": "nack", "id": row[0], "reason": "spoof"})
+            return
         self.peer_idle = False
         ts = now_ms()
-        with self.con:
-            cur = self.con.execute(
-                "INSERT OR IGNORE INTO messages(id, ts, origin_host, from_host, from_name, to_host, to_name, thread_id, kind, importance, subject, body, meta)"
-                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                row,
-            )
-            self.con.execute("INSERT OR IGNORE INTO relay_log(msg_id, peer, direction, ts) VALUES (?,?,'in',?)", (row[0], self.peer, ts))
-            self.con.execute("UPDATE peers SET last_in=?, last_seen=? WHERE host=?", (ts, ts, self.peer))
+        try:
+            with self.con:
+                cur = self.con.execute(
+                    "INSERT OR IGNORE INTO messages(id, ts, origin_host, from_host, from_name, to_host, to_name, thread_id, kind, importance, subject, body, meta)"
+                    " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    row,
+                )
+                self.con.execute("INSERT OR IGNORE INTO relay_log(msg_id, peer, direction, ts) VALUES (?,?,'in',?)", (row[0], self.peer, ts))
+                self.con.execute("UPDATE peers SET last_in=?, last_seen=? WHERE host=?", (ts, ts, self.peer))
+        except (OverflowError, ValueError, UnicodeError, sqlite3.IntegrityError, sqlite3.DataError) as e:
+            # the row itself is the problem: refuse it so the sender stops offering it
+            log(f"{self.tag} peer={self.peer} nack id={row[0]} reason=store-refused err={type(e).__name__}")
+            self.send({"t": "nack", "id": row[0], "reason": "store-refused"})
+            return
+        except sqlite3.Error as e:
+            # the database is the problem (locked, full): neither ack nor nack, so the sender offers it again later
+            log(f"{self.tag} peer={self.peer} store-failed id={row[0]} err={type(e).__name__}: {e}")
+            return
         # committed above; the ack goes out only now
         self.send({"t": "ack", "id": row[0]})
         log(f"{self.tag} in id={row[0]} peer={self.peer} from={row[3]}:{row[4]} to={row[5]}:{row[6]} new={cur.rowcount == 1}")
@@ -919,28 +1040,35 @@ def cmd_link(a: argparse.Namespace) -> int:
             errs: collections.deque = collections.deque(maxlen=20)
             drain = threading.Thread(target=_drain, args=(proc.stderr, errs), daemon=True)
             drain.start()
-            w = Wire(con, a.role, via, proc.stdout, proc.stdin, once=a.once, tag="link")
+            w = Wire(con, a.role, via, proc.stdout, proc.stdin, once=a.once, tag="link", expect=a.expect_host or a.host)
             live["wire"] = w
-            reason = w.run()
+            if stop.is_set():  # a signal that landed between the loop check and the wire's creation
+                w.reason = "signal"
+                w.stop.set()
             try:
-                proc.stdin.close()
-            except OSError:
-                pass
-            try:
-                proc.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                proc.kill()
-                proc.wait()
-            # the child is gone, so its pipes drain to EOF; release the descriptors rather than leak three per attempt
-            for th in (w.reader, drain):
-                th.join(2)
-            for f in (proc.stdout, proc.stderr):
+                reason = w.run()
+            finally:
                 try:
-                    f.close()
+                    proc.stdin.close()
                 except OSError:
                     pass
-            w.close()
-            live.pop("wire", None)
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait()
+                # the child is gone, so its pipes drain to EOF and their reader threads end; release the descriptors
+                # only once they have, since a descriptor closed under a blocked reader could be reused by the next child
+                for th, f in ((w.reader, proc.stdout), (drain, proc.stderr)):
+                    if th is not None:
+                        th.join(2)
+                    if th is None or not th.is_alive():
+                        try:
+                            f.close()
+                        except OSError:
+                            pass
+                w.close()
+                live.pop("wire", None)
             ok, short = w.ok, now_ms() - w.started < SHORT_LINK_MS
             tail = " | ".join(errs)
             if not ok:
@@ -948,10 +1076,13 @@ def cmd_link(a: argparse.Namespace) -> int:
             elif tail or proc.returncode:
                 log(f"link peer={a.host} child-exit={proc.returncode} stderr={tail!r}")
         if a.once:
-            return 0 if ok and reason in ("done", "bye", "eof") else 1
+            # eof counts only when both ends had said idle and nothing was still in flight; a peer that vanished
+            # mid-transfer is a failure even though the hello was fine
+            clean_eof = reason == "eof" and w.self_idle and w.peer_idle and not w.inflight
+            return 0 if ok and (reason in ("done", "bye") or clean_eof) else 1
         if stop.is_set():
             break
-        if reason in ("loop", "proto-mismatch"):
+        if reason in ("loop", "proto-mismatch", "label-mismatch"):
             backoff = BACKOFF_MAX_S  # a configuration error: do not spin
         elif ok and not short:
             backoff = 1
@@ -1003,7 +1134,8 @@ def build_parser() -> argparse.ArgumentParser:
     l.set_defaults(fn=cmd_ls)
 
     k = sub.add_parser("link", help="keep one outbound link to HOST up and carry mail both ways (store-and-forward)")
-    k.add_argument("host", help="ssh destination (a Host alias in ~/.ssh/config); the peer announces its own mail label")
+    k.add_argument("host", help="ssh destination (a Host alias in ~/.ssh/config); the peer must announce this as its mail label unless --expect-host says otherwise")
+    k.add_argument("--expect-host", default=None, help="the mail label the peer must announce (default: HOST); any other label is refused")
     k.add_argument("--role", choices=("hub", "leaf"), default="hub", help="hub forwards to the peer what is addressed to it or to *; leaf forwards everything not for itself")
     k.add_argument("--once", action="store_true", help="connect once, carry what is pending both ways, then exit (0 when the peer answered)")
     k.add_argument("--remote-cmd", default=REMOTE_CMD_DEFAULT, help=f"command ssh runs on HOST (default: {REMOTE_CMD_DEFAULT})")

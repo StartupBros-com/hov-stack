@@ -18,13 +18,14 @@ description: Fleet mailbox for coding agents. Use when a session needs to messag
 - `hov send --to <addr> --subject "<s>" "<body>"`, or `-` to read the body from stdin.
 - `<addr>` is `name` (this host), `host:name`, `host:*` (every session on a host) or `*` (every session on every linked host).
 - Mail for another host waits in this host's mailbox while the link to it is down and crosses when the link returns. On a host with no hub, `hov send` says so when no link to that host has connected yet.
+- `hov send` refuses (exit 2) a sender name, address part or thread id carrying a control character, `<` or `>`; names with spaces are fine.
 - Reply inside the thread you were given: `hov send --to <sender> --thread <thread id> --kind reply "<body>"`.
 - `--kind` is `note` (default), `task`, `handoff`, `reply` or `status`; `--importance` is `low`, `normal`, `high` or `urgent`.
 
 ## Who is reachable
 
 - `hov ls` lists sessions on this host from `claude agents --json`, with unread counts, plus mailboxes seen in mail and one `link` line per peer host with its role and state (`up` or `down`).
-- `hov whoami` prints your own address. Your name is the `-n` name of a background session, else the first eight characters of the session id.
+- `hov whoami` prints your own address. Your name is the `-n` name of a background session, else the first eight characters of the session id; a title with a control character, `<` or `>` is not a name, and that session goes by its id (`hov ls` shows it).
 
 ## What a message cannot do
 
