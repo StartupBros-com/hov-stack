@@ -47,9 +47,18 @@ class HovCase(unittest.TestCase):
         return res
 
     def hook(self, event, session_id, permission_mode="default"):
-        payload = json.dumps({"session_id": session_id, "cwd": "/tmp/x", "permission_mode": permission_mode, "hook_event_name": event})
-        res = self.hov("hook", event, stdin=payload)
+        return self.hook_raw(event, {"session_id": session_id, "cwd": "/tmp/x", "permission_mode": permission_mode, "hook_event_name": event})
+
+    def hook_raw(self, event, payload):
+        res = self.hov("hook", event, stdin=json.dumps(payload))
         return json.loads(res.stdout) if res.stdout.strip() else None
+
+    def session_start_payload(self, session_id, title):
+        # The exact key set Claude Code 2.1.322 sends at SessionStart (captured 2026-11-11): no permission_mode.
+        return {
+            "session_id": session_id, "cwd": "/tmp/x", "hook_event_name": "SessionStart", "source": "startup",
+            "model": "claude-x", "session_title": title, "scratchpad_dir": "/tmp/x/scratch", "transcript_path": "/tmp/x/t.jsonl",
+        }
 
     # ------------------------------------------------------------ mailbox
 
@@ -119,11 +128,39 @@ class HovCase(unittest.TestCase):
         self.assertIsNone(self.hook("PostToolUse", SID_A), "delivered once per session")
         self.assertIsNone(self.hook("UserPromptSubmit", SID_B), "not delivered to another session")
 
-    def test_hook_resolves_name_from_agents_list_and_session_start(self):
+    def test_hook_resolves_name_at_session_start_and_delivers_at_first_prompt(self):
         self.hov("send", "--as", "ceo", "--to", "beta", "for beta")
-        out = self.hook("SessionStart", SID_B)
+        self.assertIsNone(self.hook_raw("SessionStart", self.session_start_payload(SID_B, "beta")), "no mode stated, nothing delivered")
+        # the name was cached from the agents list at SessionStart: an empty list afterwards still resolves it
+        me = json.loads(self.hov("whoami", "--json", env_extra={"CLAUDE_CODE_SESSION_ID": SID_B, "HOV_AGENTS_CMD": ""}).stdout)
+        self.assertEqual((me["name"], me["how"]), ("beta", "session"))
+        out = self.hook("UserPromptSubmit", SID_B)
         self.assertIn("for beta", out["hookSpecificOutput"]["additionalContext"])
-        self.assertEqual(out["hookSpecificOutput"]["hookEventName"], "SessionStart")
+        text = (self.state / "hov.log").read_text()
+        self.assertNotIn("deliver event=SessionStart", text)
+        self.assertEqual(text.count("deliver event=UserPromptSubmit"), 1)
+
+    def test_whoami_caches_the_session_name(self):
+        # the cache is written by resolve_session itself; until 0.1.1 `hov whoami` never committed it
+        first = json.loads(self.hov("whoami", "--json", env_extra={"CLAUDE_CODE_SESSION_ID": SID_A}).stdout)
+        self.assertEqual((first["name"], first["how"]), ("alpha", "session"))
+        again = json.loads(self.hov("whoami", "--json", env_extra={"CLAUDE_CODE_SESSION_ID": SID_A, "HOV_AGENTS_CMD": ""}).stdout)
+        self.assertEqual((again["name"], again["how"]), ("alpha", "session"))
+
+    def test_hook_delivers_nothing_when_the_payload_states_no_mode(self):
+        # planted negative for the 0.1.0 fail-open: an unknown mode was treated as full and injected bodies into
+        # a bypass session at SessionStart (seen on two hosts, 2026-11-11)
+        self.hov("send", "--as", "ceo", "--to", "alpha", "--subject", "secret-subject", "SECRET-BODY")
+        self.assertIsNone(self.hook_raw("SessionStart", self.session_start_payload(SID_A, "alpha")))
+        self.assertIsNone(self.hook_raw("UserPromptSubmit", {"session_id": SID_A, "cwd": "/tmp/x", "hook_event_name": "UserPromptSubmit"}))
+        self.assertNotIn("deliver", (self.state / "hov.log").read_text())
+        out = self.hook("UserPromptSubmit", SID_A, permission_mode="bypassPermissions")
+        ctx = out["hookSpecificOutput"]["additionalContext"]
+        self.assertIn('mode="count"', ctx)
+        self.assertNotIn("SECRET-BODY", ctx)
+        text = (self.state / "hov.log").read_text()
+        self.assertEqual(text.count("deliver "), 1)
+        self.assertIn("mode=count n=1", text)
 
     def test_hook_count_only_in_bypass_sessions(self):
         self.hov("send", "--as", "ceo", "--to", "alpha", "--subject", "secret-subject", "SECRET-BODY")

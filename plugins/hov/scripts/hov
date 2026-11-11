@@ -176,30 +176,36 @@ def agents_rows() -> list[dict]:
 
 
 def resolve_session(con: sqlite3.Connection, session_id: str, cwd: str | None, force: bool) -> str | None:
-    """Return the session's name, caching the agents-list lookup in `sessions`."""
+    """Return the session's name, caching the agents-list lookup in `sessions`.
+
+    Commits its own writes: the connection runs implicit transactions, and until 0.1.1 the cached name and the
+    lookup throttle only reached the database when the caller happened to commit something else afterwards
+    (the hook on a delivery; `hov whoami` never).
+    """
     host = local_host()
     ts = now_ms()
-    row = con.execute("SELECT name, last_lookup FROM sessions WHERE session_id=?", (session_id,)).fetchone()
-    if row is None:
-        con.execute(
-            "INSERT INTO sessions(session_id, host, name, cwd, first_seen, last_seen) VALUES (?,?,?,?,?,?)",
-            (session_id, host, None, cwd, ts, ts),
-        )
-        name, last_lookup = None, 0
-    else:
-        name, last_lookup = row["name"], row["last_lookup"]
-        con.execute("UPDATE sessions SET last_seen=?, cwd=COALESCE(?, cwd) WHERE session_id=?", (ts, cwd, session_id))
-    if name:
-        return name
-    if not force and ts - last_lookup < LOOKUP_INTERVAL_MS:
-        return None
-    con.execute("UPDATE sessions SET last_lookup=? WHERE session_id=?", (ts, session_id))
-    for r in agents_rows():
-        if r.get("sessionId") == session_id and r.get("name"):
-            name = str(r["name"])
-            con.execute("UPDATE sessions SET name=?, cwd=COALESCE(?, cwd) WHERE session_id=?", (name, r.get("cwd"), session_id))
+    with con:
+        row = con.execute("SELECT name, last_lookup FROM sessions WHERE session_id=?", (session_id,)).fetchone()
+        if row is None:
+            con.execute(
+                "INSERT INTO sessions(session_id, host, name, cwd, first_seen, last_seen) VALUES (?,?,?,?,?,?)",
+                (session_id, host, None, cwd, ts, ts),
+            )
+            name, last_lookup = None, 0
+        else:
+            name, last_lookup = row["name"], row["last_lookup"]
+            con.execute("UPDATE sessions SET last_seen=?, cwd=COALESCE(?, cwd) WHERE session_id=?", (ts, cwd, session_id))
+        if name:
             return name
-    return None
+        if not force and ts - last_lookup < LOOKUP_INTERVAL_MS:
+            return None
+        con.execute("UPDATE sessions SET last_lookup=? WHERE session_id=?", (ts, session_id))
+        for r in agents_rows():
+            if r.get("sessionId") == session_id and r.get("name"):
+                name = str(r["name"])
+                con.execute("UPDATE sessions SET name=?, cwd=COALESCE(?, cwd) WHERE session_id=?", (name, r.get("cwd"), session_id))
+                return name
+        return None
 
 
 def whoami(con: sqlite3.Connection, as_name: str | None = None, session_id: str | None = None, cwd: str | None = None, force: bool = False) -> Me:
@@ -421,6 +427,11 @@ def cmd_hook(a: argparse.Namespace) -> int:
         return 0
     con = db()
     me = whoami(con, None, session_id=sid, cwd=payload.get("cwd"), force=(event == "SessionStart"))
+    if "permission_mode" not in payload:
+        # Claude Code's SessionStart payload carries no permission_mode (2.1.322, seen 2026-11-11), so the mode
+        # is unknown here. Deliver nothing and record nothing; the first event that states the mode delivers in
+        # it. Treating "unknown" as full injected bodies into sessions that bypass permissions.
+        return 0
     bypass = payload.get("permission_mode") == "bypassPermissions"
     aliases = me.aliases()
     q = (
