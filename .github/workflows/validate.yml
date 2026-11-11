@@ -9,6 +9,14 @@ on:
 permissions:
   contents: read
 
+# A newer push to a pull request cancels the run it supersedes. A push to main gets
+# a group of its own commit, so the run the release gate reads is never cancelled.
+# The prefix is literal and unique to this file: GitHub compares group names
+# case-insensitively across workflows (pinned in release/tests/root-workflows.test.sh).
+concurrency:
+  group: validate-yml-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   syntax:
     name: Trusted syntax and policy
