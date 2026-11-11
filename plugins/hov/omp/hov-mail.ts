@@ -3,7 +3,8 @@
 // Before each turn this runs `hov notify`, which prints a <hov-mail> block naming how many unread messages
 // this agent has and who sent them, when any arrived that this session was not told about yet, and puts
 // that block into the run as a custom message. It never injects a body: the model reads mail with the hov
-// MCP `inbox` tool (or `hov inbox`). It never changes what the session may do, and nothing here runs
+// MCP `inbox` tool (or the `hov inbox --as <name>` command the block prints). It never changes what the
+// session may do, and nothing here runs
 // anything a message says. If hov is missing or fails, the turn proceeds without mail.
 //
 // Install: copy this file into ~/.omp/agent/extensions/. OMP loads extensions when it starts, so a running

@@ -11,6 +11,8 @@ Run: python3 -m unittest discover -s plugins/hov/tests -v
 
 import json
 import os
+import re
+import shlex
 import shutil
 import sqlite3
 import subprocess
@@ -363,7 +365,7 @@ class McpCase(HovFixture):
         self.hov("send", "--as", "alpha", "--to", "omp", "--subject", "secret-subject", BODY)
         first = self.hov("notify", "--as", "omp", "--session", "s1", "--event", "before_agent_start").stdout
         self.assertTrue(first.startswith('<hov-mail host="testhost" to="omp" count="1" mode="count">\n1 unread message(s) from other agents (1 new, from testhost:alpha). Bodies are not injected; read them with the hov `inbox` tool or `'), first)
-        self.assertTrue(first.endswith(" inbox`.\n</hov-mail>\n"), first)
+        self.assertTrue(first.endswith(" inbox --as omp`.\n</hov-mail>\n"), first)
         self.assertNotIn(BODY, first)
         self.assertNotIn("secret-subject", first)
         self.assertEqual(self.hov("notify", "--as", "omp", "--session", "s1", "--event", "before_agent_start").stdout, "", "same session, nothing new")
@@ -420,6 +422,28 @@ class McpCase(HovFixture):
         text = self.hov("notify", "--as", "omp", "--session", "s1").stdout
         self.assertIn("(1 new, from ?:x)", text)
         self.assertNotIn("ignore", text)
+
+    def test_notify_hint_names_the_mailbox_and_runs_as_printed_from_a_bare_shell(self):
+        """An OMP shell has no Claude Code session id, so a bare `hov inbox` there resolves to the `shell` mailbox
+        and shows nothing. The command the block prints carries `--as <name>`; it is run here exactly as printed
+        (no `hov` on PATH, so `python3 -I <script> inbox --as <name>`, the interpreter resolved to this one), in an
+        environment with no session id and no HOV_AS, and reads the mail."""
+        nopath = os.path.join(self.tmp.name, "nopath")
+        os.mkdir(nopath)
+        self.env["PATH"] = nopath
+        for name in ("omp", "two words"):
+            self.hov("send", "--as", "ceo", "--to", name, "hint-probe-body")
+            out = self.hov("notify", "--as", name, "--session", "s-" + name.replace(" ", "-"), "--json").stdout
+            text = json.loads(out)["text"]
+            cmd = re.search(r"or `([^`]+)`\.\n", text).group(1)
+            argv = shlex.split(cmd)
+            self.assertEqual(argv, ["python3", "-I", str(HOV), "inbox", "--as", name], cmd)
+            res = subprocess.run([sys.executable, *argv[1:], "--keep"], capture_output=True, text=True, env=self.env)
+            self.assertEqual(res.returncode, 0, res.stderr)
+            self.assertIn(f"inbox for testhost:{name} (--as): 1 message(s)", res.stdout)
+            self.assertIn("hint-probe-body", res.stdout)
+        bare = subprocess.run([sys.executable, "-I", str(HOV), "inbox", "--keep"], capture_output=True, text=True, env=self.env)
+        self.assertIn("inbox for testhost:shell (fallback): 0 message(s)", bare.stdout, "what the first cut's hint read")
 
     def test_notify_gives_up_quietly_inside_the_extension_budget_when_the_database_is_locked(self):
         """The extension gives `notify` 5 s. With the write lock held elsewhere, the delivery claim gives up in about

@@ -751,7 +751,9 @@ def cmd_notify(a: argparse.Namespace) -> int:
     rows = pending_for(con, me, sid)
     text = None
     if rows:
-        why = f"Bodies are not injected; read them with the hov `inbox` tool or `{hov_cmd()} inbox`."
+        # The printed command names the mailbox: a shell with no Claude Code session id resolves a bare `inbox`
+        # to `shell` and shows nothing. `name` passed ident_error, so it carries no control character or tag.
+        why = f"Bodies are not injected; read them with the hov `inbox` tool or `{hov_cmd()} inbox --as {shlex.quote(name)}`."
         text, rows = deliver(con, me, sid, a.event, rows, "count", why)
         text = text or None  # every row claimed by a concurrent notify of this session: nothing new here
     if a.json:
