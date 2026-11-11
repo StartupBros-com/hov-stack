@@ -141,10 +141,10 @@ ci_mutants=(
   'unfiltered push|.on.push = null'
   'push on every branch|.on.push = {"branches":["**"]}'
   'missing concurrency|del(.concurrency)'
-  'group keyed on the ref|.concurrency.group = "ci-yml-${{ github.ref }}"'
-  'main pushes sharing one group|.concurrency.group = "ci-yml-${{ github.event.pull_request.number || github.ref }}"'
-  'group keyed on the workflow name|.concurrency.group = "${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}"'
-  'another workflow prefix|.concurrency.group = "plugins-ci-yml-${{ github.event.pull_request.number || github.sha }}"'
+  "group keyed on the ref|.concurrency.group = \"ci-yml-\${{ github.ref }}\""
+  "main pushes sharing one group|.concurrency.group = \"ci-yml-\${{ github.event.pull_request.number || github.ref }}\""
+  "group keyed on the workflow name|.concurrency.group = \"\${{ github.workflow }}-\${{ github.event.pull_request.number || github.sha }}\""
+  "another workflow prefix|.concurrency.group = \"plugins-ci-yml-\${{ github.event.pull_request.number || github.sha }}\""
   'cancel-in-progress not limited to pull requests|.concurrency["cancel-in-progress"] = true'
 )
 for mutant in "${ci_mutants[@]}"; do
