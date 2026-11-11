@@ -162,11 +162,16 @@ def _age(path, seconds_ago):
     os.utime(path, (t, t), follow_symlinks=False)
 
 
-# Fixture repositories are built with none of the host's git config.
+# Fixture repositories are built with none of the host's git config, and without
+# the maintenance `git commit` starts in the background. That process takes and
+# drops objects/maintenance.lock after commit returns: a write in the tree, so a
+# second plan sees a new fingerprint and asks git again. Under load it hit 108
+# of 720 fresh repositories (git 2.56.1) and failed the past-the-horizon test on
+# CI (dotfiles#2230); with maintenance.auto=false, 0 of 720.
 _GIT_ENV = {**{k: v for k, v in os.environ.items() if not k.startswith("GIT_")},
             "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"}
 _GIT = ("git", "-c", "user.email=t@t", "-c", "user.name=t", "-c", "init.defaultBranch=main",
-        "-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false")
+        "-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false", "-c", "maintenance.auto=false")
 
 
 def _git(*args, cwd=None):
@@ -1292,6 +1297,12 @@ class GitScratchTests(_FixtureTree):
         self.assertEqual(plan.items, [], plan.kept)
         self.assertEqual(plan.kept.get(why), 1, plan.kept)
 
+    def _empty_root(self):
+        """Start a subtest with nothing under the scratch root, so a tree left by
+        an earlier subtest that failed is not in this one's plan."""
+        for name in os.listdir(self.root):
+            shutil.rmtree(os.path.join(self.root, name))
+
     def test_a_clean_pushed_clone_is_reclaimed(self):
         clone = self._clone()
         plan = self._plan()
@@ -1315,6 +1326,7 @@ class GitScratchTests(_FixtureTree):
     def test_uncommitted_work_is_kept(self):
         for change in ("untracked", "modified", "staged"):
             with self.subTest(change=change):
+                self._empty_root()
                 clone = self._clone(f"clone-{change}")
                 if change == "untracked":
                     Path(clone, "new.txt").write_text("y")
@@ -1323,7 +1335,6 @@ class GitScratchTests(_FixtureTree):
                     if change == "staged":
                         _git("add", "tracked.txt", cwd=clone)
                 self._kept_by(self._plan(), "git: uncommitted changes")
-                shutil.rmtree(clone)
 
     def test_a_stash_is_kept(self):
         clone = self._clone()
@@ -1470,11 +1481,11 @@ class GitScratchTests(_FixtureTree):
         """assume-unchanged and skip-worktree hide an edited file from status."""
         for flag in ("--assume-unchanged", "--skip-worktree"):
             with self.subTest(flag=flag):
+                self._empty_root()
                 clone = self._clone(f"clone{flag}")
                 _git("update-index", flag, "tracked.txt", cwd=clone)
                 Path(clone, "tracked.txt").write_text("y")
                 self._kept_by(self._plan(), "git: files status is told to skip")
-                shutil.rmtree(clone)
 
     def test_a_sparse_checkout_is_reclaimed(self):
         """A sparse checkout marks what it leaves out skip-worktree too, but
@@ -1534,6 +1545,7 @@ class GitScratchTests(_FixtureTree):
         which any read moves; here the write clock decides."""
         for n, reason in enumerate(self.SOFT):
             with self.subTest(reason=reason):
+                self._empty_root()
                 tree = self._holding(reason, n)
                 let_go = f'write-idle past the 14d horizon, so git\'s "{reason[5:]}" no longer keeps it'
                 for ahead, said in ((self.BEYOND, "1 tree(s) asked, 0 verdict(s) remembered"),
@@ -1547,7 +1559,6 @@ class GitScratchTests(_FixtureTree):
                 plan = self._plan(ahead=self.SHORT)
                 self._kept_by(plan, reason)
                 self.assertEqual(plan.evidence["git"], "0 tree(s) asked, 1 verdict(s) remembered")
-                shutil.rmtree(tree)
 
     def test_unpushed_commits_do_not_hide_a_worktree_registered_outside(self):
         """Planted negative: the outside worktree's git dir is in this tree.
@@ -1573,6 +1584,7 @@ class GitScratchTests(_FixtureTree):
         cases = [(own, dependent) for own in ("uncommitted", "no remote") for dependent in ("work tree", "worktree")]
         for n, (own, dependent) in enumerate(cases):
             with self.subTest(own=own, dependent=dependent):
+                self._empty_root()
                 tree = os.path.join(self.root, f"tree{n}")
                 a, b = os.path.join(tree, "a"), os.path.join(tree, "b")
                 outside = os.path.join(self.tmp.name, f"outside{n}")
@@ -1591,7 +1603,6 @@ class GitScratchTests(_FixtureTree):
                     _git("worktree", "add", "-q", "-b", "wt", outside, cwd=b)
                     why = "git: registers a worktree outside it"
                 self._kept_by(self._plan(ahead=self.BEYOND), why)
-                shutil.rmtree(tree)
 
     def test_a_separate_git_dir_is_kept_past_the_horizon(self):
         outside = os.path.join(self.tmp.name, "w")
