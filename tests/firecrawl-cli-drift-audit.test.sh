@@ -107,7 +107,7 @@ run_scanner() {
 }
 OUT=$(run_scanner); ST=$?
 status_is "$ST" 0 "matching help"
-contains "$OUT" "firecrawl-cli-drift: 37 subcommand(s), 41 flag(s), 18 default(s) checked, 0 finding(s)" "summary"
+contains "$OUT" "firecrawl-cli-drift: 38 subcommand(s), 41 flag(s), 18 default(s) checked, 0 finding(s)" "summary"
 omits "$OUT" "WARN" "matching help"
 omits "$OUT" "DO-NOT-PRINT" "settings values stay private"
 OUT=$(DRIFT_FIXTURE="alias" run_scanner); ST=$?
@@ -233,6 +233,29 @@ PY
 ); ST=$?
 status_is "$ST" 0 'real vendor help tokenizes'
 contains "$OUT" 'OK' 'real vendor help assertions'
+
+# The shipped map against the vendor's real help: a stand-in vendor serves the help
+# captured from firecrawl 1.29.0, so the map must audit clean against it. Planted
+# negative: the same map without `update` (the 1.26.25-era map) must trip on it.
+FIX129=$REPO/tests/fixtures/firecrawl-cli/vendor-help-1.29.0
+mkdir -p "$TMP/vh129"
+{
+  printf '#!/bin/sh\n'
+  printf 'name=\nfor a in "$@"; do [ "$a" = --help ] && break; name=${name:+$name-}$a; done\n'
+  printf 'exec cat "%s/${name:-root}.txt"\n' "$FIX129"
+} >"$TMP/vh129/firecrawl"
+chmod +x "$TMP/vh129/firecrawl"
+OUT=$(PATH="$TMP/vh129:/usr/bin:/bin" "$PYTHON" "$SCANNER" --settings "$SETTINGS" 2>&1); ST=$?
+status_is "$ST" 0 'shipped map audits clean against real 1.29.0 help'
+contains "$OUT" ', 0 finding(s)' 'shipped map against 1.29.0 help has no findings'
+"$PYTHON" -c 'import json, sys
+d = json.load(open(sys.argv[1]))
+d["command_groups"][""].remove("update")
+json.dump(d, open(sys.argv[2], "w"))' "$MAP" "$TMP/map-without-update.json"
+OUT=$(PATH="$TMP/vh129:/usr/bin:/bin" "$PYTHON" "$SCANNER" --settings "$SETTINGS" --verb-map "$TMP/map-without-update.json" 2>&1); ST=$?
+status_is "$ST" 1 'map without update trips on real 1.29.0 help'
+contains "$OUT" "new subcommand 'update'; update the verb map" 'planted negative names the new subcommand'
+count_is "$OUT" 1 'planted negative has exactly one finding'
 
 echo "firecrawl-cli-drift-audit: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]

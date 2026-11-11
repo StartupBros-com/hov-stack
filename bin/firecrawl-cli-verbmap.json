@@ -1,7 +1,8 @@
 {
   "schema_version": 1,
-  "vendor_version": "1.26.25",
+  "vendor_version": "1.29.0",
   "notes": [
+    "vendor_version is the release this map was last checked against, not a pin: firecrawl 1.27.0 and later update themselves, so each later release that changes the help covered here shows up as a doctor drift finding until the map is updated.",
     "Hand-maintained from the wrapper registry and vendor_arguments; raw passthrough has no fixed flag contract.",
     "Null means the vendor help states no default; it does not assert an API default.",
     "Scrape and parse --only-main-content name the API default without stating a CLI default.",
@@ -46,6 +47,7 @@
       "env",
       "credit-usage",
       "doctor",
+      "update",
       "version",
       "help"
     ],

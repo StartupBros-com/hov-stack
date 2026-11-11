@@ -16,7 +16,7 @@ installer fan-out into every agent tree and default-on telemetry.
 Local changes:
 
 - Every command retargeted to the `firecrawl-cli gov` wrapper verb (API-direct,
-  free, keyless; the vendor is pinned to 1.26.25 and the wrapper remains API-direct).
+  free, keyless; the wrapper stays API-direct whichever vendor release is installed).
 - Filters named per the wrapper's flag spelling (`--court-type`, `--cites`,
   `--domain`, `--jurisdiction`, `--court`), with the court-type enum listed.
 - Added the envelope location (`data.data.web[]`), the 24,576-character body
