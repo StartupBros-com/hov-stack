@@ -2,28 +2,44 @@
 """hov: fleet mailbox for coding agents. Stdlib only.
 
 Decision record: docs/decisions/2026-11-10-fleet-interaction-layer.md.
-This file is PR 1 of hov-stack#529: a per-host SQLite/FTS5 mailbox, the
-send/inbox/thread/search/ls commands, and the Claude Code hook entry point.
-Delivery into a session is hook text and nothing else: the hook returns
-`hookSpecificOutput.additionalContext` and no other key.
+This file is PRs 1 and 2 of hov-stack#529: a per-host SQLite/FTS5 mailbox,
+the send/inbox/thread/search/ls commands, the Claude Code hook entry point,
+and the cross-host link (`hov link`, `hov relay`) that carries mail between
+two hosts' mailboxes over one outbound ssh session. Delivery into a session
+is hook text and nothing else: the hook returns
+`hookSpecificOutput.additionalContext` and no other key. The link inserts
+rows and never runs anything a row says.
 """
 
 from __future__ import annotations
 
 import argparse
+import collections
 import json
 import os
+import queue
 import shlex
 import shutil
+import signal
 import socket
 import sqlite3
 import subprocess
 import sys
+import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-VERSION = "0.1.0"
+
+def read_version() -> str:
+    """The plugin's VERSION file, read through the symlink both hosts run `hov` from (0.1.1 shipped a constant that lagged it)."""
+    try:
+        return (Path(__file__).resolve().parent.parent / "VERSION").read_text(encoding="utf-8").strip() or "0.0.0"
+    except OSError:
+        return "0.0.0"
+
+
+VERSION = read_version()
 KINDS = ("note", "task", "handoff", "reply", "status")
 IMPORTANCE = ("low", "normal", "high", "urgent")
 BODY_CAP = 4000
@@ -134,6 +150,24 @@ CREATE TABLE IF NOT EXISTS sessions (
   first_seen INTEGER NOT NULL,
   last_seen INTEGER NOT NULL,
   last_lookup INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS relay_log (
+  msg_id TEXT NOT NULL,
+  peer TEXT NOT NULL,
+  direction TEXT NOT NULL,
+  ts INTEGER NOT NULL,
+  PRIMARY KEY (msg_id, peer)
+);
+CREATE TABLE IF NOT EXISTS peers (
+  host TEXT PRIMARY KEY,
+  role TEXT NOT NULL,
+  via TEXT NOT NULL,
+  state TEXT NOT NULL,
+  first_seen INTEGER NOT NULL,
+  last_hello INTEGER NOT NULL,
+  last_seen INTEGER NOT NULL,
+  last_ack INTEGER NOT NULL DEFAULT 0,
+  last_in INTEGER NOT NULL DEFAULT 0
 );
 """
 
@@ -265,6 +299,14 @@ def cmd_send(a: argparse.Namespace) -> int:
             )
     for mid, addr in zip(ids, a.to):
         log(f"send id={mid} from={me.addr} to={addr} kind={a.kind} thread={a.thread or ids[0]}")
+    remote = {parse_addr(x)[0] for x in a.to} - {me.host, "*"}
+    if remote:
+        peers = con.execute("SELECT host, role FROM peers").fetchall()
+        known = {r["host"] for r in peers}
+        hub = any(r["role"] == "hub" for r in peers)
+        for h in sorted(remote - known):
+            if not hub:
+                print(f"hov send: no link to host {h!r} has connected yet; the message waits here until one does", file=sys.stderr)
     if a.json:
         print(json.dumps({"ids": ids, "thread": a.thread or ids[0], "from": me.addr}))
     else:
@@ -364,19 +406,29 @@ def cmd_ls(a: argparse.Namespace) -> int:
         name = r.get("name") or (r.get("sessionId") or "")[:8]
         seen.add(name)
         me = Me(host, name, r.get("sessionId"), "agents")
-        out.append({"addr": me.addr, "session_id": r.get("sessionId"), "state": r.get("state"), "status": r.get("status"), "cwd": r.get("cwd"), "unread": len(unread_for(con, me))})
+        out.append({"kind": "session", "addr": me.addr, "session_id": r.get("sessionId"), "state": r.get("state"), "status": r.get("status"), "cwd": r.get("cwd"), "unread": len(unread_for(con, me))})
     for r in con.execute("SELECT DISTINCT to_host AS h, to_name AS n FROM messages UNION SELECT DISTINCT from_host, from_name FROM messages"):
         if r["n"] in ("*",) or (r["h"] == host and r["n"] in seen):
             continue
         me = Me(r["h"], r["n"], None, "mailbox")
-        out.append({"addr": me.addr, "session_id": None, "state": None, "status": None, "cwd": None, "unread": len(unread_for(con, me)) if r["h"] == host else None})
+        out.append({"kind": "mailbox", "addr": me.addr, "session_id": None, "state": None, "status": None, "cwd": None, "unread": len(unread_for(con, me)) if r["h"] == host else None})
+    links = []
+    for r in con.execute("SELECT * FROM peers ORDER BY host"):
+        links.append({
+            "kind": "link", "addr": f"{r['host']}:*", "host": r["host"], "role": r["role"], "via": r["via"], "state": r["state"],
+            "last_hello": iso(r["last_hello"]), "last_seen": iso(r["last_seen"]),
+            "last_ack": iso(r["last_ack"]) if r["last_ack"] else None, "last_in": iso(r["last_in"]) if r["last_in"] else None,
+            "session_id": None, "status": None, "cwd": None, "unread": None,
+        })
     if a.json:
-        print(json.dumps(out))
+        print(json.dumps(out + links))
     else:
         for o in out:
             st = f"{o['state']}/{o['status']}" if o["state"] else "-"
             un = "-" if o["unread"] is None else str(o["unread"])
             print(f"{o['addr']:40} {st:18} unread={un}")
+        for o in links:
+            print(f"link {o['host']:35} {o['role']}/{o['state']:13} hello={o['last_hello']} ack={o['last_ack'] or '-'} in={o['last_in'] or '-'}")
     return 0
 
 
@@ -482,6 +534,433 @@ def cmd_hook(a: argparse.Namespace) -> int:
     sys.stdout.write(json.dumps(hook_output(event, text)))
     return 0
 
+# ---------------------------------------------------------------- link (PR 2)
+#
+# One outbound ssh session per peer carries mail both ways as newline-delimited JSON. The initiating end
+# (`hov link HOST`, the hub) runs `hov relay` on HOST through ssh and speaks to its stdio; nothing listens
+# anywhere. Every row crosses once per peer: the receiver inserts the row and its inbound mark in one
+# transaction, commits, and only then acks; the sender records the ack in `relay_log`, which doubles as the
+# echo guard (a row received from a peer is never sent back to it). Mail written while the link is down waits
+# in the local mailbox and crosses when the link returns. A hub forwards to peer P what is addressed to P or to
+# `*`; a leaf forwards to its hub everything not addressed to itself, so two leaves reach each other through
+# the hub. The wire carries rows; nothing a row says is ever run.
+
+PROTO = 1
+MSG_FIELDS = ("id", "ts", "origin_host", "from_host", "from_name", "to_host", "to_name", "thread_id", "kind", "importance", "subject", "body", "meta")
+REMOTE_CMD_DEFAULT = "~/.local/bin/hov relay"
+SSH_OPTS = (
+    "-T", "-o", "BatchMode=yes", "-o", "ConnectTimeout=15", "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=3",
+    # multiplexing off: a shared master from an interactive shell must not carry, or outlive, the unit's session
+    "-o", "ControlMaster=no", "-o", "ControlPath=none",
+)
+LINE_CAP = 4 * 1024 * 1024
+BATCH = 200
+INFLIGHT_CAP = 1000
+RESEND_AFTER_MS = 30_000
+HELLO_TIMEOUT_MS = 60_000
+SHORT_LINK_MS = 10_000
+BACKOFF_MAX_S = 60
+
+
+def _env_number(name: str, default: float, floor: float) -> float:
+    try:
+        return max(floor, float(os.environ.get(name) or default))
+    except ValueError:
+        return default
+
+
+def coerce_msg(m: object) -> tuple[tuple | None, str | None]:
+    """A wire row as a tuple in MSG_FIELDS order, or the reason it is refused. Unknown kinds and importances fold
+    to the defaults, an over-long subject is cut; a refused row is nacked so the sender stops offering it."""
+    if not isinstance(m, dict):
+        return None, "not-an-object"
+    out: list = []
+    for k in MSG_FIELDS:
+        v = m.get(k)
+        if k == "ts":
+            if isinstance(v, bool) or not isinstance(v, int) or v < 0:
+                return None, "bad-ts"
+        elif k == "meta":
+            if v is None:
+                v = "{}"
+            elif isinstance(v, dict):
+                v = json.dumps(v)
+            if not isinstance(v, str) or len(v) > 65536:
+                return None, "bad-meta"
+        else:
+            if not isinstance(v, str):
+                return None, f"bad-{k}"
+            if k in ("id", "origin_host", "from_host", "to_host") and not 1 <= len(v) <= 64:
+                return None, f"bad-{k}"
+            if k in ("from_name", "to_name", "thread_id") and not 1 <= len(v) <= 200:
+                return None, f"bad-{k}"
+            if k == "kind" and v not in KINDS:
+                v = "note"
+            if k == "importance" and v not in IMPORTANCE:
+                v = "normal"
+            if k == "subject":
+                v = v[:1000]
+            if k == "body" and len(v) > 1_000_000:
+                return None, "body-too-long"
+        out.append(v)
+    return tuple(out), None
+
+
+class Wire:
+    """One end of a link. Lines come in on `inp` and go out on `out`; every line is flushed as it is written.
+    All database work runs on the thread that calls run(); the reader thread only queues raw lines, so no
+    write transaction is ever open across pipe I/O."""
+
+    def __init__(self, con: sqlite3.Connection, role: str, via: str, inp, out, once: bool, tag: str):
+        self.con, self.role, self.via, self.inp, self.out, self.once, self.tag = con, role, via, inp, out, once, tag
+        self.me = local_host()
+        self.peer: str | None = None
+        self.peer_role: str | None = None
+        self.q: queue.Queue = queue.Queue()
+        self.inflight: dict[str, int] = {}
+        self.self_idle = False
+        self.peer_idle = False
+        self.started = self.last_rx = self.last_tx = now_ms()
+        self.stop = threading.Event()
+        self.reason = "eof"
+        self.ok = False
+        self.reader: threading.Thread | None = None
+
+    # -- I/O
+
+    def _read(self) -> None:
+        # Raw reads on the descriptor, never through the buffered object: a daemon thread blocked inside
+        # `BufferedReader.readline` holds that object's lock, and a process that exits while it is blocked (the
+        # peer said bye, or a bad hello stopped the loop with stdin still open) aborts at interpreter shutdown
+        # with "could not acquire lock for <_io.BufferedReader name='<stdin>'>".
+        fd = self.inp.fileno()
+        buf = bytearray()
+        try:
+            while True:
+                chunk = os.read(fd, 65536)
+                if not chunk:
+                    break
+                buf += chunk
+                while True:
+                    nl = buf.find(b"\n")
+                    if nl < 0:
+                        break
+                    if nl >= LINE_CAP:
+                        self.q.put(("oversize", None))
+                        return
+                    self.q.put(("line", bytes(buf[: nl + 1])))
+                    del buf[: nl + 1]
+                if len(buf) > LINE_CAP:
+                    self.q.put(("oversize", None))
+                    return
+        except OSError:
+            pass
+        if buf:
+            self.q.put(("line", bytes(buf)))
+        self.q.put(("eof", None))
+
+    def send(self, obj: dict) -> bool:
+        try:
+            self.out.write((json.dumps(obj, separators=(",", ":")) + "\n").encode("utf-8"))
+            self.out.flush()
+            self.last_tx = now_ms()
+            return True
+        except (OSError, ValueError):
+            self.reason = "write-failed"
+            self.stop.set()
+            return False
+
+    def fail(self, reason: str, detail: str) -> None:
+        self.reason = reason
+        log(f"{self.tag} peer={self.peer or '?'} {reason} via={self.via} {detail}")
+        self.stop.set()
+
+    # -- protocol
+
+    def run(self) -> str:
+        self.reader = threading.Thread(target=self._read, daemon=True)
+        self.reader.start()
+        if not self.send({"t": "hello", "proto": PROTO, "host": self.me, "role": self.role, "ver": VERSION}):
+            return self.reason
+        poll = _env_number("HOV_RELAY_POLL_MS", 1000, 20) / 1000
+        ping_ms = _env_number("HOV_RELAY_PING_S", 20, 1) * 1000
+        while not self.stop.is_set():
+            try:
+                kind, raw = self.q.get(timeout=poll)
+            except queue.Empty:
+                kind, raw = None, None
+            if kind == "eof":
+                self.reason = "eof"
+                break
+            if kind == "oversize":
+                self.fail("oversize-line", f"over {LINE_CAP} bytes")
+                break
+            if kind == "line":
+                self.last_rx = now_ms()
+                self.handle(raw)
+                if self.stop.is_set() or not self.q.empty():
+                    continue
+            if self.peer is None:
+                if now_ms() - self.last_rx > HELLO_TIMEOUT_MS:
+                    self.fail("hello-timeout", f"nothing valid in {HELLO_TIMEOUT_MS // 1000}s")
+                    break
+                continue
+            self.pump()
+            if self.stop.is_set():
+                break
+            if self.once and self.self_idle and self.peer_idle:
+                self.send({"t": "bye"})
+                self.reason = "done"
+                break
+            if now_ms() - self.last_rx > 3 * ping_ms:
+                self.fail("peer-silent", f"no traffic for {3 * ping_ms / 1000:.0f}s")
+                break
+            if now_ms() - self.last_tx > ping_ms:
+                self.send({"t": "ping"})
+        return self.reason
+
+    def handle(self, raw: bytes) -> None:
+        line = raw.decode("utf-8", "replace").strip()
+        if not line:
+            return
+        try:
+            obj = json.loads(line)
+            if not isinstance(obj, dict):
+                raise ValueError("not an object")
+        except ValueError:
+            # before hello: login banners, shell noise, a runtime manager's warnings; after it: logged and skipped
+            log(f"{self.tag} peer={self.peer or '?'} skipped-junk via={self.via} line={line[:200]!r}")
+            return
+        t = obj.get("t")
+        if self.peer is None:
+            if t != "hello":
+                self.fail("no-hello", f"first message was {t!r}")
+                return
+            self.on_hello(obj)
+        elif t == "msg":
+            self.on_msg(obj.get("m"))
+        elif t == "ack":
+            self.on_ack(obj.get("id"), None)
+        elif t == "nack":
+            self.on_ack(obj.get("id"), str(obj.get("reason") or "unspecified"))
+        elif t == "ping":
+            self.send({"t": "pong"})
+        elif t == "idle":
+            self.peer_idle = True
+        elif t == "bye":
+            self.reason = "bye"
+            self.stop.set()
+        elif t not in ("pong", "hello"):
+            log(f"{self.tag} peer={self.peer} unknown-type t={t!r}")
+
+    def on_hello(self, obj: dict) -> None:
+        host, proto, role = obj.get("host"), obj.get("proto"), obj.get("role") or "leaf"
+        if not isinstance(host, str) or not 1 <= len(host) <= 64 or ":" in host or "*" in host or host != host.strip():
+            self.fail("bad-hello", f"host={host!r}")
+            return
+        if proto != PROTO:
+            self.fail("proto-mismatch", f"peer proto={proto!r} ours={PROTO}")
+            return
+        if host == self.me:
+            self.fail("loop", f"peer announced our own label {host!r}; a link must not point at this host")
+            return
+        self.peer, self.peer_role = host, role if role in ("hub", "leaf") else "leaf"
+        ts = now_ms()
+        with self.con:
+            self.con.execute(
+                "INSERT INTO peers(host, role, via, state, first_seen, last_hello, last_seen) VALUES (?,?,?,?,?,?,?)"
+                " ON CONFLICT(host) DO UPDATE SET role=excluded.role, via=excluded.via, state='up', last_hello=excluded.last_hello, last_seen=excluded.last_seen",
+                (self.peer, self.peer_role, self.via, "up", ts, ts, ts),
+            )
+        self.ok = True
+        log(f"{self.tag} peer={self.peer} hello role={self.peer_role} proto={proto} ver={obj.get('ver')!r} via={self.via}")
+
+    def candidates(self) -> list[sqlite3.Row]:
+        guard = " AND NOT EXISTS (SELECT 1 FROM relay_log r WHERE r.msg_id=m.id AND r.peer=?) ORDER BY m.ts, m.id LIMIT ?"
+        if self.role == "hub":
+            return self.con.execute("SELECT m.* FROM messages m WHERE m.to_host IN (?, '*')" + guard, (self.peer, self.peer, BATCH)).fetchall()
+        return self.con.execute("SELECT m.* FROM messages m WHERE m.to_host != ?" + guard, (self.me, self.peer, BATCH)).fetchall()
+
+    def pump(self) -> None:
+        ts = now_ms()
+        for mid, sent in list(self.inflight.items()):
+            # an unacked id leaves the in-flight set after RESEND_AFTER_MS; the receiver's INSERT OR IGNORE makes a resend harmless
+            if ts - sent > RESEND_AFTER_MS:
+                del self.inflight[mid]
+        room = INFLIGHT_CAP - len(self.inflight)
+        if room <= 0:
+            return
+        rows = [r for r in self.candidates() if r["id"] not in self.inflight]
+        if not rows:
+            if not self.inflight and not self.self_idle:
+                self.self_idle = True
+                self.send({"t": "idle"})
+            return
+        self.self_idle = False
+        for r in rows[:room]:
+            if not self.send({"t": "msg", "m": {k: r[k] for k in MSG_FIELDS}}):
+                return
+            self.inflight[r["id"]] = ts
+
+    def on_msg(self, m: object) -> None:
+        row, err = coerce_msg(m)
+        if row is None:
+            mid = m.get("id") if isinstance(m, dict) else None
+            log(f"{self.tag} peer={self.peer} nack id={mid!r} reason={err}")
+            self.send({"t": "nack", "id": mid if isinstance(mid, str) else None, "reason": err})
+            return
+        self.peer_idle = False
+        ts = now_ms()
+        with self.con:
+            cur = self.con.execute(
+                "INSERT OR IGNORE INTO messages(id, ts, origin_host, from_host, from_name, to_host, to_name, thread_id, kind, importance, subject, body, meta)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                row,
+            )
+            self.con.execute("INSERT OR IGNORE INTO relay_log(msg_id, peer, direction, ts) VALUES (?,?,'in',?)", (row[0], self.peer, ts))
+            self.con.execute("UPDATE peers SET last_in=?, last_seen=? WHERE host=?", (ts, ts, self.peer))
+        # committed above; the ack goes out only now
+        self.send({"t": "ack", "id": row[0]})
+        log(f"{self.tag} in id={row[0]} peer={self.peer} from={row[3]}:{row[4]} to={row[5]}:{row[6]} new={cur.rowcount == 1}")
+
+    def on_ack(self, mid: object, nack_reason: str | None) -> None:
+        if not isinstance(mid, str) or not mid:
+            return
+        self.inflight.pop(mid, None)
+        ts = now_ms()
+        with self.con:
+            self.con.execute(
+                "INSERT OR IGNORE INTO relay_log(msg_id, peer, direction, ts) VALUES (?,?,?,?)",
+                (mid, self.peer, "nack" if nack_reason else "out", ts),
+            )
+            self.con.execute("UPDATE peers SET last_ack=?, last_seen=? WHERE host=?", (ts, ts, self.peer))
+        if nack_reason:
+            log(f"{self.tag} out-rejected id={mid} peer={self.peer} reason={nack_reason}")
+        else:
+            log(f"{self.tag} out id={mid} peer={self.peer}")
+
+    def close(self) -> None:
+        if self.peer:
+            with self.con:
+                self.con.execute("UPDATE peers SET state='down', last_seen=? WHERE host=?", (now_ms(), self.peer))
+        log(f"{self.tag} peer={self.peer or '?'} closed reason={self.reason} up={(now_ms() - self.started) / 1000:.1f}s via={self.via}")
+
+
+def cmd_relay(a: argparse.Namespace) -> int:
+    """The far end of a link: the wire on stdin/stdout. Exits when stdin closes, the peer says bye, or a signal arrives."""
+    con = db()
+    w = Wire(con, a.role, "stdio", sys.stdin.buffer, sys.stdout.buffer, once=False, tag="relay")
+
+    def _sig(signum, _frame):
+        w.reason = f"signal-{signum}"
+        w.stop.set()
+
+    for s in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):
+        signal.signal(s, _sig)
+    reason = w.run()
+    w.close()
+    return 0 if reason in ("eof", "bye", "done") or reason.startswith("signal-") else 1
+
+
+def _drain(stream, sink: collections.deque) -> None:
+    """The child's stderr, last lines kept, read on the raw descriptor like Wire._read."""
+    fd = stream.fileno()
+    buf = bytearray()
+    try:
+        while True:
+            chunk = os.read(fd, 65536)
+            if not chunk:
+                break
+            buf += chunk
+            while True:
+                nl = buf.find(b"\n")
+                if nl < 0:
+                    break
+                sink.append(bytes(buf[:nl]).decode("utf-8", "replace").rstrip())
+                del buf[: nl + 1]
+            if len(buf) > 65536:
+                sink.append(bytes(buf).decode("utf-8", "replace").rstrip())
+                buf.clear()
+    except OSError:
+        pass
+    if buf:
+        sink.append(bytes(buf).decode("utf-8", "replace").rstrip())
+
+
+def cmd_link(a: argparse.Namespace) -> int:
+    """Keep one link to HOST up: spawn ssh (or --via), speak the wire to its stdio, reconnect with capped backoff."""
+    con = db()
+    if a.via:
+        argv, via = shlex.split(a.via), a.via[:200]
+    else:
+        argv, via = ["ssh", *SSH_OPTS, a.host, a.remote_cmd], f"ssh {a.host}"
+    stop = threading.Event()
+    live: dict = {}
+
+    def _sig(signum, _frame):
+        stop.set()
+        w = live.get("wire")
+        if w is not None:
+            w.reason = f"signal-{signum}"
+            w.stop.set()
+
+    for s in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):
+        signal.signal(s, _sig)
+    backoff, attempt = 1, 0
+    while not stop.is_set():
+        attempt += 1
+        log(f"link peer={a.host} connecting attempt={attempt} via={via}")
+        ok, short, reason = False, True, "spawn-failed"
+        try:
+            proc = subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        except OSError as e:
+            log(f"link peer={a.host} spawn-failed via={via} err={e}")
+        else:
+            errs: collections.deque = collections.deque(maxlen=20)
+            drain = threading.Thread(target=_drain, args=(proc.stderr, errs), daemon=True)
+            drain.start()
+            w = Wire(con, a.role, via, proc.stdout, proc.stdin, once=a.once, tag="link")
+            live["wire"] = w
+            reason = w.run()
+            try:
+                proc.stdin.close()
+            except OSError:
+                pass
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait()
+            # the child is gone, so its pipes drain to EOF; release the descriptors rather than leak three per attempt
+            for th in (w.reader, drain):
+                th.join(2)
+            for f in (proc.stdout, proc.stderr):
+                try:
+                    f.close()
+                except OSError:
+                    pass
+            w.close()
+            live.pop("wire", None)
+            ok, short = w.ok, now_ms() - w.started < SHORT_LINK_MS
+            tail = " | ".join(errs)
+            if not ok:
+                log(f"link peer={a.host} ended-before-hello reason={reason} exit={proc.returncode} stderr={tail!r}")
+            elif tail or proc.returncode:
+                log(f"link peer={a.host} child-exit={proc.returncode} stderr={tail!r}")
+        if a.once:
+            return 0 if ok and reason in ("done", "bye", "eof") else 1
+        if stop.is_set():
+            break
+        if reason in ("loop", "proto-mismatch"):
+            backoff = BACKOFF_MAX_S  # a configuration error: do not spin
+        elif ok and not short:
+            backoff = 1
+        else:
+            backoff = min(BACKOFF_MAX_S, backoff * 2)
+        log(f"link peer={a.host} retry-in={backoff}s")
+        stop.wait(backoff)
+    return 0
+
 # ---------------------------------------------------------------- main
 
 def build_parser() -> argparse.ArgumentParser:
@@ -519,9 +998,21 @@ def build_parser() -> argparse.ArgumentParser:
     q.add_argument("--json", action="store_true")
     q.set_defaults(fn=cmd_search)
 
-    l = sub.add_parser("ls", help="list reachable sessions and mailboxes on this host")
+    l = sub.add_parser("ls", help="list reachable sessions and mailboxes on this host, and the state of each link")
     l.add_argument("--json", action="store_true")
     l.set_defaults(fn=cmd_ls)
+
+    k = sub.add_parser("link", help="keep one outbound link to HOST up and carry mail both ways (store-and-forward)")
+    k.add_argument("host", help="ssh destination (a Host alias in ~/.ssh/config); the peer announces its own mail label")
+    k.add_argument("--role", choices=("hub", "leaf"), default="hub", help="hub forwards to the peer what is addressed to it or to *; leaf forwards everything not for itself")
+    k.add_argument("--once", action="store_true", help="connect once, carry what is pending both ways, then exit (0 when the peer answered)")
+    k.add_argument("--remote-cmd", default=REMOTE_CMD_DEFAULT, help=f"command ssh runs on HOST (default: {REMOTE_CMD_DEFAULT})")
+    k.add_argument("--via", default=None, help="run this local command instead of ssh and use its stdio as the wire (tests)")
+    k.set_defaults(fn=cmd_link)
+
+    r = sub.add_parser("relay", help="the far end of a link: speaks the wire on stdin/stdout (what `hov link` runs over ssh)")
+    r.add_argument("--role", choices=("leaf", "hub"), default="leaf")
+    r.set_defaults(fn=cmd_relay)
 
     w = sub.add_parser("whoami", help="show this caller's address")
     w.add_argument("--as", dest="as_name", default=None)

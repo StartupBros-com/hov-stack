@@ -1,0 +1,27 @@
+# hov mail link to one peer host: outbound ssh, store-and-forward (hov-stack#529, PR 2).
+#
+# Enable per peer, on the host that initiates (the hub):
+#   ln -s <plugin root>/systemd/hov-link@.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now hov-link@HOST.service
+# HOST is an ssh destination (a Host alias in ~/.ssh/config). The peer announces its own mail label in its
+# hello, so the alias and the label need not match. The far end needs `~/.local/bin/hov` at this version.
+#
+# network-online.target does not exist in the user manager, so there is no readiness target to order after;
+# the link retries with capped backoff (1 s doubling to 60 s) until ssh connects.
+
+[Unit]
+Description=hov mail link to %i (outbound ssh, store-and-forward)
+
+[Service]
+Type=simple
+# The user manager's stock PATH has no ~/.local/bin, which is where hov lives.
+Environment=PATH=%h/.local/bin:%h/.local/share/mise/shims:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=%h/.local/bin/hov link %i
+Restart=always
+RestartSec=10
+KillMode=control-group
+TimeoutStopSec=15
+
+[Install]
+WantedBy=default.target
