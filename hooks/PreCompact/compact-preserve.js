@@ -115,11 +115,13 @@
  *               the ledger shows no category losses without steering; or CC
  *               ships documented compaction-instruction config (upstream
  *               anthropics/claude-code#55905).
- * verified-at — 2.1.321 (re-run the marker test and bump this stamp when
- *               doctor check 24 flags a version change). 2.1.321: marker test
- *               re-run live (XYZZY-MARKER-7734 reached the summary); the hook-help
- *               string and the deny message/reason strings are still in the
- *               binary. The deny wiring itself is not re-derived from the bundle.
+ * verified-at — 2.1.322 (re-run the marker test and bump this stamp when
+ *               doctor check 24 flags a version change). 2.1.322: marker test
+ *               re-run live (XYZZY-MARKER-7734 reached the compact-summary record
+ *               itself, not just the hook's echoed output); the hook-help string
+ *               and the deny message/reason strings are still in the binary.
+ *               2.1.321 passed the same test. The deny wiring itself is not
+ *               re-derived from the bundle.
  *
  * WHY: compaction is the one place session state is rewritten by a model with
  * no standing guidance from this harness. The summarizer guesses what matters;
