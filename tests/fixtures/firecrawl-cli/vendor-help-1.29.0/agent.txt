@@ -1,0 +1,62 @@
+Usage: firecrawl agent [options] [command] <prompt-or-job-id>
+
+Run an AI agent to extract data from the web
+
+Arguments:
+  prompt-or-job-id              Natural language prompt describing data to
+                                extract, or job ID to check status
+
+Options:
+  --urls <urls>                 Comma-separated URLs to focus extraction on
+  --model <model>               Model to use: spark-2 (default). spark-1-mini
+                                and spark-1-pro are deprecated and run spark-2
+  --schema <json>               JSON schema for structured output (inline JSON
+                                string)
+  --schema-file <path>          Path to JSON schema file for structured output
+  --max-credits <number>        Maximum credits to spend (job fails if exceeded)
+  --webhook <url-or-json>       Webhook URL or webhook configuration
+  --status                      Check status of existing agent job (default:
+                                false)
+  --cancel                      Cancel active agent job by job ID (default:
+                                false)
+  --wait                        Wait for agent to complete before returning
+                                results (default: false)
+  --poll-interval <seconds>     Polling interval in seconds when waiting
+                                (default: 5)
+  --timeout <seconds>           Timeout in seconds when waiting (default: no
+                                timeout)
+  -k, --api-key <key>           Firecrawl API key (overrides global --api-key)
+  --api-url <url>               API URL (overrides global --api-url)
+  -o, --output <path>           Output file path (default: stdout)
+  --json                        Output as JSON format (default: false)
+  --pretty                      Pretty print JSON output (default: false)
+  --thread <threadId>           Continue an existing thread with this prompt as
+                                the next turn
+  --mode <mode>                 extract returns structured data; chat returns a
+                                text message (choices: "extract", "chat")
+  --effort <level>              Reasoning effort for the run (choices: "low",
+                                "medium", "high")
+  --alexandria                  Let the agent call Alexandria providers (implied
+                                by the flags below)
+  --no-alexandria               Keep the agent off Alexandria providers
+  --toolkits <slugs>            Comma-separated provider slugs the agent may use
+                                (up to 5; default: the whole catalog)
+  --max-calls <n>               Most provider calls the agent may make this turn
+                                (1-30)
+  --require-approval            Stop for approval before any paid provider call
+                                (needs --mode chat)
+  --approve <approvalId>        Approve the previous turn's pending approval
+                                (needs --thread)
+  --call-ids <ids>              With --approve: comma-separated call IDs to
+                                approve (default: all)
+  --always                      With --approve: stop asking for the rest of the
+                                thread
+  --decline <approvalId>        Decline the previous turn's pending approval
+                                (needs --thread)
+  --on-terms-required <action>  When a provider needs data terms the team has
+                                not accepted: skip it (default) or ask (choices:
+                                "skip", "ask")
+  -h, --help                    display help for command
+
+Commands:
+  thread [options] <threadId>   Show a thread and its runs, oldest turn first
