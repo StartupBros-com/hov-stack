@@ -303,6 +303,39 @@ class HovCase(unittest.TestCase):
         self.assertIn("deliver event=UserPromptSubmit session=" + SID_A, text)
         self.assertIn("me=testhost:alpha mode=full n=1", text)
 
+    def test_a_title_the_identity_rules_refuse_falls_back_to_the_short_id(self):
+        # a session titled with '<', '>' or a control character cannot be a mail name (the hook frame shows names);
+        # it keeps its 8-character id as its name, so it still sends without --as and is still reached
+        listing = Path(self.tmp.name) / "agents-odd.json"
+        listing.write_text(json.dumps([{"sessionId": SID_A, "name": "alpha -> beta <x>", "cwd": "/tmp/a"}]))
+        cmd = f"{shutil.which('cat')} {listing}"
+        odd = {"CLAUDE_CODE_SESSION_ID": SID_A, "HOV_AGENTS_CMD": cmd}
+        me = json.loads(self.hov("whoami", "--json", env_extra=odd).stdout)
+        self.assertEqual((me["name"], me["how"]), (SID_A[:8], "session-id, title refused"))
+        # it sends without --as, as its short id
+        self.hov("send", "--to", "beta", "from the oddly titled one", env_extra=odd)
+        out = json.dumps(self.hook("UserPromptSubmit", SID_B))
+        self.assertIn(f"from testhost:{SID_A[:8]}", out)
+        self.assertIn("from the oddly titled one", out)
+        # it is reached by its short id
+        self.hov("send", "--as", "beta", "--to", SID_A[:8], "back to you", env_extra={"HOV_AGENTS_CMD": cmd})
+        prompt = {"session_id": SID_A, "cwd": "/tmp/a", "permission_mode": "default", "hook_event_name": "UserPromptSubmit"}
+        got = json.dumps(self.hook_raw("UserPromptSubmit", prompt, env_extra={"HOV_AGENTS_CMD": cmd}))
+        self.assertIn("back to you", got)
+        # its title is not an address, and the refusal says what to use instead
+        res = self.hov("send", "--as", "beta", "--to", "alpha -> beta <x>", "nope", env_extra={"HOV_AGENTS_CMD": cmd}, check=False)
+        self.assertEqual(res.returncode, 2)
+        self.assertIn("8-character id", res.stderr)
+        res = self.hov("send", "--as", "a<b", "--to", "beta", "nope", check=False)
+        self.assertEqual(res.returncode, 2)
+        self.assertIn("pass --as with a plain name", res.stderr)
+        self.assertEqual(json.loads(self.hov("inbox", "--as", "beta", "--json", "--keep").stdout)["count"], 0)
+        # the listing shows the address that works and the short id, never the refused title
+        ls = self.hov("ls", env_extra={"HOV_AGENTS_CMD": cmd}).stdout
+        self.assertIn(f"testhost:{SID_A[:8]}", ls)
+        self.assertIn(f"id={SID_A[:8]}", ls)
+        self.assertNotIn("<x>", ls)
+
 
 if __name__ == "__main__":
     unittest.main()

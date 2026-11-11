@@ -1,8 +1,8 @@
 # hov
 
-Fleet mailbox for coding agents. Decision record: `docs/decisions/2026-11-10-fleet-interaction-layer.md`. Umbrella issue: hov-stack#529. This directory is PR 1 of that build order: one host, one mailbox, delivery into Claude Code sessions as hook text.
+Fleet mailbox for coding agents. Decision record: `docs/decisions/2026-11-10-fleet-interaction-layer.md`. Umbrella issue: hov-stack#529. This directory is PRs 1 and 2 of that build order: one mailbox per host, delivery into Claude Code sessions as hook text, and one outbound ssh link per peer host that carries mail between mailboxes.
 
-Stdlib Python 3.10+ with an SQLite that has FTS5 (3.12 on Ubuntu 24.04 does). No daemon, no listener, no settings edits. The plugin is inert until a host enables it; nothing here runs on its own.
+Stdlib Python 3.10+ with an SQLite that has FTS5 (3.12 on Ubuntu 24.04 does). No listener, no settings edits. The plugin is inert until a host enables it; nothing here runs on its own, and the link runs only where its user unit is enabled.
 
 ## Try it for one session
 
@@ -24,26 +24,50 @@ Observed the same day, with the plugin enabled through settings on two hosts: a 
 
 | Command | What it does |
 | --- | --- |
-| `hov send --to ADDR [--to ADDR] [--subject S] [--thread ID] [--kind note\|task\|handoff\|reply\|status] [--importance low\|normal\|high\|urgent] BODY` | Send. `ADDR` is `name`, `host:name`, `host:*` or `*`. `-` reads the body from stdin. |
+| `hov send --to ADDR [--to ADDR] [--subject S] [--thread ID] [--kind note\|task\|handoff\|reply\|status] [--importance low\|normal\|high\|urgent] BODY` | Send. `ADDR` is `name`, `host:name`, `host:*` or `*` (every session on every linked host). `-` reads the body from stdin. Mail for another host waits here while its link is down; on a host with no hub, a send to a host no link has reached says so. A sender name, address part or thread id with a control character, `<` or `>` is refused (exit 2). |
 | `hov inbox [--all] [--keep] [--json]` | Your unread mail; marks it read unless `--keep`. |
 | `hov thread ID` | Every message in a thread. |
 | `hov search QUERY` | FTS5 full-text search over subject and body. |
-| `hov ls` | Sessions on this host (from `claude agents --json`) and known mailboxes, with unread counts. |
+| `hov ls` | Sessions on this host (from `claude agents --json`) and known mailboxes, with unread counts, then one `link` line per peer host with its role, state and last hello, ack and inbound times. |
 | `hov whoami` | Your address and how it was resolved. |
 | `hov hook EVENT` | The hook entry point; reads Claude Code's hook JSON on stdin. |
+| `hov link HOST [--once] [--expect-host LABEL] [--role hub\|leaf] [--remote-cmd CMD] [--via CMD]` | Keep one outbound link to `HOST` (an ssh alias) up and carry mail both ways; reconnects with capped backoff. The peer must announce `HOST`, or `--expect-host LABEL`, as its mail label. `--once` carries what is pending and exits 0 when the peer answered and both ends went idle. `--via` runs a local command instead of ssh (tests). |
+| `hov relay [--role leaf\|hub]` | The far end of a link: speaks the wire on stdin/stdout. What `hov link` runs on `HOST` through ssh. |
 
-Identity: `--as NAME`, else `$HOV_AS`, else the session named in `claude agents --json` for `$CLAUDE_CODE_SESSION_ID` (Claude Code exports it into tool shells), else the first eight characters of the session id, else `shell`.
+Identity: `--as NAME`, else `$HOV_AS`, else the session named in `claude agents --json` for `$CLAUDE_CODE_SESSION_ID` (Claude Code exports it into tool shells), else the first eight characters of the session id, else `shell`. A session title the identity rules refuse (a control character, `<` or `>`, over 200 characters) is not a mail name: that session is named by its first eight characters instead, which `hov ls` shows beside every session, and it is reached by that id.
 
-State: `$HOV_STATE_DIR`, else `$XDG_STATE_HOME/hov`, else `~/.local/state/hov`. Files: `mail.db` (WAL) and `hov.log` (one line per send, read and delivery). `$HOV_HOST` overrides the host label; `$HOV_AGENTS_CMD` overrides the agents-list command (tests point it at a fixture).
+State: `$HOV_STATE_DIR`, else `$XDG_STATE_HOME/hov`, else `~/.local/state/hov`. Files: `mail.db` (WAL) and `hov.log` (one line per send, read, delivery, link event and row carried). `$HOV_HOST` overrides the host label, which is otherwise the short hostname and is what a peer's mail is addressed to; `$HOV_AGENTS_CMD` overrides the agents-list command (tests point it at a fixture); `$HOV_RELAY_POLL_MS` (default 1000) and `$HOV_RELAY_PING_S` (default 20) tune the link.
 
 ## What the hook does, and does not do
 
 - Returns `{"hookSpecificOutput": {"hookEventName": ..., "additionalContext": ...}}` and nothing else. Never `permissionDecision`, `decision` or `continue`. `tests/test_hov.py` asserts the key set.
-- Frames mail as untrusted peer text, caps bodies at 4,000 characters, removes slash-command-shaped lines and neutralises `<hov-mail>` tags inside a body.
+- Frames mail as untrusted peer text, caps bodies at 4,000 characters, removes slash-command-shaped lines and neutralises `<hov-mail>` tags inside a body. Every identity field it shows (host, name, id, thread id) passes a filter that replaces control characters and angle brackets, so no row can close the frame or place text outside it, and the reply hint is shell-quoted. The same fields are validated on `hov send` and on every row that arrives over a link.
 - In a session whose hook stdin says `permission_mode: bypassPermissions`, injects sender and count only; the body arrives through `hov inbox`.
 - When the hook stdin states no `permission_mode` at all (Claude Code's `SessionStart` payload), delivers nothing and records nothing, so the first event that states the mode delivers in it.
 - Delivers each message to a session once (`deliveries` table), and marks it read for the recipient name when the body was injected.
 - Stays silent (empty stdout) when there is no mail or no session id, and logs rather than fails on a database error.
+
+## The cross-host link
+
+`hov link HOST` runs `~/.local/bin/hov relay` on `HOST` through `ssh -T` and speaks newline-delimited JSON over its stdio. Nothing listens anywhere, and the wire carries rows; nothing a row says is ever run. The host that initiates is the hub; the far end is a leaf. A hub forwards to a peer what is addressed to that peer or to `*`; a leaf forwards to its hub everything not addressed to itself, so two leaves reach each other through the hub.
+
+Every row crosses once per peer. The receiver inserts the row and its inbound mark (`relay_log`) in one transaction, commits, and only then acks; the sender records the ack in its own `relay_log`. That table doubles as the echo guard: a row received from a peer is never offered back to it. An ack lost in flight means the row is offered again after thirty seconds, and the receiver's `INSERT OR IGNORE` keeps one copy. Mail written while the link is down waits in the local mailbox and crosses when the link returns, in both directions, which replaces the reverse ssh path the decision record left open; the residual is latency, since a message written on the far host while the link is down arrives at the next connect rather than at once.
+
+The link binds the peer's label to the host it dialed: the peer must announce `HOST` (or `--expect-host LABEL`) as its mail label and any other label is refused (`label-mismatch`), since that label decides which rows the peer is handed. It also refuses a peer that announces the hub's own label (a unit pointed at the wrong alias), a peer on another protocol number, a row that fails validation (nacked, recorded, never offered again: a timestamp within what SQLite and `datetime` both hold, encodable strings, no control character or angle bracket in any host, name, id or thread id), and a row that names this host as its origin or sender (`spoof`). `origin_host` and `from_host` on a relayed row are what the peer asserted; the ssh key is what authenticates the peer. A row too large for one wire line (4 MiB) is refused on the sending side, recorded as a local nack and never closes the link, so the rows behind it still cross. Lines that are not JSON, before or after the hello, are logged and skipped and never count as traffic, so a login banner or a runtime manager's warning on the remote's stdout does not break the link, while a peer that only ever sends noise still hits the hello timeout. When the remote command ends before saying hello, the log carries its exit code and the last lines of its stderr. `peers` holds one row per peer with its state; `hov ls` prints it.
+
+`systemd/hov-link@.service` is the user unit, one instance per peer alias, enabled on the hub only:
+
+```bash
+ln -s "$(pwd)/plugins/hov/systemd/hov-link@.service" ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now hov-link@HOST.service
+```
+
+The unit sets the `PATH` the user manager lacks (`~/.local/bin` is not on it), and the ssh command pins `ControlMaster=no` so a shared master from an interactive shell never carries or outlives the unit's session. `network-online.target` does not exist in the user manager; the link retries with backoff (1 s doubling to 60 s) instead. The far host needs `~/.local/bin/hov` at this version and nothing else: no unit, no listener, no settings change.
+
+What the tests prove and what they do not: `tests/test_relay.py` runs two real `hov` processes against each other over a pipe (`--via`), so the round trips, store-and-forward, dedup, echo guard, loop guard and label binding are observed on bytes that crossed between processes and on rows in two SQLite files, and the row with its inbound mark is in the receiver's database by the time its ack is read. Forwarding through a hub to a third host is proven the same way, with three mailboxes on one machine. Delivery of a relayed message into a session by the hook is proven on the leaf's mailbox with the agents fixture. A model reading relayed mail on the far host through its own Claude Code session is not proven here.
+
+Observed on 2026-11-11 over real ssh between two hosts on one tailnet, with this branch's script staged on the far host under `/tmp` and both hosts' live mailboxes (checked first: nothing in either backlog was addressed to the other host). One message was written on each host to a unique recipient on the other, and each `hov send` printed the waits-here hint. One `hov link HOST --once` from the hub exchanged hellos, carried both rows and exited 0 in 0.2 s; each inbox then held the other host's message with its `origin_host` intact, and both `relay_log` tables held one `in` and one `out` row. A second `--once` connect, run as a transient user unit with the unit's `PATH` through `systemd-run --user`, exchanged hellos and carried nothing: both row counts were unchanged. The far host had only the staged script and `/usr/bin/python3` in a non-login ssh shell, and its hello carried `ver='0.0.0'`, since a loose copy has no VERSION file beside it. Repeated with the final script (label binding, identity validation on send and arrival, local refusal of oversize rows): a run with `--expect-host elsewhere` was refused as `label-mismatch` with exit 1, both inboxes empty and both row counts unchanged; the same command without it crossed one message each way, exit 0 in 0.2 s, and the transient-unit connect again carried nothing.
 
 ## Tests
 
@@ -51,10 +75,12 @@ State: `$HOV_STATE_DIR`, else `$XDG_STATE_HOME/hov`, else `~/.local/state/hov`. 
 plugins/hov/tests/ci.sh
 ```
 
-That is what `release/scripts/plugin-ci.sh plugins/hov` runs in CI: the hook manifest check (three events, commands pointing at `scripts/hov`, a timeout on each), the VERSION match, then the unit tests.
+That is what `release/scripts/plugin-ci.sh plugins/hov` runs in CI: the hook manifest check (three events, commands pointing at `scripts/hov`, a timeout on each), the VERSION match, the stdlib-only import check, then the unit tests.
 
-Twenty tests: mailbox round trip, threads, FTS5 search, ULID ordering, `ls`, the hook's output shape, once-per-session delivery, name resolution at SessionStart with delivery held until the first prompt, the session-name cache surviving a `whoami` with no agents list (it was never committed before 0.1.1), the cached name following a retitle at the next SessionStart or once the lookup throttle lapses while a dropped listing keeps the last name, nothing delivered when the payload states no mode (the 0.1.0 fail-open as a planted negative), count-only in bypass sessions with its default-mode twin, slash-line stripping and the body cap, tag escaping, silence without a session id, the one-second hook budget at 1,000 messages, the log line per delivery, the untrusted-peer framing on `hov inbox` output, and a runnable command in every hook hint (plain `hov` when it is on `PATH`, else `python3 -I` and the script's absolute path).
+Fifty tests. `test_hov.py`, twenty-one: mailbox round trip, threads, FTS5 search, ULID ordering, `ls`, the hook's output shape, once-per-session delivery, name resolution at SessionStart with delivery held until the first prompt, the session-name cache surviving a `whoami` with no agents list (it was never committed before 0.1.1), the cached name following a retitle at the next SessionStart or once the lookup throttle lapses while a dropped listing keeps the last name, nothing delivered when the payload states no mode (the 0.1.0 fail-open as a planted negative), count-only in bypass sessions with its default-mode twin, slash-line stripping and the body cap, tag escaping, silence without a session id, the one-second hook budget at 1,000 messages, the log line per delivery, the untrusted-peer framing on `hov inbox` output, a runnable command in every hook hint (plain `hov` when it is on `PATH`, else `python3 -I` and the script's absolute path), and a session whose title the identity rules refuse: it sends as its short id, is reached by it, its title is refused as an address with the id named as the way out, and `hov ls` shows the id, never the title.
 
-## Not in this PR
+`test_relay.py`, twenty-nine: hub-to-leaf and leaf-to-hub round trips with the `relay_log` and `peers` rows on both sides and the carried row searchable, store-and-forward in both directions over one connect, a second connect carrying nothing and a lost ack carrying one duplicate that the receiver ignores, a `*` message crossing once and never echoing, leaf mail for its own host staying home, a leaf-to-leaf message forwarded through the hub and never sent back, the loop guard against a peer with the hub's own label, the hook on the leaf delivering a relayed message into a session, the `link` row in `hov ls`, the `hov send` hint for an unreached host and its absence on a leaf that has met its hub, `--version` against the VERSION file, then with a fake peer: junk before hello skipped, death before hello with its stderr in the log, a command that exits at once, a protocol mismatch, a nacked row recorded and not offered again, junk after hello skipped, and a peer that vanishes mid-transfer failing `--once`; then what the review found: the peer label bound to the dialed host (the default and `--expect-host`), `hov send` refusing identity fields that could break the hook frame while names with spaces and `*` addresses pass, the hook frame surviving a hostile stored identity in both delivery modes, and an oversize row refused locally while the row behind it crosses; and the relay end driven directly: the row and its inbound mark committed before the ack is on the wire, a malformed row nacked with its reason, rows that used to crash the receiver or escape the frame (a timestamp past SQLite's integer range or past year 9999, a lone surrogate, a name with a newline and a closing tag, an id with a space, a row naming this host as its sender or origin) each nacked with the relay still alive, pong for ping, exit 0 on stdin EOF and on bye, exit 1 on a message before hello and on a bad hello. One more on a stored row an older version let in: a timestamp that fits SQLite's integer but not `datetime` renders as `ts=<repr>` in the hook and in `hov inbox` instead of raising.
 
-Cross-host relay, remote launch, idle wake, the Codex/OMP MCP server, claims, and the router columns are PRs 2 to 8 in hov-stack#529. The schema already carries `origin_host` and `meta` for the relay.
+## Not in these PRs
+
+Remote launch, idle wake, the Codex/OMP MCP server, claims, and the router columns are PRs 3 to 8 in hov-stack#529.
