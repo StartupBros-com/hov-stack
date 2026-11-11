@@ -9,6 +9,10 @@
 // Install: copy this file into ~/.omp/agent/extensions/. OMP loads extensions when it starts, so a running
 // session is not affected until it is restarted. Plain JavaScript in a .ts file, so node loads it in tests.
 //
+// A subagent turn (ctx.agent.kind === "sub") asks for nothing: a subagent shares the main session's mailbox
+// name, so only the main session is told. The block goes in with attribution "agent", the value OMP gives its
+// own injected messages, so it is never billed or shown as something the user typed.
+//
 // Environment: HOV_AS names this agent in the mailbox (default "omp"); HOV_BIN names the hov executable
 // (default: ~/.local/bin/hov when it exists, else `hov` on PATH).
 
@@ -33,6 +37,7 @@ export default function (pi) {
         sid = "";
       }
       if (!sid) sid = FALLBACK_SESSION;
+      if (ctx?.agent?.kind === "sub") return;
       const out = await pi.exec(
         HOV,
         ["notify", "--as", NAME, "--session", sid, "--event", "before_agent_start", "--json"],
@@ -41,7 +46,7 @@ export default function (pi) {
       if (!out || out.code !== 0 || !out.stdout) return;
       const r = JSON.parse(out.stdout);
       if (!r || typeof r.text !== "string" || !r.text) return;
-      return { message: { customType: "hov-mail", content: r.text, display: true } };
+      return { message: { customType: "hov-mail", content: r.text, display: true, attribution: "agent" } };
     } catch {
       return; // mail is never worth failing a turn over
     }
