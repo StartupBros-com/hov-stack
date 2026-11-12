@@ -64,12 +64,15 @@ const child = spawn(process.execPath, ['-e', `
     result.error = (e.message || '').slice(0, 200);
   }
 
-  // Keep Codex App's short-name aliases on the newest plugin cache.
+  // Keep the Codex desktop app's copies of the Claude skills on the newest plugin
+  // cache. 90s, not 30s: since the bridge copies every portable skill, measured
+  // full runs took 12-25s, too close to a 30s kill. Failures land in bridgeError,
+  // which harness-doctor reads.
   try {
     if (fs.existsSync(codexSkillBridge)) {
       execFileSync(codexSkillBridge, [], {
         encoding: 'utf8',
-        timeout: 30000,
+        timeout: 90000,
         windowsHide: true,
       });
     }
