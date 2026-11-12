@@ -30,21 +30,23 @@
 #   (Codex ignores Claude's frontmatter key) was true; the conclusion was false, and it
 #   left six deliberately-demoted forks silently auto-invocable in Codex until #219.
 #
-#   RULE: a fork listed below that is invoke-only in Claude MUST carry
-#   plugins/hov-stack/skills/<name>/agents/openai.yaml with allow_implicit_invocation: false.
+#   RULE: a fork listed below that is invoke-only in Claude MUST carry agents/openai.yaml
+#   in the folder it deploys from (see HOW IT WORKS) with allow_implicit_invocation: false.
 #   A fork that is model-invoked BY DESIGN (papercut) ships the interface block and no
 #   policy block. skills-localize.sh warns on a listed fork with no gate file.
 #
 # HOW IT WORKS
-#   skills-localize.sh apply  → rsync each listed plugins/hov-stack/skills/<name>/ into
-#                               ~/.codex/skills/<name>/ (same copy semantics as the
-#                               Claude tree; symlinked entries are never touched).
+#   skills-localize.sh apply  → rsync each listed skill's folder into ~/.codex/skills/<name>/
+#                               (same copy semantics as the Claude tree; symlinked entries
+#                               are never touched). The folder is plugins/hov-stack/skills/<name>/,
+#                               else harnesses/codex/skills/<name>/ (Codex-only skills),
+#                               else skills/<name>/ in a skill-plugins folder.
 #                               The rsync is recursive, so agents/openai.yaml and any
 #                               scripts/ dir travel with the fork.
 #   skills-localize.sh check  → DRIFT: lines when a listed fork differs.
 #   No-op when ~/.codex/skills does not exist (Codex not installed on this box).
 #
-# One skill name per line; must be a directory under plugins/hov-stack/skills/. `#` comments ok.
+# One skill name per line; must be one of the folders above. `#` comments ok.
 
 # --- Design/motion reference + build. Pure knowledge or single-file authoring;
 #     no agent fan-out, no dev server, useful identically in both tools.
@@ -67,6 +69,9 @@ review-animations
 #     no PostToolUseFailure event, so the automatic capture half does NOT exist
 #     there. Self-report is the ONLY papercut path a Codex session has, which makes
 #     the skill more load-bearing there than in Claude, not less.
+#     Its Codex copy lives in harnesses/codex/skills/papercut (#249): Claude gets papercut
+#     from the papercut plugin, whose copy runs commands through ${CLAUDE_PLUGIN_ROOT},
+#     which Codex never sets.
 papercut
 
 # --- Deliberately NOT deployed to Codex (add here if that changes):

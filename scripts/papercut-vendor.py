@@ -72,7 +72,7 @@ VENDORED = {
     # SKELETON/lib/hook-output.js: vendoring here needs no import-rewrite rule
     # (verified by the load gate below, not assumed).
     "hooks/lib/hook-output.js": "lib/hook-output.js",
-    "plugins/hov-stack/skills/papercut/SKILL.md": "skills/papercut/SKILL.md",
+    "harnesses/codex/skills/papercut/SKILL.md": "skills/papercut/SKILL.md",
     "tests/test_papercut.py": "tests/test_papercut.py",
 }
 

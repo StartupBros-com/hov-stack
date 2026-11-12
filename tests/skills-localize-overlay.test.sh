@@ -10,6 +10,7 @@ export HOME=$T/home HOV_STACK_OVERLAY=$T/overlay
 export SKILLS_DIR=$HOME/.claude/skills SKILLS_LOCAL_DIR=$T/local
 export CODEX_SKILLS_DIR=$HOME/.codex/skills AGENTS_SKILLS_DIR=$HOME/.agents/skills
 export SKILLS_PATCHES_DIR=$T/patches SKILLS_LOCALIZE_STATE=$T/state CODEX_SKILLS_LIST=$T/codex.txt
+export SKILLS_CODEX_ONLY_DIR=$T/codex-only
 export PATH=$T/bin:$PATH
 mkdir -p "$HOV_STACK_OVERLAY" "$SKILLS_DIR" "$SKILLS_LOCAL_DIR" "$CODEX_SKILLS_DIR" "$T/bin"
 printf '#!/bin/sh\nprintf "managed 1.0\\n"\n' > "$T/bin/jsm"
@@ -31,7 +32,7 @@ has "$HOV_STACK_OVERLAY/retired-skills.txt"
 [ ! -e "$SKILLS_DIR/old" ]
 cmp "$P/skills/alpha/SKILL.md" "$CODEX_SKILLS_DIR/alpha/SKILL.md"
 has "WARN: $HOV_STACK_OVERLAY/codex-skills.txt lists 'absent'"
-has "$SKILLS_LOCAL_DIR/absent or skills/absent in plugin folders"
+has "$SKILLS_LOCAL_DIR/absent, $SKILLS_CODEX_ONLY_DIR/absent or skills/absent in plugin folders"
 [ -L "$SKILLS_DIR/my-skills" ] && [ "$(readlink "$SKILLS_DIR/my-skills")" = "$P" ]
 [ "$(cat "$P/skills/alpha/SKILL.md")" = '# alpha' ]
 [ "$(cat "$P/.claude-plugin/plugin.json")" = '{"name":"my-skills"}' ]

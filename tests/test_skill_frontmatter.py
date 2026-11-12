@@ -26,7 +26,12 @@ import yaml
 
 CLAUDE = Path(__file__).resolve().parents[1]
 PACK = "plugins/hov-stack/skills"
-PATTERNS = (f"{PACK}/*/SKILL.md", "skills-stack/*/SKILL.md", "skills-patches/*/SKILL.md")
+PATTERNS = (
+    f"{PACK}/*/SKILL.md",
+    "skills-stack/*/SKILL.md",
+    "skills-patches/*/SKILL.md",
+    "harnesses/codex/skills/*/SKILL.md",
+)
 # The licence-file names test_skill_pack.py accepts.
 LICENCE_FILE = re.compile(r"^(LICENSE(-.+)?|LICENSE\.(md|txt)|COPYING)$")
 
