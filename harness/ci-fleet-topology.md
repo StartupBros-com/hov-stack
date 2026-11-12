@@ -24,6 +24,10 @@ Never force-push an in-flight PR. Before assuming a required check's queue is si
 assuming it no longer is, check the job's live `runs-on:` label against the runners that carry that
 label today. On a width-one label, keep one PR in that queue at a time. Batch edits into one push.
 When a queue is deep, land the unblocking PR first and leave the rest alone.
+When waiting on an armed auto-merge, read `mergeStateStatus` as well as the checks: hov-stack's main ruleset
+requires an up-to-date branch (`strict_required_status_checks_policy`), and auto-merge never updates one, so a
+green PR sits at `BEHIND` with nothing failing once main moves. `gh pr update-branch` clears it and restarts CI
+(a 2026-11-12 PR sat 20 minutes before that).
 
 ## Why: the 2026-07-29 incident, moved from CLAUDE.md
 
