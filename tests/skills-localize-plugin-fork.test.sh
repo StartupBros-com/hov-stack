@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # skills-localize-plugin-fork.test.sh — deploy_forks must not copy a fork into the Claude
-# tree when an enabled plugin provides a skill of the same name (papercut: the pack's
-# skills/papercut is the upstream of the papercut plugin's skill), must flag an existing
-# real copy as DRIFT in check, and must deploy as before when the plugin is disabled.
+# tree when an enabled plugin provides a skill of the same name (papercut was that case
+# until #249 moved the pack's copy to harnesses/codex/skills; the fixture keeps its name),
+# must flag an existing real copy as DRIFT in check, and must deploy as before when the
+# plugin is disabled.
 # Runs the REAL script end to end against scratch trees only.
 # shellcheck disable=SC2016,SC2034
 set -uo pipefail
@@ -16,7 +17,7 @@ export HOME=$T/home
 export SKILLS_DIR=$HOME/.claude/skills SKILLS_LOCAL_DIR=$T/local
 export CODEX_SKILLS_DIR=$HOME/.codex/skills AGENTS_SKILLS_DIR=$HOME/.agents/skills
 export SKILLS_PATCHES_DIR=$T/patches SKILLS_LOCALIZE_STATE=$T/state
-export CODEX_SKILLS_LIST=$T/codex.txt
+export CODEX_SKILLS_LIST=$T/codex.txt SKILLS_CODEX_ONLY_DIR=$T/codex-only
 REAL_PATH=$PATH
 export PATH=$T/bin:$PATH
 mkdir -p "$SKILLS_DIR" "$SKILLS_LOCAL_DIR/papercut" "$SKILLS_LOCAL_DIR/other" "$CODEX_SKILLS_DIR" "$T/bin" "$HOME/.claude/plugins"

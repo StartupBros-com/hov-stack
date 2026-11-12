@@ -27,6 +27,7 @@ NOTICE row covers that directory.
 import json
 import os
 import re
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -67,6 +68,20 @@ def skills():
 
 def stack_skills():
     return sorted(STACK_SKILLS.iterdir())
+
+
+def shipped_elsewhere(root):
+    """Pack skill names another plugin under root/plugins also ships, each with those plugins.
+
+    A member who installs both plugins would otherwise get two skills of one name (#249).
+    """
+    pack = {p.parent.name for p in (root / "plugins" / "hov-stack" / "skills").glob("*/SKILL.md")}
+    found = {}
+    for skill_md in sorted((root / "plugins").glob("*/skills/*/SKILL.md")):
+        plugin, name = skill_md.parents[2].name, skill_md.parent.name
+        if plugin != "hov-stack" and name in pack:
+            found.setdefault(name, []).append(plugin)
+    return found
 
 
 def licence_files(skill):
@@ -252,6 +267,16 @@ class SkillPackTests(unittest.TestCase):
         self.assertTrue(link.is_symlink(), "root skills is not a symlink")
         self.assertEqual(os.readlink(link), "plugins/hov-stack/skills")
         self.assertEqual(link.resolve(), (PLUGIN / "skills").resolve())
+
+    def test_no_pack_skill_is_one_another_plugin_ships(self):
+        # papercut was one until #249 moved the pack's copy to harnesses/codex/skills.
+        self.assertEqual(shipped_elsewhere(CLAUDE), {}, "pack skills another plugin also ships (#249)")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for plugin in ("hov-stack", "other"):
+                (root / "plugins" / plugin / "skills" / "x").mkdir(parents=True)
+                (root / "plugins" / plugin / "skills" / "x" / "SKILL.md").write_text("---\nname: x\n---\n")
+            self.assertEqual(shipped_elsewhere(root), {"x": ["other"]})
 
     def test_skill_name_pattern_rejects_a_planted_bad_name(self):
         # SKILL_NAME is the guard above; prove it refuses what it should.

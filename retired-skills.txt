@@ -88,6 +88,8 @@ memory-eval replaced-by=memory-dream@hov
 # The local changes went upstream first: harness-vet#20, rent-check#14, sign-it#16.
 # Keep their deployed copies trashed. papercut stays in the skill pack: it is the vendor
 # source that scripts/papercut-vendor.py turns into the papercut@hov package.
+# 2026-11-12 (#249): that source moved out of the pack to harnesses/codex/skills/papercut,
+# so a member with both plugins no longer gets two papercut skills.
 harness-vet replaced-by=harness-vet@hov
 rent-check replaced-by=rent-check@hov
 sign-it replaced-by=sign-it@hov

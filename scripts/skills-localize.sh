@@ -22,6 +22,11 @@
 #                                 is skipped, and check reports an existing real
 #                                 ~/.claude/skills/<name> as a duplicate DRIFT. Codex still
 #                                 gets the fork.
+#   harnesses/codex/skills/<name>/  Codex-only skills → deployed into ~/.codex/skills/ when
+#                                 codex-skills.txt lists them, never into the Claude tree.
+#                                 Looked up after the pack and before skill-plugins folders.
+#                                 papercut lives here: Claude gets it from the papercut
+#                                 plugin (#249). SKILLS_CODEX_ONLY_DIR names another dir
 #   skills-patches/<name>/<rel>   content overlays, 3-way merged onto the installed jsm skill
 #   skills-patches/<name>/.base/  the upstream files each overlay was written against, plus
 #                                 VERSION; never deployed
@@ -35,7 +40,7 @@
 #   local-tooling-note.codex.md  whose pristine text names beads/br/bv, NTM, Agent Mail or
 #                                 idea-wizard (none installed here); the Codex trees get the
 #                                 .codex one
-#   codex-skills.txt             subset of plugins/hov-stack/skills/ that ALSO deploys to ~/.codex/skills/
+#   codex-skills.txt             pack forks and harnesses/codex/skills/ names that deploy to ~/.codex/skills/
 #   <overlay>/codex-skills.txt   extra Codex names, from local forks or listed plugin skills;
 #                                 CODEX_SKILLS_HOST_LIST overrides it (empty means none)
 #   <overlay>/retired-skills.txt extra retirements; RETIRED_SKILLS_HOST_LIST overrides it
@@ -127,8 +132,10 @@ RETIRED="$HERE/retired-skills.txt"
 # so tests can point at a fixture.
 INSTALLED_PLUGINS="${SKILLS_INSTALLED_PLUGINS:-$HOME/.claude/plugins/installed_plugins.json}"
 # Overridable so tests can point at fixture trees instead of this repo's real
-# plugins/hov-stack/skills/, codex-skills.txt, overlays, notes and saved layer state.
+# plugins/hov-stack/skills/, harnesses/codex/skills/, codex-skills.txt, overlays, notes
+# and saved layer state.
 LOCAL="${SKILLS_LOCAL_DIR:-$HERE/plugins/hov-stack/skills}"
+CODEX_ONLY="${SKILLS_CODEX_ONLY_DIR:-$HERE/harnesses/codex/skills}"
 PATCHES="${SKILLS_PATCHES_DIR:-$HERE/skills-patches}"
 NOTE_CLAUDE="${SKILLS_NOTE_FILE:-$HERE/local-tooling-note.md}"
 NOTE_CODEX="${SKILLS_NOTE_FILE_CODEX:-$HERE/local-tooling-note.codex.md}"
@@ -366,8 +373,8 @@ sync_fork() {
 
 # A fork whose name an ENABLED plugin also provides is not copied into the Claude tree:
 # the copy would load next to <plugin>:<name> and skill-collision-check.py reports the
-# pair as a COLLISION (papercut, 2026-11-07: plugins/hov-stack/skills/papercut is the
-# upstream source of the papercut plugin's skill). The plugin list comes from the one
+# pair as a COLLISION (papercut, 2026-11-07, until #249 moved the pack's copy to
+# harnesses/codex/skills). The plugin list comes from the one
 # enumeration skill-collision-check.py owns (--plugin-skill-names), for the config dir
 # that holds $SKILLS. If the helper fails the fork deploys as before, with a WARN.
 # deploy_codex is untouched: Codex has no plugins and still needs the fork.
@@ -406,6 +413,20 @@ deploy_forks() {
   done
 }
 
+# codex_source <name> — print the folder deploy_codex copies <name> from: the skill pack,
+# then harnesses/codex/skills, then the skill-plugins folders. Fails when none holds it.
+# The Codex-only folder comes before plugin folders because a Claude plugin's copy can
+# run commands through ${CLAUDE_PLUGIN_ROOT}, which Codex never sets (papercut, #249).
+codex_source() {
+  local folder
+  if [ -d "$LOCAL/$1" ]; then printf '%s\n' "$LOCAL/$1"; return 0; fi
+  if [ -d "$CODEX_ONLY/$1" ]; then printf '%s\n' "$CODEX_ONLY/$1"; return 0; fi
+  for folder in ${PLUGIN_FOLDERS[@]+"${PLUGIN_FOLDERS[@]}"}; do
+    if [ -d "$folder/skills/$1" ]; then printf '%s\n' "$folder/skills/$1"; return 0; fi
+  done
+  return 1
+}
+
 # Codex keeps its own skills tree; jsm installs into it independently and nothing here
 # reached it before codex-skills.txt existed. Allowlist only — see that file.
 # sync_fork writes the deployment, never this list.
@@ -415,7 +436,7 @@ deploy_codex() {
     say "codex: $CODEX_SKILLS absent — skipping (Codex not installed here)"
     return 0
   fi
-  local line name file src folder label deployed=" "
+  local line name file src label deployed=" "
   for file in "$CODEX_LIST" "$CODEX_HOST_LIST"; do
   [ -f "$file" ] || continue
   label=$file
@@ -426,15 +447,8 @@ deploy_codex() {
     name="$line"
     valid_skill_name "$name" || { reject_name "$name" "$label"; continue; }
     case $deployed in *" $name "*) continue ;; esac
-    src=$LOCAL/$name
-    if [ ! -d "$src" ]; then
-      src=
-      for folder in ${PLUGIN_FOLDERS[@]+"${PLUGIN_FOLDERS[@]}"}; do
-        if [ -d "$folder/skills/$name" ]; then src=$folder/skills/$name; break; fi
-      done
-    fi
-    if [ -z "$src" ]; then
-      note "WARN: $label lists '$name' but plugins/hov-stack/skills/$name does not exist ($LOCAL/$name or skills/$name in plugin folders listed in $PLUGIN_LIST)"
+    if ! src=$(codex_source "$name"); then
+      note "WARN: $label lists '$name' but no skill folder holds it ($LOCAL/$name, $CODEX_ONLY/$name or skills/$name in plugin folders listed in $PLUGIN_LIST)"
       continue
     fi
     deployed="$deployed$name "
@@ -861,16 +875,12 @@ drop_state() {
   rm -rf "${STATE:?}/$label/manifest/$skill" "$STATE/$label/pristine/$skill" && say "dropped $label layer state: $skill"
 }
 
-# codex_plugin_fork <label> <skill> — deploy_codex copies this skill from a skill-plugins
-# folder, so, like a skill-pack fork, it carries its own text. Layering it anyway never
-# settles: deploy_codex copies the fork back over the layered SKILL.md on every apply.
+# codex_plugin_fork <label> <skill> — deploy_codex copies this skill from
+# harnesses/codex/skills or a skill-plugins folder, so, like a skill-pack fork, it
+# carries its own text. Layering it anyway never settles: deploy_codex copies the fork
+# back over the layered SKILL.md on every apply.
 codex_plugin_fork() {
-  local folder
-  [ "$1" = codex ] && [ ! -d "$LOCAL/$2" ] && codex_wants "$2" || return 1
-  for folder in ${PLUGIN_FOLDERS[@]+"${PLUGIN_FOLDERS[@]}"}; do
-    [ -d "$folder/skills/$2" ] && return 0
-  done
-  return 1
+  [ "$1" = codex ] && [ ! -d "$LOCAL/$2" ] && codex_wants "$2" && codex_source "$2" >/dev/null
 }
 
 # layer_skill <label> <root> <skill> <note> — apply, dry-run or check one skill.

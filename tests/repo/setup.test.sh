@@ -163,7 +163,8 @@ done
 ok "10 harness links, memory-dream.json among them (the memory-dream plugin reads its config there)"
 # Skills (#37, restructure plan KTD12): one link per skill in the pack and in skills-stack/
 # (R21's exception), except the ones lib/default-plugin-skills.txt says a default plugin
-# provides, and each skip is reported.
+# provides, and each skip is reported. Since #249 the pack carries none of those, so the
+# skip report is also checked on the scratch copy below, which has one planted.
 FILTER=$ROOT/lib/default-plugin-skills.txt
 RECORD=$ROOT/tests/fixtures/default-plugin-skills.txt
 filter_names() { awk '$1 !~ /^#/ && NF { print $1 }' "$1" | LC_ALL=C sort -u; }
@@ -177,14 +178,18 @@ want=$(want_skills "$ROOT")
 [ -n "$want" ] || fail "the pack minus the filter is empty"
 [ "$got" = "$want" ] || { diff <(printf '%s\n' "$want") <(printf '%s\n' "$got") || true; fail "linked skills are not the pack minus the default-plugin skills"; }
 n_skipped=0
-while read -r name plugin _; do
-  case "$name" in ''|'#'*) continue ;; esac
-  [ -d "$ROOT/plugins/hov-stack/skills/$name" ] || continue
-  grep -q -x -F "  skipped $name: the $plugin plugin provides it" "$WORK/run1.log" || fail "setup did not report skipping $name ($plugin)"
-  n_skipped=$((n_skipped + 1))
-done < "$FILTER"
-[ "$n_skipped" -gt 0 ] || fail "no pack skill is on the filter, so the skip report went untested"
-ok "$(printf '%s\n' "$got" | wc -l) skills linked; the $n_skipped a default plugin provides were skipped and named"
+skips_reported() {  # $1 = a checkout root, $2 = its setup log; sets n_skipped
+  local name plugin
+  n_skipped=0
+  while read -r name plugin _; do
+    case "$name" in ''|'#'*) continue ;; esac
+    [ -d "$1/plugins/hov-stack/skills/$name" ] || continue
+    grep -q -x -F "  skipped $name: the $plugin plugin provides it" "$2" || fail "setup did not report skipping $name ($plugin)"
+    n_skipped=$((n_skipped + 1))
+  done < "$1/lib/default-plugin-skills.txt"
+}
+skips_reported "$ROOT" "$WORK/run1.log"
+ok "$(printf '%s\n' "$got" | wc -l) skills linked; $n_skipped pack skills are ones a default plugin provides, each skipped and named"
 
 # What each default plugin ships is recorded from the plugin trees at their marketplace
 # pins, apart from the filter, so a name dropped from the filter fails here instead of
@@ -226,9 +231,14 @@ mkdir -p "$copy"
 rm "$copy/skills"
 printf 'plugins/hov-stack/skills' > "$copy/skills"
 if [ ! -f "$copy/skills" ] || [ -L "$copy/skills" ]; then fail "the scratch copy's skills entry is not a plain file"; fi
+# A pack skill a default plugin ships, for the skip report, the filter's last line and
+# the planted negative below; removed again after them.
+cp -R "$copy/plugins/papercut/skills/papercut" "$copy/plugins/hov-stack/skills/papercut"
 HOME=$WORK/home-plain bash "$copy/setup" --no-dcg > "$WORK/run-plain.log" 2>&1 || { cat "$WORK/run-plain.log"; fail "setup failed in a checkout whose skills link is a plain file"; }
 [ "$(linked_skills "$WORK/home-plain/.claude")" = "$want" ] || fail "a plain-file skills link changed the linked set"
-ok "a checkout whose root skills link is a plain file links the same $(printf '%s\n' "$want" | wc -l) skills"
+skips_reported "$copy" "$WORK/run-plain.log"
+[ "$n_skipped" -gt 0 ] || fail "no skill in the copy's pack is on the filter, so the skip report went untested"
+ok "a checkout whose root skills link is a plain file links the same $(printf '%s\n' "$want" | wc -l) skills and names the $n_skipped it skipped"
 # A filter whose last line lost its newline still skips that line's skill.
 last=$(tail -n1 "$copy/lib/default-plugin-skills.txt" | awk '{print $1}')
 [ -d "$copy/plugins/hov-stack/skills/$last" ] || fail "the filter's last entry ($last) is not a pack skill, so this case tests nothing"
@@ -248,6 +258,7 @@ found=$(dup_names "$WORK/home-planted/.claude" "$RECORD")
 missing=$(LC_ALL=C comm -23 <(awk '$1 !~ /^#/ && NF { print $3 }' "$RECORD" | LC_ALL=C sort -u) <(filter_names "$copy/lib/default-plugin-skills.txt"))
 [ "$missing" = "papercut" ] || fail "the filter check did not name the planted gap: '$missing'"
 ok "a filter missing papercut links it, and both record checks name papercut"
+rm -rf "$copy/plugins/hov-stack/skills/papercut"
 
 # Every file setup just linked now runs, or is read, on the adopter's machine, so
 # none may name a home directory as a path (#7 was one hook, #16 the rest; the
