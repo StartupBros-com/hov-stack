@@ -76,10 +76,10 @@ uv|0.13.7|darwin-x86_64|https://github.com/astral-sh/uv/releases/download/0.13.7
 cass|0.11.0|linux-x86_64|https://github.com/Dicklesworthstone/coding_agent_session_search/releases/download/v0.11.0/cass-linux-amd64.tar.gz|d7b3804847c0b39dd3831e82e4a40d85549147147196810805638f211c5c9812|cass
 cass|0.11.0|linux-aarch64|https://github.com/Dicklesworthstone/coding_agent_session_search/releases/download/v0.11.0/cass-linux-arm64.tar.gz|9ed27b62007d25b1f67feba4208e99dcb53f478d8c13264f7d12aa244472904b|cass
 cass|0.11.0|darwin-arm64|https://github.com/Dicklesworthstone/coding_agent_session_search/releases/download/v0.11.0/cass-darwin-arm64.tar.gz|9f545193dee6061584919367209e3c0471cafe82b481d04e74f91ca963d057fd|cass
-jsm|0.3.46|linux-x86_64|https://jeffreys-skills.md/api/v1/downloads/jsm/v0.3.46/jsm-x86_64-unknown-linux-musl.tar.gz|57bf04440db6e3fed7e518c9cda4b0dbdcc87ab9fc20050b86132f91be511b70|jsm
-jsm|0.3.46|linux-aarch64|https://jeffreys-skills.md/api/v1/downloads/jsm/v0.3.46/jsm-aarch64-unknown-linux-gnu.tar.gz|157dcf73a67660cdac5edf7c68d857625adfce85292abc2604c2f8f6f92a211b|jsm
-jsm|0.3.46|darwin-arm64|https://jeffreys-skills.md/api/v1/downloads/jsm/v0.3.46/jsm-aarch64-apple-darwin.tar.gz|6617ef809c2827307fe1e848aa94224bbf2c103739527f5b5f930e388646ed99|jsm
-jsm|0.3.46|darwin-x86_64|https://jeffreys-skills.md/api/v1/downloads/jsm/v0.3.46/jsm-x86_64-apple-darwin.tar.gz|740cb0859fe1b10ee0ab430b54f853c4ebd716967abe2ac0aa7a2707da0b29d3|jsm
+jsm|0.3.47|linux-x86_64|https://jeffreys-skills.md/api/v1/downloads/jsm/v0.3.47/jsm-x86_64-unknown-linux-musl.tar.gz|4ac39598b4946ea96dbb3c5db52e3f2511d1887660e626be564b9ca9c4cc1276|jsm
+jsm|0.3.47|linux-aarch64|https://jeffreys-skills.md/api/v1/downloads/jsm/v0.3.47/jsm-aarch64-unknown-linux-gnu.tar.gz|7620c3ee564e5d13653fd8f5620256e2afd0bb7a09ff7dd5efe01bd1c8476e79|jsm
+jsm|0.3.47|darwin-arm64|https://jeffreys-skills.md/api/v1/downloads/jsm/v0.3.47/jsm-aarch64-apple-darwin.tar.gz|deafe213fd288c1fcbb90df79aa306fc17d644432552ae86270e562d154657ac|jsm
+jsm|0.3.47|darwin-x86_64|https://jeffreys-skills.md/api/v1/downloads/jsm/v0.3.47/jsm-x86_64-apple-darwin.tar.gz|e4ecd29a79c26c8903859aeef5295af8fd3a61e7509c362b31cf307c713579f2|jsm
 '}
 
 usage() {
