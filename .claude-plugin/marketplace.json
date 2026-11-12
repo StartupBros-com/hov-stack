@@ -293,13 +293,13 @@
         "source": "git-subdir",
         "url": "https://github.com/StartupBros-com/hov-stack.git",
         "path": "plugins/hov-stack",
-        "sha": "86ca4603583f81e6fcd84b7902ebd2248ab14ecf"
+        "sha": "3d50dba79c3efa4487cbef98404d4baa8186bc5e"
       },
       "description": "The skill pack from the hov-stack Claude Code harness, installable on its own as one plugin.",
       "metadata": {
-        "version": "0.2.0",
-        "releaseId": 434517783,
-        "releaseTag": "hov-stack--v0.2.0"
+        "version": "0.3.0",
+        "releaseId": 442717711,
+        "releaseTag": "hov-stack--v0.3.0"
       },
       "card": {
         "rows": [
