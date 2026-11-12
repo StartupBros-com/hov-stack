@@ -139,6 +139,8 @@ Product-level decisions carried from the merged decision record. Each is `sessio
 
 **Recorded (2026-11-11):** the old-name fallback removal is #373, still open, and the cutover solution docs are #374. The plugin-install counter, the merge queue and the `houseofvibe` organisation have no tracking issue and are not cutover work; this plan closes without them.
 
+**Recorded (2026-11-12):** the observation #373 asks for is posted on that issue: 24 plugin releases from the new name between 2026-10-31 and 2026-11-12, each announced, and the manifest never deleted from main. The validator's release-train reference check now accepts only the new repository name, which ends U6's "accepts either repository name during the window". The members app's old-name manifest fallback is a separate change in its own repository.
+
 **Non-goals (considered, not built).** Hub-and-spokes with a manifest repo; relative manifest entries; a second marketplace name; the stack root as a plugin; a single skill-pack repo for everything; a builder edition; moving the manifest into the staging repo before the flip; any flip date, org creation or VERSION bump decision.
 
 ### Acceptance Examples
