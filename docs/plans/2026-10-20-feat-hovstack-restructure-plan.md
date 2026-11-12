@@ -137,6 +137,8 @@ Product-level decisions carried from the merged decision record. Each is `sessio
 - Solution docs for the cutover (the learnings store has no prior art for OIDC lineage, repository renames or `git-subdir` sources).
 - The `houseofvibe` organisation and the transfer that reserves it; independent of this plan.
 
+**Recorded (2026-11-11):** the old-name fallback removal is #373, still open, and the cutover solution docs are #374. The plugin-install counter, the merge queue and the `houseofvibe` organisation have no tracking issue and are not cutover work; this plan closes without them.
+
 **Non-goals (considered, not built).** Hub-and-spokes with a manifest repo; relative manifest entries; a second marketplace name; the stack root as a plugin; a single skill-pack repo for everything; a builder edition; moving the manifest into the staging repo before the flip; any flip date, org creation or VERSION bump decision.
 
 ### Acceptance Examples
@@ -155,7 +157,7 @@ Product-level decisions carried from the merged decision record. Each is `sessio
 
 ### Open Questions
 
-Author-only calls. The author settled OQ1-OQ6 and OQ8 on 2026-10-23; OQ7 stays open.
+Author-only calls. The author settled OQ1-OQ6 and OQ8 on 2026-10-23; OQ7 was settled by the rename itself on 2026-10-25.
 
 - OQ1. Which plugin is the canary (U24)? Default: rent-check, the smallest install base with a normal workflow set. **Settled:** the default.
 - OQ2. Does `harness-optimizer@hov` join the default plugin list (U15)? Its owner asks that installation never schedule or run optimisation. Default: not in the list until the author says so. **Settled:** the default.
@@ -163,7 +165,7 @@ Author-only calls. The author settled OQ1-OQ6 and OQ8 on 2026-10-23; OQ7 stays o
 - OQ4. How should `./setup` word dcg's licence disclosure, given the upstream repo publishes no SPDX-detectable licence (U15)? Default: state that fact and link the upstream. **Settled:** before downloading anything, `./setup` says dcg is MIT-licensed with an added OpenAI/Anthropic rider that GitHub's licence detection does not recognise, links the upstream LICENSE, and names `--no-dcg` as the way to skip it.
 - OQ5. Who creates the throwaway GitHub-hosted marketplace for the gate-2 rehearsal, and under which account (U21)? Default: the author, under the same organisation, deleted after the flip. **Settled:** the session creates two public scratch repos under the same organisation, `rehearsal-marketplace` and `rehearsal-monorepo`, so that no public repo carries the new name before the flip; they are deleted after the flip on the author's go (U26).
 - OQ6. Does the core card carry a clone line for people who will not install the plugin (U3)? Default: yes, one line. **Settled:** the default.
-- OQ7. The flip date. Not decided here.
+- OQ7. The flip date. Not decided here. **Settled:** the rename ran on 2026-10-25 (U22).
 - OQ8. Do the twelve migration releases carry a release note saying the plugin moved (U24)? They are bumps made to migrate, and each produces a card (KD9). Default: yes, the note names the new path and says nothing else changed. **Settled:** the default.
 
 ---
@@ -341,14 +343,14 @@ Inferred bets made without a synchronous user; each names where it is checked.
 | The announce workflow stays on the watched main branch | U6 and U10 keep the pin-is-ancestor check; the R17 ancestry assertion in U10; KTD6 |
 | Releases fire on the GitHub release event | U10's release-train trigger; U8 keeps the draft and prerelease skips |
 
-**Gate status (2026-11-03)**
+**Gate status (2026-11-11)**
 
 | Gate | Status | Evidence |
 |---|---|---|
 | 1a members app accepts both | passed | U1-U4 merged in the members app on 2026-10-23; its production deploy of 2026-10-24 contains all four merges and reported success |
 | 1b marketplace tooling accepts both | passed | U5-U11 merged on the marketplace main on 2026-10-21 and 2026-10-22, as PRs #216, #218, #220, #222, #224, #227 and #229 |
-| 2 member continuity | rehearsal passed; canary open | The hosted rehearsal (U21) passed on Claude Code 2.1.76, 2.1.77 and 2.1.309, record below. The earlier directory-source pass on 2.1.305 agreed: the `url` to `git-subdir` update, a cache holding only the subdirectory, the old folder marked orphaned, enabled state and data kept, a wrong sha failing closed. The canary after the real rename (U24) is the open half (KTD8) |
-| 3 the flip | open; stranger check passed | Runbook U20-U26. The U20 freeze has been in place since 2026-10-24, and the U22 rename and controls were recorded 2026-10-25. U26's stranger check (AE7) passed on 2026-11-03 on a clean macOS 15.7.7 arm64 machine with Claude Code 2.1.317: the README's install line at main 30c2c41, `./setup` and `./setup --check` all green, and offline the dcg step skipped with its command (record below). Still open: U24-U25 (#249), and U26's guided `/hov-setup`, which needs a logged-in session |
+| 2 member continuity | passed 2026-10-31 | The hosted rehearsal (U21) passed on Claude Code 2.1.76, 2.1.77 and 2.1.309, record below. The earlier directory-source pass on 2.1.305 agreed: the `url` to `git-subdir` update, a cache holding only the subdirectory, the old folder marked orphaned, enabled state and data kept, a wrong sha failing closed. The canary after the real rename (KTD8) passed with rent-check 0.3.2, published 2026-10-31: its run log reads `announced`, and AE6 updated a member install from 0.3.1 to 0.3.2, in a scratch home on the author's machine rather than on a separate machine (U24) |
+| 3 the flip | passed 2026-11-03, accepted by the author 2026-11-11 | Runbook U20-U26. The U20 freeze has been in place since 2026-10-24, and the U22 rename and controls were recorded 2026-10-25. U26's stranger check (AE7) passed on 2026-11-03 on a clean macOS 15.7.7 arm64 machine (a Mac mini) with Claude Code 2.1.317: the README's install line at main 30c2c41, `./setup` and `./setup --check` all green, and offline the dcg step skipped with its command (record below). U24 and U25 are recorded under their units. The rewritten guided `/hov-setup` passed its rerun on the same Mac the same day, through `claude -p --resume` in the first run's scratch home, not on a fresh machine or in the interactive app (record below) |
 
 **Gate-2 rehearsal record (U21, 2026-10-23).** Two public scratch repositories in the same organization: a manifest repo holding a `hov` manifest, renamed partway through, and a monorepo holding a scratch plugin and a three-skill pack. Each client ran Claude Code 2.1.68 to 2.1.77 or 2.1.309 in a scratch home with no GitHub token; one 2.1.309 client had no SSH key. Every manifest state was checked by U6's validator, with its monorepo url aimed at the scratch monorepo, and landed through a pull request.
 
@@ -400,6 +402,7 @@ The machine was a Mac mini on macOS 15.7.7 arm64 with git 2.39.5, node 26 and Ho
 - **Not exercised.**
   - Linux was not run as a clean machine here; CI runs `tests/repo/setup.test.sh` on Ubuntu on every PR.
 - **Follow-up work scheduled.** The old-name fallback removal is #373, and the cutover solution docs are #374. Deleting the U21 rehearsal repos waits on the author's go.
+- **Recorded (2026-11-11).** Neither rehearsal repository resolves under the organisation any more. No record says who deleted them or when; the organisation audit log is not readable through the API.
 
 ---
 
@@ -681,6 +684,7 @@ The machine was a Mac mini on macOS 15.7.7 arm64 with git 2.39.5, node 26 and Ho
 - **Test scenarios:** AE3, AE4, AE8, AE9, AE10; the canary's announcement shows `announced` in the run log; the pack's entry validates as a created `git-subdir` entry with no prior release id; a second plugin's bump on the same day produces its own card; no imported plugin keeps a test that reads a root workflow file.
 - **Verification:** every entry in `.claude-plugin/marketplace.json`, the twelve plugins and the skill pack, is `git-subdir`; the validator passes on main; no `url` entry remains.
 - **Recorded (2026-11-02):** all twelve plugins and the skill pack live under `plugins/`. Each plugin came in as one import PR that left its VERSION at the old repository's last release, so no import made a tag, and then released from its own bump PR: rent-check #250 then 0.3.2 in #251 (the canary), harness-optimizer #253 then 0.2.1 in #255, harness-vet #256 then 0.3.1 in #271, sign-it #257 then 0.6.1 in #273, product-video #258 then 0.2.0 in #274, memory-dream #259 then 0.4.1 in #276, wsl-cdp #260 then 0.3.7 in #277, token-eater #261 then 0.1.3 in #278, design-rails #263 then 0.13.1 in #279, skill-tuner #265 then 0.10.1 in #280, papercut #268 then 0.1.22 in #281, and pro-gate #283 then 0.65.3 in #311. Each import PR lists what it dropped or narrowed and why. Every plugin bump ran the whole chain: the prefixed tag, a draft once the plugin's CI passed on the merge commit, a migration repin PR dispatched by hand that switched the entry to `git-subdir`, the publish, and an announcement whose run log reads `announced`. pro-gate's draft carried the runtime tarball and its `.sha256` from `release/stage-assets.sh`, and the published tarball matches its checksum. Hosts on pro-gate's 0.65.2 auto-updater look for the next release in the old repository until their next `/pro-gate` run, as the 0.65.3 notes say. Before the canary's bump, the negative leg passed: `rent-check--v99.0.0` on a side-branch commit was refused by the release run and made no draft. AE6 passed on the canary, updating a member install from 0.3.1 to 0.3.2 at the pinned commit, in a scratch home directory on the author's machine rather than on a separate machine. The skill pack released `hov-stack--v0.1.1` from #282, and its migration repin (#310) created its `git-subdir` entry with no prior release id. That release announced nothing: the new entry has no card, so the announce run reports `not-announced` with reason `no-card`. Writing the card is a copy change left to the author, after which editing the release re-fires the announcement. Against the Verification line: on main at `c20aa2d` the manifest has thirteen entries, all `git-subdir` at `plugins/<name>`, no `url` entry is left, and `validate-marketplace.sh` passes in its syntax and full modes.
+- **Recorded (2026-11-11):** the skill pack's entry now has a card. `hov-stack--v0.1.1` was announced when the author re-ran its release-train run on 2026-11-02 after the card landed (run 41429855015, attempt 2, log `announced`), and `hov-stack--v0.2.0` announced on its first run on 2026-11-04 (run 41936754742). On main at `4f8fade` the manifest still has thirteen entries, all `git-subdir`.
 
 ### U25. Archive and transfer
 
@@ -692,6 +696,7 @@ The machine was a Mac mini on macOS 15.7.7 arm64 with git 2.39.5, node 26 and Ho
 - **Test scenarios:** `Test expectation: none -- settings and docs; checked by listing.`
 - **Verification:** every old repo is archived with a README whose first line names `plugins/<name>/` in hov-stack; the issue counts in hov-stack match the transferred totals (49 open on 2026-10-24, recounted at U25).
 - **Recorded (2026-11-02):** eleven of the twelve old repos are archived, each with a README whose first line names `plugins/<name>/` in hov-stack, merged as a pointer PR before archiving. Twenty open issues moved to hov-stack with their `plugin:<name>` labels: one each from rent-check and product-video, three from memory-dream, two each from wsl-cdp, design-rails and skill-tuner, and nine from token-eater; sign-it, harness-vet, harness-optimizer and papercut had none to move. Every repository's dependency dashboard was closed as not planned, since its releases now run on hov-stack's workflows, and so were two issues about the old repositories' own release plumbing, rent-check #6 and harness-optimizer #3. Three old draft PRs were closed unmerged with a pointer to the new home: design-rails #54, skill-tuner #76 and papercut #29. pro-gate is not archived. Its 18 open issues are held for the author, because 13 of them quote private names and moving them would bring those names into hov-stack's tracker, which this repository keeps free of them; an archived repository cannot transfer issues, so it stays open until that is decided. The private staging repo is archived after U26, as planned.
+- **Recorded (2026-11-11):** all twelve old repos are archived, pro-gate included. pro-gate's 18 held issues were not transferred: they were closed as not planned on 2026-11-02, each with a "Continued in" link to a new issue in hov-stack, and hov-stack has 18 issues labelled `plugin:pro-gate`, the oldest created 2026-11-02. The titles and bodies of those 18 pass the public-safety scan with the private token list, 0 hits. pro-gate's only open item is its dependency dashboard (#4). None of the twelve old repos holds an Actions secret. The private staging repo is archived. The recount against U20's 49 open issues was not redone.
 
 ### U26. Post-flip verification and capture
 
@@ -702,6 +707,7 @@ The machine was a Mac mini on macOS 15.7.7 arm64 with git 2.39.5, node 26 and Ho
 - **Approach:** on a clean machine run the README's install line, `./setup`, `./setup --check` and the guided skill; record the result in the gate table; delete the rehearsal repos on the author's go; schedule the fallback removal and the solution docs (Scope Boundaries) as follow-up work.
 - **Test scenarios:** AE7 on the clean machine.
 - **Verification:** the gate table shows gate 3 passed with the date and the machine.
+- **Recorded (2026-11-11):** done, with two departures from the Approach. The guided skill was rerun in the first run's scratch home through `claude -p --resume`, not on a fresh machine or in the interactive app, and the author accepted that rerun as gate 3 on 2026-11-11 (gate table and the gate-3 record). The rehearsal repos are gone, but no record shows the author's go or the date (gate-3 record). The fallback removal and the solution docs are #373 and #374.
 
 ### U27. Author host cutover
 
@@ -749,3 +755,13 @@ The machine was a Mac mini on macOS 15.7.7 arm64 with git 2.39.5, node 26 and Ho
 - **Cleanup:** the rehearsal repos are deleted; the old-name fallbacks are listed under follow-up work with the observation that justifies their removal; the in-tree copy of the optimiser plugin and the vendored design-rails copy are gone; no `wstack` token remains outside history.
 - The shared-repository controls (R46-R49) are in place before the rename, each verified as U22 lists; no switched entry was reverted (R50).
 - Nothing announced from a user account at any point; no force push touched the renamed repo.
+
+**Recorded (2026-11-11), against each bullet above:**
+
+- The plan is on main at its named path.
+- The gate table records gates 1a, 1b, 2 and 3 with their dates.
+- On main at `4f8fade` all thirteen manifest entries are `git-subdir`. The twelve old repos are archived, each README's first line naming its `plugins/<name>/` home, and the private staging repo is archived.
+- Cleanup. The rehearsal repos no longer resolve, with no record of when or by whom they were deleted. The fallback removal is #373, still open. The optimiser and design-rails copies are gone. The old name remains on main only in this plan and the architecture decision record, which quote it to state the rule; the public-safety scan allowlists both and passed on `4f8fade` with the private token list.
+- Controls. U22 verified R46-R49 before the rename. On 2026-11-11 the `protect-main`, `code-owner-review`, `release-tags` and `require-ci` rulesets are active and private vulnerability reporting is on. The manifest's `url` entry count never rose across its 25 commits since 2026-10-30, so no switched entry was reverted (R50).
+- Announcing. 22 of the 23 release-train runs were started by the release App. The 23rd is the author's re-run of the `hov-stack--v0.1.1` run, whose release the App had published (U24). No workflow in the repo references a user token.
+- Force pushes. The repository activity API lists five, none to main or a tag: three by Renovate's bot to its own update branches (2026-11-06 to 2026-11-09), and two by the author to a feature branch on 2026-09-12, before the rename. So the bullet holds for main and the tags, not for every branch.
