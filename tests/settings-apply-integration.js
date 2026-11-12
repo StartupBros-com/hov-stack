@@ -246,6 +246,47 @@ const target = (f) =>
       assert.equal(f.read(f.live).env.CLAUDE_CODE_PLUGIN_DIRS,mod);
     }
   });
+  await test("T6 overlay plugin-dirs appended after the tracked list", (f) => {
+    // The fixture copies no Docker policy helper, so check would report that
+    // drift on every run; a passing stub leaves only this case's findings.
+    fs.writeFileSync(path.join(f.root,"scripts/docker-daemon-config.py"),"import sys\nsys.exit(0)\n");
+    f.apply();
+    const tracked = f.read(f.live).env.CLAUDE_CODE_PLUGIN_DIRS;
+    assert.match(tracked, /\/mods\/.*:.*\/mods\//, "the fixture's tracked list must be the mods");
+    const engine = require(path.join(f.root,"lib/settings-apply.js"));
+    const args = {root:f.root,cfg:f.cfg,overlayDir:f.env.HOV_STACK_OVERLAY,dcgPath:path.join(f.home,".local/lib/dcg/v0.16.0/dcg"),env:f.env};
+    const stamp = path.join(f.cfg,".hov-stack/settings-apply.stamp");
+    assert.equal(fs.readFileSync(stamp,"utf8").trim(),engine.inputsHash(args));
+    const extra = path.join(f.tmp,"host-plugin");
+    fs.mkdirSync(path.join(extra,".claude-plugin"),{recursive:true});
+    fs.writeFileSync(path.join(extra,".claude-plugin/plugin.json"),'{"name":"host-plugin"}');
+    fs.mkdirSync(f.env.HOV_STACK_OVERLAY,{recursive:true});
+    const list = path.join(f.env.HOV_STACK_OVERLAY,"plugin-dirs");
+    fs.writeFileSync(list,`# this host's own plugins\n${extra}\n${tracked.split(":")[0]}\n`);
+    // The session-start backstop re-applies when this file changes.
+    assert.notEqual(fs.readFileSync(stamp,"utf8").trim(),engine.inputsHash(args));
+    f.apply();
+    assert.equal(f.read(f.live).env.CLAUDE_CODE_PLUGIN_DIRS,tracked+":"+extra);
+    const clean = f.run(["check"]);
+    assert.doesNotMatch(clean.stdout,/^DRIFT: settings.json/m);
+    assert.equal(clean.status,0,clean.stdout);
+    // PLANTED NEGATIVE: lines that cannot be loaded are left out, check names
+    // them and exits non-zero, and the loadable list is still written.
+    const bare = path.join(f.tmp,"no-manifest");
+    fs.mkdirSync(bare);
+    fs.appendFileSync(list,`${bare}\n${extra}:${bare}\n`);
+    f.apply();
+    assert.equal(f.read(f.live).env.CLAUDE_CODE_PLUGIN_DIRS,tracked+":"+extra);
+    const bad = f.run(["check"]);
+    assert.notEqual(bad.status,0,bad.stdout);
+    const report = bad.stdout;
+    assert.match(report,/plugin-dirs names \S*no-manifest, which is left out of CLAUDE_CODE_PLUGIN_DIRS: it has no \.claude-plugin\/plugin\.json/);
+    assert.match(report,/plugin-dirs names \S*host-plugin:\S*no-manifest, which is left out of CLAUDE_CODE_PLUGIN_DIRS: it contains a colon/);
+    // Deleting the file returns the live list to the tracked one.
+    fs.unlinkSync(list);
+    f.apply();
+    assert.equal(f.read(f.live).env.CLAUDE_CODE_PLUGIN_DIRS,tracked);
+  });
   await test("T6 seed bad rev exits 2 for every role", (f) => {
     for (const role of ["workstation","satellite","member",""]) {
       fs.writeFileSync(path.join(f.root,"hosts.tsv"),role ? os.hostname().split(".")[0]+"	"+role+"\n" : "");

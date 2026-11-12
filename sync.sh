@@ -694,6 +694,45 @@ plugin_dir_missing_manifest() {
   return 0
 }
 
+# A mapped CLAUDE_CODE_PLUGIN_DIRS list with this host's own plugin folders
+# appended: <overlay>/plugin-dirs, one absolute folder per line, blank lines and
+# # comments ignored (the skill-plugins line format). Each folder is added once,
+# after the tracked list, so a mod added to the tracked list later still reaches
+# the host. A line that cannot be loaded (not absolute, a colon or control
+# character in it, no .claude-plugin/plugin.json there) is left out and named on
+# stderr; the rest is still returned. With no tracked list, or no file, the input
+# comes back unchanged. reconcile_runtime_env, build_settings_desired and check
+# all call this, so the three agree on one value.
+plugin_dirs_with_overlay() {
+  local list=$1 dir file line folder why
+  [ -n "$list" ] || return 0
+  if ! dir=$(overlay_dir) || [ ! -f "$dir/plugin-dirs" ]; then
+    printf '%s' "$list"
+    return 0
+  fi
+  file=$dir/plugin-dirs
+  while IFS= read -r line || [ -n "$line" ]; do
+    folder=${line%%#*}
+    folder="${folder#"${folder%%[![:space:]]*}"}"
+    folder="${folder%"${folder##*[![:space:]]}"}"
+    [ -n "$folder" ] || continue
+    why=""
+    case $folder in
+      *[[:cntrl:]]*) why='it contains a control character' ;;
+      *:*) why='it contains a colon, which separates entries in the list' ;;
+      /*) [ -f "$folder/.claude-plugin/plugin.json" ] || why='it has no .claude-plugin/plugin.json' ;;
+      *) why='it is not an absolute path' ;;
+    esac
+    if [ -n "$why" ]; then
+      printf '%s names %s, which is left out of CLAUDE_CODE_PLUGIN_DIRS: %s\n' "$file" "$folder" "$why" >&2
+      continue
+    fi
+    case ":$list:" in *":$folder:"*) continue ;; esac
+    list="$list:$folder"
+  done <"$file"
+  printf '%s' "$list"
+}
+
 reconcile_hook_group() {
   local label=$1 event=$2 cmd=$3
   local live=$H/settings.json canonical=${4:-$HERE/settings.json} canonical_group
@@ -1351,6 +1390,7 @@ reconcile_runtime_env() (
       echo "  install links ~/.claude/mods into the canonical checkout; if the mod is still on an unmerged branch, merge it and pull the main checkout first" >&2
       return 1
     fi
+    mapped_plugin_dirs=$(plugin_dirs_with_overlay "$mapped_plugin_dirs")
     canonical_defenses=$(printf '%s' "$canonical_defenses" | jq -ce --arg dirs "$mapped_plugin_dirs" '
       .env.CLAUDE_CODE_PLUGIN_DIRS = $dirs
     ') || {
@@ -2429,7 +2469,7 @@ build_settings_desired() (
   if dir=$(overlay_dir) && [ -f "$dir/settings.json" ]; then ov=$dir/settings.json; fi
   SETTINGS_SEED_ALL_KEYS=1 node "$HERE/lib/settings-seed.js" "$src" "$tmp/seed.json" "$H" "$HOME" "$DCG_COMMAND" "$ov" >/dev/null || return 1
   env_file=$(target_in_harness_home "$(jq -r '.env.CLAUDE_ENV_FILE // empty' "$src")")
-  plugin_dirs=$(mapped_plugin_dirs_of "$(jq -r '.env.CLAUDE_CODE_PLUGIN_DIRS // empty' "$src")")
+  plugin_dirs=$(plugin_dirs_with_overlay "$(mapped_plugin_dirs_of "$(jq -r '.env.CLAUDE_CODE_PLUGIN_DIRS // empty' "$src")")")
   case "$(profile_role 2>/dev/null)" in
     workstation) proxy_url=$CCFLARE_URL_WORKSTATION ;;
     satellite) proxy_url=$CCFLARE_URL_SATELLITE ;;
@@ -2611,6 +2651,12 @@ check() {
         missing_plugin_dir=$(plugin_dir_missing_manifest "$mapped_plugin_dirs")
         [ -z "$missing_plugin_dir" ] ||
           { echo "DRIFT: $f env.CLAUDE_CODE_PLUGIN_DIRS names $missing_plugin_dir, which has no .claude-plugin/plugin.json (sync.sh install relinks ~/.claude/mods; a mod on an unmerged branch is not loadable)"; drift=1; }
+        # The overlay's plugin-dirs lines are compared below as part of the
+        # desired settings, which drop a line that cannot be loaded; name it
+        # here, since the builder's stderr is shown only when it fails.
+        overlay_plugin_dirs_err=$(plugin_dirs_with_overlay "$mapped_plugin_dirs" 2>&1 >/dev/null)
+        [ -z "$overlay_plugin_dirs_err" ] ||
+          { printf '%s\n' "$overlay_plugin_dirs_err" | sed 's/^/DRIFT: /'; drift=1; }
       fi
       # ANTHROPIC_BASE_URL is role-projected exactly as reconcile_runtime_env
       # writes it, or a satellite's legitimate tailnet URL reads as permanent
@@ -2711,7 +2757,13 @@ check() {
         # included, so it is the remedy only for a live-only entry that is
         # public (docs/solutions/integration-issues/a-permissions-entry-added-
         # to-the-tracked-settings-json-never-reaches-the-live-file.md).
-        echo "DRIFT: $f differs from repo copy beyond ad-daemon-owned keys$settings_keys (an entry only live has goes into settings.json, or the overlay when private; one only the repo has reaches live through sync.sh apply-settings)"
+        settings_plugin_dirs_hint=""
+        if [ "$settings_live_ok" -eq 1 ] && [ "$settings_canonical_ok" -eq 1 ] &&
+           jq -en --slurpfile a "$settings_tmp/live.proj.json" --slurpfile b "$settings_tmp/canonical.proj.json" \
+             '$a[0].env.CLAUDE_CODE_PLUGIN_DIRS != $b[0].env.CLAUDE_CODE_PLUGIN_DIRS' >/dev/null 2>&1; then
+          settings_plugin_dirs_hint="; a plugin folder only this host loads goes in the overlay's plugin-dirs file, not in env.CLAUDE_CODE_PLUGIN_DIRS"
+        fi
+        echo "DRIFT: $f differs from repo copy beyond ad-daemon-owned keys$settings_keys (an entry only live has goes into settings.json, or the overlay when private; one only the repo has reaches live through sync.sh apply-settings$settings_plugin_dirs_hint)"
         drift=1
       fi
       if ! settings_apply_check=$(node "$HERE/lib/settings-apply.js" --desired "$settings_tmp/canonical.json" --live "$H/$f" --base "$H/.hov-stack/settings-base.json" --config-dir "$H" --home "$HOME" --report check 2>"$settings_tmp/apply-error"); then
