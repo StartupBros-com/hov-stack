@@ -21,9 +21,9 @@ MARKETPLACE_TEST_REMOTE_ROOT="${MARKETPLACE_TEST_REMOTE_ROOT:-}"
 # so the gate-2 rehearsal can aim the check at a scratch repository without
 # editing the check itself.
 MONOREPO_SOURCE_URL="${MONOREPO_SOURCE_URL:-https://github.com/StartupBros-com/hov-stack.git}"
-# The shared announce workflow is referenced under either repository name
-# during the rename window; GitHub redirects the old one.
-ANNOUNCE_WORKFLOW_REPOSITORIES=(StartupBros-com/hov-marketplace StartupBros-com/hov-stack)
+# The shared announce workflow is called under the renamed repository only. The
+# old name was accepted during the rename window, which closed in #373.
+ANNOUNCE_WORKFLOW_REPOSITORY=StartupBros-com/hov-stack
 # Per-run cache of monorepo main checkouts (one full fetch per distinct remote),
 # created on first use and removed at exit.
 MONOREPO_CACHE_DIR=""
@@ -51,14 +51,9 @@ announce_pin_is_blessed() {
   git -C "$MARKETPLACE_REPO_DIR" cat-file -e "$pin:.github/workflows/hov-tool-drop-announce.yml" 2>/dev/null
 }
 
-# The announce job must call the shared workflow by full path at a pin, under
-# either repository name while the rename window is open.
+# The announce job must call the shared workflow by full path at a pin.
 announce_uses_is_shared_workflow() {
-  local uses="$1" repository
-  for repository in "${ANNOUNCE_WORKFLOW_REPOSITORIES[@]}"; do
-    [[ "$uses" == "$repository/.github/workflows/hov-tool-drop-announce.yml@"* ]] && return 0
-  done
-  return 1
+  [[ "$1" == "$ANNOUNCE_WORKFLOW_REPOSITORY/.github/workflows/hov-tool-drop-announce.yml@"* ]]
 }
 
 fail() {

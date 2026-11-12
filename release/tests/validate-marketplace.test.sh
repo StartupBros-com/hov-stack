@@ -69,7 +69,7 @@ permissions:
   id-token: write
 jobs:
   announce:
-    uses: StartupBros-com/hov-marketplace/.github/workflows/hov-tool-drop-announce.yml@c981b872ebf650805200ad72c8b7142232f8b3f6
+    uses: StartupBros-com/hov-stack/.github/workflows/hov-tool-drop-announce.yml@c981b872ebf650805200ad72c8b7142232f8b3f6
 EOF
 }
 
@@ -194,7 +194,7 @@ permissions:
   id-token: write
 jobs:
   decoy:
-    uses: StartupBros-com/hov-marketplace/.github/workflows/hov-tool-drop-announce.yml@c981b872ebf650805200ad72c8b7142232f8b3f6
+    uses: StartupBros-com/hov-stack/.github/workflows/hov-tool-drop-announce.yml@c981b872ebf650805200ad72c8b7142232f8b3f6
   announce:
     uses: attacker/other/.github/workflows/hov-tool-drop-announce.yml@c981b872ebf650805200ad72c8b7142232f8b3f6
 EOF
@@ -236,24 +236,24 @@ rm -rf "$TMP/token-eater/evals"
 # marketplace commit that carries the announce workflow; anything else fails.
 
 restore_valid_token_fixture
-yq -i '.jobs.announce.uses = "StartupBros-com/hov-marketplace/.github/workflows/hov-tool-drop-announce.yml@main"' "$TMP/token-eater/.github/workflows/release-train.yml"
+yq -i '.jobs.announce.uses = "StartupBros-com/hov-stack/.github/workflows/hov-tool-drop-announce.yml@main"' "$TMP/token-eater/.github/workflows/release-train.yml"
 publish_fixture_commit 'branch ref instead of a commit pin'
 validate_default_branch_failure "a branch ref is never an acceptable announce pin"
 
 restore_valid_token_fixture
-yq -i '.jobs.announce.uses = "StartupBros-com/hov-marketplace/.github/workflows/hov-tool-drop-announce.yml@v1.0.0"' "$TMP/token-eater/.github/workflows/release-train.yml"
+yq -i '.jobs.announce.uses = "StartupBros-com/hov-stack/.github/workflows/hov-tool-drop-announce.yml@v1.0.0"' "$TMP/token-eater/.github/workflows/release-train.yml"
 publish_fixture_commit 'tag ref instead of a commit pin'
 validate_default_branch_failure "a tag ref is never an acceptable announce pin"
 
 restore_valid_token_fixture
-yq -i '.jobs.announce.uses = "StartupBros-com/hov-marketplace/.github/workflows/hov-tool-drop-announce.yml@0123456789abcdef0123456789abcdef01234567"' "$TMP/token-eater/.github/workflows/release-train.yml"
+yq -i '.jobs.announce.uses = "StartupBros-com/hov-stack/.github/workflows/hov-tool-drop-announce.yml@0123456789abcdef0123456789abcdef01234567"' "$TMP/token-eater/.github/workflows/release-train.yml"
 publish_fixture_commit 'well-formed but nonexistent commit'
 validate_default_branch_failure "a SHA that is not a marketplace commit is rejected"
 
 # The live successor pin (#34) must pass exactly like the original: this is the
 # regression that a frozen constant caused.
 restore_valid_token_fixture
-yq -i '.jobs.announce.uses = "StartupBros-com/hov-marketplace/.github/workflows/hov-tool-drop-announce.yml@08f7d22f3a5b59b1658ab2e96a20d0d3c352869c"' "$TMP/token-eater/.github/workflows/release-train.yml"
+yq -i '.jobs.announce.uses = "StartupBros-com/hov-stack/.github/workflows/hov-tool-drop-announce.yml@08f7d22f3a5b59b1658ab2e96a20d0d3c352869c"' "$TMP/token-eater/.github/workflows/release-train.yml"
 publish_fixture_commit 'advanced announce pin'
 write_unreleased_manifest "$TOKEN_SHA"
 expect_pass "an advanced-but-real announce pin is blessed" validate full
@@ -510,12 +510,13 @@ mutate_manifest --arg sha "$SIDE_SHA" '(.plugins[] | select(.name == "hov-stack"
 TMPDIR="$TMP/validator-tmp" GIT_TRACE="$TMP/git-trace" expect_fail_reason "git-subdir pinned commit must be reachable from main" "plugin hov-stack pinned commit is not reachable from main at" validate full
 assert_monorepo_cache "a failing full run reuses the first entry's fetch and still removes its cache"
 
-# Twin: a url entry's release train may reference the shared workflow under
-# the new repository name during the window.
-yq -i '.jobs.announce.uses = "StartupBros-com/hov-stack/.github/workflows/hov-tool-drop-announce.yml@c981b872ebf650805200ad72c8b7142232f8b3f6"' "$TMP/token-eater/.github/workflows/release-train.yml"
-publish_fixture_commit 'announce reference under the new repository name'
+# The rename window is closed (#373): a url entry's release train that still calls
+# the shared workflow under the old repository name is refused, even at a blessed
+# pin, so it fails here rather than at announce time.
+yq -i '.jobs.announce.uses = "StartupBros-com/hov-marketplace/.github/workflows/hov-tool-drop-announce.yml@c981b872ebf650805200ad72c8b7142232f8b3f6"' "$TMP/token-eater/.github/workflows/release-train.yml"
+publish_fixture_commit 'announce reference under the old repository name'
 write_mixed_manifest
-expect_pass "url entry may reference the shared workflow under the new repository name" validate full
+expect_fail_reason "url entry calling the shared workflow under the old repository name is refused" "announce job does not call the shared hov announce workflow" validate full
 restore_valid_token_fixture
 publish_fixture_commit 'restore announce reference'
 
