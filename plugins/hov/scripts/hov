@@ -9,7 +9,7 @@ hosts' mailboxes over one outbound ssh session, and the two paths by which an
 agent without a Claude Code hook (Codex, OMP) reaches the same mailbox:
 `hov mcp`, an MCP server on stdio that exposes the commands as tools, and
 `hov notify`, the count-only delivery an OMP extension prints into the run
-before each turn. Delivery into a session is text and nothing else: the hook
+before turns, after tool results and on a timer. Delivery into a session is text and nothing else: the hook
 returns `hookSpecificOutput.additionalContext` and no other key, `notify`
 prints a count and never a body, and the MCP server answers only what it was
 asked. The link inserts rows and never runs anything a row says.
@@ -723,7 +723,7 @@ def cmd_hook(a: argparse.Namespace) -> int:
 #
 # Codex and OMP have no Claude Code hook, so they reach the mailbox two ways. `hov mcp` is an MCP server on
 # stdio (newline-delimited JSON-RPC 2.0, MCP 2025-06-18) that exposes whoami/inbox/send/thread/search/ls as
-# tools: the agent pulls its own mail. `hov notify` is the push half: an OMP extension runs it before each turn
+# tools: the agent pulls its own mail. `hov notify` is the push half: an OMP extension runs it at its delivery checkpoints
 # and prints what it returns into the run as a custom message. It is count-only, always; a body crosses into an
 # agent's context only when that agent asks for it with the inbox tool. Both share `pending_for` and `deliver`
 # with the hook, so the frame, the once-per-session record and the log line are the same three ways in.
