@@ -32,6 +32,12 @@ const cases = [
   ["T6 check engine failure","sync.sh",'echo "DRIFT: settings.json apply check failed: $(head -1 "$settings_tmp/apply-error")"',':',"T6 corrupt base"],
   ["T6 install early return","sync.sh","echo 'install finished everything else, but settings apply failed (see above)' >&2","echo 'install finished everything else, but settings apply failed (see above)' >&2\n    return 1","install reports"],
   ["T6 seed rev role gate","sync.sh",'git -C "$HERE" rev-parse --verify "$rev^{commit}" >/dev/null 2>&1 ||', 'true ||',"T6 seed bad"],
+  ["T6 plugin-dirs hash","lib/settings-apply.js",'["settings.json", "env", "plugin-dirs"]','["settings.json", "env"]',"T6 overlay plugin-dirs"],
+  ["T6 plugin-dirs append","sync.sh",'    list="$list:$folder"\n','',"T6 overlay plugin-dirs"],
+  ["T6 plugin-dirs repeat","sync.sh",'case ":$list:" in *":$folder:"*) continue ;; esac','',"T6 overlay plugin-dirs"],
+  ["T6 plugin-dirs manifest","sync.sh",'[ -f "$folder/.claude-plugin/plugin.json" ] || why=','true || why=',"T6 overlay plugin-dirs"],
+  ["T6 plugin-dirs colon","sync.sh","*:*) why='it contains a colon","*::::*) why='it contains a colon","T6 overlay plugin-dirs"],
+  ["T6 plugin-dirs check exit","sync.sh","sed 's/^/DRIFT: /'; drift=1; }","sed 's/^/DRIFT: /'; }","T6 overlay plugin-dirs"],
 ];
 let killed=0;
 for (const [name,file,from,to,pattern,unit,second] of cases) {

@@ -1,0 +1,6 @@
+# Plugin folders only this host loads, one absolute path per line. A # starts a
+# comment; blank lines are ignored. sync.sh adds each folder after the tracked
+# CLAUDE_CODE_PLUGIN_DIRS list, once, when it writes settings.json. A folder
+# without .claude-plugin/plugin.json, a relative path or a line with a colon is
+# left out, and sync.sh check names it.
+/srv/my-plugin

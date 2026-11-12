@@ -846,6 +846,66 @@ case "$sn_line" in
   *) bad "an overlay that is not a JSON object did not stop the comparison with the builder's reason: ${sn_line:-<no settings line>}" ;;
 esac
 
+# -- the overlay's plugin-dirs file (#552) -------------------------------------
+# A host adds its own plugin folders after the tracked list through
+# <overlay>/plugin-dirs. The fresh case above runs with an overlay that has no
+# such file and gets the tracked list unchanged.
+pd_home=$TMP/plugin-dirs-home
+pd_ov=$TMP/plugin-dirs-overlay
+pd_no_file_ov=$TMP/plugin-dirs-overlay-without-file
+pd_extra=$TMP/plugin-dirs-fixture/extra-plugin
+pd_bare=$TMP/plugin-dirs-fixture/no-manifest
+mkdir -p "$pd_home" "$pd_ov" "$pd_no_file_ov" "$pd_extra/.claude-plugin" "$pd_bare"
+printf '%s\n' '{"name":"extra-plugin"}' > "$pd_extra/.claude-plugin/plugin.json"
+ln -s "$REPO/claude-env.sh" "$pd_home/claude-env.sh"
+ln -s "$REPO/mods" "$pd_home/mods"
+pd_reconcile() { CLAUDE_HOME="$pd_home" HOV_STACK_OVERLAY="$1" "$SYNC" reconcile-runtime-env 2>&1; }
+pd_live() { jq -r '.env.CLAUDE_CODE_PLUGIN_DIRS' "$pd_home/settings.json"; }
+# check's exit status is not asserted here: this home reports other drift too.
+pd_check() {
+  CLAUDE_HOME="$pd_home" HOV_STACK_OVERLAY="$pd_ov" "$SYNC" check >"$TMP/plugin-dirs-check.out" 2>&1
+  pd_line=$(grep -F -e 'settings.json' -e 'plugin-dirs' "$TMP/plugin-dirs-check.out" || true)
+}
+pd_out=$(pd_reconcile "$pd_no_file_ov") || bad "plugin-dirs fixture: reconcile-runtime-env failed:"$'\n'"$pd_out"
+pd_tracked=$(pd_live)
+pd_first=${pd_tracked%%:*}
+case "$pd_tracked" in "$pd_home/mods/"*":$pd_home/mods/"*) ok ;; *) bad "plugin-dirs fixture: the tracked list is not this home's mods, so the cases below test nothing: $pd_tracked" ;; esac
+{
+  printf '# folders only this host loads\n\n'
+  printf '   %s   # indented, with a trailing comment\n' "$pd_extra"
+  printf '%s\n' "$pd_first" "$pd_extra"
+} > "$pd_ov/plugin-dirs"
+# PLANTED NEGATIVE: check reads the file, so a live list without the folder is
+# settings drift, and the hint points at the file rather than the live key.
+pd_check
+case "$pd_line" in
+  *"DRIFT: settings.json differs"*" in: "*"env"*"the overlay's plugin-dirs file"*) ok ;;
+  *) bad "check did not report a live list missing the plugin-dirs folder as env drift with the plugin-dirs hint: ${pd_line:-<no settings line>}" ;;
+esac
+pd_out=$(pd_reconcile "$pd_ov"); pd_status=$?
+if [ "$pd_status" -eq 0 ]; then ok; else bad "reconcile-runtime-env with a plugin-dirs file exited $pd_status:"$'\n'"$pd_out"; fi
+if [ "$(pd_live)" = "$pd_tracked:$pd_extra" ]; then ok; else bad "plugin-dirs: live list is not the tracked list followed by the extra folder once: $(pd_live)"; fi
+case "$pd_out" in *"left out"*) bad "plugin-dirs: reconcile named a loadable line as left out:"$'\n'"$pd_out" ;; *) ok ;; esac
+pd_check
+case "$pd_line" in *"DRIFT"*) bad "plugin-dirs: check reported drift after reconcile wrote the overlay's folder: $pd_line" ;; *) ok ;; esac
+# PLANTED NEGATIVE: a folder without a manifest, a line with a colon and a
+# relative path are each left out and named; the loadable list is still written.
+printf '%s\n' "$pd_bare" "$pd_extra:$pd_bare" "relative/plugin" >> "$pd_ov/plugin-dirs"
+pd_out=$(pd_reconcile "$pd_ov"); pd_status=$?
+if [ "$pd_status" -eq 0 ]; then ok; else bad "reconcile-runtime-env refused the whole list over one bad plugin-dirs line:"$'\n'"$pd_out"; fi
+if [ "$(pd_live)" = "$pd_tracked:$pd_extra" ]; then ok; else bad "plugin-dirs: a bad line changed the written list: $(pd_live)"; fi
+for pd_reason in "$pd_bare, which is left out of CLAUDE_CODE_PLUGIN_DIRS: it has no .claude-plugin/plugin.json" \
+                 "$pd_extra:$pd_bare, which is left out of CLAUDE_CODE_PLUGIN_DIRS: it contains a colon" \
+                 "relative/plugin, which is left out of CLAUDE_CODE_PLUGIN_DIRS: it is not an absolute path"; do
+  case "$pd_out" in *"$pd_ov/plugin-dirs names $pd_reason"*) ok ;; *) bad "reconcile did not name the bad plugin-dirs line ($pd_reason):"$'\n'"$pd_out" ;; esac
+done
+pd_check
+for pd_reason in "$pd_bare, which is left out of CLAUDE_CODE_PLUGIN_DIRS: it has no .claude-plugin/plugin.json" \
+                 "$pd_extra:$pd_bare, which is left out of CLAUDE_CODE_PLUGIN_DIRS: it contains a colon"; do
+  case "$pd_line" in *"DRIFT: $pd_ov/plugin-dirs names $pd_reason"*) ok ;; *) bad "check did not report the bad plugin-dirs line as DRIFT ($pd_reason): ${pd_line:-<no line>}" ;; esac
+done
+case "$pd_line" in *"DRIFT: settings.json"*) bad "plugin-dirs: a left-out line also showed as settings drift: $pd_line" ;; *) ok ;; esac
+
 # A CLAUDE_CODE_PLUGIN_DIRS entry whose folder has no plugin manifest must fail
 # closed before anything is written: the engine would log a failed load in
 # every session, and nothing else would say why. Only the manifest is moved
