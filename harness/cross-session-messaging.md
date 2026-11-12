@@ -17,6 +17,12 @@ require, and there is **no narrower switch**: `DISABLE_TELEMETRY`,
 `DO_NOT_TRACK`, and `DISABLE_GROWTHBOOK` each also kill feature-flag fetching
 (env-vars docs, verified 2026-08-08). Beware the trap on two of them: any
 non-empty value counts, including `0`/`false` — only *unsetting* re-enables.
+The docs read 2026-11-12 narrow this. Same-machine messaging works with
+flag fetching off from 2.1.248, so the flag now costs Remote Control, and
+with it cross-machine messaging, but not same-machine messaging. Setting
+only `DISABLE_TELEMETRY` or `DO_NOT_TRACK` leaves Remote Control available
+from 2.1.283, unless the organization requires Trusted Devices.
+`CLAUDE_CODE_DISABLE_FEATURE_FLAGS` makes it unavailable too.
 
 - **Cost accepted**: telemetry, auto-update checks, release notes, `/feedback`,
   and fast-mode availability checks come back. Telemetry excludes code, file
@@ -99,7 +105,16 @@ non-empty value counts, including `0`/`false` — only *unsetting* re-enables.
   beyond this machine (transits Anthropic servers, Remote Control path) prompts
   first, even in bypass mode. Codifies CLAUDE.md's "pause before external
   sends"; a `true` from any scope wins, so no project file can loosen it.
-  Cross-machine is reply-only anyway — a local session can never initiate.
+  Per the messaging docs read 2026-11-12, a session connected to Remote
+  Control can start a conversation with your Remote Control sessions on
+  other machines (2.1.225+). Two limits apply:
+  - a cloud session can't answer with `SendMessage`;
+  - a send from a session not connected to Remote Control carries no reply
+    address.
+
+  None of it applies on this host while Remote Control is off (below), so
+  native messaging reaches same-machine sessions only. Cross-host and
+  cross-harness mail goes through the hov mailbox (`plugins/hov/`).
 - Headless `claude -p` workers bind an inbox but cannot show the approval
   dialog. Under the class default a message held there is dropped after
   `dialogExpiry` (five minutes by default; a sender it can reach is told it
@@ -121,11 +136,19 @@ non-empty value counts, including `0`/`false` — only *unsetting* re-enables.
   refuses with "Remote Control is only available when using Claude via
   api.anthropic.com. ANTHROPIC_BASE_URL is set and does not point at
   api.anthropic.com" (verified 2026-09-28; the 2026-08-08 probe agrees). The
-  documented way out is to unset the variable for that one session
-  (`env -u ANTHROPIC_BASE_URL claude --remote-control`, not run here): by
-  construction that session then talks to api.anthropic.com directly, with
-  no ccflare account pool and no guard in front of it. Not adopted; no
-  stated need (Ground Truth vet X5).
+  rule dates from v2.1.196 per the env-vars docs. It applies even with a
+  claude.ai login, and the same refusal string is in the installed 2.1.323
+  binary (checked 2026-11-12). The documented way out is to unset the
+  variable. Here it is set in the `settings.json` `env` block, not in the
+  shell: the daemon that launches sessions has no `ANTHROPIC_BASE_URL` in
+  its own environment (checked 2026-11-12). So
+  `env -u ANTHROPIC_BASE_URL claude --remote-control` would not clear it,
+  because Claude Code applies the settings `env` itself. The Remote Control
+  docs say to remove it from that block too. A Remote Control session would
+  therefore need a config without that entry (not tried). By construction,
+  that session then talks to api.anthropic.com directly, with no ccflare
+  account pool and no guard in front of it. Not adopted; no stated need
+  (Ground Truth vet X5).
 
 ## Plumbing facts
 
@@ -160,6 +183,8 @@ content rule).
 ## Retrofit candidates (not built — build on evidence, Ceremony Test applies)
 
 - Nothing detects two sessions on the same issue any more (the
-  `worktree-claim-advisory.js` hook retired 2026-10-17, move 7); messaging
-  the *other* live session is the missing half (motivating incident:
-  2026-08-07 dup work, issue 553 / PRs 552+550).
+  `worktree-claim-advisory.js` hook retired 2026-10-17, move 7). Messaging
+  the *other* live session now exists, through `SendMessage` on the same
+  host and the hov mailbox across hosts; detection is the missing half,
+  planned as advisory hov claims (hov-stack#529, PR 6) (motivating
+  incident: 2026-08-07 dup work, issue 553 / PRs 552+550).
