@@ -64,6 +64,10 @@ def state_dir() -> Path:
     return p
 
 
+def db_path() -> Path:
+    return state_dir() / "mail.db"
+
+
 def local_host() -> str:
     h = os.environ.get("HOV_HOST") or socket.gethostname()
     return h.split(".", 1)[0]
@@ -247,7 +251,7 @@ HOOK_BUSY_MS = 2000
 
 def db(busy_ms: int = 5000) -> sqlite3.Connection:
     """Open the mailbox; `busy_ms` is how long a statement waits for the write lock (see HOOK_BUSY_MS)."""
-    con = sqlite3.connect(state_dir() / "mail.db", timeout=busy_ms / 1000)
+    con = sqlite3.connect(db_path(), timeout=busy_ms / 1000)
     con.row_factory = sqlite3.Row
     con.execute("PRAGMA journal_mode=WAL")
     con.execute(f"PRAGMA busy_timeout={int(busy_ms)}")
@@ -726,12 +730,14 @@ def cmd_hook(a: argparse.Namespace) -> int:
 
 
 def cmd_notify(a: argparse.Namespace) -> int:
-    """Count-only delivery for an agent without a Claude Code hook: what the OMP extension runs before each turn.
+    """Count-only delivery for an agent without a Claude Code hook: what the OMP extension runs at delivery checkpoints.
 
     Prints the <hov-mail> count block when this session has mail it was not handed yet, else nothing (with
     --json, an object either way). Never marks anything read and never prints a body. The caller states who it
     is (--as or HOV_AS) and which session it is (--session or HOV_SESSION_ID): an agent with no Claude Code
-    session has no title to resolve, and the session id is what makes each message cross once.
+    session has no title to resolve, and the session id is what makes each message cross once. The --json
+    object also names the mailbox file (`db`): a poll that finds nothing writes nothing, so a caller may skip
+    polls while that file and its -wal are unchanged.
     """
     sid = a.session
     if not sid:
@@ -757,7 +763,8 @@ def cmd_notify(a: argparse.Namespace) -> int:
         text, rows = deliver(con, me, sid, a.event, rows, "count", why)
         text = text or None  # every row claimed by a concurrent notify of this session: nothing new here
     if a.json:
-        print(json.dumps({"me": me.addr, "session": sid, "new": len(rows), "count": len(unread_for(con, me)), "text": text}))
+        print(json.dumps({"me": me.addr, "session": sid, "new": len(rows), "count": len(unread_for(con, me)), "text": text,
+                          "db": str(db_path())}))
     elif text:
         print(text)
     return 0
@@ -1616,7 +1623,7 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("--role", choices=("leaf", "hub"), default="leaf")
     r.set_defaults(fn=cmd_relay)
 
-    n = sub.add_parser("notify", help="count-only delivery for an agent without a Claude Code hook (what the OMP extension runs before each turn)")
+    n = sub.add_parser("notify", help="count-only delivery for an agent without a Claude Code hook (what the OMP extension runs at delivery checkpoints)")
     n.add_argument("--as", dest="as_name", default=None, help="this agent's mail name (or HOV_AS); required")
     n.add_argument("--session", default=os.environ.get("HOV_SESSION_ID") or None, help="the agent's own session id; each message is handed to a session once (default: $HOV_SESSION_ID)")
     n.add_argument("--event", default="notify", help="recorded with the delivery (default: notify)")
