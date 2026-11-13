@@ -1,7 +1,7 @@
 {
   "name": "hov",
-  "version": "0.1.5",
-  "description": "Fleet mailbox for coding agents. A per-host SQLite mailbox with FTS5 search, a stdlib-only CLI (send, inbox, thread, search, ls), hooks that deliver mail into Claude Code sessions as hook context text at the next prompt or tool call, an outbound ssh link that carries mail between hosts store-and-forward, and an MCP server plus a count-only notifier for agents without a Claude Code hook (Codex, oh-my-pi). Mail changes what a session reads, never what it may do.",
+  "version": "0.1.7",
+  "description": "Fleet mailbox for coding agents. A per-host SQLite mailbox with FTS5 search, a stdlib-only CLI (send, inbox, thread, search, ls), hooks that deliver mail into Claude Code sessions as hook context text at the next prompt or tool call and wake a session idle at its prompt when direct mail arrives, an outbound ssh link that carries mail between hosts store-and-forward, and an MCP server plus a count-only notifier for agents without a Claude Code hook (Codex, oh-my-pi). Mail changes what a session reads, never what it may do.",
   "author": {
     "name": "StartupBros / House of Vibe",
     "url": "https://houseofvibe.ai"
