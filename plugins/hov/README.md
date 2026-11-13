@@ -131,4 +131,4 @@ One hundred and forty-two tests. `test_hov.py`, forty-two: mailbox round trip, t
 
 ## Not in these PRs
 
-Remote launch, claims, and the router columns are PRs 3 and 6 to 8 in hov-stack#529. Idle wake has one of its two candidates here: the `asyncRewake` Stop hook. The other, `hov channel` (a `claude/channel` MCP server), was not built or tested. The `run-codex` wrapper the decision record named for PR 5 is not built: draining bodies into an unattended prompt contradicts count-only delivery, and the MCP `inbox` tool gives Codex the same mail when it asks.
+Remote launch, claims, and the router columns are PRs 3 and 6 to 8 in hov-stack#529. Idle wake has one of its two candidates here: the `asyncRewake` Stop hook. The other, `hov channel` (an MCP server using Claude Code's channels), was not built or tested. The `run-codex` wrapper the decision record named for PR 5 is not built: draining bodies into an unattended prompt contradicts count-only delivery, and the MCP `inbox` tool gives Codex the same mail when it asks.
