@@ -79,6 +79,17 @@ ACCOUNT_COMMANDS = {
     "make",
 }
 CREDENTIAL_FLAGS = {"--api-url", "--api-key", "-k", "--token"}
+# Vendor verbs whose exact `<verb> --help` prints local usage. Probed on vendor
+# 1.29.0 with the network cut, no key and an empty HOME: each exited 0 with its
+# usage on stdout. Raw interact needs --scrape-id, so its help never gets here.
+# An unlisted verb keeps the bounded hold, so a new vendor verb is never free
+# unseen (#1380).
+LOCAL_HELP_COMMANDS = frozenset({
+    "scrape", "crawl", "batch-scrape", "map", "parse", "monitor", "search",
+    "find-tools", "find-skills", "read-skill", "list", "list-tools", "alexandria",
+    "developer", "gov", "research", "feedback", "search-feedback", "agent",
+    "experimental", "create-skill", "update-skill",
+})
 BODY_LIMIT = 24 * 1024
 PARSE_EXTENSIONS = {
     ".html", ".htm", ".pdf", ".docx", ".doc", ".odt", ".rtf", ".xlsx", ".xls",
@@ -796,8 +807,12 @@ def budgeted_invoke(args, surface, command):
         return invoke_vendor(command, args.timeout, args.verb == "raw")
     if args.timeout >= BUDGET.constants["reservation_lifetime"]:
         raise CliError("wrapper timeout must be shorter than reservation lifetime", "reduce --timeout")
-    # This exact validated argv prints local help without spending account credits.
-    if args.verb == "raw" and command == ["research", "--help"]:
+    # Exactly `<listed verb> --help` prints local help without spending account
+    # credits; any other argv, -h or added tokens included, stays budgeted.
+    if (
+        args.verb == "raw" and len(command) == 2
+        and command[0] in LOCAL_HELP_COMMANDS and command[1] == "--help"
+    ):
         return invoke_vendor(command, args.timeout, True, args.retry_command)
     # Free-first (#2118): an eligible call tries keyless, then runs keyed once when
     # keyless refuses it. Without a key keyless is the only leg, cooldown or not.

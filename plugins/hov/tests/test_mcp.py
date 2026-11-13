@@ -383,6 +383,57 @@ class McpCase(HovFixture):
         self.assertIn("deliver event=notify session=s2 me=testhost:omp mode=count n=1 ids=", log)
         self.assertNotIn(BODY, log)
 
+    def converse(self, *steps, as_name="codex"):
+        """One live `hov mcp` process. Each dict in `steps` is sent (a request waits for its reply); each callable runs
+        between them, so another process can act while this reader is connected. Returns the replies by id."""
+        proc = subprocess.Popen([sys.executable, "-I", str(HOV), "mcp", "--as", as_name], stdin=subprocess.PIPE,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=self.env)
+        replies = {}
+        try:
+            for step in steps:
+                if callable(step):
+                    step()
+                    continue
+                proc.stdin.write(json.dumps(step) + "\n")
+                proc.stdin.flush()
+                if "id" in step:
+                    r = json.loads(readline_within(proc))
+                    replies[r["id"]] = r
+            proc.stdin.close()
+            err = proc.stderr.read()
+            proc.wait(timeout=10)
+        finally:
+            proc.kill()
+            proc.stdout.close()
+            proc.stderr.close()
+        self.assertEqual((proc.returncode, err), (0, ""))
+        return replies
+
+    def broadcast(self, subject):
+        return lambda: self.hov("send", "--as", "beta", "--to", "*", "--subject", subject, "x")
+
+    def test_a_connected_reader_gets_the_broadcasts_sent_while_it_is_connected(self):
+        # planted negative: recording first contact at the reader's first inbox, send or whoami call loses both
+        self.broadcast("before connect")()
+        r = self.converse(INIT, self.broadcast("after initialize"), INITD, call(2, "ls"),
+                          self.broadcast("after ls"), call(3, "inbox", {"keep": True}))
+        is_error, text = self.text(r[3])
+        self.assertFalse(is_error)
+        self.assertIn("inbox for testhost:codex (--as): 2 message(s)", text)
+        self.assertIn("subject: after initialize", text)
+        self.assertIn("subject: after ls", text)
+        self.assertNotIn("before connect", text)
+
+    def test_a_client_that_skips_initialize_is_registered_at_its_first_tool_call(self):
+        # planted negative: recording first contact only at initialize misses a client that never sends it
+        r = self.converse(call(1, "thread", {"id": "no-such-thread"}), self.broadcast("after thread"),
+                          call(2, "inbox", {"keep": True}))
+        self.assertTrue(self.text(r[1])[0])
+        is_error, text = self.text(r[2])
+        self.assertFalse(is_error)
+        self.assertIn("inbox for testhost:codex (--as): 1 message(s)", text)
+        self.assertIn("subject: after thread", text)
+
     def test_notify_counts_every_unread_message_and_takes_wildcards(self):
         # omp is around before the broadcasts: one sent before a name's first contact is not its mail
         self.hov("whoami", "--as", "omp")

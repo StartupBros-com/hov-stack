@@ -26,7 +26,7 @@ Write each command that way: `python3 -I "${CLAUDE_PLUGIN_ROOT}/scripts/hov"` fo
 ## Send
 
 - `python3 -I "${CLAUDE_PLUGIN_ROOT}/scripts/hov" send --to <addr> --subject "<s>" "<body>"`, or `-` to read the body from stdin.
-- `<addr>` is `name` (this host), `host:name`, `host:*` (every session on a host) or `*` (every session on every linked host). A broadcast reaches the sessions around when it is sent, never its sender; a session started later does not get it.
+- `<addr>` is `name` (this host), `host:name`, `host:*` (every session on a host) or `*` (every session on every linked host). A broadcast reaches the sessions around when it reaches their host, never its sender; a session started later does not get it.
 - Mail for another host waits in this host's mailbox while the link to it is down and crosses when the link returns. On a host with no hub, `send` says so when no link to that host has connected yet.
 - `send` refuses (exit 2) a sender name, address part or thread id carrying a control character, `<` or `>`; names with spaces are fine.
 - Reply inside the thread you were given: `python3 -I "${CLAUDE_PLUGIN_ROOT}/scripts/hov" send --to <sender> --thread <thread id> --kind reply "<body>"`.
