@@ -155,7 +155,7 @@ End with `Block` when any `HIGH` remains and `Approve` otherwise, leaving the re
 
 ## Severity, cap and verdict
 
-Folded in from the upstream orchestrator skill (jakubkrehel/skills better-interface, commit 267330e), which this harness does not install; verbatim except for the local changes UPSTREAM.md lists (heading numbers dropped, the cap sentence's cross-reference to that file's own heading removed, triggers exempted from the cap). In a change review these cover `Introduced` and `Regression` only; pre-existing findings stay out of the cap and the verdict.
+Folded in from the upstream orchestrator skill (jakubkrehel/skills better-interface, commit 267330e), which this harness does not install; verbatim except for the local changes UPSTREAM.md lists, among them: heading numbers dropped, the cap sentence's cross-reference to that file's own heading removed, triggers exempted from the cap. In a change review these cover `Introduced` and `Regression` only; pre-existing findings stay out of the cap and the verdict.
 
 ### Rank by user impact
 

@@ -18,7 +18,7 @@ the failure is invisible, because the file still looks fine. Live instances:
 
 All were found by hand. This test is the guard so the next one isn't. Delete it
 when `claude plugin validate` rejects these defects itself (on 2026-11-13 it
-passed both broken agents).
+passed both broken agents unchanged; see PR #567).
 """
 
 import glob
@@ -46,7 +46,8 @@ AGENT_PATTERNS = (
 # The licence-file names test_skill_pack.py accepts.
 LICENCE_FILE = re.compile(r"^(LICENSE(-.+)?|LICENSE\.(md|txt)|COPYING)$")
 # A top-level `key: value` line whose value is a plain (unquoted, non-block) scalar.
-# Nested and multi-line values are out of scope: every frontmatter here is flat.
+# Only top-level single-line values are checked; nested values, list items and
+# continuation lines are not.
 PLAIN_SCALAR = re.compile(r"""^([A-Za-z][\w-]*):[ \t]+([^"'|>\s].*)$""")
 
 

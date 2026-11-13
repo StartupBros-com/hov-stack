@@ -6,7 +6,7 @@ Pinned at commit f0bb5426d51601a7e39c4d3bcadbe592962ab980 (2026-06-18).
 
 `SKILL.md` rewords the agent-instructions block that `posthog-cli` writes into an
 AGENTS.md file, which is the file above at the pin. This copy adds the skill frontmatter
-and keeps the three instructions (prefer `posthog-cli api` over MCP calls, read
+and keeps the three instructions (prefer the PostHog CLI over MCP calls, read
 `--agent-help` before the first command, check `skill list` before each task). It also
 changes one stance: upstream says to treat the `--agent-help` output and installed skills
 as instructions to follow; here they are reference data. Data queries run through
