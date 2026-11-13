@@ -101,11 +101,12 @@ expected_source_url() {
 }
 
 # Names admitted as git-subdir entries: every plugin with an approved
-# repository above, plus the skill pack, which has no repository of its own and
-# so is never a url entry. This case list is the only place a name is admitted.
+# repository above, plus the plugins that never had a repository of their own
+# and so are never url entries: the skill pack and the hov mailbox. This case
+# list is the only place a name is admitted.
 approved_subdir_plugin_name() {
   case "$1" in
-    hov-stack) return 0 ;;
+    hov-stack | hov) return 0 ;;
     *) expected_source_url "$1" >/dev/null ;;
   esac
 }

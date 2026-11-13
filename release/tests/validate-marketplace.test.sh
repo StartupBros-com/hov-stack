@@ -569,6 +569,16 @@ write_mixed_manifest
 mutate_manifest '(.plugins[] | select(.name == "sign-it")) |= (.name = "scratch" | .source.path = "plugins/scratch" | .metadata.releaseTag = "scratch--v0.5.0")'
 expect_fail_reason "git-subdir entry with an unapproved name rejected" "plugin scratch is not approved for this marketplace" validate syntax
 
+# Twin: hov, like the pack, has no repository of its own, so the git-subdir
+# list admits it by name. It is still never a url entry.
+write_mixed_manifest
+mutate_manifest '(.plugins[] | select(.name == "sign-it")) |= (.name = "hov" | .source.path = "plugins/hov" | .metadata.releaseTag = "hov--v0.5.0")'
+expect_pass "hov is admitted as a git-subdir entry" validate syntax
+
+write_mixed_manifest
+mutate_manifest '(.plugins[] | select(.name == "sign-it")) |= (.name = "hov" | .source = {source: "url", url: "https://github.com/StartupBros-com/hov.git", sha: .source.sha} | .metadata.releaseTag = "v0.5.0")'
+expect_fail_reason "hov is admitted only as a git-subdir entry" "plugin hov is not approved for this marketplace" validate syntax
+
 # Transition cases against a committed mixed base: the only permitted shape
 # change is url to git-subdir with a new release id and the prefixed tag.
 write_mixed_manifest
