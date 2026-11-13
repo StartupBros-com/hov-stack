@@ -32,6 +32,20 @@
           }
         ]
       }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh -c 'python3 -I \"$0\" wake; [ $? -eq 86 ] && exit 2; exit 0' \"${CLAUDE_PLUGIN_ROOT}/scripts/hov\"",
+            "asyncRewake": true,
+            "rewakeMessage": "hov: mail from other agents reached this idle session.",
+            "rewakeSummary": "hov: mail from another agent",
+            "timeout": 14400
+          }
+        ]
+      }
     ]
   }
 }
