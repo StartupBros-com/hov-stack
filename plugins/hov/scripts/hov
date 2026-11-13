@@ -54,14 +54,46 @@ TAG = "hov-mail"
 
 # ---------------------------------------------------------------- paths
 
+STATE_FILES = ("mail.db", "mail.db-wal", "mail.db-shm", "hov.log")
+_made_private = False
+
+
+def make_private(p: Path) -> None:
+    """Take group and other access off `p` when it has any. Never raises: a hook must not fail over a mode."""
+    try:
+        mode = os.stat(p).st_mode
+        if mode & 0o077:
+            os.chmod(p, mode & 0o700)
+    except OSError:
+        pass
+
+
 def state_dir() -> Path:
+    """The mailbox folder. Mail bodies live here, so it is created 0700 and its files 0600 (0.1.6).
+
+    Once per process, a looser folder and files left by 0.1.5 or earlier are narrowed. A folder named by
+    HOV_STATE_DIR keeps the mode its owner gave it, since it may be shared or watched; its files are narrowed.
+    """
+    global _made_private
     d = os.environ.get("HOV_STATE_DIR")
+    named = bool(d)
     if not d:
         base = os.environ.get("XDG_STATE_HOME") or os.path.join(os.path.expanduser("~"), ".local", "state")
         d = os.path.join(base, "hov")
     p = Path(d)
-    p.mkdir(parents=True, exist_ok=True)
+    p.mkdir(mode=0o700, parents=True, exist_ok=True)
+    if not _made_private and os.name == "posix":
+        _made_private = True
+        if not named:
+            make_private(p)
+        for f in STATE_FILES:
+            make_private(p / f)
     return p
+
+
+def open_private(p: Path, flags: int) -> int:
+    """os.open with 0600 for a file it creates. SQLite gives `-wal` and `-shm` the database file's mode."""
+    return os.open(p, flags | os.O_CREAT, 0o600)
 
 
 def db_path() -> Path:
@@ -143,7 +175,7 @@ def log(line: str) -> None:
     # with a newline did, before 0.1.3) becomes '?', so a line can be neither split nor disguised.
     line = "".join("?" if (c < " " or c == "\x7f") else c for c in line)
     try:
-        with open(state_dir() / "hov.log", "a", encoding="utf-8") as f:
+        with os.fdopen(open_private(state_dir() / "hov.log", os.O_WRONLY | os.O_APPEND), "a", encoding="utf-8") as f:
             f.write(f"{iso(now_ms())} {line}\n")
     except OSError:
         pass
@@ -251,7 +283,13 @@ HOOK_BUSY_MS = 2000
 
 def db(busy_ms: int = 5000) -> sqlite3.Connection:
     """Open the mailbox; `busy_ms` is how long a statement waits for the write lock (see HOOK_BUSY_MS)."""
-    con = sqlite3.connect(db_path(), timeout=busy_ms / 1000)
+    path = db_path()
+    if not path.exists():
+        try:
+            os.close(open_private(path, os.O_WRONLY))  # SQLite takes an empty file as a new database
+        except OSError:
+            pass  # sqlite3.connect below names the real problem
+    con = sqlite3.connect(path, timeout=busy_ms / 1000)
     con.row_factory = sqlite3.Row
     con.execute("PRAGMA journal_mode=WAL")
     con.execute(f"PRAGMA busy_timeout={int(busy_ms)}")
@@ -1045,7 +1083,8 @@ class McpServer:
                 return {"content": [{"type": "text", "text": f"{name}: {e}"}], "isError": True}
             except sqlite3.Error as e:
                 log(f"mcp db-error tool={name} err={e}")
-                return {"content": [{"type": "text", "text": f"{name}: database error"}], "isError": True}
+                why = sqlite_problem(e) or "database error"
+                return {"content": [{"type": "text", "text": f"{name}: {why}"}], "isError": True}
             return {"content": [{"type": "text", "text": text}], "isError": False}
         raise McpError(-32601, f"method not found: {shown(method, 64)}")
 
@@ -1759,16 +1798,52 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
+MIN_PYTHON = (3, 9)
+
+
+def python_problem(v: tuple = tuple(sys.version_info)) -> str | None:
+    """Why this Python cannot run hov, or None. The tests cover 3.9 and newer."""
+    if tuple(v[:2]) >= MIN_PYTHON:
+        return None
+    return (f"hov needs Python {MIN_PYTHON[0]}.{MIN_PYTHON[1]} or newer, and {sys.executable or 'python3'} is "
+            f"{v[0]}.{v[1]}. Put a newer python3 first on PATH.")
+
+
+def sqlite_problem(e: sqlite3.Error) -> str | None:
+    """Why this Python's SQLite cannot run hov, or None for an ordinary database error (locked, full)."""
+    if "fts5" not in str(e).lower():
+        return None
+    return (f"hov needs an SQLite with FTS5, and the one in {sys.executable or 'python3'} (SQLite "
+            f"{sqlite3.sqlite_version}) has none. Put a python3 whose SQLite has FTS5 first on PATH.")
+
+
+def cannot_run(args: argparse.Namespace, why: str) -> int:
+    """hov cannot run on this Python. A SessionStart hook says so on stderr with exit 1, which Claude Code shows
+    as a hook error with that first line; the prompt and tool hooks stay quiet and log it, so the session gets
+    one notice, not one per tool call. Commands, `mcp` included, print it and exit 1."""
+    if args.cmd == "hook":
+        log(f"hook-error event={args.event} err={why}")
+        if args.event != "SessionStart":
+            return 0
+    print(why, file=sys.stderr)
+    return 1
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    try:
-        return args.fn(args)
-    except sqlite3.Error as e:
-        if args.cmd == "hook":
-            log(f"hook-error event={args.event} err={e}")
-            return 0
-        print(f"hov: database error: {e}", file=sys.stderr)
-        return 1
+    why = python_problem()
+    if why is None:
+        try:
+            return args.fn(args)
+        except sqlite3.Error as e:
+            why = sqlite_problem(e)
+            if why is None:
+                if args.cmd == "hook":
+                    log(f"hook-error event={args.event} err={e}")
+                    return 0
+                print(f"hov: database error: {e}", file=sys.stderr)
+                return 1
+    return cannot_run(args, why)
 
 
 if __name__ == "__main__":
