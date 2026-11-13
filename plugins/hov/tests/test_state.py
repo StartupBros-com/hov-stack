@@ -194,6 +194,21 @@ class RequirementErrors(HovFixture):
             self.assertEqual((rc, out, err), (1, "", why + "\n"))
             self.assertEqual(self.run_main(["hook", "PostToolUse"], prompt_payload("PostToolUse")), (0, "", ""))
 
+    def test_the_stop_hooks_watcher_exits_0_with_nothing_on_stderr_whatever_cannot_run(self):
+        """`hov wake` is the `Stop` hook's watcher (0.1.7). An old Python, an SQLite without FTS5 and an ordinary
+        database error each leave it at exit 0 with empty stdout and stderr and one `wake-error` log line, so a host
+        that cannot run hov shows no hook error at every turn's end and wakes nothing."""
+        log = self.state / "hov.log"
+        why = self.mod.python_problem((3, 8, 10))
+        with mock.patch.object(self.mod, "python_problem", return_value=why):
+            self.assertEqual(self.run_main(["wake"]), (0, "", ""))
+        self.assertEqual(log.read_text().count(f"wake-error err={why}"), 1)
+        for boom, logged in ((sqlite3.OperationalError("no such module: fts5"), FTS5_MISSING),
+                             (sqlite3.OperationalError("database is locked"), "database is locked")):
+            with self.subTest(err=str(boom)), mock.patch.object(self.mod, "cmd_wake", side_effect=boom):
+                self.assertEqual(self.run_main(["wake"]), (0, "", ""))
+                self.assertEqual(log.read_text().count(f"wake-error err={logged}"), 1)
+
 
 if __name__ == "__main__":
     unittest.main()
