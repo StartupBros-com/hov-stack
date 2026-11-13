@@ -155,7 +155,7 @@ End with `Block` when any `HIGH` remains and `Approve` otherwise, leaving the re
 
 ## Severity, cap and verdict
 
-Folded in verbatim from the upstream orchestrator skill (jakubkrehel/skills better-interface, commit 267330e), which this harness does not install; heading numbers dropped and the cap sentence's cross-reference to that file's own heading removed. In a change review these cover `Introduced` and `Regression` only; pre-existing findings stay out of the cap and the verdict.
+Folded in from the upstream orchestrator skill (jakubkrehel/skills better-interface, commit 267330e), which this harness does not install; verbatim except for the local changes UPSTREAM.md lists (heading numbers dropped, the cap sentence's cross-reference to that file's own heading removed, triggers exempted from the cap). In a change review these cover `Introduced` and `Regression` only; pre-existing findings stay out of the cap and the verdict.
 
 ### Rank by user impact
 
@@ -183,7 +183,7 @@ Within a severity, rank by how many places the finding reaches and how much one 
 - A semantic color used against its meaning, such as the danger hue on a non-destructive action.
 - A state change carried by motion alone, with no color, icon, or label left behind when the animation does not run.
 
-Triggers rank above every other finding. When more fire than the cap allows, list them first and say how many the cap excluded. A cap may shorten a report; it may never be why a blocker went unreported.
+Triggers rank above every other finding and are listed first. The cap counts only the findings after them: report every trigger, and when the cap cuts other findings, say how many. A cap may shorten a report; it may never be why a blocker went unreported.
 
 These set severity, not new rules. The owning skill decides whether the symptom is present; this list decides what it costs. In a change review, a confirmed `Regression` against a trigger is `HIGH` even where the same symptom would be `MEDIUM` as pre-existing.
 
@@ -205,7 +205,7 @@ One root cause is one finding. List every confirmed location in the same row rat
 
 ### The cap
 
-Cover the resolved scope across every domain skill, including the empty, loading, error and narrow-width states where they exist. Report at most 15 findings.
+Cover the resolved scope across every domain skill, including the empty, loading, error and narrow-width states where they exist. Report at most 15 findings besides the triggers, which are never capped.
 
 ### Verdict
 
