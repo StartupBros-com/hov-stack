@@ -576,7 +576,7 @@ mutate_manifest '(.plugins[] | select(.name == "sign-it")) |= (.name = "hov" | .
 expect_pass "hov is admitted as a git-subdir entry" validate syntax
 
 write_mixed_manifest
-mutate_manifest '(.plugins[] | select(.name == "sign-it")) |= (.name = "hov" | .source = {source: "url", url: "https://github.com/StartupBros-com/hov.git", sha: .source.sha} | .metadata.releaseTag = "v0.5.0")'
+mutate_manifest '(.plugins[] | select(.name == "sign-it")) |= (.name = "hov" | .source = {source: "url", url: "https://github.com/StartupBros-com/hov-stack.git", sha: .source.sha} | .metadata.releaseTag = "v0.5.0")'
 expect_fail_reason "hov is admitted only as a git-subdir entry" "plugin hov is not approved for this marketplace" validate syntax
 
 # Transition cases against a committed mixed base: the only permitted shape
