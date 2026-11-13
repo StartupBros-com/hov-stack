@@ -322,6 +322,20 @@ class Me:
         """The names this reader answers to: what it reads and sends under, never the broadcast address."""
         return [n for n in self.aliases() if n != "*"]
 
+    @property
+    def session_reader(self) -> bool:
+        """A Claude Code session known by its own session id, not by a `--as` or HOV_AS name it runs under."""
+        return bool(self.session_id) and self.how not in ("--as", "HOV_AS")
+
+    def read_names(self) -> list[str]:
+        """The names a read is recorded under. A session records it under its 8-character id too, which no retitle
+        changes, so what it read under one title stays read under the next."""
+        out = [self.name]
+        sid = self.session_id
+        if sid and self.session_reader and sid[:8] != self.name:
+            out.append(sid[:8])
+        return out
+
 
 def note_name(con: sqlite3.Connection, me: Me) -> None:
     """Record the first time `me.name` was seen on this host. Writes only the first time."""
@@ -338,7 +352,7 @@ def first_contact(con: sqlite3.Connection, me: Me) -> int:
     session that reuses an old title starts clean. Every other reader (`--as`, HOV_AS, OMP) counts from its name's
     first contact. A reader never seen at all counts from now, so `hov ls` shows what its first contact would.
     """
-    if me.session_id and me.how not in ("--as", "HOV_AS"):
+    if me.session_reader:
         row = con.execute("SELECT first_seen FROM sessions WHERE session_id=?", (me.session_id,)).fetchone()
         if row:
             return row[0]
@@ -350,8 +364,9 @@ def mail_where(con: sqlite3.Connection, me: Me, include_read: bool = False) -> t
     """The WHERE clause (on `messages m`) for `me`'s mail, shared by every reader query.
 
     Direct mail to any of its aliases, plus broadcasts (`*`, `host:*`) sent since its first contact by anyone but
-    itself. Unless `include_read`, minus what it read under any of its own names: a session that read under its
-    8-character id and was then titled does not see that mail again.
+    itself. Unless `include_read`, minus what it read under any of its own names. A session records each read, and
+    each broadcast it sends, under its 8-character id as well as its title (see Me.read_names), so neither comes
+    back when the session is retitled.
     """
     aliases, own = me.aliases(), me.own_names()
     marks = ",".join("?" * len(own))
@@ -505,6 +520,13 @@ def send_rows(con: sqlite3.Connection, me: Me, to: list[str], subject: str, body
                 " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (mid, ts, me.host, me.host, me.name, to_host, to_name, thread or ids[0], kind, importance, subject, body, json.dumps(meta or {})),
             )
+            if to_name == "*" and to_host in (me.host, "*") and me.session_reader:
+                # The row names the sender by its current title, which a retitle leaves behind. The session has read
+                # its own broadcast, recorded under its 8-character id too, so the broadcast never comes back to it.
+                con.executemany(
+                    "INSERT OR IGNORE INTO reads(msg_id, reader_host, reader_name, ts) VALUES (?,?,?,?)",
+                    [(mid, me.host, n, ts) for n in me.read_names()],
+                )
     for mid, addr in zip(ids, to):
         log(f"send id={mid} from={me.addr} to={addr} kind={kind} thread={thread or ids[0]}")
     waiting: list[str] = []
@@ -545,10 +567,11 @@ def unread_for(con: sqlite3.Connection, me: Me, include_read: bool = False) -> l
 
 def mark_read(con: sqlite3.Connection, me: Me, rows: list[sqlite3.Row]) -> None:
     ts = now_ms()
+    names = me.read_names()
     with con:
         con.executemany(
             "INSERT OR IGNORE INTO reads(msg_id, reader_host, reader_name, ts) VALUES (?,?,?,?)",
-            [(r["id"], me.host, me.name, ts) for r in rows],
+            [(r["id"], me.host, n, ts) for r in rows for n in names],
         )
 
 

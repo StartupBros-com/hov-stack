@@ -185,6 +185,40 @@ class HovCase(HovFixture):
         self.assertEqual(json.loads(self.hov("whoami", "--json", env_extra=after).stdout)["name"], "alpha titled")
         self.assertEqual(self.inbox_subjects(env_extra=after), ["unread at the title"])
 
+    def retitle_envs(self):
+        one = Path(self.tmp.name) / "agents-one.json"
+        one.write_text(json.dumps([{"sessionId": SID_A, "name": "alpha one", "cwd": "/tmp/a"}]))
+        two = Path(self.tmp.name) / "agents-two.json"
+        two.write_text(json.dumps([{"sessionId": SID_A, "name": "alpha two", "cwd": "/tmp/a"}]))
+        cat = shutil.which("cat")
+        return ({"CLAUDE_CODE_SESSION_ID": SID_A, "HOV_AGENTS_CMD": f"{cat} {one}"},
+                {"CLAUDE_CODE_SESSION_ID": SID_A, "HOV_AGENTS_CMD": f"{cat} {two}"})
+
+    def test_a_session_retitled_from_one_title_to_another_keeps_its_read_state(self):
+        # planted negative: recording a read under the current title alone loses it at the next title
+        one, two = self.retitle_envs()
+        self.assertEqual(self.inbox_subjects(env_extra=one), [])
+        self.hov("send", "--as", "carol", "--to", "*", "--subject", "read under the first title", "x")
+        out = json.loads(self.hov("inbox", "--json", env_extra=one).stdout)
+        self.assertEqual(out["me"], "testhost:alpha one")
+        self.assertEqual([m["subject"] for m in out["messages"]], ["read under the first title"])
+        self.hov("send", "--as", "carol", "--to", "*", "--subject", "unread at the second title", "x")
+        out = json.loads(self.hov("inbox", "--keep", "--json", env_extra=two).stdout)
+        self.assertEqual(out["me"], "testhost:alpha two")
+        self.assertEqual([m["subject"] for m in out["messages"]], ["unread at the second title"])
+
+    def test_a_session_retitled_after_sending_a_broadcast_does_not_get_it_back(self):
+        # planted negative: matching the sender by name alone misses the title it sent under
+        one, two = self.retitle_envs()
+        self.assertIsNone(self.hook("UserPromptSubmit", SID_B))
+        self.assertEqual(self.inbox_subjects(env_extra=one), [])
+        self.hov("send", "--to", "*", "--subject", "sent under the first title", "x", env_extra=one)
+        self.hov("send", "--to", "testhost:*", "--subject", "sent to this host", "x", env_extra=one)
+        out = json.loads(self.hov("inbox", "--keep", "--json", env_extra=two).stdout)
+        self.assertEqual((out["me"], out["messages"]), ("testhost:alpha two", []))
+        self.assertEqual(self.inbox_subjects(env_extra={"CLAUDE_CODE_SESSION_ID": SID_B}),
+                         ["sent under the first title", "sent to this host"])
+
     def drop_names_table(self):
         """Turn this mailbox back into a 0.1.4 one: 0.1.5 adds the `names` table and changes no other table."""
         con = sqlite3.connect(self.state / "mail.db")
