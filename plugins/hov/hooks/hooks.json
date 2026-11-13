@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 -I \"${CLAUDE_PLUGIN_ROOT}/scripts/hov\" hook SessionStart",
+            "command": "command -v python3 >/dev/null 2>&1 || { echo 'hov needs Python 3.9 or newer, and no python3 is on PATH. Install one or put it first on PATH.' >&2; exit 1; }; exec python3 -I \"${CLAUDE_PLUGIN_ROOT}/scripts/hov\" hook SessionStart",
             "timeout": 10
           }
         ]
@@ -16,7 +16,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 -I \"${CLAUDE_PLUGIN_ROOT}/scripts/hov\" hook UserPromptSubmit",
+            "command": "command -v python3 >/dev/null 2>&1 || exit 0; exec python3 -I \"${CLAUDE_PLUGIN_ROOT}/scripts/hov\" hook UserPromptSubmit",
             "timeout": 5
           }
         ]
@@ -27,7 +27,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 -I \"${CLAUDE_PLUGIN_ROOT}/scripts/hov\" hook PostToolUse",
+            "command": "command -v python3 >/dev/null 2>&1 || exit 0; exec python3 -I \"${CLAUDE_PLUGIN_ROOT}/scripts/hov\" hook PostToolUse",
             "timeout": 5
           }
         ]
