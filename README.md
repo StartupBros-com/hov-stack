@@ -97,6 +97,12 @@ This repository is the `hov` marketplace, and `./setup` adds it. To add it by ha
 - `rent-check`: audits what `CLAUDE.md` and always-on skills cost per prompt, measures which rules earn their tokens from real transcripts, and proposes demotions for the ones that do not.
 - `harness-optimizer`: investigates recurring problems in your Claude Code setup across six evidence lanes, then has independent agents challenge its diagnosis, proposed changes and reported outcome. It runs only when you invoke it.
 
+### Installed by hand
+
+Neither `./setup` nor `/hov-setup` installs this one; add it with `/plugin install hov@hov`.
+
+- `hov`: a mailbox between your agent sessions. One Claude Code session sends with `/hov:hov`, and the other gets the mail at its next prompt or tool call, framed as untrusted peer text; a session that skips permission prompts gets only the sender and the count. On Linux and WSL, a session idle at its prompt is woken when direct mail arrives: the woken turn starts from the count and the senders, never a message body, runs under that session's own permissions, and each idle session keeps one small Python watcher for it. It needs Python 3.9 or later with an SQLite that has FTS5. Reaching Codex or another machine takes extra setup, which `plugins/hov/README.md` describes.
+
 ## More that `/hov-setup` offers
 
 Most of these are not part of this repository: `gsc`, `ga4` and `vastai` are its own commands, which `./setup` links, and `/hov-setup` builds the Python environment each one runs from. `/hov-setup` offers each one with its publisher, cost and what it needs, installs only the ones you pick, and gets each working in the same session. Plugins come from their publishers' own marketplaces, which it adds after a yes. Programs go into `~/.local/bin` without sudo: `gh`, `uv`, `cass` and `jsm` are release binaries checked against a SHA-256 written in `install-release.sh`, `wacli` has its own installer that checks its one release the same way, and `synthetic-panel` and `ast-grep` install through uv. `vercel` installs with `pnpm add -g vercel` into pnpm's global folder, which `/hov-setup` offers to point at `~/.local/bin`. The Python environments for `gsc`, `ga4` and `vastai` go into `~/.local/share` through uv, with the package versions `venv-install.sh` names. `./setup --update` leaves them as they are; rerunning `venv-install.sh`, as each one's `/hov-setup` section says, brings one to the versions the checkout names.
