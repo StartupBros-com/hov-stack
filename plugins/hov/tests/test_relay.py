@@ -7,6 +7,8 @@ processes and on rows in two SQLite files. A small fake peer stands in for the f
 a peer that vanishes mid-transfer).
 """
 
+from __future__ import annotations
+
 import json
 import os
 import queue
