@@ -1,6 +1,6 @@
 # sign-it first-run onboarding: the user flow
 
-Status: implemented and shipped as plugin v0.5.0 on 2026-09-13; spec written 2026-09-12 and revised after three refute-by-default reviews (a non-technical user walkthrough, a privacy and safety review, an executability review against WSL2, macOS and Linux). Deviations from the text below as built: `doctor.platform` uses the value `windows` (not `windows-unsupported`); the drawing listener is polled with `setup --wait` rather than blocking; an absent config folder counts as owner-only protection. The four headless acceptance proofs passed on the deployed skill.
+Status: implemented and shipped as plugin v0.5.0 on 2026-09-13; spec written 2026-09-12 and revised after three refute-by-default reviews (a non-technical user walkthrough, a privacy and safety review, an executability review against WSL2, macOS and Linux). Deviations from the text below as built: `doctor.platform` uses the value `windows` (not `windows-unsupported`); the drawing listener is polled with `setup --wait` rather than blocking; an absent config folder counts as owner-only protection; when `doctor` reports protection `unverified`, the opener, the receipt's storage line and the spoken privacy statement say only "in a private folder on this computer" (`SKILL.md` → First run). The four headless acceptance proofs passed on the deployed skill.
 
 ## Who this is for
 
@@ -156,7 +156,7 @@ Then, if the user started with a document, the agent proceeds to sign it without
 
 ## Privacy and safety, stated to the user once and enforced in the tool
 
-Spoken (in the opener and the receipt): the signature and details stay on this computer in a private folder that only this login can open; sign-it never sends them to us or to any server; the phone path moves the drawing only from the user's phone to this computer over the user's own network. What the user later sends (a signed document, a sealed document) goes wherever they send it; that is theirs, not sign-it's.
+Spoken (in the opener and the receipt): the signature and details stay on this computer in a private folder that only this login can open (only "in a private folder on this computer" when `doctor` reports protection `unverified`); sign-it never sends them to us or to any server; the phone path moves the drawing only from the user's phone to this computer over the user's own network. What the user later sends (a signed document, a sealed document) goes wherever they send it; that is theirs, not sign-it's.
 
 Enforced: the folder and files are owner-only on macOS, Linux and WSL (the platforms supported this round); the agent never draws, generates, or types a signature in a script font; the agent never signs as a counterparty; the tool refuses a line that already carries a signature; the phone link is a random token of at least 128 bits, loadable until used or expired, consumed by the first accepted drawing, and the listener is torn down the moment a drawing is accepted, the user says skip, or the agent exits. The Step 3 render is the check that the drawing is the user's own: a drawing that does not look right is redrawn, never kept.
 

@@ -14,6 +14,9 @@ Local changes:
 - Rule 2 drops "No exceptions for "it would look cool."".
 - The Speed gate's UI budget is 500ms (upstream 300ms), and the hold-to-confirm
   recipe is marked exempt from that budget.
+- Part 1's properties rule names animate's two exceptions (`clip-path`, and `height`
+  for accordions), so it no longer contradicts the hold-to-confirm and accordion
+  recipes in the hunt list.
 - A closing paragraph is added: prefer one root-cause row against a shared component
   over one row per call site, and state the blast radius.
 
