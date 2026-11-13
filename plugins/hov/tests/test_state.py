@@ -15,6 +15,7 @@ import sqlite3
 import stat
 import subprocess
 import sys
+import tempfile
 import unittest
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
@@ -208,6 +209,59 @@ class RequirementErrors(HovFixture):
             with self.subTest(err=str(boom)), mock.patch.object(self.mod, "cmd_wake", side_effect=boom):
                 self.assertEqual(self.run_main(["wake"]), (0, "", ""))
                 self.assertEqual(log.read_text().count(f"wake-error err={logged}"), 1)
+
+
+@unittest.skipUnless(os.path.exists("/bin/sh") and os.path.exists("/bin/cat"), "runs the hook commands under /bin/sh")
+class HookCommandsWithoutPython(unittest.TestCase):
+    """The commands in hooks.json, run the way Claude Code runs them (`sh -c`, with CLAUDE_PLUGIN_ROOT set), on a
+    host with no `python3` on PATH. Without a guard each one exited 127 with `python3: not found`, which Claude Code
+    shows as a hook error on every prompt and every tool call. SessionStart now names the problem once and the prompt
+    and tool hooks stay quiet, the way `cannot_run` treats an old Python. The Stop command already exits 0."""
+
+    ROOT = HOV.parents[1]
+    EVENTS = ("SessionStart", "UserPromptSubmit", "PostToolUse")
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.tmp = Path(tmp.name)
+        hooks = json.loads((self.ROOT / "hooks" / "hooks.json").read_text())["hooks"]
+        self.commands = {ev: hooks[ev][0]["hooks"][0]["command"] for ev in self.EVENTS}
+
+    def run_hook(self, event: str, path: Path, stdin: str = "") -> subprocess.CompletedProcess:
+        env = {"PATH": str(path), "CLAUDE_PLUGIN_ROOT": str(self.ROOT)}
+        return subprocess.run(["/bin/sh", "-c", self.commands[event]], input=stdin, capture_output=True, text=True,
+                              env=env, timeout=10)
+
+    def test_no_python3_on_path_is_one_line_at_session_start_and_quiet_after(self):
+        empty = self.tmp / "empty"
+        empty.mkdir()
+        res = self.run_hook("SessionStart", empty)
+        self.assertEqual((res.returncode, res.stdout), (1, ""), res.stderr)
+        lines = res.stderr.splitlines()
+        self.assertEqual(len(lines), 1, res.stderr)
+        self.assertTrue(lines[0].startswith("hov needs Python 3.9 or newer"), res.stderr)
+        self.assertIn("python3", lines[0])
+        self.assertIn("PATH", lines[0])
+        for event in ("UserPromptSubmit", "PostToolUse"):
+            with self.subTest(event=event):
+                res = self.run_hook(event, empty)
+                self.assertEqual((res.returncode, res.stdout, res.stderr), (0, "", ""))
+
+    def test_with_python3_on_path_each_command_still_runs_hov_hook_with_its_input(self):
+        """A stub `python3` that prints its arguments and then its stdin shows the guarded command still hands the
+        event to `python3 -I <root>/scripts/hov hook <Event>` and passes the hook payload through."""
+        bindir = self.tmp / "bin"
+        bindir.mkdir()
+        stub = bindir / "python3"
+        stub.write_text("#!/bin/sh\nprintf '%s\\n' \"$@\"\nexec /bin/cat\n")
+        stub.chmod(0o755)
+        for event in self.EVENTS:
+            with self.subTest(event=event):
+                res = self.run_hook(event, bindir, stdin='{"payload": 1}')
+                self.assertEqual((res.returncode, res.stderr), (0, ""))
+                self.assertEqual(res.stdout, "\n".join(["-I", str(self.ROOT / "scripts" / "hov"), "hook", event])
+                                 + '\n{"payload": 1}')
 
 
 if __name__ == "__main__":
