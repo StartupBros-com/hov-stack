@@ -349,13 +349,13 @@ def first_contact(con: sqlite3.Connection, me: Me) -> int:
     """When `me` first appeared on this host: broadcasts sent before it are not its mail.
 
     A Claude Code session counts from its own first hook or command, whatever titles it takes later, so a new
-    session that reuses an old title starts clean. Every other reader (`--as`, HOV_AS, OMP) counts from its name's
-    first contact. A reader never seen at all counts from now, so `hov ls` shows what its first contact would.
+    session that reuses an old title starts clean; it never falls back to that title's first contact. Every other
+    reader (`--as`, HOV_AS, OMP) counts from its name's first contact. A reader never seen at all counts from now,
+    so `hov ls` shows what its first contact would.
     """
     if me.session_reader:
         row = con.execute("SELECT first_seen FROM sessions WHERE session_id=?", (me.session_id,)).fetchone()
-        if row:
-            return row[0]
+        return row[0] if row else now_ms()
     row = con.execute("SELECT first_seen FROM names WHERE host=? AND name=?", (me.host, me.name)).fetchone()
     return row[0] if row else now_ms()
 
@@ -612,6 +612,7 @@ def cmd_inbox(a: argparse.Namespace) -> int:
 
 def cmd_thread(a: argparse.Namespace) -> int:
     con = db()
+    whoami(con)  # any command counts as first contact: broadcasts sent after it are this reader's mail
     rows = con.execute(
         "SELECT * FROM messages WHERE thread_id=? OR id=? ORDER BY ts, id", (a.id, a.id)
     ).fetchall()
@@ -626,6 +627,7 @@ def cmd_thread(a: argparse.Namespace) -> int:
 
 def cmd_search(a: argparse.Namespace) -> int:
     con = db()
+    whoami(con)  # as in cmd_thread
     rows = con.execute(
         "SELECT m.* FROM messages_fts f JOIN messages m ON m.rowid=f.rowid WHERE messages_fts MATCH ? ORDER BY rank LIMIT ?",
         (a.query, a.limit),
@@ -682,6 +684,7 @@ def fmt_ls(out: list[dict], links: list[dict]) -> list[str]:
 
 def cmd_ls(a: argparse.Namespace) -> int:
     con = db()
+    whoami(con)  # as in cmd_thread
     out, links = ls_rows(con)
     if a.json:
         print(json.dumps(out + links))
@@ -1004,12 +1007,20 @@ class McpServer:
     def __init__(self, as_name: str | None):
         self.as_name = as_name
         self.client = "?"
+        self.registered = False
 
     def label(self) -> str:
         return self.as_name or os.environ.get("HOV_AS") or "-"
 
     def me(self, con: sqlite3.Connection) -> Me:
         return whoami(con, self.as_name, force=True)
+
+    def register(self, con: sqlite3.Connection) -> None:
+        """Record this reader's first contact once per connection: at initialize, or at the first tool call of a
+        client that skips it. A broadcast sent while the reader is connected is its mail, whatever it calls first."""
+        if not self.registered:
+            whoami(con, self.as_name)
+            self.registered = True
 
     def handle(self, method: str, params: dict) -> dict:
         if method == "initialize":
@@ -1018,6 +1029,10 @@ class McpServer:
             info = params.get("clientInfo") if isinstance(params.get("clientInfo"), dict) else {}
             self.client = shown(info.get("name") or "?", 64)
             log(f"mcp start client={self.client} proto={proto} as={self.label()}")
+            try:
+                self.register(db())
+            except sqlite3.Error as e:  # the handshake still answers; the first tool call registers instead
+                log(f"mcp db-error at initialize err={e}")
             return {
                 "protocolVersion": proto,
                 "capabilities": {"tools": {"listChanged": False}},
@@ -1051,6 +1066,7 @@ class McpServer:
 
     def call(self, name: str, args: dict) -> str:
         con = db()
+        self.register(con)
         if name == "whoami":
             me = self.me(con)
             return json.dumps({"addr": me.addr, "host": me.host, "name": me.name, "session_id": me.session_id, "how": me.how})

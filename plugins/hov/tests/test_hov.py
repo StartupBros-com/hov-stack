@@ -17,6 +17,7 @@ from pathlib import Path
 HOV = Path(__file__).resolve().parents[1] / "scripts" / "hov"
 SID_A = "aaaaaaaa-1111-2222-3333-444444444444"
 SID_B = "bbbbbbbb-1111-2222-3333-444444444444"
+SID_C = "cccccccc-1111-2222-3333-444444444444"
 
 
 class HovFixture(unittest.TestCase):
@@ -166,6 +167,28 @@ class HovCase(HovFixture):
         self.hov("send", "--as", "carol", "--to", "*", "--subject", "after alpha", "x")
         by = {r["addr"]: r for r in json.loads(self.hov("ls", "--json").stdout)}
         self.assertEqual((by["testhost:alpha"]["unread"], by["testhost:beta"]["unread"]), (1, 0))
+
+    def test_ls_does_not_count_old_broadcasts_for_a_new_session_that_reuses_a_title(self):
+        # planted negative: falling back to the title's first contact counts the old session's backlog for the new one
+        self.assertIsNone(self.hook("UserPromptSubmit", SID_A))
+        self.hov("send", "--as", "carol", "--to", "*", "--subject", "for the first alpha", "x")
+        reused = Path(self.tmp.name) / "agents-reused.json"
+        reused.write_text(json.dumps([{"sessionId": SID_C, "name": "alpha", "cwd": "/tmp/c"}]))
+        listing = {"HOV_AGENTS_CMD": f"{shutil.which('cat')} {reused}"}
+        by = {r["addr"]: r for r in json.loads(self.hov("ls", "--json", env_extra=listing).stdout)}
+        self.assertEqual((by["testhost:alpha"]["session_id"], by["testhost:alpha"]["unread"]), (SID_C, 0))
+        self.assertEqual(self.inbox_subjects(env_extra=dict(listing, CLAUDE_CODE_SESSION_ID=SID_C)), [])
+
+    def test_a_reader_whose_first_command_is_ls_search_or_thread_gets_broadcasts_sent_after_it(self):
+        # planted negative: recording first contact only in inbox, send, notify and whoami misses these three
+        self.hov("send", "--as", "carol", "--to", "*", "--subject", "before every reader", "x")
+        for first in (("ls",), ("search", "reader"), ("thread", "no-such-thread")):
+            with self.subTest(first=first[0]):
+                env = {"HOV_AS": f"reader-{first[0]}"}
+                res = self.hov(*first, env_extra=env, check=False)
+                self.assertEqual(res.returncode, 1 if first[0] == "thread" else 0, res.stderr)
+                self.hov("send", "--as", "carol", "--to", "*", "--subject", f"after {first[0]}", "x")
+                self.assertEqual(self.inbox_subjects(env_extra=env), [f"after {first[0]}"])
 
     def test_a_session_retitled_after_reading_a_broadcast_does_not_get_it_back(self):
         # read state is kept per name; a session that read mail under its 8-character id, then got a title,
