@@ -42,14 +42,20 @@ yt-dlp --skip-download --write-subs --write-auto-subs \
 ## Flatten json3 → raw text
 
 ```bash
-python3 - "$OUT" <<'PY'
-import json, html, re, glob, sys, pathlib
-f = glob.glob(sys.argv[1] + "/*.json3")
-if not f: sys.exit("no json3 file")
+python3 - "$OUT" "$NAME" <<'PY'
+import json, html, re, sys, pathlib
+out_dir, name = pathlib.Path(sys.argv[1]), sys.argv[2]
+# Only this video's files ("<NAME>.<lang>.json3"); other videos' captions in the folder are ignored.
+f = sorted(p for p in out_dir.glob("*.json3") if p.name.rsplit(".", 2)[0] == name)
+if not f: sys.exit("no json3 caption file for this video")
+if len(f) > 1:
+    # Auto captions arrive as both "en" and "en-orig" (same text); a manual "en" track takes the "en" name.
+    f = [p for p in f if p.name == name + ".en.json3"]
+    if not f: sys.exit("several caption languages and no plain 'en'; rerun yt-dlp with one --sub-langs value")
 data = json.load(open(f[0], encoding="utf-8"))
 parts = ["".join(s.get("utf8","") for s in e.get("segs") or []) for e in data.get("events", [])]
 txt = re.sub(r"\s+", " ", html.unescape(" ".join(p.strip() for p in parts if p.strip()))).strip()
-out = pathlib.Path(f[0]).with_suffix(".txt")
+out = out_dir / (name + ".txt")
 out.write_text(txt, encoding="utf-8"); print(out)
 PY
 ```
