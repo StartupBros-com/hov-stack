@@ -198,6 +198,34 @@ class RelayCase(unittest.TestCase):
         self.assertNotIn(f"link in id={mid}", self.hub.log())
         self.assertEqual([r["id"] for r in self.leaf.inbox("bob")], [mid])
 
+    def shift_clock(self, host: Host, mid: str, by_ms: int) -> None:
+        """Move a stored row as if the host that stored it ran on a clock `by_ms` off the other's: its timestamp and,
+        where the mailbox keeps one, its own arrival stamp."""
+        with host.con() as c:
+            cols = {r[1] for r in c.execute("PRAGMA table_info(messages)")}
+            sets = "ts = ts + :by" + (", arrived = arrived + :by" if "arrived" in cols else "")
+            c.execute(f"UPDATE messages SET {sets} WHERE id = :id", {"by": by_ms, "id": mid})
+
+    def test_a_broadcast_from_a_hub_whose_clock_is_behind_is_mail_for_a_reader_already_around(self):
+        # planted negative: placing a carried broadcast by its sender's clock (its timestamp, or the hub's own arrival
+        # stamp if that crossed the link) puts it an hour before bob, so bob would never get it
+        self.assertEqual(self.leaf.inbox("bob"), [])  # bob is around on the leaf first
+        mid = self.hub.send("*", "from a hub an hour behind")
+        self.shift_clock(self.hub, mid, -3_600_000)
+        self.link(self.leaf)
+        rows = self.leaf.inbox("bob")
+        self.assertEqual([r["id"] for r in rows], [mid])
+        sent = self.hub.con().execute("SELECT ts FROM messages WHERE id=?", (mid,)).fetchone()[0]
+        self.assertEqual(rows[0]["ts"], sent, "a reader sees the sender's time")
+        self.assertNotIn("arrived", rows[0])
+
+    def test_a_broadcast_from_a_hub_whose_clock_is_ahead_is_not_mail_for_a_reader_who_came_later(self):
+        mid = self.hub.send("*", "from a hub an hour ahead")
+        self.shift_clock(self.hub, mid, 3_600_000)
+        self.link(self.leaf)
+        self.assertIn(mid, self.leaf.ids())
+        self.assertEqual(self.leaf.inbox("bob"), [])  # bob's first contact comes after the broadcast reached the leaf
+
     def test_leaf_mail_for_its_own_host_stays_home(self):
         mid = self.leaf.send("leafhost:bob", "local mail")
         self.link(self.leaf)

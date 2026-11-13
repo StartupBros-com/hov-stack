@@ -3,6 +3,7 @@
 Run: python3 -m unittest discover -s plugins/hov/tests -v
 """
 
+import contextlib
 import json
 import os
 import shutil
@@ -242,11 +243,115 @@ class HovCase(HovFixture):
         self.assertEqual(self.inbox_subjects(env_extra={"CLAUDE_CODE_SESSION_ID": SID_B}),
                          ["sent under the first title", "sent to this host"])
 
-    def drop_names_table(self):
-        """Turn this mailbox back into a 0.1.4 one: 0.1.5 adds the `names` table and changes no other table."""
+    # ------------------------------------------------------------ arrival order
+
+    @contextlib.contextmanager
+    def hov_module(self, clock_offset_ms=0):
+        """This test's hov, loaded in-process with the test's environment, its wall clock `clock_offset_ms` off the real
+        one: a reader registered through it stands for a process that read the clock just before or after a step."""
+        import importlib.util
+        from importlib.machinery import SourceFileLoader
+        name = "hov_under_test_" + self._testMethodName
+        spec = importlib.util.spec_from_loader(name, SourceFileLoader(name, str(HOV)))
+        mod = importlib.util.module_from_spec(spec)
+        saved = dict(os.environ)
+        os.environ.update(self.env)
+        try:
+            spec.loader.exec_module(mod)
+            real = mod.now_ms
+            mod.now_ms = lambda: real() + clock_offset_ms
+            yield mod
+        finally:
+            os.environ.clear()
+            os.environ.update(saved)
+
+    def register(self, mod, as_name=None, session_id=None):
+        con = mod.db()
+        try:
+            mod.whoami(con, as_name, session_id=session_id)
+        finally:
+            con.close()
+
+    def test_a_reader_whose_first_contact_was_read_before_the_clock_stepped_back_gets_the_next_broadcast(self):
+        # This host's wall clock steps back about 0.7 s several times a minute. A first contact read just before a step
+        # and a broadcast sent just after it compared as broadcast-before-reader, so the reader lost the broadcast.
+        with self.subTest(reader="--as name"):
+            with self.hov_module(clock_offset_ms=30_000) as mod:
+                self.register(mod, "dave")
+            self.hov("send", "--as", "carol", "--to", "*", "--subject", "after dave", "x")
+            self.assertEqual(self.inbox_subjects("--as", "dave"), ["after dave"])
+        with self.subTest(reader="session"):
+            with self.hov_module(clock_offset_ms=30_000) as mod:
+                self.register(mod, session_id=SID_A)
+            self.hov("send", "--as", "carol", "--to", "*", "--subject", "after alpha", "x")
+            self.assertEqual(self.inbox_subjects(env_extra={"CLAUDE_CODE_SESSION_ID": SID_A}), ["after alpha"])
+
+    def test_a_reader_whose_first_contact_was_read_after_the_clock_stepped_back_does_not_get_the_last_broadcast(self):
+        with self.subTest(reader="--as name"):
+            self.hov("send", "--as", "carol", "--to", "*", "--subject", "before dave", "x")
+            # planted negative: bounding direct mail by first contact too would lose this one
+            self.hov("send", "--as", "carol", "--to", "dave", "--subject", "direct, before dave", "x")
+            with self.hov_module(clock_offset_ms=-30_000) as mod:
+                self.register(mod, "dave")
+            self.assertEqual(self.inbox_subjects("--as", "dave"), ["direct, before dave"])
+        with self.subTest(reader="session"):
+            self.hov("send", "--as", "carol", "--to", "*", "--subject", "before alpha", "x")
+            with self.hov_module(clock_offset_ms=-30_000) as mod:
+                self.register(mod, session_id=SID_A)
+            self.assertEqual(self.inbox_subjects(env_extra={"CLAUDE_CODE_SESSION_ID": SID_A}), [])
+
+    def test_stamps_follow_commit_order_whatever_the_wall_clock_does(self):
+        with self.hov_module() as mod:
+            wall = [mod.now_ms()]
+            mod.now_ms = lambda: wall[0]
+            con1, con2 = mod.db(), mod.db(busy_ms=0)
+            s1 = mod.stamp(con1)
+            # taking a stamp takes the write lock: no other process stamps until this transaction ends
+            with self.assertRaises(sqlite3.OperationalError):
+                mod.stamp(con2)
+            con2.rollback()
+            con1.commit()
+            s2 = mod.stamp(con2)
+            con2.commit()
+            wall[0] -= 30_000  # the wall clock steps back: stamps still go up
+            s3 = mod.stamp(con1)
+            con1.commit()
+            wall[0] += 60_000  # and forward: stamps follow it
+            s4 = mod.stamp(con2)
+            con2.commit()
+            con1.close()
+            con2.close()
+        self.assertEqual((s2, s3, s4), (s1 + 1, s1 + 2, wall[0]))
+
+    def test_a_broadcast_a_process_older_than_the_upgrade_stores_is_placed_by_its_timestamp(self):
+        # A `hov mcp` or `hov link` started before the upgrade keeps running 0.1.4 code, which stores no arrival stamp.
+        # planted negative: comparing arrival stamps alone would drop every broadcast such a process stores
+        self.assertEqual(self.inbox_subjects("--as", "dave"), [])
+        con = sqlite3.connect(self.state / "mail.db")
+        first = con.execute("SELECT first_seen FROM names WHERE host='testhost' AND name='dave'").fetchone()[0]
+        with con:
+            for n, (subject, ts) in enumerate((("stored by 0.1.4, before dave", first - 1000),
+                                               ("stored by 0.1.4, after dave", first + 1000))):
+                mid = f"01TEST{n:020d}"
+                con.execute(  # 0.1.4's insert, column for column
+                    "INSERT INTO messages(id, ts, origin_host, from_host, from_name, to_host, to_name, thread_id, kind, importance, subject, body, meta)"
+                    " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (mid, ts, "testhost", "testhost", "carol", "*", "*", mid, "note", "normal", subject, "x", "{}"),
+                )
+        con.close()
+        self.assertEqual(self.inbox_subjects("--as", "dave"), ["stored by 0.1.4, after dave"])
+
+    def downgrade_to_0_1_4(self):
+        """Turn this mailbox back into a 0.1.4 one: 0.1.5 adds the `names` and `clock` tables and the messages' `arrived`
+        column, and changes nothing else. Each timestamp is set to its row's arrival stamp first, as if 0.1.4 had stored
+        the row on a steady clock, so the upgrade sees what the test sent in the order it sent it, whatever this host's
+        clock did in between."""
         con = sqlite3.connect(self.state / "mail.db")
         with con:
-            con.execute("DROP TABLE IF EXISTS names")
+            con.execute("UPDATE messages SET ts = arrived")
+            con.execute("DROP TABLE names")
+            con.execute("DROP TABLE clock")
+            con.execute("ALTER TABLE messages DROP COLUMN arrived")
         con.close()
 
     def test_an_upgraded_mailbox_keeps_each_known_readers_unread_broadcasts(self):
@@ -255,7 +360,7 @@ class HovCase(HovFixture):
         self.hov("send", "--as", "carol", "--to", "olive", "--subject", "direct to olive", "x")
         self.assertIsNone(self.hook("UserPromptSubmit", SID_A))
         self.hov("send", "--as", "carol", "--to", "testhost:*", "--subject", "after alpha", "x")
-        self.drop_names_table()
+        self.downgrade_to_0_1_4()
         # olive was a known name in the old mailbox (mail was addressed to her), so she keeps what was unread
         self.assertEqual(self.inbox_subjects("--as", "olive"), ["before olive", "direct to olive", "after alpha"])
         # a session keeps the broadcasts sent since it started, not the backlog from before it existed
@@ -266,7 +371,7 @@ class HovCase(HovFixture):
     def test_two_first_opens_of_an_old_mailbox_both_succeed(self):
         for attempt in range(5):
             self.hov("send", "--as", "carol", "--to", "olive", "--subject", f"direct {attempt}", "x")
-            self.drop_names_table()
+            self.downgrade_to_0_1_4()
             env = dict(self.env)
             procs = [subprocess.Popen([sys.executable, "-I", str(HOV), "inbox", "--as", "olive", "--keep", "--json"],
                                       stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env) for _ in range(2)]
@@ -276,8 +381,13 @@ class HovCase(HovFixture):
                 self.assertEqual(json.loads(out)["count"], attempt + 1)
             con = sqlite3.connect(self.state / "mail.db")
             rows = con.execute("SELECT name, first_seen FROM names WHERE host='testhost' ORDER BY name").fetchall()
+            restamped = con.execute("SELECT count(*) FROM messages WHERE arrived IS NULL OR arrived <> ts").fetchone()[0]
+            clock = con.execute("SELECT count(*), max(last) FROM clock").fetchone()
+            newest = con.execute("SELECT max(ts) FROM messages").fetchone()[0]
             con.close()
             self.assertEqual(rows, [("carol", 0), ("olive", 0)])
+            # every stored message starts with its timestamp as its arrival stamp, and the counter starts at the newest
+            self.assertEqual((restamped, clock), (0, (1, newest)))
 
     # ------------------------------------------------------------ hook
 
