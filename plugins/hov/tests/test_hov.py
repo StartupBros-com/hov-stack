@@ -273,8 +273,9 @@ class HovCase(HovFixture):
             con.close()
 
     def test_a_reader_whose_first_contact_was_read_before_the_clock_stepped_back_gets_the_next_broadcast(self):
-        # This host's wall clock steps back about 0.7 s several times a minute. A first contact read just before a step
-        # and a broadcast sent just after it compared as broadcast-before-reader, so the reader lost the broadcast.
+        # This host's wall clock was seen stepping back about 0.7 s several times a minute. A first contact read just
+        # before a step and a broadcast sent just after it compared as broadcast-before-reader, so the reader lost the
+        # broadcast.
         with self.subTest(reader="--as name"):
             with self.hov_module(clock_offset_ms=30_000) as mod:
                 self.register(mod, "dave")
