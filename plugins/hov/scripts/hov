@@ -256,7 +256,90 @@ def db(busy_ms: int = 5000) -> sqlite3.Connection:
     con.execute("PRAGMA journal_mode=WAL")
     con.execute(f"PRAGMA busy_timeout={int(busy_ms)}")
     con.executescript(SCHEMA)
+    upgrade_0_1_5(con)
     return con
+
+
+# First contact and arrival order (0.1.5). A broadcast is mail only for readers that were around when it reached this
+# mailbox (see first_contact), so a newcomer does not inherit every broadcast the host ever carried. Both sides of that
+# comparison are stamps from the one counter in `clock` (see stamp), never wall-clock readings: this host's clock can
+# step backward (the WSL2 host hov was built on was seen stepping back about 0.7 s several times a minute), and a
+# sender's clock is another host's.
+NAMES_TABLE = """
+CREATE TABLE names (
+  host TEXT NOT NULL,
+  name TEXT NOT NULL,
+  first_seen INTEGER NOT NULL,
+  PRIMARY KEY (host, name)
+)"""
+
+CLOCK_TABLE = """
+CREATE TABLE clock (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  last INTEGER NOT NULL
+)"""
+
+
+def upgrade_0_1_5(con: sqlite3.Connection) -> None:
+    """Add what 0.1.5 needs to an older mailbox, once: `names`, an `arrived` stamp on each message, and `clock`.
+
+    `names` starts with every name the mailbox already knew, at first_seen 0, so a name that read, sent or was sent
+    direct mail, or titled a session, before 0.1.5 keeps every broadcast it had unread. A stored message's arrival
+    stamp starts as its timestamp, and the counter starts above every timestamp and first contact already stored, so
+    a session that already existed keeps the broadcasts sent since it started and everything stamped later sorts
+    after what is there. It all runs in one write transaction: of two processes opening an old mailbox at once, one
+    upgrades it and the other finds it upgraded. Opening an upgraded mailbox writes nothing.
+    """
+    probe = "SELECT count(*) FROM sqlite_master WHERE type='table' AND name IN ('names', 'clock')"
+    if con.execute(probe).fetchone()[0] == 2:
+        return
+    host = local_host()
+    if con.in_transaction:
+        con.commit()
+    con.execute("BEGIN IMMEDIATE")
+    try:
+        tables = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        if "names" not in tables:
+            con.execute(NAMES_TABLE)
+            con.execute(
+                "INSERT OR IGNORE INTO names(host, name, first_seen)"
+                " SELECT host, name, 0 FROM sessions WHERE name IS NOT NULL"
+                " UNION SELECT host, substr(session_id, 1, 8), 0 FROM sessions"
+                " UNION SELECT reader_host, reader_name, 0 FROM reads"
+                " UNION SELECT from_host, from_name, 0 FROM messages WHERE from_host=?"
+                " UNION SELECT ?, to_name, 0 FROM messages WHERE to_host IN (?, '*') AND to_name <> '*'",
+                (host, host, host),
+            )
+        if "clock" not in tables:
+            if "arrived" not in {r[1] for r in con.execute("PRAGMA table_info(messages)")}:
+                con.execute("ALTER TABLE messages ADD COLUMN arrived INTEGER")
+            con.execute("UPDATE messages SET arrived = ts WHERE arrived IS NULL")
+            con.execute(CLOCK_TABLE)
+            con.execute(
+                "INSERT INTO clock(id, last) SELECT 1, max((SELECT coalesce(max(ts), 0) FROM messages),"
+                " (SELECT coalesce(max(first_seen), 0) FROM sessions), (SELECT coalesce(max(first_seen), 0) FROM names))"
+            )
+        con.commit()
+    except BaseException:
+        con.rollback()
+        raise
+
+
+def stamp(con: sqlite3.Connection) -> int:
+    """The next stamp from this mailbox's counter: one more than the last, or the wall clock if that is later.
+
+    Call it inside `with con:`, before the row it stamps. Its first statement is a write, which opens the transaction
+    and takes the write lock, so stamps follow the order in which writes commit, and no two are equal. Readers' first
+    contacts and messages' arrivals share the counter, so whichever was stored first has the smaller stamp.
+    """
+    con.execute("UPDATE clock SET last = max(last + 1, ?) WHERE id = 1", (now_ms(),))
+    return con.execute("SELECT last FROM clock WHERE id = 1").fetchone()[0]
+
+
+def next_stamp(con: sqlite3.Connection) -> int:
+    """The stamp a write made now would get, without taking it: what a reader's first contact would be."""
+    row = con.execute("SELECT last FROM clock WHERE id = 1").fetchone()
+    return max(row[0] + 1, now_ms()) if row else now_ms()
 
 # ---------------------------------------------------------------- identity
 
@@ -273,6 +356,70 @@ class Me:
         if self.session_id:
             out.append(self.session_id[:8])
         return out
+
+    def own_names(self) -> list[str]:
+        """The names this reader answers to: what it reads and sends under, never the broadcast address."""
+        return [n for n in self.aliases() if n != "*"]
+
+    @property
+    def session_reader(self) -> bool:
+        """A Claude Code session known by its own session id, not by a `--as` or HOV_AS name it runs under."""
+        return bool(self.session_id) and self.how not in ("--as", "HOV_AS")
+
+    def read_names(self) -> list[str]:
+        """The names a read is recorded under. A session records it under its 8-character id too, which no retitle
+        changes, so what it read under one title stays read under the next."""
+        out = [self.name]
+        sid = self.session_id
+        if sid and self.session_reader and sid[:8] != self.name:
+            out.append(sid[:8])
+        return out
+
+
+def note_name(con: sqlite3.Connection, me: Me) -> None:
+    """Record the first time `me.name` was seen on this host. Writes only the first time."""
+    if con.execute("SELECT 1 FROM names WHERE host=? AND name=?", (me.host, me.name)).fetchone():
+        return
+    with con:
+        first = stamp(con)
+        con.execute("INSERT OR IGNORE INTO names(host, name, first_seen) VALUES (?,?,?)", (me.host, me.name, first))
+
+
+def first_contact(con: sqlite3.Connection, me: Me) -> int:
+    """The stamp of `me`'s first contact with this mailbox: broadcasts that arrived before it are not its mail.
+
+    A Claude Code session counts from its own first hook or command, whatever titles it takes later, so a new
+    session that reuses an old title starts clean; it never falls back to that title's first contact. Every other
+    reader (`--as`, HOV_AS, OMP) counts from its name's first contact. A reader never seen at all counts from the next
+    stamp, so `hov ls` shows what its first contact would.
+    """
+    if me.session_reader:
+        row = con.execute("SELECT first_seen FROM sessions WHERE session_id=?", (me.session_id,)).fetchone()
+        return row[0] if row else next_stamp(con)
+    row = con.execute("SELECT first_seen FROM names WHERE host=? AND name=?", (me.host, me.name)).fetchone()
+    return row[0] if row else next_stamp(con)
+
+
+def mail_where(con: sqlite3.Connection, me: Me, include_read: bool = False) -> tuple[str, list]:
+    """The WHERE clause (on `messages m`) for `me`'s mail, shared by every reader query.
+
+    Direct mail to any of its aliases, plus broadcasts (`*`, `host:*`) sent since its first contact by anyone but
+    itself. Unless `include_read`, minus what it read under any of its own names. A session records each read, and
+    each broadcast it sends, under its 8-character id as well as its title (see Me.read_names), so neither comes
+    back when the session is retitled.
+    """
+    aliases, own = me.aliases(), me.own_names()
+    marks = ",".join("?" * len(own))
+    q = (
+        "(m.to_host IN (?, '*')) AND (m.to_name IN (%s))"
+        # a row a pre-0.1.5 writer stored after the upgrade has no arrival stamp; its timestamp stands in
+        " AND (m.to_name <> '*' OR (COALESCE(m.arrived, m.ts) >= ? AND NOT (m.from_host = ? AND m.from_name IN (%s))))"
+    ) % (",".join("?" * len(aliases)), marks)
+    params: list = [me.host, *aliases, first_contact(con, me), me.host, *own]
+    if not include_read:
+        q += " AND NOT EXISTS (SELECT 1 FROM reads r WHERE r.msg_id=m.id AND r.reader_host=? AND r.reader_name IN (%s))" % marks
+        params += [me.host, *own]
+    return q, params
 
 
 def agents_rows() -> list[dict]:
@@ -300,9 +447,11 @@ def resolve_session(con: sqlite3.Connection, session_id: str, cwd: str | None, f
     with con:
         row = con.execute("SELECT name, last_lookup FROM sessions WHERE session_id=?", (session_id,)).fetchone()
         if row is None:
+            # first_seen is the session's first contact, a stamp; last_seen and the lookup throttle stay wall time
+            first = stamp(con)
             con.execute(
                 "INSERT INTO sessions(session_id, host, name, cwd, first_seen, last_seen) VALUES (?,?,?,?,?,?)",
-                (session_id, host, None, cwd, ts, ts),
+                (session_id, host, None, cwd, first, ts),
             )
             name, last_lookup = None, 0
         else:
@@ -324,6 +473,13 @@ def resolve_session(con: sqlite3.Connection, session_id: str, cwd: str | None, f
 
 
 def whoami(con: sqlite3.Connection, as_name: str | None = None, session_id: str | None = None, cwd: str | None = None, force: bool = False) -> Me:
+    """Who this caller is, recording its name's first contact (see first_contact) the first time it appears."""
+    me = identify(con, as_name, session_id, cwd, force)
+    note_name(con, me)
+    return me
+
+
+def identify(con: sqlite3.Connection, as_name: str | None, session_id: str | None, cwd: str | None, force: bool) -> Me:
     host = local_host()
     if as_name:
         return Me(host, as_name, session_id, "--as")
@@ -398,15 +554,23 @@ def send_rows(con: sqlite3.Connection, me: Me, to: list[str], subject: str, body
     ts = now_ms()
     ids: list[str] = []
     with con:
+        arrived = stamp(con)  # ts is the sender's clock, shown to readers; arrived orders it against first contacts
         for addr in to:
             to_host, to_name = parse_addr(addr)
             mid = ulid()
             ids.append(mid)
             con.execute(
-                "INSERT INTO messages(id, ts, origin_host, from_host, from_name, to_host, to_name, thread_id, kind, importance, subject, body, meta)"
-                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                (mid, ts, me.host, me.host, me.name, to_host, to_name, thread or ids[0], kind, importance, subject, body, json.dumps(meta or {})),
+                "INSERT INTO messages(id, ts, origin_host, from_host, from_name, to_host, to_name, thread_id, kind, importance, subject, body, meta, arrived)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (mid, ts, me.host, me.host, me.name, to_host, to_name, thread or ids[0], kind, importance, subject, body, json.dumps(meta or {}), arrived),
             )
+            if to_name == "*" and to_host in (me.host, "*") and me.session_reader:
+                # The row names the sender by its current title, which a retitle leaves behind. The session has read
+                # its own broadcast, recorded under its 8-character id too, so the broadcast never comes back to it.
+                con.executemany(
+                    "INSERT OR IGNORE INTO reads(msg_id, reader_host, reader_name, ts) VALUES (?,?,?,?)",
+                    [(mid, me.host, n, ts) for n in me.read_names()],
+                )
     for mid, addr in zip(ids, to):
         log(f"send id={mid} from={me.addr} to={addr} kind={kind} thread={thread or ids[0]}")
     waiting: list[str] = []
@@ -441,29 +605,23 @@ def cmd_send(a: argparse.Namespace) -> int:
 
 
 def unread_for(con: sqlite3.Connection, me: Me, include_read: bool = False) -> list[sqlite3.Row]:
-    q = (
-        "SELECT m.* FROM messages m WHERE (m.to_host IN (?, '*')) AND (m.to_name IN (%s))"
-        % ",".join("?" * len(me.aliases()))
-    )
-    params: list = [me.host, *me.aliases()]
-    if not include_read:
-        q += " AND NOT EXISTS (SELECT 1 FROM reads r WHERE r.msg_id=m.id AND r.reader_host=? AND r.reader_name=?)"
-        params += [me.host, me.name]
-    q += " ORDER BY m.ts, m.id"
-    return con.execute(q, params).fetchall()
+    where, params = mail_where(con, me, include_read)
+    return con.execute(f"SELECT m.* FROM messages m WHERE {where} ORDER BY m.ts, m.id", params).fetchall()
 
 
 def mark_read(con: sqlite3.Connection, me: Me, rows: list[sqlite3.Row]) -> None:
     ts = now_ms()
+    names = me.read_names()
     with con:
         con.executemany(
             "INSERT OR IGNORE INTO reads(msg_id, reader_host, reader_name, ts) VALUES (?,?,?,?)",
-            [(r["id"], me.host, me.name, ts) for r in rows],
+            [(r["id"], me.host, n, ts) for r in rows for n in names],
         )
 
 
 def row_dict(r: sqlite3.Row) -> dict:
     d = dict(r)
+    d.pop("arrived", None)  # this mailbox's ordering stamp, not part of the message
     d["when"] = iso(d["ts"])
     return d
 
@@ -499,6 +657,7 @@ def cmd_inbox(a: argparse.Namespace) -> int:
 
 def cmd_thread(a: argparse.Namespace) -> int:
     con = db()
+    whoami(con)  # every reader command counts as first contact: broadcasts sent after it are this reader's mail
     rows = con.execute(
         "SELECT * FROM messages WHERE thread_id=? OR id=? ORDER BY ts, id", (a.id, a.id)
     ).fetchall()
@@ -513,6 +672,7 @@ def cmd_thread(a: argparse.Namespace) -> int:
 
 def cmd_search(a: argparse.Namespace) -> int:
     con = db()
+    whoami(con)  # as in cmd_thread
     rows = con.execute(
         "SELECT m.* FROM messages_fts f JOIN messages m ON m.rowid=f.rowid WHERE messages_fts MATCH ? ORDER BY rank LIMIT ?",
         (a.query, a.limit),
@@ -569,6 +729,7 @@ def fmt_ls(out: list[dict], links: list[dict]) -> list[str]:
 
 def cmd_ls(a: argparse.Namespace) -> int:
     con = db()
+    whoami(con)  # as in cmd_thread
     out, links = ls_rows(con)
     if a.json:
         print(json.dumps(out + links))
@@ -619,14 +780,13 @@ def hook_output(event: str, text: str) -> dict:
 
 def pending_for(con: sqlite3.Connection, me: Me, sid: str) -> list[sqlite3.Row]:
     """Mail for `me` that session `sid` has not been handed yet and `me` has not read: oldest first, fifty at most."""
-    aliases = me.aliases()
+    where, params = mail_where(con, me)
     q = (
-        "SELECT m.* FROM messages m WHERE (m.to_host IN (?, '*')) AND (m.to_name IN (%s))"
+        f"SELECT m.* FROM messages m WHERE {where}"
         " AND NOT EXISTS (SELECT 1 FROM deliveries d WHERE d.msg_id=m.id AND d.session_id=?)"
-        " AND NOT EXISTS (SELECT 1 FROM reads r WHERE r.msg_id=m.id AND r.reader_host=? AND r.reader_name=?)"
         " ORDER BY m.ts, m.id LIMIT 50"
-    ) % ",".join("?" * len(aliases))
-    return con.execute(q, [me.host, *aliases, sid, me.host, me.name]).fetchall()
+    )
+    return con.execute(q, [*params, sid]).fetchall()
 
 
 def deliver(con: sqlite3.Connection, me: Me, sid: str, event: str, rows: list[sqlite3.Row], mode: str, why: str | None = None) -> tuple[str, list[sqlite3.Row]]:
@@ -736,8 +896,9 @@ def cmd_notify(a: argparse.Namespace) -> int:
     --json, an object either way). Never marks anything read and never prints a body. The caller states who it
     is (--as or HOV_AS) and which session it is (--session or HOV_SESSION_ID): an agent with no Claude Code
     session has no title to resolve, and the session id is what makes each message cross once. The --json
-    object also names the mailbox file (`db`): a poll that finds nothing writes nothing, so a caller may skip
-    polls while that file and its -wal are unchanged.
+    object also names the mailbox file (`db`): after a name's first poll, which records its first contact (broadcasts
+    sent before it are not its mail), a poll that finds nothing writes nothing, so a caller may skip polls while that
+    file and its -wal are unchanged.
     """
     sid = a.session
     if not sid:
@@ -754,6 +915,7 @@ def cmd_notify(a: argparse.Namespace) -> int:
             return 2
     con = db(HOOK_BUSY_MS)  # the extension's exec budget is 5 s; a locked database is one stderr line, exit 1
     me = Me(local_host(), name, sid, "--as" if a.as_name else "HOV_AS")
+    note_name(con, me)
     rows = pending_for(con, me, sid)
     text = None
     if rows:
@@ -890,12 +1052,20 @@ class McpServer:
     def __init__(self, as_name: str | None):
         self.as_name = as_name
         self.client = "?"
+        self.registered = False
 
     def label(self) -> str:
         return self.as_name or os.environ.get("HOV_AS") or "-"
 
     def me(self, con: sqlite3.Connection) -> Me:
         return whoami(con, self.as_name, force=True)
+
+    def register(self, con: sqlite3.Connection) -> None:
+        """Record this reader's first contact once per connection: at initialize, or at the first tool call of a
+        client that skips it. A broadcast sent while the reader is connected is its mail, whatever it calls first."""
+        if not self.registered:
+            whoami(con, self.as_name)
+            self.registered = True
 
     def handle(self, method: str, params: dict) -> dict:
         if method == "initialize":
@@ -904,6 +1074,10 @@ class McpServer:
             info = params.get("clientInfo") if isinstance(params.get("clientInfo"), dict) else {}
             self.client = shown(info.get("name") or "?", 64)
             log(f"mcp start client={self.client} proto={proto} as={self.label()}")
+            try:
+                self.register(db())
+            except sqlite3.Error as e:  # the handshake still answers; the first tool call registers instead
+                log(f"mcp db-error at initialize err={e}")
             return {
                 "protocolVersion": proto,
                 "capabilities": {"tools": {"listChanged": False}},
@@ -937,6 +1111,7 @@ class McpServer:
 
     def call(self, name: str, args: dict) -> str:
         con = db()
+        self.register(con)
         if name == "whoami":
             me = self.me(con)
             return json.dumps({"addr": me.addr, "host": me.host, "name": me.name, "session_id": me.session_id, "how": me.how})
@@ -1401,10 +1576,12 @@ class Wire:
         ts = now_ms()
         try:
             with self.con:
+                # the row keeps the sender's ts; its arrival stamp is this mailbox's, and never crosses a link (MSG_FIELDS)
+                arrived = stamp(self.con)
                 cur = self.con.execute(
-                    "INSERT OR IGNORE INTO messages(id, ts, origin_host, from_host, from_name, to_host, to_name, thread_id, kind, importance, subject, body, meta)"
-                    " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                    row,
+                    "INSERT OR IGNORE INTO messages(id, ts, origin_host, from_host, from_name, to_host, to_name, thread_id, kind, importance, subject, body, meta, arrived)"
+                    " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (*row, arrived),
                 )
                 self.con.execute("INSERT OR IGNORE INTO relay_log(msg_id, peer, direction, ts) VALUES (?,?,'in',?)", (row[0], self.peer, ts))
                 self.con.execute("UPDATE peers SET last_in=?, last_seen=? WHERE host=?", (ts, ts, self.peer))

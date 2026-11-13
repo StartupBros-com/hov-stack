@@ -3,6 +3,7 @@
 Run: python3 -m unittest discover -s plugins/hov/tests -v
 """
 
+import contextlib
 import json
 import os
 import shutil
@@ -17,6 +18,7 @@ from pathlib import Path
 HOV = Path(__file__).resolve().parents[1] / "scripts" / "hov"
 SID_A = "aaaaaaaa-1111-2222-3333-444444444444"
 SID_B = "bbbbbbbb-1111-2222-3333-444444444444"
+SID_C = "cccccccc-1111-2222-3333-444444444444"
 
 
 class HovFixture(unittest.TestCase):
@@ -115,6 +117,278 @@ class HovCase(HovFixture):
         self.hov("send", "--as", "ceo", "--to", "nobody-here", "lost")
         self.assertIsNone(self.hook("UserPromptSubmit", SID_A))
         self.assertIsNone(self.hook("UserPromptSubmit", SID_B))
+
+    # ------------------------------------------------------------ broadcasts
+
+    def inbox_subjects(self, *args, env_extra=None):
+        out = json.loads(self.hov("inbox", "--keep", "--json", *args, env_extra=env_extra).stdout)
+        return [m["subject"] for m in out["messages"]]
+
+    def test_a_sender_does_not_get_its_own_broadcasts(self):
+        # planted negative: excluding every row from the sender's host would also hide them from beta
+        self.assertIsNone(self.hook("UserPromptSubmit", SID_A))
+        self.assertIsNone(self.hook("UserPromptSubmit", SID_B))
+        as_alpha = {"CLAUDE_CODE_SESSION_ID": SID_A}
+        self.hov("send", "--to", "*", "--subject", "every host", "x", env_extra=as_alpha)
+        self.hov("send", "--to", "testhost:*", "--subject", "this host", "x", env_extra=as_alpha)
+        self.hov("send", "--as", "carol", "--to", "*", "--subject", "from carol", "x")
+        self.assertEqual(self.inbox_subjects(env_extra=as_alpha), ["from carol"])
+        ctx = self.hook("UserPromptSubmit", SID_A)["hookSpecificOutput"]["additionalContext"]
+        self.assertIn('count="1"', ctx)
+        self.assertIn("subject: from carol", ctx)
+        self.assertEqual(self.inbox_subjects("--as", "carol"), [])
+        ctx = self.hook("UserPromptSubmit", SID_B)["hookSpecificOutput"]["additionalContext"]
+        for subject in ("every host", "this host", "from carol"):
+            self.assertIn(f"subject: {subject}", ctx)
+
+    def test_a_name_first_seen_after_a_broadcast_does_not_get_it(self):
+        self.hov("send", "--as", "carol", "--to", "*", "--subject", "before dave", "x")
+        self.hov("send", "--as", "carol", "--to", "testhost:*", "--subject", "before dave, this host", "x")
+        # planted negative: bounding direct mail by first contact too would lose this one
+        self.hov("send", "--as", "carol", "--to", "dave", "--subject", "direct, before dave", "x")
+        self.assertEqual(self.inbox_subjects("--as", "dave"), ["direct, before dave"])
+        self.hov("send", "--as", "carol", "--to", "*", "--subject", "after dave", "x")
+        self.assertEqual(self.inbox_subjects("--as", "dave"), ["direct, before dave", "after dave"])
+
+    def test_a_session_first_seen_after_a_broadcast_does_not_get_it_from_its_first_hook(self):
+        self.hov("send", "--as", "carol", "--to", "*", "--subject", "before alpha", "x")
+        self.hov("send", "--as", "carol", "--to", "alpha", "--subject", "direct, before alpha", "x")
+        ctx = self.hook("UserPromptSubmit", SID_A)["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("subject: direct, before alpha", ctx)
+        self.assertNotIn("before alpha\n", ctx.replace("direct, before alpha\n", ""))
+        self.assertIn('count="1"', ctx)
+        self.hov("send", "--as", "carol", "--to", "testhost:*", "--subject", "after alpha", "x")
+        ctx = self.hook("UserPromptSubmit", SID_A, permission_mode="bypassPermissions")["hookSpecificOutput"]["additionalContext"]
+        self.assertIn('count="1" mode="count"', ctx)
+        self.assertEqual(self.inbox_subjects(env_extra={"CLAUDE_CODE_SESSION_ID": SID_A}), ["after alpha"])
+
+    def test_ls_counts_only_the_broadcasts_each_reader_was_around_for(self):
+        self.hov("send", "--as", "carol", "--to", "*", "--subject", "before anyone", "x")
+        self.assertIsNone(self.hook("UserPromptSubmit", SID_A))
+        self.hov("send", "--as", "carol", "--to", "*", "--subject", "after alpha", "x")
+        by = {r["addr"]: r for r in json.loads(self.hov("ls", "--json").stdout)}
+        self.assertEqual((by["testhost:alpha"]["unread"], by["testhost:beta"]["unread"]), (1, 0))
+
+    def test_ls_does_not_count_old_broadcasts_for_a_new_session_that_reuses_a_title(self):
+        # planted negative: falling back to the title's first contact counts the old session's backlog for the new one
+        self.assertIsNone(self.hook("UserPromptSubmit", SID_A))
+        self.hov("send", "--as", "carol", "--to", "*", "--subject", "for the first alpha", "x")
+        reused = Path(self.tmp.name) / "agents-reused.json"
+        reused.write_text(json.dumps([{"sessionId": SID_C, "name": "alpha", "cwd": "/tmp/c"}]))
+        listing = {"HOV_AGENTS_CMD": f"{shutil.which('cat')} {reused}"}
+        by = {r["addr"]: r for r in json.loads(self.hov("ls", "--json", env_extra=listing).stdout)}
+        self.assertEqual((by["testhost:alpha"]["session_id"], by["testhost:alpha"]["unread"]), (SID_C, 0))
+        self.assertEqual(self.inbox_subjects(env_extra=dict(listing, CLAUDE_CODE_SESSION_ID=SID_C)), [])
+
+    def test_a_reader_whose_first_command_is_ls_search_or_thread_gets_broadcasts_sent_after_it(self):
+        # planted negative: recording first contact only in inbox, send, notify and whoami misses these three
+        self.hov("send", "--as", "carol", "--to", "*", "--subject", "before every reader", "x")
+        for first in (("ls",), ("search", "reader"), ("thread", "no-such-thread")):
+            with self.subTest(first=first[0]):
+                env = {"HOV_AS": f"reader-{first[0]}"}
+                res = self.hov(*first, env_extra=env, check=False)
+                self.assertEqual(res.returncode, 1 if first[0] == "thread" else 0, res.stderr)
+                self.hov("send", "--as", "carol", "--to", "*", "--subject", f"after {first[0]}", "x")
+                self.assertEqual(self.inbox_subjects(env_extra=env), [f"after {first[0]}"])
+
+    def test_a_session_retitled_after_reading_a_broadcast_does_not_get_it_back(self):
+        # read state is kept per name; a session that read mail under its 8-character id, then got a title,
+        # used to see that mail as unread again. Broadcasts it had not read stay unread across the retitle.
+        untitled = Path(self.tmp.name) / "agents-untitled.json"
+        untitled.write_text(json.dumps([{"sessionId": SID_A, "cwd": "/tmp/a"}]))
+        titled = Path(self.tmp.name) / "agents-titled.json"
+        titled.write_text(json.dumps([{"sessionId": SID_A, "name": "alpha titled", "cwd": "/tmp/a"}]))
+        before = {"CLAUDE_CODE_SESSION_ID": SID_A, "HOV_AGENTS_CMD": f"{shutil.which('cat')} {untitled}"}
+        after = {"CLAUDE_CODE_SESSION_ID": SID_A, "HOV_AGENTS_CMD": f"{shutil.which('cat')} {titled}"}
+        self.assertEqual(json.loads(self.hov("whoami", "--json", env_extra=before).stdout)["name"], SID_A[:8])
+        self.hov("send", "--as", "carol", "--to", "*", "--subject", "read before the title", "x")
+        self.hov("send", "--as", "carol", "--to", SID_A[:8], "--subject", "direct, read before the title", "x")
+        out = json.loads(self.hov("inbox", "--json", env_extra=before).stdout)
+        self.assertEqual([m["subject"] for m in out["messages"]], ["read before the title", "direct, read before the title"])
+        self.hov("send", "--as", "carol", "--to", "*", "--subject", "unread at the title", "x")
+        self.assertEqual(json.loads(self.hov("whoami", "--json", env_extra=after).stdout)["name"], "alpha titled")
+        self.assertEqual(self.inbox_subjects(env_extra=after), ["unread at the title"])
+
+    def retitle_envs(self):
+        one = Path(self.tmp.name) / "agents-one.json"
+        one.write_text(json.dumps([{"sessionId": SID_A, "name": "alpha one", "cwd": "/tmp/a"}]))
+        two = Path(self.tmp.name) / "agents-two.json"
+        two.write_text(json.dumps([{"sessionId": SID_A, "name": "alpha two", "cwd": "/tmp/a"}]))
+        cat = shutil.which("cat")
+        return ({"CLAUDE_CODE_SESSION_ID": SID_A, "HOV_AGENTS_CMD": f"{cat} {one}"},
+                {"CLAUDE_CODE_SESSION_ID": SID_A, "HOV_AGENTS_CMD": f"{cat} {two}"})
+
+    def test_a_session_retitled_from_one_title_to_another_keeps_its_read_state(self):
+        # planted negative: recording a read under the current title alone loses it at the next title
+        one, two = self.retitle_envs()
+        self.assertEqual(self.inbox_subjects(env_extra=one), [])
+        self.hov("send", "--as", "carol", "--to", "*", "--subject", "read under the first title", "x")
+        out = json.loads(self.hov("inbox", "--json", env_extra=one).stdout)
+        self.assertEqual(out["me"], "testhost:alpha one")
+        self.assertEqual([m["subject"] for m in out["messages"]], ["read under the first title"])
+        self.hov("send", "--as", "carol", "--to", "*", "--subject", "unread at the second title", "x")
+        out = json.loads(self.hov("inbox", "--keep", "--json", env_extra=two).stdout)
+        self.assertEqual(out["me"], "testhost:alpha two")
+        self.assertEqual([m["subject"] for m in out["messages"]], ["unread at the second title"])
+
+    def test_a_session_retitled_after_sending_a_broadcast_does_not_get_it_back(self):
+        # planted negative: matching the sender by name alone misses the title it sent under
+        one, two = self.retitle_envs()
+        self.assertIsNone(self.hook("UserPromptSubmit", SID_B))
+        self.assertEqual(self.inbox_subjects(env_extra=one), [])
+        self.hov("send", "--to", "*", "--subject", "sent under the first title", "x", env_extra=one)
+        self.hov("send", "--to", "testhost:*", "--subject", "sent to this host", "x", env_extra=one)
+        out = json.loads(self.hov("inbox", "--keep", "--json", env_extra=two).stdout)
+        self.assertEqual((out["me"], out["messages"]), ("testhost:alpha two", []))
+        self.assertEqual(self.inbox_subjects(env_extra={"CLAUDE_CODE_SESSION_ID": SID_B}),
+                         ["sent under the first title", "sent to this host"])
+
+    # ------------------------------------------------------------ arrival order
+
+    @contextlib.contextmanager
+    def hov_module(self, clock_offset_ms=0):
+        """This test's hov, loaded in-process with the test's environment, its wall clock `clock_offset_ms` off the real
+        one: a reader registered through it stands for a process that read the clock just before or after a step."""
+        import importlib.util
+        from importlib.machinery import SourceFileLoader
+        name = "hov_under_test_" + self._testMethodName
+        spec = importlib.util.spec_from_loader(name, SourceFileLoader(name, str(HOV)))
+        mod = importlib.util.module_from_spec(spec)
+        saved = dict(os.environ)
+        os.environ.update(self.env)
+        try:
+            spec.loader.exec_module(mod)
+            real = mod.now_ms
+            mod.now_ms = lambda: real() + clock_offset_ms
+            yield mod
+        finally:
+            os.environ.clear()
+            os.environ.update(saved)
+
+    def register(self, mod, as_name=None, session_id=None):
+        con = mod.db()
+        try:
+            mod.whoami(con, as_name, session_id=session_id)
+        finally:
+            con.close()
+
+    def test_a_reader_whose_first_contact_was_read_before_the_clock_stepped_back_gets_the_next_broadcast(self):
+        # This host's wall clock was seen stepping back about 0.7 s several times a minute. A first contact read just
+        # before a step and a broadcast sent just after it compared as broadcast-before-reader, so the reader lost the
+        # broadcast.
+        with self.subTest(reader="--as name"):
+            with self.hov_module(clock_offset_ms=30_000) as mod:
+                self.register(mod, "dave")
+            self.hov("send", "--as", "carol", "--to", "*", "--subject", "after dave", "x")
+            self.assertEqual(self.inbox_subjects("--as", "dave"), ["after dave"])
+        with self.subTest(reader="session"):
+            with self.hov_module(clock_offset_ms=30_000) as mod:
+                self.register(mod, session_id=SID_A)
+            self.hov("send", "--as", "carol", "--to", "*", "--subject", "after alpha", "x")
+            self.assertEqual(self.inbox_subjects(env_extra={"CLAUDE_CODE_SESSION_ID": SID_A}), ["after alpha"])
+
+    def test_a_reader_whose_first_contact_was_read_after_the_clock_stepped_back_does_not_get_the_last_broadcast(self):
+        with self.subTest(reader="--as name"):
+            self.hov("send", "--as", "carol", "--to", "*", "--subject", "before dave", "x")
+            # planted negative: bounding direct mail by first contact too would lose this one
+            self.hov("send", "--as", "carol", "--to", "dave", "--subject", "direct, before dave", "x")
+            with self.hov_module(clock_offset_ms=-30_000) as mod:
+                self.register(mod, "dave")
+            self.assertEqual(self.inbox_subjects("--as", "dave"), ["direct, before dave"])
+        with self.subTest(reader="session"):
+            self.hov("send", "--as", "carol", "--to", "*", "--subject", "before alpha", "x")
+            with self.hov_module(clock_offset_ms=-30_000) as mod:
+                self.register(mod, session_id=SID_A)
+            self.assertEqual(self.inbox_subjects(env_extra={"CLAUDE_CODE_SESSION_ID": SID_A}), [])
+
+    def test_stamps_follow_commit_order_whatever_the_wall_clock_does(self):
+        with self.hov_module() as mod:
+            wall = [mod.now_ms()]
+            mod.now_ms = lambda: wall[0]
+            con1, con2 = mod.db(), mod.db(busy_ms=0)
+            s1 = mod.stamp(con1)
+            # taking a stamp takes the write lock: no other process stamps until this transaction ends
+            with self.assertRaises(sqlite3.OperationalError):
+                mod.stamp(con2)
+            con2.rollback()
+            con1.commit()
+            s2 = mod.stamp(con2)
+            con2.commit()
+            wall[0] -= 30_000  # the wall clock steps back: stamps still go up
+            s3 = mod.stamp(con1)
+            con1.commit()
+            wall[0] += 60_000  # and forward: stamps follow it
+            s4 = mod.stamp(con2)
+            con2.commit()
+            con1.close()
+            con2.close()
+        self.assertEqual((s2, s3, s4), (s1 + 1, s1 + 2, wall[0]))
+
+    def test_a_broadcast_a_process_older_than_the_upgrade_stores_is_placed_by_its_timestamp(self):
+        # A `hov mcp` or `hov link` started before the upgrade keeps running 0.1.4 code, which stores no arrival stamp.
+        # planted negative: comparing arrival stamps alone would drop every broadcast such a process stores
+        self.assertEqual(self.inbox_subjects("--as", "dave"), [])
+        con = sqlite3.connect(self.state / "mail.db")
+        first = con.execute("SELECT first_seen FROM names WHERE host='testhost' AND name='dave'").fetchone()[0]
+        with con:
+            for n, (subject, ts) in enumerate((("stored by 0.1.4, before dave", first - 1000),
+                                               ("stored by 0.1.4, after dave", first + 1000))):
+                mid = f"01TEST{n:020d}"
+                con.execute(  # 0.1.4's insert, column for column
+                    "INSERT INTO messages(id, ts, origin_host, from_host, from_name, to_host, to_name, thread_id, kind, importance, subject, body, meta)"
+                    " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (mid, ts, "testhost", "testhost", "carol", "*", "*", mid, "note", "normal", subject, "x", "{}"),
+                )
+        con.close()
+        self.assertEqual(self.inbox_subjects("--as", "dave"), ["stored by 0.1.4, after dave"])
+
+    def downgrade_to_0_1_4(self):
+        """Turn this mailbox back into a 0.1.4 one: 0.1.5 adds the `names` and `clock` tables and the messages' `arrived`
+        column, and changes nothing else. Each timestamp is set to its row's arrival stamp first, as if 0.1.4 had stored
+        the row on a steady clock, so the upgrade sees what the test sent in the order it sent it, whatever this host's
+        clock did in between."""
+        con = sqlite3.connect(self.state / "mail.db")
+        with con:
+            con.execute("UPDATE messages SET ts = arrived")
+            con.execute("DROP TABLE names")
+            con.execute("DROP TABLE clock")
+            con.execute("ALTER TABLE messages DROP COLUMN arrived")
+        con.close()
+
+    def test_an_upgraded_mailbox_keeps_each_known_readers_unread_broadcasts(self):
+        # planted negative: starting every name's first contact at the upgrade (no backfill) loses "before olive"
+        self.hov("send", "--as", "carol", "--to", "*", "--subject", "before olive", "x")
+        self.hov("send", "--as", "carol", "--to", "olive", "--subject", "direct to olive", "x")
+        self.assertIsNone(self.hook("UserPromptSubmit", SID_A))
+        self.hov("send", "--as", "carol", "--to", "testhost:*", "--subject", "after alpha", "x")
+        self.downgrade_to_0_1_4()
+        # olive was a known name in the old mailbox (mail was addressed to her), so she keeps what was unread
+        self.assertEqual(self.inbox_subjects("--as", "olive"), ["before olive", "direct to olive", "after alpha"])
+        # a session keeps the broadcasts sent since it started, not the backlog from before it existed
+        self.assertEqual(self.inbox_subjects(env_extra={"CLAUDE_CODE_SESSION_ID": SID_A}), ["after alpha"])
+        # a name the old mailbox never saw starts now
+        self.assertEqual(self.inbox_subjects("--as", "newcomer"), [])
+
+    def test_two_first_opens_of_an_old_mailbox_both_succeed(self):
+        for attempt in range(5):
+            self.hov("send", "--as", "carol", "--to", "olive", "--subject", f"direct {attempt}", "x")
+            self.downgrade_to_0_1_4()
+            env = dict(self.env)
+            procs = [subprocess.Popen([sys.executable, "-I", str(HOV), "inbox", "--as", "olive", "--keep", "--json"],
+                                      stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env) for _ in range(2)]
+            for p in procs:
+                out, err = p.communicate(timeout=30)
+                self.assertEqual(p.returncode, 0, err)
+                self.assertEqual(json.loads(out)["count"], attempt + 1)
+            con = sqlite3.connect(self.state / "mail.db")
+            rows = con.execute("SELECT name, first_seen FROM names WHERE host='testhost' ORDER BY name").fetchall()
+            restamped = con.execute("SELECT count(*) FROM messages WHERE arrived IS NULL OR arrived <> ts").fetchone()[0]
+            clock = con.execute("SELECT count(*), max(last) FROM clock").fetchone()
+            newest = con.execute("SELECT max(ts) FROM messages").fetchone()[0]
+            con.close()
+            self.assertEqual(rows, [("carol", 0), ("olive", 0)])
+            # every stored message starts with its timestamp as its arrival stamp, and the counter starts at the newest
+            self.assertEqual((restamped, clock), (0, (1, newest)))
 
     # ------------------------------------------------------------ hook
 
