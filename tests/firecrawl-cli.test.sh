@@ -886,6 +886,18 @@ all_argv_is 'failing research help is still the sole vendor call' "assert d==[['
 run_cli budget --json
 jcheck 'failed research help leaves no charge or hold' "$OUT" "assert d['data']['session']['spent']==0 and d['data']['day_state']['spent']==0 and not d['data']['reservations']"
 
+# The same exact `<verb> --help` is local for every listed vendor work verb, not
+# only research: no credit query, no charge, no 100-credit hold.
+for verb in scrape crawl batch-scrape map search agent find-skills alexandria; do
+  configure "{\"default\":{\"text\":\"Usage: firecrawl $verb [options]\\n\"},\"credit-usage\":{\"failures\":99}}"
+  run_cli raw --json -- "$verb" --help
+  status_is 0 "$verb help is local"
+  all_argv_is "$verb help is the sole vendor call" "assert d==[['$verb','--help']], d"
+  jcheck "$verb help zero-cost envelope" "$OUT" "assert d['ok'] and d['credits_spent']==0 and d['credits_remaining'] is None and d['degraded'] is None"
+  run_cli budget --json
+  jcheck "$verb help leaves no charge or hold" "$OUT" "assert d['data']['session']['spent']==0 and not d['data']['reservations']"
+done
+
 configure '{"default":{"text":"research local help\n"}}'
 ST=0
 (cd "$TMP/work" && HOME="$TMP/home" PATH="$TMP/no-vendor" "$CLI" raw --json -- research --help) >"$TMP/out" 2>"$TMP/err" || ST=$?
@@ -921,7 +933,7 @@ done
 
 # Planted bypasses: values, substrings, other help spellings, and added argv
 # remain normal raw work. Each costs 100 when admitted and is refused at zero.
-for candidate in question prompt extra-command extra-flag unknown short-help equals-help reordered-help redundant-separator ordinary; do
+for candidate in question prompt extra-command extra-flag unknown short-help equals-help reordered-help redundant-separator ordinary scrape-url scrape-short-help; do
   case "$candidate" in
     question) vendor_args=(research read-paper paper-id --question --help) ;;
     prompt) vendor_args=(research ask 'explain --help usage') ;;
@@ -933,6 +945,8 @@ for candidate in question prompt extra-command extra-flag unknown short-help equ
     reordered-help) vendor_args=(--help research) ;;
     redundant-separator) vendor_args=(-- research --help) ;;
     ordinary) vendor_args=(research search-papers 'research topic') ;;
+    scrape-url) vendor_args=(scrape https://x --help) ;;
+    scrape-short-help) vendor_args=(scrape -h) ;;
   esac
   expected_argv=$(python3 -c 'import json,sys; print(json.dumps(sys.argv[1:]))' "${vendor_args[@]}")
   fixture plain-success

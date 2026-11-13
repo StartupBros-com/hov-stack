@@ -158,7 +158,11 @@ exit dictionary; it makes no vendor request.
   30 minutes later: a started or still-running job, a status the wrapper cannot
   read, and output with no reported cost, which includes keyed `research` (a
   `search-papers` call billed nothing that day and still took 100). Three such
-  calls exhaust a session, so use a shaped verb where one exists.
+  calls exhaust a session, so use a shaped verb where one exists. Exactly
+  `<verb> --help` (one vendor work verb such as `scrape`, `search` or `crawl`,
+  then `--help`, nothing else) prints the vendor's local usage, reads no
+  balance and holds nothing; `-h`, any added argument, and a verb the wrapper
+  does not list (`LOCAL_HELP_COMMANDS`) keep the hold.
   `research search-papers` goes keyless first (`search-github` no longer exists in vendor 1.26.25) and holds
   nothing when the free tier answers (next bullet).
 - **Free-first keyless routing (dotfiles #2118):** an eligible call tries Firecrawl's
