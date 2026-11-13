@@ -116,6 +116,112 @@ class HovCase(HovFixture):
         self.assertIsNone(self.hook("UserPromptSubmit", SID_A))
         self.assertIsNone(self.hook("UserPromptSubmit", SID_B))
 
+    # ------------------------------------------------------------ broadcasts
+
+    def inbox_subjects(self, *args, env_extra=None):
+        out = json.loads(self.hov("inbox", "--keep", "--json", *args, env_extra=env_extra).stdout)
+        return [m["subject"] for m in out["messages"]]
+
+    def test_a_sender_does_not_get_its_own_broadcasts(self):
+        # planted negative: excluding every row from the sender's host would also hide them from beta
+        self.assertIsNone(self.hook("UserPromptSubmit", SID_A))
+        self.assertIsNone(self.hook("UserPromptSubmit", SID_B))
+        as_alpha = {"CLAUDE_CODE_SESSION_ID": SID_A}
+        self.hov("send", "--to", "*", "--subject", "every host", "x", env_extra=as_alpha)
+        self.hov("send", "--to", "testhost:*", "--subject", "this host", "x", env_extra=as_alpha)
+        self.hov("send", "--as", "carol", "--to", "*", "--subject", "from carol", "x")
+        self.assertEqual(self.inbox_subjects(env_extra=as_alpha), ["from carol"])
+        ctx = self.hook("UserPromptSubmit", SID_A)["hookSpecificOutput"]["additionalContext"]
+        self.assertIn('count="1"', ctx)
+        self.assertIn("subject: from carol", ctx)
+        self.assertEqual(self.inbox_subjects("--as", "carol"), [])
+        ctx = self.hook("UserPromptSubmit", SID_B)["hookSpecificOutput"]["additionalContext"]
+        for subject in ("every host", "this host", "from carol"):
+            self.assertIn(f"subject: {subject}", ctx)
+
+    def test_a_name_first_seen_after_a_broadcast_does_not_get_it(self):
+        self.hov("send", "--as", "carol", "--to", "*", "--subject", "before dave", "x")
+        self.hov("send", "--as", "carol", "--to", "testhost:*", "--subject", "before dave, this host", "x")
+        # planted negative: bounding direct mail by first contact too would lose this one
+        self.hov("send", "--as", "carol", "--to", "dave", "--subject", "direct, before dave", "x")
+        self.assertEqual(self.inbox_subjects("--as", "dave"), ["direct, before dave"])
+        self.hov("send", "--as", "carol", "--to", "*", "--subject", "after dave", "x")
+        self.assertEqual(self.inbox_subjects("--as", "dave"), ["direct, before dave", "after dave"])
+
+    def test_a_session_first_seen_after_a_broadcast_does_not_get_it_from_its_first_hook(self):
+        self.hov("send", "--as", "carol", "--to", "*", "--subject", "before alpha", "x")
+        self.hov("send", "--as", "carol", "--to", "alpha", "--subject", "direct, before alpha", "x")
+        ctx = self.hook("UserPromptSubmit", SID_A)["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("subject: direct, before alpha", ctx)
+        self.assertNotIn("before alpha\n", ctx.replace("direct, before alpha\n", ""))
+        self.assertIn('count="1"', ctx)
+        self.hov("send", "--as", "carol", "--to", "testhost:*", "--subject", "after alpha", "x")
+        ctx = self.hook("UserPromptSubmit", SID_A, permission_mode="bypassPermissions")["hookSpecificOutput"]["additionalContext"]
+        self.assertIn('count="1" mode="count"', ctx)
+        self.assertEqual(self.inbox_subjects(env_extra={"CLAUDE_CODE_SESSION_ID": SID_A}), ["after alpha"])
+
+    def test_ls_counts_only_the_broadcasts_each_reader_was_around_for(self):
+        self.hov("send", "--as", "carol", "--to", "*", "--subject", "before anyone", "x")
+        self.assertIsNone(self.hook("UserPromptSubmit", SID_A))
+        self.hov("send", "--as", "carol", "--to", "*", "--subject", "after alpha", "x")
+        by = {r["addr"]: r for r in json.loads(self.hov("ls", "--json").stdout)}
+        self.assertEqual((by["testhost:alpha"]["unread"], by["testhost:beta"]["unread"]), (1, 0))
+
+    def test_a_session_retitled_after_reading_a_broadcast_does_not_get_it_back(self):
+        # read state is kept per name; a session that read mail under its 8-character id, then got a title,
+        # used to see that mail as unread again. Broadcasts it had not read stay unread across the retitle.
+        untitled = Path(self.tmp.name) / "agents-untitled.json"
+        untitled.write_text(json.dumps([{"sessionId": SID_A, "cwd": "/tmp/a"}]))
+        titled = Path(self.tmp.name) / "agents-titled.json"
+        titled.write_text(json.dumps([{"sessionId": SID_A, "name": "alpha titled", "cwd": "/tmp/a"}]))
+        before = {"CLAUDE_CODE_SESSION_ID": SID_A, "HOV_AGENTS_CMD": f"{shutil.which('cat')} {untitled}"}
+        after = {"CLAUDE_CODE_SESSION_ID": SID_A, "HOV_AGENTS_CMD": f"{shutil.which('cat')} {titled}"}
+        self.assertEqual(json.loads(self.hov("whoami", "--json", env_extra=before).stdout)["name"], SID_A[:8])
+        self.hov("send", "--as", "carol", "--to", "*", "--subject", "read before the title", "x")
+        self.hov("send", "--as", "carol", "--to", SID_A[:8], "--subject", "direct, read before the title", "x")
+        out = json.loads(self.hov("inbox", "--json", env_extra=before).stdout)
+        self.assertEqual([m["subject"] for m in out["messages"]], ["read before the title", "direct, read before the title"])
+        self.hov("send", "--as", "carol", "--to", "*", "--subject", "unread at the title", "x")
+        self.assertEqual(json.loads(self.hov("whoami", "--json", env_extra=after).stdout)["name"], "alpha titled")
+        self.assertEqual(self.inbox_subjects(env_extra=after), ["unread at the title"])
+
+    def drop_names_table(self):
+        """Turn this mailbox back into a 0.1.4 one: 0.1.5 adds the `names` table and changes no other table."""
+        con = sqlite3.connect(self.state / "mail.db")
+        with con:
+            con.execute("DROP TABLE IF EXISTS names")
+        con.close()
+
+    def test_an_upgraded_mailbox_keeps_each_known_readers_unread_broadcasts(self):
+        # planted negative: starting every name's first contact at the upgrade (no backfill) loses "before olive"
+        self.hov("send", "--as", "carol", "--to", "*", "--subject", "before olive", "x")
+        self.hov("send", "--as", "carol", "--to", "olive", "--subject", "direct to olive", "x")
+        self.assertIsNone(self.hook("UserPromptSubmit", SID_A))
+        self.hov("send", "--as", "carol", "--to", "testhost:*", "--subject", "after alpha", "x")
+        self.drop_names_table()
+        # olive was a known name in the old mailbox (mail was addressed to her), so she keeps what was unread
+        self.assertEqual(self.inbox_subjects("--as", "olive"), ["before olive", "direct to olive", "after alpha"])
+        # a session keeps the broadcasts sent since it started, not the backlog from before it existed
+        self.assertEqual(self.inbox_subjects(env_extra={"CLAUDE_CODE_SESSION_ID": SID_A}), ["after alpha"])
+        # a name the old mailbox never saw starts now
+        self.assertEqual(self.inbox_subjects("--as", "newcomer"), [])
+
+    def test_two_first_opens_of_an_old_mailbox_both_succeed(self):
+        for attempt in range(5):
+            self.hov("send", "--as", "carol", "--to", "olive", "--subject", f"direct {attempt}", "x")
+            self.drop_names_table()
+            env = dict(self.env)
+            procs = [subprocess.Popen([sys.executable, "-I", str(HOV), "inbox", "--as", "olive", "--keep", "--json"],
+                                      stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env) for _ in range(2)]
+            for p in procs:
+                out, err = p.communicate(timeout=30)
+                self.assertEqual(p.returncode, 0, err)
+                self.assertEqual(json.loads(out)["count"], attempt + 1)
+            con = sqlite3.connect(self.state / "mail.db")
+            rows = con.execute("SELECT name, first_seen FROM names WHERE host='testhost' ORDER BY name").fetchall()
+            con.close()
+            self.assertEqual(rows, [("carol", 0), ("olive", 0)])
+
     # ------------------------------------------------------------ hook
 
     def test_hook_delivers_once_as_additional_context_only(self):

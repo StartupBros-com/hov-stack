@@ -384,6 +384,8 @@ class McpCase(HovFixture):
         self.assertNotIn(BODY, log)
 
     def test_notify_counts_every_unread_message_and_takes_wildcards(self):
+        # omp is around before the broadcasts: one sent before a name's first contact is not its mail
+        self.hov("whoami", "--as", "omp")
         self.hov("send", "--as", "alpha", "--to", "omp", "one")
         self.hov("send", "--as", "beta", "--to", "*", "two")
         self.hov("send", "--as", "beta", "--to", "testhost:*", "three")
