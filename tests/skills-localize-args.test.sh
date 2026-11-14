@@ -60,7 +60,7 @@ if [ "$rc" -eq 0 ] && canary_in_place && ! trashed; then ok "control: '--dry-run
 if [[ $out == *"would retire: $CANARY"* ]]; then ok "control: '--dry-run' announces the retirement"; else bad "control: '--dry-run' did not announce $CANARY: $brief"; fi
 
 # 2. A stray argument after a no-argument mode is refused before any change.
-for argv in "apply --dry-run" "apply -n" "apply extra" "--dry-run apply" "check --dry-run" "audit now"; do
+for argv in "apply --dry-run" "apply -n" "apply extra" "--dry-run apply" "check --dry-run" "audit now" "sources apply"; do
   read -r -a words <<<"$argv"
   run "${words[@]}"
   if [ "$rc" -eq 2 ]; then ok "'$argv' exits 2"; else bad "'$argv' exited $rc, want 2: $brief"; fi
@@ -83,6 +83,33 @@ help=$(bash "$SCRIPT" --help 2>&1)
 if [[ $help == *"It is a mode, not a"* ]]; then ok "--help documents that --dry-run is a mode"; else bad "--help lacks the --dry-run note"; fi
 if [[ $help == *"harness-doctor runs \`skills-localize.sh check\`"* ]]; then ok "--help reaches the last header line"; else bad "--help stops before the end of the header"; fi
 if [[ $help != *"set -uo pipefail"* ]]; then ok "--help stops at the first line of code"; else bad "--help printed code past the header"; fi
+
+# 5. `sources` prints the real path of every input that exists, one per line, and
+#    writes nothing. wt-done.sh reads it to decide whether a merge it activated can
+#    change a deployed skill, so a missing line means a skill change that stays stale
+#    until the 03:00 run, and a stray line means an apply nobody needed.
+fresh_home
+OV="$T/home/.config/hov-stack"
+mkdir -p "$T/local" "$T/plugin/.claude-plugin" "$OV/skills-patches"
+echo '{}' >"$T/plugin/.claude-plugin/plugin.json"
+printf '%s\n' "$T/plugin" "$T/no-such-plugin" >"$OV/skill-plugins"
+ln -sfn "$T/local" "$T/local-link"
+out=$(cd "$T" && env -i PATH="$PATH" HOME="$T/home" XDG_CONFIG_HOME="$T/home/.config" \
+  XDG_STATE_HOME="$T/home/.local/state" SKILLS_LOCAL_DIR="$T/local-link" \
+  SKILLS_CODEX_ONLY_DIR="$T/no-such-dir" bash "$SCRIPT" sources 2>&1)
+rc=$?
+RT=$(readlink -f "$T")
+REPO=$(cd -P "$(dirname "$SCRIPT")/.." && pwd)
+has_line() { grep -qxF -- "$1" <<<"$out"; }
+if [ "$rc" -eq 0 ]; then ok "sources exits 0"; else bad "sources exited $rc: $out"; fi
+for want in "$REPO" "$RT/local" "$RT/home/.config/hov-stack" "$RT/home/.config/hov-stack/skills-patches" \
+  "$RT/home/.config/hov-stack/skill-plugins" "$RT/plugin"; do
+  if has_line "$want"; then ok "sources lists $want"; else bad "sources lacks $want: $out"; fi
+done
+if [[ $out != *no-such* && $out != *local-link* ]]; then ok "sources lists only resolved paths that exist"; else bad "sources listed a missing or unresolved path: $out"; fi
+if ! grep -qv '^/' <<<"$out"; then ok "sources prints nothing but absolute paths"; else bad "sources printed a non-path line: $out"; fi
+if [ ! -e "$T/home/.local/state/skills-localize" ]; then ok "sources creates no state"; else bad "sources created $T/home/.local/state/skills-localize"; fi
+if canary_in_place && ! trashed; then ok "sources leaves the tree untouched"; else bad "sources changed the tree"; fi
 
 echo "skills-localize-args: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]

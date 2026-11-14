@@ -89,6 +89,30 @@ STUB
 chmod +x "$TMP/bin/systemctl"
 export PATH="$TMP/bin:$PATH"
 
+# `skills-localize.sh` stub: after activating a checkout, wt-done asks the installed
+# copy for its `sources` and runs `apply` when the checkout holds one (section 53b).
+# Exported for the whole suite, so no closeout here reaches the host's real
+# reconciler. SKILLS_SOURCES is empty unless a test sets it, so a fixture repo is not
+# a skill source by default. SKILLS_CALLS records argv.
+cat >"$TMP/skills-localize-stub" <<'STUB'
+#!/usr/bin/env bash
+printf '%s%s\n' "${SKILLS_TAG:-}" "$*" >>"${SKILLS_CALLS:-/dev/null}"
+case "${1:-}" in
+  sources)
+    [ "${SKILLS_SOURCES_SLEEP:-0}" = 0 ] || sleep 5
+    [ -z "${SKILLS_SOURCES:-}" ] || printf '%s\n' "$SKILLS_SOURCES"
+    [ -z "${SKILLS_SOURCES_ERR:-}" ] || printf '%s\n' "$SKILLS_SOURCES_ERR" >&2
+    exit "${SKILLS_SOURCES_RC:-0}" ;;
+  apply)
+    [ "${SKILLS_APPLY_SLEEP:-0}" = 0 ] || sleep 5
+    printf '%s\n' "${SKILLS_APPLY_OUT:-skills-localize: done}"
+    exit "${SKILLS_APPLY_RC:-0}" ;;
+esac
+exit 2
+STUB
+chmod +x "$TMP/skills-localize-stub"
+export WT_DONE_SKILLS_LOCALIZE="$TMP/skills-localize-stub"
+
 # Exercise the actual sibling freshener and its shared diagnosis library, but never
 # consult the host's route registration for fixture repositories. Route refusal is
 # also exercised below by changing the stub's classification (no guard is bypassed).
@@ -1307,6 +1331,123 @@ out=$(runordinary)
 chk 'non-harness repo does not apply' '' "$(cat "$SETTINGS_CALLS")"
 hasnot 'non-harness repo has no settings activation line' "$out" 'activation: settings'
 unset CLAUDE_HOME SETTINGS_CALLS
+
+# --- 53b. skills activation: once the merge is current in a checkout that holds a
+#          skills-localize input, the installed copy's `apply` runs; any other
+#          checkout gets nothing. Until 2026-11-14 nothing on the merge path ran it,
+#          so merged Codex forks, agents-layer copies and skills-patches overlays
+#          stayed stale until the 03:00 jsm run. A failure is reported and never
+#          fails the closeout, the same contract as the settings apply above.
+skillsfix(){
+  ordinaryfix "$1"
+  CR=$(readlink -f "$C")
+  export SKILLS_CALLS="$TMP/$1/skills.calls"
+  : >"$SKILLS_CALLS"
+}
+two_calls=$(printf 'sources\napply')
+# A preview of a checkout that is not current yet names both the freshen and the apply.
+skillsfix skills-preview-stale
+out=$(cd "$W" && SKILLS_SOURCES="$CR/plugins/hov-stack/skills" DRY_RUN=1 bash "$ORDINARY_SCRIPT" 2>&1)
+has 'skills stale preview names the freshen' "$out" "launchpad-freshen.sh --repo '$C' (safe fast-forward"
+has 'skills stale preview names the apply' "$out" "would: $WT_DONE_SKILLS_LOCALIZE apply ($CR/plugins/hov-stack/skills is in $C)"
+chk 'skills stale preview only asks for sources' 'sources' "$(cat "$SKILLS_CALLS")"
+skillsfix skills-fresh
+# The sibling is a near-miss prefix: $CR-sibling is not inside $CR.
+export SKILLS_SOURCES="$CR-sibling/skills
+/elsewhere/skills
+$CR/plugins/hov-stack/skills"
+out=$(runordinary); rc=$?
+chk 'skills post-freshen closeout succeeds' 0 "$rc"
+chk 'skills post-freshen asks for sources, then applies once' "$two_calls" "$(cat "$SKILLS_CALLS")"
+has 'skills post-freshen reports the apply' "$out" 'activation: skills applied (0 change(s), 0 fork(s) synced)'
+chk 'skills post-freshen prints one skills line' 1 "$(printf '%s\n' "$out" | grep -c -F 'activation: skills')"
+hasnot 'skills clean apply raises no alarm' "$out" '!! activation: skills'
+: >"$SKILLS_CALLS"
+out=$(runordinary)
+chk 'skills already-current applies once' "$two_calls" "$(cat "$SKILLS_CALLS")"
+: >"$SKILLS_CALLS"
+out=$(cd "$W" && DRY_RUN=1 bash "$ORDINARY_SCRIPT" 2>&1)
+chk 'skills preview only asks for sources' 'sources' "$(cat "$SKILLS_CALLS")"
+has 'skills preview prints the apply it would run' "$out" "would: $WT_DONE_SKILLS_LOCALIZE apply ($CR/plugins/hov-stack/skills is in $C)"
+out=$(SKILLS_APPLY_OUT="$(printf 'localized (claude): x/SKILL.md\nretired (moved to .trash): y\ndropped claude layer state: q\nretirement from retired-skills.txt: y\ndeployed codex fork: z\nskills-localize: done')" runordinary)
+has 'skills apply counts changes and forks' "$out" 'activation: skills applied (3 change(s), 1 fork(s) synced)'
+out=$(SKILLS_APPLY_RC=1 SKILLS_APPLY_OUT="$(printf 'ERROR: could not write claude x/SKILL.md\nskills-localize: completed WITH ERRORS')" runordinary); rc=$?
+chk 'skills failure keeps the closeout successful' 0 "$rc"
+has 'skills failure names rc and the first error' "$out" \
+  "!! activation: skills apply failed (rc=1; 124 means timeout): ERROR: could not write claude x/SKILL.md; $WT_DONE_SKILLS_LOCALIZE --dry-run shows why"
+out=$(WT_DONE_SKILLS_TIMEOUT=1 SKILLS_APPLY_SLEEP=1 runordinary); rc=$?
+chk 'skills timeout keeps the closeout successful' 0 "$rc"
+has 'skills timeout is explicit' "$out" '!! activation: skills apply failed (rc=124;'
+out=$(SKILLS_APPLY_OUT="$(printf 'DRIFT: claude x/SKILL.md was edited after skills-localize wrote it - left alone\nconflict (codex): x/SKILL.md - upstream changed it; kept our side\nskills-localize: done')" runordinary)
+has 'skills drift left after apply is explicit' "$out" \
+  "!! activation: skills applied, but 2 problem line(s) remain (first: DRIFT: claude x/SKILL.md was edited after skills-localize wrote it - left alone); $WT_DONE_SKILLS_LOCALIZE --dry-run shows them"
+: >"$SKILLS_CALLS"
+out=$(SKILLS_SOURCES_RC=1 runordinary); rc=$?
+chk 'skills sources failure keeps the closeout successful' 0 "$rc"
+chk 'skills sources failure never applies' 'sources' "$(cat "$SKILLS_CALLS")"
+has 'skills sources failure is reported, not taken as "not a source"' "$out" \
+  "!! activation: skills not applied (skills-localize.sh sources failed, rc=1; 124 means timeout); run $WT_DONE_SKILLS_LOCALIZE apply"
+out=$(WT_DONE_SKILLS_SOURCES_TIMEOUT=1 SKILLS_SOURCES_SLEEP=1 runordinary)
+has 'skills sources timeout is reported' "$out" '!! activation: skills not applied (skills-localize.sh sources failed, rc=124;'
+: >"$SKILLS_CALLS"
+out=$(SKILLS_SOURCES_RC=2 runordinary)
+chk 'skills older reconciler never applies' 'sources' "$(cat "$SKILLS_CALLS")"
+has 'skills older reconciler says so' "$out" 'activation: skills n/a (the installed skills-localize.sh has no sources mode'
+hasnot 'skills older reconciler is not an alarm' "$out" '!! activation: skills'
+: >"$SKILLS_CALLS"
+out=$(SKILLS_SOURCES="$CR-sibling/skills
+ERROR: $CR/lib/overlay.sh is missing
+/elsewhere/skills" runordinary)
+chk 'non-source repo only asks for sources' 'sources' "$(cat "$SKILLS_CALLS")"
+hasnot 'non-source repo has no skills line' "$out" 'activation: skills'
+# Only stdout is the path list: a diagnostic on stderr that names a path inside the
+# checkout is not an input.
+: >"$SKILLS_CALLS"
+out=$(SKILLS_SOURCES=/elsewhere/skills SKILLS_SOURCES_ERR="$CR/plugins/hov-stack/skills" runordinary)
+chk 'sources stderr is not read as a path' 'sources' "$(cat "$SKILLS_CALLS")"
+: >"$SKILLS_CALLS"
+out=$(WT_DONE_SKILLS_LOCALIZE="$TMP/no-such-localize" runordinary); rc=$?
+chk 'no installed reconciler: closeout succeeds' 0 "$rc"
+hasnot 'no installed reconciler: no skills line' "$out" 'activation: skills'
+# The default is the copy installed under CLAUDE_HOME, never one beside wt-done: a
+# worktree's copy would deploy that worktree's files. The decoy sibling must not run.
+mkdir -p "$TMP/skills-home/scripts"
+cp "$TMP/skills-localize-stub" "$TMP/skills-home/scripts/skills-localize.sh"
+printf '#!/usr/bin/env bash\nprintf "DECOY %%s\\n" "$*" >>"$SKILLS_CALLS"\n' >"$INSTALLED/skills-localize.sh"
+chmod +x "$INSTALLED/skills-localize.sh"
+: >"$SKILLS_CALLS"
+out=$(unset WT_DONE_SKILLS_LOCALIZE; CLAUDE_HOME="$TMP/skills-home" SKILLS_TAG=x runordinary)
+chk 'skills default runs the CLAUDE_HOME copy' "$(printf 'xsources\nxapply')" "$(cat "$SKILLS_CALLS")"
+has 'skills default names the installed copy' "$out" 'activation: skills applied'
+rm -f "$INSTALLED/skills-localize.sh"
+# Format seam: the real script's `sources` output drives the gate (paths only, real
+# paths, one per line). It runs under a fixture HOME and writes no state.
+export REAL_LOCALIZE="$HERE/../scripts/skills-localize.sh" SEAM_HOME="$TMP/seam-home"
+mkdir -p "$SEAM_HOME" "$C/plugins/hov-stack/skills" "$TMP/seam-elsewhere"
+cat >"$TMP/skills-seam" <<'STUB'
+#!/usr/bin/env bash
+case "${1:-}" in
+  sources) exec env -i PATH="$PATH" HOME="$SEAM_HOME" XDG_CONFIG_HOME="$SEAM_HOME/.config" \
+             XDG_STATE_HOME="$SEAM_HOME/.local/state" SKILLS_LOCAL_DIR="$SEAM_LOCAL" \
+             bash "$REAL_LOCALIZE" sources ;;
+  *) printf '%s\n' "$*" >>"$SKILLS_CALLS"; echo 'skills-localize: done' ;;
+esac
+STUB
+chmod +x "$TMP/skills-seam"
+: >"$SKILLS_CALLS"
+out=$(SEAM_LOCAL="$C/plugins/hov-stack/skills" WT_DONE_SKILLS_LOCALIZE="$TMP/skills-seam" runordinary)
+chk 'seam: a skill folder inside the checkout applies' 'apply' "$(cat "$SKILLS_CALLS")"
+: >"$SKILLS_CALLS"
+out=$(SEAM_LOCAL="$TMP/seam-elsewhere" WT_DONE_SKILLS_LOCALIZE="$TMP/skills-seam" runordinary)
+chk 'seam: no input inside the checkout, no apply' '' "$(cat "$SKILLS_CALLS")"
+if [ ! -e "$SEAM_HOME/.local/state/skills-localize" ]; then ok 'seam: sources wrote no state'; else no 'seam: sources wrote no state'; fi
+# Settings run before skills, each with its own line.
+settingsfix skills-order
+CR=$(readlink -f "$C")
+out=$(SKILLS_SOURCES="$CR/x" runordinary)
+chk 'settings line precedes the skills line' 'settings skills' \
+  "$(printf '%s\n' "$out" | sed -n 's/^ *activation: \(settings\|skills\) .*/\1/p' | tr '\n' ' ' | sed 's/ $//')"
+unset CLAUDE_HOME SETTINGS_CALLS SKILLS_SOURCES SKILLS_CALLS
 
 # --- 54. a failed closeout fetch names git's reason, not "(offline?)" -----------
 # repo_fetch_origin is sourced fail-soft from ../lib/repo-update.sh, so a wrong
