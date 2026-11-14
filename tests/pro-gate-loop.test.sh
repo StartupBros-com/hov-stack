@@ -1150,7 +1150,7 @@ jq -se '[.[] | select(.mode == "query")][3] as $q |
   $q.diff == $q.endpoint and $q.diff != "none" and $e.diff == $q.diff
 ' "$RT_CALLS.confirm" >/dev/null && ok || bad 'G1v query/effect confirmation or full endpoint bytes differ'
 
-echo "== G1gateway (dotfiles#1691): default gateway fixers enroll in Auto without replacing hard routes =="
+echo "== G1gateway (dotfiles#1691, hov-stack#597): default gateway fixers run plain Opus without replacing hard routes =="
 mkdir -p "$HOME/.claude"
 printf '{"model":"claude-bccf-route-codex-pool-astra[1m]"}\n' > "$HOME/.claude/settings.json"
 gateway_case=0
@@ -1161,8 +1161,8 @@ for gateway in http://127.0.0.1:8788 http://localhost:8788/ 'http://[::1]:8788';
     ANTHROPIC_DEFAULT_OPUS_MODEL= ANTHROPIC_DEFAULT_SONNET_MODEL= ANTHROPIC_DEFAULT_HAIKU_MODEL= \
     run_loop "g1gateway-$gateway_case"
   [ "$RC" = 0 ] && [ "$(fixers)" = 1 ] && ok || bad "G1gateway exit $RC with $(fixers) fixers: $OUT"
-  grep -q -F -- '--model claude-bccf-quality-auto[1m]' "$CLAUDE_CALLS" && ok \
-    || bad "G1gateway $gateway did not enroll the fixer in Auto with its existing 1m context opt-in"
+  grep -q -F -- '--model opus[1m]' "$CLAUDE_CALLS" && ok \
+    || bad "G1gateway $gateway did not default the fixer to opus with its existing 1m context opt-in"
   grep -q -F -- '--max-budget-usd 80' "$CLAUDE_CALLS" && ok \
     || bad 'G1gateway lost the existing fixer budget'
 done
@@ -1180,7 +1180,7 @@ for route in model account role foreign; do
     ANTHROPIC_DEFAULT_OPUS_MODEL= ANTHROPIC_DEFAULT_SONNET_MODEL="$sonnet" ANTHROPIC_DEFAULT_HAIKU_MODEL= \
     run_loop "g1gateway-$route"
   [ "$RC" = 0 ] && [ "$(fixers)" = 1 ] && ok || bad "G1gateway-$route exit $RC with $(fixers) fixers: $OUT"
-  ! grep -q -F -- '--model claude-bccf-quality-auto' "$CLAUDE_CALLS" && ok \
+  ! grep -q -F -- '--model opus' "$CLAUDE_CALLS" && ok \
     || bad "G1gateway-$route replaced an explicit route or a foreign backend"
 done
 mkdir -p "$TREE/.claude"
@@ -1198,10 +1198,10 @@ for scoped in model account backend harmless malformed; do
     run_loop "g1gateway-scoped-$scoped"
   [ "$RC" = 0 ] && [ "$(fixers)" = 1 ] && ok || bad "G1gateway-scoped-$scoped exit $RC with $(fixers) fixers: $OUT"
   if [ "$scoped" = harmless ]; then
-    grep -q -F -- '--model claude-bccf-quality-auto' "$CLAUDE_CALLS" && ok \
-      || bad 'G1gateway-scoped harmless settings disabled Auto'
+    grep -q -F -- '--model opus' "$CLAUDE_CALLS" && ok \
+      || bad 'G1gateway-scoped harmless settings disabled the opus default'
   else
-    ! grep -q -F -- '--model claude-bccf-quality-auto' "$CLAUDE_CALLS" && ok \
+    ! grep -q -F -- '--model opus' "$CLAUDE_CALLS" && ok \
       || bad "G1gateway-scoped-$scoped replaced a scoped pin or ambiguous settings"
   fi
 done
