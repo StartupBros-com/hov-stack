@@ -93,3 +93,8 @@ memory-eval replaced-by=memory-dream@hov
 harness-vet replaced-by=harness-vet@hov
 rent-check replaced-by=rent-check@hov
 sign-it replaced-by=sign-it@hov
+
+multi-model-triangulation  # retired 2026-10-29: it only wrote prompts for the operator to paste into
+                           # other models by hand. Replacement: /ce-pov oracle (compound-engineering),
+                           # a cross-model panel that dispatches on its own and reconciles the
+                           # answers into one verdict.
