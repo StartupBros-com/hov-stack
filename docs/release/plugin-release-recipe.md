@@ -22,6 +22,12 @@ Merging the version bump is the ship moment. No step after it is a human step;
 the two hand dispatches below are a nudge and a one-time migration, and the
 chain converges without them.
 
+A routine version bump's Tool Drop card needs no operator go (operator ruling,
+2026-11-13). The release train is the configured send, and
+`check-release-notes.sh` checks the card lines, so the bump PR merges under
+merge-and-end like any other PR and is not held under `external-send`. The
+ruling covers bumps of plugins already listed; a first listing is outside it.
+
 1. **Bump merge (the ship moment).** Land a PR that moves
    `plugins/<name>/VERSION` and `plugins/<name>/.claude-plugin/plugin.json`
    together and adds `plugins/<name>/docs/release-notes/v<version>.md` with a
