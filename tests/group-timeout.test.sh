@@ -10,7 +10,7 @@ set -uo pipefail
 
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 LIB=$ROOT/scripts/lib/group-timeout.sh
-TMP=$(mktemp -d)
+TMP=$(mktemp -d) || exit 1
 trap 'rm -rf "$TMP"' EXIT
 # The helper's scratch files land here, so the leftover checks below can count them.
 export TMPDIR=$TMP

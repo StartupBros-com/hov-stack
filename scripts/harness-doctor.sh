@@ -1790,7 +1790,7 @@ else
   done <<< "$_suite_list"
 
   if [ "${#_run_args[@]}" -gt 0 ]; then
-    _rlog=$(mktemp -d "${TMPDIR:-/tmp}/doctor-tests.XXXXXX")
+    _rlog=$(mktemp -d "${TMPDIR:-/tmp}/doctor-tests.XXXXXX") || { echo "harness-doctor: could not create a scratch directory for the test run" >&2; exit 1; }
     (cd "$HARNESS_REPO" && CLAUDE_TESTS_TIMEOUT=$BASH_SUITE_TIMEOUT_S timeout -k 10 "$RUNNER_TOTAL_TIMEOUT_S" \
       bash "$TEST_RUNNER" -j "$_jobs" -o "$_rlog/logs" "${_run_args[@]}") >"$_rlog/runner.out" 2>&1 </dev/null
     _rrc=$?

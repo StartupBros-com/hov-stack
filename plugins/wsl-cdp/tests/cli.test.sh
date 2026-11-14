@@ -159,7 +159,7 @@ b_err="$(WSL_CDP_USERS_ROOT="$fx2/users" WSL_CDP_WINUSER=test \
 assert_contains "browsers warns on a non-executable override" "$b_err" "not executable"
 
 # --- browsers: zero installs is a loud exit 1, not an empty success
-fx3="$(mktemp -d "${TMPDIR:-/tmp}/wslcdp-none.XXXXXX")"
+fx3="$(mktemp -d "${TMPDIR:-/tmp}/wslcdp-none.XXXXXX")" || exit 1
 mkdir -p "$fx3/users/test/AppData/Local/Temp" "$fx3/home"
 assert_exit "browsers with no installs -> 1" 1 env WSL_CDP_USERS_ROOT="$fx3/users" \
   WSL_CDP_WINUSER=test WSL_CDP_PROGRAMFILES="$fx3/pf" \

@@ -9,7 +9,7 @@ set -euo pipefail
 # which would otherwise rewrite every plugin's card and bury the real change.
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-TMP="$(mktemp -d)"
+TMP="$(mktemp -d)" || exit 1
 trap 'rm -rf "$TMP"' EXIT
 PASS=0
 

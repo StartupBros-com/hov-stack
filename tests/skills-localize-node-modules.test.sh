@@ -27,7 +27,7 @@ notes=""
 note() { notes="$notes"$'\n'"$*"; }
 drift=0; errors=0
 
-T=$(mktemp -d /tmp/skills-localize-nm.XXXXXX)
+T=$(mktemp -d /tmp/skills-localize-nm.XXXXXX) || exit 1
 SRC="$T/src/demo"; DST="$T/skills"
 mkdir -p "$SRC/scripts" "$DST"
 echo "---" > "$SRC/SKILL.md"; echo "x" > "$SRC/scripts/x.mjs"

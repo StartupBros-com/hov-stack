@@ -17,7 +17,7 @@
 set -uo pipefail
 
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-TMP=$(mktemp -d)
+TMP=$(mktemp -d) || exit 1
 trap 'rm -rf "$TMP"' EXIT
 
 for dep in jq rsync flock; do

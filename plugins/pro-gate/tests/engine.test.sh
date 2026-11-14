@@ -33,7 +33,7 @@ check() { # name condition-result detail
 }
 phase_of() { jq -r .phase "$1" 2>/dev/null || sed -nE 's/.*"phase":"([^"]+)".*/\1/p' "$1"; }
 
-TDIR="$(mktemp -d "${TMPDIR:-/tmp}/pg-engine-test.XXXXXX")"
+TDIR="$(mktemp -d "${TMPDIR:-/tmp}/pg-engine-test.XXXXXX")" || exit 1
 # Kill only a mock this run started: `kill 0` would signal the caller's whole process group, and a
 # run that exits before its first start_mock, such as a shard that selects no region, has none (#254).
 trap 'lock_cleanup; [ -n "${MOCK_PID:-}" ] && kill "$MOCK_PID" 2>/dev/null; rm -rf "$TDIR"' EXIT

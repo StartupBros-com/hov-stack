@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-TMP="$(mktemp -d)"
+TMP="$(mktemp -d)" || exit 1
 trap 'rm -rf "$TMP"' EXIT
 PASS=0
 pass() { printf 'ok - %s\n' "$1"; PASS=$((PASS + 1)); }
@@ -189,7 +189,7 @@ pass 'repeating tick 2 has the same key, finds PR 2 open and creates no third PR
 # before merging the already committed PR branch.
 git -C "$TEST_REPO" show main:.claude-plugin/marketplace.json > "$TEST_REPO/.claude-plugin/marketplace.json"
 git -C "$TEST_REPO" merge -q --ff-only "$branch2"
-state_tmp="$(mktemp)"
+state_tmp="$(mktemp)" || exit 1
 jq '.state = "MERGED"' "$STATE/pr-2.json" > "$state_tmp"
 mv "$state_tmp" "$STATE/pr-2.json"
 reconcile || die 'tick 3 reconcile failed'

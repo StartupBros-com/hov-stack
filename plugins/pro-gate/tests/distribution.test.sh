@@ -3,7 +3,7 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 FAILS=0
 check() { local name="$1"; shift; if "$@"; then echo "ok - $name"; else echo "FAIL - $name"; FAILS=$((FAILS + 1)); fi; }
-TDIR="$(mktemp -d "${TMPDIR:-/tmp}/pro-gate-distribution.XXXXXX")"
+TDIR="$(mktemp -d "${TMPDIR:-/tmp}/pro-gate-distribution.XXXXXX")" || exit 1
 trap 'rm -rf "$TDIR"' EXIT
 VERSION="$(tr -d '[:space:]' < "$ROOT/VERSION")"
 export PRO_GATE_SERVICE_MANAGER=none

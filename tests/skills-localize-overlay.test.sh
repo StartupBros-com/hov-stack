@@ -4,7 +4,7 @@ set -euo pipefail
 unset HOV_STACK_OVERLAY XDG_CONFIG_HOME
 unset CODEX_SKILLS_HOST_LIST RETIRED_SKILLS_HOST_LIST SKILL_PLUGINS_LIST
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-T=$(mktemp -d)
+T=$(mktemp -d) || exit 1
 trap 'rm -rf "$T"' EXIT
 export HOME=$T/home HOV_STACK_OVERLAY=$T/overlay
 export SKILLS_DIR=$HOME/.claude/skills SKILLS_LOCAL_DIR=$T/local

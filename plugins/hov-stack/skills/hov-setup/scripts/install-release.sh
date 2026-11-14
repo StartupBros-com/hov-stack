@@ -273,7 +273,7 @@ EOF
 
 
 
-work=$(mktemp -d)
+work=$(mktemp -d) || exit 1
 stage=""       # staging directory inside dest; removed on every exit path
 installed=""   # newline-separated absolute paths this run moved into place
 displaced=""   # newline-separated basenames whose previous copy waits in $stage/<name>.prev

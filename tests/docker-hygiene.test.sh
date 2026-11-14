@@ -9,7 +9,7 @@ set -uo pipefail
 
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 SCRIPT=$REPO/scripts/docker-hygiene.sh
-TMP=$(mktemp -d /tmp/docker-hygiene-test.XXXXXX)
+TMP=$(mktemp -d /tmp/docker-hygiene-test.XXXXXX) || exit 1
 trap 'rm -rf "$TMP"' EXIT
 BIN=$TMP/bin
 CALLS=$TMP/calls.tsv

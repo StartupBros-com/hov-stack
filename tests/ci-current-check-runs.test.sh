@@ -11,7 +11,7 @@ ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 LIB="$ROOT/scripts/lib/ci-current-check-runs.sh"
 LIB_DIR=${LIB%/*}
 FIX="$ROOT/tests/fixtures/ci-current-check-runs"
-TMP=$(mktemp -d /tmp/ci-current-test.XXXXXX)
+TMP=$(mktemp -d /tmp/ci-current-test.XXXXXX) || exit 1
 trap 'rm -rf "$TMP"' EXIT
 pass=0 fail=0
 check() { local name=$1; shift; if "$@"; then pass=$((pass + 1)); else fail=$((fail + 1)); echo "FAIL: $name" >&2; fi; }

@@ -89,7 +89,7 @@ if [[ ! -r $FIXTURE_FILE ]]; then
   preflight_incomplete "fixture source is unreadable: $FIXTURE_FILE" fixture-source-unreadable
 fi
 FIXTURE_SOURCE=$(<"$FIXTURE_FILE")
-TMP=$(mktemp -d /tmp/docker-init-runtime.XXXXXX)
+TMP=$(mktemp -d /tmp/docker-init-runtime.XXXXXX) || exit 1
 PRE_CONTAINERS_FILE=$TMP/preexisting-containers
 PRE_VOLUMES_FILE=$TMP/preexisting-volumes
 
