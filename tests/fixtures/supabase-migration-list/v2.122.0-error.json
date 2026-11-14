@@ -1,0 +1,1 @@
+{"_tag":"Error","error":{"code":"DbConfigIpv6Error","message":"IPv6 is not supported on your current network","suggestion":"Run supabase link --project-ref abcdefghijklmnopqrst to setup IPv4 connection."}}
