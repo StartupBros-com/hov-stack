@@ -108,11 +108,12 @@ for the attachment, hook-context and compaction rows (Anthropic's mods admin
 page, "Know which hooks of a user's mod don't run", read 2026-11-14). That list
 is narrower than the events the guard itself hooks, which a session's debug log
 prints on the line `hooks module cc-plugin-sec-default@builtin loaded`:
-agent-radar's `agent.spawn` hook is on that line and drew no skip notice in the
-same 14 days. The debug log names each skip as `<mod>: <event> bypassed by
-cc-plugin-sec-default`; the page adds that the guard passes over a user's hooks
-in a few other cases with no note, such as `tool.describe` for an
-organization's tools.
+agent-radar's `agent.spawn` hook is on that line and ran in a session checked
+on 2026-11-14, where the debug log shows it settling and names only
+reminder-diet's hooks as passed over. The debug log names each skip as `<mod>:
+<event> bypassed by cc-plugin-sec-default`; the page adds that the guard passes
+over a user's hooks in a few other cases with no note, such as `tool.describe`
+for an organization's tools.
 
 lookout was wired on 2026-10-06 and removed on 2026-11-14 on the operator's
 verdict. Every six main-thread model steps it asked one tool-less fork of the
