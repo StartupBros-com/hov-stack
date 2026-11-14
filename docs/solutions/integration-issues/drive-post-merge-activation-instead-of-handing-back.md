@@ -62,6 +62,13 @@ A merged dotfiles PR is not live. `~/.claude/{scripts,hooks,agents,bin,CLAUDE.md
 
 A settings failure never fails the closeout. A dry run prints `would: <repo>/sync.sh apply-settings` and runs nothing.
 
+**Update 2026-11-14:** skill changes deployed only at the 03:00 jsm run once the 2026-11-02 switch retired dotup, so a merged skills-patches or private-skills edit stayed stale for up to a day. After the settings step, closeout now runs the installed `~/.claude/scripts/skills-localize.sh apply` when the activated checkout holds a path that `skills-localize.sh sources` prints (hov-stack itself, or the dotfiles overlay and skill-plugin folders), and prints:
+- `activation: skills applied (N change(s), M fork(s) synced)`.
+- `!! activation: skills applied, but N problem line(s) remain (first: ...)` when apply printed ERROR, DRIFT, WARN or conflict lines.
+- `!! activation: skills apply failed (rc=<code>; 124 means timeout)` or `!! activation: skills not applied (skills-localize.sh sources failed ...)`.
+
+A checkout that holds no input prints no skills line. A dry run prints `would: <localize> apply (<input> is in <repo>)`. The apply waits up to 120 s on the skills-localize lock the jsm run holds, and never fails the closeout.
+
 After merging your own PR, run the closeout from inside the worktree:
 
 ```

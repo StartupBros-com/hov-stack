@@ -41,8 +41,8 @@ copies of the plugin coexist, and where the plugin documents the rest.
   on `CLAUDE_CONFIG_DIR`; a dev pass against real memory is a real pass. Point
   `CLAUDE_CONFIG_DIR` at a scratch copy or use the plugin's eval fixtures for dev runs.
 - **Retired copies stay retired.** `retired-skills.txt` lists `memory-dream` and
-  `memory-eval`, so `skills-localize.sh apply` (run by the refresh step after every activation)
-  trashes any deployed copy and `check` reports DRIFT if one reappears. The fork agents
+  `memory-eval`, so `skills-localize.sh apply` (run by `wt-done.sh` once a merge is current in
+  a checkout holding one of its inputs, and nightly by the jsm unit) trashes any deployed copy and `check` reports DRIFT if one reappears. The fork agents
   (`memory-dream-drafter`, `memory-eval-scribe`) were deleted from `agents/`, which
   `~/.claude/agents` symlinks; the plugin's `memory-dream:drafter` and `memory-dream:scribe`
   (Glob-only, `omitClaudeMd`) replace them.
