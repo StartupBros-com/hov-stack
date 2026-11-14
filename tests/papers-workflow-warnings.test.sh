@@ -6,7 +6,7 @@ CLAUDE_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 OVERLAY=$CLAUDE_DIR/skills-patches/papers/scripts/workflow.py
 FIXTURE=$CLAUDE_DIR/tests/fixtures/papers-workflow-warnings.py
 PYTHON=$(command -v python3)
-TMP=$(mktemp -d)
+TMP=$(mktemp -d) || exit 1
 trap 'rm -rf "$TMP"' EXIT
 mkdir -p "$TMP/home" "$TMP/bin" "$TMP/scripts" "$TMP/tmp"
 cp "$OVERLAY" "$TMP/scripts/workflow.py"

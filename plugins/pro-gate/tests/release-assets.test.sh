@@ -5,7 +5,7 @@
 # tarball and its checksum, and the tarball must be the runtime only.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-TMP="$(mktemp -d)"
+TMP="$(mktemp -d)" || exit 1
 trap 'rm -rf "$TMP"' EXIT
 pass(){ printf 'ok - %s\n' "$1"; }
 fail(){ printf 'not ok - %s\n' "$1" >&2; exit 1; }

@@ -3,7 +3,7 @@
 # Real process_pr, dispatch, runtime_gate and validators; isolated external process doubles.
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-TDIR="$(mktemp -d "${TMPDIR:-/tmp}/pg-daemon-query-test.XXXXXX")"
+TDIR="$(mktemp -d "${TMPDIR:-/tmp}/pg-daemon-query-test.XXXXXX")" || exit 1
 trap 'rm -rf "$TDIR"' EXIT
 export TMPDIR="$TDIR" PRO_GATE_REPOS_DIR="$TDIR/repos" PRO_GATE_HOME="$TDIR/runtime" PRO_GATE_CONSENT_HOME="$TDIR/consent"
 export PRO_GATE_PLUGIN_SEARCH_DIR="$TDIR/plugins"

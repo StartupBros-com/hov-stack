@@ -26,7 +26,7 @@ if [ ! -f "$SRC" ]; then
   exit 1
 fi
 
-TMP=$(mktemp -d /tmp/review-adversarial-first-test.XXXXXX)
+TMP=$(mktemp -d /tmp/review-adversarial-first-test.XXXXXX) || exit 1
 trap 'rm -rf "$TMP" 2>/dev/null || true' EXIT
 
 extract() {

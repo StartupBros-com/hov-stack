@@ -29,7 +29,7 @@ fi
 # Negative control (issue #377): the allowlist must not open the door to other build scripts.
 # A scratch project with the plugin's own pnpm-workspace.yaml and a local dependency that has
 # an install script must still fail with ERR_PNPM_IGNORED_BUILDS.
-scratch="$(mktemp -d)"
+scratch="$(mktemp -d)" || exit 1
 trap 'rm -r "$scratch"' EXIT
 mkdir -p "$scratch/app" "$scratch/evil"
 cp pnpm-workspace.yaml "$scratch/app/"

@@ -25,7 +25,7 @@ set -uo pipefail
 
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 SRC=$REPO/scripts/harness-weekly.sh
-TMP=$(mktemp -d /tmp/hw-pipeline-mix-test.XXXXXX)
+TMP=$(mktemp -d /tmp/hw-pipeline-mix-test.XXXXXX) || exit 1
 trap 'rm -rf "$TMP" 2>/dev/null || true' EXIT
 
 pass=0 fail=0

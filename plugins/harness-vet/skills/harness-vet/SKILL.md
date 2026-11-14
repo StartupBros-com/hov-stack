@@ -308,18 +308,13 @@ command the verifier ran. Empirical beats documentary:
   that ran: a per-line rule passes no line that only ran inside a pair, so
   run each line alone in its final wording or judge the pair as one unit
   [measured: same vet — the final first line never ran alone, so the
-  per-line rule could not be met]. Where cost or tokens is a metric, log
-  each run's cache-creation and cache-read tokens, and before the batch
-  declare the count that marks a run cold, set per arm from its calibration
-  runs (a larger prompt writes more even when warm), and a replacement rule
-  keyed on that count alone, such as one re-run that stands whatever it
-  shows, applied before any run's cost or outcome is read. Launching behind
-  a warm same-model run does not rule out a cold one [measured: same vet —
-  cold runs wrote 9,814 to 13,508 more cache-creation tokens than the warm
-  median for their arm and task; the candidate's median in the 1.445 cell
-  was itself a cold run; in the last batch a run started 1 s after a warm
-  same-model run finished was still cold, and with no replacement rule
-  declared it invalidated its cell and failed the batch].
+  per-line rule could not be met]. Cost from three runs per arm cannot pass
+  or fail a change of a few lines: report it, and make it a pass condition
+  only with enough runs to beat its noise [measured: same vet — runs that
+  started on a cold prompt cache wrote 9,814 to 13,508 more cache-creation
+  tokens than the warm median of the same arm and task; two such runs in
+  one three-run cell set its median, and launching a run behind a warm one
+  did not keep it warm].
   Drop fixture items that pass or fail in every arm from the arm comparison;
   they cannot separate arms and only pad the denominator. Give each arm its
   own config directory

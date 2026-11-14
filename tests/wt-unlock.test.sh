@@ -35,7 +35,7 @@ gone(){ if [ -e "$2" ]; then no "$1 (still present: $2)"; else ok "$1"; fi; }
 # the two prints 121s for a 120 s plant; the wording is what the test pins.
 agemask(){ sed -E 's/\(([0-9]+)s old, /(Ns old, /' <<<"$1"; }
 
-TMP=$(mktemp -d)
+TMP=$(mktemp -d) || exit 1
 holders=()
 cleanup(){
   local p

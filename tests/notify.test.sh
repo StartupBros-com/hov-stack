@@ -43,7 +43,7 @@ set -uo pipefail
 
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)  # repo root
 SCRIPT="$HERE/scripts/notify.sh"
-TMP=$(mktemp -d)
+TMP=$(mktemp -d) || exit 1
 # An orphan still running at exit is killed by process group (setsid made it a
 # leader) before its PATH stub disappears, so it cannot fall through to the
 # real `timeout` and pop a real balloon.

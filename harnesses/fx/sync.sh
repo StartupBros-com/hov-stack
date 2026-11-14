@@ -66,7 +66,7 @@ install() {
         local live_cl tmp
         live_cl=$(jq -c '.context_limits // null' "$LIVE_SETTINGS" 2>/dev/null)
         if [ "$live_cl" != "$repo_cl" ]; then
-          tmp=$(mktemp "$FX_HOME/.settings.json.fx.XXXXXX") 2>/dev/null
+          tmp=$(mktemp "$FX_HOME/.settings.json.fx.XXXXXX") 2>/dev/null || tmp=""
           if [ -n "$tmp" ] && jq --argjson cl "$repo_cl" '.context_limits = $cl' "$LIVE_SETTINGS" > "$tmp" 2>/dev/null \
              && jq -e . "$tmp" >/dev/null 2>&1; then
             local mode
@@ -122,7 +122,7 @@ push() {
     # directly would truncate the canonical file before jq runs, so a failing
     # or null-emitting jq (e.g. live file lacks context_limits) would zero it.
     local tmp
-    tmp=$(mktemp "$HERE/.settings.json.push.XXXXXX") 2>/dev/null
+    tmp=$(mktemp "$HERE/.settings.json.push.XXXXXX") 2>/dev/null || tmp=""
     if [ -z "$tmp" ]; then
       echo "  ERROR: could not create temp file; settings.json not pushed" >&2
       return 1

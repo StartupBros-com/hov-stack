@@ -9,7 +9,7 @@ APPLY="$HERE/scripts/migration-apply.sh"
 [ -f "$APPLY" ] || { echo "FAIL: apply controller not found at $APPLY" >&2; exit 1; }
 
 HOME=/fixture-home
-TMP=$(mktemp -d)
+TMP=$(mktemp -d) || exit 1
 trap 'rm -rf "$TMP"' EXIT
 # The repository and app/ref map are overlay data; this suite supplies its own fixture map.
 TARGET_TABLE='acme-web:abcdefghijklmnopqrst
@@ -99,7 +99,7 @@ done
 # Fail-closed: without a map, the list and lookup accessors return non-zero, print nothing on
 # stdout, and name the missing path and the variable on stderr (a loop over a failed query
 # used to answer an empty list at exit 0).
-MISSING_DIR=$(mktemp -d "$TMP/empty.XXXXXX")
+MISSING_DIR=$(mktemp -d "$TMP/empty.XXXXXX") || exit 1
 missing_err="$TMP/missing.err"
 without_map() { unset HOV_STACK_MIGRATION_TARGETS_FILE; "$@"; } # runs inside the $( ) subshell
 without_overlay() { unset HOV_STACK_MIGRATION_TARGETS_FILE HOV_STACK_OVERLAY; "$@"; } # the XDG default
@@ -124,9 +124,9 @@ fi
 # $XDG_CONFIG_HOME/hov-stack, the same order as the other overlay readers; the explicit variable
 # still wins over both, and an overlay without the map fails closed naming the overlay path
 # rather than falling through to the XDG directory.
-OVERLAY=$(mktemp -d "$TMP/overlay.XXXXXX")
+OVERLAY=$(mktemp -d "$TMP/overlay.XXXXXX") || exit 1
 cp "$HOV_STACK_MIGRATION_TARGETS_FILE" "$OVERLAY/migration-targets.json"
-XDG_DIR=$(mktemp -d "$TMP/xdg.XXXXXX")
+XDG_DIR=$(mktemp -d "$TMP/xdg.XXXXXX") || exit 1
 mkdir -p "$XDG_DIR/hov-stack"
 cp "$HOV_STACK_MIGRATION_TARGETS_FILE" "$XDG_DIR/hov-stack/migration-targets.json"
 [ "$(HOV_STACK_OVERLAY="$OVERLAY" XDG_CONFIG_HOME="$MISSING_DIR" without_map migration_targets_file)" = "$OVERLAY/migration-targets.json" ] \
@@ -139,7 +139,7 @@ cp "$HOV_STACK_MIGRATION_TARGETS_FILE" "$XDG_DIR/hov-stack/migration-targets.jso
   || fail "the XDG map does not resolve a ref"
 [ "$(HOV_STACK_OVERLAY="$OVERLAY" XDG_CONFIG_HOME="$XDG_DIR" HOV_STACK_MIGRATION_TARGETS_FILE="$TMP/explicit.json" migration_targets_file)" = "$TMP/explicit.json" ] \
   || fail "HOV_STACK_MIGRATION_TARGETS_FILE no longer wins over the overlay"
-EMPTY_OVERLAY=$(mktemp -d "$TMP/empty-overlay.XXXXXX")
+EMPTY_OVERLAY=$(mktemp -d "$TMP/empty-overlay.XXXXXX") || exit 1
 if out=$(HOV_STACK_OVERLAY="$EMPTY_OVERLAY" XDG_CONFIG_HOME="$XDG_DIR" without_map migration_target_apps 2>"$missing_err"); then
   fail "an overlay without the map fell through to the XDG directory"
 fi

@@ -40,7 +40,7 @@ set -uo pipefail
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 SCANNER=$REPO/scripts/cli-supersedes-mcp-audit.py
 DOCTOR=$REPO/scripts/harness-doctor.sh
-TMP=$(mktemp -d /tmp/cli-supersedes-mcp.XXXXXX)
+TMP=$(mktemp -d /tmp/cli-supersedes-mcp.XXXXXX) || exit 1
 trap 'rm -rf "$TMP"' EXIT
 
 pass=0 fail=0
