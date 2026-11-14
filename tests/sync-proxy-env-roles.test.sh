@@ -36,7 +36,7 @@ set -uo pipefail
 SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 # shellcheck source=../lib/manifest.sh
 . "$SRC/lib/manifest.sh"   # DOTFILES_HARNESS: the tree sync.sh installs
-TMP=$(mktemp -d)
+TMP=$(mktemp -d) || exit 1
 trap 'rm -rf "$TMP" 2>/dev/null || true' EXIT
 
 pass=0 fail=0

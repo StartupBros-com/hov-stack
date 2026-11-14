@@ -27,7 +27,7 @@ no_error_line() {
 . "$DCG_DIR/common.sh"
 
 tmp_base=${TMPDIR:-/tmp}
-test_root=$(mktemp -d "${tmp_base%/}/dcg-install-test.XXXXXX")
+test_root=$(mktemp -d "${tmp_base%/}/dcg-install-test.XXXXXX") || exit 1
 cleanup() {
     local status=$?
 

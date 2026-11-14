@@ -19,7 +19,7 @@ pass=0; fail=0
 ok()   { pass=$((pass+1)); }
 bad()  { fail=$((fail+1)); echo "FAIL: $*"; }
 
-tmp=$(mktemp -d /tmp/open-deliverable-test.XXXXXX)
+tmp=$(mktemp -d /tmp/open-deliverable-test.XXXXXX) || exit 1
 trap 'rm -rf "$tmp"' EXIT
 printf '<!doctype html><title>t</title>\n' > "$tmp/page.html"
 on_wsl=0

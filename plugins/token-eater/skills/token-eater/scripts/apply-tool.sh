@@ -18,7 +18,8 @@ ALLOWED="${3:-}"
 
 [ -d "$WT" ] || { echo '{"adapter":"tool","ok":false,"error":"worktree not found"}'; exit 2; }
 WT="$(cd "$WT" && pwd)"
-RUNDIR="$(mktemp -d -t te-tool-XXXXXX)"; LOG="$RUNDIR/log"
+RUNDIR="$(mktemp -d -t te-tool-XXXXXX)" || { echo '{"adapter":"tool","ok":false,"error":"could not create a run directory"}'; exit 2; }
+LOG="$RUNDIR/log"
 
 # run the fixer in the worktree
 set +e

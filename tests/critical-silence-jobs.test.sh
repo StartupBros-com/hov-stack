@@ -8,7 +8,7 @@ SKILLS_SCRIPT=$REPO/scripts/update-skills.sh
 CRON_OWNERSHIP=$REPO/scripts/cron-ownership.py
 SYSTEMD_DIR=$REPO/systemd
 
-TMP=$(mktemp -d)
+TMP=$(mktemp -d) || exit 1
 trap 'rm -rf "$TMP"' EXIT
 
 pass=0

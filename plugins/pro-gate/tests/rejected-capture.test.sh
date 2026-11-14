@@ -6,7 +6,7 @@
 # are not a live reproduction of the better-ccflare#486 report that motivated it.
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-TDIR="$(mktemp -d "${TMPDIR:-/tmp}/pg-rejected-capture.XXXXXX")"
+TDIR="$(mktemp -d "${TMPDIR:-/tmp}/pg-rejected-capture.XXXXXX")" || exit 1
 trap '[ -z "${MOCK_PID:-}" ] || kill "$MOCK_PID" 2>/dev/null; chmod -R u+rwX "$TDIR" 2>/dev/null; rm -rf "$TDIR"' EXIT
 while IFS='=' read -r name _; do
   case "$name" in PRO_GATE_*|ORACLE_*) unset "$name" ;; esac

@@ -3,7 +3,7 @@
 # has reachable mutation state so removing a fence makes this suite fail.
 set -euo pipefail
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-TMP=$(mktemp -d)
+TMP=$(mktemp -d) || exit 1
 export WT_CLAUDE_HOME="$TMP/claude-home"  # the session check (hov-stack#384) never reads the real ~/.claude
 export WT_HOLD_CACHE_DIR="$TMP/hold-cache"  # nor writes its transcript index to the real ~/.cache (#394)
 trap 'rm -rf "$TMP"' EXIT

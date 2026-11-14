@@ -73,7 +73,7 @@ derive_family() {
 
 list_releases() {
   require GITHUB_REPOSITORY
-  GUARD_TMP_DIR="$(mktemp -d)"
+  GUARD_TMP_DIR="$(mktemp -d)" || fail "could not create a temp directory for the release list"
   trap cleanup_tmp_dir EXIT
   # Every page lands in the file before anything reads it, and the status is
   # checked here, on its own line: a failure on page two must fail the guard,

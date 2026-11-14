@@ -44,7 +44,7 @@ ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 LIB="$ROOT/scripts/lib/ci-stall-classify.sh"
 LIB_DIR=${LIB%/*}
 FIX="$ROOT/tests/fixtures/ci-stall-classify"
-TMP=$(mktemp -d /tmp/ci-stall-test.XXXXXX)
+TMP=$(mktemp -d /tmp/ci-stall-test.XXXXXX) || exit 1
 trap 'rm -rf "$TMP"' EXIT
 pass=0 fail=0
 check() { local name=$1; shift; if "$@"; then pass=$((pass + 1)); else fail=$((fail + 1)); echo "FAIL: $name" >&2; fi; }

@@ -83,7 +83,7 @@ bash scripts/validate-source.sh
 echo '== shell syntax =='
 while IFS= read -r file; do bash -n "$file"; done < <(find . -type f -name '*.sh' -print)
 
-logs="$(mktemp -d)"
+logs="$(mktemp -d)" || exit 1
 trap 'rm -rf "$logs"' EXIT
 run_leg() { # leg name; runs its suites in order, stops at the first failure
   local suite

@@ -2,7 +2,7 @@
 # #262: the real classifier and terminal ledger writer, isolated from browser/account IO.
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-TDIR="$(mktemp -d "${TMPDIR:-/tmp}/pg-template-verdict.XXXXXX")"
+TDIR="$(mktemp -d "${TMPDIR:-/tmp}/pg-template-verdict.XXXXXX")" || exit 1
 trap '[ -z "${MOCK_PID:-}" ] || kill "$MOCK_PID" 2>/dev/null; rm -rf "$TDIR"' EXIT
 export PRO_GATE_HOME="$TDIR/home" PRO_GATE_LEDGER="$TDIR/ledger.jsonl"
 mkdir -p "$PRO_GATE_HOME" "$TDIR/work"

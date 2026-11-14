@@ -10,7 +10,7 @@ set -euo pipefail
 # repin PRs a newer one or main superseded; and it is safe to run again.
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-TMP="$(mktemp -d)"
+TMP="$(mktemp -d)" || exit 1
 trap 'rm -rf "$TMP"' EXIT
 PASS=0
 

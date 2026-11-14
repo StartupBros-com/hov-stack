@@ -7,7 +7,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 echo "install.sh URLs"
-t="$(mktemp -d "${TMPDIR:-/tmp}/wslcdp-inst.XXXXXX")"
+t="$(mktemp -d "${TMPDIR:-/tmp}/wslcdp-inst.XXXXXX")" || exit 1
 trap 'rm -rf "$t"' EXIT
 mkdir -p "$t/bin" "$t/src" "$t/home"
 cp "$HERE/install.sh" "$t/src/install.sh"

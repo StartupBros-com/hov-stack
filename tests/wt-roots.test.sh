@@ -38,7 +38,7 @@ check(){ # name expected actual
   else echo "  FAIL: $name"; echo "        want: [$want]"; echo "        got:  [$got]"; fail=$((fail+1)); fi
 }
 
-TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
+TMP="$(mktemp -d)" || exit 1; trap 'rm -rf "$TMP"' EXIT
 
 # --- fixture: one repo inside SITES, one directly in HOME, one non-repo dir ---
 FAKEHOME="$TMP/home"

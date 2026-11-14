@@ -24,7 +24,7 @@ python3 scripts/check_stdlib_only.py
 
 echo "== known spec divergence (agentskills.io reference validator) =="
 # check_spec_divergence.py needs the `agentskills` console command on PATH.
-venv="$(mktemp -d)"
+venv="$(mktemp -d)" || exit 1
 trap 'rm -rf "$venv"' EXIT
 # uv when it is installed (the author's machines); the GitHub runner has only venv and pip.
 if command -v uv >/dev/null 2>&1; then

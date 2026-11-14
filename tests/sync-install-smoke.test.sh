@@ -32,7 +32,7 @@
 set -uo pipefail
 
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-TMP=$(mktemp -d)
+TMP=$(mktemp -d) || exit 1
 # Git records only modes 644 and 755, but cp -a carries the checkout's own: a
 # worktree created under umask 0002 holds 664/775, and the literal 644 check on
 # migration-targets.sh read red with nothing wrong in sync.sh (#1647, pro-gate
@@ -2520,7 +2520,7 @@ for bad_global in '50000' '2000000' '"300k"' '300000.5'; do
   global_refusal=$("$SYNC" reconcile-runtime-env 2>&1); global_refusal_status=$?
   if [ "$global_refusal_status" -ne 0 ] \
      && cmp -s "$TMP/global-live-baseline.json" "$CLAUDE_HOME/settings.json"; then ok; else bad "invalid canonical global reconciled/wrote live: $bad_global"$'\n'"$global_refusal"; fi
-  global_invalid_home=$(mktemp -d "$TMP/global-invalid-install.XXXXXX")
+  global_invalid_home=$(mktemp -d "$TMP/global-invalid-install.XXXXXX") || exit 1
   global_install_refusal=$(CLAUDE_HOME="$global_invalid_home" "$SYNC" install 2>&1); global_install_refusal_status=$?
   if [ "$global_install_refusal_status" -ne 0 ] && [ -z "$(find "$global_invalid_home" -mindepth 1 -print -quit)" ]; then ok; else bad "invalid canonical global installed live artifacts: $bad_global"$'\n'"$global_install_refusal"; fi
   # Equal invalid values cannot pass the drift projection by equality alone.

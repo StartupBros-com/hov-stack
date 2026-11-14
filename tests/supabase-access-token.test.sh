@@ -12,7 +12,7 @@ set -euo pipefail
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 LIB="$HERE/scripts/lib/supabase-access-token.sh"
 JQ=$(command -v jq) || { echo "jq is required" >&2; exit 1; }
-TMP=$(mktemp -d)
+TMP=$(mktemp -d) || exit 1
 trap 'rm -rf "$TMP"' EXIT
 mkdir -p "$TMP/bin"
 fail() { echo "FAIL: $*" >&2; exit 1; }
