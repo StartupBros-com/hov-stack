@@ -310,10 +310,11 @@ command the verifier ran. Empirical beats documentary:
   [measured: same vet — the final first line never ran alone, so the
   per-line rule could not be met]. Cost from three runs per arm cannot pass
   or fail a change of a few lines: report it, and make it a pass condition
-  only with enough runs to beat its noise [measured: same vet — a run that
+  only with enough runs to beat its noise [measured: same vet — runs that
   started on a cold prompt cache wrote 9,814 to 13,508 more cache-creation
-  tokens than its arm's warm median, enough to set a three-run median, and
-  launching it behind a warm run did not prevent that].
+  tokens than the warm median of the same arm and task; two such runs in
+  one three-run cell set its median, and launching a run behind a warm one
+  did not keep it warm].
   Drop fixture items that pass or fail in every arm from the arm comparison;
   they cannot separate arms and only pad the denominator. Give each arm its
   own config directory
