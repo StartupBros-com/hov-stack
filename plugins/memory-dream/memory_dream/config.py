@@ -168,21 +168,32 @@ def eval_home() -> Path:
     ).expanduser()
 
 
+_scratch_fallback: Path | None = None
+
+
 def scratch_dir() -> Path:
     """Session scratch for the pass's working JSON (plan, shards, drafts, selection).
 
     The plan, shards and drafts carry note bodies; results persist only in the
-    patch-set directory under pass_root().
+    patch-set directory under pass_root(). So the folder is owner-only: a
+    MEMORY_DREAM_SCRATCH or $CLAUDE_JOB_DIR/tmp folder is tightened to 0700
+    when the current user owns it, and the fallback is a fresh
+    tempfile.mkdtemp() folder (0700, unpredictable name, never an existing
+    folder), made once per process.
     """
+    global _scratch_fallback
+    from memory_dream import compat
+
     env = os.environ.get(_ENV_PREFIX + "SCRATCH")
-    if env:
-        p = Path(env).expanduser()
-    elif os.environ.get("CLAUDE_JOB_DIR"):
-        p = Path(os.environ["CLAUDE_JOB_DIR"]) / "tmp"
-    else:
-        p = Path(tempfile.gettempdir()) / f"memory-dream-{os.getpid()}"
-    p.mkdir(parents=True, exist_ok=True)
-    return p
+    job_dir = os.environ.get("CLAUDE_JOB_DIR")
+    if env or job_dir:
+        p = Path(env).expanduser() if env else Path(job_dir) / "tmp"
+        p.mkdir(parents=True, exist_ok=True)
+        compat.restrict_if_owned(p)
+        return p
+    if _scratch_fallback is None or not _scratch_fallback.is_dir():
+        _scratch_fallback = Path(tempfile.mkdtemp(prefix="memory-dream-"))
+    return _scratch_fallback
 
 
 def _file_config() -> dict:
