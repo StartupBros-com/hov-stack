@@ -116,8 +116,11 @@ reset() { rm -rf "$FIX"; mkdir -p "$FIX"; }
 reset; fixture widget false "[$UP,$UP]"; manifest "$TMP/m.json" widget
 run_publish || die 'a published release made the run fail'
 [ ! -s "$CALLS" ] || die 'an already-published release was patched'
-grep -q '^published widget: v2.0.0' "$TMP/out" || die 'the published release was not reported'
-pass 'an already-published release is reported and never patched'
+grep -q '^already published widget: v2.0.0' "$TMP/out" || die 'the published release was not reported'
+# A bare "published" line reads like a publish; on every push to main that made
+# a docs-only merge look like a release of every listed plugin.
+! grep -q '^published' "$TMP/out" || die 'an already-published release was reported as a publish'
+pass 'an already-published release is reported as already published and never patched'
 
 # --- a pinned, complete draft is published exactly once -----------------------
 reset; fixture widget true "[$UP,$UP]"; manifest "$TMP/m.json" widget
