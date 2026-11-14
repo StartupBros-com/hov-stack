@@ -1082,7 +1082,7 @@ layer_skill() {
     esac
   fi
   local src verb failed=0
-  local -a flush=()
+  local -a flush=() written=()
   for rel in "${towrite[@]}"; do
     if [ "${EK[$rel]}" = absent ]; then src=""; verb="removed"
     elif owned "$rel"; then src="$W/e/$rel"; verb="localized"
@@ -1090,9 +1090,12 @@ layer_skill() {
     if put_file "$dir" "$rel" "$src"; then
       say "$verb ($label): $skill/$rel"
       [ -z "$src" ] || flush+=("$dir/$rel")
-      flush+=("$(live_parent "$dir" "$rel")")
+      written+=("$rel")
     else note "ERROR: could not write $label $skill/$rel"; errors=1; failed=1; fi
   done
+  # Each parent is looked up once every file is written: removing a directory's last
+  # file removes the directory, so a parent found after an earlier file may be gone.
+  for rel in "${written[@]}"; do flush+=("$(live_parent "$dir" "$rel")"); done
   # The final manifest forgets the old text, so the new text must be on disk first.
   if [ "$failed" = 0 ] && [ "${#flush[@]}" -gt 0 ] && ! durable "${flush[@]}"; then
     note "ERROR: could not sync the files written for $label $skill"; errors=1; failed=1
@@ -1150,7 +1153,7 @@ apply_layer() {
 # unapply_cmd <skill>... — pristine files back in every tree, all or nothing per skill.
 unapply_cmd() {
   local skill label root dir rel live copy rc=0 foreign unrec mismatch damaged
-  local -a restored=()
+  local -a restored=() touched=()
   for skill in "$@"; do
     valid_skill_name "$skill" || { reject_name "$skill" "unapply"; [ "$rc" -ge 2 ] || rc=2; continue; }
     foreign=0; unrec=0; mismatch=0; damaged=0
@@ -1190,15 +1193,18 @@ unapply_cmd() {
       root=$(tree_root "$label"); dir="$root/$skill"
       if load_manifest "$label" "$skill"; then
         if [ -d "$dir" ] && [ ! -L "$dir" ]; then
-          restored=()
+          restored=() touched=()
           for rel in "${!MH[@]}"; do
             live="$dir/$rel"; copy="$STATE/$label/pristine/$skill/$rel"
             recorded_as "$rel" "$live" || continue
             if [ "${MK[$rel]}" = file ]; then put_file "$dir" "$rel" "$copy" && restored+=("$live"); else put_file "$dir" "$rel" ""; fi ||
               { note "ERROR: could not restore $label $skill/$rel"; errors=1; [ "$rc" -ge 1 ] || rc=1; continue 3; }
-            restored+=("$(live_parent "$dir" "$rel")")
+            touched+=("$rel")
             say "unapplied ($label): $skill/$rel"
           done
+          # Parents are looked up once every file is back, as in apply: removing a
+          # directory's last file removes the directory.
+          for rel in "${touched[@]}"; do restored+=("$(live_parent "$dir" "$rel")"); done
           # The saved state is the only record of what these files held: they go to disk
           # before it is dropped.
           [ "${#restored[@]}" -eq 0 ] || durable "${restored[@]}" ||
