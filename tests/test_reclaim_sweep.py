@@ -2742,5 +2742,27 @@ class MainScratchTests(_FixtureTree):
             self.assertFalse([k for k in item if k.startswith("_")], item)
 
 
+
+class UnitTimeoutTests(unittest.TestCase):
+    """The unit shipped with a 10m start timeout under a 20m planning budget, so
+    systemd could kill a slow plan before any removal began."""
+
+    def _timeout_s(self):
+        seconds = {"s": 1, "sec": 1, "m": 60, "min": 60, "h": 3600}
+        unit = (CLAUDE / "systemd" / "reclaim-sweep.service").read_text()
+        values = [ln.split("=", 1)[1].strip() for ln in unit.splitlines()
+                  if ln.startswith("TimeoutStartSec=")]
+        self.assertEqual(len(values), 1, values)
+        digits = values[0].rstrip("abcdefghijklmnopqrstuvwxyz")
+        suffix = values[0][len(digits):] or "s"
+        self.assertTrue(digits.isdigit(), values[0])
+        self.assertIn(suffix, seconds, values[0])
+        return int(digits) * seconds[suffix]
+
+    def test_the_start_timeout_leaves_removal_time_after_the_planning_budget(self):
+        # Removal gets at least as long as planning may take.
+        self.assertGreaterEqual(self._timeout_s(), 2 * R.PLAN_BUDGET_S)
+
+
 if __name__ == "__main__":
     unittest.main()
