@@ -1,4 +1,0 @@
-{
-  "description": "lookout: every few main-thread model steps, one cached fork asks whether there is something the person should know; the answer shows above the prompt",
-  "modules": ["./register.tsx"]
-}
