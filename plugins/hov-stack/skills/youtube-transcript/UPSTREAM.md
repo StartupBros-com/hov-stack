@@ -15,3 +15,5 @@ than google-safe-browsing: thin without the vendor path, no established
 transcript-fetching workflow in this operator's stack to justify always-on.
 
 Additional SKILL.md changes: added an attribution/rationale comment, shortened the description and reorganized headings for the standalone yt-dlp path; the output rule now prints text only below approximately 500 words.
+
+Converter change (2026-11-13): the json3 flattener now reads only this video's caption files (exact `$NAME` basename), prefers the plain `en` track when yt-dlp writes several (auto captions arrive as both `en` and `en-orig`), and writes `$OUT/$NAME.txt`. Upstream globbed every `*.json3` in the folder, so a second run in the same folder could flatten another video's captions.

@@ -101,7 +101,8 @@ Full mechanism: `harness/gh-tracking-and-claims.md`.
 ## The patterns worth knowing (from the Workflow doctrine)
 
 - **Fan-out → adversarially verify → synthesize.** Generate findings in parallel, then spawn *independent
-  skeptics* per finding (prompted to refute; kill on majority-refute), then synthesize survivors. Stops
+  skeptics* per batch of related findings (one host or subsystem each, per the fan-out hygiene rules
+  below; prompted to refute; kill on majority-refute), then synthesize survivors. Stops
   plausible-but-wrong findings from shipping.
 - **Loop-until-dry.** For unknown-size discovery (bugs, dead code, refactor sites), keep spawning finders
   until K consecutive rounds surface nothing new — dedup against everything seen, not just what's kept.
