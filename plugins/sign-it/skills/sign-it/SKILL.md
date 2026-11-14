@@ -37,7 +37,7 @@ The operator drew their signature once; you apply it. The CLI is `scripts/sign-i
 
 ## First run
 
-Before the opener, read `doctor.protection`: when it is `unverified`, replace "in a private folder that only your login can open" with "in a private folder on this computer" and say nothing more about it; `owner-only` keeps the sentence as written.
+Before the opener, read `doctor.protection`: when it is `unverified`, every place this skill promises owner-only access says "in a private folder on this computer" instead, and nothing more about it. That covers the opener ("in a private folder that only your login can open"), the Step 5 receipt (its storage line becomes "Stored in a private folder on this computer.") and the privacy statement below. `owner-only` keeps every sentence as written.
 
 This is the script for a non-technical operator who has never used sign-it: they typed `/sign-it`, will not read a README, will not type a flag, and never see a file path unless it is a link to click. Every message and option below is quoted verbatim; reword only to answer a question the operator asked. Supported this round: macOS, Linux, and Windows through WSL2 (native Windows is Step 0/2's platform check above, not this section).
 
@@ -129,7 +129,7 @@ Options: **Keep it (Recommended)** / **Redraw** / **Use a different picture**. R
 
 Store each answer the moment it is given (`setup --name/--title/--company/--email/--date-format`) so an interruption loses nothing.
 
-**Step 5: receipt.** One fixed shape, each item on its own line:
+**Step 5: receipt.** One fixed shape, each item on its own line (the storage line follows the `doctor.protection` rule under First run):
 
 > ✅ sign-it is ready.
 > Signature: saved (drawn on this computer)
@@ -159,7 +159,7 @@ Store each answer the moment it is given (`setup --name/--title/--company/--emai
 | Someone else's signature is stored here | "The signature stored here belongs to whoever set this login up. Ask whoever manages this computer for a login of your own, then type /sign-it there." | stops |
 | Helper program cannot be installed | the technical-helper sentence from Step 0 | stops |
 
-**Privacy, stated once, in the opener and the receipt:** the signature and details stay on this computer in a private folder that only this login can open; sign-it never sends them to us or to any server; the phone path moves the drawing only from the operator's phone to this computer over their own network. What the operator later sends (a signed or sealed document) goes wherever they send it; that is theirs, not sign-it's.
+**Privacy, stated once, in the opener and the receipt:** the signature and details stay on this computer in a private folder that only this login can open (when `doctor.protection` is `unverified`, only "in a private folder on this computer"; see First run); sign-it never sends them to us or to any server; the phone path moves the drawing only from the operator's phone to this computer over their own network. What the operator later sends (a signed or sealed document) goes wherever they send it; that is theirs, not sign-it's.
 
 Files live under `~/.config/sign-it/` (override with `SIGN_IT_HOME`; a pre-rename `~/.config/sign-pdf/` is used until `setup` runs once, which moves it, and `doctor` says so); the directory is 0700 and its top-level files (signature, config, certificate material) are 0600; the pyhanko environment under `.venv/` keeps normal permissions.
 

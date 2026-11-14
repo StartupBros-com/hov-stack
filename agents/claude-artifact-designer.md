@@ -26,8 +26,10 @@ Based on requirements and patterns found, produce complete specification.
 
 ## Artifact Decision Tree
 
-- **"I want Claude to remember X automatically"** → Skill
-- **"I want to automate Y workflow step-by-step"** → Agent
+- **"I want Claude to retain instructions or learnings across sessions"** → CLAUDE.md for standing instructions, or auto memory for learned preferences and context
+- **"X must happen every time Y does, with no exceptions"** → Hook
+- **"I want reference material or a repeatable workflow Claude loads when relevant"** → Skill
+- **"I want to hand work to an isolated context with its own tools or model"** → Agent
 - **"I use workflow Z frequently and want a shortcut"** → Command
 - **"I want to share my setup with others"** → Plugin
 
@@ -38,7 +40,7 @@ Based on requirements and patterns found, produce complete specification.
 - **Minimal tools**: Only what's needed (Glob, Grep, Read for analysis; add Write, Edit, Bash only if modifying)
 - **Model selection**: haiku (simple/fast), sonnet (standard), opus (critical/quality)
 - **Concise prompts**: Guidance, not rigid templates. Trust Claude.
-- **Shorter is better**: Research shows 65% reduction in agent length improved performance scores from 62→85
+- **Task fit**: Keep context, constraints, and examples that support correct behavior; judge changes by task performance, not prompt length
 
 ## Frontmatter Reference
 
