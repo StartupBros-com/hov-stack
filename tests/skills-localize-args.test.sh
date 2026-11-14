@@ -25,7 +25,7 @@ CANARY=beads-br
 grep -qE "^${CANARY}([[:space:]]|$)" "$(dirname "$SCRIPT")/../retired-skills.txt" \
   || { echo "FAIL: canary $CANARY is no longer in retired-skills.txt; pick another retired name"; exit 1; }
 
-T=$(mktemp -d /tmp/skills-localize-args.XXXXXX)
+T=$(mktemp -d /tmp/skills-localize-args.XXXXXX) || exit 1
 trap 'rm -rf "$T" 2>/dev/null || true' EXIT
 
 pass=0; fail=0

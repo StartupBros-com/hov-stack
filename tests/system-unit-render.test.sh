@@ -8,7 +8,7 @@
 # public-safety scan catches it instead of being folded into the template.
 set -u
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-T=$(mktemp -d)
+T=$(mktemp -d) || exit 1
 trap 'rm -rf "$T"' EXIT
 fail=0
 ok() { echo "ok   $*"; }

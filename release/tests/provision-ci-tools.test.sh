@@ -6,7 +6,7 @@ set -euo pipefail
 # authenticity test; real pinned downloads are validated separately.
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 SCRIPT="${PROVISION_SCRIPT:-$ROOT/release/scripts/provision-ci-tools.sh}"
-TMP="$(mktemp -d)"
+TMP="$(mktemp -d)" || exit 1
 trap 'rm -rf "$TMP"' EXIT
 mkdir -p "$TMP/bin" "$TMP/assets/shellcheck-v0.11.0" "$TMP/ambient"
 REAL_SHA="$(command -v sha256sum)"

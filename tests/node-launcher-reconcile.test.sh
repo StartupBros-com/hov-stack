@@ -6,7 +6,7 @@
 set -uo pipefail
 
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-TMP=$(mktemp -d)
+TMP=$(mktemp -d) || exit 1
 trap 'rm -rf "$TMP"' EXIT
 PASS=0
 FAILN=0

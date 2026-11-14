@@ -17,7 +17,7 @@
 #     once, to confirm it can fail.
 set -euo pipefail
 ROOT=$(git rev-parse --show-toplevel); cd "$ROOT"
-TMP=$(mktemp -d /tmp/unit-failure-alert-test.XXXXXX); trap 'rm -rf "$TMP"' EXIT
+TMP=$(mktemp -d /tmp/unit-failure-alert-test.XXXXXX) || exit 1; trap 'rm -rf "$TMP"' EXIT
 unset MONITOR_UNIT MONITOR_INVOCATION_ID MONITOR_SERVICE_RESULT MONITOR_EXIT_STATUS
 mkdir -p "$TMP/bin" "$TMP/stamps"
 

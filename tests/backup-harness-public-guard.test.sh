@@ -12,7 +12,7 @@ set -uo pipefail
 
 SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 SCRIPT=$SRC/scripts/backup-harness.sh
-TMP=$(mktemp -d)
+TMP=$(mktemp -d) || exit 1
 trap 'rm -rf "$TMP"' EXIT
 pass=0 fail=0
 ok() { pass=$((pass + 1)); }

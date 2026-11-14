@@ -2103,7 +2103,7 @@ pg_reservation_restore_from_meta() { # marker -> restore legacy recovery ownersh
     return 1
   fi
   created="$spend"
-  tmp="$(mktemp "$dir/.${marker}.restore.XXXXXX" 2>/dev/null || true)"
+  tmp="$(mktemp "$dir/.${marker}.restore.XXXXXX" 2>/dev/null)" || tmp=""
   if [ -n "$tmp" ] && [ -f "$tmp" ] && [ ! -L "$tmp" ] \
      && printf '%s\t%s\t%s\t0\t\t\t%s\tgenerating\n' "$key" "$out" "$created" "$spend" > "$tmp" 2>/dev/null \
      && mv -f "$tmp" "$f" 2>/dev/null; then

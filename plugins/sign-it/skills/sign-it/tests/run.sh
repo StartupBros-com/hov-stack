@@ -9,7 +9,7 @@ SKILL="$(cd "$HERE/.." && pwd)"
 node --test "$HERE/signature-storage.test.mjs" || exit 1
 node --test "$HERE/listener-lifecycle.test.mjs" || exit 1
 CLI="node $SKILL/scripts/sign-it.mjs"
-T="$(mktemp -d /tmp/sign-it-test.XXXXXX)"
+T="$(mktemp -d /tmp/sign-it-test.XXXXXX)" || exit 1
 export SIGN_IT_HOME="$T/home"
 node --test "$HERE/listener-response.test.mjs" || exit 1
 pass=0; fail=0
@@ -662,7 +662,7 @@ chmod 700 "$T/home2" 2>/dev/null || true
 # The copy sits in its own folder under /tmp, where walking up finds no node_modules,
 # and runs from / with NODE_PATH cleared. One command per package: doctor and sign
 # (pdf-lib), setup from a JPG (pngjs, jpeg-js), finalize a .docx (fflate).
-FRESH="$(mktemp -d /tmp/sign-it-fresh.XXXXXX)"
+FRESH="$(mktemp -d /tmp/sign-it-fresh.XXXXXX)" || exit 1
 (cd "$SKILL" && tar --exclude=./node_modules -cf - .) | (cd "$FRESH" && tar -xf -)
 FCLI="node $FRESH/scripts/sign-it.mjs"
 check "fresh install: no node_modules in the copy or above it" "[ ! -e $FRESH/node_modules ] && [ ! -e /tmp/node_modules ] && [ ! -e /node_modules ]"

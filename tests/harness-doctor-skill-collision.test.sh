@@ -15,7 +15,7 @@ set -uo pipefail
 
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 DOCTOR=$REPO/scripts/harness-doctor.sh
-TMP=$(mktemp -d /tmp/doctor-skill-collision.XXXXXX)
+TMP=$(mktemp -d /tmp/doctor-skill-collision.XXXXXX) || exit 1
 trap 'rm -rf "$TMP"' EXIT
 
 pass=0 fail=0

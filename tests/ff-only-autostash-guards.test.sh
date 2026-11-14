@@ -28,7 +28,7 @@ set -uo pipefail
 
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 MCP_SCRIPT=$REPO/scripts/update-mcp-servers.sh
-TMP=$(mktemp -d /tmp/ff-only-guards.XXXXXX)
+TMP=$(mktemp -d /tmp/ff-only-guards.XXXXXX) || exit 1
 trap 'rm -rf "$TMP"' EXIT
 
 pass=0 fail=0

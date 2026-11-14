@@ -17,7 +17,7 @@ SETTINGS=$HERE/harnesses/pi/agent/settings.json
 fail() { echo "FAIL: $*" >&2; exit 1; }
 command -v jq >/dev/null || fail "jq is required"
 [ -f "$SETTINGS" ] || fail "no Pi settings at $SETTINGS"
-SCRATCH=$(mktemp -d)
+SCRATCH=$(mktemp -d) || exit 1
 trap 'rm -rf "$SCRATCH"' EXIT
 
 # git_sources FILE: one git: package source per line, from both the bare-string and the

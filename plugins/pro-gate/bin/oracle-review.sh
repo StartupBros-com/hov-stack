@@ -1202,7 +1202,7 @@ if [ "$RECOVER_REQUESTED" = 1 ]; then
          && [ -z "$(pg_capture_foreign_echo "$REC_LOCATOR" "$REC_SELECTED")" ]; then
         REC_BODY="$REC_LOCATOR"
       else
-        REC_HV_BODY="$(mktemp "${TMPDIR:-/tmp}/pg-recover-hvbody.XXXXXX" 2>/dev/null)"
+        REC_HV_BODY="$(mktemp "${TMPDIR:-/tmp}/pg-recover-hvbody.XXXXXX" 2>/dev/null)" || REC_HV_BODY=""
         if [ -n "$REC_HV_BODY" ]; then
           grep -v '^RESULT_FILE=' "$REC_HV_OUT" > "$REC_HV_BODY" 2>/dev/null
           pg_is_review "$REC_HV_BODY" 2>/dev/null \
@@ -1304,7 +1304,7 @@ if [ "$STATUS_REQUESTED" = 1 ]; then
     return 1
   }
 
-  ST_TMP="$(mktemp -d "${TMPDIR:-/tmp}/pg-status.XXXXXX")"
+  ST_TMP="$(mktemp -d "${TMPDIR:-/tmp}/pg-status.XXXXXX")" || exit 1
   trap 'rm -rf "$ST_TMP"' EXIT
   : > "$ST_TMP/res.jsonl"; : > "$ST_TMP/rounds.jsonl"; : > "$ST_TMP/ledger.jsonl"
   ST_HINT=""
@@ -1796,7 +1796,7 @@ case "${PRO_GATE_CHAT_ARCHIVE:-1}" in
      echo "[oracle-review] WARNING: invalid PRO_GATE_CHAT_ARCHIVE='${PRO_GATE_CHAT_ARCHIVE}'; conversation archive disabled for safety (use 0 or 1)." >&2 ;;
 esac
 MODEL="${ORACLE_MODEL:-gpt-5.6}"
-WORK="$(mktemp -d "${TMPDIR:-/tmp}/pro-review.XXXXXX")"
+WORK="$(mktemp -d "${TMPDIR:-/tmp}/pro-review.XXXXXX")" || exit 1
 [ -n "$OUT" ] || OUT="$WORK/findings.md"
 # gate #91 P1 (:192): a caller-supplied relative --out is resolved against whatever directory
 # this process happened to start in (below this line and before the later `cd "$REPO"`), which
@@ -2493,7 +2493,7 @@ pg_preserve_rejected_capture() { # diagnostic bytes, never a completed review
   local src="$1" kept
   [ -s "$src" ] || return 0
   if [ -n "${PG_REJECTED_CAPTURE:-}" ] && cmp -s "$src" "$PG_REJECTED_CAPTURE"; then return 0; fi
-  kept="$(mktemp "$OUT.rejected.XXXXXX")"
+  kept="$(mktemp "$OUT.rejected.XXXXXX")" || kept=""
   if [ -n "$kept" ] && cp "$src" "$kept" && cmp -s "$src" "$kept"; then
     PG_REJECTED_CAPTURE="$kept"
     echo "[oracle-review] rejected capture retained at $kept (not an accepted review)." >&2

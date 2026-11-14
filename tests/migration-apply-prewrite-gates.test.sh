@@ -6,7 +6,7 @@ set -euo pipefail
 
 HERE=$(cd -P "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 APPLY="$HERE/scripts/migration-apply.sh"
-TMP=$(mktemp -d)
+TMP=$(mktemp -d) || exit 1
 trap 'rm -rf "$TMP"' EXIT
 
 fail() { echo "FAIL: $*" >&2; exit 1; }

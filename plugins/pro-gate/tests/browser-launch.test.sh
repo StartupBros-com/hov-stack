@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-TDIR="$(mktemp -d "${TMPDIR:-/tmp}/pro-gate-browser-launch.XXXXXX")"
+TDIR="$(mktemp -d "${TMPDIR:-/tmp}/pro-gate-browser-launch.XXXXXX")" || exit 1
 trap 'rm -rf "$TDIR"' EXIT
 FAILS=0
 TEST_DISPLAY=:199
