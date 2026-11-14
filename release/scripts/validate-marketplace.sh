@@ -221,6 +221,38 @@ validate_shape() {
   done < <(jq -r '.plugins[] | [.name, .source.source, .source.url, (.metadata.version // ""), (.metadata.releaseId // "" | tostring), (.metadata.releaseTag // ""), (.source.path // "")] | join("\u001f")' "$MANIFEST")
 }
 
+# A stated skill count ("45 skills" in an entry's description or card) must be the
+# count members get. They install the pinned release, so between releases the card
+# keeps the released count even while main gains skills (#474). The count is due
+# while a release is in flight: from the PR that moves <path>/VERSION off
+# metadata.version until the repin moves the entry to it. That release ships this
+# checkout's tree, so each claim must equal the skills tracked here, counted as
+# pin_has_pack_skill counts them at a pin. "45+ skills" is not an exact claim and is
+# not checked. A skill change that merges while a release is in flight is compared
+# with the tree as well, although that release does not carry it.
+validate_card_skill_counts() {
+  local name shape path version claims root="" current count claim file rest
+  while IFS=$'\x1f' read -r name shape path version claims; do
+    [[ -n "$claims" ]] || continue
+    [[ "$shape" == git-subdir ]] || fail "plugin $name states a skill count, which is checked only for git-subdir entries"
+    if [[ -z "$root" ]]; then
+      root="$(git -C "$(dirname "$MANIFEST")" rev-parse --show-toplevel 2>/dev/null)" || fail "plugin $name states a skill count, but $MANIFEST is not inside a git checkout to count skills in"
+    fi
+    [[ -f "$root/$path/VERSION" ]] || fail "plugin $name states a skill count, but $path/VERSION is not in this checkout"
+    current="$(tr -d '[:space:]' <"$root/$path/VERSION")"
+    [[ "$current" != "$version" ]] || continue
+    count=0
+    while IFS= read -r -d '' file; do
+      rest="${file#"$path"/skills/}"
+      if [[ "$rest" == */SKILL.md && "${rest%/SKILL.md}" != */* ]]; then count=$((count + 1)); fi
+    done < <(git -C "$root" ls-files -z -- "$path/skills")
+    for claim in $claims; do
+      [[ "$claim" == "$count" ]] || fail "plugin $name is being released as $current (the marketplace lists $version) and states a skill count of $claim, but $path/skills holds $count; set the count to $count in this release"
+    done
+  done < <(jq -r '.plugins[] | [.name, .source.source, (.source.path // ""), (.metadata.version // ""),
+      ([.description, .card.tagline?, .card.rows[]?] | map(strings | scan("(?<![0-9.,])([0-9]+)\\s+skills?\\b"; "i")[0]) | join(" "))] | join("\u001f")' "$MANIFEST")
+}
+
 validate_expected_entry() {
   [[ -n "$EXPECTED_PLUGIN_NAME" ]] || return 0
   local count
@@ -514,6 +546,7 @@ require_command git
 jq -e . "$MANIFEST" >/dev/null 2>&1 || fail "marketplace manifest is malformed JSON"
 validate_expected_inputs
 validate_shape
+validate_card_skill_counts
 validate_expected_entry
 validate_monotonicity
 [[ "$MODE" == syntax ]] || validate_full
