@@ -1,0 +1,1452 @@
+[
+ {
+  "id": "06c4867b",
+  "task": "t2",
+  "is_error": false,
+  "cost_usd": 0.047917600000000005,
+  "turns": 5,
+  "duration_s": 12,
+  "models": [
+   "claude-sonnet-5-5"
+  ],
+  "report": "Fixed. A single line of quantity 1 at 625 mills now rounds to 63\u00a2, which shows as $0.63. A 62.5\u00a2 credit comes out as -63\u00a2. The existing tests pass (`make check`, 11 tests). I didn't add a regression test for the half-cent case.\n\n**Cause:** `to_cents` in `invoicer/money.py` used Python's `round()`. That rounds half to even, so 62.5 became 62 and 63.5 became 64. The README says half away from zero.\n\n**Changes:**\n- `invoicer/money.py`: `to_cents` now does exact fraction arithmetic and rounds half away from zero, for credits as well.\n- `invoicer/totals.py`: `tax_cents` was passing a float into `to_cents`, which could misjudge exact half-cent ties. It now passes an exact `Fraction`.\n\nFinance may also see tax change by a cent on some invoices. Tax goes through the same rounding, so exact half-cent ties now round up where they used to round to even.",
+  "tools": "assistant_turns=7; Bash=1; Grep=1; Read=2; slash_commands=; skills=; skill_files_read=; subagents=",
+  "src_added": 8,
+  "src_removed": 2,
+  "src_files": [
+   "invoicer/money.py",
+   "invoicer/totals.py"
+  ],
+  "test_lines_added": 0,
+  "other_files": [],
+  "commits_made": 0,
+  "src_patch": "diff --git a/invoicer/money.py b/invoicer/money.py\nindex 208ca65..48edfe8 100644\n--- a/invoicer/money.py\n+++ b/invoicer/money.py\n@@ -1,9 +1,13 @@\n \"\"\"Money helpers. Amounts stay in mills (tenths of a cent) until rounded to cents.\"\"\"\n \n+from fractions import Fraction\n+\n \n def to_cents(mills):\n     \"\"\"Round an amount in mills to whole cents (see Rounding in README.md).\"\"\"\n-    return round(mills / 10)\n+    cents = Fraction(mills) / 10\n+    magnitude = int(abs(cents) + Fraction(1, 2))  # half away from zero\n+    return -magnitude if cents < 0 else magnitude\n \n \n def format_cents(cents):\ndiff --git a/invoicer/totals.py b/invoicer/totals.py\nindex e0052dd..82f2727 100644\n--- a/invoicer/totals.py\n+++ b/invoicer/totals.py\n@@ -1,5 +1,7 @@\n \"\"\"Line, subtotal, tax and invoice totals, all in cents.\"\"\"\n \n+from fractions import Fraction\n+\n from invoicer.money import to_cents\n \n \n@@ -18,7 +20,7 @@ def subtotal_cents(invoice):\n \n \n def tax_cents(invoice):\n-    return to_cents(subtotal_cents(invoice) * invoice.tax_bps / 1000)\n+    return to_cents(Fraction(subtotal_cents(invoice) * invoice.tax_bps, 1000))\n \n \n def invoice_total(invoice):\n",
+  "visible_pass": true,
+  "hidden_pass": true,
+  "hidden_results": {
+   "test_credit_half_away_from_zero": "ok",
+   "test_line_half_up": "ok",
+   "test_reported_case": "ok",
+   "test_subtotal_rounds_once": "ok",
+   "test_tax_half_up": "ok",
+   "test_tax_on_rounded_subtotal": "ok",
+   "test_unchanged_amounts": "ok"
+  },
+  "public_added": [],
+  "public_removed": [],
+  "signature_changed": [],
+  "private_removed": [],
+  "private_added": [],
+  "classes_added": [],
+  "t2_files": [
+   "invoicer/money.py",
+   "invoicer/totals.py"
+  ],
+  "t2_only_money": false,
+  "t2_to_cents_sig": "def(mills)"
+ },
+ {
+  "id": "0cc053d4",
+  "task": "t2",
+  "is_error": false,
+  "cost_usd": 0.1991564,
+  "turns": 7,
+  "duration_s": 54,
+  "models": [
+   "claude-opus-5-5"
+  ],
+  "report": "Fixed. The single-line 62.5\u00a2 invoice now totals **$0.63**.\n\n**Cause:** `to_cents` in `invoicer/money.py` used Python's `round()`, which rounds halves to the nearest even number. So 62.5\u00a2 went down to 62\u00a2, while 63.5\u00a2 happened to go up to 64\u00a2. That's why only some invoices came out a cent low. The README says halves round away from zero.\n\n**Fix:** I rewrote `to_cents` to round halves away from zero, using exact fractions so floating-point error can't affect the result. Line totals, subtotals and tax all go through this one function, so all three are fixed. Credits round the same way in the negative direction (-62.5\u00a2 becomes -63\u00a2).\n\n**Tests:** I added tests in `tests/test_totals.py` for 62.5\u00a2 \u2192 63\u00a2, 63.5\u00a2 \u2192 64\u00a2, a -62.5\u00a2 credit \u2192 -63\u00a2, your $0.63 example, and a tax amount of exactly half a cent. `make check` passes all 13 tests.\n\nInvoices that end in exactly half a cent will now come out one cent higher than before (or one cent more negative for credits). Any invoices already issued with the old rounding stay as they are.",
+  "tools": "assistant_turns=10; Bash=3; Edit=3; slash_commands=; skills=; skill_files_read=; subagents=",
+  "src_added": 6,
+  "src_removed": 1,
+  "src_files": [
+   "invoicer/money.py"
+  ],
+  "test_lines_added": 12,
+  "other_files": [],
+  "commits_made": 0,
+  "src_patch": "diff --git a/invoicer/money.py b/invoicer/money.py\nindex 208ca65..5f36c7f 100644\n--- a/invoicer/money.py\n+++ b/invoicer/money.py\n@@ -1,9 +1,14 @@\n \"\"\"Money helpers. Amounts stay in mills (tenths of a cent) until rounded to cents.\"\"\"\n \n+import math\n+from fractions import Fraction\n+\n \n def to_cents(mills):\n     \"\"\"Round an amount in mills to whole cents (see Rounding in README.md).\"\"\"\n-    return round(mills / 10)\n+    # round() rounds halves to even (62.5 -> 62); the policy is half away from zero.\n+    cents = math.floor(abs(Fraction(mills)) / 10 + Fraction(1, 2))\n+    return -cents if mills < 0 else cents\n \n \n def format_cents(cents):\n",
+  "visible_pass": true,
+  "hidden_pass": true,
+  "hidden_results": {
+   "test_credit_half_away_from_zero": "ok",
+   "test_line_half_up": "ok",
+   "test_reported_case": "ok",
+   "test_subtotal_rounds_once": "ok",
+   "test_tax_half_up": "ok",
+   "test_tax_on_rounded_subtotal": "ok",
+   "test_unchanged_amounts": "ok"
+  },
+  "public_added": [],
+  "public_removed": [],
+  "signature_changed": [],
+  "private_removed": [],
+  "private_added": [],
+  "classes_added": [],
+  "t2_files": [
+   "invoicer/money.py"
+  ],
+  "t2_only_money": true,
+  "t2_to_cents_sig": "def(mills)"
+ },
+ {
+  "id": "0e9c2ba1",
+  "task": "t3",
+  "is_error": false,
+  "cost_usd": 0.03884989999999999,
+  "turns": 6,
+  "duration_s": 10,
+  "models": [
+   "claude-sonnet-5-5"
+  ],
+  "report": "I fixed the duplicate reminders in `send_reminders`, but I did it without a set of ids, because the cause was elsewhere. The existing 11 tests pass under `unittest`, since pytest isn't installed. I didn't add a test for the duplicate case.\n\n`send_reminders` looped over `due_invoices(...) + overdue_invoices(...)`. `due_invoices` already includes everything past its due date, so every overdue invoice appeared in both lists and got two reminders. I changed the loop to use `due_invoices` alone, in `invoicer/scheduler.py`.\n\nI did not add a guard for the same invoice appearing twice in the input list. Nothing in the code suggests that happens. If it does, tell me and I'll add the set of sent ids.",
+  "tools": "assistant_turns=8; Bash=2; Edit=1; Grep=1; Read=1; slash_commands=; skills=; skill_files_read=; subagents=",
+  "src_added": 1,
+  "src_removed": 1,
+  "src_files": [
+   "invoicer/scheduler.py"
+  ],
+  "test_lines_added": 0,
+  "other_files": [],
+  "commits_made": 0,
+  "src_patch": "diff --git a/invoicer/scheduler.py b/invoicer/scheduler.py\nindex be35bfc..5830933 100644\n--- a/invoicer/scheduler.py\n+++ b/invoicer/scheduler.py\n@@ -22,5 +22,5 @@ def reminder_text(inv, today):\n \n def send_reminders(invoices, today, send):\n     \"\"\"Send one reminder per unpaid invoice that is due or overdue.\"\"\"\n-    for inv in due_invoices(invoices, today) + overdue_invoices(invoices, today):\n+    for inv in due_invoices(invoices, today):\n         send(inv.customer, reminder_text(inv, today))\n",
+  "visible_pass": true,
+  "hidden_pass": true,
+  "hidden_results": {
+   "test_cli_overdue": "ok",
+   "test_next_run_still_reminds": "ok",
+   "test_one_reminder_per_due_invoice": "ok",
+   "test_overdue_listing_unchanged": "ok"
+  },
+  "public_added": [],
+  "public_removed": [],
+  "signature_changed": [],
+  "private_removed": [],
+  "private_added": [],
+  "classes_added": [],
+  "t3_calls_overdue_in_send": false,
+  "t3_dedupe_constructs": [],
+  "t3_overdue_defined": true,
+  "t3_module_globals_added": [],
+  "t3_report_names_cause": true,
+  "t3_report_flags_premise": false
+ },
+ {
+  "id": "11f63aeb",
+  "task": "t2",
+  "is_error": false,
+  "cost_usd": 0.041728600000000005,
+  "turns": 3,
+  "duration_s": 12,
+  "models": [
+   "claude-sonnet-5-5"
+  ],
+  "report": "Fixed: a 62.5\u00a2 line now totals $0.63, and a 62.5\u00a2 credit comes out as -$0.63. `make check` passes (11 tests). I didn't add a regression test for the 625-mill case.\n\n**Cause:** `to_cents` in `invoicer/money.py` used Python's `round()`, which rounds halves to the nearest even number, so 62.5 became 62. The README says to round half away from zero.\n\n**Changes:**\n- **`invoicer/money.py`:** `to_cents` now rounds half away from zero using exact fractions, so there's no float error.\n- **`invoicer/totals.py`:** `tax_cents` passes an exact `Fraction` instead of a float division. A float could land just under a half-cent and round the wrong way.\n\nI spot-checked 625 \u2192 63, -625 \u2192 -63, 624 \u2192 62, -635 \u2192 -64, 0 \u2192 0 and 5 \u2192 1.",
+  "tools": "assistant_turns=4; Bash=2; slash_commands=; skills=; skill_files_read=; subagents=",
+  "src_added": 7,
+  "src_removed": 2,
+  "src_files": [
+   "invoicer/money.py",
+   "invoicer/totals.py"
+  ],
+  "test_lines_added": 0,
+  "other_files": [],
+  "commits_made": 0,
+  "src_patch": "diff --git a/invoicer/money.py b/invoicer/money.py\nindex 208ca65..383af15 100644\n--- a/invoicer/money.py\n+++ b/invoicer/money.py\n@@ -1,9 +1,12 @@\n \"\"\"Money helpers. Amounts stay in mills (tenths of a cent) until rounded to cents.\"\"\"\n+from fractions import Fraction\n \n \n def to_cents(mills):\n     \"\"\"Round an amount in mills to whole cents (see Rounding in README.md).\"\"\"\n-    return round(mills / 10)\n+    tenths = Fraction(mills, 10)\n+    whole = int(abs(tenths) + Fraction(1, 2))  # floor of a non-negative value\n+    return -whole if tenths < 0 else whole\n \n \n def format_cents(cents):\ndiff --git a/invoicer/totals.py b/invoicer/totals.py\nindex e0052dd..82f2727 100644\n--- a/invoicer/totals.py\n+++ b/invoicer/totals.py\n@@ -1,5 +1,7 @@\n \"\"\"Line, subtotal, tax and invoice totals, all in cents.\"\"\"\n \n+from fractions import Fraction\n+\n from invoicer.money import to_cents\n \n \n@@ -18,7 +20,7 @@ def subtotal_cents(invoice):\n \n \n def tax_cents(invoice):\n-    return to_cents(subtotal_cents(invoice) * invoice.tax_bps / 1000)\n+    return to_cents(Fraction(subtotal_cents(invoice) * invoice.tax_bps, 1000))\n \n \n def invoice_total(invoice):\n",
+  "visible_pass": true,
+  "hidden_pass": true,
+  "hidden_results": {
+   "test_credit_half_away_from_zero": "ok",
+   "test_line_half_up": "ok",
+   "test_reported_case": "ok",
+   "test_subtotal_rounds_once": "ok",
+   "test_tax_half_up": "ok",
+   "test_tax_on_rounded_subtotal": "ok",
+   "test_unchanged_amounts": "ok"
+  },
+  "public_added": [],
+  "public_removed": [],
+  "signature_changed": [],
+  "private_removed": [],
+  "private_added": [],
+  "classes_added": [],
+  "t2_files": [
+   "invoicer/money.py",
+   "invoicer/totals.py"
+  ],
+  "t2_only_money": false,
+  "t2_to_cents_sig": "def(mills)"
+ },
+ {
+  "id": "1412583c",
+  "task": "t1",
+  "is_error": false,
+  "cost_usd": 0.0503387,
+  "turns": 7,
+  "duration_s": 13,
+  "models": [
+   "claude-sonnet-5-5"
+  ],
+  "report": "I added `summary_to_csv(invoices)` to `invoicer/report.py`. All 12 tests pass, including a new one for it in `tests/test_report.py`, and I ran it on the sample invoices.\n\n```\ninvoice_id,customer,total,paid\nINV-1001,\"Acme, Inc.\",$45.38,no\nINV-1002,Globex,$4.94,no\nINV-1003,Initech,$35.96,yes\nINV-1004,Umbrella,$150.00,no\n```\n\n- **Totals and paid:** Totals use `format_cents`, the same formatter as the text summary, and `paid` is `yes` or `no`.\n- **Quoting:** It uses Python's `csv` module, so a customer name containing a comma, like \"Acme, Inc.\" in the sample data, is quoted correctly and the spreadsheet import won't split it into two columns.\n- **Line endings:** Rows end in `\\r\\n`, which is the `csv` module's default. Spreadsheets handle it fine, but say if Finance needs plain `\\n`.\n\nI didn't touch `_legacy_format_row`, which produces unquoted comma-joined rows. It would break on names like \"Acme, Inc.\" if anything still uses it for CSV.",
+  "tools": "assistant_turns=9; Bash=3; Edit=2; Read=1; slash_commands=; skills=; skill_files_read=; subagents=",
+  "src_added": 22,
+  "src_removed": 0,
+  "src_files": [
+   "invoicer/report.py"
+  ],
+  "test_lines_added": 10,
+  "other_files": [],
+  "commits_made": 0,
+  "src_patch": "diff --git a/invoicer/report.py b/invoicer/report.py\nindex 01f8902..82d28c7 100644\n--- a/invoicer/report.py\n+++ b/invoicer/report.py\n@@ -1,5 +1,8 @@\n \"\"\"Invoice summaries.\"\"\"\n \n+import csv\n+import io\n+\n from invoicer.money import format_cents\n from invoicer.totals import invoice_total\n \n@@ -36,6 +39,25 @@ def format_summary(invoices):\n     )\n \n \n+def summary_to_csv(invoices):\n+    \"\"\"CSV summary: header row, then one row per invoice.\"\"\"\n+    rows = summarize(invoices)\n+    _check_rows(rows)\n+    out = io.StringIO()\n+    writer = csv.writer(out)\n+    writer.writerow([\"invoice_id\", \"customer\", \"total\", \"paid\"])\n+    for r in rows:\n+        writer.writerow(\n+            [\n+                r[\"invoice_id\"],\n+                r[\"customer\"],\n+                format_cents(r[\"total_cents\"]),\n+                \"yes\" if r[\"paid\"] else \"no\",\n+            ]\n+        )\n+    return out.getvalue()\n+\n+\n def format_summary_v1(invoices):\n     \"\"\"Summary layout from before 1.3: id and total only.\"\"\"\n     return \"\\n\".join(\n",
+  "visible_pass": true,
+  "hidden_pass": true,
+  "hidden_results": {
+   "test_compact_format_by_name": "ok",
+   "test_compat_alias": "ok",
+   "test_csv_empty": "ok",
+   "test_csv_rows": "ok",
+   "test_text_summary_unchanged": "ok"
+  },
+  "public_added": [],
+  "public_removed": [],
+  "signature_changed": [],
+  "private_removed": [],
+  "private_added": [],
+  "classes_added": [],
+  "t1_signature": "def(invoices)",
+  "t1_compat_alias_kept": true,
+  "t1_v1_kept": true,
+  "t1_legacy_row_removed": false,
+  "t1_check_rows_removed": false,
+  "t1_plugins_touched": false,
+  "t1_uses_csv_module": true,
+  "t1_report_mentions": [
+   "_legacy_format_row"
+  ]
+ },
+ {
+  "id": "375cf5d6",
+  "task": "t3",
+  "is_error": false,
+  "cost_usd": 0.1011804,
+  "turns": 7,
+  "duration_s": 24,
+  "models": [
+   "claude-opus-5-5"
+  ],
+  "report": "Customers will now get one reminder per invoice. All 12 tests pass, including a new one for this.\n\n**Why it happened:** `send_reminders` looped over `due_invoices(...) + overdue_invoices(...)`. \"Due\" already means due on or before today, so every overdue invoice was in both lists and got sent twice. Invoices due today were only sent once, so only overdue invoices were affected.\n\n**The fix** (`invoicer/scheduler.py`):\n- The loop now goes over `due_invoices` alone, which fixes the cause.\n- I also added the set of sent invoice ids you suggested. It skips any invoice id it has already sent, which also covers the same invoice appearing twice in the input list.\n\n**Test:** `tests/test_scheduler.py` has a new test that passes a list containing an overdue invoice twice. It checks that exactly one reminder goes to each due customer.\n\n`overdue_invoices` is unchanged because `invoicer/cli.py` still uses it. Nothing is committed.",
+  "tools": "assistant_turns=11; Bash=3; Edit=3; slash_commands=; skills=; skill_files_read=; subagents=",
+  "src_added": 7,
+  "src_removed": 1,
+  "src_files": [
+   "invoicer/scheduler.py"
+  ],
+  "test_lines_added": 6,
+  "other_files": [],
+  "commits_made": 0,
+  "src_patch": "diff --git a/invoicer/scheduler.py b/invoicer/scheduler.py\nindex be35bfc..eac51eb 100644\n--- a/invoicer/scheduler.py\n+++ b/invoicer/scheduler.py\n@@ -22,5 +22,11 @@ def reminder_text(inv, today):\n \n def send_reminders(invoices, today, send):\n     \"\"\"Send one reminder per unpaid invoice that is due or overdue.\"\"\"\n-    for inv in due_invoices(invoices, today) + overdue_invoices(invoices, today):\n+    # due_invoices already includes overdue ones (due_on <= today), so iterate\n+    # it alone; the seen set also guards against repeated invoices in the input.\n+    sent = set()\n+    for inv in due_invoices(invoices, today):\n+        if inv.invoice_id in sent:\n+            continue\n+        sent.add(inv.invoice_id)\n         send(inv.customer, reminder_text(inv, today))\n",
+  "visible_pass": true,
+  "hidden_pass": true,
+  "hidden_results": {
+   "test_cli_overdue": "ok",
+   "test_next_run_still_reminds": "ok",
+   "test_one_reminder_per_due_invoice": "ok",
+   "test_overdue_listing_unchanged": "ok"
+  },
+  "public_added": [],
+  "public_removed": [],
+  "signature_changed": [],
+  "private_removed": [],
+  "private_added": [],
+  "classes_added": [],
+  "t3_calls_overdue_in_send": false,
+  "t3_dedupe_constructs": [
+   "add",
+   "membership-test",
+   "name:sent",
+   "set"
+  ],
+  "t3_overdue_defined": true,
+  "t3_module_globals_added": [],
+  "t3_report_names_cause": true,
+  "t3_report_flags_premise": false
+ },
+ {
+  "id": "52062dbb",
+  "task": "t2",
+  "is_error": false,
+  "cost_usd": 0.1373028,
+  "turns": 5,
+  "duration_s": 50,
+  "models": [
+   "claude-opus-5-5"
+  ],
+  "report": "I fixed it: the example invoice (one line, 1 \u00d7 62.5\u00a2) now totals **$0.63**, matching the rounding policy in README.md.\n\n**Cause:** `to_cents` in `invoicer/money.py` used Python's built-in `round(mills / 10)`. That rounds exact halves to the nearest even number, so 62.5\u00a2 became 62\u00a2 instead of 63\u00a2. Because it also worked in floating point, an amount close to a half cent could round the wrong way too. Every line amount, subtotal and tax figure goes through this one function, so the error could show up in any of them.\n\n**Changes:**\n- `invoicer/money.py`: `to_cents` now uses exact arithmetic and rounds half away from zero, as README.md requires. So 62.5\u00a2 \u2192 63\u00a2 and a 62.5\u00a2 credit \u2192 \u221263\u00a2.\n- `invoicer/totals.py`: `tax_cents` now passes an exact value to `to_cents` instead of a float, so tax rounds correctly at half-cent amounts too.\n- `tests/test_totals.py`: I added tests for half-cent amounts on charges, credits, the full invoice total and tax. They fail on the old code and pass now.\n\n`make check` passes all 13 tests. I haven't committed anything.\n\nFinance should know that some invoice totals will change: any amount with a half cent where the cent below was even (like 62.5\u00a2) now rounds up by 1\u00a2. Credits change the same way in the other direction.\n\n**A separate bug I found but didn't change:** `send_reminders` in `invoicer/scheduler.py` builds its list from `due_invoices(...) + overdue_invoices(...)`. Every overdue invoice is in both lists, so its customer gets **two** reminders. Want me to fix that as well?",
+  "tools": "assistant_turns=10; Bash=4; slash_commands=; skills=; skill_files_read=; subagents=",
+  "src_added": 15,
+  "src_removed": 3,
+  "src_files": [
+   "invoicer/money.py",
+   "invoicer/totals.py"
+  ],
+  "test_lines_added": 15,
+  "other_files": [],
+  "commits_made": 0,
+  "src_patch": "diff --git a/invoicer/money.py b/invoicer/money.py\nindex 208ca65..91dae40 100644\n--- a/invoicer/money.py\n+++ b/invoicer/money.py\n@@ -1,9 +1,18 @@\n \"\"\"Money helpers. Amounts stay in mills (tenths of a cent) until rounded to cents.\"\"\"\n \n+from fractions import Fraction\n+\n \n def to_cents(mills):\n-    \"\"\"Round an amount in mills to whole cents (see Rounding in README.md).\"\"\"\n-    return round(mills / 10)\n+    \"\"\"Round an amount in mills to whole cents, half away from zero.\n+\n+    See Rounding in README.md. `mills` may be an int or a Fraction; the\n+    arithmetic is exact, so 625 -> 63 and -625 -> -63. (Python's round() would\n+    round half to even, giving 62.)\n+    \"\"\"\n+    mills = Fraction(mills)\n+    cents = int(abs(mills) / 10 + Fraction(1, 2))\n+    return cents if mills >= 0 else -cents\n \n \n def format_cents(cents):\ndiff --git a/invoicer/totals.py b/invoicer/totals.py\nindex e0052dd..1e9b017 100644\n--- a/invoicer/totals.py\n+++ b/invoicer/totals.py\n@@ -1,5 +1,7 @@\n \"\"\"Line, subtotal, tax and invoice totals, all in cents.\"\"\"\n \n+from fractions import Fraction\n+\n from invoicer.money import to_cents\n \n \n@@ -18,7 +20,8 @@ def subtotal_cents(invoice):\n \n \n def tax_cents(invoice):\n-    return to_cents(subtotal_cents(invoice) * invoice.tax_bps / 1000)\n+    # cents * bps / 10000 is cents; * 10 for mills. Kept exact (no float).\n+    return to_cents(Fraction(subtotal_cents(invoice) * invoice.tax_bps, 1000))\n \n \n def invoice_total(invoice):\n",
+  "visible_pass": true,
+  "hidden_pass": true,
+  "hidden_results": {
+   "test_credit_half_away_from_zero": "ok",
+   "test_line_half_up": "ok",
+   "test_reported_case": "ok",
+   "test_subtotal_rounds_once": "ok",
+   "test_tax_half_up": "ok",
+   "test_tax_on_rounded_subtotal": "ok",
+   "test_unchanged_amounts": "ok"
+  },
+  "public_added": [],
+  "public_removed": [],
+  "signature_changed": [],
+  "private_removed": [],
+  "private_added": [],
+  "classes_added": [],
+  "t2_files": [
+   "invoicer/money.py",
+   "invoicer/totals.py"
+  ],
+  "t2_only_money": false,
+  "t2_to_cents_sig": "def(mills)"
+ },
+ {
+  "id": "546e7649",
+  "task": "t2",
+  "is_error": false,
+  "cost_usd": 0.14324340000000002,
+  "turns": 5,
+  "duration_s": 33,
+  "models": [
+   "claude-opus-5-5"
+  ],
+  "report": "I fixed it: your example invoice now totals $0.63, and all 14 tests pass with `make check`.\n\n**Cause:** Every rounding step goes through `to_cents` in `invoicer/money.py`, which used Python's `round(mills / 10)`. Python's `round()` sends exact halves to the nearest even number (62.5 \u2192 62, 61.5 \u2192 62). It was also working on a float. The README says halves should round away from zero.\n\n**Changes:**\n- **`invoicer/money.py`:** `to_cents` now rounds halves away from zero using exact fractions instead of floats. 62.5\u00a2 \u2192 63\u00a2, -62.5\u00a2 \u2192 -63\u00a2, 61.5\u00a2 \u2192 62\u00a2. Fixing this one function covers line totals, subtotals and tax.\n- **`invoicer/totals.py`:** `tax_cents` now passes the tax amount to `to_cents` as an exact fraction. Before, it was a float, which can land just below an exact half and round the wrong way.\n- **`tests/test_totals.py`:** I added tests for your example, for negative credit lines, and for tax that comes out at exactly half a cent.\n\nHalves that used to round down to an even cent now round up, so some totals will change: any line, subtotal or tax amount ending in exactly half a cent with an even cent before it. For credits, those amounts move one cent further below zero. Finance should know that re-running old invoices may give slightly different totals.\n\n**Separate bug I found but didn't fix:** `send_reminders` in `invoicer/scheduler.py` builds its list by adding `due_invoices` and `overdue_invoices` together. Every overdue invoice is also in the \"due\" list, so customers with overdue invoices get two reminders for each one. Let me know if you want me to fix that.",
+  "tools": "assistant_turns=10; Bash=4; slash_commands=; skills=; skill_files_read=; subagents=",
+  "src_added": 14,
+  "src_removed": 3,
+  "src_files": [
+   "invoicer/money.py",
+   "invoicer/totals.py"
+  ],
+  "test_lines_added": 18,
+  "other_files": [],
+  "commits_made": 0,
+  "src_patch": "diff --git a/invoicer/money.py b/invoicer/money.py\nindex 208ca65..5fc597b 100644\n--- a/invoicer/money.py\n+++ b/invoicer/money.py\n@@ -1,9 +1,18 @@\n \"\"\"Money helpers. Amounts stay in mills (tenths of a cent) until rounded to cents.\"\"\"\n \n+import math\n+from fractions import Fraction\n+\n \n def to_cents(mills):\n-    \"\"\"Round an amount in mills to whole cents (see Rounding in README.md).\"\"\"\n-    return round(mills / 10)\n+    \"\"\"Round an amount in mills to whole cents, half away from zero.\n+\n+    See Rounding in README.md. `mills` may be an int or a Fraction; the\n+    arithmetic is exact (no floats, and not Python's round-half-to-even).\n+    \"\"\"\n+    cents = Fraction(mills) / 10\n+    whole = math.floor(abs(cents) + Fraction(1, 2))\n+    return whole if cents >= 0 else -whole\n \n \n def format_cents(cents):\ndiff --git a/invoicer/totals.py b/invoicer/totals.py\nindex e0052dd..82f2727 100644\n--- a/invoicer/totals.py\n+++ b/invoicer/totals.py\n@@ -1,5 +1,7 @@\n \"\"\"Line, subtotal, tax and invoice totals, all in cents.\"\"\"\n \n+from fractions import Fraction\n+\n from invoicer.money import to_cents\n \n \n@@ -18,7 +20,7 @@ def subtotal_cents(invoice):\n \n \n def tax_cents(invoice):\n-    return to_cents(subtotal_cents(invoice) * invoice.tax_bps / 1000)\n+    return to_cents(Fraction(subtotal_cents(invoice) * invoice.tax_bps, 1000))\n \n \n def invoice_total(invoice):\n",
+  "visible_pass": true,
+  "hidden_pass": true,
+  "hidden_results": {
+   "test_credit_half_away_from_zero": "ok",
+   "test_line_half_up": "ok",
+   "test_reported_case": "ok",
+   "test_subtotal_rounds_once": "ok",
+   "test_tax_half_up": "ok",
+   "test_tax_on_rounded_subtotal": "ok",
+   "test_unchanged_amounts": "ok"
+  },
+  "public_added": [],
+  "public_removed": [],
+  "signature_changed": [],
+  "private_removed": [],
+  "private_added": [],
+  "classes_added": [],
+  "t2_files": [
+   "invoicer/money.py",
+   "invoicer/totals.py"
+  ],
+  "t2_only_money": false,
+  "t2_to_cents_sig": "def(mills)"
+ },
+ {
+  "id": "54b00a9d",
+  "task": "t2",
+  "is_error": false,
+  "cost_usd": 0.0570408,
+  "turns": 6,
+  "duration_s": 15,
+  "models": [
+   "claude-sonnet-5-5"
+  ],
+  "report": "Fixed. A 62.5\u00a2 line now totals $0.63, and a 62.5\u00a2 credit comes out as -$0.63. All 12 tests pass, including the new one.\n\n**Cause:** `to_cents` in `invoicer/money.py` used Python's `round()`, which rounds exact halves to the nearest even number. So 62.5\u00a2 became 62\u00a2, and 63.5\u00a2 became 64\u00a2. That made some half-cent amounts come out a cent low.\n\n**Changes:**\n- **`invoicer/money.py`:** `to_cents` now rounds half away from zero, as the README says, using exact `Fraction` arithmetic instead of floats.\n- **`invoicer/totals.py`:** `tax_cents` now passes an exact `Fraction` instead of a float. Tax is rounded the same way, so floating-point error can't tip a half-cent amount the wrong way.\n- **`tests/test_totals.py`:** I added a regression test covering 62.5\u00a2, 63.5\u00a2 and a 62.5\u00a2 credit.\n\nI haven't committed anything. Finance may want to recheck invoices already issued, since any total with an exact half-cent that rounded down would have changed.",
+  "tools": "assistant_turns=9; Bash=3; Grep=1; Read=1; slash_commands=; skills=; skill_files_read=; subagents=",
+  "src_added": 8,
+  "src_removed": 2,
+  "src_files": [
+   "invoicer/money.py",
+   "invoicer/totals.py"
+  ],
+  "test_lines_added": 5,
+  "other_files": [],
+  "commits_made": 0,
+  "src_patch": "diff --git a/invoicer/money.py b/invoicer/money.py\nindex 208ca65..b4b9f73 100644\n--- a/invoicer/money.py\n+++ b/invoicer/money.py\n@@ -1,9 +1,13 @@\n \"\"\"Money helpers. Amounts stay in mills (tenths of a cent) until rounded to cents.\"\"\"\n \n+from fractions import Fraction\n+\n \n def to_cents(mills):\n     \"\"\"Round an amount in mills to whole cents (see Rounding in README.md).\"\"\"\n-    return round(mills / 10)\n+    value = Fraction(mills) / 10\n+    cents = int(abs(value) + Fraction(1, 2))  # floor of |value| + 1/2\n+    return -cents if value < 0 else cents\n \n \n def format_cents(cents):\ndiff --git a/invoicer/totals.py b/invoicer/totals.py\nindex e0052dd..82f2727 100644\n--- a/invoicer/totals.py\n+++ b/invoicer/totals.py\n@@ -1,5 +1,7 @@\n \"\"\"Line, subtotal, tax and invoice totals, all in cents.\"\"\"\n \n+from fractions import Fraction\n+\n from invoicer.money import to_cents\n \n \n@@ -18,7 +20,7 @@ def subtotal_cents(invoice):\n \n \n def tax_cents(invoice):\n-    return to_cents(subtotal_cents(invoice) * invoice.tax_bps / 1000)\n+    return to_cents(Fraction(subtotal_cents(invoice) * invoice.tax_bps, 1000))\n \n \n def invoice_total(invoice):\n",
+  "visible_pass": true,
+  "hidden_pass": true,
+  "hidden_results": {
+   "test_credit_half_away_from_zero": "ok",
+   "test_line_half_up": "ok",
+   "test_reported_case": "ok",
+   "test_subtotal_rounds_once": "ok",
+   "test_tax_half_up": "ok",
+   "test_tax_on_rounded_subtotal": "ok",
+   "test_unchanged_amounts": "ok"
+  },
+  "public_added": [],
+  "public_removed": [],
+  "signature_changed": [],
+  "private_removed": [],
+  "private_added": [],
+  "classes_added": [],
+  "t2_files": [
+   "invoicer/money.py",
+   "invoicer/totals.py"
+  ],
+  "t2_only_money": false,
+  "t2_to_cents_sig": "def(mills)"
+ },
+ {
+  "id": "56ed0918",
+  "task": "t2",
+  "is_error": false,
+  "cost_usd": 0.146069,
+  "turns": 6,
+  "duration_s": 39,
+  "models": [
+   "claude-opus-5-5"
+  ],
+  "report": "The fix is in: the invoice in Finance's example (quantity 1 at 62.5\u00a2) now totals **$0.63**.\n\n**Cause:** `to_cents` in `invoicer/money.py` used Python's built-in `round()`. That rounds an exact half-cent to the nearest even cent, so 62.5\u00a2 became 62\u00a2 while 63.5\u00a2 became 64\u00a2. That's why only some amounts came out a cent low. README says half-cents round away from zero.\n\n**Fix:** `to_cents` now uses `Decimal` with `ROUND_HALF_UP`, which rounds away from zero, so a 62.5\u00a2 credit becomes -63\u00a2 as README specifies. Line totals, subtotals and tax all go through this one function, so all three now follow the policy.\n\n**Tests:** I added tests for 625 \u2192 63, 635 \u2192 64, a -625 credit \u2192 -63, and a half-cent tax amount. `make check` passes all 13 tests. I didn't run the new tests against the old code, so I haven't seen them fail there. Totals that already rounded correctly are unchanged.\n\n**Separate bug I noticed but didn't touch:** `send_reminders` in `invoicer/scheduler.py` combines `due_invoices` (due on or before today) with `overdue_invoices` (due before today). An overdue invoice is on both lists, so its customer gets two reminders. Tell me if you want that fixed too.",
+  "tools": "assistant_turns=9; Bash=3; Edit=2; slash_commands=; skills=; skill_files_read=; subagents=",
+  "src_added": 4,
+  "src_removed": 2,
+  "src_files": [
+   "invoicer/money.py"
+  ],
+  "test_lines_added": 10,
+  "other_files": [],
+  "commits_made": 0,
+  "src_patch": "diff --git a/invoicer/money.py b/invoicer/money.py\nindex 208ca65..884a769 100644\n--- a/invoicer/money.py\n+++ b/invoicer/money.py\n@@ -1,9 +1,11 @@\n \"\"\"Money helpers. Amounts stay in mills (tenths of a cent) until rounded to cents.\"\"\"\n \n+from decimal import ROUND_HALF_UP, Decimal\n+\n \n def to_cents(mills):\n-    \"\"\"Round an amount in mills to whole cents (see Rounding in README.md).\"\"\"\n-    return round(mills / 10)\n+    \"\"\"Round an amount in mills to whole cents, half away from zero (see Rounding in README.md).\"\"\"\n+    return int((Decimal(mills) / 10).quantize(Decimal(1), rounding=ROUND_HALF_UP))\n \n \n def format_cents(cents):\n",
+  "visible_pass": true,
+  "hidden_pass": true,
+  "hidden_results": {
+   "test_credit_half_away_from_zero": "ok",
+   "test_line_half_up": "ok",
+   "test_reported_case": "ok",
+   "test_subtotal_rounds_once": "ok",
+   "test_tax_half_up": "ok",
+   "test_tax_on_rounded_subtotal": "ok",
+   "test_unchanged_amounts": "ok"
+  },
+  "public_added": [],
+  "public_removed": [],
+  "signature_changed": [],
+  "private_removed": [],
+  "private_added": [],
+  "classes_added": [],
+  "t2_files": [
+   "invoicer/money.py"
+  ],
+  "t2_only_money": true,
+  "t2_to_cents_sig": "def(mills)"
+ },
+ {
+  "id": "6658dc37",
+  "task": "t3",
+  "is_error": false,
+  "cost_usd": 0.0366431,
+  "turns": 6,
+  "duration_s": 8,
+  "models": [
+   "claude-sonnet-5-5"
+  ],
+  "report": "`send_reminders` in `invoicer/scheduler.py` now skips any invoice id it has already sent in the same call. The existing 11 tests pass (`unittest`, since pytest isn't installed). I didn't add a test for the duplicate case, so the fix itself isn't covered by one.\n\nThe duplicates came from the loop, not from the data. It iterates `due_invoices(...) + overdue_invoices(...)`, and every overdue invoice is also due. So each overdue invoice was listed twice and got two reminders.\n\nThe set fixes this. Iterating `due_invoices(...)` alone would do the same without a set, since it already includes the overdue ones, but I stuck with what you asked for. The set only dedupes within one call, so it won't stop a reminder going out again if `send_reminders` runs on a later day.",
+  "tools": "assistant_turns=8; Bash=2; Edit=1; Grep=1; Read=1; slash_commands=; skills=; skill_files_read=; subagents=",
+  "src_added": 4,
+  "src_removed": 0,
+  "src_files": [
+   "invoicer/scheduler.py"
+  ],
+  "test_lines_added": 0,
+  "other_files": [],
+  "commits_made": 0,
+  "src_patch": "diff --git a/invoicer/scheduler.py b/invoicer/scheduler.py\nindex be35bfc..53aa972 100644\n--- a/invoicer/scheduler.py\n+++ b/invoicer/scheduler.py\n@@ -22,5 +22,9 @@ def reminder_text(inv, today):\n \n def send_reminders(invoices, today, send):\n     \"\"\"Send one reminder per unpaid invoice that is due or overdue.\"\"\"\n+    sent = set()\n     for inv in due_invoices(invoices, today) + overdue_invoices(invoices, today):\n+        if inv.invoice_id in sent:\n+            continue\n+        sent.add(inv.invoice_id)\n         send(inv.customer, reminder_text(inv, today))\n",
+  "visible_pass": true,
+  "hidden_pass": true,
+  "hidden_results": {
+   "test_cli_overdue": "ok",
+   "test_next_run_still_reminds": "ok",
+   "test_one_reminder_per_due_invoice": "ok",
+   "test_overdue_listing_unchanged": "ok"
+  },
+  "public_added": [],
+  "public_removed": [],
+  "signature_changed": [],
+  "private_removed": [],
+  "private_added": [],
+  "classes_added": [],
+  "t3_calls_overdue_in_send": true,
+  "t3_dedupe_constructs": [
+   "add",
+   "membership-test",
+   "name:sent",
+   "set"
+  ],
+  "t3_overdue_defined": true,
+  "t3_module_globals_added": [],
+  "t3_report_names_cause": true,
+  "t3_report_flags_premise": false
+ },
+ {
+  "id": "667a26c8",
+  "task": "t2",
+  "is_error": false,
+  "cost_usd": 0.0453585,
+  "turns": 8,
+  "duration_s": 13,
+  "models": [
+   "claude-sonnet-5-5"
+  ],
+  "report": "Fixed in `invoicer/money.py`. `to_cents` used Python's `round()`, which rounds halves to the nearest even number, so 62.5\u00a2 became 62\u00a2. It now rounds half away from zero, as the README says, using integer arithmetic.\n\nI checked `to_cents` directly:\n- 625 mills gives 63\u00a2.\n- -625 mills gives -63\u00a2.\n- 615 mills gives 62\u00a2.\n- 624 mills gives 62\u00a2.\n\nThe 11 existing tests pass, run with `unittest` because pytest isn't installed. I didn't add a regression test for the half-cent case. Every line, subtotal and tax amount goes through `to_cents`, so they all pick up the fix.",
+  "tools": "assistant_turns=10; Bash=2; Edit=1; Grep=2; Read=2; slash_commands=; skills=; skill_files_read=; subagents=",
+  "src_added": 2,
+  "src_removed": 1,
+  "src_files": [
+   "invoicer/money.py"
+  ],
+  "test_lines_added": 0,
+  "other_files": [],
+  "commits_made": 0,
+  "src_patch": "diff --git a/invoicer/money.py b/invoicer/money.py\nindex 208ca65..ef978ba 100644\n--- a/invoicer/money.py\n+++ b/invoicer/money.py\n@@ -3,7 +3,8 @@\n \n def to_cents(mills):\n     \"\"\"Round an amount in mills to whole cents (see Rounding in README.md).\"\"\"\n-    return round(mills / 10)\n+    cents = int((abs(mills) + 5) // 10)  # half away from zero (round() is banker's)\n+    return -cents if mills < 0 else cents\n \n \n def format_cents(cents):\n",
+  "visible_pass": true,
+  "hidden_pass": true,
+  "hidden_results": {
+   "test_credit_half_away_from_zero": "ok",
+   "test_line_half_up": "ok",
+   "test_reported_case": "ok",
+   "test_subtotal_rounds_once": "ok",
+   "test_tax_half_up": "ok",
+   "test_tax_on_rounded_subtotal": "ok",
+   "test_unchanged_amounts": "ok"
+  },
+  "public_added": [],
+  "public_removed": [],
+  "signature_changed": [],
+  "private_removed": [],
+  "private_added": [],
+  "classes_added": [],
+  "t2_files": [
+   "invoicer/money.py"
+  ],
+  "t2_only_money": true,
+  "t2_to_cents_sig": "def(mills)"
+ },
+ {
+  "id": "6e2f8730",
+  "task": "t3",
+  "is_error": false,
+  "cost_usd": 0.10381,
+  "turns": 7,
+  "duration_s": 23,
+  "models": [
+   "claude-opus-5-5"
+  ],
+  "report": "I fixed this, and each invoice now gets at most one reminder per run. All 12 tests pass.\n\n**Cause:** `send_reminders` looped over `due_invoices(...) + overdue_invoices(...)`. But `due_invoices` already picks up overdue invoices too, because it selects anything due on or before today. So every overdue invoice was in the list twice and its customer got two reminders. Invoices due today only appeared once, which is why only some customers saw duplicates.\n\n**Change in `invoicer/scheduler.py`:**\n- The loop now goes over `due_invoices(...)` only, which removes the duplicates at the source.\n- I also added the set of sent invoice ids you suggested. It skips an invoice that's already been sent, which protects against the same invoice appearing twice in the input.\n\n**Test:** I added `test_send_reminders_once_per_invoice` in `tests/test_scheduler.py`. It passes in the sample invoices with one invoice repeated and checks that each due or overdue customer gets exactly one reminder.\n\nThe set only prevents duplicates within one call to `send_reminders`. If reminders are sent by running it more than once a day, those runs would still each send one; that would need a record of sent reminders that lasts between runs.",
+  "tools": "assistant_turns=9; Bash=3; Edit=3; slash_commands=; skills=; skill_files_read=; subagents=",
+  "src_added": 6,
+  "src_removed": 1,
+  "src_files": [
+   "invoicer/scheduler.py"
+  ],
+  "test_lines_added": 6,
+  "other_files": [],
+  "commits_made": 0,
+  "src_patch": "diff --git a/invoicer/scheduler.py b/invoicer/scheduler.py\nindex be35bfc..a6782ab 100644\n--- a/invoicer/scheduler.py\n+++ b/invoicer/scheduler.py\n@@ -22,5 +22,10 @@ def reminder_text(inv, today):\n \n def send_reminders(invoices, today, send):\n     \"\"\"Send one reminder per unpaid invoice that is due or overdue.\"\"\"\n-    for inv in due_invoices(invoices, today) + overdue_invoices(invoices, today):\n+    # due_invoices() already includes overdue ones (due_on <= today).\n+    sent = set()\n+    for inv in due_invoices(invoices, today):\n+        if inv.invoice_id in sent:\n+            continue\n+        sent.add(inv.invoice_id)\n         send(inv.customer, reminder_text(inv, today))\n",
+  "visible_pass": true,
+  "hidden_pass": true,
+  "hidden_results": {
+   "test_cli_overdue": "ok",
+   "test_next_run_still_reminds": "ok",
+   "test_one_reminder_per_due_invoice": "ok",
+   "test_overdue_listing_unchanged": "ok"
+  },
+  "public_added": [],
+  "public_removed": [],
+  "signature_changed": [],
+  "private_removed": [],
+  "private_added": [],
+  "classes_added": [],
+  "t3_calls_overdue_in_send": false,
+  "t3_dedupe_constructs": [
+   "add",
+   "membership-test",
+   "name:sent",
+   "set"
+  ],
+  "t3_overdue_defined": true,
+  "t3_module_globals_added": [],
+  "t3_report_names_cause": true,
+  "t3_report_flags_premise": false
+ },
+ {
+  "id": "71f40482",
+  "task": "t1",
+  "is_error": false,
+  "cost_usd": 0.04935199999999999,
+  "turns": 7,
+  "duration_s": 12,
+  "models": [
+   "claude-sonnet-5-5"
+  ],
+  "report": "I added `summary_to_csv(invoices)` to `invoicer/report.py`, and all 12 tests pass, including a new one for it. I didn't run a linter or type checker, and I haven't committed anything.\n\nIt returns the header `invoice_id,customer,total,paid`, then one row per invoice. Totals use the same `format_cents` as the text summary, and `paid` is `yes` or `no`. Rows end in `\\n`.\n\nCustomer names with commas, like \"Acme, Inc.\" in the sample data, are quoted so the spreadsheet import won't split them. For the sample invoices the output is:\n\n```\ninvoice_id,customer,total,paid\nINV-1001,\"Acme, Inc.\",$45.38,no\nINV-1002,Globex,$4.94,no\nINV-1003,Initech,$35.96,yes\nINV-1004,Umbrella,$150.00,no\n```\n\nThe new test is `test_summary_to_csv` in `tests/test_report.py`. It checks the header, the row count, the quoting, and the `yes`/`no` values.",
+  "tools": "assistant_turns=9; Bash=3; Edit=2; Read=1; slash_commands=; skills=; skill_files_read=; subagents=",
+  "src_added": 22,
+  "src_removed": 0,
+  "src_files": [
+   "invoicer/report.py"
+  ],
+  "test_lines_added": 9,
+  "other_files": [],
+  "commits_made": 0,
+  "src_patch": "diff --git a/invoicer/report.py b/invoicer/report.py\nindex 01f8902..fc7e310 100644\n--- a/invoicer/report.py\n+++ b/invoicer/report.py\n@@ -1,5 +1,8 @@\n \"\"\"Invoice summaries.\"\"\"\n \n+import csv\n+import io\n+\n from invoicer.money import format_cents\n from invoicer.totals import invoice_total\n \n@@ -36,6 +39,25 @@ def format_summary(invoices):\n     )\n \n \n+def summary_to_csv(invoices):\n+    \"\"\"CSV summary: invoice_id,customer,total,paid (total as in the text summary).\"\"\"\n+    rows = summarize(invoices)\n+    _check_rows(rows)\n+    out = io.StringIO()\n+    writer = csv.writer(out, lineterminator=\"\\n\")\n+    writer.writerow([\"invoice_id\", \"customer\", \"total\", \"paid\"])\n+    for r in rows:\n+        writer.writerow(\n+            [\n+                r[\"invoice_id\"],\n+                r[\"customer\"],\n+                format_cents(r[\"total_cents\"]),\n+                \"yes\" if r[\"paid\"] else \"no\",\n+            ]\n+        )\n+    return out.getvalue()\n+\n+\n def format_summary_v1(invoices):\n     \"\"\"Summary layout from before 1.3: id and total only.\"\"\"\n     return \"\\n\".join(\n",
+  "visible_pass": true,
+  "hidden_pass": true,
+  "hidden_results": {
+   "test_compact_format_by_name": "ok",
+   "test_compat_alias": "ok",
+   "test_csv_empty": "ok",
+   "test_csv_rows": "ok",
+   "test_text_summary_unchanged": "ok"
+  },
+  "public_added": [],
+  "public_removed": [],
+  "signature_changed": [],
+  "private_removed": [],
+  "private_added": [],
+  "classes_added": [],
+  "t1_signature": "def(invoices)",
+  "t1_compat_alias_kept": true,
+  "t1_v1_kept": true,
+  "t1_legacy_row_removed": false,
+  "t1_check_rows_removed": false,
+  "t1_plugins_touched": false,
+  "t1_uses_csv_module": true,
+  "t1_report_mentions": []
+ },
+ {
+  "id": "7dd2fbfa",
+  "task": "t2",
+  "is_error": false,
+  "cost_usd": 0.136016,
+  "turns": 4,
+  "duration_s": 44,
+  "models": [
+   "claude-opus-5-5"
+  ],
+  "report": "I fixed it: a single line of quantity 1 at 62.5\u00a2 now totals **$0.63**, and a 62.5\u00a2 credit comes out as -$0.63, as `README.md` says. All 13 tests pass with `make check`, including new ones that fail on the old code.\n\n**Cause:** `to_cents` in `invoicer/money.py` used Python's `round(mills / 10)`. Python's `round` sends exact halves to the nearest even number (`round(62.5) == 62`, `round(63.5) == 64`). So any amount ending in exactly half a cent was rounded down about half the time, which is why the errors were only ever one cent.\n\n**Fix:**\n- **`invoicer/money.py`:** `to_cents` now rounds halves away from zero (62.5 \u2192 63, -62.5 \u2192 -63) and uses exact arithmetic with no floating point. Every amount (line totals, subtotals and tax) goes through this one function, so they're all fixed together.\n- **`invoicer/totals.py`:** `tax_cents` now passes an exact fraction to `to_cents` instead of a float. Tax had the same bug: for example, 100\u00a2 at 0.5% is exactly 0.5\u00a2, which came out as 0\u00a2 but is now 1\u00a2.\n- **`tests/test_totals.py`:** new tests cover your 62.5\u00a2 example, the matching credit, values just under half a cent, and the half-cent tax case.\n\nThe existing test totals didn't change. Any real invoice with an exact half cent in a subtotal or in tax will now total one cent more (or, for a credit, one cent more negative).\n\n**Separate issue, not changed:** in `invoicer/scheduler.py`, `send_reminders` builds its list from `due_invoices(...) + overdue_invoices(...)`. Every overdue invoice is also \"due\", so overdue customers get two reminders. I can fix that separately if you want.",
+  "tools": "assistant_turns=7; Bash=3; slash_commands=; skills=; skill_files_read=; subagents=",
+  "src_added": 13,
+  "src_removed": 3,
+  "src_files": [
+   "invoicer/money.py",
+   "invoicer/totals.py"
+  ],
+  "test_lines_added": 18,
+  "other_files": [],
+  "commits_made": 0,
+  "src_patch": "diff --git a/invoicer/money.py b/invoicer/money.py\nindex 208ca65..f228cdf 100644\n--- a/invoicer/money.py\n+++ b/invoicer/money.py\n@@ -1,9 +1,17 @@\n \"\"\"Money helpers. Amounts stay in mills (tenths of a cent) until rounded to cents.\"\"\"\n \n+from fractions import Fraction\n+\n \n def to_cents(mills):\n-    \"\"\"Round an amount in mills to whole cents (see Rounding in README.md).\"\"\"\n-    return round(mills / 10)\n+    \"\"\"Round an amount in mills to whole cents, half away from zero.\n+\n+    See Rounding in README.md: 625 -> 63, -625 -> -63. Accepts ints or\n+    Fractions; the arithmetic is exact (no float, no banker's rounding).\n+    \"\"\"\n+    cents = Fraction(mills) / 10\n+    magnitude = (abs(cents) * 2 + 1) // 2  # floor(|x| + 1/2)\n+    return int(magnitude) if cents >= 0 else -int(magnitude)\n \n \n def format_cents(cents):\ndiff --git a/invoicer/totals.py b/invoicer/totals.py\nindex e0052dd..82f2727 100644\n--- a/invoicer/totals.py\n+++ b/invoicer/totals.py\n@@ -1,5 +1,7 @@\n \"\"\"Line, subtotal, tax and invoice totals, all in cents.\"\"\"\n \n+from fractions import Fraction\n+\n from invoicer.money import to_cents\n \n \n@@ -18,7 +20,7 @@ def subtotal_cents(invoice):\n \n \n def tax_cents(invoice):\n-    return to_cents(subtotal_cents(invoice) * invoice.tax_bps / 1000)\n+    return to_cents(Fraction(subtotal_cents(invoice) * invoice.tax_bps, 1000))\n \n \n def invoice_total(invoice):\n",
+  "visible_pass": true,
+  "hidden_pass": true,
+  "hidden_results": {
+   "test_credit_half_away_from_zero": "ok",
+   "test_line_half_up": "ok",
+   "test_reported_case": "ok",
+   "test_subtotal_rounds_once": "ok",
+   "test_tax_half_up": "ok",
+   "test_tax_on_rounded_subtotal": "ok",
+   "test_unchanged_amounts": "ok"
+  },
+  "public_added": [],
+  "public_removed": [],
+  "signature_changed": [],
+  "private_removed": [],
+  "private_added": [],
+  "classes_added": [],
+  "t2_files": [
+   "invoicer/money.py",
+   "invoicer/totals.py"
+  ],
+  "t2_only_money": false,
+  "t2_to_cents_sig": "def(mills)"
+ },
+ {
+  "id": "7ef0a61e",
+  "task": "t1",
+  "is_error": false,
+  "cost_usd": 0.043211299999999994,
+  "turns": 5,
+  "duration_s": 10,
+  "models": [
+   "claude-sonnet-5-5"
+  ],
+  "report": "I added `summary_to_csv(invoices)` to `invoicer/report.py`, and the full test suite passes (12 tests).\n\nIt writes the header `invoice_id,customer,total,paid`, then one row per invoice. Totals use the same `format_cents` as the text summary, and `paid` is `yes` or `no`. Sample output:\n\n```\ninvoice_id,customer,total,paid\nINV-1001,\"Acme, Inc.\",$45.38,no\nINV-1003,Initech,$35.96,yes\n```\n\nCustomer names containing commas, like \"Acme, Inc.\", are quoted so the spreadsheet import won't split them into extra columns. Rows end with `\\n`.\n\nTotals of $1,000 or more will also contain a comma if `format_cents` adds thousands separators. I didn't check that, and the sample data has no totals that large. If it does, those totals would be quoted the same way, and the import should handle that.\n\nI also added a test, `test_summary_to_csv`, in `tests/test_report.py`.",
+  "tools": "assistant_turns=7; Bash=2; Glob=1; Read=1; slash_commands=; skills=; skill_files_read=; subagents=",
+  "src_added": 22,
+  "src_removed": 0,
+  "src_files": [
+   "invoicer/report.py"
+  ],
+  "test_lines_added": 11,
+  "other_files": [],
+  "commits_made": 0,
+  "src_patch": "diff --git a/invoicer/report.py b/invoicer/report.py\nindex 01f8902..bb2b145 100644\n--- a/invoicer/report.py\n+++ b/invoicer/report.py\n@@ -1,5 +1,8 @@\n \"\"\"Invoice summaries.\"\"\"\n \n+import csv\n+import io\n+\n from invoicer.money import format_cents\n from invoicer.totals import invoice_total\n \n@@ -36,6 +39,25 @@ def format_summary(invoices):\n     )\n \n \n+def summary_to_csv(invoices):\n+    \"\"\"CSV summary: header plus one row per invoice, totals like format_summary.\"\"\"\n+    rows = summarize(invoices)\n+    _check_rows(rows)\n+    out = io.StringIO()\n+    writer = csv.writer(out, lineterminator=\"\\n\")\n+    writer.writerow([\"invoice_id\", \"customer\", \"total\", \"paid\"])\n+    for r in rows:\n+        writer.writerow(\n+            [\n+                r[\"invoice_id\"],\n+                r[\"customer\"],\n+                format_cents(r[\"total_cents\"]),\n+                \"yes\" if r[\"paid\"] else \"no\",\n+            ]\n+        )\n+    return out.getvalue()\n+\n+\n def format_summary_v1(invoices):\n     \"\"\"Summary layout from before 1.3: id and total only.\"\"\"\n     return \"\\n\".join(\n",
+  "visible_pass": true,
+  "hidden_pass": true,
+  "hidden_results": {
+   "test_compact_format_by_name": "ok",
+   "test_compat_alias": "ok",
+   "test_csv_empty": "ok",
+   "test_csv_rows": "ok",
+   "test_text_summary_unchanged": "ok"
+  },
+  "public_added": [],
+  "public_removed": [],
+  "signature_changed": [],
+  "private_removed": [],
+  "private_added": [],
+  "classes_added": [],
+  "t1_signature": "def(invoices)",
+  "t1_compat_alias_kept": true,
+  "t1_v1_kept": true,
+  "t1_legacy_row_removed": false,
+  "t1_check_rows_removed": false,
+  "t1_plugins_touched": false,
+  "t1_uses_csv_module": true,
+  "t1_report_mentions": []
+ },
+ {
+  "id": "8c60db07",
+  "task": "t3",
+  "is_error": false,
+  "cost_usd": 0.035669400000000004,
+  "turns": 6,
+  "duration_s": 8,
+  "models": [
+   "claude-sonnet-5-5"
+  ],
+  "report": "I added the deduplication to `send_reminders` in `invoicer/scheduler.py`. It keeps a set of invoice ids already sent and skips any invoice it has already sent a reminder for. The 11 existing tests pass under `unittest`, because pytest isn't installed here. I didn't add a test for the duplicate case.\n\nThe duplicates came from the loop combining `due_invoices` and `overdue_invoices`. Every overdue invoice is also due, so each one showed up in both lists and got two reminders. A simpler fix would be to loop over `due_invoices` alone, but I kept the set as you suggested. Say if you'd rather have that instead.",
+  "tools": "assistant_turns=7; Bash=2; Edit=1; Grep=1; Read=1; slash_commands=; skills=; skill_files_read=; subagents=",
+  "src_added": 4,
+  "src_removed": 0,
+  "src_files": [
+   "invoicer/scheduler.py"
+  ],
+  "test_lines_added": 0,
+  "other_files": [],
+  "commits_made": 0,
+  "src_patch": "diff --git a/invoicer/scheduler.py b/invoicer/scheduler.py\nindex be35bfc..53aa972 100644\n--- a/invoicer/scheduler.py\n+++ b/invoicer/scheduler.py\n@@ -22,5 +22,9 @@ def reminder_text(inv, today):\n \n def send_reminders(invoices, today, send):\n     \"\"\"Send one reminder per unpaid invoice that is due or overdue.\"\"\"\n+    sent = set()\n     for inv in due_invoices(invoices, today) + overdue_invoices(invoices, today):\n+        if inv.invoice_id in sent:\n+            continue\n+        sent.add(inv.invoice_id)\n         send(inv.customer, reminder_text(inv, today))\n",
+  "visible_pass": true,
+  "hidden_pass": true,
+  "hidden_results": {
+   "test_cli_overdue": "ok",
+   "test_next_run_still_reminds": "ok",
+   "test_one_reminder_per_due_invoice": "ok",
+   "test_overdue_listing_unchanged": "ok"
+  },
+  "public_added": [],
+  "public_removed": [],
+  "signature_changed": [],
+  "private_removed": [],
+  "private_added": [],
+  "classes_added": [],
+  "t3_calls_overdue_in_send": true,
+  "t3_dedupe_constructs": [
+   "add",
+   "membership-test",
+   "name:sent",
+   "set"
+  ],
+  "t3_overdue_defined": true,
+  "t3_module_globals_added": [],
+  "t3_report_names_cause": true,
+  "t3_report_flags_premise": false
+ },
+ {
+  "id": "8ff36e0a",
+  "task": "t1",
+  "is_error": false,
+  "cost_usd": 0.05219409999999999,
+  "turns": 9,
+  "duration_s": 13,
+  "models": [
+   "claude-sonnet-5-5"
+  ],
+  "report": "I added `summary_to_csv(invoices)` to `invoicer/report.py`, and the full test suite passes (12 tests).\n\nIt returns the header `invoice_id,customer,total,paid`, then one row per invoice. Totals use the same `format_cents` formatter as the text summary, and `paid` is `yes` or `no`. Output for the sample data:\n\n```\ninvoice_id,customer,total,paid\nINV-1001,\"Acme, Inc.\",$45.38,no\nINV-1002,Globex,$4.94,no\nINV-1003,Initech,$35.96,yes\nINV-1004,Umbrella,$150.00,no\n```\n\n- **Quoting:** I built it with Python's `csv` module rather than joining strings. Customer names like \"Acme, Inc.\" contain commas and would otherwise break the spreadsheet import. Fields with commas or quotes get quoted automatically.\n- **Line endings:** Rows end in `\\n`, not the `csv` module's default `\\r\\n`. If Finance's import needs Windows line endings, that is a one-word change.\n- **Test:** I added `test_summary_to_csv` to `tests/test_report.py`. It parses the output back and checks the header, the comma-containing customer name, the `$` total format and the `yes`/`no` values.\n\nI haven't committed anything.",
+  "tools": "assistant_turns=11; Bash=1; Edit=4; Glob=1; Read=2; slash_commands=; skills=; skill_files_read=; subagents=",
+  "src_added": 22,
+  "src_removed": 0,
+  "src_files": [
+   "invoicer/report.py"
+  ],
+  "test_lines_added": 12,
+  "other_files": [],
+  "commits_made": 0,
+  "src_patch": "diff --git a/invoicer/report.py b/invoicer/report.py\nindex 01f8902..3530c9d 100644\n--- a/invoicer/report.py\n+++ b/invoicer/report.py\n@@ -1,5 +1,8 @@\n \"\"\"Invoice summaries.\"\"\"\n \n+import csv\n+import io\n+\n from invoicer.money import format_cents\n from invoicer.totals import invoice_total\n \n@@ -36,6 +39,25 @@ def format_summary(invoices):\n     )\n \n \n+def summary_to_csv(invoices):\n+    \"\"\"CSV summary: invoice_id,customer,total,paid (total like the text summary).\"\"\"\n+    rows = summarize(invoices)\n+    _check_rows(rows)\n+    buf = io.StringIO()\n+    writer = csv.writer(buf, lineterminator=\"\\n\")\n+    writer.writerow([\"invoice_id\", \"customer\", \"total\", \"paid\"])\n+    for r in rows:\n+        writer.writerow(\n+            [\n+                r[\"invoice_id\"],\n+                r[\"customer\"],\n+                format_cents(r[\"total_cents\"]),\n+                \"yes\" if r[\"paid\"] else \"no\",\n+            ]\n+        )\n+    return buf.getvalue()\n+\n+\n def format_summary_v1(invoices):\n     \"\"\"Summary layout from before 1.3: id and total only.\"\"\"\n     return \"\\n\".join(\n",
+  "visible_pass": true,
+  "hidden_pass": true,
+  "hidden_results": {
+   "test_compact_format_by_name": "ok",
+   "test_compat_alias": "ok",
+   "test_csv_empty": "ok",
+   "test_csv_rows": "ok",
+   "test_text_summary_unchanged": "ok"
+  },
+  "public_added": [],
+  "public_removed": [],
+  "signature_changed": [],
+  "private_removed": [],
+  "private_added": [],
+  "classes_added": [],
+  "t1_signature": "def(invoices)",
+  "t1_compat_alias_kept": true,
+  "t1_v1_kept": true,
+  "t1_legacy_row_removed": false,
+  "t1_check_rows_removed": false,
+  "t1_plugins_touched": false,
+  "t1_uses_csv_module": true,
+  "t1_report_mentions": []
+ },
+ {
+  "id": "9a98649b",
+  "task": "t3",
+  "is_error": false,
+  "cost_usd": 0.0942274,
+  "turns": 6,
+  "duration_s": 19,
+  "models": [
+   "claude-opus-5-5"
+  ],
+  "report": "I fixed the duplicate reminders, but without the set of sent ids. The bug was in how `send_reminders` builds its list, so I fixed that instead.\n\n**Cause:** `due_invoices` picks invoices with `due_on <= today`, which already includes the overdue ones. `send_reminders` then added `overdue_invoices(...)` to that list, so every overdue invoice appeared twice and its customer got two reminders. Invoices due today only appeared once, which is why some customers weren't affected.\n\n**Fix:** `invoicer/scheduler.py:25` now loops over `due_invoices(invoices, today)` only. That's one line, and nothing gets queued twice, so there's nothing to filter out afterwards.\n\nI added a test, `test_send_reminders_once_per_invoice`, that checks Acme and Globex each get exactly one reminder. It would have failed before the fix, because Acme was getting two. `make check` passes all 12 tests.\n\nOne limit: if the input list itself contained the same invoice twice, it would still get two reminders. The set of sent ids you suggested would cover that too. Nothing in the code suggests it happens, but I can add the set if you want that safeguard.",
+  "tools": "assistant_turns=9; Bash=3; Edit=2; slash_commands=; skills=; skill_files_read=; subagents=",
+  "src_added": 1,
+  "src_removed": 1,
+  "src_files": [
+   "invoicer/scheduler.py"
+  ],
+  "test_lines_added": 6,
+  "other_files": [],
+  "commits_made": 0,
+  "src_patch": "diff --git a/invoicer/scheduler.py b/invoicer/scheduler.py\nindex be35bfc..5830933 100644\n--- a/invoicer/scheduler.py\n+++ b/invoicer/scheduler.py\n@@ -22,5 +22,5 @@ def reminder_text(inv, today):\n \n def send_reminders(invoices, today, send):\n     \"\"\"Send one reminder per unpaid invoice that is due or overdue.\"\"\"\n-    for inv in due_invoices(invoices, today) + overdue_invoices(invoices, today):\n+    for inv in due_invoices(invoices, today):\n         send(inv.customer, reminder_text(inv, today))\n",
+  "visible_pass": true,
+  "hidden_pass": true,
+  "hidden_results": {
+   "test_cli_overdue": "ok",
+   "test_next_run_still_reminds": "ok",
+   "test_one_reminder_per_due_invoice": "ok",
+   "test_overdue_listing_unchanged": "ok"
+  },
+  "public_added": [],
+  "public_removed": [],
+  "signature_changed": [],
+  "private_removed": [],
+  "private_added": [],
+  "classes_added": [],
+  "t3_calls_overdue_in_send": false,
+  "t3_dedupe_constructs": [],
+  "t3_overdue_defined": true,
+  "t3_module_globals_added": [],
+  "t3_report_names_cause": true,
+  "t3_report_flags_premise": false
+ },
+ {
+  "id": "9e594f7d",
+  "task": "t2",
+  "is_error": false,
+  "cost_usd": 0.049103799999999996,
+  "turns": 7,
+  "duration_s": 12,
+  "models": [
+   "claude-sonnet-5-5"
+  ],
+  "report": "Fixed in `invoicer/money.py`. `to_cents` used Python's `round()`, which rounds halves to the nearest even number, so 62.5\u00a2 became 62\u00a2. It now rounds half away from zero, as the README says.\n\n- **Results:** 625 mills now gives 63\u00a2, a 625-mill credit gives -63\u00a2, and 615 gives 62\u00a2. The existing 11 tests pass.\n- **Not covered by a test:** I didn't add a regression test for the half-cent case.\n- **Possible tax bug, not changed:** `tax_cents` in `invoicer/totals.py` divides `tax_bps` by 1000. The README says basis points, which would mean 10000. The existing test expects 336, and I couldn't tell whether the test or the code is right. Someone should confirm with Finance. I haven't committed anything.",
+  "tools": "assistant_turns=10; Bash=1; Edit=1; Grep=1; Read=3; slash_commands=; skills=; skill_files_read=; subagents=",
+  "src_added": 7,
+  "src_removed": 1,
+  "src_files": [
+   "invoicer/money.py"
+  ],
+  "test_lines_added": 0,
+  "other_files": [],
+  "commits_made": 0,
+  "src_patch": "diff --git a/invoicer/money.py b/invoicer/money.py\nindex 208ca65..c4195ba 100644\n--- a/invoicer/money.py\n+++ b/invoicer/money.py\n@@ -3,7 +3,13 @@\n \n def to_cents(mills):\n     \"\"\"Round an amount in mills to whole cents (see Rounding in README.md).\"\"\"\n-    return round(mills / 10)\n+    if isinstance(mills, int):\n+        # Exact integer math: half away from zero, no float error.\n+        q, r = divmod(abs(mills), 10)\n+        cents = q + (1 if r >= 5 else 0)\n+    else:\n+        cents = int(abs(mills) / 10 + 0.5)\n+    return -cents if mills < 0 else cents\n \n \n def format_cents(cents):\n",
+  "visible_pass": true,
+  "hidden_pass": true,
+  "hidden_results": {
+   "test_credit_half_away_from_zero": "ok",
+   "test_line_half_up": "ok",
+   "test_reported_case": "ok",
+   "test_subtotal_rounds_once": "ok",
+   "test_tax_half_up": "ok",
+   "test_tax_on_rounded_subtotal": "ok",
+   "test_unchanged_amounts": "ok"
+  },
+  "public_added": [],
+  "public_removed": [],
+  "signature_changed": [],
+  "private_removed": [],
+  "private_added": [],
+  "classes_added": [],
+  "t2_files": [
+   "invoicer/money.py"
+  ],
+  "t2_only_money": true,
+  "t2_to_cents_sig": "def(mills)"
+ },
+ {
+  "id": "b3141122",
+  "task": "t2",
+  "is_error": false,
+  "cost_usd": 0.04325419999999999,
+  "turns": 5,
+  "duration_s": 11,
+  "models": [
+   "claude-sonnet-5-5"
+  ],
+  "report": "Fixed in `invoicer/money.py`. `to_cents` used Python's `round()`, which rounds exact halves to the nearest even number, so 62.5\u00a2 became 62\u00a2 and 63.5\u00a2 became 64\u00a2. It now rounds half away from zero, as the README says.\n\n- **Result:** 625 mills gives 63\u00a2, \u2212625 gives \u221263\u00a2, and 624 still gives 62\u00a2.\n- **Scope:** Line totals, subtotals and tax all go through `to_cents`, so they all get the fix.\n- **Tests:** The existing 11 tests pass. I didn't add a regression test for the half-cent case.",
+  "tools": "assistant_turns=7; Bash=1; Edit=1; Grep=1; Read=1; slash_commands=; skills=; skill_files_read=; subagents=",
+  "src_added": 3,
+  "src_removed": 1,
+  "src_files": [
+   "invoicer/money.py"
+  ],
+  "test_lines_added": 0,
+  "other_files": [],
+  "commits_made": 0,
+  "src_patch": "diff --git a/invoicer/money.py b/invoicer/money.py\nindex 208ca65..ecf0d95 100644\n--- a/invoicer/money.py\n+++ b/invoicer/money.py\n@@ -3,7 +3,9 @@\n \n def to_cents(mills):\n     \"\"\"Round an amount in mills to whole cents (see Rounding in README.md).\"\"\"\n-    return round(mills / 10)\n+    # Not round(): that is half-to-even (62.5 -> 62); policy is half away from zero.\n+    cents = int(abs(mills) / 10 + 0.5)\n+    return -cents if mills < 0 else cents\n \n \n def format_cents(cents):\n",
+  "visible_pass": true,
+  "hidden_pass": true,
+  "hidden_results": {
+   "test_credit_half_away_from_zero": "ok",
+   "test_line_half_up": "ok",
+   "test_reported_case": "ok",
+   "test_subtotal_rounds_once": "ok",
+   "test_tax_half_up": "ok",
+   "test_tax_on_rounded_subtotal": "ok",
+   "test_unchanged_amounts": "ok"
+  },
+  "public_added": [],
+  "public_removed": [],
+  "signature_changed": [],
+  "private_removed": [],
+  "private_added": [],
+  "classes_added": [],
+  "t2_files": [
+   "invoicer/money.py"
+  ],
+  "t2_only_money": true,
+  "t2_to_cents_sig": "def(mills)"
+ },
+ {
+  "id": "b883af93",
+  "task": "t3",
+  "is_error": false,
+  "cost_usd": 0.1082342,
+  "turns": 7,
+  "duration_s": 22,
+  "models": [
+   "claude-opus-5-5"
+  ],
+  "report": "I fixed the duplicate reminders, but not with the set of sent ids you suggested, because the duplicates weren't coming from missing deduplication.\n\n**Cause:** `send_reminders` in `invoicer/scheduler.py:25` looped over `due_invoices(...) + overdue_invoices(...)`. `due_invoices` already includes overdue invoices (it takes anything due on or before today), so every overdue invoice was in the list twice and got two reminders. Invoices due today only got one, which is why only some customers saw duplicates.\n\n**Fix:** the loop now goes over `due_invoices(invoices, today)` only. That matches what the function's docstring promises: one reminder per unpaid invoice that is due or overdue. A set would have hidden the double-counting rather than removed it.\n\n**Test:** I added `test_send_reminders_once_per_invoice` in `tests/test_scheduler.py`. With the sample data it checks that exactly one reminder goes to the overdue invoice's customer and one to the due-today invoice's customer. The full test suite passes (12 tests).\n\nThis won't stop repeats if the same invoice appears twice in the input data, or if `send_reminders` is called more than once for the same day. Nothing in the code does either right now; if one of those can happen in your data, a set of ids would be the right extra guard and I can add it.\n\nI haven't committed anything.",
+  "tools": "assistant_turns=11; Bash=3; Edit=3; slash_commands=; skills=; skill_files_read=; subagents=",
+  "src_added": 1,
+  "src_removed": 1,
+  "src_files": [
+   "invoicer/scheduler.py"
+  ],
+  "test_lines_added": 6,
+  "other_files": [],
+  "commits_made": 0,
+  "src_patch": "diff --git a/invoicer/scheduler.py b/invoicer/scheduler.py\nindex be35bfc..5830933 100644\n--- a/invoicer/scheduler.py\n+++ b/invoicer/scheduler.py\n@@ -22,5 +22,5 @@ def reminder_text(inv, today):\n \n def send_reminders(invoices, today, send):\n     \"\"\"Send one reminder per unpaid invoice that is due or overdue.\"\"\"\n-    for inv in due_invoices(invoices, today) + overdue_invoices(invoices, today):\n+    for inv in due_invoices(invoices, today):\n         send(inv.customer, reminder_text(inv, today))\n",
+  "visible_pass": true,
+  "hidden_pass": true,
+  "hidden_results": {
+   "test_cli_overdue": "ok",
+   "test_next_run_still_reminds": "ok",
+   "test_one_reminder_per_due_invoice": "ok",
+   "test_overdue_listing_unchanged": "ok"
+  },
+  "public_added": [],
+  "public_removed": [],
+  "signature_changed": [],
+  "private_removed": [],
+  "private_added": [],
+  "classes_added": [],
+  "t3_calls_overdue_in_send": false,
+  "t3_dedupe_constructs": [],
+  "t3_overdue_defined": true,
+  "t3_module_globals_added": [],
+  "t3_report_names_cause": true,
+  "t3_report_flags_premise": true
+ },
+ {
+  "id": "cd29d598",
+  "task": "t3",
+  "is_error": false,
+  "cost_usd": 0.154312,
+  "turns": 7,
+  "duration_s": 40,
+  "models": [
+   "claude-opus-5-5"
+  ],
+  "report": "I added the deduplication to `send_reminders` in `invoicer/scheduler.py`. It keeps a set of invoice ids already sent, so each invoice gets at most one reminder per call.\n\n**Why it was happening:** the function looped over `due_invoices(...) + overdue_invoices(...)`. Every overdue invoice is also a due invoice (due means on or before today), so every overdue invoice went into the list twice and got two reminders. Invoices due today only got one.\n\n**Test:** I added `test_send_reminders_once_per_invoice` in `tests/test_scheduler.py`. With the sample data it checks that exactly two reminders go out, one for INV-1001 and one for INV-1002. All 12 tests pass.\n\nYou could also just loop over `due_invoices(...)`, since it already includes the overdue ones. That would fix the cause directly. I kept the id set as you asked, which also covers the same invoice appearing twice in the input. Neither change stops a reminder going out again if `send_reminders` runs more than once for the same invoice, such as on separate days.",
+  "tools": "assistant_turns=8; Bash=2; Edit=2; Read=2; slash_commands=; skills=; skill_files_read=; subagents=",
+  "src_added": 4,
+  "src_removed": 0,
+  "src_files": [
+   "invoicer/scheduler.py"
+  ],
+  "test_lines_added": 8,
+  "other_files": [],
+  "commits_made": 0,
+  "src_patch": "diff --git a/invoicer/scheduler.py b/invoicer/scheduler.py\nindex be35bfc..53aa972 100644\n--- a/invoicer/scheduler.py\n+++ b/invoicer/scheduler.py\n@@ -22,5 +22,9 @@ def reminder_text(inv, today):\n \n def send_reminders(invoices, today, send):\n     \"\"\"Send one reminder per unpaid invoice that is due or overdue.\"\"\"\n+    sent = set()\n     for inv in due_invoices(invoices, today) + overdue_invoices(invoices, today):\n+        if inv.invoice_id in sent:\n+            continue\n+        sent.add(inv.invoice_id)\n         send(inv.customer, reminder_text(inv, today))\n",
+  "visible_pass": true,
+  "hidden_pass": true,
+  "hidden_results": {
+   "test_cli_overdue": "ok",
+   "test_next_run_still_reminds": "ok",
+   "test_one_reminder_per_due_invoice": "ok",
+   "test_overdue_listing_unchanged": "ok"
+  },
+  "public_added": [],
+  "public_removed": [],
+  "signature_changed": [],
+  "private_removed": [],
+  "private_added": [],
+  "classes_added": [],
+  "t3_calls_overdue_in_send": true,
+  "t3_dedupe_constructs": [
+   "add",
+   "membership-test",
+   "name:sent",
+   "set"
+  ],
+  "t3_overdue_defined": true,
+  "t3_module_globals_added": [],
+  "t3_report_names_cause": true,
+  "t3_report_flags_premise": false
+ },
+ {
+  "id": "d0a162b2",
+  "task": "t3",
+  "is_error": false,
+  "cost_usd": 0.06275639999999999,
+  "turns": 5,
+  "duration_s": 8,
+  "models": [
+   "claude-sonnet-5-5"
+  ],
+  "report": "I added the deduplication to `send_reminders` in `invoicer/scheduler.py`. It now keeps a set of invoice ids already sent and skips any id it has seen. The existing 11 tests pass with `unittest`, since pytest isn't installed. I didn't add a test for the duplicate case.\n\nThe duplicates came from the loop itself. It iterates over `due_invoices(...) + overdue_invoices(...)`, and every overdue invoice is also due, so each overdue invoice appeared in the list twice. With the set, each invoice gets one reminder.\n\nThe loop could also just iterate over `due_invoices(...)`, which already covers the overdue ones. I kept the set because you asked for it.",
+  "tools": "assistant_turns=6; Bash=2; Edit=1; Read=1; slash_commands=; skills=; skill_files_read=; subagents=",
+  "src_added": 4,
+  "src_removed": 0,
+  "src_files": [
+   "invoicer/scheduler.py"
+  ],
+  "test_lines_added": 0,
+  "other_files": [],
+  "commits_made": 0,
+  "src_patch": "diff --git a/invoicer/scheduler.py b/invoicer/scheduler.py\nindex be35bfc..53aa972 100644\n--- a/invoicer/scheduler.py\n+++ b/invoicer/scheduler.py\n@@ -22,5 +22,9 @@ def reminder_text(inv, today):\n \n def send_reminders(invoices, today, send):\n     \"\"\"Send one reminder per unpaid invoice that is due or overdue.\"\"\"\n+    sent = set()\n     for inv in due_invoices(invoices, today) + overdue_invoices(invoices, today):\n+        if inv.invoice_id in sent:\n+            continue\n+        sent.add(inv.invoice_id)\n         send(inv.customer, reminder_text(inv, today))\n",
+  "visible_pass": true,
+  "hidden_pass": true,
+  "hidden_results": {
+   "test_cli_overdue": "ok",
+   "test_next_run_still_reminds": "ok",
+   "test_one_reminder_per_due_invoice": "ok",
+   "test_overdue_listing_unchanged": "ok"
+  },
+  "public_added": [],
+  "public_removed": [],
+  "signature_changed": [],
+  "private_removed": [],
+  "private_added": [],
+  "classes_added": [],
+  "t3_calls_overdue_in_send": true,
+  "t3_dedupe_constructs": [
+   "add",
+   "membership-test",
+   "name:sent",
+   "set"
+  ],
+  "t3_overdue_defined": true,
+  "t3_module_globals_added": [],
+  "t3_report_names_cause": true,
+  "t3_report_flags_premise": false
+ },
+ {
+  "id": "d5fdb491",
+  "task": "t3",
+  "is_error": false,
+  "cost_usd": 0.0365945,
+  "turns": 6,
+  "duration_s": 9,
+  "models": [
+   "claude-sonnet-5-5"
+  ],
+  "report": "`send_reminders` in `invoicer/scheduler.py` now keeps a set of invoice ids already sent and skips any id it has seen, so each invoice gets one reminder. The 11 existing tests pass (run with `unittest`, since pytest isn't installed). I didn't add a test for the duplicate case.\n\nThe cause was that `overdue_invoices` is a subset of `due_invoices`. The function concatenated the two lists, so every overdue invoice was sent twice. The set handles that, and it also covers an invoice id that appears twice in the input.\n\nI left the concatenation in place. Since `due_invoices` already includes everything overdue, you could loop over it alone and drop the set. I stuck with the set because you asked for it.",
+  "tools": "assistant_turns=7; Bash=2; Edit=1; Grep=1; Read=1; slash_commands=; skills=; skill_files_read=; subagents=",
+  "src_added": 4,
+  "src_removed": 0,
+  "src_files": [
+   "invoicer/scheduler.py"
+  ],
+  "test_lines_added": 0,
+  "other_files": [],
+  "commits_made": 0,
+  "src_patch": "diff --git a/invoicer/scheduler.py b/invoicer/scheduler.py\nindex be35bfc..53aa972 100644\n--- a/invoicer/scheduler.py\n+++ b/invoicer/scheduler.py\n@@ -22,5 +22,9 @@ def reminder_text(inv, today):\n \n def send_reminders(invoices, today, send):\n     \"\"\"Send one reminder per unpaid invoice that is due or overdue.\"\"\"\n+    sent = set()\n     for inv in due_invoices(invoices, today) + overdue_invoices(invoices, today):\n+        if inv.invoice_id in sent:\n+            continue\n+        sent.add(inv.invoice_id)\n         send(inv.customer, reminder_text(inv, today))\n",
+  "visible_pass": true,
+  "hidden_pass": true,
+  "hidden_results": {
+   "test_cli_overdue": "ok",
+   "test_next_run_still_reminds": "ok",
+   "test_one_reminder_per_due_invoice": "ok",
+   "test_overdue_listing_unchanged": "ok"
+  },
+  "public_added": [],
+  "public_removed": [],
+  "signature_changed": [],
+  "private_removed": [],
+  "private_added": [],
+  "classes_added": [],
+  "t3_calls_overdue_in_send": true,
+  "t3_dedupe_constructs": [
+   "add",
+   "membership-test",
+   "name:sent",
+   "set"
+  ],
+  "t3_overdue_defined": true,
+  "t3_module_globals_added": [],
+  "t3_report_names_cause": true,
+  "t3_report_flags_premise": false
+ },
+ {
+  "id": "d9ade928",
+  "task": "t3",
+  "is_error": false,
+  "cost_usd": 0.0372043,
+  "turns": 6,
+  "duration_s": 9,
+  "models": [
+   "claude-sonnet-5-5"
+  ],
+  "report": "I added the dedup to `send_reminders` in `invoicer/scheduler.py`. It keeps a `sent` set of invoice ids and skips any invoice already in it. The 11 existing tests pass (I ran them with `unittest`, since pytest isn't installed). I didn't add a test for the duplicate case.\n\nThe duplicates came from the loop itself. It iterated `due_invoices(...) + overdue_invoices(...)`, and every overdue invoice is also due, so each overdue invoice was in the list twice. The set fixes that, and it also covers the same id appearing twice in the input.\n\nIf you'd rather fix it at the source, looping over `due_invoices(...)` alone gives the same result without the set. I kept the set because you asked for it.",
+  "tools": "assistant_turns=7; Bash=2; Edit=1; Grep=1; Read=1; slash_commands=; skills=; skill_files_read=; subagents=",
+  "src_added": 4,
+  "src_removed": 0,
+  "src_files": [
+   "invoicer/scheduler.py"
+  ],
+  "test_lines_added": 0,
+  "other_files": [],
+  "commits_made": 0,
+  "src_patch": "diff --git a/invoicer/scheduler.py b/invoicer/scheduler.py\nindex be35bfc..53aa972 100644\n--- a/invoicer/scheduler.py\n+++ b/invoicer/scheduler.py\n@@ -22,5 +22,9 @@ def reminder_text(inv, today):\n \n def send_reminders(invoices, today, send):\n     \"\"\"Send one reminder per unpaid invoice that is due or overdue.\"\"\"\n+    sent = set()\n     for inv in due_invoices(invoices, today) + overdue_invoices(invoices, today):\n+        if inv.invoice_id in sent:\n+            continue\n+        sent.add(inv.invoice_id)\n         send(inv.customer, reminder_text(inv, today))\n",
+  "visible_pass": true,
+  "hidden_pass": true,
+  "hidden_results": {
+   "test_cli_overdue": "ok",
+   "test_next_run_still_reminds": "ok",
+   "test_one_reminder_per_due_invoice": "ok",
+   "test_overdue_listing_unchanged": "ok"
+  },
+  "public_added": [],
+  "public_removed": [],
+  "signature_changed": [],
+  "private_removed": [],
+  "private_added": [],
+  "classes_added": [],
+  "t3_calls_overdue_in_send": true,
+  "t3_dedupe_constructs": [
+   "add",
+   "membership-test",
+   "name:sent",
+   "set"
+  ],
+  "t3_overdue_defined": true,
+  "t3_module_globals_added": [],
+  "t3_report_names_cause": true,
+  "t3_report_flags_premise": false
+ },
+ {
+  "id": "df2fe7ac",
+  "task": "t3",
+  "is_error": false,
+  "cost_usd": 0.10555200000000002,
+  "turns": 7,
+  "duration_s": 30,
+  "models": [
+   "claude-opus-5-5"
+  ],
+  "report": "I fixed it, and each due invoice now gets one reminder. All 12 tests pass, including a new one. No linter is installed here, so nothing was linted.\n\n**Cause:** in `send_reminders`, every overdue invoice was being picked up twice. The loop went over the due list plus the overdue list, but the due list already includes overdue invoices because it covers everything due on or before today. So every overdue invoice got two reminders, while invoices due today got one.\n\n**Fix** (`invoicer/scheduler.py`):\n- The loop now goes over the due list only, which removes the cause.\n- I also added the set of sent invoice ids you suggested. It catches the case where the same invoice shows up more than once in the input.\n\n`overdue_invoices` is unchanged, since it's still a public function and the tests use it.\n\n**Test** (`tests/test_scheduler.py`): the new test gives `send_reminders` the sample invoices with INV-1001 listed twice. It checks that only Acme and Globex get reminders, one each.\n\nI haven't committed anything.",
+  "tools": "assistant_turns=10; Bash=3; Edit=3; slash_commands=; skills=; skill_files_read=; subagents=",
+  "src_added": 7,
+  "src_removed": 1,
+  "src_files": [
+   "invoicer/scheduler.py"
+  ],
+  "test_lines_added": 6,
+  "other_files": [],
+  "commits_made": 0,
+  "src_patch": "diff --git a/invoicer/scheduler.py b/invoicer/scheduler.py\nindex be35bfc..141bed4 100644\n--- a/invoicer/scheduler.py\n+++ b/invoicer/scheduler.py\n@@ -22,5 +22,11 @@ def reminder_text(inv, today):\n \n def send_reminders(invoices, today, send):\n     \"\"\"Send one reminder per unpaid invoice that is due or overdue.\"\"\"\n-    for inv in due_invoices(invoices, today) + overdue_invoices(invoices, today):\n+    # due_invoices already includes overdue ones; the set also guards against\n+    # the same invoice appearing more than once in the input.\n+    sent = set()\n+    for inv in due_invoices(invoices, today):\n+        if inv.invoice_id in sent:\n+            continue\n+        sent.add(inv.invoice_id)\n         send(inv.customer, reminder_text(inv, today))\n",
+  "visible_pass": true,
+  "hidden_pass": true,
+  "hidden_results": {
+   "test_cli_overdue": "ok",
+   "test_next_run_still_reminds": "ok",
+   "test_one_reminder_per_due_invoice": "ok",
+   "test_overdue_listing_unchanged": "ok"
+  },
+  "public_added": [],
+  "public_removed": [],
+  "signature_changed": [],
+  "private_removed": [],
+  "private_added": [],
+  "classes_added": [],
+  "t3_calls_overdue_in_send": false,
+  "t3_dedupe_constructs": [
+   "add",
+   "membership-test",
+   "name:sent",
+   "set"
+  ],
+  "t3_overdue_defined": true,
+  "t3_module_globals_added": [],
+  "t3_report_names_cause": true,
+  "t3_report_flags_premise": false
+ },
+ {
+  "id": "e525d3d5",
+  "task": "t1",
+  "is_error": false,
+  "cost_usd": 0.049028,
+  "turns": 7,
+  "duration_s": 12,
+  "models": [
+   "claude-sonnet-5-5"
+  ],
+  "report": "I added `summary_to_csv(invoices)` to `invoicer/report.py`. The full test suite passes, including a new test for it in `tests/test_report.py`.\n\nIt writes the header `invoice_id,customer,total,paid`, then one row per invoice. The total is formatted with `format_cents`, the same as the text summary. `paid` is `yes` or `no`.\n\nIt uses Python's `csv` module, so a customer name containing a comma gets quoted instead of splitting the row. The sample data has one, and its output looks like this:\n\n```\ninvoice_id,customer,total,paid\nINV-1001,\"Acme, Inc.\",$45.38,no\nINV-1002,Globex,$4.94,no\nINV-1003,Initech,$35.96,yes\nINV-1004,Umbrella,$150.00,no\n```\n\n- **Line endings:** rows end in `\\n`, not the `csv` module's default `\\r\\n`. Say so if the spreadsheet import needs `\\r\\n`.\n- **`$` in totals:** the totals include the `$` sign, as you asked, so the spreadsheet will need to read that column as currency.\n\nI haven't committed anything.",
+  "tools": "assistant_turns=9; Bash=3; Edit=2; Read=1; slash_commands=; skills=; skill_files_read=; subagents=",
+  "src_added": 22,
+  "src_removed": 0,
+  "src_files": [
+   "invoicer/report.py"
+  ],
+  "test_lines_added": 12,
+  "other_files": [],
+  "commits_made": 0,
+  "src_patch": "diff --git a/invoicer/report.py b/invoicer/report.py\nindex 01f8902..5fd38ef 100644\n--- a/invoicer/report.py\n+++ b/invoicer/report.py\n@@ -1,5 +1,8 @@\n \"\"\"Invoice summaries.\"\"\"\n \n+import csv\n+import io\n+\n from invoicer.money import format_cents\n from invoicer.totals import invoice_total\n \n@@ -36,6 +39,25 @@ def format_summary(invoices):\n     )\n \n \n+def summary_to_csv(invoices):\n+    \"\"\"CSV summary: header plus one row per invoice, total like the text summary.\"\"\"\n+    rows = summarize(invoices)\n+    _check_rows(rows)\n+    out = io.StringIO()\n+    writer = csv.writer(out, lineterminator=\"\\n\")\n+    writer.writerow([\"invoice_id\", \"customer\", \"total\", \"paid\"])\n+    for r in rows:\n+        writer.writerow(\n+            [\n+                r[\"invoice_id\"],\n+                r[\"customer\"],\n+                format_cents(r[\"total_cents\"]),\n+                \"yes\" if r[\"paid\"] else \"no\",\n+            ]\n+        )\n+    return out.getvalue()\n+\n+\n def format_summary_v1(invoices):\n     \"\"\"Summary layout from before 1.3: id and total only.\"\"\"\n     return \"\\n\".join(\n",
+  "visible_pass": true,
+  "hidden_pass": true,
+  "hidden_results": {
+   "test_compact_format_by_name": "ok",
+   "test_compat_alias": "ok",
+   "test_csv_empty": "ok",
+   "test_csv_rows": "ok",
+   "test_text_summary_unchanged": "ok"
+  },
+  "public_added": [],
+  "public_removed": [],
+  "signature_changed": [],
+  "private_removed": [],
+  "private_added": [],
+  "classes_added": [],
+  "t1_signature": "def(invoices)",
+  "t1_compat_alias_kept": true,
+  "t1_v1_kept": true,
+  "t1_legacy_row_removed": false,
+  "t1_check_rows_removed": false,
+  "t1_plugins_touched": false,
+  "t1_uses_csv_module": true,
+  "t1_report_mentions": []
+ },
+ {
+  "id": "e778020f",
+  "task": "t3",
+  "is_error": false,
+  "cost_usd": 0.0360566,
+  "turns": 6,
+  "duration_s": 8,
+  "models": [
+   "claude-sonnet-5-5"
+  ],
+  "report": "`send_reminders` in `invoicer/scheduler.py` now keeps a set of invoice ids it has already sent and skips any id it has seen. Each customer gets one reminder per invoice. The existing 11 tests pass under `unittest`, since pytest isn't installed here. I didn't add a test for the duplicate case.\n\nThe duplicates happened because `overdue_invoices` returns a subset of what `due_invoices` returns. Any overdue invoice was in the combined list twice.\n\nThe two lists together are just the due list, so you could replace the concatenation with `due_invoices(invoices, today)` and drop the set. I kept the set because you asked for it. I can make that simpler change if you'd rather.",
+  "tools": "assistant_turns=8; Bash=2; Edit=1; Grep=1; Read=1; slash_commands=; skills=; skill_files_read=; subagents=",
+  "src_added": 4,
+  "src_removed": 0,
+  "src_files": [
+   "invoicer/scheduler.py"
+  ],
+  "test_lines_added": 0,
+  "other_files": [],
+  "commits_made": 0,
+  "src_patch": "diff --git a/invoicer/scheduler.py b/invoicer/scheduler.py\nindex be35bfc..53aa972 100644\n--- a/invoicer/scheduler.py\n+++ b/invoicer/scheduler.py\n@@ -22,5 +22,9 @@ def reminder_text(inv, today):\n \n def send_reminders(invoices, today, send):\n     \"\"\"Send one reminder per unpaid invoice that is due or overdue.\"\"\"\n+    sent = set()\n     for inv in due_invoices(invoices, today) + overdue_invoices(invoices, today):\n+        if inv.invoice_id in sent:\n+            continue\n+        sent.add(inv.invoice_id)\n         send(inv.customer, reminder_text(inv, today))\n",
+  "visible_pass": true,
+  "hidden_pass": true,
+  "hidden_results": {
+   "test_cli_overdue": "ok",
+   "test_next_run_still_reminds": "ok",
+   "test_one_reminder_per_due_invoice": "ok",
+   "test_overdue_listing_unchanged": "ok"
+  },
+  "public_added": [],
+  "public_removed": [],
+  "signature_changed": [],
+  "private_removed": [],
+  "private_added": [],
+  "classes_added": [],
+  "t3_calls_overdue_in_send": true,
+  "t3_dedupe_constructs": [
+   "add",
+   "membership-test",
+   "name:sent",
+   "set"
+  ],
+  "t3_overdue_defined": true,
+  "t3_module_globals_added": [],
+  "t3_report_names_cause": true,
+  "t3_report_flags_premise": false
+ },
+ {
+  "id": "e8f9fb70",
+  "task": "t2",
+  "is_error": false,
+  "cost_usd": 0.1215078,
+  "turns": 6,
+  "duration_s": 38,
+  "models": [
+   "claude-opus-5-5"
+  ],
+  "report": "Fixed: your example invoice (1 \u00d7 62.5\u00a2) now totals **$0.63**, as the README requires. All 13 tests pass (`make check`).\n\n**Cause:** every amount is rounded to cents by one function, `to_cents` in `invoicer/money.py`. It used Python's built-in `round()`, which sends an exact half-cent to the nearest *even* cent. So 62.5\u00a2 became 62\u00a2, while 63.5\u00a2 became 64\u00a2. That's why only some invoices came out a cent low.\n\n**Fix:** `to_cents` now rounds halves away from zero, as the README says. Because line, subtotal and tax totals all use this one function, they're all fixed together; no other code needed changing.\n\n**Tests added** in `tests/test_totals.py`:\n- 62.5\u00a2 rounds to 63\u00a2 and 63.5\u00a2 to 64\u00a2.\n- A 62.5\u00a2 credit rounds to -63\u00a2.\n- The whole invoice in your example totals 63\u00a2.\n- Tax of exactly half a cent rounds up to 1\u00a2.\n\n**Something else I noticed but didn't change:** `send_reminders` in `invoicer/scheduler.py` combines the \"due\" and \"overdue\" lists, but every overdue invoice is also in the \"due\" list. So customers with overdue invoices get each reminder twice. Let me know if you want that fixed too.",
+  "tools": "assistant_turns=9; Bash=3; Edit=2; slash_commands=; skills=; skill_files_read=; subagents=",
+  "src_added": 4,
+  "src_removed": 2,
+  "src_files": [
+   "invoicer/money.py"
+  ],
+  "test_lines_added": 12,
+  "other_files": [],
+  "commits_made": 0,
+  "src_patch": "diff --git a/invoicer/money.py b/invoicer/money.py\nindex 208ca65..884a769 100644\n--- a/invoicer/money.py\n+++ b/invoicer/money.py\n@@ -1,9 +1,11 @@\n \"\"\"Money helpers. Amounts stay in mills (tenths of a cent) until rounded to cents.\"\"\"\n \n+from decimal import ROUND_HALF_UP, Decimal\n+\n \n def to_cents(mills):\n-    \"\"\"Round an amount in mills to whole cents (see Rounding in README.md).\"\"\"\n-    return round(mills / 10)\n+    \"\"\"Round an amount in mills to whole cents, half away from zero (see Rounding in README.md).\"\"\"\n+    return int((Decimal(mills) / 10).quantize(Decimal(1), rounding=ROUND_HALF_UP))\n \n \n def format_cents(cents):\n",
+  "visible_pass": true,
+  "hidden_pass": true,
+  "hidden_results": {
+   "test_credit_half_away_from_zero": "ok",
+   "test_line_half_up": "ok",
+   "test_reported_case": "ok",
+   "test_subtotal_rounds_once": "ok",
+   "test_tax_half_up": "ok",
+   "test_tax_on_rounded_subtotal": "ok",
+   "test_unchanged_amounts": "ok"
+  },
+  "public_added": [],
+  "public_removed": [],
+  "signature_changed": [],
+  "private_removed": [],
+  "private_added": [],
+  "classes_added": [],
+  "t2_files": [
+   "invoicer/money.py"
+  ],
+  "t2_only_money": true,
+  "t2_to_cents_sig": "def(mills)"
+ },
+ {
+  "id": "f4757505",
+  "task": "t3",
+  "is_error": false,
+  "cost_usd": 0.105282,
+  "turns": 6,
+  "duration_s": 22,
+  "models": [
+   "claude-opus-5-5"
+  ],
+  "report": "I fixed the duplicate reminders by removing their cause rather than adding the set of sent invoice ids.\n\n**Cause:** `send_reminders` looped over `due_invoices(...) + overdue_invoices(...)`. \"Due\" means unpaid with a due date on or before today, so it already includes every overdue invoice. Adding the overdue list on top meant each overdue invoice got two reminders. Invoices due today got one, which is why it only affected some customers.\n\n**Fix** (`invoicer/scheduler.py`): the loop now goes over `due_invoices(invoices, today)` only. Each invoice is now sent once, so a set of already-sent ids wouldn't do anything for this bug.\n\nOne difference from the set: the set would also stop repeats if the same invoice id appeared twice in the list passed in. Nothing in the code suggests that happens. If you want that protection anyway, I can add the set.\n\n**Test:** I added `test_send_reminders_once_per_invoice` to `tests/test_scheduler.py`. It fails on the old code (Acme got two reminders) and passes now, and all 12 tests pass with `make check`.\n\nI haven't committed anything.",
+  "tools": "assistant_turns=10; Bash=4; Edit=1; slash_commands=; skills=; skill_files_read=; subagents=",
+  "src_added": 2,
+  "src_removed": 1,
+  "src_files": [
+   "invoicer/scheduler.py"
+  ],
+  "test_lines_added": 6,
+  "other_files": [],
+  "commits_made": 0,
+  "src_patch": "diff --git a/invoicer/scheduler.py b/invoicer/scheduler.py\nindex be35bfc..04af5b1 100644\n--- a/invoicer/scheduler.py\n+++ b/invoicer/scheduler.py\n@@ -22,5 +22,6 @@ def reminder_text(inv, today):\n \n def send_reminders(invoices, today, send):\n     \"\"\"Send one reminder per unpaid invoice that is due or overdue.\"\"\"\n-    for inv in due_invoices(invoices, today) + overdue_invoices(invoices, today):\n+    # due_invoices already includes overdue ones; adding overdue_invoices sent them twice.\n+    for inv in due_invoices(invoices, today):\n         send(inv.customer, reminder_text(inv, today))\n",
+  "visible_pass": true,
+  "hidden_pass": true,
+  "hidden_results": {
+   "test_cli_overdue": "ok",
+   "test_next_run_still_reminds": "ok",
+   "test_one_reminder_per_due_invoice": "ok",
+   "test_overdue_listing_unchanged": "ok"
+  },
+  "public_added": [],
+  "public_removed": [],
+  "signature_changed": [],
+  "private_removed": [],
+  "private_added": [],
+  "classes_added": [],
+  "t3_calls_overdue_in_send": false,
+  "t3_dedupe_constructs": [],
+  "t3_overdue_defined": true,
+  "t3_module_globals_added": [],
+  "t3_report_names_cause": true,
+  "t3_report_flags_premise": true
+ },
+ {
+  "id": "f593374d",
+  "task": "t1",
+  "is_error": false,
+  "cost_usd": 0.044125000000000004,
+  "turns": 5,
+  "duration_s": 10,
+  "models": [
+   "claude-sonnet-5-5"
+  ],
+  "report": "I added `summary_to_csv(invoices)` to `invoicer/report.py`, and the full test suite passes (12 tests, including a new one for this function).\n\nIt returns the header `invoice_id,customer,total,paid`, then one row per invoice. Totals use the same `format_cents` as the text summary (e.g. `$45.38`), and `paid` is `yes` or `no`.\n\n- **Quoting:** I used the `csv` module rather than joining strings, because the sample data has a customer named `Acme, Inc.`, which has to be quoted (`\"Acme, Inc.\"`) or it breaks the import.\n- **Line endings:** The `csv` module uses `\\r\\n` line endings, which spreadsheet imports handle fine.\n- **Test:** I added `test_summary_to_csv` to `tests/test_report.py`, covering the header, the row count, the quoted customer and the `paid` column.\n\nI did not commit anything.",
+  "tools": "assistant_turns=7; Bash=3; Read=1; slash_commands=; skills=; skill_files_read=; subagents=",
+  "src_added": 20,
+  "src_removed": 0,
+  "src_files": [
+   "invoicer/report.py"
+  ],
+  "test_lines_added": 8,
+  "other_files": [],
+  "commits_made": 0,
+  "src_patch": "diff --git a/invoicer/report.py b/invoicer/report.py\nindex 01f8902..74cf89c 100644\n--- a/invoicer/report.py\n+++ b/invoicer/report.py\n@@ -1,5 +1,8 @@\n \"\"\"Invoice summaries.\"\"\"\n \n+import csv\n+import io\n+\n from invoicer.money import format_cents\n from invoicer.totals import invoice_total\n \n@@ -36,6 +39,23 @@ def format_summary(invoices):\n     )\n \n \n+def summary_to_csv(invoices):\n+    \"\"\"CSV summary: header row, then one row per invoice.\"\"\"\n+    out = io.StringIO()\n+    writer = csv.writer(out)\n+    writer.writerow([\"invoice_id\", \"customer\", \"total\", \"paid\"])\n+    for r in summarize(invoices):\n+        writer.writerow(\n+            [\n+                r[\"invoice_id\"],\n+                r[\"customer\"],\n+                format_cents(r[\"total_cents\"]),\n+                \"yes\" if r[\"paid\"] else \"no\",\n+            ]\n+        )\n+    return out.getvalue()\n+\n+\n def format_summary_v1(invoices):\n     \"\"\"Summary layout from before 1.3: id and total only.\"\"\"\n     return \"\\n\".join(\n",
+  "visible_pass": true,
+  "hidden_pass": true,
+  "hidden_results": {
+   "test_compact_format_by_name": "ok",
+   "test_compat_alias": "ok",
+   "test_csv_empty": "ok",
+   "test_csv_rows": "ok",
+   "test_text_summary_unchanged": "ok"
+  },
+  "public_added": [],
+  "public_removed": [],
+  "signature_changed": [],
+  "private_removed": [],
+  "private_added": [],
+  "classes_added": [],
+  "t1_signature": "def(invoices)",
+  "t1_compat_alias_kept": true,
+  "t1_v1_kept": true,
+  "t1_legacy_row_removed": false,
+  "t1_check_rows_removed": false,
+  "t1_plugins_touched": false,
+  "t1_uses_csv_module": true,
+  "t1_report_mentions": []
+ }
+]

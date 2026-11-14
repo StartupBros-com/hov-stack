@@ -1,8 +1,9 @@
 # Upstream provenance
 
 Source: https://github.com/cursor/plugins/tree/main/pstack/skills/maintain-verification-skill
-Commit: 1f84288b2c047b6d39952da23f51cf486f3b2f7a (pstack 0.15.2)
-Date: 2026-09-19
+path: pstack/skills/maintain-verification-skill
+Commit: 6714489fa233263f00e419f6cfc4759b07c81056 (the last upstream change to this path; same content at 1f84288b, pstack 0.15.2, where it was ported, and at 3dbd22ff, pstack 0.15.36, where it was re-vetted 2026-11-14 with no upstream change)
+Date: 2026-07-12 (ported 2026-09-19)
 License: MIT (verbatim upstream `LICENSE` copied beside this file; upstream
 copyright holder Lauren Tan)
 
