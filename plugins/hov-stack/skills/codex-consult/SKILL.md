@@ -1,6 +1,6 @@
 ---
 name: codex-consult
-description: Ask Codex (GPT-5.5) for a read-only second opinion on the current problem, then synthesize agree/disagree against Claude's own view. Advisory only — Codex never edits files.
+description: Ask Codex, on the operator-selected model, for a read-only second opinion on the current problem, then synthesize agree/disagree against Claude's own view. Advisory only — Codex never edits files.
 argument-hint: The question or decision to get a second opinion on (e.g. "is this auth refactor sound?", "why does X deadlock?")
 disable-model-invocation: true
 allowed-tools: Bash
@@ -8,7 +8,7 @@ allowed-tools: Bash
 
 # Codex Consult — cross-model second opinion
 
-Get an independent read from **Codex / GPT-5.5** on `$ARGUMENTS`, then return a
+Get an independent read from **Codex** (the operator-selected model) on `$ARGUMENTS`, then return a
 synthesis — not a raw forward. This is the lightweight, stateless counterpart to
 the codex second-opinion pass inside `/ce-code-review` (diff review). Use it
 mid-conversation when you want a fast, divergent opinion before committing to an
