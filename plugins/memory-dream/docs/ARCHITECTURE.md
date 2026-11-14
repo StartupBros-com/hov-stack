@@ -70,8 +70,10 @@ takes the plan plus a subagent's drafts and turns them into a **patch set**:
 it schema-validates every proposal, confines every destination path, retargets
 same-project inbound wikilinks to survivors, dry-run-audits every resulting
 file, and writes `manifest.json`, per-proposal diffs, `report.json`, and a
-`results/` directory of plain files — the patch-set directory is the _only_
-surface allowed to hold memory bodies outside live memory itself.
+`results/` directory of plain files — apart from the session scratch's working
+JSON (the plan, per-cluster shards and drafts carry note bodies), the
+patch-set directory is the _only_ surface allowed to hold memory bodies
+outside live memory itself.
 `memory-dream archive` does a separate, fully deterministic operation: moving
 settled index entries to a cold, never-auto-loaded file without touching any
 note body (see "Archive" below).

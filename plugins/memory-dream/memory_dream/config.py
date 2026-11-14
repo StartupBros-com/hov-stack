@@ -169,7 +169,11 @@ def eval_home() -> Path:
 
 
 def scratch_dir() -> Path:
-    """Session scratch for plan/drafts/selection JSON. Never memory bodies."""
+    """Session scratch for the pass's working JSON (plan, shards, drafts, selection).
+
+    The plan, shards and drafts carry note bodies; results persist only in the
+    patch-set directory under pass_root().
+    """
     env = os.environ.get(_ENV_PREFIX + "SCRATCH")
     if env:
         p = Path(env).expanduser()
