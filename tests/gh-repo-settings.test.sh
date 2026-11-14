@@ -13,7 +13,7 @@ set -uo pipefail
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)   # repo root
 # GH_REPO_SETTINGS lets the inverted-state proof point at a doctored copy.
 SCRIPT="${GH_REPO_SETTINGS:-$HERE/scripts/gh-repo-settings.sh}"
-TMP=$(mktemp -d /tmp/gh-repo-settings.XXXXXX)
+TMP=$(mktemp -d /tmp/gh-repo-settings.XXXXXX) || exit 1
 trap 'rm -rf "$TMP"' EXIT
 export HOME="$TMP/home"; mkdir -p "$HOME"
 

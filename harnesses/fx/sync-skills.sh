@@ -81,7 +81,7 @@ copy_skill() {
   # immune to --delete. rsync --delete is safe here because staging is a fresh
   # empty directory we just created.
   local staging changes rc
-  staging=$(mktemp -d "$FX_SKILLS/.${name}.staging.XXXXXX") 2>/dev/null
+  staging=$(mktemp -d "$FX_SKILLS/.${name}.staging.XXXXXX") 2>/dev/null || staging=""
   if [ -z "$staging" ]; then
     echo "  FAIL $name (cannot create staging dir)" >&2
     return 1
@@ -109,7 +109,7 @@ copy_skill() {
   # .<name>.old.* dir that recover_leftovers() restores on the next run.
   local old=""
   if [ -d "$dst" ]; then
-    old=$(mktemp -d "$FX_SKILLS/.${name}.old.XXXXXX" 2>/dev/null)
+    old=$(mktemp -d "$FX_SKILLS/.${name}.old.XXXXXX" 2>/dev/null) || old=""
     if [ -z "$old" ] || ! mv -T "$dst" "$old" 2>/dev/null; then
       [ -n "$old" ] && rmdir "$old" 2>/dev/null
       rm -rf "$staging"

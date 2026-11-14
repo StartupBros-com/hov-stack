@@ -10,7 +10,7 @@ PASS=0
 FAIL=0
 
 setup() {
-  WORK="$(mktemp -d)"
+  WORK="$(mktemp -d)" || exit 1
   STUB_SCENARIO="$WORK/scenario"
   STUB_CALLS="$WORK/calls"
   STUB_SLEEPS="$WORK/sleeps"

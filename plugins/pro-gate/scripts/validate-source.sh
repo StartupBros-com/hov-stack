@@ -11,7 +11,7 @@ find . -path './.git' -prune -o -name '*.sh' -exec shellcheck --norc --severity=
 # sourced lib/pro-gate-lib.sh could start on a Mac (#295). Parse every shell file with bash 3.2.57.
 # The suites under tests/ are left out because they need bash 4 or later anyway.
 BASH32_IMAGE='bash:3.2@sha256:0fd7cb8499c63a3c9345e7088a9cd83bb69f6e895e83833859aff838a0312091'
-shells="$(mktemp)"
+shells="$(mktemp)" || exit 1
 trap 'rm -f "$shells"' EXIT
 find . -path './.git' -prune -o -path './tests' -prune -o -name '*.sh' -print0 > "$shells"
 if [ -s "$shells" ]; then

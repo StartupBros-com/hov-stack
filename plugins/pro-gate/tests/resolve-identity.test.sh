@@ -14,7 +14,7 @@ OUT="$(env -u SKILL_ROOT -u PRO_GATE_SKILL_ROOT -u CLAUDE_PLUGIN_ROOT \
   || fail "resolver output must carry the five identity fields"
 pass "scrubbed-env by-path invocation self-locates"
 
-TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
+TMP="$(mktemp -d)" || exit 1; trap 'rm -rf "$TMP"' EXIT
 mkdir -p "$TMP/scripts"
 cp "$ROOT/skills/pro-gate/scripts/resolve-identity.sh" "$TMP/scripts/"
 if env -u SKILL_ROOT -u PRO_GATE_SKILL_ROOT -u CLAUDE_PLUGIN_ROOT \

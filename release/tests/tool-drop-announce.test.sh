@@ -9,7 +9,7 @@ WORKFLOW="$ROOT/.github/workflows/hov-tool-drop-announce.yml"
 HELPER="$ROOT/release/scripts/tool-drop-announce.sh"
 GUARD="$ROOT/release/scripts/latest-stable-release.sh"
 FIXED_ENDPOINT='https://members.startupbros.com/api/internal/ops/tool-releases'
-TMP="$(mktemp -d)"
+TMP="$(mktemp -d)" || exit 1
 trap 'rm -rf "$TMP"' EXIT
 
 pass_count=0

@@ -37,7 +37,7 @@ for s in "$JAKUB" "$PSTACK" "$EXPLAINER"; do
 done
 [ -f "$CHECK" ] || { echo "FAIL: shared validator not found at $CHECK" >&2; exit 1; }
 
-TMP=$(mktemp -d)
+TMP=$(mktemp -d) || exit 1
 trap 'rm -rf "$TMP"' EXIT
 
 # --- stub claude: reads the prompt on stdin, writes a JSON envelope ---

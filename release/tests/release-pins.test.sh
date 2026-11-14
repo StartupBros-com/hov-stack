@@ -19,7 +19,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 SCRIPT="${PINS_SCRIPT:-$ROOT/release/scripts/release-pins.sh}"
 REAL_IR="$ROOT/plugins/hov-stack/skills/hov-setup/scripts/install-release.sh"
 IR_REL='plugins/hov-stack/skills/hov-setup/scripts/install-release.sh'
-TMP="$(mktemp -d)"
+TMP="$(mktemp -d)" || exit 1
 # shellcheck disable=SC2329  # invoked by the EXIT trap
 cleanup() { chmod -R u+w "$TMP" 2>/dev/null || true; rm -rf "$TMP"; }
 trap cleanup EXIT
@@ -171,7 +171,7 @@ mkrelease() { # tool version
   sums="$dir/$(sumsname "$t" "$v")"; : > "$sums"
   while IFS='|' read -r plat asset members; do
     [ -n "$plat" ] || continue
-    stage=$(mktemp -d "$TMP/stage.XXXXXX")
+    stage=$(mktemp -d "$TMP/stage.XXXXXX") || exit 1
     if [ "$plat" = "${OMIT_PLAT:-}" ]; then
       echo decoy > "$stage/decoy"
     else

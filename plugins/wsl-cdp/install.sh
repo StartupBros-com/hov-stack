@@ -72,7 +72,7 @@ if [ "$LOCAL" = 1 ]; then
   info "installing from local files in $SRC_DIR"
   INSTALL_SOURCE="$SRC_DIR"
 else
-  TMP="$(mktemp -d)"
+  TMP="$(mktemp -d)" || exit 1
   cleanup() { rm -rf "$TMP"; }
   trap cleanup EXIT
 

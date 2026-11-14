@@ -10,7 +10,7 @@
 set -uo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 SCAN=$ROOT/scripts/public-safety-scan.sh
-WORK=$(mktemp -d "${TMPDIR:-/tmp}/public-safety-test.XXXXXX")
+WORK=$(mktemp -d "${TMPDIR:-/tmp}/public-safety-test.XXXXXX") || exit 1
 trap 'rm -rf "$WORK"' EXIT
 fails=0
 fail() { echo "FAIL: $*"; fails=$((fails + 1)); }

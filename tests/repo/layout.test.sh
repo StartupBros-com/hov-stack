@@ -42,7 +42,7 @@ HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
 REPO=$(cd "$HERE/../.." && pwd -P)
 ROOT=${1:-$REPO}
 FIXTURE=$REPO/tests/fixtures/marketplace-tree.txt
-WORK=$(mktemp -d)
+WORK=$(mktemp -d) || exit 1
 trap 'rm -rf "$WORK"' EXIT
 mkdir "$WORK/home"
 # shellcheck source=/dev/null

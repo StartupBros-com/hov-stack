@@ -3,7 +3,7 @@
 set -euo pipefail
 
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-TMP=$(mktemp -d)
+TMP=$(mktemp -d) || exit 1
 trap 'rm -rf "$TMP"' EXIT
 export XDG_CONFIG_HOME=$TMP/config
 export DCG_BIN=${DCG_BIN:-$HOME/.local/bin/dcg}

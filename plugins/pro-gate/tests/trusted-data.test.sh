@@ -2,7 +2,7 @@
 # Real independent git roots: expectations/helpers live only in the trusted tree.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-TDIR="$(mktemp -d)"
+TDIR="$(mktemp -d)" || exit 1
 trap 'rm -rf "$TDIR"' EXIT
 fail() { echo "FAIL: $*" >&2; exit 1; }
 commit() {

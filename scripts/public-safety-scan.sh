@@ -71,7 +71,7 @@ if [ -n "$REV" ]; then
   SHA=$(git -C "$ROOT" rev-parse --verify --quiet "$REV^{commit}") || { echo "no such revision: $REV" >&2; exit 2; }
 fi
 
-WORK=$(mktemp -d "${TMPDIR:-/tmp}/public-safety.XXXXXX")
+WORK=$(mktemp -d "${TMPDIR:-/tmp}/public-safety.XXXXXX") || exit 1
 trap 'rm -rf "$WORK"' EXIT
 
 # ---- the private-token list -----------------------------------------------------------

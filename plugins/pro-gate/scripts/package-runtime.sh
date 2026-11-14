@@ -15,7 +15,7 @@ if [ "$VERSION" != "$MANIFEST_VERSION" ] || [ "$VERSION" != "$TAG_VERSION" ]; th
 fi
 
 mkdir -p "$OUT"
-STAGE="$(mktemp -d "${TMPDIR:-/tmp}/pro-gate-package.XXXXXX")"
+STAGE="$(mktemp -d "${TMPDIR:-/tmp}/pro-gate-package.XXXXXX")" || exit 1
 trap 'rm -rf "$STAGE"' EXIT
 PKG="$STAGE/pro-gate-runtime-$VERSION"
 mkdir -p "$PKG/bin" "$PKG/daemon" "$PKG/lib"

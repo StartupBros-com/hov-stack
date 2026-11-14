@@ -142,7 +142,7 @@ fi
 # \uXXXX escaping and --indent 2 its layout, so the diff is only the fields that
 # actually changed; a formatting rewrite here would touch every plugin's card and
 # bury the real change.
-tmp="$(mktemp)"
+tmp="$(mktemp)" || exit 1
 cp "$MANIFEST" "$tmp"
 while IFS=$'\t' read -r name version tag rel_id sha _draft; do
   [ -n "$name" ] || continue

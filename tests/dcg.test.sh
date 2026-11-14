@@ -14,7 +14,7 @@ set -euo pipefail
 
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 tmp_base=${TMPDIR:-/tmp}
-work=$(mktemp -d "${tmp_base%/}/dcg-suites.XXXXXX")
+work=$(mktemp -d "${tmp_base%/}/dcg-suites.XXXXXX") || exit 1
 cleanup() {
     case "$work" in
         "${tmp_base%/}"/dcg-suites.*) rm -rf -- "$work" ;;

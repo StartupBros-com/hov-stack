@@ -62,7 +62,7 @@ SCRIPT="$HERE/scripts/dispatcher-ledger.sh"
 [ -f "$SCRIPT" ] || { echo "FAIL: not found: $SCRIPT" >&2; exit 1; }
 bash -n "$SCRIPT" || { echo "FAIL: $SCRIPT does not parse" >&2; exit 1; }
 
-TMP=$(mktemp -d)
+TMP=$(mktemp -d) || exit 1
 trap 'rm -rf "$TMP"' EXIT
 export HOME="$TMP/home"; mkdir -p "$HOME"
 
