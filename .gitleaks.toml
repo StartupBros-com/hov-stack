@@ -34,6 +34,7 @@ paths = [
   '''tests/test_resend_cli\.py''',
   '''tests/test_supabase_api\.py''',
   '''tests/vastai\.test\.sh''',
+  '''tests/supabase-migration-list\.test\.sh''',
 ]
 # Matched against the secret, not the file. pro-gate's engine test keys its scratch review
 # homes by fake round keys like acme-exhausted-96 in *_KEY= variables, which the

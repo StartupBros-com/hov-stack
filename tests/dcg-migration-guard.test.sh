@@ -127,6 +127,7 @@ want DENY "cat <migration> | psql"         "cat $MIG | psql \"\$POSTGRES_URL_NON
 # --- and the ordinary work that must stay frictionless ----------------------
 want ALLOW "db push --dry-run"             "supabase db push --linked --dry-run"
 want ALLOW "migration list"                "supabase migration list --linked"
+want ALLOW "migration list, JSON"          "supabase migration list --linked --output-format json"
 want ALLOW "migration new"                 "supabase migration new add_widget"
 want ALLOW "db diff"                       "supabase db diff --linked"
 want ALLOW "gen types"                     "supabase gen types typescript --linked"
