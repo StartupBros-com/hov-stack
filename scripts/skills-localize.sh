@@ -59,6 +59,12 @@
 #   pristine copies go back wherever the live file still matches what apply wrote, jsm
 #   upgrades a plain skill, and ExecStopPost re-applies. A file edited by hand after apply
 #   is never overwritten: apply and check report it as DRIFT, and unapply exits 4 naming it.
+#   Saved state is synced to disk before it is renamed into place, and each pristine copy's
+#   own sha256 is saved beside it (#593): a copy that no longer matches (a crash, a full
+#   disk) is an ERROR naming it, never a merge conflict, and unapply exits 5 instead of
+#   restoring it. State saved before that, or by an older copy of this script, has no sums:
+#   there only a missing or empty copy, or one holding a NUL byte, counts as damaged, and
+#   apply records the sums once a run shows the saved copies reproduce every live file.
 #   Where upstream changed the same lines as an overlay, our side wins and the file is
 #   listed in $SKILLS_LOCALIZE_STATE/conflicts, which the weekly jsm digest names; `rebase`
 #   (from a worktree) then moves that overlay's base forward.
@@ -101,8 +107,9 @@
 #                         file was edited by hand (nothing changed), 3 when the skill has an
 #                         overlay but no saved pristine copy, or still holds pre-#2091 overlay
 #                         text (whose added files it removes): only `jsm install --force`
-#                         restores either. 2 on a bad name, 1 on an error (state saved for
-#                         another tree, a failed write).
+#                         restores either. 5 when a saved pristine copy is damaged or missing
+#                         (nothing changed; forget, `jsm install --force`, then apply). 2 on a
+#                         bad name, 1 on an error (state saved for another tree, a failed write).
 #   forget <skill>...     drop a skill's saved state; the next apply treats the live files
 #                         as pristine
 #   rebase <skill> <ver>  from a worktree's copy of this script: make the installed
@@ -529,7 +536,11 @@ reap_broken_links() {
 #                       wrote<TAB>file|absent (whether pristine had the file). After a
 #                       failed write the hash field also lists, space-separated, what the
 #                       last apply wrote, and a file no longer layered keeps its line
-#   pristine/<skill>/   the pristine copies
+#   pristine/<skill>/   the pristine copies, and .skills-localize.sums: a header line, then
+#                       rel<TAB>sha256 of each copy as saved. It lives in the same directory
+#                       so that any write of the copies, by any version of this script,
+#                       replaces or removes it with them. Without it, only a missing or
+#                       empty copy, or one holding a NUL byte, is known to be damaged
 #   migrated/<skill>    apply has layered this overlay skill here, so a live file equal to
 #                       one of its overlays is upstream's, not a pre-#2091 copy
 # $STATE/conflicts lists "<label> <skill>/<rel>" where our side won a conflict.
@@ -538,6 +549,12 @@ LABELS=(claude codex agents)
 tree_root() { case "$1" in claude) echo "$SKILLS" ;; codex) echo "$CODEX_SKILLS" ;; agents) echo "$AGENTS_SKILLS" ;; esac; }
 note_file() { case "$1" in claude) echo "$NOTE_CLAUDE" ;; codex|agents) echo "$NOTE_CODEX" ;; esac; }
 sha_of()    { sha256sum "$1" | awk '{print $1}'; }
+# durable <path>... — fsync files and directories (GNU sync). ext4's delayed allocation
+# can put a rename on disk before the data of the new file it moves, so state is synced
+# before it is renamed into place and live files before the state that names them (#593).
+durable()   { sync -- "$@"; }
+SUMS_FILE=.skills-localize.sums
+SUMS_HEADER='# skills-localize pristine sha256 v1'
 
 # take_lock exclusive|shared — dotup and the jsm unit can run this at the same time. A
 # lock the caller holds comes in as SKILLS_LOCALIZE_LOCK_FD: locking a new open of the file
@@ -658,8 +675,8 @@ report_shadowed() {
   done
 }
 
-declare -A MH=() MK=() XK=() EK=() CONF=() CARRY=() LEG_SHA=() LEG_KIND=() LEG_SKILL=()
-RELS=(); FOREIGN=(); CONFLICT_LINES=(); LEGACY_HITS=(); NOTED=0; W=""
+declare -A MH=() MK=() MP=() XK=() EK=() CONF=() CARRY=() LEG_SHA=() LEG_KIND=() LEG_SKILL=()
+RELS=(); FOREIGN=(); DAMAGED=(); CONFLICT_LINES=(); LEGACY_HITS=(); NOTED=0; SUMS=0; STAGE_REL=""; W=""
 
 # load_legacy — skills-legacy-overlays.txt into LEG_SHA/LEG_KIND keyed by skill/rel. A
 # path may be listed once per old overlay version, so LEG_SHA holds every listed hash,
@@ -716,13 +733,56 @@ legacy_drift() {
 
 load_manifest() {
   local f="$STATE/$1/manifest/$2" rel h k
-  MH=(); MK=()
+  MH=(); MK=(); MP=(); SUMS=0
   [ -f "$f" ] || return 1
   while IFS=$'\t' read -r rel h k; do
     valid_rel "$rel" || { note "WARN: ignoring bad path '$rel' in $f"; continue; }
     MH[$rel]=$h; MK[$rel]=$k
   done < "$f"
+  load_sums "$1" "$2"
   return 0
+}
+
+# load_sums <label> <skill> — each saved copy's own hash into MP. SUMS=0 when the saved
+# state has no sums file: saved before #593, or rewritten by an older copy of this script,
+# which replaces the whole pristine directory and so never leaves sums that do not match.
+load_sums() {
+  local f="$STATE/$1/pristine/$2/$SUMS_FILE" rel h
+  [ -f "$f" ] || return 0
+  SUMS=1
+  while IFS=$'\t' read -r rel h; do
+    case "$rel" in ""|\#*) continue ;; esac
+    MP[$rel]=$h
+  done < "$f"
+}
+
+# copy_damaged <rel> <copy> — the saved pristine copy of a file recorded as present is
+# missing, or no longer holds the bytes apply saved. Without sums, only what a crash leaves
+# and no layered file is can be told: a missing or empty copy, or one holding a NUL byte.
+copy_damaged() {
+  [ "${MK[$1]:-}" = file ] || return 1
+  if [ "$SUMS" = 1 ]; then
+    [ -f "$2" ] && [ -n "${MP[$1]:-}" ] && [ "${MP[$1]}" = "$(sha_of "$2")" ] && return 1
+    return 0
+  fi
+  if [ -f "$2" ] && [ -s "$2" ]; then
+    local kept
+    kept=$(tr -d '\000' < "$2" | wc -c) && [ "$kept" -eq "$(wc -c < "$2")" ] && return 1
+  fi
+  return 0
+}
+
+damaged_error() {
+  note "ERROR: the saved pristine copy of $1 $2/$3 is damaged or missing ($STATE/$1/pristine/$2/$3 is not the file apply saved) — $2 left alone. To recover: skills-localize.sh forget $2 && jsm install $2 --force && skills-localize.sh apply"
+}
+
+# live_parent <skilldir> <rel> — the nearest directory of rel that exists, to sync after a
+# write or removal under it.
+live_parent() {
+  local d
+  d=$(dirname "$1/$2")
+  while [ ! -d "$d" ] && [ "$d" != "$1" ]; do d=$(dirname "$d"); done
+  printf '%s\n' "$d"
 }
 
 # recorded_as <rel> <file> — the file is one of the outputs the manifest records for rel.
@@ -744,45 +804,56 @@ recorded_as() {
 #                                          pre-#2091 whole-file copy, whose pristine is the
 #                                          overlay's base; any other match is upstream
 #                                          adopting the overlay
-# Returns 2 when any file is foreign (FOREIGN names them).
+# A recorded file whose saved copy is damaged (copy_damaged) is damaged whatever the live
+# file holds: a live file equal to it cannot be shown to be pristine.
+# Returns 3 when any saved copy is damaged (DAMAGED names them), else 2 when any file is
+# foreign (FOREIGN names them), 1 when a working copy could not be written (STAGE_REL).
 compute_skill() {
   local label="$1" root="$2" skill="$3" noteline="$4"
   local dir="$root/$skill" rel live copy o b c f pr
-  XK=(); EK=(); CONF=(); RELS=(); FOREIGN=(); NOTED=0
-  W="$WORK/$label/$skill"; rm -rf "$W"; mkdir -p "$W/x" "$W/m" "$W/e"
+  XK=(); EK=(); CONF=(); RELS=(); FOREIGN=(); DAMAGED=(); NOTED=0; STAGE_REL=""
+  W="$WORK/$label/$skill"; rm -rf "$W"
+  mkdir -p "$W/x" "$W/m" "$W/e" || { STAGE_REL=.; return 1; }
   load_manifest "$label" "$skill"
   while IFS= read -r rel; do
     [ -n "$rel" ] && RELS+=("$rel")
   done < <({ overlay_rels "$skill"; printf '%s\n' "${!MH[@]}"; echo SKILL.md; } | LC_ALL=C sort -u)
 
+  # Every copy into $W is checked: a missing merged copy reads as "remove the live file".
   for rel in "${RELS[@]}"; do
     pr=$(patch_root "$skill" "$rel")
     live="$dir/$rel"; copy="$STATE/$label/pristine/$skill/$rel"; o="$pr/$skill/$rel"
-    mkdir -p "$(dirname "$W/x/$rel")" "$(dirname "$W/m/$rel")" "$(dirname "$W/e/$rel")"
+    mkdir -p "$(dirname "$W/x/$rel")" "$(dirname "$W/m/$rel")" "$(dirname "$W/e/$rel")" ||
+      { STAGE_REL=$rel; return 1; }
     if [ -L "$live" ]; then
       XK[$rel]=foreign; FOREIGN+=("$rel")
     elif [ -n "${MH[$rel]:-}" ]; then
-      if recorded_as "$rel" "$live" && { [ "${MK[$rel]}" = absent ] || [ -f "$copy" ]; }; then
-        if [ "${MK[$rel]}" = file ]; then cp "$copy" "$W/x/$rel"; XK[$rel]="file"
+      if copy_damaged "$rel" "$copy"; then
+        XK[$rel]=damaged; DAMAGED+=("$rel")
+      elif recorded_as "$rel" "$live" && { [ "${MK[$rel]}" = absent ] || [ -f "$copy" ]; }; then
+        if [ "${MK[$rel]}" = file ]; then cp "$copy" "$W/x/$rel" || { STAGE_REL=$rel; return 1; }; XK[$rel]="file"
         else XK[$rel]=absent; fi
       elif [ "${MK[$rel]}" = absent ] && [ ! -e "$live" ]; then
         XK[$rel]=absent
       elif [ "${MK[$rel]}" = file ] && [ -f "$live" ] && cmp -s "$live" "$copy"; then
-        cp "$live" "$W/x/$rel"; XK[$rel]="file"
+        cp "$live" "$W/x/$rel" || { STAGE_REL=$rel; return 1; }; XK[$rel]="file"
       else
         XK[$rel]=foreign; FOREIGN+=("$rel")
       fi
     elif [ -f "$o" ] && [ -f "$live" ] && ! migrated "$label" "$skill" && cmp -s "$live" "$o" &&
          legacy_copy "$skill" "$rel" "$live"; then
-      if [ -f "$pr/$skill/.base/$rel" ]; then cp "$pr/$skill/.base/$rel" "$W/x/$rel"; XK[$rel]="file"
+      if [ -f "$pr/$skill/.base/$rel" ]; then
+        cp "$pr/$skill/.base/$rel" "$W/x/$rel" || { STAGE_REL=$rel; return 1; }; XK[$rel]="file"
       else XK[$rel]=absent; fi
     elif [ -f "$live" ]; then
-      { [ "$rel" = SKILL.md ] && note_strip "$live" "$W/x/$rel"; } || cp "$live" "$W/x/$rel"
+      { [ "$rel" = SKILL.md ] && note_strip "$live" "$W/x/$rel"; } || cp "$live" "$W/x/$rel" ||
+        { STAGE_REL=$rel; return 1; }
       XK[$rel]="file"
     else
       XK[$rel]=absent
     fi
   done
+  [ "${#DAMAGED[@]}" -eq 0 ] || return 3
   [ "${#FOREIGN[@]}" -eq 0 ] || return 2
 
   # The note goes on any skill whose pristine markdown names the vocabulary.
@@ -800,7 +871,7 @@ compute_skill() {
   for rel in "${RELS[@]}"; do
     pr=$(patch_root "$skill" "$rel"); o="$pr/$skill/$rel"; b="$pr/$skill/.base/$rel"
     if [ -f "$o" ]; then
-      cp "$o" "$W/m/$rel"
+      cp "$o" "$W/m/$rel" || { STAGE_REL=$rel; return 1; }
       if [ "${XK[$rel]}" = absent ]; then
         [ -f "$b" ] && CONF[$rel]="upstream no longer ships this file"
       elif [ ! -f "$b" ]; then
@@ -811,22 +882,22 @@ compute_skill() {
         git merge-file -p "$o" "$b" "$W/x/$rel" > /dev/null 2>&1; c=$?
         if [ "$c" -ge 128 ] || ! git merge-file -p --ours "$o" "$b" "$W/x/$rel" > "$W/m/$rel" 2>/dev/null; then
           note "WARN: could not merge $label $skill/$rel — kept our copy"
-          cp "$o" "$W/m/$rel"; c=1
+          cp "$o" "$W/m/$rel" || { STAGE_REL=$rel; return 1; }; c=1
         fi
         [ "$c" -eq 0 ] || CONF[$rel]="upstream changed lines the overlay also changes"
       fi
     elif [ "${XK[$rel]}" = file ]; then
-      cp "$W/x/$rel" "$W/m/$rel"
+      cp "$W/x/$rel" "$W/m/$rel" || { STAGE_REL=$rel; return 1; }
     fi
     if [ ! -f "$W/m/$rel" ]; then
       EK[$rel]=absent
     elif [ "$rel" = SKILL.md ] && [ "$NOTED" = 1 ]; then
       note_insert "$W/m/$rel" "$W/e/$rel" "$noteline" || {
         say "WARN: $label $skill/SKILL.md has no frontmatter — local-tooling note not added"
-        cp "$W/m/$rel" "$W/e/$rel"; }
+        cp "$W/m/$rel" "$W/e/$rel" || { STAGE_REL=$rel; return 1; }; }
       EK[$rel]="file"
     else
-      cp "$W/m/$rel" "$W/e/$rel"; EK[$rel]="file"
+      cp "$W/m/$rel" "$W/e/$rel" || { STAGE_REL=$rel; return 1; }; EK[$rel]="file"
     fi
   done
   return 0
@@ -852,23 +923,48 @@ put_file() {
 }
 
 # write_state <label> <root> <skill> [manifest] — install a manifest ($W/manifest by
-# default) and its pristine copies from $W/x; an empty manifest drops the skill's state.
+# default) and its pristine copies from $W/x, with their sums; an empty manifest drops the
+# skill's state. Everything new is on disk before the renames, and the renames before the
+# caller goes on to write the live files this state guards. Returns 2 when the renames
+# landed but could not be synced: the new state is in place, not known to be on disk.
 write_state() {
-  local label="$1" skill="$3" mf="${4:-$W/manifest}" sd="$STATE/$1" rel h k
+  local label="$1" skill="$3" mf="${4:-$W/manifest}" sd="$STATE/$1" rel h k ps new
+  local -a flush=()
   mkdir -p "$sd/manifest" "$sd/pristine" || return 1
-  [ -f "$sd/root" ] || printf '%s\n' "$2" > "$sd/root" || return 1
+  if [ ! -f "$sd/root" ]; then
+    printf '%s\n' "$2" > "$sd/root" && durable "$sd/root" "$sd" || return 1
+  fi
   if [ ! -s "$mf" ]; then
     rm -rf "${sd:?}/pristine/$skill" "$sd/manifest/$skill"; return 0
   fi
-  rm -rf "$sd/pristine/.$skill.new"; mkdir -p "$sd/pristine/.$skill.new" || return 1
+  new="$sd/pristine/.$skill.new"
+  rm -rf "$new"; mkdir -p "$new" || return 1
+  printf '%s\n' "$SUMS_HEADER" > "$new/$SUMS_FILE" || return 1
   while IFS=$'\t' read -r rel h k; do
     [ "$k" = file ] || continue
-    mkdir -p "$(dirname "$sd/pristine/.$skill.new/$rel")" && cp "$W/x/$rel" "$sd/pristine/.$skill.new/$rel" || return 1
+    mkdir -p "$(dirname "$new/$rel")" && cp "$W/x/$rel" "$new/$rel" && ps=$(sha_of "$new/$rel") &&
+      printf '%s\t%s\n' "$rel" "$ps" >> "$new/$SUMS_FILE" || return 1
   done < "$mf"
   cp "$mf" "$sd/manifest/.$skill.new" || return 1
+  mapfile -d '' flush < <(find "$new" -print0) || return 1
+  durable "${flush[@]}" "$sd/manifest/.$skill.new" || return 1
   rm -rf "${sd:?}/pristine/$skill" &&
-    mv "$sd/pristine/.$skill.new" "$sd/pristine/$skill" &&
-    mv "$sd/manifest/.$skill.new" "$sd/manifest/$skill"
+    mv "$new" "$sd/pristine/$skill" &&
+    mv "$sd/manifest/.$skill.new" "$sd/manifest/$skill" || return 1
+  durable "$sd/pristine" "$sd/manifest" || return 2
+}
+
+# record_sums <label> <skill> — sums for saved state that has none. The caller has just
+# shown that the saved copies reproduce every live file, so they are taken as intact.
+record_sums() {
+  local p="$STATE/$1/pristine/$2" rel ps
+  mkdir -p "$p" || return 1
+  printf '%s\n' "$SUMS_HEADER" > "$p/$SUMS_FILE.new" || return 1
+  while IFS= read -r rel; do
+    [ -n "$rel" ] && [ "${MK[$rel]}" = file ] || continue
+    ps=$(sha_of "$p/$rel") && printf '%s\t%s\n' "$rel" "$ps" >> "$p/$SUMS_FILE.new" || return 1
+  done < <(printf '%s\n' "${!MK[@]}" | LC_ALL=C sort)
+  durable "$p/$SUMS_FILE.new" && mv -f "$p/$SUMS_FILE.new" "$p/$SUMS_FILE" && durable "$p"
 }
 
 # manifest_differs <new> <saved> — saving <new> would change the saved state.
@@ -907,7 +1003,14 @@ layer_skill() {
      ! grep -rEiq --include='*.md' --exclude-dir=node_modules -- "$VOCAB" "$dir" 2>/dev/null; then
     return 0
   fi
-  if ! compute_skill "$label" "$root" "$skill" "$noteline"; then
+  local crc=0
+  compute_skill "$label" "$root" "$skill" "$noteline" || crc=$?
+  if [ "$crc" -ne 0 ]; then
+    if [ "$crc" = 1 ]; then
+      note "ERROR: could not write the working copy of $label $skill/$STAGE_REL under $WORK — $skill left alone"
+      errors=1
+    fi
+    for rel in "${DAMAGED[@]}"; do damaged_error "$label" "$skill" "$rel"; errors=1; done
     for rel in "${FOREIGN[@]}"; do
       note "DRIFT: $label $skill/$rel was edited after skills-localize wrote it — left alone. To discard the edit and take upstream: skills-localize.sh forget $skill && jsm install $skill --force && skills-localize.sh apply"
     done
@@ -938,6 +1041,12 @@ layer_skill() {
     else [ -e "$live" ] || continue; fi
     towrite+=("$rel")
   done
+  # State with no sums (saved before #593, or by an older copy of this script) gets them
+  # once this run shows its copies reproduce every live file: nothing to write, no
+  # conflict, nothing new to record. check stays quiet about it.
+  local unsummed=0
+  [ "$SUMS" = 1 ] || [ ! -e "$old" ] || [ "${#towrite[@]}" -gt 0 ] || [ "${#CONF[@]}" -gt 0 ] ||
+    [ "$stale" = 1 ] || unsummed=1
 
   if [ "$MODE" = check ]; then
     for rel in "${towrite[@]}"; do note "DRIFT: $label $skill/$rel is not the localized copy (run apply)"; drift=1; done
@@ -951,31 +1060,58 @@ layer_skill() {
   if [ "$DRY" = 1 ]; then
     for rel in "${towrite[@]}"; do note "would localize ($label): $skill/$rel"; done
     [ "$stale" = 0 ] || note "would record $label layer state: $skill"
+    [ "$unsummed" = 0 ] || note "would record $label pristine sums: $skill"
     return 0
+  fi
+  if [ "$unsummed" = 1 ]; then
+    if record_sums "$label" "$skill"; then say "recorded $label pristine sums: $skill"
+    else note "ERROR: could not record $label pristine sums for '$skill'"; errors=1; fi
   fi
   # The transitional state goes first, so every file stays recognisable whichever writes
   # land: a new pristine copy is saved before the file it guards changes, and an old hash
   # or pristine copy stays until its file is written. Only once every write has landed
   # does the state become $W/manifest; otherwise a later run would take layered text it
   # no longer recognises as pristine, or as a hand edit.
-  if manifest_differs "$W/manifest.tx" "$old" && ! write_state "$label" "$root" "$skill" "$W/manifest.tx"; then
-    note "ERROR: could not save $label layer state for '$skill' — left unchanged"; errors=1; return 0
+  local wrc=0
+  if manifest_differs "$W/manifest.tx" "$old"; then
+    write_state "$label" "$root" "$skill" "$W/manifest.tx" || wrc=$?
+    case "$wrc" in
+      0) ;;
+      2) note "ERROR: saved $label layer state for '$skill' but could not sync it — its files left unchanged"; errors=1; return 0 ;;
+      *) note "ERROR: could not save $label layer state for '$skill' — left unchanged"; errors=1; return 0 ;;
+    esac
   fi
   local src verb failed=0
+  local -a flush=()
   for rel in "${towrite[@]}"; do
     if [ "${EK[$rel]}" = absent ]; then src=""; verb="removed"
     elif owned "$rel"; then src="$W/e/$rel"; verb="localized"
     else src="$W/e/$rel"; verb="restored"; fi
-    if put_file "$dir" "$rel" "$src"; then say "$verb ($label): $skill/$rel"
+    if put_file "$dir" "$rel" "$src"; then
+      say "$verb ($label): $skill/$rel"
+      [ -z "$src" ] || flush+=("$dir/$rel")
+      flush+=("$(live_parent "$dir" "$rel")")
     else note "ERROR: could not write $label $skill/$rel"; errors=1; failed=1; fi
   done
+  # The final manifest forgets the old text, so the new text must be on disk first.
+  if [ "$failed" = 0 ] && [ "${#flush[@]}" -gt 0 ] && ! durable "${flush[@]}"; then
+    note "ERROR: could not sync the files written for $label $skill"; errors=1; failed=1
+  fi
   if manifest_differs "$W/manifest" "$old"; then
     if [ "$failed" = 1 ]; then note "ERROR: kept $label layer state for '$skill' until its files are restored"
-    elif ! write_state "$label" "$root" "$skill"; then note "ERROR: could not update $label layer state for '$skill'"; errors=1; fi
+    else
+      wrc=0; write_state "$label" "$root" "$skill" || wrc=$?
+      case "$wrc" in
+        0) ;;
+        2) note "ERROR: updated $label layer state for '$skill' but could not sync it"; errors=1 ;;
+        *) note "ERROR: could not update $label layer state for '$skill'"; errors=1 ;;
+      esac
+    fi
   fi
   # This tree has now been layered once, so its pre-#2091 copies are behind it.
   if has_patch "$skill" && ! migrated "$label" "$skill"; then
-    { mkdir -p "$STATE/$label/migrated" && : > "$STATE/$label/migrated/$skill"; } ||
+    { mkdir -p "$STATE/$label/migrated" && : > "$STATE/$label/migrated/$skill" &&
+        durable "$STATE/$label/migrated/$skill" "$STATE/$label/migrated"; } ||
       { note "ERROR: could not record $label $skill as migrated"; errors=1; }
   fi
 }
@@ -1013,10 +1149,11 @@ apply_layer() {
 
 # unapply_cmd <skill>... — pristine files back in every tree, all or nothing per skill.
 unapply_cmd() {
-  local skill label root dir rel live copy rc=0 foreign unrec mismatch
+  local skill label root dir rel live copy rc=0 foreign unrec mismatch damaged
+  local -a restored=()
   for skill in "$@"; do
     valid_skill_name "$skill" || { reject_name "$skill" "unapply"; [ "$rc" -ge 2 ] || rc=2; continue; }
-    foreign=0; unrec=0; mismatch=0
+    foreign=0; unrec=0; mismatch=0; damaged=0
     # Pass 1: classify every recorded file in every tree and change nothing.
     for label in "${LABELS[@]}"; do
       root=$(tree_root "$label"); dir="$root/$skill"
@@ -1025,7 +1162,10 @@ unapply_cmd() {
         { [ -d "$dir" ] && [ ! -L "$dir" ]; } || continue
         for rel in "${!MH[@]}"; do
           live="$dir/$rel"; copy="$STATE/$label/pristine/$skill/$rel"
-          if [ ! -L "$live" ] && recorded_as "$rel" "$live" &&
+          if copy_damaged "$rel" "$copy"; then
+            note "damaged: the saved pristine copy of $label $skill/$rel is not the file apply saved; not restoring it"
+            damaged=1
+          elif [ ! -L "$live" ] && recorded_as "$rel" "$live" &&
              { [ "${MK[$rel]}" = absent ] || [ -f "$copy" ]; }; then :
           elif [ "${MK[$rel]}" = absent ] && [ ! -e "$live" ]; then :
           elif [ "${MK[$rel]}" = file ] && [ -f "$live" ] && [ ! -L "$live" ] && cmp -s "$live" "$copy"; then :
@@ -1039,7 +1179,10 @@ unapply_cmd() {
         unrec=1
       fi
     done
-    if [ "$foreign" = 1 ]; then rc=4; continue; fi
+    # A damaged saved copy is no pristine to restore: change nothing (#593). It outranks a
+    # hand edit, as in apply, and the same recovery clears both.
+    if [ "$damaged" = 1 ]; then rc=5; continue; fi
+    if [ "$foreign" = 1 ]; then [ "$rc" -ge 4 ] || rc=4; continue; fi
     # State saved for another tree is a setup error, not a hand edit: change nothing.
     if [ "$mismatch" = 1 ]; then [ "$rc" -ge 1 ] || rc=1; continue; fi
     # Pass 2: restore. Nothing changed since pass 1 (we hold the lock).
@@ -1047,13 +1190,19 @@ unapply_cmd() {
       root=$(tree_root "$label"); dir="$root/$skill"
       if load_manifest "$label" "$skill"; then
         if [ -d "$dir" ] && [ ! -L "$dir" ]; then
+          restored=()
           for rel in "${!MH[@]}"; do
             live="$dir/$rel"; copy="$STATE/$label/pristine/$skill/$rel"
             recorded_as "$rel" "$live" || continue
-            if [ "${MK[$rel]}" = file ]; then put_file "$dir" "$rel" "$copy"; else put_file "$dir" "$rel" ""; fi ||
+            if [ "${MK[$rel]}" = file ]; then put_file "$dir" "$rel" "$copy" && restored+=("$live"); else put_file "$dir" "$rel" ""; fi ||
               { note "ERROR: could not restore $label $skill/$rel"; errors=1; [ "$rc" -ge 1 ] || rc=1; continue 3; }
+            restored+=("$(live_parent "$dir" "$rel")")
             say "unapplied ($label): $skill/$rel"
           done
+          # The saved state is the only record of what these files held: they go to disk
+          # before it is dropped.
+          [ "${#restored[@]}" -eq 0 ] || durable "${restored[@]}" ||
+            { note "ERROR: could not sync the restored files of $label $skill — its layer state kept"; errors=1; [ "$rc" -ge 1 ] || rc=1; continue 2; }
         fi
         rm -rf "${STATE:?}/$label/manifest/$skill" "$STATE/$label/pristine/$skill"
       elif [ -d "$dir" ] && [ ! -L "$dir" ] && legacy_hits "$label" "$dir" "$skill"; then
@@ -1107,9 +1256,14 @@ rebase_cmd() {
     return 4
   fi
   noteline=$(note_line claude) || noteline=""
-  if ! compute_skill claude "$SKILLS" "$skill" "$noteline"; then
-    note "ERROR: hand-edited files in $skill: ${FOREIGN[*]} — resolve them first"; return 4
-  fi
+  local crc=0
+  compute_skill claude "$SKILLS" "$skill" "$noteline" || crc=$?
+  case "$crc" in
+    0) ;;
+    1) note "ERROR: could not write the working copy of $skill/$STAGE_REL under $WORK"; return 1 ;;
+    3) for rel in "${DAMAGED[@]}"; do damaged_error claude "$skill" "$rel"; done; return 5 ;;
+    *) note "ERROR: hand-edited files in $skill: ${FOREIGN[*]} — resolve them first"; return 4 ;;
+  esac
   while IFS= read -r rel; do
     [ -n "$rel" ] || continue
     pr=$(patch_root "$skill" "$rel")
