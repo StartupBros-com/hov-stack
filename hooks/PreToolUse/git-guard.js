@@ -119,7 +119,7 @@ const DESTRUCTIVE_GIT = [
       reGit(String.raw`push\b`).test(c) &&
       (/(?:^|\s)--force(?![-\w])/.test(c) || /(?:^|\s)-[a-z]*f[a-z]*\b/.test(c)),
     why: 'can overwrite commits pushed by others',
-    safe: 'git push --force-with-lease (fails if the remote moved)',
+    safe: 'on a branch with an open PR, `gh pr update-branch` or merge `origin/<default>` and push normally; otherwise `git push --force-with-lease` (fails if the remote moved)',
   },
   {
     label: 'git push --delete/-d/:ref (remote branch deletion)',
@@ -141,7 +141,7 @@ const DESTRUCTIVE_GIT = [
       return !!tokens && tokens.slice(1).some((t) => t.startsWith('+'));
     },
     why: 'the leading `+` force-pushes that refspec regardless of --force, and can overwrite commits pushed by others',
-    safe: 'git push --force-with-lease (fails if the remote moved), or drop the `+` prefix',
+    safe: 'on a branch with an open PR, `gh pr update-branch` or merge `origin/<default>` and push normally; otherwise `git push --force-with-lease` (fails if the remote moved), or drop the `+` prefix',
   },
   {
     label: 'git clean -f',
