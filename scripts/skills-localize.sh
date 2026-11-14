@@ -110,10 +110,16 @@
 #                         overlay; review the diff before committing. Each file goes back to
 #                         the root it came from, so a host patch is rewritten in place, outside
 #                         this repository's review
+#   sources               print the real path of every input this script reads that exists
+#                         (this checkout, the skill folders, the overlay and its lists, the
+#                         skill-plugin folders), one per line. No lock, no state, no writes.
+#                         An input added above belongs in print_sources too
 #
 # WIRING
-#   1. dotup runs `skills-localize.sh apply` after install.sh (2026-09-02, #909;
-#      deliberately dotup and not sync.sh install, which can be run from a worktree)
+#   1. wt-done.sh runs this installed copy's `apply` once a merge is current in a
+#      checkout that holds one of its `sources` (2026-11-14). A worktree's copy never
+#      runs, since it would deploy that worktree's files. Until the 2026-11-02 switch,
+#      dotup ran apply after install.sh (#909)
 #   2. the jsm auto-update unit: the wrapper runs `unapply` per pending skill, and
 #      ExecStopPost (jsm-auto-update.service.d/zz-skills-localize.conf) runs `apply`
 #   3. harness-doctor runs `skills-localize.sh check` and warns on DRIFT
@@ -175,14 +181,14 @@ MARKER='> **Local tooling on this machine.**'
 # always earns the note.
 VOCAB='\bbr (create|list|close|update|ready|show|sync|dep)\b|\bbv (--|robot|prioritize\b)|\bbd (onboard|ready|show|update|close|sync)\b|\bbeads\b|\bbeads-|\bntm\b|agent mail|agent-mail|mcp_agent_mail|file_reservation|idea-wizard'
 
-usage() { echo "usage: skills-localize.sh [apply|--dry-run|check|audit|unapply <skill>...|forget <skill>...|rebase <skill> <version>]" >&2; }
+usage() { echo "usage: skills-localize.sh [apply|--dry-run|check|audit|sources|unapply <skill>...|forget <skill>...|rebase <skill> <version>]" >&2; }
 
-# apply, --dry-run, check and audit take no further arguments. A trailing word used to
+# apply, --dry-run, check, audit and sources take no further arguments. A trailing word used to
 # be ignored, so `apply --dry-run` did a real apply; refuse it before anything changes.
 # Checked on the original argv, before the modes below shift theirs.
 if [ "$#" -gt 1 ]; then
   case "$1" in
-    apply|--dry-run|check|audit)
+    apply|--dry-run|check|audit|sources)
       echo "skills-localize: '$1' takes no further arguments (got: ${*:2}). For a dry run, run 'skills-localize.sh --dry-run' with nothing after it." >&2
       usage; exit 2 ;;
   esac
@@ -194,6 +200,7 @@ case "${1:-apply}" in
   --dry-run)      MODE="apply"; DRY=1 ;;
   check)          MODE="check" ;;
   audit)          MODE="audit" ;;
+  sources)        MODE="sources" ;;
   unapply|forget) MODE="$1"; shift; [ "$#" -gt 0 ] || { usage; exit 2; } ;;
   rebase)         MODE="rebase"; shift; [ "$#" -eq 2 ] || { usage; exit 2; } ;;
   -h|--help)      awk 'NR == 1 { next } /^#/ { print; next } { exit }' "$SELF"; exit 0 ;;
@@ -1171,8 +1178,23 @@ audit() {
   done
 }
 
+# print_sources(): every input apply reads, resolved through symlinks, one per line; an
+# input that does not exist is left out. wt-done.sh runs apply after activating a
+# checkout that holds one, so an input missing here deploys only at the 03:00 run.
+print_sources() {
+  local p
+  for p in "$HERE" "$LOCAL" "$CODEX_ONLY" "$PATCHES" "$NOTE_CLAUDE" "$NOTE_CODEX" "$CODEX_LIST" \
+    "$LEGACY" "$RETIRED" ${OVERLAY:+"$OVERLAY"} ${HOST_PATCHES:+"$HOST_PATCHES"} \
+    ${CODEX_HOST_LIST:+"$CODEX_HOST_LIST"} ${RETIRED_HOST_LIST:+"$RETIRED_HOST_LIST"} \
+    ${PLUGIN_LIST:+"$PLUGIN_LIST"} ${PLUGIN_FOLDERS[@]+"${PLUGIN_FOLDERS[@]}"}; do
+    [ -e "$p" ] && readlink -f -- "$p"
+  done
+  return 0
+}
+
 case "$MODE" in
   audit)   audit; exit 0 ;;
+  sources) print_sources; exit 0 ;;
   unapply)
     take_lock exclusive
     WORK=$(mktemp -d) || { note "ERROR: mktemp failed"; exit 1; }

@@ -621,6 +621,62 @@ settings_activation() {
   return 0
 }
 
+# Skills (2026-11-14): skills-localize.sh apply deploys the Codex forks, the agents
+# layer and the host's skills-patches overlays. Until the 2026-11-02 switch, dotup ran
+# it after every activation; since then only the 03:00 jsm run did, so a merged skill
+# change sat stale in ~/.codex/skills and ~/.agents/skills for up to a day. It runs
+# when this checkout holds one of the reconciler's inputs (`skills-localize.sh
+# sources`): hov-stack itself, or a repository holding the overlay or a skill-plugin
+# folder. The installed copy runs, never one beside this script, since a worktree's
+# copy would deploy that worktree's files. The jsm wrapper holds the same lock from
+# its unapply until jsm has written, so a closeout during an upgrade waits and layers
+# onto the new version. A failed `sources` is reported, never read as "not a source".
+skills_activation() {
+  local repo=$1 cfg localize real srcs src hit="" out rc first problems n
+  cfg=${CLAUDE_HOME:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}}
+  localize=${WT_DONE_SKILLS_LOCALIZE:-$cfg/scripts/skills-localize.sh}
+  [ -x "$localize" ] || return 0
+  real=$(readlink -f -- "$repo") && [ -n "$real" ] || return 0
+  srcs=$(timeout --kill-after=5 "${WT_DONE_SKILLS_SOURCES_TIMEOUT:-20}" "$localize" sources 2>/dev/null); rc=$?
+  if [ "$rc" = 2 ]; then
+    echo "      activation: skills n/a (the installed skills-localize.sh has no sources mode; the 03:00 jsm run applies)"
+    return 0
+  fi
+  if [ "$rc" != 0 ]; then
+    echo "      !! activation: skills not applied (skills-localize.sh sources failed, rc=$rc; 124 means timeout); run $localize apply"
+    return 0
+  fi
+  while IFS= read -r src; do
+    case $src in "$real"|"$real"/*) hit=$src; break ;; esac
+  done <<<"$srcs"
+  [ -n "$hit" ] || return 0
+  if [ "$DRY_RUN" = 1 ]; then
+    echo "      would: $localize apply ($hit is in $repo)"
+    return 0
+  fi
+  out=$(timeout --kill-after=5 "${WT_DONE_SKILLS_TIMEOUT:-240}" "$localize" apply 2>&1); rc=$?
+  if [ "$rc" != 0 ]; then
+    first=$(printf '%s\n' "$out" | grep -m1 '^ERROR:')
+    echo "      !! activation: skills apply failed (rc=$rc; 124 means timeout)${first:+: $first}; $localize --dry-run shows why"
+    return 0
+  fi
+  problems=$(printf '%s\n' "$out" | grep -E '^(ERROR:|DRIFT:|WARN:|conflict \()')
+  if [ -n "$problems" ]; then
+    n=$(printf '%s\n' "$problems" | wc -l | tr -d ' ')
+    echo "      !! activation: skills applied, but $n problem line(s) remain (first: ${problems%%$'\n'*}); $localize --dry-run shows them"
+  else
+    echo "      activation: skills applied ($(printf '%s\n' "$out" | grep -c -E '^(localized|restored|removed|retired|dropped) ') change(s), $(printf '%s\n' "$out" | grep -c '^deployed ') fork(s) synced)"
+  fi
+  return 0
+}
+
+# What a current checkout deploys beyond its own files, in this order. Each step
+# prints its own activation line and never fails the closeout.
+deploy_activation() {
+  settings_activation "$1"
+  skills_activation "$1"
+}
+
 activate_checkout() {
   local repo="$1" mc="$2" head rc freshener
   freshener="$(dirname "$_lib")/../launchpad-freshen.sh"
@@ -630,14 +686,14 @@ activate_checkout() {
   }
   if git -C "$repo" merge-base --is-ancestor "$mc" "$head" 2>/dev/null; then
     echo "      activation: checkout current ($repo at $head; includes $mc)"
-    settings_activation "$repo"
+    deploy_activation "$repo"
     return 0
   fi
   echo "      activation: checkout NOT current ($repo at $head; merge $mc not applied)"
   if [ "$DRY_RUN" = 1 ]; then
     # Even the freshener's own dry run fetches. Preview must not invoke it at all.
     echo "      would: $freshener --repo '$repo' (safe fast-forward; no branch switch)"
-    settings_activation "$repo"
+    deploy_activation "$repo"
     return 0
   fi
   if [ ! -x "$freshener" ]; then
@@ -653,7 +709,7 @@ activate_checkout() {
   }
   if git -C "$repo" merge-base --is-ancestor "$mc" "$head" 2>/dev/null; then
     echo "      activation: checkout current ($repo at $head; includes $mc)"
-    settings_activation "$repo"
+    deploy_activation "$repo"
   else
     echo "      !! activation: checkout not current ($repo still at $head; merge $mc not applied; freshener output above)"
   fi
