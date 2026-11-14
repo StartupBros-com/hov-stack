@@ -36,7 +36,9 @@ python3 "${CLAUDE_PLUGIN_ROOT}/memory_dream/cli.py" <subcommand> ...
 (subcommands used below: `triage`, `plan`, `build`, `archive`, `trace`,
 `transcript-locate`, `apply`, `restore`, `open-preview`, `scratch`). Capture
 the session scratch directory once, at the top of the pipeline, and reuse it
-everywhere — scratch holds plan/drafts/selection JSON, never memory bodies:
+everywhere. Scratch holds this pass's working JSON (plan, per-cluster shards,
+drafts, findings, selection); the plan, the shards and the drafts carry note
+bodies, so nothing else belongs there and no result is kept there:
 
 ```bash
 SCRATCH=$(python3 "${CLAUDE_PLUGIN_ROOT}/memory_dream/cli.py" scratch)
@@ -64,7 +66,7 @@ them as-is.
 ### 0. Baseline the recall score (feedback metric)
 
 If a frozen eval suite exists at
-`${CLAUDE_CONFIG_DIR:-$HOME/.claude}/logs/memory-dream/eval/suite.json`, run
+`${MEMORY_DREAM_EVAL_HOME:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}/logs/memory-dream/eval}/suite.json`, run
 `/memory-dream:eval` with a `pre-<ts>` run tag BEFORE drafting, so this pass
 gets a measured before/after recall delta instead of an assumed one. No
 suite yet is fine: skip, and suggest `/memory-dream:eval` to the operator
@@ -267,11 +269,13 @@ numbers with no remaining decision value (dropping these with a one-line
 justification is not a finding). A post-hoc audit of one unverified pass
 found 26 blocking losses — nearly all in the operational class: a repair
 command, a risk acceptance, open follow-up lists, and two outright
-fabrications. The verifier may additionally cross-check against the
-project's other live notes and, for asserted repo artifacts (PR numbers,
-merge states, file paths), against the project's repo history when one
-exists locally: an artifact claim contradicted by `git log`/`gh pr view` is
-`distorted`.
+fabrications. The verifier checks only what its prompt carries: it runs as
+the `Glob`-only scribe, so it cannot read other notes or run `git log` or
+`gh pr view`. When another live note in the project bears on a claim, pass
+that note inline as an extra SOURCE. For asserted repo artifacts (PR
+numbers, merge states, file paths), the parent may add the survivor to
+Stage 3.6's read-only lookups when the project's repo exists locally; an
+artifact claim contradicted by `git log`/`gh pr view` is `distorted`.
 
 **Shared finding schema (stages 3.5, 3.7, 3.8) and the quote-existence
 gate.** Every finding-producing stage from here through the quality panel
@@ -364,6 +368,11 @@ refuses to assemble a patch set that grows an over-cap index unless
 `--allow-index-growth` is passed after an explicit operator decision.
 
 ### 3.7 Checker-check the correction layer (MANDATORY when edits were applied)
+
+Stages 3.7 and 3.8 read the built results under `$PS/results/`, so run
+Stage 4's `build` once the 3.5 and 3.6 verdicts are in the findings file,
+then come back here. A fix either stage leads to changes that cluster's
+drafts, so refresh its `drafts_digest` and rebuild before Stage 4.5.
 
 Every edit applied after the fidelity fleet ran (high fixes, med/low
 applications, repo-grounding corrections) is itself unverified text.
@@ -484,7 +493,7 @@ Stage 6):
 TRANSCRIPT=$(python3 "${CLAUDE_PLUGIN_ROOT}/memory_dream/cli.py" transcript-locate)
 CREATED_AT=$(wc -l < "$TRANSCRIPT")
 TS=$(date +%Y%m%d-%H%M%S)
-PS="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/logs/memory-dream/passes/$TS"
+PS="${MEMORY_DREAM_PASS_ROOT:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}/logs/memory-dream/passes}/$TS"
 python3 "${CLAUDE_PLUGIN_ROOT}/memory_dream/cli.py" build \
   --plan "$SCRATCH/dream-plan.json" \
   --drafts "$SCRATCH/dream-drafts.json" \
@@ -528,8 +537,9 @@ against the store's dominant separator (`casing_drift` in `report.json` —
 rename before preview unless deliberate), and writes `manifest.json`,
 per-proposal `.diff` files, `report.json`, and a `results/` directory
 holding one plain-markdown copy of every result file (`<project>__<path>`,
-byte-identical to `manifest.json`'s `results[]`). The patch-set directory is
-the **only** surface allowed to hold memory bodies.
+byte-identical to `manifest.json`'s `results[]`). Apart from scratch's
+working JSON, the patch-set directory is the **only** surface allowed to
+hold memory bodies.
 
 Build also REFUSES to grow an already-over-cap index (see Stage 3.6 and the
 Archive tier below); `--allow-index-growth` overrides only after an
@@ -808,7 +818,7 @@ its own backup snapshot, per project, atomically, and refuses on a digest
 mismatch unless explicitly forced. Because apply is single-flight (the lock
 gate) and per-project atomic (the stage-then-commit gate), a crash
 mid-apply followed by a re-run never double-applies. The patch-set
-directory under `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/logs/memory-dream/passes/<ts>/`
+directory under `${MEMORY_DREAM_PASS_ROOT:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}/logs/memory-dream/passes}/<ts>/`
 holds the manifest, diffs, and backup snapshot until an operator-owned
 prune removes sets older than the advisory 90-day retention window;
 `restore` works regardless of what else has run since.
