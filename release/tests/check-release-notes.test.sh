@@ -53,7 +53,10 @@ reject '182 UTF-16 units' bash "$SCRIPT" "$TMP/notes"
 pass 'UTF-16 feed length includes emoji width'
 reject 'no such release notes file' bash "$SCRIPT" "$TMP/missing"
 pass 'missing file is annotated'
-printf '## Highlights\n- Set `MEMORY_DREAM_PASS_ROOT` to move the pass folder somewhere else.\n' >"$TMP/notes"
+cat >"$TMP/notes" <<'NOTES'
+## Highlights
+- Set `MEMORY_DREAM_PASS_ROOT` to move the pass folder somewhere else.
+NOTES
 reject 'members would read: Set MEMORYDREAMPASSROOT to move the pass folder somewhere else.' bash "$SCRIPT" "$TMP/notes"
 pass 'a bullet the card would strip characters from fails and shows the card text'
 cat >"$TMP/notes" <<'NOTES'

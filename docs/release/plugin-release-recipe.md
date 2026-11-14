@@ -389,6 +389,9 @@ last release.
 Rules that make the bullets land: user-facing outcome first (the extractor
 strips `feat:`/`fix:` prefixes and trailing `by @author in <url>`, so
 changelog-style bullets survive but read poorly); at most 180 characters each;
+no backticks, underscores, `*`, `~`, `>`, `|`, `#`, brackets, braces or
+parentheses in the first three, because the card deletes them (`WSL_CDP_REF`
+reads `WSLCDPREF`; a masked link keeps its words);
 and if a release genuinely has no user-visible change, say so in one bullet
 rather than leaving the section out. `release/scripts/check-release-notes.sh`
 runs on the bump PR and again before the draft is created.
