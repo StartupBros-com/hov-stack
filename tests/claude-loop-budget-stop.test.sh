@@ -220,9 +220,12 @@ grep -q -F -- "Bash(git push --force:*)" "$CLAUDE_CALLS" && ok \
 # (better-ccflare#356). Only the CLI flag reaches the launch-time decision.
 grep -q -F -- '--thinking-display summarized' "$CLAUDE_CALLS" && ok \
   || bad "B2 claude argv lacks --thinking-display summarized (dotfiles#1225): $(cat "$CLAUDE_CALLS")"
-# Default dispatched roots enroll in gateway Auto, not the operator's picker pin.
-grep -q -F -- '--model claude-bccf-quality-auto' "$CLAUDE_CALLS" && ok \
-  || bad "B2 gateway-targeted headless root did not enroll in Auto: $(cat "$CLAUDE_CALLS")"
+# Default dispatched roots run plain Opus on the gateway, not the operator's
+# picker pin, and never the retired Auto lane (hov-stack#597).
+grep -q -F -- '--model opus' "$CLAUDE_CALLS" && ok \
+  || bad "B2 gateway-targeted headless root did not default to opus: $(cat "$CLAUDE_CALLS")"
+! grep -q -F -- 'claude-bccf-quality-' "$CLAUDE_CALLS" && ok \
+  || bad "B2 gateway-targeted headless root still names the retired Auto lane: $(cat "$CLAUDE_CALLS")"
 # Runaway fences (dotfiles#968): 1000 tool calls and three hours reach the
 # child's environment when no per-run override is set. 300 calls refused the
 # #481 run's own commit with its work verified on disk.
