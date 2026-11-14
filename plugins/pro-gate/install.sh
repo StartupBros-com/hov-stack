@@ -96,7 +96,7 @@ cleanup() {
   trap - EXIT
   exit "$rc"
 }
-TMP="$(mktemp -d "${TMPDIR:-/tmp}/pro-gate-install.XXXXXX")"
+TMP="$(mktemp -d "${TMPDIR:-/tmp}/pro-gate-install.XXXXXX")" || exit 1
 trap cleanup EXIT
 
 sha256() {

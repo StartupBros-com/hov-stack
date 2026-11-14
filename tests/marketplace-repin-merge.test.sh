@@ -5,7 +5,7 @@
 set -uo pipefail
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 SCRIPT_SRC="$ROOT/scripts/marketplace-repin-merge.sh"
-TMP=$(mktemp -d /tmp/marketplace-repin-merge-test.XXXXXX)
+TMP=$(mktemp -d /tmp/marketplace-repin-merge-test.XXXXXX) || exit 1
 trap 'rm -rf "$TMP"' EXIT
 pass=0 fail=0
 ok() { pass=$((pass + 1)); }

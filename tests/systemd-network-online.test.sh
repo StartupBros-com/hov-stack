@@ -52,7 +52,7 @@
 # copy and may fail too).
 set -euo pipefail
 ROOT=$(git rev-parse --show-toplevel); cd "$ROOT"
-TMP=$(mktemp -d /tmp/systemd-network-online-test.XXXXXX)
+TMP=$(mktemp -d /tmp/systemd-network-online-test.XXXXXX) || exit 1
 pids=()
 cleanup() {
   local p

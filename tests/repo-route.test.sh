@@ -3,7 +3,7 @@
 # no network command is used.
 set -euo pipefail
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-TMP=$(mktemp -d)
+TMP=$(mktemp -d) || exit 1
 trap 'rm -rf "$TMP"' EXIT
 export HOME="$TMP/home" REPO_ROUTE_HOST_ID=test-host
 mkdir -p "$HOME" "$TMP/sites"

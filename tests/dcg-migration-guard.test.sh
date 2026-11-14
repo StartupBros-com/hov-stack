@@ -92,7 +92,7 @@ fi
 # stdin-unverified rule denies a MISSING -f target regardless of path, so a
 # fabricated path would pass the DENY cases for the wrong reason and prove
 # nothing about the migration guard.
-TD=$(mktemp -d)
+TD=$(mktemp -d) || exit 1
 trap 'rm -rf "$TD"' EXIT
 mkdir -p "$TD/apps/acme-web/supabase/migrations"
 MIG="$TD/apps/acme-web/supabase/migrations/20270829000100_probe.sql"

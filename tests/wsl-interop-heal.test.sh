@@ -37,7 +37,7 @@ set -uo pipefail
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)  # repo root
 SCRIPT="$HERE/bin/wsl-interop-heal.sh"
 WATCHDOG="$HERE/bin/wsl-watchdog.sh"
-TMP=$(mktemp -d)
+TMP=$(mktemp -d) || exit 1
 trap 'rm -rf "$TMP"' EXIT
 
 pass=0 fail=0

@@ -33,7 +33,7 @@ report "Highlights bullets are capped at three and prefixes are stripped" $?
 (
   CURRENT_RELEASE_NOTES=$'Born from a live outage: the thing wedged mid-session.\n\nMore detail below.'
   export CURRENT_RELEASE_NOTES
-  err_file="$(mktemp)"
+  err_file="$(mktemp)" || exit 1
   out="$(notes_summary 2>"$err_file")"
   grep -q 'Born from a live outage' <<<"$out" || exit 1
   grep -q '::warning title=No release highlights::' "$err_file" || exit 1

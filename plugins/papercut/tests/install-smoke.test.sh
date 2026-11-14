@@ -14,7 +14,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SCRATCH="$(mktemp -d)"
+SCRATCH="$(mktemp -d)" || exit 1
 trap 'rm -rf "$SCRATCH"' EXIT
 
 # PAPERCUT_STORE outranks BOTH CLAUDE_CONFIG_DIR and HOME in the CLI's store

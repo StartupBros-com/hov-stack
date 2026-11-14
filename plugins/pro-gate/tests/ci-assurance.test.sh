@@ -2,7 +2,7 @@
 # Exercise the commands trusted CI actually invokes, including planted negatives.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-TDIR="$(mktemp -d)"
+TDIR="$(mktemp -d)" || exit 1
 trap 'rm -rf "$TDIR"' EXIT
 fail() { echo "FAIL: $*" >&2; exit 1; }
 helper="$ROOT/scripts/validate-source.sh"

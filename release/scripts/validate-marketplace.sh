@@ -249,7 +249,7 @@ validate_expected_entry() {
 validate_monotonicity() {
   [[ -n "$BASE_REF" ]] || return 0
   local base_manifest
-  base_manifest="$(mktemp)"
+  base_manifest="$(mktemp)" || fail "could not create a temp file for the base manifest"
   trap 'rm -f "${base_manifest:-}"' RETURN
   git show "$BASE_REF:$MANIFEST" >"$base_manifest" 2>/dev/null || fail "could not read $MANIFEST from BASE_REF $BASE_REF"
   jq -e . "$base_manifest" >/dev/null 2>&1 || fail "base marketplace manifest is malformed"
@@ -377,7 +377,9 @@ validate_remote_subdir_plugin() {
   # The cache directory is created here, in the validator's own shell: a
   # command substitution runs in a subshell and would lose the assignment,
   # leaving nothing for the EXIT trap to remove and nothing to reuse.
-  [[ -n "$MONOREPO_CACHE_DIR" ]] || MONOREPO_CACHE_DIR="$(mktemp -d)"
+  if [[ -z "$MONOREPO_CACHE_DIR" ]]; then
+    MONOREPO_CACHE_DIR="$(mktemp -d)" || fail "could not create the monorepo cache directory"
+  fi
   repo="$(monorepo_main_checkout "$remote")" || fail "plugin $name monorepo main is not reachable from $url"
   # Only main is fetched, so an object missing here was not reachable from
   # main; the merge-base line below answers the same question when the cache
@@ -440,7 +442,7 @@ validate_remote_plugin() {
   fi
   local remote repo manifest_json manifest_name manifest_version resolved_tag version_file release_workflow
   remote="$(remote_for_url "$url")"
-  repo="$(mktemp -d)"
+  repo="$(mktemp -d)" || fail "could not create a temp directory to fetch plugin $name"
   git -C "$repo" init -q
   if ! git -C "$repo" fetch -q --depth=1 --no-write-fetch-head "$remote" "$sha"; then
     rm -rf "$repo"

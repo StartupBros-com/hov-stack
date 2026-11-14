@@ -22,7 +22,7 @@ bad() { fail=$((fail + 1)); echo "FAIL: $*" >&2; }
 [ -f "$SCRIPT" ] || { echo "FAIL: script not found at $SCRIPT" >&2; exit 1; }
 bash -n "$SCRIPT" || { echo "FAIL: $SCRIPT does not parse" >&2; exit 1; }
 
-TMP=$(mktemp -d)
+TMP=$(mktemp -d) || exit 1
 trap 'rm -rf "$TMP"' EXIT
 
 mkdir -p "$TMP/cand" "$TMP/inc/break" "$TMP/inc/better-typography" "$TMP/inc/better-layout" "$TMP/bin"

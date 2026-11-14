@@ -8,7 +8,7 @@ set -uo pipefail
 
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 BASHRC=$REPO/.bashrc
-TMP=$(mktemp -d)
+TMP=$(mktemp -d) || exit 1
 trap 'rm -rf "$TMP"' EXIT
 HOME_FIXTURE=$TMP/home
 BIN=$TMP/bin

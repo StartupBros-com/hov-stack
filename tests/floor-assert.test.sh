@@ -25,7 +25,7 @@ set -uo pipefail
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")/../scripts" && pwd)
 SCRIPT="$HERE/dcg-update.sh"
 LIB="$HERE/lib/floor-assert.sh"
-TMP=$(mktemp -d)
+TMP=$(mktemp -d) || exit 1
 trap 'rm -rf "$TMP"' EXIT
 
 pass=0 fail=0

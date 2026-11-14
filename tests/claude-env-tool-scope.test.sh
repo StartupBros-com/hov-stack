@@ -22,7 +22,7 @@ REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 ENVFILE=$REPO/claude-env.sh
 HEADROOM=$REPO/scripts/heavy-job-headroom.js
 HEAVY_RUN=$REPO/hooks/lib/heavy-job-admission-run.sh
-TMP=$(mktemp -d)
+TMP=$(mktemp -d) || exit 1
 trap 'rm -rf "$TMP"' EXIT
 pass=0 fail=0 skipped=0
 ok()  { pass=$((pass + 1)); }

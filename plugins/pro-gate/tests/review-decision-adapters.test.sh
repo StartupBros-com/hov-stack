@@ -104,7 +104,7 @@ check 'identity resolver supports the Claude plugin-root layout' \
 check 'identity resolver supports the repository-mounted Codex skill layout' \
   "$([ "$CODEX_IDENTITY_FIELDS" = "$EXPECTED_IDENTITY_FIELDS" ]; printf '%s' "$?")" "$CODEX_IDENTITY_FIELDS"
 
-TMP="$(mktemp -d)"
+TMP="$(mktemp -d)" || exit 1
 trap 'rm -rf "$TMP"' EXIT
 # Exercise the real generator against an isolated tree, never the source checkout.
 check 'generator checks and repairs every compiled identity pin without check-mode writes' \

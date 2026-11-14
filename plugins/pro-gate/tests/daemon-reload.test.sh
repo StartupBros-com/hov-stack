@@ -15,7 +15,7 @@ LIB="$HERE/../lib/pro-gate-lib.sh"
 TEST_FAILURES=0
 check() { if [ "$2" = 0 ]; then echo "ok - $1"; else echo "FAIL - $1: ${3:-}"; TEST_FAILURES=$((TEST_FAILURES + 1)); fi; }
 
-TDIR="$(mktemp -d "${TMPDIR:-/tmp}/pg-daemon-test.XXXXXX")"
+TDIR="$(mktemp -d "${TMPDIR:-/tmp}/pg-daemon-test.XXXXXX")" || exit 1
 DPID=""
 cleanup() {
   [ -n "$DPID" ] && { kill "$DPID" 2>/dev/null; pkill -P "$DPID" 2>/dev/null; }

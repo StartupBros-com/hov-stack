@@ -2,7 +2,7 @@
 # Synthetic retained records exercise the installed public CLI, not live model quality or shipping.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-TDIR="$(mktemp -d "${TMPDIR:-/tmp}/pg-review-facts-test.XXXXXX")"
+TDIR="$(mktemp -d "${TMPDIR:-/tmp}/pg-review-facts-test.XXXXXX")" || exit 1
 trap 'chmod -R u+rwX "$TDIR"; rm -rf "$TDIR"' EXIT
 while IFS='=' read -r name _; do
   case "$name" in PRO_GATE_*|ORACLE_*) unset "$name" ;; esac

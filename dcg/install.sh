@@ -205,7 +205,7 @@ fi
 
 tmp_base=${TMPDIR:-/tmp}
 [[ "$tmp_base" == /* && -d "$tmp_base" ]] || dcg_die "TMPDIR must name an existing absolute directory"
-work_dir=$(mktemp -d "${tmp_base%/}/dcg-install.XXXXXX")
+work_dir=$(mktemp -d "${tmp_base%/}/dcg-install.XXXXXX") || exit 1
 target_tmp=
 link_tmp=
 

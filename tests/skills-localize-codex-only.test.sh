@@ -10,7 +10,7 @@ unset HOV_STACK_OVERLAY XDG_CONFIG_HOME SKILLS_INSTALLED_PLUGINS
 export CODEX_SKILLS_HOST_LIST="" RETIRED_SKILLS_HOST_LIST=""
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 SCRIPT=$REPO/scripts/skills-localize.sh
-T=$(mktemp -d /tmp/skills-localize-codex-only.XXXXXX)
+T=$(mktemp -d /tmp/skills-localize-codex-only.XXXXXX) || exit 1
 trap 'rm -rf "$T"' EXIT
 export HOME=$T/home
 export SKILLS_DIR=$HOME/.claude/skills SKILLS_LOCAL_DIR=$T/local
