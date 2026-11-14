@@ -1,6 +1,7 @@
 ---
 title: "Renaming a repository that serves a Claude Code marketplace: what follows the old name and what does not"
 date: "2026-11-11"
+last_updated: "2026-11-14"
 category: best-practices
 module: repository-rename
 problem_type: best_practice
@@ -53,7 +54,7 @@ GitHub's rename documentation adds one case the rehearsal did not exercise: call
 
 The evidence that A2 held is indirect. The members app's production deploy serving at the rename had already ended its acceptance of the old name (U22). After the rename, the canary, rent-check 0.3.2 published 2026-10-31, ran the whole release chain to an announcement whose run log reads `announced`, and the plugin bumps after it announced the same way (gate-2 row and U24 record). The rehearsal lists the OIDC claims after a rename as not exercised, so the canary was the first check of A2.
 
-**Remove the old-name fallbacks only once the cutover window closes.** That removal is tracked in #373.
+**Remove the old-name fallbacks only once the cutover window closes.** Here that was 2026-11-12. #550 made the marketplace validator accept the shared announce workflow only under the new name, and, per #373's closing comment, the members app's manifest fetch dropped its old-name fallback the same day and now fails closed on any non-OK status. #373 closed that day.
 
 ## Why This Matters
 
@@ -73,7 +74,7 @@ The order the hov-stack rename ran in:
 2. Repository creation was restricted, then the repository was renamed in place, keeping its id (U22, 2026-10-25). The members app deploy serving at that moment accepted only the new name.
 3. The marketplace literals in the tree flipped to the new name in #234, merged after the rename.
 4. A canary release ran the whole chain under the new name (rent-check 0.3.2, published 2026-10-31; gate-2 row and U24 record).
-5. The old-name fallbacks stay until the cutover window closes (#373).
+5. The old-name fallbacks were removed once the cutover window closed, on 2026-11-12: #550 here and the members app's fetch the same day (#373).
 
 ## Related
 
@@ -85,4 +86,4 @@ The order the hov-stack rename ran in:
 - `a-grepped-implementation-string-in-a-test-is-an-invisible-caller.md` (the same hidden-consumer shape, for identifiers)
 - `serving-plugins-from-a-monorepo-with-git-subdir-marketplace-entries.md` (the same rehearsal, for git-subdir sources)
 - [GitHub: Renaming a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/renaming-a-repository)
-- #234, #373, #374
+- #234, #373, #374, #550
