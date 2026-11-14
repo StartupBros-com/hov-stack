@@ -409,7 +409,7 @@ class SkillPackTests(unittest.TestCase):
             "ls ~/.claude/scripts",
             "the hooks in `~/.claude/hooks`.",
             "clone into ~/hov-stack",
-            "~/.claude/mods/lookout/README.md",
+            "~/.claude/mods/loop-breaker/README.md",
             "~/.claude/skills/$name/SKILL.md",
             "~/.claude/skills/{design-drift,verify-review}/SKILL.md",
             "$CLAUDE_CONFIG_DIR/skills/design-drift/src/scan.mjs",
