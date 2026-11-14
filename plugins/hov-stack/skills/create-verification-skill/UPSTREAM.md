@@ -1,10 +1,37 @@
 # Upstream provenance
 
 Source: https://github.com/cursor/plugins/tree/main/pstack/skills/create-verification-skill
-Commit: 1f84288b2c047b6d39952da23f51cf486f3b2f7a (pstack 0.15.2)
-Date: 2026-09-19
+path: pstack/skills/create-verification-skill
+Commit: c49b37a2c0e7bede60a71ad7322e3f12c337a3da (the last upstream change to this path; same content at 3dbd22ff, pstack 0.15.36)
+Date: 2026-10-12 (re-vetted 2026-11-14; first ported at 1f84288b, pstack 0.15.2, 2026-09-19)
 License: MIT (verbatim upstream `LICENSE` copied beside this file; upstream
-copyright holder Lauren Tan)
+copyright holder Lauren Tan; unchanged between 1f84288b and 3dbd22ff)
+
+The `path:` line scopes `scripts/vendored-drift-check.sh` to this subtree, so
+the pin above reads `ok` until upstream edits this skill, instead of `MOVED` on
+every cursor/plugins commit.
+
+## Re-vet 2026-11-14 (docs/vets/2026-11-14-pstack-revet-harness-vet.md)
+
+Upstream changed this SKILL.md once since the first port (c49b37a, cursor/plugins
+#573). All three hunks are adopted verbatim into the local text; none needed a
+translation:
+
+- Launch bullet: readiness drops "a port answering" and adds "Launch must reach
+  a usable state from an empty data dir, including any migrations and seed data.
+  Ready means usable, not just that a process answers. A database health check
+  can pass while its init scripts are still running."
+- Section 3: adds "If the seed data lacks a precondition that a journey needs,
+  the journey reports a failure and the reason goes in that feature's
+  `Gotchas`. Never weaken the journey to make it pass."
+- Section 4: appends the stand-in rule: a proof run in a stand-in for the real
+  target lists every setup step the stand-in did that the target will not, and
+  those steps stay unverified until a run on the real target covers them.
+
+Unverified: no generator run has exercised these three sentences here. They
+are adopted on reading, because each restates a rule this harness already
+holds (no weakened assertions, no proof-class inflation) at the point where a
+generated verify skill would break it.
 
 Vetted per `harness/third-party-skill-vetting.md`: read every file in
 both `create-verification-skill/` and `maintain-verification-skill/`, no

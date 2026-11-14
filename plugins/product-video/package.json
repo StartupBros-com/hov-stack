@@ -36,7 +36,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "@remotion/cli": "4.0.540",
+    "@remotion/cli": "4.0.542",
     "@types/node": "22.10.2",
     "@types/react": "19.2.3",
     "@types/react-dom": "19.2.3",

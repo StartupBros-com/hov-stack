@@ -462,13 +462,48 @@ assert_gone "$SA/manifest/zzd-up" "the second unapply drops the agents state"
 assert_same "$U/zzd-up/SKILL.md" "$A/zzd-up/SKILL.md" "the agents file is still pristine"
 
 # ---------------------------------------------------------------------------
+# 11. An overlay that adds several files in one directory (de-slopify adds five
+#     under scripts/). Removing the last of them removes the directory too, so the
+#     sync after the removals goes to the parent that is left, never to the gone
+#     directory: unapply exits 0 and drops the state, and an apply whose overlay
+#     no longer adds the files removes them without an error.
+fixture
+printf 'echo two\n' >"$P/zzd-ov/scripts/more.sh"
+run many-apply apply
+assert_rc 0 "apply with two added files in one directory"
+assert_exists "$C/zzd-ov/scripts/more.sh" "the second added file is live"
+srun many-unapply "" unapply zzd-ov
+assert_rc 0 "unapply that empties a directory"
+assert_lacks '^ERROR' "unapply that empties a directory"
+for t in "$C" "$A"; do
+  assert_gone "$t/zzd-ov/scripts" "unapply removes the emptied directory in $t"
+  assert_same "$U/zzd-ov/SKILL.md" "$t/zzd-ov/SKILL.md" "unapply restores SKILL.md in $t"
+done
+assert_gone "$SC/manifest/zzd-ov" "unapply drops the claude state"
+assert_gone "$SA/manifest/zzd-ov" "unapply drops the agents state"
+if grep -q '^gone ' "$T/sync.log"; then bad "unapply synced a removed path: $(grep '^gone ' "$T/sync.log" | head -3)"; else ok; fi
+if grep -qxF "exists $C/zzd-ov" "$T/sync.log"; then ok; else bad "unapply did not sync the skill directory that held scripts/"; fi
+run many-reapply apply
+assert_rc 0 "apply after unapply"
+assert_exists "$A/zzd-ov/scripts/more.sh" "apply adds the files back"
+rm -rf "$P/zzd-ov/scripts"
+srun many-drop "" apply
+assert_rc 0 "apply whose overlay drops two files in one directory"
+assert_lacks '^ERROR' "apply whose overlay drops two files in one directory"
+assert_has "removed (agents): zzd-ov/scripts/more.sh" "apply removes the dropped file"
+for t in "$C" "$A"; do assert_gone "$t/zzd-ov/scripts" "apply removes the emptied directory in $t"; done
+if grep -q '^gone ' "$T/sync.log"; then bad "apply synced a removed path: $(grep '^gone ' "$T/sync.log" | head -3)"; else ok; fi
+run many-dry --dry-run
+assert_lacks '^(would |ERROR:|DRIFT:|WARN:|conflict )' "a dry run after the drop has nothing to do"
+
+# ---------------------------------------------------------------------------
 if [ ! -s "$JSM_CALLED" ]; then ok; else bad "the layer called jsm: $(cat "$JSM_CALLED")"; fi
 HOME=$REAL_HOME XDG_STATE_HOME=$REAL_XDG
 [ -n "$XDG_STATE_HOME" ] || unset XDG_STATE_HOME
 if [ "$(real_state_sum)" = "$REAL_STATE_BEFORE" ]; then ok
 else bad "the real skills-localize state changed during this suite"; fi
 
-assertion_floor=130
+assertion_floor=150
 assertion_total=$((pass + fail))
 [ "$assertion_total" -ge "$assertion_floor" ] || bad "assertion floor: ran $assertion_total, expected at least $assertion_floor"
 if [ "$fail" -eq 0 ]; then
