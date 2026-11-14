@@ -105,10 +105,9 @@ if [ -n "$highlights" ]; then
 print(sum(2 if ord(c) > 0xFFFF else 1 for c in sys.stdin.read()))')"
     [ "$units" -gt 180 ] && problem "bullet $n is $units UTF-16 units; the feed truncates at 180"
     # Check what the CARD prints. The members' Tool Drop card shows the first three bullets
-    # through sanitize() (pushbot apps/startupbros/app/api/internal/ops/tool-releases/
-    # tool-drop-card.ts): it drops links and mentions, keeping a masked link's words, then
-    # deletes every backtick and * _ ~ > | # [ ] { } ( ) without a word of warning. So
-    # `MEMORY_DREAM_PASS_ROOT` reaches members as MEMORYDREAMPASSROOT and `<pdf>` as <pdf.
+    # through the members site's sanitize(): it drops links and mentions, keeping a masked
+    # link's words, then deletes every backtick and * _ ~ > | # [ ] { } ( ) without a word of
+    # warning. So `MEMORY_DREAM_PASS_ROOT` reaches members as MEMORYDREAMPASSROOT and `<pdf>` as <pdf.
     # The link step runs first here too, so a masked link's brackets or a URL's underscores
     # never count. When this rule landed (2026-11-13), 32 of the 104 notes files on main had
     # such a bullet in their first three.
