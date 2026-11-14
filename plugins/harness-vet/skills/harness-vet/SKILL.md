@@ -302,24 +302,24 @@ command the verifier ran. Empirical beats documentary:
   reads as a worsening, and a band picked after the ratios are known is
   reported as post hoc [measured: pstack re-vet, 2026-11-14 — with no band,
   four of five median-cost ratios against the incumbent (1.036 to 1.445)
-  read as worse, while the incumbent's own costliest run sat 1.035 to 1.213
-  times its median across the same cells; the 1.10 band that passed three of
+  read as worse; at 1.036 the candidate's median, $0.1086, matched the
+  incumbent's own costliest run, $0.1085; the 1.10 band that passed three of
   those ratios was picked after they were known]. The rule judges the unit
   that ran: a per-line rule passes no line that only ran inside a pair, so
   run each line alone in its final wording or judge the pair as one unit
   [measured: same vet — the final first line never ran alone, so the
   per-line rule could not be met]. Where cost or tokens is a metric, log
   each run's cache-creation and cache-read tokens, and before the batch
-  declare the count that marks a run cold (per arm: a larger prompt writes
-  more even when warm) and a replacement rule keyed on that count alone,
-  such as one re-run that stands whatever it shows, applied before any
-  run's cost or outcome is read. Launching behind a warm same-model run does
-  not rule out a cold one [measured: same vet — cold runs wrote 9,814 to
-  13,508 more cache-creation tokens than the warm median for their arm and
-  task; a9's median in the 1.445 cell was itself a cold run; in the last
-  batch a run started 1 s after a warm same-model run finished was still
-  cold, and with no replacement rule declared it invalidated its cell and
-  failed the batch].
+  declare the count that marks a run cold, set per arm from its calibration
+  runs (a larger prompt writes more even when warm), and a replacement rule
+  keyed on that count alone, such as one re-run that stands whatever it
+  shows, applied before any run's cost or outcome is read. Launching behind
+  a warm same-model run does not rule out a cold one [measured: same vet —
+  cold runs wrote 9,814 to 13,508 more cache-creation tokens than the warm
+  median for their arm and task; the candidate's median in the 1.445 cell
+  was itself a cold run; in the last batch a run started 1 s after a warm
+  same-model run finished was still cold, and with no replacement rule
+  declared it invalidated its cell and failed the batch].
   Drop fixture items that pass or fail in every arm from the arm comparison;
   they cannot separate arms and only pad the denominator. Give each arm its
   own config directory
