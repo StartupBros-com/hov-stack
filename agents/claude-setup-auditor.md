@@ -30,9 +30,9 @@ Scan `~/.claude/plugins/` for installed plugins and their provided artifacts.
 
 ## Quality Indicators
 
-**Good**: Under token budget, no duplication, commands prioritized, clear agent descriptions, automation hooks
+**Good**: Instruction files under Claude Code's 200-line guidance, no duplication, commands prioritized, clear agent descriptions, automation hooks
 
-**Issues**: Over 5KB AGENTS.md, twin CLAUDE.md/AGENTS.md pairs, nested AGENTS.md without a pointer, duplicated content, file trees, generic patterns, vague descriptions
+**Issues**: Instruction files over 200 lines, twin CLAUDE.md/AGENTS.md pairs, nested AGENTS.md without a pointer, duplicated content, file trees, generic patterns, vague descriptions
 
 ## Output Guidance
 

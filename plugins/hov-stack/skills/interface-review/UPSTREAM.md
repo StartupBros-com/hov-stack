@@ -22,6 +22,7 @@ correction or a reconciliation with skills already installed on this harness.
 - Before-you-finish row: defer target updated
 - L154: severity/cap source updated
 - appended `## Severity, cap and verdict`: upstream better-interface ranking, fix-order, consolidation, cap and verdict rules, with heading numbers and the internal cap cross-reference removed; added provenance and change-review applicability notes
+- `## Severity, cap and verdict`: triggers are exempt from the 15-finding cap. As folded, the cap and "never why a blocker went unreported" disagreed once more than 15 triggers fired
 - scope-resolution L27: citation rule no longer attributed to `better-interface`
 - scope-resolution L45: `gh pr status` mechanism corrected (verified live: `currentBranch` is not a --json field)
 - scope-resolution L49: repository audit routes to /ux-audit or /design-rails
