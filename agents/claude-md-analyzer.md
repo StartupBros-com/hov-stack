@@ -39,7 +39,7 @@ Files Claude should avoid. Real failure modes specific to this component.
 ## Output Guidance
 
 Generate an AGENTS.md that is:
-- **Minimal**: Subdirectories <1KB, components <1.5KB, root <3KB
+- **Minimal**: Only what this level needs, well under Claude Code's 200-line guidance per file; move reference material to skills or path-scoped `.claude/rules/`
 - **Non-duplicative**: Nothing from parent instruction files
 - **Command-focused**: Copy-paste ready commands are highest value
 - **Terse**: Bullets, not paragraphs
