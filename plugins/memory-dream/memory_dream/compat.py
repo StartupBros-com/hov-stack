@@ -70,6 +70,18 @@ def restrict_permissions(path: Path | str) -> None:
         os.chmod(path, 0o700)
 
 
+def restrict_if_owned(path: Path | str) -> bool:
+    """Owner-only (0700) when the current user owns ``path``; True if applied.
+
+    A folder someone else owns is left as it is: chmod would fail there, and a
+    folder the operator chose is theirs to share. No-op on Windows.
+    """
+    if os.name != "posix" or os.stat(path).st_uid != os.geteuid():
+        return False
+    os.chmod(path, 0o700)
+    return True
+
+
 def is_escaping_link(path: Path) -> bool:
     """True when the path or its parent is a symlink (POSIX) or any reparse
     point / junction (Windows) — the tree could point outside itself."""
