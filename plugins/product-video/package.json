@@ -40,7 +40,7 @@
     "@types/node": "22.10.2",
     "@types/react": "19.2.3",
     "@types/react-dom": "19.2.3",
-    "eslint": "^9.39.1",
+    "eslint": "^9.39.5",
     "playwright-capture-runtime": "npm:playwright@1.63.0-alpha-2026-08-05",
     "prettier": "^3.6.2",
     "tsx": "^4.21.0",
