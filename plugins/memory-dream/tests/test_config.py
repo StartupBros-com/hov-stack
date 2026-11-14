@@ -159,5 +159,80 @@ class PreviewOpenerConfigTests(unittest.TestCase):
         self.assertIn("valid: mirror_root, mirror_push_hint, preview_opener", message)
 
 
+class ScratchDirTests(unittest.TestCase):
+    """The scratch folder holds note bodies, so it must be owner-only."""
+
+    def setUp(self):
+        self._root = tempfile.TemporaryDirectory()
+        self.root = Path(self._root.name)
+        env = mock.patch.dict(os.environ, {}, clear=False)
+        env.start()
+        self.addCleanup(env.stop)
+        os.environ.pop("MEMORY_DREAM_SCRATCH", None)
+        os.environ.pop("CLAUDE_JOB_DIR", None)
+        # gettempdir() caches, so point tempfile itself at the throwaway root.
+        temp_root = mock.patch.object(tempfile, "tempdir", str(self.root))
+        temp_root.start()
+        self.addCleanup(temp_root.stop)
+        if hasattr(config, "_scratch_fallback"):
+            fallback = mock.patch.object(config, "_scratch_fallback", None)
+            fallback.start()
+            self.addCleanup(fallback.stop)
+        self.addCleanup(self._root.cleanup)
+
+    def _mode(self, path: Path) -> int:
+        return path.stat().st_mode & 0o777
+
+    def test_fallback_is_a_fresh_unpredictable_folder(self):
+        scratch = config.scratch_dir()
+        self.assertTrue(scratch.is_dir())
+        self.assertEqual(scratch.parent, self.root)
+        self.assertTrue(scratch.name.startswith("memory-dream-"))
+        self.assertNotEqual(scratch.name, f"memory-dream-{os.getpid()}")
+
+    @unittest.skipUnless(os.name == "posix", "POSIX modes")
+    def test_fallback_is_owner_only(self):
+        self.assertEqual(self._mode(config.scratch_dir()), 0o700)
+
+    def test_fallback_never_reuses_a_precreated_pid_folder(self):
+        planted = self.root / f"memory-dream-{os.getpid()}"
+        planted.mkdir()
+        (planted / "planted.txt").write_text("someone else's", encoding="utf-8")
+        scratch = config.scratch_dir()
+        self.assertNotEqual(scratch, planted)
+        self.assertEqual(list(scratch.iterdir()), [])
+
+    def test_fallback_is_stable_within_one_process(self):
+        self.assertEqual(config.scratch_dir(), config.scratch_dir())
+
+    @unittest.skipUnless(os.name == "posix", "POSIX modes")
+    def test_env_scratch_is_honored_and_tightened_when_owned(self):
+        chosen = self.root / "chosen"
+        chosen.mkdir()
+        os.chmod(chosen, 0o755)
+        os.environ["MEMORY_DREAM_SCRATCH"] = str(chosen)
+        self.assertEqual(config.scratch_dir(), chosen)
+        self.assertEqual(self._mode(chosen), 0o700)
+
+    @unittest.skipUnless(os.name == "posix", "POSIX modes")
+    def test_job_dir_scratch_is_honored_and_tightened(self):
+        job_tmp = self.root / "job" / "tmp"
+        job_tmp.mkdir(parents=True)
+        os.chmod(job_tmp, 0o755)
+        os.environ["CLAUDE_JOB_DIR"] = str(self.root / "job")
+        self.assertEqual(config.scratch_dir(), job_tmp)
+        self.assertEqual(self._mode(job_tmp), 0o700)
+
+    @unittest.skipUnless(os.name == "posix", "POSIX modes")
+    def test_env_scratch_owned_by_someone_else_is_left_alone(self):
+        shared = self.root / "shared"
+        shared.mkdir()
+        os.chmod(shared, 0o755)
+        os.environ["MEMORY_DREAM_SCRATCH"] = str(shared)
+        with mock.patch.object(os, "geteuid", return_value=os.geteuid() + 1):
+            self.assertEqual(config.scratch_dir(), shared)
+        self.assertEqual(self._mode(shared), 0o755)
+
+
 if __name__ == "__main__":
     unittest.main()
