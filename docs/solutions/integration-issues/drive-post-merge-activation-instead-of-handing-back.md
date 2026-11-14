@@ -67,7 +67,7 @@ A settings failure never fails the closeout. A dry run prints `would: <repo>/syn
 - `!! activation: skills applied, but N problem line(s) remain (first: ...)` when apply printed ERROR, DRIFT, WARN or conflict lines.
 - `!! activation: skills apply failed (rc=<code>; 124 means timeout)` or `!! activation: skills not applied (skills-localize.sh sources failed ...)`.
 
-A checkout that holds no input prints no skills line. A dry run prints `would: <localize> apply (<input> is in <repo>)`. The apply waits up to 120 s on the skills-localize lock the jsm run holds, and never fails the closeout.
+A checkout that holds no input prints no skills line, except when the `sources` query itself fails: without the list wt-done cannot tell, so any checkout then gets the `!!` line (or `activation: skills n/a` from an installed copy older than the mode). A dry run prints `would: <localize> apply (<input> is in <repo>)`. The apply waits up to 120 s on the skills-localize lock the jsm run holds, and never fails the closeout.
 
 After merging your own PR, run the closeout from inside the worktree:
 

@@ -665,7 +665,7 @@ skills_activation() {
     n=$(printf '%s\n' "$problems" | wc -l | tr -d ' ')
     echo "      !! activation: skills applied, but $n problem line(s) remain (first: ${problems%%$'\n'*}); $localize --dry-run shows them"
   else
-    echo "      activation: skills applied ($(printf '%s\n' "$out" | grep -c -E '^(localized|restored|removed|retired) ') change(s), $(printf '%s\n' "$out" | grep -c '^deployed ') fork(s) synced)"
+    echo "      activation: skills applied ($(printf '%s\n' "$out" | grep -c -E '^(localized|restored|removed|retired|dropped) ') change(s), $(printf '%s\n' "$out" | grep -c '^deployed ') fork(s) synced)"
   fi
   return 0
 }

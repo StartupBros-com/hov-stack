@@ -101,6 +101,7 @@ case "${1:-}" in
   sources)
     [ "${SKILLS_SOURCES_SLEEP:-0}" = 0 ] || sleep 5
     [ -z "${SKILLS_SOURCES:-}" ] || printf '%s\n' "$SKILLS_SOURCES"
+    [ -z "${SKILLS_SOURCES_ERR:-}" ] || printf '%s\n' "$SKILLS_SOURCES_ERR" >&2
     exit "${SKILLS_SOURCES_RC:-0}" ;;
   apply)
     [ "${SKILLS_APPLY_SLEEP:-0}" = 0 ] || sleep 5
@@ -1344,6 +1345,12 @@ skillsfix(){
   : >"$SKILLS_CALLS"
 }
 two_calls=$(printf 'sources\napply')
+# A preview of a checkout that is not current yet names both the freshen and the apply.
+skillsfix skills-preview-stale
+out=$(cd "$W" && SKILLS_SOURCES="$CR/plugins/hov-stack/skills" DRY_RUN=1 bash "$ORDINARY_SCRIPT" 2>&1)
+has 'skills stale preview names the freshen' "$out" "launchpad-freshen.sh --repo '$C' (safe fast-forward"
+has 'skills stale preview names the apply' "$out" "would: $WT_DONE_SKILLS_LOCALIZE apply ($CR/plugins/hov-stack/skills is in $C)"
+chk 'skills stale preview only asks for sources' 'sources' "$(cat "$SKILLS_CALLS")"
 skillsfix skills-fresh
 # The sibling is a near-miss prefix: $CR-sibling is not inside $CR.
 export SKILLS_SOURCES="$CR-sibling/skills
@@ -1362,8 +1369,8 @@ chk 'skills already-current applies once' "$two_calls" "$(cat "$SKILLS_CALLS")"
 out=$(cd "$W" && DRY_RUN=1 bash "$ORDINARY_SCRIPT" 2>&1)
 chk 'skills preview only asks for sources' 'sources' "$(cat "$SKILLS_CALLS")"
 has 'skills preview prints the apply it would run' "$out" "would: $WT_DONE_SKILLS_LOCALIZE apply ($CR/plugins/hov-stack/skills is in $C)"
-out=$(SKILLS_APPLY_OUT="$(printf 'localized (claude): x/SKILL.md\nretired (moved to .trash): y\ndeployed codex fork: z\nskills-localize: done')" runordinary)
-has 'skills apply counts changes and forks' "$out" 'activation: skills applied (2 change(s), 1 fork(s) synced)'
+out=$(SKILLS_APPLY_OUT="$(printf 'localized (claude): x/SKILL.md\nretired (moved to .trash): y\ndropped claude layer state: q\nretirement from retired-skills.txt: y\ndeployed codex fork: z\nskills-localize: done')" runordinary)
+has 'skills apply counts changes and forks' "$out" 'activation: skills applied (3 change(s), 1 fork(s) synced)'
 out=$(SKILLS_APPLY_RC=1 SKILLS_APPLY_OUT="$(printf 'ERROR: could not write claude x/SKILL.md\nskills-localize: completed WITH ERRORS')" runordinary); rc=$?
 chk 'skills failure keeps the closeout successful' 0 "$rc"
 has 'skills failure names rc and the first error' "$out" \
@@ -1393,6 +1400,11 @@ ERROR: $CR/lib/overlay.sh is missing
 /elsewhere/skills" runordinary)
 chk 'non-source repo only asks for sources' 'sources' "$(cat "$SKILLS_CALLS")"
 hasnot 'non-source repo has no skills line' "$out" 'activation: skills'
+# Only stdout is the path list: a diagnostic on stderr that names a path inside the
+# checkout is not an input.
+: >"$SKILLS_CALLS"
+out=$(SKILLS_SOURCES=/elsewhere/skills SKILLS_SOURCES_ERR="$CR/plugins/hov-stack/skills" runordinary)
+chk 'sources stderr is not read as a path' 'sources' "$(cat "$SKILLS_CALLS")"
 : >"$SKILLS_CALLS"
 out=$(WT_DONE_SKILLS_LOCALIZE="$TMP/no-such-localize" runordinary); rc=$?
 chk 'no installed reconciler: closeout succeeds' 0 "$rc"
@@ -1401,7 +1413,8 @@ hasnot 'no installed reconciler: no skills line' "$out" 'activation: skills'
 # worktree's copy would deploy that worktree's files. The decoy sibling must not run.
 mkdir -p "$TMP/skills-home/scripts"
 cp "$TMP/skills-localize-stub" "$TMP/skills-home/scripts/skills-localize.sh"
-cp "$TMP/skills-localize-stub" "$INSTALLED/skills-localize.sh"
+printf '#!/usr/bin/env bash\nprintf "DECOY %%s\\n" "$*" >>"$SKILLS_CALLS"\n' >"$INSTALLED/skills-localize.sh"
+chmod +x "$INSTALLED/skills-localize.sh"
 : >"$SKILLS_CALLS"
 out=$(unset WT_DONE_SKILLS_LOCALIZE; CLAUDE_HOME="$TMP/skills-home" SKILLS_TAG=x runordinary)
 chk 'skills default runs the CLAUDE_HOME copy' "$(printf 'xsources\nxapply')" "$(cat "$SKILLS_CALLS")"
