@@ -33,7 +33,7 @@ Check the working directory for config files. Use the FIRST match:
 | None of above | minimal | Skip to audit phase |
 
 For **node** projects, read `package.json` scripts to determine which commands exist. Map them:
-- format: `format:fix` or `format` or `prettier --write .`
+- format: `format:fix` or `format`; skip if neither script exists (never fall back to `prettier --write .`, which reformats the whole repo)
 - lint: `lint:fix` or `lint`
 - typecheck: `typecheck` or fall back to `tsc --noEmit`
 - test: `test` or `test:run`

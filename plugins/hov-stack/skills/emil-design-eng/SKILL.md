@@ -659,7 +659,7 @@ When reviewing UI code, check for:
 | `ease-in` on UI element                    | See "Never use ease-in for UI animations" above                  |
 | `transform-origin: center` on popover      | Set to trigger location (see "Make popovers origin-aware")       |
 | Animation on keyboard action               | Remove animation entirely                                        |
-| Duration > 300ms on UI element             | Reduce to 150-250ms                                              |
+| Duration > 300ms on UI element             | Reduce to 150-250ms (modals and drawers may run up to 500ms)     |
 | Hover animation without media query        | Add `@media (hover: hover) and (pointer: fine)`                  |
 | Keyframes on rapidly-triggered element     | Use CSS transitions for interruptibility                         |
 | Framer Motion `x`/`y` props under load     | Use `transform: "translateX()"` for hardware acceleration        |
