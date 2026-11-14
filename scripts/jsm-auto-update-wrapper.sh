@@ -153,9 +153,10 @@ clear_bytecode() {
 #      merges the overlay back afterwards
 #   4  a file was edited by hand after apply (unapply names it): a person
 #      decides, so jsm is not run and the night fails
-#   5  a saved pristine copy no longer matches the sha256 apply saved (a crash
-#      or a full disk, hov-stack#593): there is no pristine to put back, so as
-#      with 4 jsm is not run and the night fails
+#   5  a saved pristine copy is damaged or missing (a crash or a full disk,
+#      hov-stack#593): it no longer matches the sha256 apply saved, or, in state
+#      with no sums, is empty or holds a NUL byte. There is no pristine to put
+#      back, so as with 4 jsm is not run and the night fails; it outranks 4
 upgrade_skill() {
   local name=$1 rc=0
   if ! { mkdir -p "$LOCALIZE_STATE" && exec 8>>"$LOCALIZE_STATE/.lock" && flock -x -w 120 8; }; then
