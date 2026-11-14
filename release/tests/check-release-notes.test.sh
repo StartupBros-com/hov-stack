@@ -68,5 +68,64 @@ cat >"$TMP/notes" <<'NOTES'
 NOTES
 bash "$SCRIPT" "$TMP/notes" >"$TMP/out" 2>"$TMP/err" || { cat "$TMP/err"; die 'card-safe notes rejected'; }
 pass 'masked links and bullets past the third are left to the card'
+# One character at a time, so a class that stops covering any of them fails here.
+while IFS= read -r ch; do
+  printf '## Highlights\n- Customers can now use the a%sb option in the installer.\n' "$ch" >"$TMP/notes"
+  reject 'members would read: Customers can now use the ab option in the installer.' bash "$SCRIPT" "$TMP/notes"
+done <<'CHARS'
+`
+*
+_
+~
+>
+|
+#
+[
+]
+{
+}
+(
+)
+CHARS
+pass 'each character the card deletes fails on its own'
+cat >"$TMP/notes" <<'NOTES'
+## Highlights
+- Customers can install updates with one command.
+- Customers can roll back an update with one command.
+- Set MEMORY_DREAM_PASS_ROOT to move the pass folder somewhere else.
+NOTES
+reject 'bullet 3 has characters the Tool Drop card deletes' bash "$SCRIPT" "$TMP/notes"
+pass 'the third bullet is still on the card'
+cat >"$TMP/notes" <<'NOTES'
+## Highlights
+- Read the guide at https://example.com/setup_guide_(v2)#top before the first run.
+- Read the notes at <https://example.com/release_notes_(v2)> before you update.
+- Thanks to <@123456789> for reporting the installer bug.
+NOTES
+bash "$SCRIPT" "$TMP/notes" >"$TMP/out" 2>"$TMP/err" || { cat "$TMP/err"; die 'bare URLs and mentions rejected'; }
+pass 'bare and angle-bracket URLs and mentions are removed before the character check'
+cat >"$TMP/notes" <<'NOTES'
+## Highlights
+- Customers can install updates with one command.
+- https://example.com/release_notes_page
+- Customers can roll back an update with one command.
+NOTES
+reject 'bullet 2 is only a link, mention, heading or Full Changelog line' bash "$SCRIPT" "$TMP/notes"
+pass 'a bullet the card would skip fails instead of letting a later one move up'
+cat >"$TMP/notes" <<'NOTES'
+## Highlights
+- # What changed in this release for installs
+- **Full Changelog**: https://github.com/a/b/compare/v1...v2
+- Customers can roll back an update with one command.
+NOTES
+reject 'bullet 1 is only a link, mention, heading or Full Changelog line' bash "$SCRIPT" "$TMP/notes"
+grep -Fq 'bullet 2 is only a link, mention, heading or Full Changelog line' "$TMP/err" || { cat "$TMP/err"; die 'Full Changelog bullet not skipped'; }
+pass 'heading and Full Changelog bullets are skipped like the card skips them'
+cat >"$TMP/notes" <<'NOTES'
+## Highlights
+- Read <https://example.com/x> before running `setup` again.
+NOTES
+reject 'members would read: Read before running setup again.' bash "$SCRIPT" "$TMP/notes"
+pass 'an angle-bracket URL leaves nothing behind in the card text'
 
 printf '%s check-release-notes checks passed\n' "$PASS"

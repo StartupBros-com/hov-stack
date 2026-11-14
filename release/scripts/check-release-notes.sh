@@ -112,18 +112,28 @@ print(sum(2 if ord(c) > 0xFFFF else 1 for c in sys.stdin.read()))')"
     # The link step runs first here too, so a masked link's brackets or a URL's underscores
     # never count. When this rule landed (2026-11-13), 32 of the 104 notes files on main had
     # such a bullet in their first three.
+    # A bullet the card cleans down to nothing (only a link or mention, a "# " heading, a
+    # "**Full Changelog**" line) is skipped, and the card fills its three from later bullets
+    # that this check never looked at. Fail it instead, so the first three stay the card's.
     if [ "$n" -le 3 ]; then
       carded="$(printf '%s' "$text" | python3 -c 'import re, sys
 t = sys.stdin.read()
+if re.match(r"#+\s", t):
+    t = ""
+t = re.sub(r"\*\*Full Changelog\*\*.*$", "", t, flags=re.I)
 t = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", t)
 t = re.sub(r"<https?://[^>]+>", "", t, flags=re.I)
 t = re.sub(r"https?://\S+", "", t, flags=re.I)
 t = re.sub(r"<@&?\d+>|<@!\d+>|<#[0-9]+>", "", t)
-if re.search(r"[`*_~>|#\[\]{}()]", t):
-    print(re.sub(r"\s+", " ", re.sub(r"[`*_~>|#\[\]{}()]", "", t)).strip())')"
-      if [ -n "$carded" ]; then
-        problem "bullet $n has characters the Tool Drop card deletes (backticks, * _ ~ > | # [ ] { } and parentheses); members would read: ${carded:0:120}"
-      fi
+shown = re.sub(r"\s+", " ", re.sub(r"[`*_~>|#\[\]{}()]", "", t)).strip()
+if not shown:
+    print("drop")
+elif re.search(r"[`*_~>|#\[\]{}()]", t):
+    print("strip " + shown)')"
+      case "$carded" in
+        drop) problem "bullet $n is only a link, mention, heading or Full Changelog line; the Tool Drop card skips it and shows a later bullet in its place" ;;
+        strip\ *) problem "bullet $n has characters the Tool Drop card deletes (backticks, * _ ~ > | # [ ] { } and parentheses); members would read: ${carded:6:120}" ;;
+      esac
     fi
     [ "${#text}" -lt 15 ] && problem "bullet $n is too short to say anything useful: ${text:0:60}"
   done <<EOF
