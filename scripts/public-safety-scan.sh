@@ -24,9 +24,10 @@
 # <overlay>/private-tokens, the overlay directory being HOV_STACK_OVERLAY or
 # ~/.config/hov-stack (restructure plan U16). Without it the scan is structural only and
 # says so; --require-tokens makes the missing list a failure, which the pre-push gate
-# uses. A public repository's CI cannot carry the list: a fork's pull request sees no
-# variables or secrets, so CI runs the structural shapes and the author's pre-push run
-# adds the list.
+# (scripts/git-hooks/pre-push) uses. A public repository's CI cannot carry the list: a
+# fork's pull request sees no variables or secrets, so CI runs the structural shapes and
+# the author's pre-push run adds the list. That hook is installed per checkout; its header
+# gives the command.
 #
 # Exceptions live in .public-safety-allow: one TAB-separated line per exception, a path
 # pattern, a match pattern (both unanchored EREs), the reason, and optionally the one
