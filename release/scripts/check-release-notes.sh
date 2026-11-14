@@ -104,6 +104,27 @@ if [ -n "$highlights" ]; then
     units="$(printf '%s' "$text" | python3 -c 'import sys
 print(sum(2 if ord(c) > 0xFFFF else 1 for c in sys.stdin.read()))')"
     [ "$units" -gt 180 ] && problem "bullet $n is $units UTF-16 units; the feed truncates at 180"
+    # Check what the CARD prints. The members' Tool Drop card shows the first three bullets
+    # through sanitize() (pushbot apps/startupbros/app/api/internal/ops/tool-releases/
+    # tool-drop-card.ts): it drops links and mentions, keeping a masked link's words, then
+    # deletes every backtick and * _ ~ > | # [ ] { } ( ) without a word of warning. So
+    # `MEMORY_DREAM_PASS_ROOT` reaches members as MEMORYDREAMPASSROOT and `<pdf>` as <pdf.
+    # The link step runs first here too, so a masked link's brackets or a URL's underscores
+    # never count. When this rule landed (2026-11-13), 32 of the 104 notes files on main had
+    # such a bullet in their first three.
+    if [ "$n" -le 3 ]; then
+      carded="$(printf '%s' "$text" | python3 -c 'import re, sys
+t = sys.stdin.read()
+t = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", t)
+t = re.sub(r"<https?://[^>]+>", "", t, flags=re.I)
+t = re.sub(r"https?://\S+", "", t, flags=re.I)
+t = re.sub(r"<@&?\d+>|<@!\d+>|<#[0-9]+>", "", t)
+if re.search(r"[`*_~>|#\[\]{}()]", t):
+    print(re.sub(r"\s+", " ", re.sub(r"[`*_~>|#\[\]{}()]", "", t)).strip())')"
+      if [ -n "$carded" ]; then
+        problem "bullet $n has characters the Tool Drop card deletes (backticks, * _ ~ > | # [ ] { } and parentheses); members would read: ${carded:0:120}"
+      fi
+    fi
     [ "${#text}" -lt 15 ] && problem "bullet $n is too short to say anything useful: ${text:0:60}"
   done <<EOF
 $highlights

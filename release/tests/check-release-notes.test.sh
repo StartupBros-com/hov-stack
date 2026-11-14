@@ -53,5 +53,17 @@ reject '182 UTF-16 units' bash "$SCRIPT" "$TMP/notes"
 pass 'UTF-16 feed length includes emoji width'
 reject 'no such release notes file' bash "$SCRIPT" "$TMP/missing"
 pass 'missing file is annotated'
+printf '## Highlights\n- Set `MEMORY_DREAM_PASS_ROOT` to move the pass folder somewhere else.\n' >"$TMP/notes"
+reject 'members would read: Set MEMORYDREAMPASSROOT to move the pass folder somewhere else.' bash "$SCRIPT" "$TMP/notes"
+pass 'a bullet the card would strip characters from fails and shows the card text'
+cat >"$TMP/notes" <<'NOTES'
+## Highlights
+- Read [the setup guide](https://example.com/setup_guide_v2) before the first run.
+- Customers can install updates with one command.
+- Customers can roll back an update with one command.
+- Later bullets such as `this_one` never reach the card.
+NOTES
+bash "$SCRIPT" "$TMP/notes" >"$TMP/out" 2>"$TMP/err" || { cat "$TMP/err"; die 'card-safe notes rejected'; }
+pass 'masked links and bullets past the third are left to the card'
 
 printf '%s check-release-notes checks passed\n' "$PASS"
