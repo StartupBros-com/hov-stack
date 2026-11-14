@@ -46,10 +46,12 @@ contract, not open-ended reasoning.
    enough.
 2. **Sound body, misrouting description: redescribe.** Stale verdict, vague,
    duplicated, or broader than the content.
-3. **One topic told as a long log: compress** in place.
-4. **Several genuinely distinct durable topics: split**, with few, sharply
+3. **Near-duplicate notes: merge** into one canonical note; the others are
+   deleted.
+4. **One topic told as a long log: compress** in place.
+5. **Several genuinely distinct durable topics: split**, with few, sharply
    distinct extracts.
-5. Otherwise **leave**.
+6. Otherwise **leave**.
 
 ## Quality doctrine (what a good consolidation is)
 
