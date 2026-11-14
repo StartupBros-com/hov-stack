@@ -95,10 +95,43 @@ fi
 if [ "${1:-}" = '--workdir' ]; then shift 2; fi
 case "$1 $2" in
   'migration list')
+    # A failing read, like CLI v2.122.0 in JSON mode: progress text on stderr,
+    # the error object as JSON on stdout, exit 1.
+    if grep -q '^db push$' "$SUPABASE_CALLS"; then fail_json=${SUPABASE_LIST_FAIL_JSON_AFTER:-}; else fail_json=${SUPABASE_LIST_FAIL_JSON:-}; fi
+    if [ -n "$fail_json" ]; then
+      printf 'Connecting to remote database...\n' >&2
+      printf '%s\n' "$fail_json"
+      exit 1
+    fi
     if grep -q '^db push$' "$SUPABASE_CALLS" && [ -n "${SUPABASE_REMOTE_AFTER:-}" ]; then
-      printf '%s\n' "$SUPABASE_REMOTE_AFTER"
+      rows=$SUPABASE_REMOTE_AFTER
     else
-      printf '%s\n' "$SUPABASE_REMOTE"
+      rows=$SUPABASE_REMOTE
+    fi
+    # Fixtures are `local | remote | time` rows. Like CLI v2.122.0 (vendor bytes
+    # in tests/fixtures/supabase-migration-list/), answer
+    # --output-format json with JSON and anything else with the backticked table,
+    # which the script must refuse; text holding no row (an error message) passes
+    # through as-is.
+    if ! grep -q '|' <<<"$rows"; then
+      printf '%s\n' "$rows"
+    else
+      case " $* " in
+        *' --output-format json '*)
+          jq -Rsc 'split("\n") | map(select(test("\\|")) | split("|") | map(gsub("^\\s+|\\s+$"; "")))
+            | {migrations: map({local: .[0], remote: .[1], time: .[2]}), message: "Migrations listed"}' <<<"$rows"
+          ;;
+        *)
+          printf '\n  \n   Local            | Remote           | Time (UTC)            \n'
+          printf '  ------------------|------------------|-----------------------\n'
+          awk -F'|' 'NF >= 3 { for (i = 1; i <= 3; i++) gsub(/^ +| +$/, "", $i); printf "   `%s` | `%s` | `%s` \n", $1, $2, $3 }' <<<"$rows"
+          ;;
+      esac
+    fi
+    # A read that printed a full listing and still failed (a timeout or a late
+    # error after the rows were written).
+    if grep -q '^db push$' "$SUPABASE_CALLS" && [ -n "${SUPABASE_LIST_RC_AFTER:-}" ]; then
+      exit "$SUPABASE_LIST_RC_AFTER"
     fi
     ;;
   'db push')
@@ -146,6 +179,9 @@ setup_case() {
   SUPABASE_LEDGER_JSON='[]'
   SUPABASE_LEDGER_JSON_AFTER=''
   SUPABASE_REMOTE_AFTER=''
+  SUPABASE_LIST_FAIL_JSON=''
+  SUPABASE_LIST_FAIL_JSON_AFTER=''
+  SUPABASE_LIST_RC_AFTER=''
   SUPABASE_WRITE_RC=97
   CURL_RC=0
   POOLER_CURL_RC=0
@@ -189,6 +225,7 @@ run_apply_with() {
     CURL_CALLS="$CURL_CALLS" CURL_RC="$CURL_RC" POOLER_CURL_RC="$POOLER_CURL_RC" \
     SUPABASE_LEDGER_JSON="$SUPABASE_LEDGER_JSON" SUPABASE_LEDGER_JSON_AFTER="$SUPABASE_LEDGER_JSON_AFTER" \
     SUPABASE_REMOTE_AFTER="$SUPABASE_REMOTE_AFTER" SUPABASE_WRITE_RC="$SUPABASE_WRITE_RC" \
+    SUPABASE_LIST_FAIL_JSON="$SUPABASE_LIST_FAIL_JSON" SUPABASE_LIST_FAIL_JSON_AFTER="$SUPABASE_LIST_FAIL_JSON_AFTER" SUPABASE_LIST_RC_AFTER="$SUPABASE_LIST_RC_AFTER" \
     SUPABASE_DRY_OUTPUT="$SUPABASE_DRY_OUTPUT" \
     bash "$APPLY_LINK" --app "$APP_FIXTURE" "$@" 2>&1)
   RC=$?
@@ -610,6 +647,61 @@ assert_eq "14: unparseable post-push history exits verification status" "$RC" 5
 assert_has "14: unparseable post-push history is named" "$OUT" 'POST-VERIFY FAILED: could not parse post-push migration history'
 assert_not_has "14: the parse failure is not reported as a history delta" "$OUT" 'remote history differs from preflight + approved set'
 [ "$(grep -c '^db push$' "$SUPABASE_CALLS" || true)" = 1 ] || fail "14: expected the simulated write before post-verify failure"
+
+# 15. A failed preflight read names the CLI's own error. In JSON mode v2.122.0
+# writes it to stdout as JSON and leaves only progress text on stderr (vendor
+# bytes: fixtures/supabase-migration-list/v2.122.0-error.json), so a handler
+# that reads stderr alone reports "Connecting to remote database...".
+setup_case
+SUPABASE_REMOTE='-- | 20270701000000 | fixture'
+SUPABASE_LIST_FAIL_JSON=$(<"$HERE/tests/fixtures/supabase-migration-list/v2.122.0-error.json")
+printf '%s\n' '-- baseline' >"$DIR/migrations/20270701000000_baseline.sql"
+printf '%s\n' '-- unique' >"$DIR/migrations/20270801000000_unique.sql"
+run_apply
+assert_eq "15: a failed preflight read exits precondition status" "$RC" 1
+assert_has "15: the failure is announced" "$OUT" 'migration list failed:'
+assert_has "15: the CLI's JSON error is the reason" "$OUT" 'DbConfigIpv6Error; IPv6 is not supported on your current network; Run supabase link'
+assert_not_has "15: the progress line is not the reason" "$OUT" 'Connecting to remote database'
+assert_no_push "15: a failed preflight read reached db push"
+
+# 16. The post-push read fails the same way: post-verify stops on the read's own
+# exit status and says what the CLI reported, before any parse.
+setup_case
+printf '%s\n' '-- | 20270701000000 | fixture' >"$CASE/remote"
+SUPABASE_REMOTE=$(<"$CASE/remote")
+SUPABASE_LIST_FAIL_JSON_AFTER=$(<"$HERE/tests/fixtures/supabase-migration-list/v2.122.0-error.json")
+SUPABASE_LEDGER_JSON='[{"version":"20270701000000","name":"baseline"}]'
+SUPABASE_LEDGER_JSON_AFTER='[{"version":"20270701000000","name":"baseline"},{"version":"20270801000000","name":"unique"}]'
+SUPABASE_DRY_OUTPUT='Applying migration 20270801000000_unique.sql...'
+SUPABASE_WRITE_RC=0
+printf '%s\n' '-- baseline' >"$DIR/migrations/20270701000000_baseline.sql"
+printf '%s\n' '-- unique' >"$DIR/migrations/20270801000000_unique.sql"
+token=$(fixture_token '20270801000000_unique.sql')
+run_apply_with 0 --confirm "$token"
+assert_eq "16: a failed post-push read exits verification status" "$RC" 5
+assert_has "16: the CLI's JSON error is named" "$OUT" 'POST-VERIFY FAILED: post-push migration list exited 1: DbConfigIpv6Error; IPv6 is not supported'
+assert_not_has "16: a failed read is not reported as a parse failure" "$OUT" 'could not parse post-push migration history'
+[ "$(grep -c '^db push$' "$SUPABASE_CALLS" || true)" = 1 ] || fail "16: expected the simulated write before post-verify failure"
+
+# 17. POST-WRITE PLANTED NEGATIVE: the post-push read exits nonzero although its
+# stdout holds exactly the expected versions, and the ledger agrees. A read that
+# failed verifies nothing, so this is exit 5 and never "applied" (#366).
+setup_case
+printf '%s\n' '-- | 20270701000000 | fixture' >"$CASE/remote"
+SUPABASE_REMOTE=$(<"$CASE/remote")
+SUPABASE_REMOTE_AFTER=$(printf '%s\n' '-- | 20270701000000 | fixture' '-- | 20270801000000 | fixture')
+SUPABASE_LIST_RC_AFTER=124
+SUPABASE_LEDGER_JSON='[{"version":"20270701000000","name":"baseline"}]'
+SUPABASE_LEDGER_JSON_AFTER='[{"version":"20270701000000","name":"baseline"},{"version":"20270801000000","name":"unique"}]'
+SUPABASE_DRY_OUTPUT='Applying migration 20270801000000_unique.sql...'
+SUPABASE_WRITE_RC=0
+printf '%s\n' '-- baseline' >"$DIR/migrations/20270701000000_baseline.sql"
+printf '%s\n' '-- unique' >"$DIR/migrations/20270801000000_unique.sql"
+token=$(fixture_token '20270801000000_unique.sql')
+run_apply_with 0 --confirm "$token"
+assert_eq "17: a nonzero post-push read exits verification status despite matching versions" "$RC" 5
+assert_has "17: the read's exit status is named" "$OUT" 'POST-VERIFY FAILED: post-push migration list exited 124: no error JSON on stdout'
+[ "$(grep -c '^db push$' "$SUPABASE_CALLS" || true)" = 1 ] || fail "17: expected the simulated write before post-verify failure"
 
 # B1. bws sits between env and ~/.secrets. With no env token the script resolves
 # the bws record through resolve_trusted_bin (a stub on PATH), the supabase

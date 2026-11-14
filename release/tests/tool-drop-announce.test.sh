@@ -458,7 +458,7 @@ expect_contract_reject "manifest read from the caller repository" "$mutant" "$HE
 
 mutant="$TMP/workflow-reordered-stable-step.yml"
 swap_once "$WORKFLOW" "$mutant" \
-  $'      - name: Check out current marketplace manifest\n        if: steps.current.outputs.eligible == \'true\'\n        uses: actions/checkout@ac593985615ec2ede58e132d2e21d2b1cbd6127c\n        with:\n          repository: ${{ inputs.marketplace-repository || job.workflow_repository }}\n          ref: main\n          path: marketplace-data\n          persist-credentials: false\n' \
+  $'      - name: Check out current marketplace manifest\n        if: steps.current.outputs.eligible == \'true\'\n        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1\n        with:\n          repository: ${{ inputs.marketplace-repository || job.workflow_repository }}\n          ref: main\n          path: marketplace-data\n          persist-credentials: false\n' \
   $'      - name: Resolve latest stable release\n        if: steps.current.outputs.eligible == \'true\'\n        id: stable\n        env:\n          GH_TOKEN: ${{ github.token }}\n          REPOSITORY: ${{ github.event.repository.name }}\n          RELEASE_ID: ${{ github.event.release.id }}\n          RELEASE_TAG: ${{ github.event.release.tag_name }}\n        run: ./trusted-workflow/release/scripts/latest-stable-release.sh\n'
 expect_contract_reject "latest stable step reordered before the manifest checkout" "$mutant" "$HELPER"
 
