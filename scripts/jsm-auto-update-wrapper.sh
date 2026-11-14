@@ -153,6 +153,9 @@ clear_bytecode() {
 #      merges the overlay back afterwards
 #   4  a file was edited by hand after apply (unapply names it): a person
 #      decides, so jsm is not run and the night fails
+#   5  a saved pristine copy no longer matches the sha256 apply saved (a crash
+#      or a full disk, hov-stack#593): there is no pristine to put back, so as
+#      with 4 jsm is not run and the night fails
 upgrade_skill() {
   local name=$1 rc=0
   if ! { mkdir -p "$LOCALIZE_STATE" && exec 8>>"$LOCALIZE_STATE/.lock" && flock -x -w 120 8; }; then
@@ -170,6 +173,10 @@ upgrade_skill() {
       ;;
     4)
       echo "jsm-auto-update: $name was not updated: a file above was edited by hand after skills-localize wrote it; to discard the edit run skills-localize.sh forget $name, jsm install $name --force, then skills-localize.sh apply"
+      note_failure 1 reported-failure
+      ;;
+    5)
+      echo "jsm-auto-update: $name was not updated: its saved pristine copy above is damaged, so there is nothing to put back; run skills-localize.sh forget $name, jsm install $name --force, then skills-localize.sh apply"
       note_failure 1 reported-failure
       ;;
     *)

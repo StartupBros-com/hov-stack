@@ -476,6 +476,20 @@ assert_line 'jsm-auto-update: ov-skill was not updated: a file above was edited 
 assert_marker 'JSM_STAGE=upgrade' "hand-edited stage"
 assert_marker 'JSM_CAUSE=reported-failure' "hand-edited cause"
 
+# A damaged saved pristine copy (exit 5, hov-stack#593) is a person's call too:
+# there is no pristine to put back, so jsm never touches that skill.
+reset_fixture
+set_updates ov-skill skill-a
+printf '5\n' >"$FIXTURE/unapply-ov-skill.rc"
+printf 'damaged: the saved pristine copy of agents ov-skill/SKILL.md is not the file apply saved; not restoring it\n' >"$FIXTURE/unapply-ov-skill.stdout"
+run_wrapper layer-damaged
+assert_rc 1 "damaged saved copy fails the night"
+assert_calls "a skill with a damaged saved copy never reaches jsm; the others still update" "$LIST" "$CONFIG" 'upgrade skill-a'
+assert_line 'damaged: the saved pristine copy of agents ov-skill/SKILL.md is not the file apply saved; not restoring it' "the damaged copy is named"
+assert_line 'jsm-auto-update: ov-skill was not updated: its saved pristine copy above is damaged, so there is nothing to put back; run skills-localize.sh forget ov-skill, jsm install ov-skill --force, then skills-localize.sh apply' "damaged copy recipe"
+assert_marker 'JSM_CAUSE=reported-failure' "damaged copy cause"
+assert_marker 'JSM_STAGE=upgrade' "damaged copy stage"
+
 # Any other exit, or no localizer at all, decides nothing: that skill is not
 # updated and the first such exit becomes the unit's.
 for case_rc in 2 127; do
