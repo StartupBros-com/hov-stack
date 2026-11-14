@@ -23,12 +23,14 @@ CLI, never a hardcoded path:
 SCRATCH=$(python3 "${CLAUDE_PLUGIN_ROOT}/memory_dream/cli.py" scratch)
 ```
 
-Suite and run artifacts live at their config defaults (`eval_home()`,
-overridable via `MEMORY_DREAM_EVAL_HOME` or the JSON config file):
+Suite and run artifacts live under the eval home (`eval_home()`):
+`$MEMORY_DREAM_EVAL_HOME` when set, else
+`<claude-config-dir>/logs/memory-dream/eval`. The JSON config file has no key
+for it.
 
-- Frozen suite: `<claude-config-dir>/logs/memory-dream/eval/suite.json`
-- Each scoring run: `<claude-config-dir>/logs/memory-dream/eval/runs/run-<tag>.json`
-- Forward suite (see Stage 7): `<claude-config-dir>/logs/memory-dream/eval/suite-forward.json`
+- Frozen suite: `<eval-home>/suite.json`
+- Each scoring run: `<eval-home>/runs/run-<tag>.json`
+- Forward suite (see Stage 7): `<eval-home>/suite-forward.json`
 
 `<claude-config-dir>` is `$CLAUDE_CONFIG_DIR` or `~/.claude`.
 
@@ -40,7 +42,7 @@ deterministically.
 ## Stage 0: reuse or rebuild the frozen suite (gate)
 
 ```bash
-EVAL_HOME="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/logs/memory-dream/eval"
+EVAL_HOME="${MEMORY_DREAM_EVAL_HOME:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}/logs/memory-dream/eval}"
 ```
 
 If `$EVAL_HOME/suite.json` exists and `$ARGUMENTS` is not `regenerate`, skip to
