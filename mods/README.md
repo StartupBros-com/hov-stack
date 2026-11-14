@@ -100,10 +100,19 @@ own switch for the task reminder, `CLAUDE_CODE_TODO_REMINDER_MODE=off` (read in
 the 2.1.325 binary, where it turns off every task reminder, not only repeats;
 not set here and not tried). The mod's last version is in git history at
 `10ea7da` (`mods/reminder-diet/`), and the smoke test holds its removal the way
-it holds lookout's. Before building a mod, check its events against the
-guard's: a session's debug log names them on the line `hooks module
-cc-plugin-sec-default@builtin loaded`, and a mod's hook on one of them is
-skipped with a notice.
+it holds lookout's. Before building a mod, check its events against the ones
+the guard holds back from a mod a user loads: `classic.*`, `prompt.compose`,
+`prompt.section`, `prompt.context`, `prompt.attachment`, `skill.prompt`,
+`attribution.text`, `session.compact`, `settings.read`, and `session.append`
+for the attachment, hook-context and compaction rows (Anthropic's mods admin
+page, "Know which hooks of a user's mod don't run", read 2026-11-14). That list
+is narrower than the events the guard itself hooks, which a session's debug log
+prints on the line `hooks module cc-plugin-sec-default@builtin loaded`:
+agent-radar's `agent.spawn` hook is on that line and drew no skip notice in the
+same 14 days. The debug log names each skip as `<mod>: <event> bypassed by
+cc-plugin-sec-default`; the page adds that the guard passes over a user's hooks
+in a few other cases with no note, such as `tool.describe` for an
+organization's tools.
 
 lookout was wired on 2026-10-06 and removed on 2026-11-14 on the operator's
 verdict. Every six main-thread model steps it asked one tool-less fork of the
