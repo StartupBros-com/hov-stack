@@ -603,7 +603,7 @@ if jq -e --arg home "$fresh_runtime_home" --arg repo "$REPO" --arg realhome "$HO
     and .env.WACLI_STORE_DIR == ($realhome + "/.local/state/wacli")
     and .env.PRO_GATE_ROUND_GUARD == "1"
     and .env.CLAUDE_CODE_FILE_READ_MAX_OUTPUT_TOKENS == "50000"
-    and .env.CLAUDE_CODE_PLUGIN_DIRS == ($home + "/mods/loop-breaker:" + $home + "/mods/agent-radar:" + $home + "/mods/read-ceiling-pager:" + $home + "/mods/x-mcp-budget")
+    and .env.CLAUDE_CODE_PLUGIN_DIRS == ($home + "/mods/loop-breaker:" + $home + "/mods/agent-radar:" + $home + "/mods/read-ceiling-pager:" + $home + "/mods/x-mcp-budget:" + $home + "/mods/idle-compact")
     and .permissions.disableAutoMode == "disable"
     and .permissions.defaultMode == "bypassPermissions"
     and .permissions.disableBypassPermissionsMode != "disable"
@@ -1854,7 +1854,7 @@ for f in settings.json keybindings.json; do
             # then sets the two env paths below.
             .env |= with_entries(.value |= (if type == "string" and startswith("$HOME/") then $realhome + .[5:] else . end))
             | .env.CLAUDE_ENV_FILE = ($home + "/claude-env.sh")
-            | .env.CLAUDE_CODE_PLUGIN_DIRS = ($home + "/mods/loop-breaker:" + $home + "/mods/agent-radar:" + $home + "/mods/read-ceiling-pager:" + $home + "/mods/x-mcp-budget")
+            | .env.CLAUDE_CODE_PLUGIN_DIRS = ($home + "/mods/loop-breaker:" + $home + "/mods/agent-radar:" + $home + "/mods/read-ceiling-pager:" + $home + "/mods/x-mcp-budget:" + $home + "/mods/idle-compact")
           ' "$REPO/$f") \
         <(jq -S . "$CLAUDE_HOME/$f"); then
       ok
@@ -1893,7 +1893,7 @@ if jq -e --arg home "$CLAUDE_HOME" --arg realhome "$HOME" '
     and .env.WACLI_STORE_DIR == ($realhome + "/.local/state/wacli")
     and .env.PRO_GATE_ROUND_GUARD == "1"
     and .env.CLAUDE_CODE_FILE_READ_MAX_OUTPUT_TOKENS == "50000"
-    and .env.CLAUDE_CODE_PLUGIN_DIRS == ($home + "/mods/loop-breaker:" + $home + "/mods/agent-radar:" + $home + "/mods/read-ceiling-pager:" + $home + "/mods/x-mcp-budget")
+    and .env.CLAUDE_CODE_PLUGIN_DIRS == ($home + "/mods/loop-breaker:" + $home + "/mods/agent-radar:" + $home + "/mods/read-ceiling-pager:" + $home + "/mods/x-mcp-budget:" + $home + "/mods/idle-compact")
     and .permissions.disableAutoMode == "disable"
     and .permissions.defaultMode == "bypassPermissions"
     and .permissions.disableBypassPermissionsMode != "disable"
@@ -1992,7 +1992,7 @@ if jq -e --arg home "$CLAUDE_HOME" --arg realhome "$HOME" '
     and .env.WACLI_STORE_DIR == ($realhome + "/.local/state/wacli")
     and .env.PRO_GATE_ROUND_GUARD == "1"
     and .env.CLAUDE_CODE_FILE_READ_MAX_OUTPUT_TOKENS == "50000"
-    and .env.CLAUDE_CODE_PLUGIN_DIRS == ($home + "/mods/loop-breaker:" + $home + "/mods/agent-radar:" + $home + "/mods/read-ceiling-pager:" + $home + "/mods/x-mcp-budget")
+    and .env.CLAUDE_CODE_PLUGIN_DIRS == ($home + "/mods/loop-breaker:" + $home + "/mods/agent-radar:" + $home + "/mods/read-ceiling-pager:" + $home + "/mods/x-mcp-budget:" + $home + "/mods/idle-compact")
     and .enabledPlugins["typescript-lsp@claude-plugins-official"] == false
     and .enabledPlugins["sync-smoke-keep@example"] == true
     and .permissions.disableAutoMode == "disable"
