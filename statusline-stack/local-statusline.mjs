@@ -1,13 +1,17 @@
 #!/usr/bin/env node
 // local-statusline: dependency-free replacement for `npx -y ccstatusline@latest`.
-// Reads Claude Code's session JSON on stdin and renders a three-line HUD:
-//   1. ctx bar · prompt-cache TTL · model + effort (+ last reply) · cost
-//   2. repo › branch ±changes · last session route
+// Reads Claude Code's session JSON on stdin and renders a HUD of up to three rows:
+//   1. ctx bar · prompt-cache TTL · model + effort · last reply · cost
+//   2. session name · repo › branch ±changes · last session route
 //   3. 5h and 7d quota bars (aligned under the ctx bar) · PR · session id
-// Each line is rebuilt at rising drop levels until it fits LINE_MAX columns.
+// A session with no quota and no PR has no third row: its id joins row 2. PR
+// links that do not fit wrap whole onto extra rows.
+// Each row is rebuilt at rising drop levels until it fits WIDTH: COLUMNS - 4
+// when Claude Code passes the terminal width, else 108.
 // STATUSLINE_PRIVATE=1 or a ~/.claude/statusline-private file (checked on every
 // render, so a touch takes effect within the refresh interval) masks the account
-// name and session id for screenshots. CC provides every field except two
+// name and hides the session name and id for screenshots. CC provides every
+// field except two
 // better-ccflare facts:
 //   - the actually-served MAIN-CHAIN model, read from the transcript tail where
 //     CC records the proxy's rewritten model verbatim (sidechain/subagent
@@ -26,15 +30,29 @@ import { sessionPrs, prStates, parsePr } from './pr-links.mjs';
 
 // ---- ANSI helpers (256-color fg; no powerline bg so no Nerd-Font dependency) ----
 const e = (n, s) => `\x1b[38;5;${n}m${s}\x1b[0m`;
+const eb = (n, s) => `\x1b[1;38;5;${n}m${s}\x1b[0m`;
 const dim = (s) => e(244, s);            // gray meta
 const sep = dim(' │ ');
-const CYAN = 51, BLUE = 39, GREEN = 42, ORANGE = 214, RED = 203;
+// CYAN is the one accent: it marks what this session is (its name and its model).
+const CYAN = 51, BLUE = 39, GREEN = 42, ORANGE = 214, RED = 203, PURPLE = 141;
 const NEUTRAL = 250;                     // soft light-gray for names and plain values
+const BRIGHT = 253;                      // branch name: the thing you switch on
+const TRACK = 238;                       // the empty part of a meter
+const QUIET = 245;                       // a meter fill that is not under pressure
+// Truecolor only when the terminal says so; every truecolor path has a 256 twin.
+const TRUE = /^(truecolor|24bit)$/i.test(process.env.COLORTERM || '');
+// Usable width: Claude Code cuts each line at COLUMNS - 4. Unknown width = 108.
+const WIDTH = (() => {
+  const c = process.env.COLUMNS;
+  const n = /^\d{1,5}$/.test(c ?? '') ? Number(c) : NaN;
+  return n >= 40 ? n - 4 : 108;
+})();
 const PROVENANCE_TTL_MS = 5000;
 const PROVENANCE_FALLBACK_BASE = 'http://127.0.0.1:8788';
-// The renderer is never told the terminal width, so every line is held to one
-// budget that leaves room on a ~110-column pane. Every glyph used is one column.
-const LINE_MAX = 108;
+// Every glyph used is one column wide where the terminal draws East Asian
+// ambiguous-width characters narrow, the default outside CJK locales. A
+// terminal set to draw them wide gives several of them two cells, and the
+// widths counted here run short.
 const TTL_SEC = { '5m': 300, '1h': 3600 };
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 // Claude Code's own wording for a cache miss's likely cause (its /cost line).
@@ -70,24 +88,55 @@ function provenanceTimeoutMs() {
   return ms >= 1 && ms <= 10000 ? ms : 250;
 }
 
-// color a percentage by pressure: <60 green, <85 orange, else red
-const pctColor = (p) => (p >= 85 ? RED : p >= 60 ? ORANGE : GREEN);
+// Pressure colour runs green, orange, red. Truecolor blends between the stops
+// below: green at 0, orange at 60, red at 85, a deeper red at 100. The
+// 256-colour twin has no blend, so it steps through five fixed colours, changing
+// at 45, 60, 75 and 85.
+const STOPS = [[0, [52, 199, 120]], [60, [240, 180, 40]], [85, [255, 110, 90]], [100, [255, 70, 90]]];
+function rgbAt(p) {
+  const x = Math.max(0, Math.min(100, p));
+  for (let i = 1; i < STOPS.length; i++) {
+    const [p1, c1] = STOPS[i];
+    if (x <= p1) {
+      const [p0, c0] = STOPS[i - 1];
+      const t = (x - p0) / (p1 - p0);
+      return c0.map((v, k) => Math.round(v + (c1[k] - v) * t));
+    }
+  }
+  return STOPS[STOPS.length - 1][1];
+}
+const ramp256 = (p) => (p >= 85 ? RED : p >= 75 ? 208 : p >= 60 ? ORANGE : p >= 45 ? 148 : GREEN);
+const pressure = (p, s) => (TRUE ? `\x1b[38;2;${rgbAt(p).join(';')}m${s}\x1b[0m` : e(ramp256(p), s));
 
-// 10-cell mini bar, e.g. ▕██████░░░░▏, colored by pressure
-function bar(pct) {
-  const w = 10;
-  const f = Math.max(0, Math.min(w, Math.round((pct / 100) * w)));
-  const body = '█'.repeat(f) + '░'.repeat(w - f);
-  return e(pctColor(pct), `▕${body}▏`);
+// 8-cell meter in eighth blocks (64 steps), e.g. █▊░░░░░░. Each filled cell is
+// coloured by how much pressure its own position stands for, so a long fill
+// shows how far into the warm colours it has reached. quiet = one gray fill,
+// for a quota that is not under pressure. The empty track stays in the text
+// (░) so the length reads with colour stripped.
+const CELLS = 8;
+const PART = ['', '▏', '▎', '▍', '▌', '▋', '▊', '▉'];
+function meter(pct, quiet = false) {
+  const p = Math.max(0, Math.min(100, pct));
+  let f = Math.round((p / 100) * CELLS * 8);
+  if (p > 0 && f === 0) f = 1; // never show a used window as empty
+  const full = Math.floor(f / 8), part = f % 8;
+  let out = '';
+  for (let i = 0; i < CELLS; i++) {
+    const paint = (s) => (quiet ? e(QUIET, s) : pressure(((i + 0.5) / CELLS) * 100, s));
+    if (i < full) out += paint('█');
+    else if (i === full && part) out += paint(PART[part]);
+    else out += e(TRACK, '░');
+  }
+  return out;
 }
 
-// an empty gray bar for a quota window that has already rolled over
-const barDim = () => dim(`▕${'░'.repeat(10)}▏`);
+// an empty gray meter for a quota window that has already rolled over
+const meterDim = () => e(TRACK, '░'.repeat(CELLS));
 
 // percentage text: gray while comfortable, pressure-colored from 60%
 function pctText(p) {
   const t = `${String(Math.round(p)).padStart(2)}%`;
-  return p >= 60 ? e(pctColor(p), t) : dim(t);
+  return p >= 60 ? pressure(p, t) : dim(t);
 }
 
 // unix epoch seconds -> local "HH:MM", or "Ddd HH:MM" when not today, so a
@@ -133,15 +182,28 @@ function midTrim(s, max) {
 
 const vis = (s) => s.replace(/\x1b\]8;;[^\x1b]*\x1b\\/g, '').replace(/\x1b\[[0-9;]*m/g, '').length;
 
-// Build a line at drop level 0, 1, 2, ... until it fits; the last build stands.
-function fit(build, maxLevel) {
-  let out = '';
-  for (let level = 0; level <= maxLevel; level++) {
-    out = build(level);
-    if (vis(out) <= LINE_MAX) break;
+// Build a line from a state object, applying one shrink step at a time (in the
+// stated priority order) until it fits; the last build stands.
+function shrink(build, state, steps) {
+  let out = build(state);
+  for (const step of steps) {
+    if (vis(out) <= WIDTH) break;
+    step(state);
+    out = build(state);
   }
   return out;
 }
+
+// Session names are the operator's own text. A line break or tab becomes a
+// space; then controls go, and only Latin characters stay, so a CJK or emoji
+// title can never be double width. The soft hyphen (U+00AD) goes too:
+// terminals disagree on whether it takes a cell.
+function cleanName(value) {
+  if (typeof value !== 'string') return '';
+  return value.replace(/\s+/g, ' ').replace(/[^\x20-\x7e\xa1-\xac\xae-ɏ]/g, '')
+    .replace(/ {2,}/g, ' ').trim().slice(0, 80);
+}
+const trimTo = (s, max) => (s.length <= max ? s : `${s.slice(0, Math.max(1, max - 1))}…`);
 
 // Screenshot privacy, read at render time only and never cached.
 function isPrivate() {
@@ -314,15 +376,18 @@ function minsUntil(ms) {
 // so stay silent. Returns null to render nothing. Fully guarded by the caller.
 // Drop levels (line 2's width budget): 1 the age, 2 windows past two, 3 a name
 // past 24 columns. Private mode masks the name and keeps the dot and windows.
-function accountBadge(data, level = 0, priv = false) {
+// st = { age, short, win, trim }: show the age, use the short label "last
+// route" (still a past observation), how many windows (4/2/0), trim a long name.
+function accountBadge(data, st, priv = false) {
   if (!data) return null; // endpoint unreachable/malformed — no badge at all
-  const unknown = () => (process.env.ANTHROPIC_BASE_URL ? dim('last session route ○ ?') : null);
+  const label = st.short ? 'last route' : 'last session route';
+  const unknown = () => (process.env.ANTHROPIC_BASE_URL ? dim(`${label} ○ ?`) : null);
   if (data.status !== 'known' || !data.account) return unknown();
   const a = data.account;
   let name = safeName(a.name);
   if (!name) return unknown();
   if (priv) name = privateName(name);
-  else if (level >= 3 && name.length > 24) name = `${name.slice(0, 23)}…`;
+  else if (st.trim && name.length > 24) name = `${name.slice(0, 23)}…`;
   const paused = a.paused === true;
   // rateLimitStatus is the human display string from the server's
   // computeRateLimitStatusDisplay: "OK", "allowed (228m)" (healthy snapshot),
@@ -347,23 +412,28 @@ function accountBadge(data, level = 0, priv = false) {
   // Dot = state (rate-limited/paused/throttled) else the worst window's pressure.
   const worst = windows.reduce((m, w) => Math.max(m, w.utilization), 0);
   let dot;
-  if (paused || rateLimited) dot = RED;
-  else if (throttled) dot = ORANGE;
-  else dot = windows.length ? pctColor(worst) : GREEN;
+  if (paused || rateLimited) dot = e(RED, '●');
+  else if (throttled) dot = e(ORANGE, '●');
+  else dot = windows.length ? pressure(worst, '●') : e(GREEN, '●');
 
   // Endpoint data renders inline: window labels are held to a strict allowlist
   // (an unsanitized label can smuggle ANSI control sequences into the HUD) and
   // the list is capped so a chatty server can't wrap the status line.
-  const parts = windows.slice(0, level >= 2 ? 2 : 4).map((w) => {
-    const label = String(w.window ?? '').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 16);
+  const parts = windows.slice(0, st.win).map((w) => {
+    const wl = String(w.window ?? '').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 16);
     const u = Math.round(Math.min(999, Math.max(0, w.utilization)));
-    const win = windowShort(label);
-    const pct = e(pctColor(w.utilization), `${u}%`);
+    const win = windowShort(wl);
+    const pct = pressure(w.utilization, `${u}%`);
     return win ? `${dim(win)} ${pct}` : pct;
   });
 
-  const age = level >= 1 ? '' : ` ${dim(`(${observationAge(a.recordedAt)})`)}`;
-  return `${dim('last session route')} ${e(dot, '●')} ${e(NEUTRAL, name)}${parts.length ? ' ' + parts.join(' ') : ''}${age}`;
+  // The account's own windows sit in parentheses with the observation age, so
+  // they read as part of the past route record and never as the session quota
+  // bars on line 3.
+  const age = st.age ? observationAge(a.recordedAt) : '';
+  const inner = parts.join(' ') + (age ? `${parts.length ? ', ' : ''}${age}` : '');
+  const tail = inner ? ` ${dim('(')}${parts.length ? inner : dim(inner)}${dim(')')}` : '';
+  return `${dim(label)} ${dot} ${e(NEUTRAL, name)}${tail}`;
 }
 
 // Streaming adapters can report an all-zero placeholder until terminal usage
@@ -387,7 +457,7 @@ function usageUnavailable(cw) {
 // its absolute expiry, so a stale frame stays true. A warm frame past its
 // expiry reads cold. Cold is a cost, not an error, so it is never red.
 // Drop levels (line 1's budget): 1 the miss flag, 3 the idle time, 4 the
-// "re-cache" word (the token count stays).
+// "re-cache" word (the token count stays), 5 the absolute expiry clock.
 function cacheSegment(pc, level, unavailable) {
   if (!pc || typeof pc !== 'object' || pc.caching_observed !== true || typeof pc.warm !== 'boolean')
     return null;
@@ -405,7 +475,7 @@ function cacheSegment(pc, level, unavailable) {
     let out = label;
     if (exp !== null) {
       const rem = exp - now;
-      out += ` ${e(rem > (ttlSec ?? 3600) * 0.2 ? GREEN : ORANGE, fmtDur(rem, 'up'))}${dim(`→${clock(exp)}`)}`;
+      out += ` ${e(rem > (ttlSec ?? 3600) * 0.2 ? GREEN : ORANGE, fmtDur(rem, 'up'))}${level < 5 ? dim(`→${clock(exp)}`) : ''}`;
     } else out += ` ${e(GREEN, 'warm')}`;
     // A fresh miss that was not idle time: something about the prompt changed.
     const causes = pc.last_miss_cause?.causes;
@@ -423,7 +493,7 @@ function cacheSegment(pc, level, unavailable) {
     if (idle > 0) out += dim(` · idle ${fmtDur(idle, 'down')}`);
   }
   const n = pc.recache_tokens_if_cold;
-  if (num(n) && n > 0) out += `${dim(level < 4 ? ' · re-cache ' : ' · ')}${e(NEUTRAL, `~${kfmt(n)}`)}`;
+  if (num(n) && n > 0) out += `${dim(level < 4 ? ' · re-cache ' : level < 5 ? ' · ' : ' ')}${e(NEUTRAL, `~${kfmt(n)}`)}`;
   else if (n === null) out += dim(' · next turn re-caches');
   return out;
 }
@@ -472,32 +542,35 @@ function tilde(p) {
 // then the branch. Outside a repo the ~-relative cwd stands alone. git names
 // its toplevel by realpath, so a cwd reached through a symlink is placed by its
 // own realpath; one placed by neither still gets the repo and branch.
-function place(cwd, g, wtName, level) {
+// st = { trim, wt }: shorten the path part, show the worktree's own name.
+function place(cwd, g, wtName, st) {
   if (!g || !g.repo || !g.top)
-    return cwd ? dim(midTrim(clean(tilde(cwd), 200), level >= 4 ? 24 : 60)) : '';
+    return cwd ? dim(midTrim(clean(tilde(cwd), 200), st.trim ? 24 : 60)) : '';
   const under = (p) => p === g.top || p.startsWith(`${g.top}/`);
   let at = under(cwd) ? cwd : '';
   if (!at) { try { const real = fs.realpathSync(cwd); if (under(real)) at = real; } catch { /* repo and branch only */ } }
   const sub = at && at !== g.top ? at.slice(g.top.length + 1) : '';
-  const where = midTrim(clean(g.repo, 40) + (sub ? `/${clean(sub, 200)}` : ''), level >= 4 ? 24 : 44);
+  const where = midTrim(clean(g.repo, 40) + (sub ? `/${clean(sub, 200)}` : ''), st.trim ? 24 : 44);
   const branch = clean(g.branch, 40) || 'HEAD';
-  let out = `${e(NEUTRAL, where)}${dim(' ›')} ${g.isWt ? `${dim('wt')} ` : ''}${e(BLUE, branch)}`;
+  let out = `${e(NEUTRAL, where)}${dim(' ›')} ${g.isWt ? `${dim('wt')} ` : ''}${e(BRIGHT, branch)}`;
   if (g.changes) out += ` ${e(ORANGE, `±${g.changes}`)}`;
   const wt = clean(wtName, 40);
-  if (level < 5 && g.isWt && wt && wt !== branch) out += dim(` (${wt})`);
+  if (st.wt && g.isWt && wt && wt !== branch) out += dim(` (${wt})`);
   return out;
 }
 
 // One quota window; the first on the line pads its label to the ctx label's
-// width so the two bars share a column.
-function quota(label, w, pad) {
+// width so the two meters share a column. Below 60% the meter is one quiet gray
+// and the number is dim: a window that is not binding does not ask for a look.
+// st = { meter, clock }.
+function quota(label, w, pad, st) {
   if (!w || !num(w.used_percentage)) return null;
-  const head = `${dim(label)}${pad ? '  ' : ' '}`;
+  const head = `${dim(label)}${pad && st.meter ? '  ' : ' '}`;
   if (num(w.resets_at) && w.resets_at > 0 && w.resets_at <= Date.now() / 1000)
-    return `${head}${barDim()} ${dim('reset due')}`; // the window rolled over since this payload
+    return `${head}${st.meter ? `${meterDim()} ` : ''}${dim('reset due')}`; // the window rolled over since this payload
   const u = w.used_percentage;
-  const when = clock(w.resets_at);
-  return `${head}${bar(u)} ${pctText(u)}${when ? dim(`→${when}`) : ''}`;
+  const when = st.clock ? clock(w.resets_at) : '';
+  return `${head}${st.meter ? `${meter(u, u < 60)} ` : ''}${pctText(u)}${when ? dim(`→${when}`) : ''}`;
 }
 
 function main(raw) {
@@ -517,11 +590,12 @@ function main(raw) {
     const tokens = num(cw.total_input_tokens)
       ? kfmt(cw.total_input_tokens) + (num(cw.context_window_size) && cw.context_window_size > 0 ? `/${sizefmt(cw.context_window_size)}` : '')
       : '';
-    let ctx = null;
-    if (unavailable) ctx = dim('ctx usage unavailable');
-    else if (num(cw.used_percentage))
-      ctx = `${dim('ctx')} ${bar(cw.used_percentage)} ${pctText(cw.used_percentage)}${tokens ? ' ' + dim(tokens) : ''}`;
-    else if (tokens) ctx = dim(`ctx ${tokens}`);
+    const ctx = (s) => {
+      if (unavailable) return dim('ctx usage unavailable');
+      if (num(cw.used_percentage))
+        return `${dim('ctx')} ${s.meter ? `${meter(cw.used_percentage)} ` : ''}${pctText(cw.used_percentage)}${tokens && s.tokens ? ' ' + dim(tokens) : ''}`;
+      return tokens ? dim(`ctx ${tokens}`) : null;
+    };
 
     // Label the previous MAIN-CHAIN reply independently from the requested
     // model. Only add the remap when both slugs are known and differ.
@@ -530,19 +604,38 @@ function main(raw) {
     const requested = typeof d.model?.id === 'string' ? normModel(d.model.id) : '';
     const mismatch = served && requested && served.model !== requested;
     const effort = typeof d.effort?.level === 'string' && /^[A-Za-z0-9_-]{1,12}$/.test(d.effort.level) ? d.effort.level : '';
-    const model = (level) => {
+    const model = (s) => {
       if (!display) return null;
       let out = e(CYAN, display);
-      if (effort) out += ` ${dim(effort)}`;
-      if (d.fast_mode) out += ` ${e(ORANGE, 'fast')}`;
-      if (mismatch) {
-        out += ` ${dim('last reply')} ${e(ORANGE, served.model)}`;
-        if (level < 2) out += ` ${dim(`(${observationAge(served.timestamp)})`)}`;
-      }
+      if (effort && s.effort) out += ` ${dim(effort)}`;
+      if (d.fast_mode && s.fast) out += ` ${e(ORANGE, 'fast')}`;
       return out;
     };
+    // The previous main-chain reply is its own segment: a past observation, not
+    // the model being dispatched now.
+    const reply = (s) => {
+      if (!mismatch) return null;
+      return `${dim('last reply')} ${e(ORANGE, served.model)}${s.age ? ` ${dim(`(${observationAge(served.timestamp)})`)}` : ''}`;
+    };
     const cost = num(d.cost?.total_cost_usd) ? e(NEUTRAL, `$${d.cost.total_cost_usd.toFixed(2)}`) : null;
-    const line = fit((level) => row([ctx, cacheSegment(d.prompt_cache, level, unavailable), model(level), level < 5 ? cost : null]), 5);
+    // Shrink order at narrow widths: reply age, miss text, tokens, idle time,
+    // "re-cache" word, effort, cache clock, ctx meter, cost, fast.
+    const line = shrink(
+      (s) => row([ctx(s), cacheSegment(d.prompt_cache, s.cache, unavailable), model(s), reply(s), s.cost ? cost : null]),
+      { age: true, cache: 0, tokens: true, effort: true, meter: true, cost: true, fast: true },
+      [
+        (s) => { s.age = false; },
+        (s) => { s.cache = 1; },
+        (s) => { s.tokens = false; },
+        (s) => { s.cache = 3; },
+        (s) => { s.cache = 4; },
+        (s) => { s.effort = false; },
+        (s) => { s.cache = 5; },
+        (s) => { s.meter = false; },
+        (s) => { s.cost = false; },
+        (s) => { s.fast = false; },
+      ],
+    );
     if (line) lines.push(line);
   }
 
@@ -553,64 +646,136 @@ function main(raw) {
     let account = null;
     // better-ccflare serving-account badge; never let it break the render.
     try { account = servingAccount(d.session_id); } catch { /* no badge */ }
-    const route = (level) => { try { return accountBadge(account, level, priv); } catch { return null; } };
-    const line = fit((level) => row([place(cwd, g, d.worktree?.name, level), route(level)]), 5);
+    const route = (s) => { try { return s.route ? accountBadge(account, s, priv) : null; } catch { return null; } };
+    // The session's own title leads the line (accent, bold). It is free text the
+    // operator typed and can name a client, so privacy mode hides it entirely.
+    const title = priv ? '' : cleanName(d.session_name);
+    const build = (s, nameMax) => row([
+      nameMax > 0 && title ? eb(CYAN, trimTo(title, nameMax)) : null,
+      place(cwd, g, d.worktree?.name, s),
+      route(s),
+    ]);
+    const s = { age: true, short: false, wt: true, win: 4, trim: false, route: true };
+    // Shrink order: long route label, worktree name, route age, windows past
+    // two, path trim and long account name, windows, [name to 10], route.
+    // The title keeps at least 24 columns until the windows are gone.
+    const steps = [
+      (x) => { x.short = true; },
+      (x) => { x.wt = false; },
+      (x) => { x.age = false; },
+      (x) => { x.win = 2; },
+      (x) => { x.trim = true; },
+      (x) => { x.win = 0; },
+      (x) => { x.route = false; },
+    ];
+    // The title yields width before any other fact does, down to the floor it
+    // is given: 24 while the windows show, then 10. With every step spent it
+    // goes to 4, and then the row is drawn without it.
+    const fitWith = (floor) => {
+      for (let m = Math.min(title.length, 40); m >= Math.min(floor, title.length); m--)
+        if (vis(build(s, m)) <= WIDTH) return build(s, m);
+      return null;
+    };
+    let line = null;
+    for (let i = 0; i <= steps.length && !line; i++) {
+      line = fitWith(i < 6 ? 24 : 10);
+      if (!line && i < steps.length) steps[i](s);
+    }
+    if (!line) line = fitWith(4) || build(s, 0);
     if (line) lines.push(line);
   }
 
   // ---- Line 3: 5h and 7d quota (bars under the ctx bar) · PR · session id ----
   {
     const rl = d.rate_limits || {};
-    const five = quota('5h', rl.five_hour, true);
-    const seven = quota('7d', rl.seven_day, !five);
+    const hasFive = !!rl.five_hour && num(rl.five_hour.used_percentage);
+    const five = (s) => quota('5h', rl.five_hour, true, s);
+    const seven = (s) => quota('7d', rl.seven_day, !hasFive, s);
     const n = d.pr?.number;
     const state = typeof d.pr?.review_state === 'string' && /^[a-z_]{1,24}$/.test(d.pr.review_state) ? d.pr.review_state : '';
     const stateColor = state === 'approved' ? GREEN : state === 'changes_requested' ? ORANGE : 244;
-    const pr = (level) => (Number.isInteger(n) && n > 0 && level < 3
-      ? e(NEUTRAL, `PR #${n}`) + (state && level < 1 ? ` ${e(stateColor, state.replace(/_/g, ' '))}` : '')
-      : null);
     const sid = typeof d.session_id === 'string' && /^[A-Za-z0-9-]{1,8}$/.test(d.session_id.slice(0, 8)) ? d.session_id.slice(0, 8) : '';
-    const id = (level) => (sid && !priv && level < 2 ? dim(sid) : null);
+    const id = (s) => (sid && !priv && s.id ? dim(sid) : null);
+    // Pull request state is its own word (wide) or a glyph (narrow), so it reads
+    // with colour stripped. Unknown state shows neither. Closed and draft share
+    // a colour and differ by word and glyph.
+    const GLYPH = { merged: '◆', ready: '✓', waiting: '○', closed: '×', draft: '◇' };
+    const colors = { merged: PURPLE, closed: 244, draft: 244, ready: GREEN, waiting: ORANGE };
+    const hasN = Number.isInteger(n) && n > 0;
     let prs = [];
     try { prs = sessionPrs(d); } catch { /* association metadata must not blank the HUD */ }
-    if (!prs.length) {
-      // Older payloads can carry only a number. Preserve their unlinked review
-      // label; never guess a repository or URL from the working directory.
-      const line = fit((level) => row([five, seven, pr(level), id(level)]), 3);
+    let states = {};
+    if (prs.length) { try { states = prStates(d.session_id, prs); } catch { /* offline/uncached means unknown */ } }
+    const current = parsePr(d.pr?.url);
+    const currentUrl = current && current.number === n ? current.url : null;
+    // The payload's review state stands in only where the cache has no word for
+    // this PR: no entry, or the helper's own 'unknown'. Any other cached value
+    // this renderer does not know came from a different helper version, and is
+    // drawn as unknown rather than guessed at.
+    const entries = prs.map((p) => {
+      const cached = states[p.url];
+      const st = typeof cached === 'string' && Object.hasOwn(colors, cached) ? cached
+        : (cached === undefined || cached === 'unknown') && p.url === currentUrl && ['changes_requested', 'pending'].includes(state) ? 'waiting' : null;
+      return { url: p.url, label: p.label, st };
+    });
+    const link = (en, s) => {
+      const col = en.st ? colors[en.st] : NEUTRAL;
+      const text = e(col, (s.words || !en.st ? '' : GLYPH[en.st]) + en.label);
+      const body = process.env.FORCE_HYPERLINK === '0' || !en.url ? text : `\x1b]8;;${en.url}\x1b\\${text}\x1b]8;;\x1b\\`;
+      return s.words && en.st ? `${body} ${e(col, en.st)}` : body;
+    };
+    // A number-only payload has no repository identity to deduplicate or link,
+    // and no cached state, so it has no glyph to fall back to. Beside linked PRs
+    // its review label therefore stays at every width, as it did before the
+    // rows were sized to the terminal; the row sheds the id, clocks and meters
+    // first. Alone on the row it is shed with the other state words.
+    const bareLink = () => e(NEUTRAL, `#${n}`) + (state ? ` ${e(stateColor, state.replace(/_/g, ' '))}` : '');
+    const prSeg = (s) => {
+      if (!entries.length) return hasN ? `${e(NEUTRAL, `PR #${n}`)}${s.words && state ? ` ${e(stateColor, state.replace(/_/g, ' '))}` : ''}` : null;
+      const parts = entries.map((en) => link(en, s));
+      if (!currentUrl && hasN) parts.push(bareLink());
+      return `${dim('PR')} ${parts.join(s.words ? dim(' · ') : ' ')}`;
+    };
+    const s3 = { words: true, id: true, clock: true, meter: true };
+    const build = (s) => row([five(s), seven(s), prSeg(s), id(s)]);
+    // With no quota and no PR the id would hold a row by itself: it joins the
+    // row above when it fits there, and keeps its own row only when it does not.
+    const solo = !five(s3) && !seven(s3) && !prSeg(s3) ? id(s3) : null;
+    const above = lines.length - 1;
+    const joined = solo && above >= 0 ? `${lines[above]}${sep}${solo}` : null;
+    const join = joined !== null && vis(joined) <= WIDTH;
+    // Shrink order: PR words to glyphs, session id, reset clocks, meters.
+    const line = join ? '' : shrink(build, s3, [
+      (s) => { s.words = false; },
+      (s) => { s.id = false; },
+      (s) => { s.clock = false; },
+      (s) => { s.meter = false; },
+    ]);
+    if (join) {
+      lines[above] = joined;
+    } else if (vis(line) <= WIDTH || !entries.length) {
       if (line) lines.push(line);
     } else {
-      let states = {};
-      try { states = prStates(d.session_id, prs); } catch { /* offline/uncached means unknown */ }
-      const colors = { merged: 141, inactive: 244, ready: GREEN, waiting: ORANGE };
-      const current = parsePr(d.pr?.url);
-      const currentUrl = current && current.number === n ? current.url : null;
-      const links = prs.map((p) => {
-        const color = Object.hasOwn(colors, states[p.url]) ? colors[states[p.url]]
-          : p.url === currentUrl && ['changes_requested', 'pending'].includes(state) ? ORANGE : NEUTRAL;
-        const label = e(color, p.label);
-        return process.env.FORCE_HYPERLINK === '0' ? label : `\x1b]8;;${p.url}\x1b\\${label}\x1b]8;;\x1b\\`;
-      });
-      // A number-only payload has no repository identity to deduplicate or link.
-      // Keep its existing review label alongside known links without guessing.
-      if (!currentUrl && Number.isInteger(n) && n > 0) {
-        links.push(e(NEUTRAL, `#${n}`) + (state ? ` ${e(stateColor, state.replace(/_/g, ' '))}` : ''));
+      // Still too wide with every PR kept: wrap whole links onto extra rows.
+      // The quota part gets its clocks and meters back when it fits without the
+      // links, and sheds them in the same order when it does not.
+      const sw = { words: false, id: false, clock: true, meter: true };
+      let cur = shrink((s) => row([five(s), seven(s)]), sw, [
+        (s) => { s.clock = false; },
+        (s) => { s.meter = false; },
+      ]);
+      let hasPr = false;
+      const all = entries.map((en) => link(en, sw));
+      if (!currentUrl && hasN) all.push(bareLink());
+      for (const lk of all) {
+        const next = cur + (hasPr ? ' ' : cur ? `${sep}${dim('PR')} ` : `${dim('PR')} `) + lk;
+        if (vis(next) > WIDTH && cur) {
+          lines.push(cur);
+          cur = `${dim('PR')} ${lk}`;
+        } else cur = next;
+        hasPr = true;
       }
-      const all = `${dim('PR')} ${links.join(' ')}`;
-      if (vis(row([five, seven, all])) <= LINE_MAX) {
-        lines.push(fit((level) => row([five, seven, all, id(level)]), 2));
-      } else {
-        let line = row([five, seven]);
-        let hasPr = false;
-        for (const link of links) {
-          const next = line + (hasPr ? ' ' : line ? `${sep}${dim('PR')} ` : `${dim('PR')} `) + link;
-          if (vis(next) > LINE_MAX && line) {
-            lines.push(line);
-            line = `${dim('PR')} ${link}`;
-          } else line = next;
-          hasPr = true;
-        }
-        if (line) lines.push(line);
-      }
+      if (cur) lines.push(cur);
     }
   }
 
