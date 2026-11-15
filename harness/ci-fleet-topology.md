@@ -24,10 +24,12 @@ Never force-push an in-flight PR. Before assuming a required check's queue is si
 assuming it no longer is, check the job's live `runs-on:` label against the runners that carry that
 label today. On a width-one label, keep one PR in that queue at a time. Batch edits into one push.
 When a queue is deep, land the unblocking PR first and leave the rest alone.
-When waiting on an armed auto-merge, read `mergeStateStatus` as well as the checks: hov-stack's main ruleset
-requires an up-to-date branch (`strict_required_status_checks_policy`), and auto-merge never updates one, so a
-green PR sits at `BEHIND` with nothing failing once main moves. `gh pr update-branch` clears it and restarts CI
-(a 2026-11-12 PR sat 20 minutes before that).
+hov-stack's main has a merge queue (since 2026-11-15). `gh pr merge --auto --squash` arms the PR as before.
+Once its required checks pass, GitHub queues it, runs the same required checks on the PR merged onto main as
+main stands at that moment, and lands it when they pass. So a green PR that is behind main needs no
+`gh pr update-branch`, and waiting on an armed PR means waiting through that second run (the suite, about 16
+minutes) after any PR queued ahead of it: the queue tests and lands one PR at a time. Before the queue, a
+green PR that fell behind sat until someone updated its branch, and each update restarted CI.
 
 ## Why: the 2026-07-29 incident, moved from CLAUDE.md
 
