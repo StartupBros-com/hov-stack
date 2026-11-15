@@ -143,14 +143,18 @@ root 87 395
 run_case rebase-10 1 1 1 1
 has rebase "free space fell from 405GB to 395GB"
 
-# -- level: WARN -> CRIT alerts; CRIT -> WARN is quiet and remembered ----------
+# -- level: WARN -> CRIT alerts; a drop back counts only once 10GB is recovered
 echo "=== case: level ===" >&2
 root 95 395
 run_case level-rise 1 1 1 1
 has level-rise "(rose from WARN to CRIT)"
 root 87 395
-run_case level-drop 0 1 0 0
+run_case level-flap-down 0 1 0 0
 root 95 395
+run_case level-flap-up 0 1 0 0
+root 87 405
+run_case level-recover 0 1 0 0
+root 95 405
 run_case level-rerise 1 1 1 1
 has level-rerise "(rose from WARN to CRIT)"
 
@@ -160,6 +164,18 @@ root 95 39
 run_case floor-new 1 1 1 1
 has floor-new "(fell below the 40GB floor)"
 run_case floor-repeat 0 1 0 0
+
+# -- floor hover: 39 -> 41 -> 39 alerts once; 10GB recovered re-arms the floor -
+echo "=== case: floor-hover ===" >&2
+root 95 41
+run_case floor-hover-up 0 1 0 0
+root 95 39
+run_case floor-hover-down 0 1 0 0
+root 95 49
+run_case floor-recover 0 1 0 0
+root 95 39
+run_case floor-rearmed 1 1 1 1
+has floor-rearmed "(fell below the 40GB floor)"
 
 # -- near full: the step shrinks to half of what was free at the last alert ----
 echo "=== case: near-full ===" >&2
@@ -171,11 +187,17 @@ root 99 4
 run_case near-4 1 1 1 1
 has near-4 "free space fell from 9GB to 4GB"
 
-# -- reset: back under every watermark clears state; the next breach is new ----
+# -- reset: back under every watermark with 10GB recovered clears state ---------
 echo "=== case: reset ===" >&2
 fresh; root 87 400
 run_case reset-first 1 1 1 1
-root 50 400
+root 50 405
+run_case reset-hover 0 0 0 0
+has reset-hover "its last alert stands until 410GB free"
+[ -n "$(ls -A "$TMP/state" 2>/dev/null)" ] && ok || bad "reset: a hover under the watermarks dropped the record"
+root 87 400
+run_case reset-hover-back 0 1 0 0
+root 50 410
 run_case reset-clear 0 0 0 0
 [ -z "$(ls -A "$TMP/state" 2>/dev/null)" ] && ok || bad "reset: state left after clearing: $(ls -A "$TMP/state")"
 root 87 400

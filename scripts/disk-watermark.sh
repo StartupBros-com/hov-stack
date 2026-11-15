@@ -39,10 +39,12 @@
 #     or half as much free when that comes sooner, so a nearly full disk
 #     keeps alerting on its way to zero.
 # Otherwise the run prints a `suppressed` line for it and does not notify.
-# Free space that recovers by the step moves the baseline up, so the next
-# 10 GB lost alerts again; a level that drops is remembered, so a re-rise
-# alerts; a filesystem back under every watermark loses its state, so its
-# next breach is new. State lives in one small file per filesystem under
+# Only free space that recovers by the step changes the record: it moves the
+# baseline up and lowers the remembered level and floor flag, and a filesystem
+# back under every watermark with that much recovered loses its record, so
+# its next breach is new. A disk hovering at a watermark or at the floor
+# (39 GB, 41 GB, 39 GB) therefore alerts once, not on every crossing.
+# State lives in one small file per filesystem under
 # DISK_WATERMARK_STATE_DIR (default ~/.local/state/hov-stack/disk-watermark).
 # If that cannot be written, every breach alerts, as before.
 #
@@ -123,24 +125,31 @@ for fs in $FILESYSTEMS; do
 
   echo "disk-watermark: $fs — ${pct}% used, ${avail_gb}GB free — $state"
 
+  # Last alert's level, floor flag and free GB. have: 0 no record, 1 a
+  # readable one, 2 an unreadable one.
   sf=$(state_file "$fs")
+  have=0 p_level="" p_floor="" p_avail="" p_extra=""
+  if [ -e "$sf" ]; then
+    have=2
+    read -r p_level p_floor p_avail p_extra 2>/dev/null <"$sf"
+    case "$p_level:$p_floor:$p_avail:$p_extra" in
+      [012]:[01]:[0-9]*:) case "$p_avail" in *[!0-9]*) ;; *) have=1 ;; esac ;;
+    esac
+  fi
+
   if [ "$state" = OK ]; then
-    rm -f "$sf" 2>/dev/null
+    if [ "$have" -eq 1 ] && [ "$avail_gb" -lt $(( p_avail + STEP_GB )) ]; then
+      echo "disk-watermark: $fs — under every watermark; its last alert stands until $(( p_avail + STEP_GB ))GB free"
+    else
+      rm -f "$sf" 2>/dev/null
+    fi
     continue
   fi
   n_flagged=$((n_flagged + 1))
 
-  # Last alert's level, floor flag and free GB, if a readable record exists.
-  why="" p_level="" p_floor="" p_avail="" p_extra=""
-  if [ ! -e "$sf" ]; then
-    why="new breach"
-  else
-    read -r p_level p_floor p_avail p_extra 2>/dev/null <"$sf"
-    case "$p_level:$p_floor:$p_avail:$p_extra" in
-      [012]:[01]:[0-9]*:) case "$p_avail" in *[!0-9]*) why="state file unreadable" ;; esac ;;
-      *) why="state file unreadable" ;;
-    esac
-  fi
+  why=""
+  [ "$have" -eq 0 ] && why="new breach"
+  [ "$have" -eq 2 ] && why="state file unreadable"
   if [ -z "$why" ]; then
     # Alerts again at STEP_GB less free, or at half as much free if sooner.
     next=$(( p_avail - STEP_GB ))
@@ -157,12 +166,9 @@ for fs in $FILESYSTEMS; do
   if [ -z "$why" ]; then
     n_suppressed=$((n_suppressed + 1))
     echo "disk-watermark: $fs — suppressed: no worse than at the last alert (${p_avail}GB free then; alerts again at ${next}GB free or a higher level)"
-    # A lower level or a cleared floor is remembered, so a re-rise alerts; free
-    # space up by the step moves the baseline, so the next step lost alerts.
-    base=$p_avail
-    [ "$avail_gb" -ge $(( p_avail + STEP_GB )) ] && base=$avail_gb
-    if [ "$level" != "$p_level" ] || [ "$floor_breach" != "$p_floor" ] || [ "$base" != "$p_avail" ]; then
-      write_state "$sf" "$level" "$floor_breach" "$base" || state_failed=1
+    # Only a recovery by the step rewrites the record (see the header).
+    if [ "$avail_gb" -ge $(( p_avail + STEP_GB )) ]; then
+      write_state "$sf" "$level" "$floor_breach" "$avail_gb" || state_failed=1
     fi
     continue
   fi
