@@ -521,7 +521,7 @@ A test that runs a scheduled unit's script under the real user manager with the 
 
 ### Marketplace card
 
-The one entry in the plugin marketplace's distribution manifest that pins a plugin to an exact release: its source commit, version, tag and release id. Installs follow the card, and a release is announced only once the card names it.
+The one entry in the plugin marketplace's distribution manifest that pins a plugin to an exact release: its source commit, version, tag and release id. Installs follow the card, and a release is announced only once the card names it. A change merged into a plugin's source after the card's pinned commit is *merged, not released*: no marketplace install has it until a release moves the card.
 
 Moving a card to a newer release is a *repin*. The release train opens and lands repins itself, and lands one only when it changes nothing but the pins the train itself computed. An older repin landed after a newer one would move the card backwards, so a repin that a newer one supersedes is closed, not merged. A staged draft is published only once the card on the default branch pins it, re-checked right before the publish.
 
