@@ -17,5 +17,10 @@ if [ "${EVENT_NAME:-}" = pull_request ] && [ "${PLUGINS_TOUCHED:-}" = true ] \
    && { [ "${HEAD_REPO_IS_FORK:-}" = true ] || [ "${HEAD_REPO:-}" != "${REPO:-}" ]; }; then
   printf '::error::plugin checks do not run for pull requests from forks; a maintainer pushes the branch to this repository\n' >&2
   failed=1
+# Anywhere else a skipped plugin job with plugins changed means the job's `if:` left this
+# event out, and a green aggregate would then stand for checks that never ran.
+elif [ "${PLUGINS_TOUCHED:-}" = true ] && [ "$(jq -r '.plugin.result // ""' <<<"$NEEDS_JSON")" = skipped ]; then
+  printf '::error::plugins changed but the plugin job was skipped on this %s run; its checks did not run\n' "${EVENT_NAME:-<unset>}" >&2
+  failed=1
 fi
 exit "$failed"
