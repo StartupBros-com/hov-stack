@@ -11,6 +11,7 @@ its own repository and a card in the House of Vibe marketplace.
 | [agent-radar](agent-radar/) | Band line per running subagent in this session (elapsed time, tool count, last tool), and per piece of delegated work it started outside itself (Codex, a Pro review, CE's peer, a headless Claude), with a toast when each ends; `/radar` opens a pane of every agent and its messages. Third-party, vendored at a pinned commit with local fixes and additions; see its `NOTICE.md` |
 | [read-ceiling-pager](read-ceiling-pager/) | A Read whose explicit window would exceed the token cap is clamped to the lines that fit, and the result says which lines came back and where to continue; a Read the engine refuses anyway gets a retry window from the engine's own numbers that the read-ceiling-chunk hook admits after a first refusal |
 | [x-mcp-budget](x-mcp-budget/) | Caps what the X (Twitter) MCP's reads cost: list, search and timeline calls ask for at most 10 results, each post and user returned is priced once per UTC day in a ledger every session on the machine shares, and once the day reaches the budget (default $1) further X MCP calls are refused until 00:00 UTC, naming the free oEmbed route for a single post |
+| [idle-compact](idle-compact/) | Compacts a session whose main loop has had no turn for 50 minutes, ten minutes before its one-hour prompt cache expires, so the first turn back does not re-read the whole conversation uncached; a conversation under 100,000 tokens (the floor set here) is left alone. Third-party, vendored unchanged at a pinned commit; see its `NOTICE.md` |
 
 Each house mod's README carries its `hooks:` and `calls:` lines as printed by
 `claude plugin validate`, its options, and its limits. where-am-i and
@@ -63,7 +64,7 @@ claude --plugin-dir ~/.claude/mods/loop-breaker --plugin-dir ~/.claude/mods/inst
 
 For every session, `CLAUDE_CODE_PLUGIN_DIRS` in `settings.json` `env` names the
 folders joined by `:` (absolute paths; the engine expands a leading `~`). The
-harness wires four of them this way, all but install-preflight: `sync.sh install`
+harness wires five of them this way, all but install-preflight: `sync.sh install`
 links this folder at `~/.claude/mods` (a `STABLE_DIRS` entry, like `hooks`),
 the canonical `settings.json` names them as
 `~/.claude/mods/<mod>`, and `reconcile-runtime-env` writes that list
@@ -155,6 +156,32 @@ account's daily X MCP spend in the X developer console, against the 30 days
 before. As with the other mods, the operator's verdict from real use decides. A
 budget that keeps refusing useful research is raised under `pluginConfigs`, not
 worked around.
+
+idle-compact was wired on 2026-11-15 on the operator's go, out of the
+2026-11-14 survey of published mods. It is davidar/claude-idle-compact,
+vendored unchanged at one pinned commit; its `NOTICE.md` has the provenance and
+what was checked. Sessions here are often left waiting overnight or for days,
+and the first turn back then re-reads the whole conversation at the uncached
+price. When a session's main loop has had no turn for 50 minutes, the mod
+compacts it through `$.session.compact`, the same model request `/compact`
+makes, while the one-hour cache (`promptCacheTtl`) is still warm. Compaction is
+lossy: the session comes back to a summary. A main loop that has ended its turn
+and is waiting on a subagent, a background shell or a scheduled wake-up counts
+as idle. Two settings are this harness's own. `pluginConfigs` sets `minTokens`
+to 100000 (upstream's default is 40000), so a small session is never compacted
+for being idle. And `hooks/PreCompact/compact-preserve.js` gives the mod's
+compaction the preserve-list, which it withholds from any other manual compact
+that carries instructions. Before wiring, a throwaway session with the floor
+lowered compacted after a minute idle (18k tokens to a 3k summary, 71% of the
+request read from cache), and two more left at the 100,000 floor each logged
+that the conversation was under it. A fourth, with the floor lowered, was
+compacted while a background shell it had started was still running: the hook
+added the preserve-list, and the shell's completion started the session's next
+turn afterwards. Not seen before wiring: a compaction at the real 50-minute
+mark, and one while a subagent was still running. As with the other mods, the operator's verdict from real use decides;
+the cost to watch for is a session that came back to a summary missing
+something it needed. `idleMinutes` and `minTokens` under `pluginConfigs` change
+when it fires, and dropping its path from the list unloads it.
 
 harness-optimizer loaded from this folder between 2026-10-18 and 2026-10-22 as a
 link to an in-tree copy of the plugin. It now ships on its own from the House of

@@ -141,6 +141,16 @@
  * the instruction the user just gave. Auto compacts and bare `/compact` get
  * the preserve-list.
  *
+ * ONE MANUAL COMPACT IS NOT THE USER'S: the idle-compact mod
+ * (mods/idle-compact) compacts through $.session.compact with its own
+ * instructions, which arrives here as trigger "manual" with custom text, the
+ * same shape as `/compact <focus>` (seen in a throwaway session, 2026-11-14).
+ * Nobody chose a focus for that one, so it gets the preserve-list like an
+ * auto compact. It is told apart by the opening words of the mod's
+ * instructions (IDLE_COMPACT_OPENING); the test reads those words out of the
+ * vendored source, so a re-vendor that rewords them fails there instead of
+ * silently dropping the list.
+ *
  * The list is deliberately short: these instructions ride inside the
  * compaction prompt, so every line competes with conversation content for the
  * summarizer's attention. Add a line only when its loss has actually hurt a
@@ -154,6 +164,10 @@ const PRESERVE_LIST = `Preserve these in the summary, verbatim where present in 
 4. Exact file paths and file:line references central to the task, and resolved locations (credentials, configs, endpoints) that were looked up.
 5. The immediate next action that was planned or in progress when compaction hit.`;
 
+// How mods/idle-compact/hooks/register.ts opens the instructions it compacts
+// with. A user who types this as a /compact focus gets the list too.
+const IDLE_COMPACT_OPENING = 'This compaction ran automatically at ';
+
 function main(raw) {
   let input = {};
   try {
@@ -165,7 +179,8 @@ function main(raw) {
     return;
   }
   const custom = typeof input.custom_instructions === 'string' ? input.custom_instructions.trim() : '';
-  if (input.trigger === 'manual' && custom !== '') return; // user's focus wins
+  const usersFocus = custom !== '' && !custom.startsWith(IDLE_COMPACT_OPENING);
+  if (input.trigger === 'manual' && usersFocus) return; // user's focus wins
   process.stdout.write(PRESERVE_LIST + '\n');
 }
 
