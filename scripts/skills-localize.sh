@@ -74,9 +74,10 @@
 #
 # THREE SKILL TREES, ONE POLICY
 #   jsm installs into ~/.claude/skills and mirrors every skill into ~/.agents/skills (and
-#   ~/.gemini/skills). Codex CLI reads ~/.agents/skills and its deprecated
-#   $CODEX_HOME/skills (~/.codex/skills), and lists a skill found in both twice (codex
-#   0.166.0, seen in its session logs 2026-10-29). Everything in THIS file was
+#   into ~/.gemini/skills and ~/.cursor/skills unless its skills.disabled_mirrors names
+#   them; nothing here touches those two). Codex CLI reads ~/.agents/skills and its
+#   deprecated $CODEX_HOME/skills (~/.codex/skills), and lists a skill found in both twice
+#   (codex 0.166.0, seen in its session logs 2026-10-29). Everything in THIS file was
 #   Claude-only until codex-skills.txt: a fork added to the local skills never reached
 #   Codex, so emil-design-eng and kill-ai-slop were live in Claude and simply absent from
 #   Codex. codex-skills.txt is an explicit allowlist rather than a blanket sync — see that
