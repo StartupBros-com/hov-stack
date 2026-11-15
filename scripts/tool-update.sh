@@ -42,6 +42,9 @@
 #
 # Usage:  tool-update.sh [tool...]      report only (default)
 #         DRY_RUN=0 tool-update.sh      download, verify, install, smoke-check
+#         tool-update.sh --any-installed [tool...]
+#                                       exit 0 if a run would find at least one tool,
+#                                       else 1; no network (sync.sh's timer gate)
 # Exit:   0 = all current or promoted, 1 = at least one failed (nothing left broken)
 
 set -uo pipefail
@@ -53,9 +56,15 @@ HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
 say() { [ -x "$HERE/notify.sh" ] && "$HERE/notify.sh" "$1" "${2:-default}" >/dev/null 2>&1; return 0; }
 
-for t in gh sha256sum tar; do
-  command -v "$t" >/dev/null 2>&1 || { echo "tool-update: missing $t"; exit 1; }
-done
+ANY_INSTALLED=0
+if [ "${1:-}" = --any-installed ]; then ANY_INSTALLED=1; shift; fi
+
+# The presence query reads no release, so it needs none of these.
+if [ "$ANY_INSTALLED" = 0 ]; then
+  for t in gh sha256sum tar; do
+    command -v "$t" >/dev/null 2>&1 || { echo "tool-update: missing $t"; exit 1; }
+  done
+fi
 
 # name|repo|asset|checksum-asset|kind|install-as
 #
@@ -64,7 +73,8 @@ done
 # `toon`, installed as `tru` until 2026-10-01, was the case that needed it).
 # TOOL_UPDATE_TABLE overrides this for tests. Production never sets it — a table that
 # could be swapped from the environment at runtime is a place to hide an install source,
-# so it exists solely so tool-update.test.sh can drive fake releases past the real logic.
+# so it exists solely so tool-update.test.sh can drive fake releases past the real logic
+# and sync-install-smoke.test.sh can pin the --any-installed timer gate to a fake tool.
 TOOLS=${TOOL_UPDATE_TABLE:-'
 xf|Dicklesworthstone/xf|xf-x86_64-unknown-linux-gnu.tar.gz|SHA256SUMS|targz|xf|xf
 csctf|Dicklesworthstone/chat_shared_conversation_to_file|csctf-linux-x64|csctf-linux-x64.sha256|raw|csctf-linux-x64|csctf
@@ -96,6 +106,23 @@ installed_ver() {
   [ -n "$p" ] || return 1
   timeout 20 "$p" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1
 }
+
+# --any-installed: would a run find at least one tool? sync.sh enables
+# tools-auto-update.timer only when it would (hov-stack#632). No installer in
+# this repo installs these tools, so on a host that never did, every scheduled
+# run hits the all-missing guard at the bottom and fails: one satellite failed
+# 72 of 72 runs from 2026-08-30 and paged nightly once it had a webhook. The
+# guard is right for a run and wrong for a schedule, so the schedule asks first.
+# Same table, same lookup and the same "not installed" test as the loop below,
+# so the gate and the run cannot disagree about what counts as installed.
+if [ "$ANY_INSTALLED" = 1 ]; then
+  while IFS='|' read -r name _ _ _ _ _ as; do
+    [ -z "$name" ] && continue
+    selected "$name" || continue
+    [ -n "$(installed_ver "$as")" ] && exit 0
+  done <<<"$TOOLS"
+  exit 1
+fi
 
 # Pull the hash for $2 out of checksum file $1. Handles both shapes upstream uses:
 # a sha256sum-format table (`<hash>  <name>`), and a bare single-hash sidecar.
