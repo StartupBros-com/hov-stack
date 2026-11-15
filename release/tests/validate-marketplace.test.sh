@@ -631,4 +631,65 @@ else
   exit 1
 fi
 
+# --- stated skill counts (#474): due while a release is in flight ---
+# The validated checkout ($WORK) gets the pack's VERSION and two tracked skills;
+# the mixed manifest lists hov-stack at 0.1.0. A VERSION other than 0.1.0 is a
+# release in flight, and every "N skills" claim on that entry must say 2.
+
+set_pack_count_claim() {
+  mutate_manifest --arg row "$1" '(.plugins[] | select(.name == "hov-stack")) |= (.card = {rows: [$row, "two", "three"], run: "Then run it"})'
+}
+
+mkdir -p "$WORK/plugins/hov-stack/skills/alpha" "$WORK/plugins/hov-stack/skills/beta"
+printf '# fixture\n' >"$WORK/plugins/hov-stack/skills/alpha/SKILL.md"
+printf '# fixture\n' >"$WORK/plugins/hov-stack/skills/beta/SKILL.md"
+printf '0.1.0\n' >"$WORK/plugins/hov-stack/VERSION"
+git -C "$WORK" add plugins/hov-stack
+git -C "$WORK" commit -qm 'pack with two skills'
+
+write_mixed_manifest
+set_pack_count_claim "9 skills in one install"
+expect_pass "between releases a stated skill count is not compared with the tree" validate syntax
+
+printf '0.2.0\n' >"$WORK/plugins/hov-stack/VERSION"
+write_mixed_manifest
+set_pack_count_claim "2 skills in one install"
+expect_pass "a release in flight passes when its card states the tracked skill count" validate syntax
+
+write_mixed_manifest
+set_pack_count_claim "3 skills in one install"
+expect_fail_reason "a release in flight fails when its card states another skill count" "plugin hov-stack is being released as 0.2.0 (the marketplace lists 0.1.0) and states a skill count of 3, but plugins/hov-stack/skills holds 2" validate syntax
+
+write_mixed_manifest
+mutate_manifest '(.plugins[] | select(.name == "hov-stack")) |= (.description = "The stack, 1 skill deep.")'
+expect_fail_reason "the description's singular count is checked too" "states a skill count of 1, but plugins/hov-stack/skills holds 2" validate syntax
+
+write_mixed_manifest
+set_pack_count_claim "45+ skills and 2.5 skills are not exact counts"
+expect_pass "an open-ended or decimal count is not a claim" validate syntax
+
+mkdir -p "$WORK/plugins/hov-stack/skills/alpha/nested" "$WORK/plugins/hov-stack/skills/gamma"
+printf '# fixture\n' >"$WORK/plugins/hov-stack/skills/alpha/nested/SKILL.md"
+git -C "$WORK" add plugins/hov-stack/skills/alpha/nested
+git -C "$WORK" commit -qm 'nested skill file'
+printf '# untracked\n' >"$WORK/plugins/hov-stack/skills/gamma/SKILL.md"
+write_mixed_manifest
+set_pack_count_claim "2 skills in one install"
+expect_pass "only tracked skills one level under skills/ are counted" validate syntax
+rm -r "$WORK/plugins/hov-stack/skills/gamma"
+
+write_mixed_manifest
+mutate_manifest '(.plugins[] | select(.name == "sign-it")) |= (.description = "Sign it, 4 skills.")'
+expect_fail_reason "a count on an entry whose VERSION is not in the checkout fails closed" "plugin sign-it states a skill count, but plugins/sign-it/VERSION is not in this checkout" validate syntax
+
+write_mixed_manifest
+mutate_manifest '(.plugins[] | select(.name == "token-eater")) |= (.description = "Token eater, 3 skills.")'
+expect_fail_reason "a count on a url entry fails closed" "plugin token-eater states a skill count, which is checked only for git-subdir entries" validate syntax
+
+mkdir -p "$TMP/no-checkout/.claude-plugin"
+write_mixed_manifest
+set_pack_count_claim "2 skills in one install"
+cp "$WORK/.claude-plugin/marketplace.json" "$TMP/no-checkout/.claude-plugin/marketplace.json"
+expect_fail_reason "a count outside a git checkout fails closed" "is not inside a git checkout to count skills in" bash -c 'cd "$1" && GIT_CEILING_DIRECTORIES="$1" "$2" syntax' _ "$TMP/no-checkout" "$VALIDATOR"
+
 printf '%d passing cases, %d expected failures\n' "$pass_count" "$fail_count"
