@@ -183,7 +183,9 @@ billing retry ba… │ hov-stack › wt statusline-refresh ±2
   is in a standard Unicode block. The set before 2026-11-15 was checked in a
   stock terminal font, Termius on iOS included. The meter eighths added then
   (`▎▍▌▋▊▉`; `▏` was already drawn) and the PR glyphs (`◆ ◇ ✓ ×`; `○` was
-  already drawn) have not been checked there. Widths are counted one cell per character, which holds
+  already drawn) were looked at there by the operator on 2026-11-15, who
+  reported that they "seem to work". That is one look at the live status line,
+  not a check of each glyph. Widths are counted one cell per character, which holds
   where the terminal draws East Asian ambiguous-width characters narrow (the
   default outside CJK locales); a terminal set to draw them wide gives several
   of these glyphs two cells, and rows run wider than counted.
