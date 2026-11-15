@@ -38,7 +38,7 @@ assert_exit "close 'zzz;rm' -> 2" 2 "$CLI" close 'zzz;rm'
 
 # --- detection seam: print-launch under a fixture root, no interop, and the
 #     debug port + dedicated profile are emitted as an inseparable unit
-fx="$(make_fixture)"; brave="$(fixture_brave "$fx")"
+fx="$(make_fixture)" || exit 1; brave="$(fixture_brave "$fx")"
 argv="$(WSL_CDP_USERS_ROOT="$fx/users" WSL_CDP_WINUSER=test \
         WSL_CDP_BROWSER="$brave" WSL_CDP_PORT=9333 HOME="$fx/home" \
         "$CLI" print-launch)"; rc=$?
@@ -91,7 +91,7 @@ fi
 #     Fresh fixture: the waterfall above deleted $fx's browsers. A shimmed
 #     no-output tasklist.exe ("interop down") makes `running` deterministic on
 #     real WSL boxes, where the genuine tasklist would answer.
-fx2="$(make_fixture)"
+fx2="$(make_fixture)" || exit 1
 mkdir -p "$fx2/bin-down"
 printf '#!/usr/bin/env bash\nexit 0\n' >"$fx2/bin-down/tasklist.exe"
 chmod +x "$fx2/bin-down/tasklist.exe"
@@ -167,7 +167,7 @@ assert_exit "browsers with no installs -> 1" 1 env WSL_CDP_USERS_ROOT="$fx3/user
 
 # --- harden / profile hygiene (v0.3.3): pref seeding, merge-not-clobber,
 #     password scrub that spares sessions, empty-store no-op
-fx4="$(make_fixture)"
+fx4="$(make_fixture)" || exit 1
 harden_run(){ WSL_CDP_USERS_ROOT="$fx4/users" WSL_CDP_WINUSER=test \
   WSL_CDP_PROGRAMFILES="$fx4/pf" WSL_CDP_PROGRAMFILES_X86="$fx4/pf86" \
   HOME="$fx4/home" "$CLI" harden 2>/dev/null; }
@@ -282,7 +282,7 @@ assert_contains "up without an override stays note-free" "$up_out" "bridge up: F
 # sleep under win_exec in the text doctor: it has the broadest public contract
 # (survival, diagnostic, and no false netsh conclusion). The other callers need
 # only the documented timeout result: empty output with status 124.
-fx5="$(make_fixture)"
+fx5="$(make_fixture)" || exit 1
 fixture_log="$fx5/interop-timeout-calls"
 mkdir -p "$fx5/hang" "$fx5/timed-out"
 for exe in cmd.exe netsh.exe powershell.exe tasklist.exe wsl.exe; do

@@ -38,9 +38,12 @@ t_summary(){ printf -- '-- %s: %d passed, %d failed\n' "${0##*/}" "$_P" "$_F"; [
 # "$root/pf{,86}" for autodetect tests, or WSL_CDP_BROWSER to bypass detection).
 # fixture_rank echoes the browser paths in the exact order detect_browser()
 # documents, so tests can assert the waterfall by deleting winners one at a time.
+# Capture it as `fx="$(make_fixture)" || exit 1`: the helper runs inside the substitution,
+# so it can only return 1 with nothing printed, and an unchecked caller would go on with
+# an empty root, where "$fx/users" means /users.
 make_fixture(){
   local d p
-  d="$(mktemp -d "${TMPDIR:-/tmp}/wslcdp-fix.XXXXXX")" || exit 1
+  d="$(mktemp -d "${TMPDIR:-/tmp}/wslcdp-fix.XXXXXX")" || return 1
   mkdir -p "$d/users/test/AppData/Local/Temp" "$d/home" "$d/home2"
   while IFS= read -r p; do
     mkdir -p "${p%/*}"; touch "$p"; chmod +x "$p"

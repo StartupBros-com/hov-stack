@@ -39,7 +39,10 @@
 #       assignment.
 #   A same-file function whose body runs mktemp is a scratch helper, and `exit` inside
 #   $( ) leaves only the subshell, so every `VAR=$(helper ...)` capture needs its own
-#   check too (stash-reap.test.sh's mkrepo, 14 sites).
+#   check too (stash-reap.test.sh's mkrepo, 14 sites). The same holds for a helper in a
+#   file the script sources from its own directory, one level deep:
+#   `. "$(dirname "${BASH_SOURCE[0]}")/lib.sh"`, or the same with "$0" (wsl-cdp's
+#   make_fixture, 4 sites that would have run on with an empty fixture root).
 #
 # SCOPE
 #   Every tracked file in the repo (git ls-files) that is a shell script: a .sh/.bash
@@ -47,8 +50,9 @@
 #   quoted strings, quoted heredoc bodies (fixture shims) and tool lists such as
 #   `for need in jq mktemp` are not invocations. It runs on a fixture repo first, with
 #   one planted positive per rejected shape and the safe forms as planted negatives,
-#   so a clean live tree is a verdict and not a blind scanner. Not claimed: cross-file
-#   helpers, other command substitutions that feed rm paths, and run: blocks in
+#   so a clean live tree is a verdict and not a blind scanner. Not claimed: helpers
+#   sourced any other way (a variable path, a source after `&&`, a second level of
+#   sourcing), other command substitutions that feed rm paths, and run: blocks in
 #   workflow YAML.
 #
 #   Left out by path: plugins/skill-tuner/experiments/ and plugins/skill-tuner/reports/.
@@ -94,6 +98,8 @@ CHECK = re.compile(r'^\|\|\s*')
 SILENCER = re.compile(r'^(?:true|:)(?=$|[\s;)}&|])')
 FNDEF = re.compile(r'(?m)^[ \t]*(?:function[ \t]+([A-Za-z_][\w:.-]*)[ \t]*(?:\([ \t]*\))?'
                    r'|([A-Za-z_][\w:.-]*)[ \t]*\([ \t]*\))\s*\{')
+SOURCE_HERE = re.compile(r'(?m)^[ \t]*((?:\.|source)[ \t]+"\$\(dirname )"\$(?:\{BASH_SOURCE\[0\]\}|0)"\)'
+                         r'(/[\w.-]+(?:/[\w.-]+)*)"')
 HEREDOC = re.compile(r'<<(-?)[ \t]*((?:[\'"]?[A-Za-z_][\w.-]*[\'"]?)|\\[A-Za-z_][\w.-]*)')
 ASSIGN_WORD = re.compile(r'[A-Za-z_]\w*(?:\[[^\]]*\])?\+?=\S*$')
 CMD_POS_WORD = re.compile(r'(?:^|[;&|({!)]|\b(?:then|do|else|elif|if|while|until|time))$')
@@ -480,19 +486,18 @@ def judge_subst(m, dollar, head, spans):
     return why
 
 
-def scan(rel, path):
+PARSED = {}
+KNOWN = {}  # relpath -> path of every shell file under scan, filled before the first scan
+
+
+def parse(path):
+    """(src, masked, errors, heredoc spans, mktemp invocations, scratch helpers) of one
+    file, read once: for its own scan and for each file that sources it."""
+    if path in PARSED:
+        return PARSED[path]
     with open(path, encoding='utf-8', errors='replace') as fh:
         src = fh.read()
     m, errors, spans = mask(src)
-    lines = src.split('\n')
-    found = []
-
-    def report(pos, why):
-        ln = m.count('\n', 0, pos) + 1
-        found.append((rel, ln, why, lines[ln - 1].strip()[:160]))
-
-    for err in errors:
-        found.append((rel, 0, f'scanner: {err}', ''))
     invocations = []
     for t in TOKEN.finditer(m):
         s, _ = logical_bounds(m, t.start())
@@ -512,6 +517,37 @@ def scan(rel, path):
             j += 1
         if any(brace < p < j for p, _ in invocations):
             helpers.add(f.group(1) or f.group(2))
+    PARSED[path] = (src, m, errors, spans, invocations, helpers)
+    return PARSED[path]
+
+
+def sourced_helpers(rel, src, m):
+    """{helper: file} for the scratch helpers of each scanned file that rel sources from
+    its own directory. The line is matched in src and must be code in m, so a source
+    line in a comment, a string or a heredoc body sources nothing."""
+    out = {}
+    for s in SOURCE_HERE.finditer(src):
+        a, b = s.span(1)
+        if m[a:b] != src[a:b]:
+            continue
+        target = os.path.normpath(os.path.join(os.path.dirname(rel), s.group(2)[1:]))
+        if target != rel and target in KNOWN:
+            for h in parse(KNOWN[target])[5]:
+                out.setdefault(h, target)
+    return out
+
+
+def scan(rel, path):
+    src, m, errors, spans, invocations, helpers = parse(path)
+    lines = src.split('\n')
+    found = []
+
+    def report(pos, why):
+        ln = m.count('\n', 0, pos) + 1
+        found.append((rel, ln, why, lines[ln - 1].strip()[:160]))
+
+    for err in errors:
+        found.append((rel, 0, f'scanner: {err}', ''))
     for p, word_end in invocations:
         s, e = logical_bounds(m, p)
         pre = m[s:p]
@@ -538,15 +574,18 @@ def scan(rel, path):
             why = None if ends_condition(m, word_end) else COND_LATER
         if why:
             report(p, why if why != UNCHECKED else 'unchecked bare mktemp (add `|| return 1`)')
-    for h in sorted(helpers):
+    borrowed = sourced_helpers(rel, src, m)
+    for h in sorted(helpers | set(borrowed)):
+        origin = '' if h in helpers else f' from {borrowed[h]}'
         for c in re.finditer(r'\$\(\s*' + re.escape(h) + r'(?![\w:.-])', m):
             why = judge_subst(m, c.start(), c.end(), spans)
             if why:
-                report(c.start(), f'captures scratch helper {h}(), {why}')
+                report(c.start(), f'captures scratch helper {h}(){origin}, {why}')
     return found
 
 
 files = list(shell_files())
+KNOWN.update(files)
 if mode == '--count':
     print(len(files))
     sys.exit(0)
@@ -606,7 +645,35 @@ M='mk''temp'   # spliced so these source lines never read as invocations themsel
 {
   echo '#!/bin/sh'
   echo "tmp=\$($M)"
+  echo '. "$(dirname "$0")/../lib/scratch-lib.sh"'
+  echo 'dir=$(mklib)'
 } > "$FX/bin/pos-extensionless"
+# A sourced helper is clean where it is defined, and a scratch helper in every file that
+# sources it from its own directory. A source line that is not code, or that names its
+# file through a variable, brings nothing in.
+mkdir -p "$FX/lib" || exit 1
+{
+  echo 'mklib() {'
+  echo '  local d'
+  echo "  d=\$($M -d) || return 1"
+  echo '  echo "$d"'
+  echo '}'
+} > "$FX/lib/scratch-lib.sh"
+{
+  echo '#!/usr/bin/env bash'
+  echo '. "$(dirname "${BASH_SOURCE[0]}")/lib/scratch-lib.sh"'
+  echo 'A=$(mklib)'
+  echo 'B="$(mklib)"; echo "$B"'
+  echo 'C=$(mklib) || exit 1'
+} > "$FX/pos-sourced.sh"
+{
+  echo '# . "$(dirname "${BASH_SOURCE[0]}")/lib/scratch-lib.sh"'
+  echo "cat <<'EOF'"
+  echo 'source "$(dirname "$0")/lib/scratch-lib.sh"'
+  echo 'EOF'
+  echo '. "$HERE/lib/scratch-lib.sh"'
+  echo 'N=$(mklib)'
+} > "$FX/neg-not-sourced.sh"
 {
   echo 'set -euo pipefail'
   echo "A=\$($M -d) || exit 1"
@@ -660,6 +727,8 @@ M='mk''temp'   # spliced so these source lines never read as invocations themsel
   echo "N2=\$($M)"
   echo 'EOF'
   echo "AB=1 AC=\$($M) || exit 1"
+  echo 'source "$(dirname "${BASH_SOURCE[0]}")/lib/scratch-lib.sh"'
+  echo 'SL=$(mklib) || exit 1'
 } > "$FX/neg-safe-forms.sh"
 echo "A=\$($M -d)" > "$FX/docs/not-a-shell-file.md"
 printf 'no shebang, no extension\nA=$(%s -d)\n' "$M" > "$FX/bin/no-shebang"
@@ -675,7 +744,11 @@ U='unchecked (add `|| exit 1`, or `|| return 1` in a function)'
 H='runs in an unquoted heredoc, where a failure becomes empty text (quote the delimiter, or assign, check, then use the variable)'
 CL='a later command in the condition supplies its status (make mktemp the last command before `then`/`do`)'
 FX_HITS=$(scan "$FX" --brief) || bad "scanner exited nonzero on the fixture repo"
+SH='captures scratch helper mklib() from lib/scratch-lib.sh'
 FX_EXPECT="bin/pos-extensionless:2: $U
+bin/pos-extensionless:4: $SH, $U
+pos-sourced.sh:3: $SH, $U
+pos-sourced.sh:4: $SH, $U
 pos.sh:2: $U
 pos.sh:3: \`|| true\` / \`|| :\` is not a check
 pos.sh:4: status masked by \`local\` (declare first, then assign and check)
@@ -705,7 +778,7 @@ pos.sh:39: an argument to \`env\`, not an assignment, so \`env\` supplies the st
 $FX_HITS"
 
 FX_FILES=$(scan "$FX" --count) || bad "scanner exited nonzero counting the fixture repo"
-[ "$FX_FILES" = 3 ] && ok || bad "fixture discovery: expected 3 tracked shell files (pos.sh, bin/pos-extensionless, neg-safe-forms.sh; the .md, the no-shebang file, the untracked file and the two recorded eval outputs stay out), got $FX_FILES"
+[ "$FX_FILES" = 6 ] && ok || bad "fixture discovery: expected 6 tracked shell files (pos.sh, pos-sourced.sh, bin/pos-extensionless, neg-safe-forms.sh, neg-not-sourced.sh, lib/scratch-lib.sh; the .md, the no-shebang file, the untracked file and the two recorded eval outputs stay out), got $FX_FILES"
 
 # ---- 2. The live tree ---------------------------------------------------------
 LIVE_FILES=$(scan "$REPO" --count) || bad "scanner exited nonzero counting $REPO"
