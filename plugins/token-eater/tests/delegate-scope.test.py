@@ -195,6 +195,20 @@ def main():
             for mode in ("circuit", "nonzero", "malformed", "nonzero_result"):
                 exercise(tmp / kind, str(allow), mode, EXPECTED[kind], EXPECTED[kind])
 
+        # A run directory that cannot be made is an invoke error like the other
+        # pre-flight failures: one JSON object on stdout and exit 2, never a bare
+        # status outside the documented 0/2/3/4 set.
+        for adapter in ADAPTERS:
+            blocked = run([bash, str(ROOT / SCRIPT_DIR / f"delegate-{adapter}.sh"),
+                           str(tmp / "clean"), str(prompt), "", ""],
+                          dict(env, TMPDIR=str(tmp / "no-such-dir")))
+            assert blocked.returncode == 2, (adapter, blocked.returncode,
+                                             blocked.stdout, blocked.stderr)
+            assert json.loads(blocked.stdout) == {
+                "adapter": adapter, "ok": False,
+                "error": "could not create a run directory"}, (adapter, blocked.stdout)
+            count += 1
+
         # Repeated calls must reset all four outputs, return success under -e,
         # and leave caller cwd unchanged (including after a violation).
         helper = ROOT / SCRIPT_DIR / "lib/delegate-common.sh"
