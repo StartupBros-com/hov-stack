@@ -1151,7 +1151,7 @@ jq -se '[.[] | select(.mode == "query")][3] as $q |
   $q.diff == $q.endpoint and $q.diff != "none" and $e.diff == $q.diff
 ' "$RT_CALLS.confirm" >/dev/null && ok || bad 'G1v query/effect confirmation or full endpoint bytes differ'
 
-echo "== G1gateway (dotfiles#1691, hov-stack#597): default gateway fixers run plain Opus without replacing hard routes =="
+echo "== G1gateway (dotfiles#1691, hov-stack#597): default gateway fixers run the newest Fable without replacing hard routes =="
 mkdir -p "$HOME/.claude"
 printf '{"model":"claude-bccf-route-codex-pool-astra[1m]"}\n' > "$HOME/.claude/settings.json"
 gateway_case=0
@@ -1159,50 +1159,52 @@ for gateway in http://127.0.0.1:8788 http://localhost:8788/ 'http://[::1]:8788';
   gateway_case=$((gateway_case + 1))
   script_actions prepare-matching-review-evidence run-granted-review fix-review-findings run-granted-review allow-existing-merge-workflow
   ANTHROPIC_BASE_URL="$gateway" ANTHROPIC_MODEL= ANTHROPIC_CUSTOM_HEADERS= \
-    ANTHROPIC_DEFAULT_OPUS_MODEL= ANTHROPIC_DEFAULT_SONNET_MODEL= ANTHROPIC_DEFAULT_HAIKU_MODEL= \
+    ANTHROPIC_DEFAULT_FABLE_MODEL= ANTHROPIC_DEFAULT_OPUS_MODEL= ANTHROPIC_DEFAULT_SONNET_MODEL= ANTHROPIC_DEFAULT_HAIKU_MODEL= \
     run_loop "g1gateway-$gateway_case"
   [ "$RC" = 0 ] && [ "$(fixers)" = 1 ] && ok || bad "G1gateway exit $RC with $(fixers) fixers: $OUT"
-  grep -q -F -- '--model opus[1m]' "$CLAUDE_CALLS" && ok \
-    || bad "G1gateway $gateway did not default the fixer to opus with its existing 1m context opt-in"
+  grep -q -F -- '--model fable[1m]' "$CLAUDE_CALLS" && ok \
+    || bad "G1gateway $gateway did not default the fixer to fable with its existing 1m context opt-in"
   grep -q -F -- '--max-budget-usd 80' "$CLAUDE_CALLS" && ok \
     || bad 'G1gateway lost the existing fixer budget'
 done
 rm "$HOME/.claude/settings.json"
-for route in model account role foreign; do
+for route in model account role fable foreign; do
   script_actions prepare-matching-review-evidence run-granted-review fix-review-findings run-granted-review allow-existing-merge-workflow
-  gateway=http://127.0.0.1:8788 model= headers= sonnet=
+  gateway=http://127.0.0.1:8788 model= headers= sonnet= fable=
   case "$route" in
     model) model=claude-opus-5-5 ;;
     account) headers=$'x-client-note: fixture\nX-Better-Ccflare-Account-Id: pinned-fixture' ;;
     role) sonnet=claude-sonnet-5-5 ;;
+    fable) fable=claude-fable-5-1 ;;
     foreign) gateway=https://api.anthropic.com ;;
   esac
   ANTHROPIC_BASE_URL="$gateway" ANTHROPIC_MODEL="$model" ANTHROPIC_CUSTOM_HEADERS="$headers" \
-    ANTHROPIC_DEFAULT_OPUS_MODEL= ANTHROPIC_DEFAULT_SONNET_MODEL="$sonnet" ANTHROPIC_DEFAULT_HAIKU_MODEL= \
+    ANTHROPIC_DEFAULT_FABLE_MODEL="$fable" ANTHROPIC_DEFAULT_OPUS_MODEL= ANTHROPIC_DEFAULT_SONNET_MODEL="$sonnet" ANTHROPIC_DEFAULT_HAIKU_MODEL= \
     run_loop "g1gateway-$route"
   [ "$RC" = 0 ] && [ "$(fixers)" = 1 ] && ok || bad "G1gateway-$route exit $RC with $(fixers) fixers: $OUT"
-  ! grep -q -F -- '--model opus' "$CLAUDE_CALLS" && ok \
+  ! grep -q -F -- '--model fable' "$CLAUDE_CALLS" && ok \
     || bad "G1gateway-$route replaced an explicit route or a foreign backend"
 done
 mkdir -p "$TREE/.claude"
-for scoped in model account backend harmless malformed; do
+for scoped in model account backend fable harmless malformed; do
   case "$scoped" in
     model) printf '{"model":"claude-opus-5-5"}\n' ;;
     account) printf '{"env":{"ANTHROPIC_CUSTOM_HEADERS":"x-better-ccflare-account-id: pinned-fixture"}}\n' ;;
     backend) printf '{"env":{"ANTHROPIC_BASE_URL":"https://api.anthropic.com"}}\n' ;;
+    fable) printf '{"env":{"ANTHROPIC_DEFAULT_FABLE_MODEL":"claude-fable-5-1"}}\n' ;;
     harmless) printf '{"permissions":{"deny":["Bash(git push --force:*)"]}}\n' ;;
     malformed) printf '{invalid settings\n' ;;
   esac > "$TREE/.claude/settings.local.json"
   script_actions prepare-matching-review-evidence run-granted-review fix-review-findings run-granted-review allow-existing-merge-workflow
   ANTHROPIC_BASE_URL=http://127.0.0.1:8788 ANTHROPIC_MODEL= ANTHROPIC_CUSTOM_HEADERS= \
-    ANTHROPIC_DEFAULT_OPUS_MODEL= ANTHROPIC_DEFAULT_SONNET_MODEL= ANTHROPIC_DEFAULT_HAIKU_MODEL= \
+    ANTHROPIC_DEFAULT_FABLE_MODEL= ANTHROPIC_DEFAULT_OPUS_MODEL= ANTHROPIC_DEFAULT_SONNET_MODEL= ANTHROPIC_DEFAULT_HAIKU_MODEL= \
     run_loop "g1gateway-scoped-$scoped"
   [ "$RC" = 0 ] && [ "$(fixers)" = 1 ] && ok || bad "G1gateway-scoped-$scoped exit $RC with $(fixers) fixers: $OUT"
   if [ "$scoped" = harmless ]; then
-    grep -q -F -- '--model opus' "$CLAUDE_CALLS" && ok \
-      || bad 'G1gateway-scoped harmless settings disabled the opus default'
+    grep -q -F -- '--model fable' "$CLAUDE_CALLS" && ok \
+      || bad 'G1gateway-scoped harmless settings disabled the fable default'
   else
-    ! grep -q -F -- '--model opus' "$CLAUDE_CALLS" && ok \
+    ! grep -q -F -- '--model fable' "$CLAUDE_CALLS" && ok \
       || bad "G1gateway-scoped-$scoped replaced a scoped pin or ambiguous settings"
   fi
 done
