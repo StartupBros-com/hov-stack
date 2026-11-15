@@ -3,7 +3,7 @@
 # Overrides are set only inside isolated fixture subshells, never in the calling session.
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-TDIR="$(mktemp -d "${TMPDIR:-/tmp}/pg-round-continue-test.XXXXXX")"
+TDIR="$(mktemp -d "${TMPDIR:-/tmp}/pg-round-continue-test.XXXXXX")" || exit 1
 trap 'rm -rf "$TDIR"' EXIT
 . "$HERE/../lib/pro-gate-lib.sh"
 FAILURES=0

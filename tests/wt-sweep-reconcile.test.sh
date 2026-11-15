@@ -29,7 +29,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT="$HERE/../scripts/wt-sweep.sh"
 [ -f "$SCRIPT" ] || { echo "FAIL: cannot find $SCRIPT"; exit 1; }
 
-TMP="$(mktemp -d)"
+TMP="$(mktemp -d)" || exit 1
 export WT_CLAUDE_HOME="$TMP/claude-home"  # the session check (hov-stack#384) never reads the real ~/.claude
 export WT_HOLD_CACHE_DIR="$TMP/hold-cache"  # nor writes its transcript index to the real ~/.cache (#394)
 trap 'rm -rf "$TMP"' EXIT

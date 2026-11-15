@@ -1,0 +1,1 @@
+Finance wants the invoice summary as CSV for their spreadsheet import. Please add `summary_to_csv(invoices)` to `invoicer/report.py`. It should return CSV text: a header row `invoice_id,customer,total,paid`, then one row per invoice, with the total formatted the way the text summary shows it (for example `$12.34`) and `paid` as `yes` or `no`.

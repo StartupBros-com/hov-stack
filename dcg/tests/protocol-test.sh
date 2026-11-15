@@ -5,7 +5,7 @@
 set -euo pipefail
 
 DCG_BIN=${DCG_BIN:-$HOME/.local/bin/dcg}
-TMP=$(mktemp -d)
+TMP=$(mktemp -d) || exit 1
 trap 'rm -rf "$TMP"' EXIT
 mkdir -p "$TMP/home/.config"
 

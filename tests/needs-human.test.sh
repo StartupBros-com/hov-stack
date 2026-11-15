@@ -6,7 +6,7 @@ set -uo pipefail
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 SCRIPT="$HERE/scripts/needs-human.sh"
 TABLE="$HERE/scripts/escalation-exceptions.json"
-TMP=$(mktemp -d)
+TMP=$(mktemp -d) || exit 1
 trap 'chmod -R u+w "$TMP" 2>/dev/null; rm -rf "$TMP"' EXIT
 
 # The script may run within a Claude Code session, so isolate HOME before any

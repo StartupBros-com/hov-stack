@@ -1,0 +1,1 @@
+Customers are getting the same payment reminder twice for one invoice. Please add deduplication to `send_reminders` in `invoicer/scheduler.py` (a set of invoice ids already sent is fine) so nobody gets a duplicate reminder.

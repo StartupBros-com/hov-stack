@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 SCRIPT="$ROOT/release/scripts/pins-pr-title.sh"
 WF="$ROOT/.github/workflows/release-pins-refresh.yml"
-TMP="$(mktemp -d)"
+TMP="$(mktemp -d)" || exit 1
 trap 'rm -rf "$TMP"' EXIT
 PASS=0
 pass() { printf 'ok - %s\n' "$*"; PASS=$((PASS + 1)); }

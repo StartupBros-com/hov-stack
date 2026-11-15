@@ -16,7 +16,7 @@ set -uo pipefail
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 # HARNESS_DOCTOR lets the inverted-state proof point at a doctored copy.
 DOCTOR=${HARNESS_DOCTOR:-$REPO/scripts/harness-doctor.sh}
-TMP=$(mktemp -d /tmp/doctor-attribution.XXXXXX)
+TMP=$(mktemp -d /tmp/doctor-attribution.XXXXXX) || exit 1
 trap 'rm -rf "$TMP"' EXIT
 
 pass=0 fail=0

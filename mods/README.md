@@ -10,7 +10,6 @@ its own repository and a card in the House of Vibe marketplace.
 | [install-preflight](install-preflight/) | `/preflight <folder or repo>` shows in plain language what a plugin or mod can do before you install it. Not wired globally since 2026-10-04 (see below) |
 | [agent-radar](agent-radar/) | Band line per running subagent in this session (elapsed time, tool count, last tool), and per piece of delegated work it started outside itself (Codex, a Pro review, CE's peer, a headless Claude), with a toast when each ends; `/radar` opens a pane of every agent and its messages. Third-party, vendored at a pinned commit with local fixes and additions; see its `NOTICE.md` |
 | [read-ceiling-pager](read-ceiling-pager/) | A Read whose explicit window would exceed the token cap is clamped to the lines that fit, and the result says which lines came back and where to continue; a Read the engine refuses anyway gets a retry window from the engine's own numbers that the read-ceiling-chunk hook admits after a first refusal |
-| [lookout](lookout/) | Every six main-thread model steps, one tool-less fork of the session (served from the prompt cache) is asked whether there is something you should know and might miss; a yes shows above the prompt until `ok` or two prompts on. No model call while nothing draws the session. `/lookout` for status and cost, `now`, `off`, `on`. Written from scratch as a host-compatible take on Claude Code's built-in you-should-know, which does not load behind the gateway |
 | [reminder-diet](reminder-diet/) | Leaves out an engine task reminder that repeats, word for word, the last one the same loop was sent; the first, and any reminder whose task list changed, still goes through, and the comparison starts over after a compaction or `/clear` |
 | [x-mcp-budget](x-mcp-budget/) | Caps what the X (Twitter) MCP's reads cost: list, search and timeline calls ask for at most 10 results, each post and user returned is priced once per UTC day in a ledger every session on the machine shares, and once the day reaches the budget (default $1) further X MCP calls are refused until 00:00 UTC, naming the free oEmbed route for a single post |
 
@@ -18,7 +17,7 @@ Each house mod's README carries its `hooks:` and `calls:` lines as printed by
 `claude plugin validate`, its options, and its limits. `IDEAS.md` is the ranked
 backlog the house mods were chosen from and records the community-mod
 evaluations that brought in agent-radar, where-am-i and next-steps (the last
-two removed, see below).
+two removed, see below). lookout, a house mod, was removed too (see below).
 
 ## Load one
 
@@ -30,7 +29,7 @@ claude --plugin-dir ~/.claude/mods/loop-breaker --plugin-dir ~/.claude/mods/inst
 
 For every session, `CLAUDE_CODE_PLUGIN_DIRS` in `settings.json` `env` names the
 folders joined by `:` (absolute paths; the engine expands a leading `~`). The
-harness wires six of them this way, all but install-preflight: `sync.sh install`
+harness wires five of them this way, all but install-preflight: `sync.sh install`
 links this folder at `~/.claude/mods` (a `STABLE_DIRS` entry, like `hooks`),
 the canonical `settings.json` names them as
 `~/.claude/mods/<mod>`, and `reconcile-runtime-env` writes that list
@@ -89,17 +88,17 @@ sent about once a loop or too small to matter, and is left alone. How often task
 tools are called per loop is the measure that would show the repeats were doing
 work; a drop takes the mod back out of `CLAUDE_CODE_PLUGIN_DIRS`.
 
-lookout was wired on 2026-10-06 on the same terms, after the operator asked for
-a version of Claude Code's built-in you-should-know that works here. The
-built-in is enabled in `enabledPlugins` but never loads on this host (it waits
-on a compliance check the gateway setup cannot settle; see lookout's README), and its
-code is not licensed for copying, so lookout is written from scratch on the
-public mod API. Before wiring, a live fork through the gateway answered from a
-user-tier mod, and the mod's own question drew `none` on routine steps and a
-correct flag on a failed migration buried in a log (figures in its README). Each
-check reads the whole conversation from the prompt cache, so it sends none while
-nothing draws the session; `/lookout` shows what this session's checks cost, and
-`/lookout off` stops them in later sessions too.
+lookout was wired on 2026-10-06 and removed on 2026-11-14 on the operator's
+verdict. Every six main-thread model steps it asked one tool-less fork of the
+session whether there was something the operator should know and might miss, and
+showed a yes above the prompt: a house-written stand-in for Claude Code's
+built-in you-should-know, which is enabled in `enabledPlugins` but never loads
+on this host. The operator retired it once before, on 2026-10-26 in the repo
+this stack was copied from, about 14 hours after the copy was taken, so the copy
+kept it registered and it loaded in every session until this removal. Its last
+version is in git history at `3dbbb6e` (`mods/lookout/`). `sync.sh
+reconcile-runtime-env` rewrites the live mod list to the tracked one, so a host
+that still names it drops it at the next install; the smoke test holds that.
 
 x-mcp-budget was wired on 2026-11-04 by operator decision, against a measured
 defect: agent sessions reading X through the hosted X MCP were most of the X

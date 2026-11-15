@@ -92,7 +92,7 @@ fi
 # stdin-unverified rule denies a MISSING -f target regardless of path, so a
 # fabricated path would pass the DENY cases for the wrong reason and prove
 # nothing about the migration guard.
-TD=$(mktemp -d)
+TD=$(mktemp -d) || exit 1
 trap 'rm -rf "$TD"' EXIT
 mkdir -p "$TD/apps/acme-web/supabase/migrations"
 MIG="$TD/apps/acme-web/supabase/migrations/20270829000100_probe.sql"
@@ -127,6 +127,7 @@ want DENY "cat <migration> | psql"         "cat $MIG | psql \"\$POSTGRES_URL_NON
 # --- and the ordinary work that must stay frictionless ----------------------
 want ALLOW "db push --dry-run"             "supabase db push --linked --dry-run"
 want ALLOW "migration list"                "supabase migration list --linked"
+want ALLOW "migration list, JSON"          "supabase migration list --linked --output-format json"
 want ALLOW "migration new"                 "supabase migration new add_widget"
 want ALLOW "db diff"                       "supabase db diff --linked"
 want ALLOW "gen types"                     "supabase gen types typescript --linked"

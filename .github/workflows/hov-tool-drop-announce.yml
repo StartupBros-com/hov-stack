@@ -101,7 +101,7 @@ jobs:
 
       - name: Check out release commit
         if: steps.current.outputs.eligible == 'true'
-        uses: actions/checkout@ac593985615ec2ede58e132d2e21d2b1cbd6127c
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: refs/tags/${{ github.event.release.tag_name }}
           fetch-depth: 0
@@ -122,7 +122,7 @@ jobs:
 
       - name: Check out trusted workflow helper
         if: steps.current.outputs.eligible == 'true'
-        uses: actions/checkout@ac593985615ec2ede58e132d2e21d2b1cbd6127c
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: ${{ job.workflow_repository }}
           ref: ${{ job.workflow_sha }}
@@ -136,7 +136,7 @@ jobs:
       # per-plugin caller read a repository with no manifest.
       - name: Check out current marketplace manifest
         if: steps.current.outputs.eligible == 'true'
-        uses: actions/checkout@ac593985615ec2ede58e132d2e21d2b1cbd6127c
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: ${{ inputs.marketplace-repository || job.workflow_repository }}
           ref: main

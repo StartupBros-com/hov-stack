@@ -271,7 +271,8 @@ LOOPSH="$HERE/scripts/pro-gate-loop.sh"
 # Physical, so every expected path below compares against what the loop
 # prints: it resolves its workdir with pwd -P (G21n), and a TMPDIR spelled
 # through a symlink would otherwise disagree with $TMP/... here.
-TMP=$(cd -P -- "$(mktemp -d)" && pwd -P)
+TMP=$(mktemp -d) || exit 1
+TMP=$(cd -P -- "$TMP" && pwd -P) || exit 1
 trap 'rm -rf "$TMP"' EXIT
 export HOME="$TMP/home"; mkdir -p "$HOME"
 # The loop arms the fixer's fence itself and honours a caller-supplied stop

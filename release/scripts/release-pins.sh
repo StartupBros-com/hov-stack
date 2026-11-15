@@ -128,7 +128,7 @@ jsm|darwin-x86_64|jsm-x86_64-apple-darwin.tar.gz|jsm
 TABLE_OPEN="TABLE=\${HOV_SETUP_RELEASE_TABLE:-'"
 TABLE_CLOSE="'}"
 
-WORK="$(mktemp -d)"
+WORK="$(mktemp -d)" || exit 1
 IR_TMP=''   # the rewrite's temp file beside install-release.sh, while one exists
 # shellcheck disable=SC2329  # invoked by the EXIT trap
 cleanup() {
@@ -268,14 +268,14 @@ REASON=''
 
 verify_row() { # tool version platform url sha members; sets REASON
   local t=$1 p=$3 u=$4 s=$5 m=$6 d a got inst out rc=0
-  d=$(mktemp -d "$WORK/row.XXXXXX")
+  d=$(mktemp -d "$WORK/row.XXXXXX") || { REASON="could not create a scratch directory under $WORK"; return 1; }
   a=${u##*/}
   download "$u" "$d/$a" || { REASON="download failed: $u"; return 1; }
   got=$(sha_of "$d/$a")
   [ "$got" = "$s" ] || { REASON="sha256 is $got, pin is $s"; return 1; }
   check_members "$d/$a" "$m" || return 1
   if [ "$p" = "$PLATFORM" ]; then
-    inst=$(mktemp -d "$WORK/inst.XXXXXX")
+    inst=$(mktemp -d "$WORK/inst.XXXXXX") || { REASON="could not create a scratch directory under $WORK"; return 1; }
     mkdir "$inst/bin"
     scratch_env "$inst"
     out=$(env -i "${SCRATCH_ENV[@]}" HOV_SETUP_PLATFORM="$p" HOV_SETUP_BIN_DIR="$inst/bin" \
@@ -633,7 +633,7 @@ EOF
 # the new one, never half of one, and the EXIT trap removes a temp file a failure leaves.
 # awk ends every row with a newline, even a last one that had none.
 write_table() { # file rows-file
-  IR_TMP=$(mktemp "$(dirname "$1")/.install-release.XXXXXX")
+  IR_TMP=$(mktemp "$(dirname "$1")/.install-release.XXXXXX") || fail "could not create a temp file beside $1"
   cp -p "$1" "$IR_TMP"
   { head -n "$TBL_START" "$1"; awk '{ print }' "$2"; tail -n +"$TBL_END" "$1"; } > "$IR_TMP" \
     || fail "could not build the new $1"

@@ -27,7 +27,7 @@ set -uo pipefail
 
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)  # repo root
 SCRIPT="$HERE/scripts/pipeline-mix-report.py"
-TMP=$(mktemp -d)
+TMP=$(mktemp -d) || exit 1
 trap 'rm -rf "$TMP"' EXIT
 
 pass=0 fail=0

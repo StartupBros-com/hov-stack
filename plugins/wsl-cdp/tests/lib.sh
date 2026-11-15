@@ -40,7 +40,7 @@ t_summary(){ printf -- '-- %s: %d passed, %d failed\n' "${0##*/}" "$_P" "$_F"; [
 # documents, so tests can assert the waterfall by deleting winners one at a time.
 make_fixture(){
   local d p
-  d="$(mktemp -d "${TMPDIR:-/tmp}/wslcdp-fix.XXXXXX")"
+  d="$(mktemp -d "${TMPDIR:-/tmp}/wslcdp-fix.XXXXXX")" || exit 1
   mkdir -p "$d/users/test/AppData/Local/Temp" "$d/home" "$d/home2"
   while IFS= read -r p; do
     mkdir -p "${p%/*}"; touch "$p"; chmod +x "$p"

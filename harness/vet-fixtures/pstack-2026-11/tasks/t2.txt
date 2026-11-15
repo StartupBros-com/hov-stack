@@ -1,0 +1,1 @@
+Finance says some invoice amounts come out a cent low. Example: an invoice with a single line, quantity 1 at a unit price of 62.5¢, shows a total of $0.62, but the rounding policy in README.md says it should be $0.63. Please fix it.

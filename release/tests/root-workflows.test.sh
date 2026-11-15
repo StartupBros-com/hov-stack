@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-TMP="$(mktemp -d)"
+TMP="$(mktemp -d)" || exit 1
 trap 'rm -rf "$TMP"' EXIT
 # An unguarded command that fails under set -e would otherwise end the suite with no
 # reason in the CI log; name the line and show the stderr the last case captured.
@@ -77,7 +77,7 @@ pass 'exactly one canonical announce pin has the required comment and OIDC'
 for file in "${files[@]}"; do
   jq -e '.permissions == {"contents":"read"} and all(.jobs[]; (has("uses") or .["runs-on"] == "ubuntu-24.04"))
     and all(.jobs[].steps[]? | select(.uses? | startswith("actions/checkout")?);
-      .uses == "actions/checkout@ac593985615ec2ede58e132d2e21d2b1cbd6127c" and .with["persist-credentials"] == false)
+      .uses == "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1" and .with["persist-credentials"] == false)
     and all(.jobs[].steps[]? | select(.uses? | startswith("actions/create-github-app-token")?);
       .uses == "actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1")
     and all(.jobs[].steps[]? | select(has("run")); (.run | rtrimstr("\n") | split("\n") | length) <= 2
@@ -166,11 +166,11 @@ jq -e --arg main '${{ github.event.repository.default_branch }}' '
   and (.jobs.refresh.outputs | keys == ["rows"])
   and .jobs.land.needs == "refresh" and .jobs.land.environment == "release"
   and all(.jobs[].steps[] | select((.uses // "") | startswith("actions/checkout"));
-    .uses == "actions/checkout@ac593985615ec2ede58e132d2e21d2b1cbd6127c"
+    .uses == "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
     and .with.ref == $main and .with["persist-credentials"] == false)
   and ([.jobs[] | .steps[] | select((.uses // "") | startswith("actions/checkout"))] | length == 2)
   and all(.jobs.land.steps[] | select(has("uses"));
-    .uses == "actions/checkout@ac593985615ec2ede58e132d2e21d2b1cbd6127c"
+    .uses == "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
     or .uses == "actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1")
   and all(.jobs.land.steps[]; (.run // "") | test("release-pins\\.sh +(verify|refresh)") | not)
   and any(.jobs.land.steps[]; (.run // "") | test("release-pins\\.sh apply "))

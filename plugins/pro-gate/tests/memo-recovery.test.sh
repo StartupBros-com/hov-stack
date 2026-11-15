@@ -2,7 +2,7 @@
 # Actual shell rejection, retirement and engine clean-scan seams under isolated I/O faults.
 set -uo pipefail
 HERE="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
-TDIR="$(mktemp -d "${TMPDIR:-/tmp}/pg-memo-shell.XXXXXX")"
+TDIR="$(mktemp -d "${TMPDIR:-/tmp}/pg-memo-shell.XXXXXX")" || exit 1
 trap 'rm -rf "$TDIR"' EXIT
 export TMPDIR="$TDIR" PRO_GATE_HOME="$TDIR/home"
 LIB="${PRO_GATE_TEST_LIB_SOURCE:-$HERE/../lib/pro-gate-lib.sh}"

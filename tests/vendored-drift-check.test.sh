@@ -19,7 +19,7 @@ set -uo pipefail
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")/../scripts" && pwd)
 SCRIPT="$HERE/vendored-drift-check.sh"
 FIXTURES=$(cd "$(dirname "${BASH_SOURCE[0]}")/fixtures/vendored-drift" && pwd)
-TMP=$(mktemp -d)
+TMP=$(mktemp -d) || exit 1
 trap 'rm -rf "$TMP"' EXIT
 
 pass=0 fail=0
