@@ -7,16 +7,24 @@
 # manifest version and a rising releaseId. What a review would add is proof that the PR is the
 # bot's and changes nothing else. This script proves exactly that, then merges the exact head.
 #
-# Usage: marketplace-repin-merge.sh <pr> [--check-only] [--wait SECONDS]
-#   --check-only  stop after the identity and diff checks
-#   --wait N      wait up to N seconds for pending required checks (default 900)
+# Main has a merge queue (since 2026-11-15), so the merge command only queues the PR: GitHub
+# re-runs the required checks on it merged onto main, after any PR queued ahead, and lands it
+# when they pass (about 20 minutes for one PR). The script waits for that landing. With the
+# queue off the merge shows within seconds and the same code reports it.
+#
+# Usage: marketplace-repin-merge.sh <pr> [--check-only] [--wait SECONDS] [--queue-wait SECONDS]
+#   --check-only    stop after the identity and diff checks
+#   --wait N        wait up to N seconds for pending required checks (default 900)
+#   --queue-wait N  wait up to N seconds for main's merge queue to land the PR (default 1800)
 # Exit: 0 merged, or eligible under --check-only
 #       1 refused: not a bot repin, a required check failed, main no longer requires
-#         "Pinned sources", or GitHub refused the merge
+#         "Pinned sources", GitHub refused the merge, or the PR was closed or left the merge
+#         queue without merging
 #       2 could not read, checks still pending, or the PR is behind main: nothing merged,
 #         safe to re-run
-#       3 a merge was requested but its outcome or main's card is unconfirmed: do not
-#         re-run blindly; check the PR and main's card by hand
+#       3 a merge was requested but its outcome or main's card is unconfirmed (still queued
+#         when --queue-wait ran out included): do not re-run blindly; check the PR and
+#         main's card by hand
 set -euo pipefail
 REPO=StartupBros-com/hov-stack
 BOT=app/startupbros-hov-marketplace-bot
@@ -28,13 +36,14 @@ retry() { say "not merged, re-run: $1"; exit 2; }
 unconfirmed() { say "merge requested, outcome unconfirmed; check by hand before re-running: $1"; exit 3; }
 
 PR=${1:-}
-[[ "$PR" =~ ^[1-9][0-9]*$ ]] || { say 'usage: marketplace-repin-merge.sh <pr> [--check-only] [--wait SECONDS]'; exit 2; }
+[[ "$PR" =~ ^[1-9][0-9]*$ ]] || { say 'usage: marketplace-repin-merge.sh <pr> [--check-only] [--wait SECONDS] [--queue-wait SECONDS]'; exit 2; }
 shift
-CHECK_ONLY=0 WAIT=900
+CHECK_ONLY=0 WAIT=900 QUEUE_WAIT=1800
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --check-only) CHECK_ONLY=1; shift ;;
     --wait) [[ "${2:-}" =~ ^[0-9]+$ ]] || { say 'usage: --wait needs seconds'; exit 2; }; WAIT=$2; shift 2 ;;
+    --queue-wait) [[ "${2:-}" =~ ^[0-9]+$ ]] || { say 'usage: --queue-wait needs seconds'; exit 2; }; QUEUE_WAIT=$2; shift 2 ;;
     *) say "usage: unknown option $1"; exit 2 ;;
   esac
 done
@@ -121,11 +130,38 @@ if ! gh pr merge "$PR" --repo "$REPO" --squash --match-head-commit "$HEAD" >&2; 
     *) refuse "GitHub refused the merge of PR #$PR at $HEAD ($POST)" ;;
   esac
 fi
-MERGED=""
-for _ in 1 2 3 4 5 6; do
-  MERGED=$(gh pr view "$PR" --repo "$REPO" --json state,mergeCommit --jq 'select(.state == "MERGED") | .mergeCommit.oid') || MERGED=""
-  [ -z "$MERGED" ] || break
-  sleep "$((POLL / 6 + 1))"
+# A PR never seen in the merge queue gets the short wait a direct merge needs. One seen in
+# the queue is waited on until --queue-wait runs out. Out of the queue and still open means
+# the queue removed it; that takes two reads in a row, since the read that lands between
+# "left the queue" and "merged" is not a removal.
+STATE_QUERY='query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){state isInMergeQueue mergeCommit{oid}}}}'
+MERGED="" QUEUED=0 GONE=0 TRIES=0
+QUEUE_DEADLINE=$((SECONDS + QUEUE_WAIT))
+while :; do
+  POST=$(gh api graphql -f owner="${REPO%/*}" -f name="${REPO#*/}" -F number="$PR" -f query="$STATE_QUERY" \
+    --jq '.data.repository.pullRequest | "\(.state) \(.isInMergeQueue) \(.mergeCommit.oid // "")"') || POST=""
+  case "$POST" in
+    MERGED\ *) MERGED=${POST##* }; [ -z "$MERGED" ] || break ;;
+    CLOSED\ *) refuse "PR #$PR was closed without merging after the merge was requested" ;;
+    OPEN\ true\ *)
+      [ "$QUEUED" = 1 ] || say "PR #$PR is in main's merge queue; waiting up to ${QUEUE_WAIT}s for it to land"
+      QUEUED=1 GONE=0 ;;
+    OPEN\ false\ *)
+      if [ "$QUEUED" = 1 ]; then
+        GONE=$((GONE + 1))
+        [ "$GONE" -lt 2 ] \
+          || refuse "PR #$PR left main's merge queue without merging; read its checks on the merge group before re-running"
+      fi ;;
+  esac
+  TRIES=$((TRIES + 1))
+  if [ "$QUEUED" = 1 ]; then
+    [ "$SECONDS" -lt "$QUEUE_DEADLINE" ] \
+      || unconfirmed "PR #$PR is still in main's merge queue after ${QUEUE_WAIT}s; it lands by itself once its checks pass there"
+    sleep "$POLL"
+  else
+    [ "$TRIES" -lt 6 ] || break
+    sleep "$((POLL / 6 + 1))"
+  fi
 done
 [ -n "$MERGED" ] || unconfirmed "PR #$PR is not shown as merged yet"
 gh api -H 'Accept: application/vnd.github.raw+json' "repos/$REPO/contents/$MANIFEST?ref=main" >"$S/live.json" \
