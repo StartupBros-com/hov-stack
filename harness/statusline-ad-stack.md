@@ -49,11 +49,11 @@ columns, then at 60:
 
 ```
 ctx █▉░░░░░░ 23% 230k/1M │ cache 48m→02:30 │ Fable 5.2 xhigh │ $12.34
-reminder-diet cleanup │ hov-stack › wt statusline-refresh ±2 │ last session route ● max-acct-b (5h 33% 7d 58%, 4s ago)
+billing retry backoff │ hov-stack › wt statusline-refresh ±2 │ last session route ● max-acct-b (5h 33% 7d 58%, 4s ago)
 5h  ███▎░░░░ 41%→03:52 │ 7d █████░░░ 63%→Tue 01:42 │ PR #625 ready │ 7f3a9c21
 
 ctx █▉░░░░░░ 23% │ cache 48m→02:30 │ Fable 5.2 │ $12.34
-reminder-diet cl… │ hov-stack › wt statusline-refresh ±2
+billing retry ba… │ hov-stack › wt statusline-refresh ±2
 5h  ███▎░░░░ 41% │ 7d █████░░░ 63% │ PR ✓#625
 ```
 
