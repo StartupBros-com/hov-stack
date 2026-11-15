@@ -18,10 +18,22 @@ reject() {
 }
 
 SCRIPT="$ROOT/release/scripts/ci-aggregate.sh"
-export EVENT_NAME=push HEAD_REPO_IS_FORK=false HEAD_REPO=acme/repo REPO=acme/repo PLUGINS_TOUCHED=true
+export EVENT_NAME=push HEAD_REPO_IS_FORK=false HEAD_REPO=acme/repo REPO=acme/repo PLUGINS_TOUCHED=false
 export NEEDS_JSON='{"changes":{"result":"skipped"},"plugin":{"result":"skipped"}}'
 bash "$SCRIPT" >"$TMP/out" || die 'all skipped'
-pass 'all skipped needs pass'
+pass 'all skipped needs pass when no plugin changed'
+export PLUGINS_TOUCHED=true
+for event in push merge_group pull_request; do
+  export EVENT_NAME="$event" NEEDS_JSON='{"changes":{"result":"success"},"plugin":{"result":"skipped"}}'
+  reject "plugins changed but the plugin job was skipped on this $event run; its checks did not run" bash "$SCRIPT"
+  export NEEDS_JSON='{"changes":{"result":"success"},"plugin":{"result":"success"}}'
+  bash "$SCRIPT" >"$TMP/out" || die "$event with plugin checks run"
+  export PLUGINS_TOUCHED=false NEEDS_JSON='{"changes":{"result":"success"},"plugin":{"result":"skipped"}}'
+  bash "$SCRIPT" >"$TMP/out" || die "$event with no plugin changed"
+  export PLUGINS_TOUCHED=true
+  pass "$event: changed plugins need the plugin job to have run; unchanged ones may skip it"
+done
+export EVENT_NAME=push
 export NEEDS_JSON='{"changes":{"result":"success"},"plugin":{"result":"success"}}'
 bash "$SCRIPT" >"$TMP/out" || die 'all success'
 pass 'successful needs pass'
@@ -40,9 +52,9 @@ pass 'fork PR without plugin changes passes'
 export PLUGINS_TOUCHED=true HEAD_REPO_IS_FORK=false
 reject 'plugin checks do not run for pull requests from forks' bash "$SCRIPT"
 pass 'different head repository fails without fork flag'
-export HEAD_REPO=acme/repo
+export HEAD_REPO=acme/repo NEEDS_JSON='{"changes":{"result":"success"},"plugin":{"result":"success"}}'
 bash "$SCRIPT" >"$TMP/out" || die 'same repo PR'
-pass 'same repository PR passes'
+pass 'same repository PR whose plugin checks ran passes'
 export NEEDS_JSON='{}'
 bash "$SCRIPT" >"$TMP/out" || die 'empty needs object'
 pass 'empty needs object has no failures'

@@ -6,12 +6,16 @@ on:
   push:
     branches: [main]
   pull_request:
+  # A merge queue on main tests a pull request merged onto main before it lands, and
+  # that test is this event. Without a queue the event never fires.
+  merge_group:
 
 permissions:
   contents: read
 
 # A newer push to a pull request cancels the run it supersedes. A push to main gets
 # a group of its own commit, so the run the release gate reads is never cancelled.
+# A merge group's run is keyed on its commit too, and has finished before main moves.
 # The prefix is literal and unique to this file: GitHub compares group names
 # case-insensitively across workflows (pinned in release/tests/root-workflows.test.sh).
 concurrency:
