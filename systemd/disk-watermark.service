@@ -6,9 +6,9 @@
 Description=Disk-fill watermark check (/ and /mnt/c; alerts on WARN/CRIT/free-GB floor breach)
 
 # NO OnFailure= ON PURPOSE.
-# exit 1 means a watermark BREACH, deliberately: its header states
-# "systemd failed-unit = visibility" and it already makes one notify.sh call.
-# A finding, not a fault.
+# exit 1 means this run ALERTED on a new or worse breach, deliberately: the
+# failed unit is the visibility and the script already made one notify.sh call
+# (a breach no worse than at its last alert exits 0). A finding, not a fault.
 [Service]
 Type=oneshot
 TimeoutStartSec=15m

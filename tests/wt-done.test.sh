@@ -1280,6 +1280,34 @@ chk "transcript elsewhere, the caller's own: exits 0" 0 "$rc"
 hasnot "transcript elsewhere, the caller's own: no session refusal" "$out" "a Claude session holds"
 chk "transcript elsewhere, the caller's own: pointer moved" "$S" "$(git -C "$TMP/heldfar/wt" rev-parse HEAD)"
 
+# --- 53b. wt-sweep's idle window (hov-stack#644): a mention 48 hours old holds
+#          a plain run, and no longer holds --reconcile-only --idle-release-hours 24 --
+S=$(mkfix idlefar); export STUB_GH_OUT="7 $S"
+H="$TMP/h-idlefar"; T="$H/projects/-launch/sid-a.jsonl"; WT="$TMP/idlefar/wt"
+mkdir -p "$H/jobs/j1" "$(dirname "$T")"
+printf '{"state":"working","name":"toucher","sessionId":"sid-a","cwd":"%s","linkScanPath":"%s"}\n' \
+  "$TMP/idlefar/repo" "$T" >"$H/jobs/j1/state.json"
+printf '{"type":"assistant","timestamp":"%s","cwd":"%s","message":{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"Read","input":{"file_path":"%s"}}]}}\n' \
+  "$(date -u -d '-48 hours' +%Y-%m-%dT%H:%M:%S.000Z)" "$TMP" "$WT/one.txt" >"$T"
+touch -d '-48 hours' "$T"
+before=$(git -C "$WT" rev-parse HEAD)
+out=$(CLAUDE_CODE_SESSION_ID=sid-b WT_CLAUDE_HOME="$H" WT_HOLD_CACHE_DIR="$TMP/hold-cache" \
+  DRY_RUN=0 bash "$SCRIPT" --reconcile-only "$WT" 2>&1); rc=$?
+chk "idle mention, no window: exits 1" 1 "$rc"
+has "idle mention, no window: refuses as held" "$out" "REFUSE (a Claude session holds this worktree: job j1 \"toucher\" is working; its transcript $T names $WT/one.txt)"
+chk "idle mention, no window: pointer unmoved" "$before" "$(git -C "$WT" rev-parse HEAD)"
+out=$(CLAUDE_CODE_SESSION_ID=sid-b WT_CLAUDE_HOME="$H" WT_HOLD_CACHE_DIR="$TMP/hold-cache" \
+  DRY_RUN=0 bash "$SCRIPT" --reconcile-only --idle-release-hours 24 "$WT" 2>&1); rc=$?
+chk "idle mention, 24h window: exits 0" 0 "$rc"
+has "idle mention, 24h window: says it is idle" "$out" "note: idle: job j1 \"toucher\" is working; its transcript $T names $WT/one.txt; last named 48h ago"
+hasnot "idle mention, 24h window: no session refusal" "$out" "a Claude session holds"
+chk "idle mention, 24h window: reconciled" "$S" "$(git -C "$WT" rev-parse HEAD)"
+out=$(bash "$SCRIPT" --idle-release-hours 24 "$WT" 2>&1); rc=$?
+chk "--idle-release-hours without --reconcile-only: usage error" 2 "$rc"
+has "--idle-release-hours without --reconcile-only: says so" "$out" "works only with --reconcile-only"
+out=$(bash "$SCRIPT" --reconcile-only --idle-release-hours soon "$WT" 2>&1); rc=$?
+chk "--idle-release-hours with a non-number: usage error" 2 "$rc"
+
 echo
 settingsfix() {
   export STUB_SYSTEMCTL_CALLS="$TMP/settings-systemctl.calls"
