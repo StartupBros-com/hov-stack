@@ -182,6 +182,7 @@ WT2=$(mk_worktree "$R2" budget-b2)
 : >"$CURL_CALLS"; : >"$CURL_PAYLOAD"; : >"$CLAUDE_CALLS"
 OUTPUT=$(CLAUDE_STUB_COMMIT=1 DISCORD_WEBHOOK_URL="https://stub.invalid/wh" \
   ANTHROPIC_BASE_URL=http://127.0.0.1:8788 ANTHROPIC_MODEL= ANTHROPIC_CUSTOM_HEADERS= \
+  ANTHROPIC_DEFAULT_FABLE_MODEL= \
   bash "$LOOP" "$R2" "test prompt" --use-worktree "$WT2" --run-id run-b2 2>&1); RC=$?
 [ "$RC" = 0 ] && ok || bad "B2 clean run exit $RC (want 0)"
 # The exact pre-#562 done line, unchanged.
@@ -220,9 +221,12 @@ grep -q -F -- "Bash(git push --force:*)" "$CLAUDE_CALLS" && ok \
 # (better-ccflare#356). Only the CLI flag reaches the launch-time decision.
 grep -q -F -- '--thinking-display summarized' "$CLAUDE_CALLS" && ok \
   || bad "B2 claude argv lacks --thinking-display summarized (dotfiles#1225): $(cat "$CLAUDE_CALLS")"
-# Default dispatched roots enroll in gateway Auto, not the operator's picker pin.
-grep -q -F -- '--model claude-bccf-quality-auto' "$CLAUDE_CALLS" && ok \
-  || bad "B2 gateway-targeted headless root did not enroll in Auto: $(cat "$CLAUDE_CALLS")"
+# Default dispatched roots run the newest Fable on the gateway, not the
+# operator's picker pin, and never the retired Auto lane (hov-stack#597).
+grep -q -F -- '--model fable' "$CLAUDE_CALLS" && ok \
+  || bad "B2 gateway-targeted headless root did not default to fable: $(cat "$CLAUDE_CALLS")"
+! grep -q -F -- 'claude-bccf-quality-' "$CLAUDE_CALLS" && ok \
+  || bad "B2 gateway-targeted headless root still names the retired Auto lane: $(cat "$CLAUDE_CALLS")"
 # Runaway fences (dotfiles#968): 1000 tool calls and three hours reach the
 # child's environment when no per-run override is set. 300 calls refused the
 # #481 run's own commit with its work verified on disk.
