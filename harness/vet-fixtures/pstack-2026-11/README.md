@@ -148,6 +148,8 @@ under it (section 2.4 of the note).
   `make-runs.sh` and `launch-seq.sh` against `a9-trimmed`.
 - The deciding run the note requires before anyone overrides its verdict on the two
   `CLAUDE.md` lines. It reuses `run_arm.sh`, `launch-seq.sh` and `grade.py` with new tasks.
+  *Retired 2026-11-15: #601 closed with no deciding run (see the update under the note's
+  header).*
 
 **Delete this directory** when a later vet of the same doctrine supersedes the note, or when
 every trigger and PARTIAL row in it has been retired.
