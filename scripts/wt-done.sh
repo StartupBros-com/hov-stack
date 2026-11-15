@@ -78,6 +78,8 @@
 #   wt-done.sh [<worktree>...]        default target: the worktree holding $PWD
 #   wt-done.sh --all [--repo <dir>]   every linked worktree of that repo
 #   --reconcile-only                  move the pointer or anchor the tip, never remove anything
+#   --idle-release-hours N            with --reconcile-only: a transcript hold idle N hours is no hold
+#                                     (wt-sweep's idle release, hov-stack#644)
 #   DRY_RUN=1 (default) prints the plan; DRY_RUN=0 executes.
 #
 #   Exit 0 when every target was reconciled, was already reconciled, or would be
@@ -109,6 +111,7 @@ _plib="$(dirname "$_lib")/wt-preserve.sh"
 # shellcheck source=SCRIPTDIR/../lib/repo-update.sh
 . "$(dirname "$(dirname "$_lib")")/../lib/repo-update.sh" 2>/dev/null || true
 RECONCILE_ONLY=0
+IDLE_HOURS=0
 ALL=0
 REPO_ARG=""
 TARGETS=()
@@ -117,13 +120,14 @@ declare -A _fetched
 declare -A _activated
 
 usage() {
-  sed -n '2,84p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,86p' "$0" | sed 's/^# \{0,1\}//'
   exit "${1:-0}"
 }
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --reconcile-only) RECONCILE_ONLY=1 ;;
+    --idle-release-hours) IDLE_HOURS="${2:-}"; shift ;;
     --all)            ALL=1 ;;
     --repo)           REPO_ARG="${2:-}"; shift ;;
     -h|--help)        usage 0 ;;
@@ -132,6 +136,13 @@ while [ $# -gt 0 ]; do
   esac
   shift
 done
+# Only wt-sweep's triage call may treat an idle hold as none: a full closeout
+# removes, and wt-sweep alone decides an idle worktree's removal.
+case $IDLE_HOURS in
+  0) ;;
+  ''|*[!0-9.]*|*.*.*|.) echo "wt-done: --idle-release-hours needs a number of hours" >&2; exit 2 ;;
+  *) [ "$RECONCILE_ONLY" = 1 ] || { echo "wt-done: --idle-release-hours works only with --reconcile-only" >&2; exit 2; } ;;
+esac
 
 run() {
   local out
@@ -372,9 +383,11 @@ close_one() {
   # the worktree it is closing out (hov-stack#394).
   local hold
   if ! run_from_inside "$wt"; then
-    if hold=$(wt_session_hold "$wt" "${CLAUDE_CODE_SESSION_ID:-}"); then
-      echo "      => REFUSE (a Claude session holds this worktree: $hold)"
-      return 1
+    if hold=$(wt_session_hold "$wt" "${CLAUDE_CODE_SESSION_ID:-}" "$IDLE_HOURS"); then
+      case $hold in
+        'idle: '*) echo "      note: ${hold}; wt-sweep releases idle worktrees (--idle-release-hours)"; hold="" ;;
+        *) echo "      => REFUSE (a Claude session holds this worktree: $hold)"; return 1 ;;
+      esac
     fi
     [ -n "$hold" ] && printf '%s\n' "$hold" | sed 's/^/      ~ /'
   fi

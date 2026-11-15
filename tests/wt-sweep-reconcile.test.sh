@@ -314,12 +314,34 @@ out=$(sweep "$TMP/badref" "$TMP/wt-done-prose" 0)
 has "unreadable count is skipped, not scored 0" "$out" "cannot count unshipped commits"
 [ -d "$TMP/badref/repo-wt" ] && ok "unreadable count removed nothing" || no "unreadable count removed nothing"
 
-# --- 12. a refused removal says why ------------------------------------------------
+# --- 12a. a locked worktree is skipped before any other step (hov-stack#644) -------
+# `git worktree lock` is how an operator or a session says "keep this". The sweep
+# reads it with the worktree list and never reconciles, pins or removes it.
+mkfix prelocked feat
+git -C "$TMP/prelocked/repo" worktree lock --reason "operator hold" "$TMP/prelocked/repo-wt"
+out=$(sweep "$TMP/prelocked" "$TMP/wt-done-head" 0)
+has "locked: skip names the lock reason" "$out" "skip (locked: operator hold): repo-wt"
+has "locked: counted" "$out" "locked:1"
+hasnot "locked: no reconcile ran" "$out" "WT_DONE_PROOF=head"
+hasnot "locked: no removal tried" "$out" "worktree remove"
+[ -d "$TMP/prelocked/repo-wt" ] && ok "locked: worktree left in place" || no "locked: worktree left in place"
+git -C "$TMP/prelocked/repo" rev-parse --verify -q refs/heads/feat >/dev/null \
+  && ok "locked: branch kept" || no "locked: branch kept"
+
+# --- 12b. a refused removal says why ------------------------------------------------
 # run() used to discard git's output, so the journal said "!! FAILED" and nothing
-# else. `--force` once does not override a lock, so a locked worktree refuses.
+# else. `--force` once does not override a lock, so a worktree locked after the
+# sweep read the list (here by the wt-done stub, mid-sweep) refuses removal.
+cat >"$TMP/wt-done-lock" <<'STUB'
+#!/usr/bin/env bash
+wt="${2:-}"
+git -C "$wt" worktree lock --reason "fixture lock" "$wt"
+echo "WT_DONE_PROOF=head"
+exit 0
+STUB
+chmod +x "$TMP/wt-done-lock"
 mkfix locked feat
-git -C "$TMP/locked/repo" worktree lock --reason "fixture lock" "$TMP/locked/repo-wt"
-out=$(sweep "$TMP/locked" "$TMP/wt-done-head" 0)
+out=$(sweep "$TMP/locked" "$TMP/wt-done-lock" 0)
 has "names the failed removal" "$out" "!! FAILED: git -C '$TMP/locked/repo' worktree remove --force"
 has "and git's own reason" "$out" "cannot remove a locked working tree"
 [ -d "$TMP/locked/repo-wt" ] && ok "locked worktree left in place" || no "locked worktree left in place"
