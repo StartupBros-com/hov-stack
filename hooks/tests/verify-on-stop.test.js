@@ -420,3 +420,66 @@ test('clipping retains first 1500 and last 1000 characters plus the explicit mar
     } finally { f.cleanup(); }
   });
 });
+
+// --- Timeout verdict -----------------------------------------------------------
+// A verify command that overruns its budget must end in a labelled verdict, and
+// nothing it started may outlive the hook. Until 2026-11-14 the hook's timeout
+// signalled only the shell: the "timed out" label never fired (a timeout read as
+// FAILED) and the command's children ran on after the hook returned.
+
+// A zombie still answers kill(pid, 0) until init reaps it, so read its state too.
+function alive(pid) {
+  try { process.kill(pid, 0); } catch { return false; }
+  try {
+    const stat = fs.readFileSync(`/proc/${pid}/stat`, 'utf8');
+    return stat[stat.lastIndexOf(')') + 2] !== 'Z';
+  } catch { return true; }
+}
+
+// Without setsid (stock macOS) the hook falls back to Node's timeout, which
+// stops only the shell; the no-survivor check holds only where setsid exists.
+const HAS_SETSID = (() => {
+  try { execSync('command -v setsid', { stdio: 'ignore' }); return true; } catch { return false; }
+})();
+
+async function goneWithin(pid, ms) {
+  const end = Date.now() + ms;
+  while (alive(pid) && Date.now() < end) await new Promise((r) => setTimeout(r, 50));
+  return !alive(pid);
+}
+
+test('a verify command past its budget ends in a timed-out verdict and leaves nothing running', async () => {
+  const { dir } = project(0);
+  const pidFile = path.join(dir, 'CHILD');
+  let pid;
+  try {
+    fs.writeFileSync(path.join(dir, '.claude', 'verify.sh'),
+      `sleep 30 &\necho $! > ${JSON.stringify(pidFile)}\necho still-running\nwait\n`);
+    const env = { CLAUDE_VERIFY_ON_STOP: '1', CLAUDE_VERIFY_TIMEOUT_MS: '1000', HOME: dir, USERPROFILE: dir };
+    const started = Date.now();
+    const res = await runHook(HOOK, { cwd: dir, stop_hook_active: false }, { env });
+    assert.ok(Date.now() - started < 15000, 'the hook returns near its budget, not when the child ends');
+    assert.strictEqual(decisionOf(res), 'block');
+    assert.match(reasonOf(res), /TIMED OUT after 1 s/);
+    assert.match(reasonOf(res), /nothing is verified/);
+    assert.doesNotMatch(reasonOf(res), /FAILED/);
+    assert.match(reasonOf(res), /still-running/, 'output printed before the deadline is kept');
+    pid = Number(fs.readFileSync(pidFile, 'utf8'));
+    assert.ok(pid > 0, 'verify.sh recorded its child');
+    if (HAS_SETSID) assert.ok(await goneWithin(pid, 3000), `verify.sh's background child ${pid} outlived the hook`);
+  } finally {
+    if (pid && alive(pid)) process.kill(pid, 'SIGKILL');
+    rmTmp(dir);
+  }
+});
+
+test('a verify command that exits 124 by itself is a failure, not a timeout', async () => {
+  const { dir } = project(124);
+  try {
+    const env = { CLAUDE_VERIFY_ON_STOP: '1', HOME: dir, USERPROFILE: dir };
+    const res = await runHook(HOOK, { cwd: dir, stop_hook_active: false }, { env });
+    assert.strictEqual(decisionOf(res), 'block');
+    assert.match(reasonOf(res), /Verification gate FAILED/);
+    assert.doesNotMatch(reasonOf(res), /TIMED OUT/);
+  } finally { rmTmp(dir); }
+});

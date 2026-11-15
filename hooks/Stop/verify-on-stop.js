@@ -46,6 +46,12 @@
  * prompts inside the fix loop, and with mise's shims dir appended to PATH so a
  * hook process launched without mise activation still finds bun and pnpm.
  *
+ * BOUNDED: the verify command gets CLAUDE_VERIFY_TIMEOUT_MS (default 180 s) in
+ * a process group of its own (scripts/lib/group-timeout.sh). At the deadline
+ * the whole group is stopped and the stop gets a "TIMED OUT, nothing is
+ * verified" block. settings.json gives this hook 270 s, enough for the git
+ * probes and the kill grace on top; a hook past that is cancelled silently.
+ *
  * Loop safety: a `stop_hook_active` Stop never runs the gate, even with
  * loop-guard off. A new false Stop evaluates anew. No persisted gate
  * eligibility is needed.
@@ -61,7 +67,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { execSync } = require('child_process');
+const { execSync, spawnSync } = require('child_process');
 const { writeHookOutput } = require('../lib/hook-output.js');
 
 const TIMEOUT_MS = Number(process.env.CLAUDE_VERIFY_TIMEOUT_MS || 180000);
@@ -71,6 +77,23 @@ const MAX_OUTPUT = 2500;
 const HEAD_OUTPUT = 1500;
 const TAIL_OUTPUT = 1000;
 const GIT_TIMEOUT_MS = 10000;
+// Seconds a timed-out verify command's process group gets between TERM and KILL.
+const KILL_GRACE_S = 5;
+// Node's own deadline sits past the group's TERM and KILL; it fires only when
+// the bounded run itself hangs.
+const BACKSTOP_MS = (KILL_GRACE_S + 5) * 1000;
+const GROUP_TIMEOUT_LIB = path.resolve(__dirname, '..', '..', 'scripts', 'lib', 'group-timeout.sh');
+// $1 lib, $2 seconds, $3 grace, $4 command. group_timeout starts the command in
+// a session of its own and signals that whole group at the deadline; Node's
+// timeout signals only the shell, so the command's children ran on after it.
+// With neither setsid nor timeout on PATH, or a lib that will not load, the
+// command runs plainly, bounded by Node's timeout alone.
+const BOUNDED_RUN = `lib=$1 secs=$2 grace=$3 cmd=$4; set --
+if [ -r "$lib" ] && { command -v setsid || command -v timeout; } >/dev/null 2>&1 && . "$lib"; then
+  group_timeout -k "$grace" "$secs" /bin/sh -c "$cmd"
+  exit
+fi
+exec /bin/sh -c "$cmd"`;
 // Clock slack for "changed during this session": generous on purpose, a false
 // "session touched this" only means the gate runs, which is the safe direction.
 const SLACK_MS = 120000;
@@ -327,6 +350,34 @@ function withMiseShims(envPath) {
   return [...parts, shims].join(path.delimiter);
 }
 
+// A bash at a fixed path: the hook's PATH can lack one, and group-timeout.sh is
+// bash-only.
+function findBash() {
+  return ['/bin/bash', '/usr/bin/bash', '/usr/local/bin/bash', '/opt/homebrew/bin/bash']
+    .find((p) => fs.existsSync(p)) || null;
+}
+
+// Runs `cmd` as /bin/sh -c would, within TIMEOUT_MS (0: no limit).
+// Returns { ok, timedOut, output }.
+function runVerify(cmd, cwd, env) {
+  const opts = { cwd, env, stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf8' };
+  const bash = findBash();
+  const started = Date.now();
+  const r = bash
+    ? spawnSync(bash, ['-c', BOUNDED_RUN, 'verify-on-stop', GROUP_TIMEOUT_LIB, String(TIMEOUT_MS / 1000), String(KILL_GRACE_S), cmd],
+      { ...opts, timeout: TIMEOUT_MS > 0 ? TIMEOUT_MS + BACKSTOP_MS : 0, killSignal: 'SIGKILL' })
+    : spawnSync('/bin/sh', ['-c', cmd], { ...opts, timeout: TIMEOUT_MS });
+  const ok = !r.error && r.status === 0;
+  // 124: stopped at the deadline; 137: the group outlived its grace and was
+  // killed. Counted only past the deadline, so a command that exits 124 or 137
+  // by itself early, or is OOM-killed, still reads as a failure.
+  const pastDeadline = TIMEOUT_MS > 0 && Date.now() - started >= TIMEOUT_MS;
+  const timedOut = !ok && (
+    (r.error && r.error.code === 'ETIMEDOUT') ||
+    (pastDeadline && (r.status === 124 || r.status === 137 || r.signal != null)));
+  return { ok, timedOut, output: `${r.stdout || ''}${r.stderr || ''}`.trim() };
+}
+
 function clipOutput(out) {
   if (out.length <= MAX_OUTPUT) return out;
   const elided = out.length - HEAD_OUTPUT - TAIL_OUTPUT;
@@ -372,33 +423,34 @@ function verifyGate(input) {
     }
   }
 
-  try {
-    execSync(cmd, {
-      cwd,
-      timeout: TIMEOUT_MS,
-      stdio: ['ignore', 'pipe', 'pipe'],
-      encoding: 'utf8',
-      env: { ...process.env, PATH: withMiseShims(process.env.PATH), CI: '1', GIT_OPTIONAL_LOCKS: '0' },
-    });
-    // Passed, allow stop.
-    return null;
-  } catch (err) {
-    const out = `${err.stdout || ''}${err.stderr || ''}`.trim();
-    const output = clipOutput(out);
-    const timedOut = err.killed || /ETIMEDOUT/.test(String(err.signal || err.code || ''));
+  const env = { ...process.env, PATH: withMiseShims(process.env.PATH), CI: '1', GIT_OPTIONAL_LOCKS: '0' };
+  const result = runVerify(cmd, cwd, env);
+  // Passed, allow stop.
+  if (result.ok) return null;
+  const output = clipOutput(result.output);
+  if (result.timedOut) {
     return JSON.stringify({
       decision: 'block',
       reason:
-        `Verification gate FAILED (\`${cmd}\`)` +
-        (timedOut ? ', timed out.' : '.') +
-        ` Do not finish yet: fix the issue and re-verify.` +
-        ` If the failure is environmental or the verify command itself is wrong for this` +
-        ` repo (not caused by your changes), say so in your summary and stop again — the` +
-        ` verify gate does not re-run on a second stop attempt. The operator can override the` +
-        ` command via CLAUDE_VERIFY_CMD or a repo .claude/verify.sh.` +
+        `Verification gate TIMED OUT after ${TIMEOUT_MS / 1000} s (\`${cmd}\`): it was stopped,` +
+        ` so nothing is verified, and a timeout says nothing about your changes either way.` +
+        ` Run \`${cmd}\` yourself, or the part of it your change touches, and report the` +
+        ` result before you claim done; the gate does not re-run on the next stop.` +
+        ` CLAUDE_VERIFY_TIMEOUT_MS sets the budget, and a repo .claude/verify.sh can scope a slow verify.` +
         `\n\n--- output ---\n${output || '(no output captured)'}`,
     });
   }
+  return JSON.stringify({
+    decision: 'block',
+    reason:
+      `Verification gate FAILED (\`${cmd}\`).` +
+      ` Do not finish yet: fix the issue and re-verify.` +
+      ` If the failure is environmental or the verify command itself is wrong for this` +
+      ` repo (not caused by your changes), say so in your summary and stop again — the` +
+      ` verify gate does not re-run on a second stop attempt. The operator can override the` +
+      ` command via CLAUDE_VERIFY_CMD or a repo .claude/verify.sh.` +
+      `\n\n--- output ---\n${output || '(no output captured)'}`,
+  });
 }
 
 module.exports = { run };
