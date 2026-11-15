@@ -593,7 +593,7 @@ if jq -e --arg home "$fresh_runtime_home" --arg repo "$REPO" --arg realhome "$HO
     and .env.WACLI_STORE_DIR == ($realhome + "/.local/state/wacli")
     and .env.PRO_GATE_ROUND_GUARD == "1"
     and .env.CLAUDE_CODE_FILE_READ_MAX_OUTPUT_TOKENS == "50000"
-    and .env.CLAUDE_CODE_PLUGIN_DIRS == ($home + "/mods/loop-breaker:" + $home + "/mods/agent-radar:" + $home + "/mods/read-ceiling-pager:" + $home + "/mods/reminder-diet:" + $home + "/mods/x-mcp-budget")
+    and .env.CLAUDE_CODE_PLUGIN_DIRS == ($home + "/mods/loop-breaker:" + $home + "/mods/agent-radar:" + $home + "/mods/read-ceiling-pager:" + $home + "/mods/x-mcp-budget")
     and .permissions.disableAutoMode == "disable"
     and .permissions.defaultMode == "bypassPermissions"
     and .permissions.disableBypassPermissionsMode != "disable"
@@ -986,26 +986,29 @@ if jq -e '(.env | has("CLAUDE_CODE_PLUGIN_DIRS") | not) and .env.CLAUDE_ENV_FILE
 # folder the canonical list dropped must be rewritten to the canonical list,
 # not merged with it. lookout came back this way once: it was unregistered in
 # the repo this stack was copied from after the copy was taken, and stayed
-# loaded in every session.
+# loaded in every session. reminder-diet, removed the same day, is held the
+# same way.
 stale_mod_home=$TMP/runtime-env-stale-mod
 mkdir -p "$stale_mod_home"
 ln -s "$REPO/claude-env.sh" "$stale_mod_home/claude-env.sh"
 ln -s "$REPO/mods" "$stale_mod_home/mods"
 stale_mod_want=$(jq -r '.env.CLAUDE_CODE_PLUGIN_DIRS' "$fresh_runtime_home/settings.json" | sed "s|$fresh_runtime_home/|$stale_mod_home/|g")
-jq --arg dirs "$stale_mod_want:$stale_mod_home/mods/lookout" '.env.CLAUDE_CODE_PLUGIN_DIRS = $dirs' \
+jq --arg dirs "$stale_mod_want:$stale_mod_home/mods/lookout:$stale_mod_home/mods/reminder-diet" '.env.CLAUDE_CODE_PLUGIN_DIRS = $dirs' \
   "$fresh_runtime_home/settings.json" > "$stale_mod_home/settings.json"
 chmod 0600 "$stale_mod_home/settings.json"
 stale_mod_out=$(CLAUDE_HOME="$stale_mod_home" "$SYNC" reconcile-runtime-env 2>&1); stale_mod_status=$?
 stale_mod_live=$(jq -r '.env.CLAUDE_CODE_PLUGIN_DIRS' "$stale_mod_home/settings.json")
 if [ "$stale_mod_status" -eq 0 ]; then ok; else bad "reconcile-runtime-env failed on a live list naming a retired mod:"$'\n'"$stale_mod_out"; fi
 if [ "$stale_mod_live" = "$stale_mod_want" ]; then ok; else bad "reconcile-runtime-env kept a retired mod in the live CLAUDE_CODE_PLUGIN_DIRS: $stale_mod_live"; fi
-case "$(jq -r '.env.CLAUDE_CODE_PLUGIN_DIRS' "$REPO/settings.json")" in
-  *lookout*) bad "the canonical CLAUDE_CODE_PLUGIN_DIRS names lookout, which was removed" ;;
-  *) ok ;;
-esac
-# The manifest, not the folder: the engine leaves untracked type files in a mod
-# folder it has loaded, so a checkout that once loaded lookout keeps the folder.
-if [ ! -e "$REPO/mods/lookout/.claude-plugin/plugin.json" ]; then ok; else bad "mods/lookout has a plugin manifest again; the mod was removed"; fi
+for retired_mod in lookout reminder-diet; do
+  case "$(jq -r '.env.CLAUDE_CODE_PLUGIN_DIRS' "$REPO/settings.json")" in
+    *"/mods/$retired_mod"*) bad "the canonical CLAUDE_CODE_PLUGIN_DIRS names $retired_mod, which was removed" ;;
+    *) ok ;;
+  esac
+  # The manifest, not the folder: the engine leaves untracked type files in a mod
+  # folder it has loaded, so a checkout that once loaded the mod keeps the folder.
+  if [ ! -e "$REPO/mods/$retired_mod/.claude-plugin/plugin.json" ]; then ok; else bad "mods/$retired_mod has a plugin manifest again; the mod was removed"; fi
+done
 
 # -- the EnterPlanMode deny union keeps live deny intact ----------------------
 # reconcile_runtime_env appends the canonical bare-name EnterPlanMode deny only
@@ -1903,7 +1906,7 @@ for f in settings.json keybindings.json; do
             # then sets the two env paths below.
             .env |= with_entries(.value |= (if type == "string" and startswith("$HOME/") then $realhome + .[5:] else . end))
             | .env.CLAUDE_ENV_FILE = ($home + "/claude-env.sh")
-            | .env.CLAUDE_CODE_PLUGIN_DIRS = ($home + "/mods/loop-breaker:" + $home + "/mods/agent-radar:" + $home + "/mods/read-ceiling-pager:" + $home + "/mods/reminder-diet:" + $home + "/mods/x-mcp-budget")
+            | .env.CLAUDE_CODE_PLUGIN_DIRS = ($home + "/mods/loop-breaker:" + $home + "/mods/agent-radar:" + $home + "/mods/read-ceiling-pager:" + $home + "/mods/x-mcp-budget")
           ' "$REPO/$f") \
         <(jq -S . "$CLAUDE_HOME/$f"); then
       ok
@@ -1942,7 +1945,7 @@ if jq -e --arg home "$CLAUDE_HOME" --arg realhome "$HOME" '
     and .env.WACLI_STORE_DIR == ($realhome + "/.local/state/wacli")
     and .env.PRO_GATE_ROUND_GUARD == "1"
     and .env.CLAUDE_CODE_FILE_READ_MAX_OUTPUT_TOKENS == "50000"
-    and .env.CLAUDE_CODE_PLUGIN_DIRS == ($home + "/mods/loop-breaker:" + $home + "/mods/agent-radar:" + $home + "/mods/read-ceiling-pager:" + $home + "/mods/reminder-diet:" + $home + "/mods/x-mcp-budget")
+    and .env.CLAUDE_CODE_PLUGIN_DIRS == ($home + "/mods/loop-breaker:" + $home + "/mods/agent-radar:" + $home + "/mods/read-ceiling-pager:" + $home + "/mods/x-mcp-budget")
     and .permissions.disableAutoMode == "disable"
     and .permissions.defaultMode == "bypassPermissions"
     and .permissions.disableBypassPermissionsMode != "disable"
@@ -2041,7 +2044,7 @@ if jq -e --arg home "$CLAUDE_HOME" --arg realhome "$HOME" '
     and .env.WACLI_STORE_DIR == ($realhome + "/.local/state/wacli")
     and .env.PRO_GATE_ROUND_GUARD == "1"
     and .env.CLAUDE_CODE_FILE_READ_MAX_OUTPUT_TOKENS == "50000"
-    and .env.CLAUDE_CODE_PLUGIN_DIRS == ($home + "/mods/loop-breaker:" + $home + "/mods/agent-radar:" + $home + "/mods/read-ceiling-pager:" + $home + "/mods/reminder-diet:" + $home + "/mods/x-mcp-budget")
+    and .env.CLAUDE_CODE_PLUGIN_DIRS == ($home + "/mods/loop-breaker:" + $home + "/mods/agent-radar:" + $home + "/mods/read-ceiling-pager:" + $home + "/mods/x-mcp-budget")
     and .enabledPlugins["typescript-lsp@claude-plugins-official"] == false
     and .enabledPlugins["sync-smoke-keep@example"] == true
     and .permissions.disableAutoMode == "disable"
