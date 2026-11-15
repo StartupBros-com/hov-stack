@@ -10,7 +10,9 @@ Built 2026-10-03: read-ceiling-pager (M04), picked from the ranked QoL shortlist
 long-running agents; its README carries the measured defect it answers.
 
 Built 2026-10-04: reminder-diet (M33), narrowed from "learns which reminders are noise" to
-the measured case, exact repeats of the engine's task reminder; its README carries the numbers.
+the measured case, exact repeats of the engine's task reminder. Removed 2026-11-14 on the
+operator's verdict: Claude Code's built-in guard skips the hooks it worked through on this
+host (see `README.md`, which keeps the numbers).
 
 The original scores below are build-idea rankings, not adoption approvals. See
 [community mod evaluations](#community-mod-evaluations-2026-10-03) for later
@@ -48,7 +50,7 @@ Consumer: whoever picks the next mod to build here or to graduate to the House o
 | M18 | 10.5 | 3 | 3 | 3 | m | both | paste-to-mod | Describe the mod you want in one line; it drafts a plugin directory, validates it, and hot-loads it after you press Install. |
 | M14 | 10.4 | 4 | 2 | 3 | s | both | turn-postcard | After each long turn, a postcard under the answer: what changed, what was verified, what is still unproven. |
 | M25 | 10.4 | 4 | 2 | 3 | m | both | hook-port | Reads your old settings.json hooks and drafts the equivalent typed, tested mod for you to review. |
-| M33 | 10.4 | 4 | 2 | 3 | xs | both | reminder-diet | Learns which of Claude Code's injected reminders and system-prompt sections are noise for you, then trims them. Implemented 2026-10-04 (see `reminder-diet/`), narrowed to exact repeats of the task reminder, the only high-volume repeat a 14-day measurement found. |
+| M33 | 10.4 | 4 | 2 | 3 | xs | both | reminder-diet | Learns which of Claude Code's injected reminders and system-prompt sections are noise for you, then trims them. Implemented 2026-10-04, narrowed to exact repeats of the task reminder, the only high-volume repeat a 14-day measurement found. Removed 2026-11-14: on a machine with managed settings the built-in guard skips a plugin-folder mod's `prompt.attachment` hook, the one that did the trimming (see `README.md`). |
 | M42 | 10.4 | 4 | 2 | 3 | m | both | hov-launcher | /hov opens a pane of House of Vibe plugins with install state, plain description and a one-key install. |
 | M46 | 10.4 | 4 | 2 | 3 | xs | both | config-confirmer | Asks for confirmation when Claude edits settings.json, .mcp.json, hooks or shell rc, showing exactly what changes. |
 | M47 | 10.4 | 4 | 2 | 3 | xs | both | tripwire-files | Plants decoy secrets (fake ~/.aws/credentials) and alerts loudly if any mod or tool reads them. |

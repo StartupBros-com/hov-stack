@@ -10,14 +10,14 @@ its own repository and a card in the House of Vibe marketplace.
 | [install-preflight](install-preflight/) | `/preflight <folder or repo>` shows in plain language what a plugin or mod can do before you install it. Not wired globally since 2026-10-04 (see below) |
 | [agent-radar](agent-radar/) | Band line per running subagent in this session (elapsed time, tool count, last tool), and per piece of delegated work it started outside itself (Codex, a Pro review, CE's peer, a headless Claude), with a toast when each ends; `/radar` opens a pane of every agent and its messages. Third-party, vendored at a pinned commit with local fixes and additions; see its `NOTICE.md` |
 | [read-ceiling-pager](read-ceiling-pager/) | A Read whose explicit window would exceed the token cap is clamped to the lines that fit, and the result says which lines came back and where to continue; a Read the engine refuses anyway gets a retry window from the engine's own numbers that the read-ceiling-chunk hook admits after a first refusal |
-| [reminder-diet](reminder-diet/) | Leaves out an engine task reminder that repeats, word for word, the last one the same loop was sent; the first, and any reminder whose task list changed, still goes through, and the comparison starts over after a compaction or `/clear` |
 | [x-mcp-budget](x-mcp-budget/) | Caps what the X (Twitter) MCP's reads cost: list, search and timeline calls ask for at most 10 results, each post and user returned is priced once per UTC day in a ledger every session on the machine shares, and once the day reaches the budget (default $1) further X MCP calls are refused until 00:00 UTC, naming the free oEmbed route for a single post |
 
 Each house mod's README carries its `hooks:` and `calls:` lines as printed by
 `claude plugin validate`, its options, and its limits. `IDEAS.md` is the ranked
 backlog the house mods were chosen from and records the community-mod
 evaluations that brought in agent-radar, where-am-i and next-steps (the last
-two removed, see below). lookout, a house mod, was removed too (see below).
+two removed, see below). lookout and reminder-diet, both house mods, were
+removed too (see below).
 
 ## Load one
 
@@ -29,7 +29,7 @@ claude --plugin-dir ~/.claude/mods/loop-breaker --plugin-dir ~/.claude/mods/inst
 
 For every session, `CLAUDE_CODE_PLUGIN_DIRS` in `settings.json` `env` names the
 folders joined by `:` (absolute paths; the engine expands a leading `~`). The
-harness wires five of them this way, all but install-preflight: `sync.sh install`
+harness wires four of them this way, all but install-preflight: `sync.sh install`
 links this folder at `~/.claude/mods` (a `STABLE_DIRS` entry, like `hooks`),
 the canonical `settings.json` names them as
 `~/.claude/mods/<mod>`, and `reconcile-runtime-env` writes that list
@@ -79,14 +79,41 @@ tokens (`CLAUDE_CODE_FILE_READ_MAX_OUTPUT_TOKENS`, see `HARNESS.md`): 86% of
 the refused windows in the 14 days before fit under it. The pager reads the same
 value, so it now handles the tail above 50,000.
 
-reminder-diet was wired on 2026-10-04 on the same terms, built from the backlog
-(M33) and narrowed to the one repeat the measurement found worth removing: in the
-14 days before, 19,794 of 27,432 stored task reminders (72%) carried the same
-task list as the previous one in the same loop, about 241M characters, most of
-them in long-running loops. Every other injected reminder is either real context
-sent about once a loop or too small to matter, and is left alone. How often task
-tools are called per loop is the measure that would show the repeats were doing
-work; a drop takes the mod back out of `CLAUDE_CODE_PLUGIN_DIRS`.
+reminder-diet was wired on 2026-10-04 and removed on 2026-11-14 on the
+operator's verdict. Built from the backlog (M33), it was meant to leave out an
+engine task reminder that repeated, word for word, the last one the same loop
+was sent: in the 14 days before wiring, 19,794 of 27,432 stored task reminders
+(72%) carried the same task list as the previous one in the same loop, about
+241M characters. On this host it could not do that. Claude Code loads its
+built-in guard here (`cc-plugin-sec-default`; its docs give the machine's
+managed settings as the reason), and the guard sends `prompt.attachment`,
+`session.compact` and `prompt.context` past a mod loaded from a plugin folder.
+Those were the hook that dropped the repeat and the two that reset it; only the
+mod's `session.end` hook was on an event the guard leaves alone. In the 14 days
+to 2026-11-14 the stored sessions hold 1,893 notices that one of its hooks was
+skipped, on every day of the window, and 16,107 of 23,922 main-loop task
+reminders (67%) still repeated the one before. When the skipping began was not
+established, so neither was whether the mod ever worked here.
+
+Nothing of it is kept. The code needs the skipped hooks, and the engine has its
+own switch for the task reminder, `CLAUDE_CODE_TODO_REMINDER_MODE=off` (read in
+the 2.1.325 binary, where it turns off every task reminder, not only repeats;
+not set here and not tried). The mod's last version is in git history at
+`10ea7da` (`mods/reminder-diet/`), and the smoke test holds its removal the way
+it holds lookout's. Before building a mod, check its events against the ones
+the guard holds back from a mod a user loads: `classic.*`, `prompt.compose`,
+`prompt.section`, `prompt.context`, `prompt.attachment`, `skill.prompt`,
+`attribution.text`, `session.compact`, `settings.read`, and `session.append`
+for the attachment, hook-context and compaction rows (Anthropic's mods admin
+page, "Know which hooks of a user's mod don't run", read 2026-11-14). That list
+is narrower than the events the guard itself hooks, which a session's debug log
+prints on the line `hooks module cc-plugin-sec-default@builtin loaded`:
+agent-radar's `agent.spawn` hook is on that line and ran in a session checked
+on 2026-11-14, where the debug log shows it settling and names only
+reminder-diet's hooks as passed over. The debug log names each skip as `<mod>:
+<event> bypassed by cc-plugin-sec-default`; the page adds that the guard passes
+over a user's hooks in a few other cases with no note, such as `tool.describe`
+for an organization's tools.
 
 lookout was wired on 2026-10-06 and removed on 2026-11-14 on the operator's
 verdict. Every six main-thread model steps it asked one tool-less fork of the
