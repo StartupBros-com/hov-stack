@@ -1170,7 +1170,7 @@ def cmd_staleness(args: argparse.Namespace) -> None:
         return
     if newest_cut == 0:
         print("WARN papercut capture: sessions are running but the store is EMPTY "
-              "— is the PostToolUseFailure hook registered? (sync.sh reconcile-papercut-hook)")
+              "— is the PostToolUseFailure hook registered? (claude plugin install papercut@hov --scope user)")
         return
     gap_h = (newest_session - newest_cut) / 3600.0
     # Oversized stores stop accepting writes silently; surface that as the same alarm.
