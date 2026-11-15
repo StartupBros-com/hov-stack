@@ -295,6 +295,26 @@ command the verifier ran. Empirical beats documentary:
   the spread; a delta smaller than the run-to-run spread is noise, not a win
   [research: single-run pass@1 moves 2-6 pp between identical runs, and
   still above 1.5 pp at temperature 0]; a single fixture is a smoke test.
+  Write the rule that decides adoption down before the runs, and make it one
+  those runs can meet. A countermetric (what the candidate must not make
+  worse, such as cost, turns or false accusations) gets a tolerance too,
+  declared with its derivation before the runs: with none, any higher median
+  reads as a worsening, and a band picked after the ratios are known is
+  reported as post hoc [measured: pstack re-vet, 2026-11-14 — with no band,
+  four of five median-cost ratios against the incumbent (1.036 to 1.445)
+  read as worse; at 1.036 the candidate's median, $0.1086, matched the
+  incumbent's own costliest run, $0.1085; the 1.10 band that passed three of
+  those ratios was picked after they were known]. The rule judges the unit
+  that ran: a per-line rule passes no line that only ran inside a pair, so
+  run each line alone in its final wording or judge the pair as one unit
+  [measured: same vet — the final first line never ran alone, so the
+  per-line rule could not be met]. Cost from three runs per arm cannot pass
+  or fail a change of a few lines: report it, and make it a pass condition
+  only with enough runs to beat its noise [measured: same vet — runs that
+  started on a cold prompt cache wrote 9,814 to 13,508 more cache-creation
+  tokens than the warm median of the same arm and task; two such runs in
+  one three-run cell set its median, and launching a run behind a warm one
+  did not keep it warm].
   Drop fixture items that pass or fail in every arm from the arm comparison;
   they cannot separate arms and only pad the denominator. Give each arm its
   own config directory

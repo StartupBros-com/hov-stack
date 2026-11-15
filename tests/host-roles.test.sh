@@ -64,7 +64,7 @@ else bad "a satellite install no longer disables backup-harness.timer"; fi
 
 # 7. The shrink guard refuses the exact accident that motivated it (693 -> 46)
 #    and permits an ordinary edit.
-T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
+T=$(mktemp -d) || exit 1; trap 'rm -rf "$T"' EXIT
 sed -n '/^push_shrink_guard() {/,/^}/p' "$REPO/sync.sh" > "$T/fn.sh"
 [ -s "$T/fn.sh" ] || bad "push_shrink_guard not found in sync.sh"
 # shellcheck source=/dev/null

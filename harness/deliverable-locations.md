@@ -22,18 +22,29 @@ skills do not restate it.
 | Tier | Path | Tracked | Deletion | Consumer |
 |---|---|---|---|---|
 | Ephemeral | `/tmp/<unique-dir>/`, or `$CLAUDE_JOB_DIR/tmp` in a background job | no | dies with the session or job | the agent itself |
-| Reviewable | `<repo>/.claude/deliverables/<skill>/<date>-<slug>.<ext>` | no (`~/.gitignore_global`, beside `.claude/scratch/`) | dies with the worktree; in a main checkout, delete when read | the operator, this week |
+| Reviewable | `<repo>/.claude/deliverables/<skill>/<date>-<slug>.<ext>` | no (`~/.gitignore_global`, beside `.claude/scratch/`) | the operator deletes it once read; a worktree's copies move to the main checkout's `.claude/deliverables/from-worktrees/<worktree>/` when `wt-sweep` or `wt-done` removes the worktree | the operator, this week |
 | External workspace | `<project>__<skill>_workspace/` beside the repo; de-monolithize is the one current example (`<project>__demonolith_workspace/`), and a new skill that emits a sibling bundle uses the same shape | no, outside the repo | `wt-sweep.sh` warns past 14 days, same threshold as an abandoned worktree; the skill that made it says when it is done | the operator, until the bundle is consumed |
 | Durable | `docs/<sub>/` (plans, solutions, reality-checks), `design/` (design-rails) | yes | normal repo governance | anyone reading the repo |
 
 Ceremony Test answers for the one new tier, Reviewable: consumer = the operator in the
 session that produced it; gate = the skill reports the path in the same turn and opens it;
-defect = the fourteen strays above; deletion = the worktree sweep, or the operator deleting a
-read file in a main checkout. `~/reports/` is retired as a target: nothing new goes there.
+defect = the fourteen strays above; deletion = the operator deleting a read file (removing a
+worktree moves its files to `from-worktrees/`, it does not delete them). `~/reports/` is
+retired as a target: nothing new goes there.
 
 Outside any repo (a session started in `~`, or a skill like memory-dream that works on the
 harness itself), the Reviewable tier is `~/.claude/deliverables/<skill>/`: the same shape, in
 the config directory the harness already owns, never loose in `~`.
+
+A background job in a repo's main checkout that has not entered a worktree writes there too.
+Claude Code's background isolation refuses its Writes inside the checkout until it calls
+EnterWorktree ("This background session hasn't isolated its changes yet"). In one private
+app repo, twenty background sessions had a report write refused this way between 2026-09-30
+and 2026-11-14: ten then wrote the report inside a worktree, five in
+`~/.claude/deliverables/`, one in the main checkout after all, one only in its job's temp
+directory, and three left no report file that their transcripts show. A worktree made only
+to hold a report is a branch with neither an issue nor a PR, which `CLAUDE.md` calls
+invisible work. A job already in a worktree writes in that worktree, as below.
 
 Choosing a tier: if the file exists so the operator can look at it once, it is Reviewable.
 If it exists so a future reader of the repo finds it, it is Durable and goes through a PR.
@@ -41,7 +52,10 @@ If only the agent reads it, it is Ephemeral. A skill that emits a whole sibling 
 of many files is the External workspace case.
 
 Under a worktree the Reviewable tier is per worktree, which is the point: two sessions never
-write over each other, and `wt-sweep` removes the lot with the worktree. Background jobs
+write over each other. Before `wt-sweep` or `wt-done` removes a worktree, they copy its
+ignored `.claude/deliverables/` files to the main checkout's
+`.claude/deliverables/from-worktrees/<worktree>/`, check each copy byte for byte, and keep
+the worktree if a copy fails (`scripts/lib/wt-preserve.sh`, hov-stack#384). Background jobs
 write there normally (verified 2026-09-03 from a background session: a Write to
 `<worktree>/.claude/deliverables/...` was allowed). Subagents and workflow agents inherit the
 same rule through this doc. Codex has filesystem access to the same path (no restriction
@@ -80,8 +94,9 @@ interception point exists; what does not exist is a way to tell a deliverable fr
 `playwright-report/index.html` or an `opengraph-image` output by path or extension, and a
 wrong guess would corrupt real in-repo files. The prose rule is the honest lever until a
 deliverable is distinguishable by something better than a guess. No promotion or
-generator CLI. No sweep timer for the Reviewable tier (it is gitignored and dies with the
-worktree). No mass edit of the fifty-odd skills that merely mention HTML: they inherit the
+generator CLI. No sweep timer for the Reviewable tier: nothing in hov-stack prunes
+`from-worktrees/` or `~/.claude/deliverables/`, so read files stay until the operator
+deletes them. No mass edit of the fifty-odd skills that merely mention HTML: they inherit the
 rule from the always-on sentence in CLAUDE.md and get fixed when they actually drift.
 
 ## Wired to the opener in the same PR

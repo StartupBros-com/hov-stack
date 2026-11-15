@@ -14,7 +14,7 @@ set -uo pipefail
 
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 DOCTOR=$REPO/scripts/harness-doctor.sh
-TMP=$(mktemp -d /tmp/vacuity-batch2-doctor.XXXXXX)
+TMP=$(mktemp -d /tmp/vacuity-batch2-doctor.XXXXXX) || exit 1
 trap 'rm -rf "$TMP"' EXIT
 # The doctor runs under a fixture HOME. From a cwd inside the operator's home
 # (any checkout or worktree), mise's node shim walks up to the operator's

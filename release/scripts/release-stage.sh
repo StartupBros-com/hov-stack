@@ -29,7 +29,7 @@ notes="$dir/docs/release-notes/v$version.md"
 hook="$dir/release/stage-assets.sh"; assets=(); expected=''
 if [ -e "$hook" ]; then
   [ -x "$hook" ] || fail "$tag asset hook $hook is not executable"
-  out="$(mktemp -d)"; trap 'rm -rf "$out"' EXIT
+  out="$(mktemp -d)" || exit 1; trap 'rm -rf "$out"' EXIT
   RELEASE_TAG="$tag" RELEASE_VERSION="$version" "$hook" "$out" || fail "$tag asset hook $hook failed"
   while IFS= read -r -d '' f; do assets+=("$f"); done < <(find "$out" -maxdepth 1 -type f -print0 | LC_ALL=C sort -z)
   [ "${#assets[@]}" -gt 0 ] || fail "$tag asset hook $hook produced no files"

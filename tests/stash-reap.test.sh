@@ -15,7 +15,7 @@ SRC="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../scripts" && pwd)/s
 [ -f "$SRC" ] || { echo "FAIL: cannot find stash-reap.sh at $SRC"; exit 1; }
 [ -x "$SRC" ] || { echo "FAIL: $SRC is not executable"; exit 1; }
 
-TMP=$(mktemp -d /tmp/stash-reap-test.XXXXXX)
+TMP=$(mktemp -d /tmp/stash-reap-test.XXXXXX) || exit 1
 trap 'rm -rf "$TMP"' EXIT
 
 pass=0; fail=0
@@ -34,7 +34,7 @@ ck_eq() {
 
 # Builds a repo with $1 stashes; echoes the repo path.
 mkrepo() {
-  local d n; d=$(mktemp -d "$TMP/repo.XXXXXX"); n="$1"
+  local d n; d=$(mktemp -d "$TMP/repo.XXXXXX") || return 1; n="$1"
   git -C "$d" init -q
   git -C "$d" config user.email t@t; git -C "$d" config user.name t
   echo base > "$d/f.txt"; git -C "$d" add f.txt
@@ -56,14 +56,14 @@ ck "not-a-repo still prints summary" "$out" "stash-reap: candidates:0"
 ck_eq "not-a-repo exits nonzero" "$rc" "1"
 
 # --- no SHAs given --------------------------------------------------------
-R=$(mkrepo 2)
+R=$(mkrepo 2) || exit 1
 out=$(REPO="$R" bash "$SRC" </dev/null 2>&1); rc=$?
 ck "no SHAs is an error" "$out" "no SHAs given"
 ck_eq "no SHAs exits nonzero" "$rc" "1"
 ck_eq "no SHAs dropped nothing" "$(nstash "$R")" "2"
 
 # --- DRY_RUN=1 is inert ---------------------------------------------------
-R=$(mkrepo 3)
+R=$(mkrepo 3) || exit 1
 S1=$(shaof "$R" 1)
 out=$(REPO="$R" bash "$SRC" "$S1" 2>&1)
 ck "dry run marks it ready" "$out" "ready    ${S1:0:12}"
@@ -82,7 +82,7 @@ ck_eq "dry run created no backup refs" \
 # subject is "WIP on main: ...". The operator authorizes a drop by matching the
 # string they see in `git stash list`, so printing the commit subject here
 # showed a message that appears nowhere in that listing.
-R=$(mkrepo 1)
+R=$(mkrepo 1) || exit 1
 echo stored > "$R/f.txt"
 CREATED=$(git -C "$R" stash create)
 git -C "$R" stash store -m autostash "$CREATED"
@@ -94,7 +94,7 @@ ck_eq "reflog subject is what stash list shows" \
   "$(git -C "$R" stash list --format='%gs' | head -1)" "autostash"
 
 # --- unknown SHA / not-on-stack SHA --------------------------------------
-R=$(mkrepo 2)
+R=$(mkrepo 2) || exit 1
 HEADSHA=$(git -C "$R" rev-parse HEAD)
 out=$(REPO="$R" bash "$SRC" 0000000000000000000000000000000000000000 2>&1)
 ck "unknown SHA reported" "$out" "unknown"
@@ -105,7 +105,7 @@ ck "not-on-stack is not a candidate" "$out" "candidates:0"
 ck_eq "neither touched the stack" "$(nstash "$R")" "2"
 
 # --- wrong CONFIRM drops nothing -----------------------------------------
-R=$(mkrepo 3)
+R=$(mkrepo 3) || exit 1
 S0=$(shaof "$R" 0); S2=$(shaof "$R" 2)
 out=$(DRY_RUN=0 STASH_REAP_CONFIRM=7 REPO="$R" bash "$SRC" "$S0" "$S2" 2>&1); rc=$?
 ck "wrong confirm refuses" "$out" "refusing"
@@ -114,14 +114,14 @@ ck_eq "wrong confirm exits nonzero" "$rc" "1"
 ck_eq "wrong confirm dropped nothing" "$(nstash "$R")" "3"
 
 # --- empty CONFIRM is not treated as a match -----------------------------
-R=$(mkrepo 2)
+R=$(mkrepo 2) || exit 1
 S0=$(shaof "$R" 0)
 out=$(DRY_RUN=0 REPO="$R" bash "$SRC" "$S0" 2>&1)
 ck "missing confirm refuses" "$out" "refusing"
 ck_eq "missing confirm dropped nothing" "$(nstash "$R")" "2"
 
 # --- the real drop --------------------------------------------------------
-R=$(mkrepo 4)
+R=$(mkrepo 4) || exit 1
 S0=$(shaof "$R" 0); S1=$(shaof "$R" 1); S3=$(shaof "$R" 3)
 out=$(DRY_RUN=0 STASH_REAP_CONFIRM=2 REPO="$R" bash "$SRC" "$S3" "$S1" 2>&1)
 ck "drop reports each" "$out" "dropped  ${S3:0:12}"
@@ -140,7 +140,7 @@ ck_eq "dropped commit is still a readable commit" \
   "$(git -C "$R" cat-file -t "$S3")" "commit"
 
 # --- bundle byte-match gate ----------------------------------------------
-R=$(mkrepo 2)
+R=$(mkrepo 2) || exit 1
 S0=$(shaof "$R" 0)
 B="$TMP/bundle"; mkdir -p "$B/diffs"
 echo "this is not the diff you are looking for" > "$B/diffs/${S0:0:12}.diff"
@@ -155,7 +155,7 @@ ck "matching bundle drops" "$out" "dropped:1"
 ck_eq "matching bundle shrank the stack" "$(nstash "$R")" "1"
 
 # A bundle that does not cover the stash must fail, not silently skip the check.
-R=$(mkrepo 2)
+R=$(mkrepo 2) || exit 1
 S0=$(shaof "$R" 0)
 BE="$TMP/bundle-empty"; mkdir -p "$BE/diffs"
 out=$(DRY_RUN=0 STASH_REAP_CONFIRM=1 BUNDLE="$BE" REPO="$R" bash "$SRC" "$S0" 2>&1)
@@ -169,7 +169,7 @@ ck_eq "missing bundle entry left the stack" "$(nstash "$R")" "2"
 # Resolving that layout is what keeps BUNDLE usable at all: before it, every
 # skill-produced bundle refused every stash, and the operator's only way
 # forward was to unset BUNDLE and drop with no comparison running.
-R=$(mkrepo 3)
+R=$(mkrepo 3) || exit 1
 S1=$(shaof "$R" 1)
 BM="$TMP/bundle-manifest"; mkdir -p "$BM/diffs"
 git -C "$R" stash list --format='%gd|%H|%ct|%ci|%gs' > "$BM/manifest.txt"
@@ -186,7 +186,7 @@ ck "manifest layout reports no mismatch" "$out" "mismatch:0"
 ck_eq "manifest layout shrank the stack" "$(nstash "$R")" "2"
 
 # The manifest resolves a path; it must not weaken the byte-match itself.
-R=$(mkrepo 3)
+R=$(mkrepo 3) || exit 1
 S1=$(shaof "$R" 1)
 BC="$TMP/bundle-corrupt"; mkdir -p "$BC/diffs"
 git -C "$R" stash list --format='%gd|%H|%ct|%ci|%gs' > "$BC/manifest.txt"
@@ -198,7 +198,7 @@ ck_eq "corrupt manifest entry dropped nothing" "$(nstash "$R")" "3"
 # Lookup is BY SHA, never by live stack position. Here diffs/000.diff holds the
 # correct diff for S0 and S0 sits at position 0, so a positional fallback would
 # sail through; the manifest does not list S0, so it must refuse instead.
-R=$(mkrepo 3)
+R=$(mkrepo 3) || exit 1
 S0=$(shaof "$R" 0)
 BA="$TMP/bundle-absent"; mkdir -p "$BA/diffs"
 printf 'stash@{0}|%s|0|x|y\n' "$(printf '0%.0s' $(seq 1 40))" > "$BA/manifest.txt"
@@ -211,7 +211,7 @@ ck_eq "SHA absent from manifest left the stack" "$(nstash "$R")" "3"
 # The suggested drop command must carry BUNDLE through. Printing it without
 # BUNDLE told the operator to re-run with the byte-match switched off, right
 # after the plan had passed it.
-R=$(mkrepo 2)
+R=$(mkrepo 2) || exit 1
 S0=$(shaof "$R" 0)
 BS="$TMP/bundle-suggest"; mkdir -p "$BS/diffs"
 git -C "$R" stash show -p --binary "$S0" > "$BS/diffs/${S0:0:12}.diff"
@@ -221,7 +221,7 @@ out=$(DRY_RUN=1 REPO="$R" bash "$SRC" "$S0" 2>&1)
 ck_not "suggested command omits BUNDLE when unset" "$out" "BUNDLE="
 
 # --- stdin input form -----------------------------------------------------
-R=$(mkrepo 3)
+R=$(mkrepo 3) || exit 1
 S0=$(shaof "$R" 0)
 out=$(printf '%s # a trailing comment\n\n' "$S0" | REPO="$R" bash "$SRC" 2>&1)
 ck "stdin form parses the SHA" "$out" "ready    ${S0:0:12}"

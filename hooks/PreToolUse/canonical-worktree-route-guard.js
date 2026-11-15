@@ -74,7 +74,7 @@ function run(rawInput) {
     }
     if (existingEntry && state === 'canonical-sibling') return rawInput;
     if (existingEntry && state === 'canonical') return rawInput;
-    return deny(`[canonical-worktree-route-guard] ${result.route} is enrolled in enforce mode. EnterWorktree is not allowed here; create planned work with wt-new.sh --issue from ${result.canonical_path}.`);
+    return deny(`[canonical-worktree-route-guard] ${result.route} is enrolled in enforce mode. EnterWorktree with a name is refused here; EnterWorktree with path set to an existing worktree is allowed. Step 1: from ${result.canonical_path} run ~/.claude/scripts/wt-new.sh <repo> <slug>, with --issue N for an existing issue, or --new-issue "Title" --body-file F whose body has Acceptance Criteria, Planted negative and No-Claim Boundary sections. An issue is optional for trivial work if you open its PR this session. Step 2: call EnterWorktree with path set to the worktree: line it prints.`);
   } catch (error) {
     return deny(`[canonical-worktree-route-guard] Route resolver failed (${error.message || error}); refusing EnterWorktree before effect.`);
   }

@@ -5,7 +5,7 @@
 set -uo pipefail
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 SCRIPT_SRC="$ROOT/scripts/marketplace-repin-merge.sh"
-TMP=$(mktemp -d /tmp/marketplace-repin-merge-test.XXXXXX)
+TMP=$(mktemp -d /tmp/marketplace-repin-merge-test.XXXXXX) || exit 1
 trap 'rm -rf "$TMP"' EXIT
 pass=0 fail=0
 ok() { pass=$((pass + 1)); }
@@ -56,14 +56,33 @@ case "$*" in
       [ "${STUB_MERGE_LANDED:-0}" = 0 ] || touch "$FIX/merged"   # GitHub merged, the client errored
       echo 'merge blocked by ruleset' >&2; exit 1
     fi
-    [ "${STUB_MERGE_UNCONFIRMED:-0}" = 1 ] || touch "$FIX/merged" ;;
+    # With a merge queue on main the command only queues the PR; without one it merges.
+    if [ -n "${STUB_QUEUE_READS:-}" ]; then touch "$FIX/queued"
+    elif [ "${STUB_MERGE_UNCONFIRMED:-0}" != 1 ]; then touch "$FIX/merged"; fi ;;
   "pr view 7 --repo $R --json state,mergeStateStatus")
     if [ -f "$FIX/merged" ]; then printf '{"state":"MERGED","mergeStateStatus":"UNKNOWN"}\n' >"$FIX/mstate.json"
     else printf '{"state":"OPEN","mergeStateStatus":"%s"}\n' "${STUB_MERGE_STATE:-BLOCKED}" >"$FIX/mstate.json"; fi
     serve "$FIX/mstate.json" ;;
-  "pr view 7 --repo $R --json state,mergeCommit")
-    if [ -f "$FIX/merged" ]; then printf '{"state":"MERGED","mergeCommit":{"oid":"%s"}}\n' "$M" >"$FIX/state.json"
-    else printf '{"state":"OPEN","mergeCommit":null}\n' >"$FIX/state.json"; fi
+  "api graphql -f owner=StartupBros-com -f name=hov-stack -F number=7 -f query="*)
+    # The post-merge state read. A queued PR reads OPEN and in the queue for STUB_QUEUE_READS
+    # reads; what follows is STUB_QUEUE_THEN: landed (default), dropped, closed, or blip (one
+    # read out of the queue and still open, then merged).
+    n=$(($(cat "$FIX/state.count" 2>/dev/null || echo 0) + 1)); echo "$n" >"$FIX/state.count"
+    state=OPEN inq=false oid=null
+    if [ -f "$FIX/queued" ] && [ ! -f "$FIX/merged" ]; then
+      if [ "$n" -le "$STUB_QUEUE_READS" ]; then inq=true
+      else
+        case "${STUB_QUEUE_THEN:-landed}" in
+          landed) touch "$FIX/merged" ;;
+          dropped) ;;
+          closed) state=CLOSED ;;
+          blip) [ "$n" -le $((STUB_QUEUE_READS + 1)) ] || touch "$FIX/merged" ;;
+        esac
+      fi
+    fi
+    if [ -f "$FIX/merged" ]; then state=MERGED oid="{\"oid\":\"$M\"}"; fi
+    printf '{"data":{"repository":{"pullRequest":{"state":"%s","isInMergeQueue":%s,"mergeCommit":%s}}}}\n' \
+      "$state" "$inq" "$oid" >"$FIX/state.json"
     serve "$FIX/state.json" ;;
   *) echo "unexpected gh call: $*" >&2; exit 91 ;;
 esac
@@ -94,6 +113,7 @@ rollup() { jq -s --arg h "${1:-$H}" '{headRefOid: $h, statusCheckRollup: .[1:]}'
 reset_case() {
   rm -rf "$FIX"; mkdir -p "$FIX"; : >"$GH_LOG"
   unset STUB_MERGE_RC STUB_PR_READ_FAIL STUB_MERGE_LANDED STUB_MERGE_UNCONFIRMED STUB_MERGE_STATE STUB_LIVE_FAIL
+  unset STUB_QUEUE_READS STUB_QUEUE_THEN
   export REPIN_MERGE_POLL_SECONDS=0
   jq -n --arg h "$H" '{state: "OPEN", isDraft: false, author: {login: "app/startupbros-hov-marketplace-bot", is_bot: true},
     baseRefName: "main", headRefOid: $h, files: [{path: ".claude-plugin/marketplace.json"}]}' >"$FIX/pr.json"
@@ -210,6 +230,47 @@ reset_case; export STUB_MERGE_UNCONFIRMED=1
 run
 check 'merge not confirmed: exit 3' test "$RC" -eq 3
 check 'merge not confirmed: does not say re-run' bash -c '[[ "$1" != *"not merged, re-run"* ]]' _ "$OUT"
+check 'merge not confirmed: gave up after the short wait' test "$(cat "$FIX/state.count")" = 6
+
+# --- Main has a merge queue: the merge command queues the PR, and GitHub lands it later.
+# The cases that end in a refusal pass --queue-wait 20, so a script that stops refusing
+# fails its exit check after 20 seconds instead of spinning out the 30-minute default.
+state_reads() { cat "$FIX/state.count" 2>/dev/null || echo 0; }
+# Queued for more reads than the short no-queue wait allows, then landed: waits it out.
+reset_case; export STUB_QUEUE_READS=9
+run
+check 'queued then landed: exit 0' test "$RC" -eq 0
+check 'queued then landed: outlasted the short wait' test "$(state_reads)" = 10
+check 'queued then landed: says it is waiting on the queue, once' test "$(grep -c -F "is in main's merge queue" <<<"$OUT")" = 1
+check 'queued then landed: confirms the card' bash -c '[[ "$1" == *"merged PR #7 as $2; main'"'"'s card carries the new pins"* ]]' _ "$OUT" "$M"
+check 'queued then landed: one merge call' test "$(merges)" = 1
+# Out of the queue and still open: the queue removed it. A refusal, never success or "unconfirmed".
+reset_case; export STUB_QUEUE_READS=2 STUB_QUEUE_THEN=dropped
+run --queue-wait 20
+check 'left the queue unmerged: exit 1' test "$RC" -eq 1
+check 'left the queue unmerged: says so' bash -c '[[ "$1" == *"left main'"'"'s merge queue without merging"* ]]' _ "$OUT"
+check 'left the queue unmerged: read it out of the queue twice before refusing' test "$(state_reads)" = 4
+check 'left the queue unmerged: no card confirmation' bash -c '[[ "$1" != *"carries the new pins"* ]]' _ "$OUT"
+# One read out of the queue just before the merge shows is not a removal.
+reset_case; export STUB_QUEUE_READS=2 STUB_QUEUE_THEN=blip
+run --queue-wait 20
+check 'one read out of the queue, then merged: exit 0' test "$RC" -eq 0
+check 'one read out of the queue, then merged: confirms the card' bash -c '[[ "$1" == *"carries the new pins"* ]]' _ "$OUT"
+# Closed while queued (the reconciler superseded it, say): a refusal.
+reset_case; export STUB_QUEUE_READS=1 STUB_QUEUE_THEN=closed
+run --queue-wait 20
+check 'closed while queued: exit 1' test "$RC" -eq 1
+check 'closed while queued: says so' bash -c '[[ "$1" == *"was closed without merging"* ]]' _ "$OUT"
+# Still queued when --queue-wait runs out: requested, not landed, so exit 3 and no "re-run".
+reset_case; export STUB_QUEUE_READS=1000
+run --queue-wait 0
+check 'still queued at the deadline: exit 3' test "$RC" -eq 3
+check 'still queued at the deadline: says it is still queued' bash -c '[[ "$1" == *"still in main'"'"'s merge queue"* ]]' _ "$OUT"
+check 'still queued at the deadline: does not say re-run' bash -c '[[ "$1" != *"not merged, re-run"* ]]' _ "$OUT"
+check 'still queued at the deadline: stopped at the first read past it' test "$(state_reads)" = 1
+reset_case
+refused_no_merge '--queue-wait without seconds' 2 '--queue-wait needs seconds' --queue-wait soon
+
 reset_case; export STUB_LIVE_FAIL=1
 run
 check 'main manifest unreadable after merge: exit 3' test "$RC" -eq 3

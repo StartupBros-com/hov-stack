@@ -37,7 +37,7 @@ check(){ # name want_rc path
   else echo "  FAIL: $name (alive=$got, want $want)"; fail=$((fail+1)); fi
 }
 
-TMP="$(mktemp -d)"; FAKE="$TMP/worktree-probe"; mkdir -p "$FAKE"
+TMP="$(mktemp -d)" || exit 1; FAKE="$TMP/worktree-probe"; mkdir -p "$FAKE"
 cleanup(){ rm -rf "$TMP"; }
 trap cleanup EXIT
 

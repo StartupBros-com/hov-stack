@@ -30,7 +30,7 @@ ALLOWED="${4:-}"
 command -v claude >/dev/null || { echo '{"adapter":"claude","ok":false,"error":"claude not installed"}'; exit 2; }
 
 WT="$(cd "$WT" && pwd)"
-RUNDIR="$(mktemp -d -t te-claude-XXXXXX)"
+RUNDIR="$(mktemp -d -t te-claude-XXXXXX)" || { echo '{"adapter":"claude","ok":false,"error":"could not create a run directory"}'; exit 2; }
 ENVRAW="$RUNDIR/stdout.json"; ERRLOG="$RUNDIR/stderr.log"
 CB_REGEX='(usage limit|rate.?limit|429|All accounts are temporarily unavailable)'
 

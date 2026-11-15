@@ -52,7 +52,7 @@ bash "$SCRIPT" --threshold abc >/dev/null 2>&1; check_exit "non-numeric --thresh
 # the assertion still passed, for the wrong reason, until CI disagreed.
 # A tool that answered "no problems" here would be reporting coverage it never
 # read: the exact failure mode this suite exists to prevent.
-tmp_dir=$(mktemp -d)
+tmp_dir=$(mktemp -d) || exit 1
 out=$(UNIT_HEALTH_SYSD="$tmp_dir/nonexistent" UNIT_HEALTH_SYNC="$tmp_dir/nonexistent.sh" bash "$SCRIPT" 2>&1); rc=$?
 check_exit "fail-closed when the unit register is unreadable" 2 "$rc"
 case "$out" in
@@ -127,7 +127,7 @@ else
 fi
 
 # --- 8. journal failures are not zero failures (hermetic, even without systemd) ---
-fixture=$(mktemp -d)
+fixture=$(mktemp -d) || exit 1
 trap 'rm -rf "$fixture"' EXIT
 mkdir -p "$fixture/bin" "$fixture/systemd" "$fixture/tmp"
 printf 'UNITS_FOREIGN="fixture"\n' > "$fixture/sync.sh"

@@ -3,14 +3,15 @@
 # path, address, host, repository or token, in a file or in its name, passes the
 # placeholder and reserved forms,
 # lists the excluded suites without excusing their sources, honours the allowlist, scans a
-# revision, fails closed when git grep fails or the required token list is missing, and
+# revision, fails closed when git grep fails or the required token list is missing, exits 2
+# rather than the hit status when it cannot make its scratch directory, and
 # proves against the real tree that the real allowlist's token rows are load-bearing
 # (restructure plan U18, issue #31). Every planted string is assembled from two pieces so
 # this suite's own source passes the scan it tests.
 set -uo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 SCAN=$ROOT/scripts/public-safety-scan.sh
-WORK=$(mktemp -d "${TMPDIR:-/tmp}/public-safety-test.XXXXXX")
+WORK=$(mktemp -d "${TMPDIR:-/tmp}/public-safety-test.XXXXXX") || exit 1
 trap 'rm -rf "$WORK"' EXIT
 fails=0
 fail() { echo "FAIL: $*"; fails=$((fails + 1)); }
@@ -289,5 +290,13 @@ for rev in "" HEAD; do
 done
 drop "$REPO/src/$BADDIR/$TOKDIR/x.json"
 ok "a token in a path that is not valid UTF-8 is a hit, in the tree and at a revision"
+
+echo "== 13: a scratch directory that cannot be made is exit 2 with a message, never the hit status =="
+# TMPDIR is set for the scan alone; this suite's own scratch directory already exists.
+OUT=$(env -u HOV_STACK_PRIVATE_TOKENS HOV_STACK_OVERLAY="$WORK/no-overlay" TMPDIR="$WORK/no-such-dir" bash "$SCAN" --root "$REPO" 2>&1); RC=$?
+[ "$RC" -eq 2 ] || fail "a scan with no scratch directory exits $RC, want 2 (1 means a hit)"
+has "^could not create a scratch directory under $WORK/no-such-dir\$" "the scratch-directory message"
+lacks '^result: ' "a result line from a scan that never ran"
+ok "a scan that cannot make its scratch directory says so and exits 2"
 
 if [ "$fails" -eq 0 ]; then echo "public-safety-scan: all sections passed"; else echo "public-safety-scan: $fails failure(s)"; exit 1; fi

@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# Default managed headless roots to gateway Auto; exact caller routes stay exact.
-# The gateway owns quota admission and provider failover, never this launcher.
+# Default managed headless roots on the local gateway to the newest Fable; exact
+# caller routes stay exact. Claude Code resolves `fable` to its current Fable, so
+# a new Fable release needs no edit here, and the gateway owns quota admission
+# and account rotation, never this launcher.
 
 headless_gateway_model_args() {
   HEADLESS_GATEWAY_MODEL_ARGS=()
@@ -9,7 +11,7 @@ headless_gateway_model_args() {
     *) return 0 ;;
   esac
   local key header
-  for key in ANTHROPIC_MODEL ANTHROPIC_DEFAULT_OPUS_MODEL ANTHROPIC_DEFAULT_SONNET_MODEL ANTHROPIC_DEFAULT_HAIKU_MODEL \
+  for key in ANTHROPIC_MODEL ANTHROPIC_DEFAULT_FABLE_MODEL ANTHROPIC_DEFAULT_OPUS_MODEL ANTHROPIC_DEFAULT_SONNET_MODEL ANTHROPIC_DEFAULT_HAIKU_MODEL \
     CLAUDE_CODE_USE_BEDROCK CLAUDE_CODE_USE_VERTEX CLAUDE_CODE_USE_FOUNDRY CLAUDE_CODE_USE_ANTHROPIC_AWS \
     CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD CLAUDE_CODE_USE_MANTLE CLAUDE_CODE_USE_GATEWAY; do
     [ -z "${!key:-}" ] || return 0
@@ -19,8 +21,8 @@ headless_gateway_model_args() {
     header=${header//[[:space:]]/}
     [ "${header,,}" != x-better-ccflare-account-id ] || return 0
   done <<< "${ANTHROPIC_CUSTOM_HEADERS:-}"
-  headless_gateway_scope_allows_auto || return 0
-  HEADLESS_GATEWAY_MODEL_ARGS=(--model claude-bccf-quality-auto)
+  headless_gateway_scope_allows_default || return 0
+  HEADLESS_GATEWAY_MODEL_ARGS=(--model fable)
   # Model choice changes, but the operator's existing context opt-in does not.
   if jq -e '.model | type == "string" and endswith("[1m]")' \
     "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json" >/dev/null 2>&1; then
@@ -30,7 +32,7 @@ headless_gateway_model_args() {
 
 # This is a conservative opt-out, not a replacement for Claude's resolver.
 # A global picker model is inherited UI state; scoped model/transport pins are not.
-headless_gateway_scope_allows_auto() {
+headless_gateway_scope_allows_default() {
   local config="${CLAUDE_CONFIG_DIR:-$HOME/.claude}" root="$PWD" common file scope
   [ -z "${CLAUDE_CODE_PROJECT_DIR_NAME:-}${CLAUDE_CODE_HOST_GATEWAY_LINEAGE:-}" ] || return 1
   [ ! -e "$config/remote-settings.json" ] || return 1
@@ -58,7 +60,7 @@ headless_gateway_scope_allows_auto() {
         ((.env // {}) as $env |
           ((($env | has("ANTHROPIC_BASE_URL")) | not) or
             ($env.ANTHROPIC_BASE_URL | type == "string" and rtrimstr("/") == $base)) and
-          ($env | with_entries(select(.key | IN("ANTHROPIC_MODEL", "ANTHROPIC_DEFAULT_OPUS_MODEL",
+          ($env | with_entries(select(.key | IN("ANTHROPIC_MODEL", "ANTHROPIC_DEFAULT_FABLE_MODEL", "ANTHROPIC_DEFAULT_OPUS_MODEL",
             "ANTHROPIC_DEFAULT_SONNET_MODEL", "ANTHROPIC_DEFAULT_HAIKU_MODEL", "CLAUDE_CODE_USE_BEDROCK",
             "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY", "CLAUDE_CODE_USE_ANTHROPIC_AWS",
             "CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD", "CLAUDE_CODE_USE_MANTLE", "CLAUDE_CODE_USE_GATEWAY"))) |

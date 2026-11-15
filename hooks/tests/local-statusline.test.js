@@ -31,11 +31,15 @@ case "$CURL_MODE" in
 esac
 `);
   fs.chmodSync(curl, 0o755);
+  // The renderer sizes each row from COLUMNS and picks its colour depth from
+  // COLORTERM. Both are dropped here so a run inside a terminal draws what CI
+  // draws; the width and colour tests set them explicitly.
+  const { COLUMNS: _columns, COLORTERM: _colorterm, ...inherited } = process.env;
   return {
     dir,
     log: path.join(dir, 'curl.log'),
     env: {
-      ...process.env,
+      ...inherited,
       HOME: dir,
       TMPDIR: dir,
       CLAUDE_JOB_DIR: path.join(dir, 'job'),
@@ -180,7 +184,7 @@ test('account badge shows name and every usage window', () => {
   const f = fixture();
   try {
     const output = runStatusline(f, 'claude');
-    assert.match(output, /● max-acct-c 5h 12% 7d 91%/);
+    assert.match(output, /● max-acct-c \(5h 12% 7d 91%, age unknown\)/);
     assert.match(
       fs.readFileSync(f.log, 'utf8').trim(),
       /\/api\/sessions\/session-123\/account$/,
@@ -194,7 +198,7 @@ test('ANTHROPIC_BASE_URL overrides the fallback endpoint base', () => {
   const f = fixture();
   try {
     const output = runStatusline(f, 'gpt', { baseUrl: 'http://127.0.0.1:9999' });
-    assert.match(output, /● acct-a 5h 5%/);
+    assert.match(output, /● acct-a \(5h 5%, age unknown\)/);
     const call = fs.readFileSync(f.log, 'utf8').trim();
     assert.match(call, /http:\/\/127\.0\.0\.1:9999\/api\/sessions\/session-123\/account$/);
   } finally {
@@ -228,7 +232,7 @@ test('a healthy "allowed (…)" snapshot does not paint the dot red', () => {
   const f = fixture();
   try {
     const raw = runStatusline(f, 'healthysnapshot', { raw: true });
-    assert.match(raw.replace(ANSI, ''), /● acct-healthy 5h 10%/);
+    assert.match(raw.replace(ANSI, ''), /● acct-healthy \(5h 10%, age unknown\)/);
     assert.ok(!raw.includes(RED_DOT), 'healthy snapshot rendered a red dot');
   } finally {
     fs.rmSync(f.dir, { recursive: true, force: true });
@@ -239,7 +243,7 @@ test('an actual rate-limit lock paints the dot red', () => {
   const f = fixture();
   try {
     const raw = runStatusline(f, 'ratelimited', { raw: true });
-    assert.match(raw.replace(ANSI, ''), /● acct-limited 5h 10%/);
+    assert.match(raw.replace(ANSI, ''), /● acct-limited \(5h 10%, age unknown\)/);
     assert.ok(raw.includes(RED_DOT), 'rate-limited account did not render a red dot');
   } finally {
     fs.rmSync(f.dir, { recursive: true, force: true });
@@ -266,7 +270,7 @@ test('unavailable or malformed provenance leaves the existing HUD intact', () =>
 test('a slow endpoint still renders inside the overridden fetch budget', () => {
   const f = fixture();
   try {
-    assert.match(runStatusline(f, 'slowclaude'), /● acct-slow 5h 7%/);
+    assert.match(runStatusline(f, 'slowclaude'), /● acct-slow \(5h 7%, age unknown\)/);
     assert.match(fs.readFileSync(f.log, 'utf8'), /--max-time 1\.8 /);
   } finally {
     fs.rmSync(f.dir, { recursive: true, force: true });
@@ -391,7 +395,10 @@ test('endpoint-controlled window labels cannot inject control sequences', () => 
     assert.ok(!raw.includes('\x1b[2J'), 'clear-screen sequence leaked into the HUD');
     assert.ok(!raw.includes('\x1b[H'), 'cursor-home sequence leaked into the HUD');
     const stripped = raw.replace(ANSI, '');
-    assert.strictEqual(stripped.trim().split('\n').length, 3, 'HUD line layout broke');
+    // Two rows for this payload: no quota and no PR, so the session id joins
+    // row 2. A label that smuggled a line break in would add a row.
+    assert.strictEqual(stripped.trim().split('\n').length, 2, 'HUD line layout broke');
+    assert.ok(!/[\x00-\x09\x0b-\x1f\x7f]/.test(stripped), 'a control byte survived in the HUD text');
     assert.match(stripped, /● acct-evil/);
   } finally {
     fs.rmSync(f.dir, { recursive: true, force: true });
@@ -505,10 +512,10 @@ test('an old reply remains explicitly historical after a newer user turn', () =>
     ]);
     const output = runStatusline(f, 'gpt', { transcript });
     assert.match(output, /last reply gpt-6\.1-sol \(2m ago\)/);
-    assert.match(output, /last session route ● acct-a 5h 5% \(age unknown\)/);
+    assert.match(output, /last session route ● acct-a \(5h 5%, age unknown\)/);
     assert.doesNotMatch(output, /gpt-6-astra|→/);
     assert.match(output, /12%/);
-    assert.match(output, /^ctx ▕.*▏ 12% 5\.0k/m);
+    assert.match(output, /^ctx █░░░░░░░ 12% 5\.0k/m);
   } finally { fs.rmSync(f.dir, { recursive: true, force: true }); }
 });
 
@@ -527,7 +534,7 @@ test('last session route age comes from recordedAt, never the five-second fetch 
     const transcript = writeTranscript(f, [assistant('gpt-6.1-sol')]);
     const output = runStatusline(f, 'unavailable', { transcript });
     assert.match(output, /last reply gpt-6\.1-sol \(age unknown\)/);
-    assert.match(output, /last session route ● secondary-route 7d 100% \(1h ago\)/);
+    assert.match(output, /last session route ● secondary-route \(7d 100%, 1h ago\)/);
     assert.doesNotMatch(output, /gpt-6-astra/);
     assert.ok(!fs.existsSync(f.log), 'cached observation should not refetch');
   } finally { fs.rmSync(f.dir, { recursive: true, force: true }); }
@@ -566,6 +573,38 @@ const lineOf = (output, n) => output.split('\n')[n] ?? '';
 const withFixture = (fn) => { const f = fixture(); try { fn(f); } finally { fs.rmSync(f.dir, { recursive: true, force: true }); } };
 
 const zeroUsage = { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 };
+// any cell a meter can draw: full, empty, or one of the seven partial blocks
+const METER_CELL = /[█░▏▎▍▌▋▊▉]/;
+
+// Pin Date in this process and in the renderer child, in UTC, so a reset or
+// expiry clock renders the same text whatever time of day the suite runs.
+function pinClock(t, f, now) {
+  t.mock.timers.enable({ apis: ['Date'], now });
+  const clock = path.join(f.dir, 'clock.cjs');
+  fs.writeFileSync(clock, `require('node:test').mock.timers.enable({ apis: ['Date'], now: ${now} });\n`);
+  f.env.NODE_OPTIONS = `${f.env.NODE_OPTIONS || ''} --require=${clock}`;
+  f.env.TZ = 'UTC';
+}
+// 2026-10-07 is a Wednesday. At noon a reset 90 minutes away is still today; at
+// 23:30 it falls on Thursday, and its clock is four cells wider.
+const NOON = Date.UTC(2026, 9, 7, 12);
+const LATE = Date.UTC(2026, 9, 7, 23, 30);
+
+// Something to shed on every row: a remapped reply, a cold cache, a long path,
+// a six-window account, two quota windows and a PR.
+function crowdedRun(f, env = {}) {
+  const transcript = writeTranscript(f, [assistant('claude-opus-5-5')]);
+  return runStatusline(f, 'manywindows', { transcript, modelId: 'claude-sonnet-5-5', env, payload: {
+    model: { display_name: 'Sonnet 5.5', id: 'claude-sonnet-5-5' },
+    effort: { level: 'xhigh' },
+    cwd: path.join(f.dir, 'a'.repeat(80)),
+    context_window: { used_percentage: 15, total_input_tokens: 152115, context_window_size: 1000000 },
+    cost: { total_cost_usd: 18.42 },
+    prompt_cache: cache({ warm: false, expires_at: nowS() - 4200 + 3600, recache_tokens_if_cold: 154851 }),
+    rate_limits: { five_hour: { used_percentage: 23, resets_at: nowS() + 5400 }, seven_day: { used_percentage: 41, resets_at: nowS() + 345600 } },
+    pr: { number: 1673, review_state: 'changes_requested' },
+  } });
+}
 
 // Native snapshots across a cached turn, an interrupted placeholder, and the
 // following completion. These fixtures test presentation, not a live provider.
@@ -716,7 +755,7 @@ test('a quota window already past its reset reads "reset due" instead of a stale
     seven_day: { used_percentage: 41, resets_at: weekly },
   } } });
   const third = lineOf(output, 2);
-  assert.ok(third.startsWith(`5h  ▕${'░'.repeat(10)}▏ reset due │ 7d ▕████░░░░░░▏ 41%→${clockOf(weekly)}`), third);
+  assert.ok(third.startsWith(`5h  ${'░'.repeat(8)} reset due │ 7d ███▎░░░░ 41%→${clockOf(weekly)}`), third);
   assert.match(clockOf(weekly), /^(Sun|Mon|Tue|Wed|Thu|Fri|Sat) \d\d:\d\d$/, 'a reset days away carries its weekday');
 }));
 
@@ -726,7 +765,10 @@ test('the first quota bar sits in the same column as the ctx bar', () => withFix
     { seven_day: { used_percentage: 41, resets_at: nowS() + 9000 } },
   ]) {
     const output = runStatusline(f, 'unavailable', { payload: { rate_limits } });
-    assert.strictEqual(lineOf(output, 2).indexOf('▕'), lineOf(output, 0).indexOf('▕'), output);
+    // The meter has no frame, so its column is where its first cell is drawn.
+    const top = lineOf(output, 0).search(METER_CELL);
+    assert.strictEqual(top, 4, output);
+    assert.strictEqual(lineOf(output, 2).search(METER_CELL), top, output);
   }
 }));
 
@@ -755,10 +797,11 @@ test('the PR segment carries its review state, colored by outcome', () => withFi
 
 test('private mode masks the account and hides the session id, by env or by flag file', () => withFixture((f) => {
   const open = runStatusline(f, 'claude');
-  assert.match(open, /last session route ● max-acct-c 5h 12% 7d 91%/);
-  assert.match(lineOf(open, 2), /session-/);
+  assert.match(open, /last session route ● max-acct-c \(5h 12% 7d 91%, age unknown\)/);
+  // no quota and no PR here, so the id closes row 2 instead of holding a third
+  assert.match(lineOf(open, 1), / │ session-$/);
   const viaEnv = runStatusline(f, 'claude', { env: { STATUSLINE_PRIVATE: '1' } });
-  assert.match(viaEnv, /last session route ● max-••• 5h 12% 7d 91%/);
+  assert.match(viaEnv, /last session route ● max-••• \(5h 12% 7d 91%, age unknown\)$/);
   assert.doesNotMatch(viaEnv, /acct-c|session-/);
   fs.mkdirSync(path.join(f.dir, '.claude'));
   fs.writeFileSync(path.join(f.dir, '.claude', 'statusline-private'), '');
@@ -774,25 +817,26 @@ test('private mode masks a name whose prefix is not a plan family in full', () =
   assert.doesNotMatch(masked, /acct/);
 }));
 
-test('a crowded HUD drops detail in order until every line fits 108 columns', () => withFixture((f) => {
-  const transcript = writeTranscript(f, [assistant('claude-opus-5-5')]);
-  const output = runStatusline(f, 'manywindows', { transcript, modelId: 'claude-sonnet-5-5', payload: {
-    model: { display_name: 'Sonnet 5.5', id: 'claude-sonnet-5-5' },
-    effort: { level: 'xhigh' },
-    cwd: path.join(f.dir, 'a'.repeat(80)),
-    context_window: { used_percentage: 15, total_input_tokens: 152115, context_window_size: 1000000 },
-    cost: { total_cost_usd: 18.42 },
-    prompt_cache: cache({ warm: false, expires_at: nowS() - 4200 + 3600, recache_tokens_if_cold: 154851 }),
-    rate_limits: { five_hour: { used_percentage: 23, resets_at: nowS() + 5400 }, seven_day: { used_percentage: 41, resets_at: nowS() + 345600 } },
-    pr: { number: 1673, review_state: 'changes_requested' },
-  } });
-  const lines = output.split('\n');
-  assert.strictEqual(lines.length, 3, output);
-  for (const line of lines) assert.ok([...line].length <= 108, `${[...line].length}: ${line}`);
-  // line 1 kept the cost, the remap and the re-cache size; it shed the idle time first
-  assert.match(lines[0], /cache cold · ~155k │ Sonnet 5\.5 xhigh last reply claude-opus-5-5 │ \$18\.42$/);
-  assert.match(lines[1], /last session route ● acct-many/);
-}));
+for (const [day, now, five, seven] of [
+  ['today', NOON, '13:30', 'Sun 12:00'],
+  ['tomorrow', LATE, 'Thu 01:00', 'Sun 23:30'],
+]) {
+  test(`a crowded HUD drops detail in order until every row fits 108 columns (5h reset ${day})`, (t) => withFixture((f) => {
+    pinClock(t, f, now);
+    const output = crowdedRun(f);
+    const lines = output.split('\n');
+    assert.strictEqual(lines.length, 3, output);
+    for (const line of lines) assert.ok([...line].length <= 108, `${[...line].length}: ${line}`);
+    // row 1 kept the cost, the remap and the re-cache size; it shed the reply's
+    // age, the token count and the cache's idle time, in that order
+    assert.strictEqual(lines[0], 'ctx █▎░░░░░░ 15% │ cache cold · re-cache ~155k │ Sonnet 5.5 xhigh │ last reply claude-opus-5-5 │ $18.42');
+    // row 2 kept the path whole (60 cells); it shed the long route label, the
+    // route's age and then all but two windows: with four it is 111 cells wide
+    assert.strictEqual(lines[1], `~/${'a'.repeat(28)}…${'a'.repeat(29)} │ last route ● acct-many (5h 1% 5h 2%)`);
+    // row 3 fits whole, with the wider next-day clock too
+    assert.strictEqual(lines[2], `5h  █▉░░░░░░ 23%→${five} │ 7d ███▎░░░░ 41%→${seven} │ PR #1673 changes requested │ session-`);
+  }));
+}
 
 test('a linked worktree is named for its repo, marked wt, and shows a differing worktree name', () => {
   const f = gitRepoFixture();
@@ -807,7 +851,8 @@ test('a linked worktree is named for its repo, marked wt, and shows a differing 
     const named = runStatusline(f, 'unavailable', { payload: { cwd: wt, worktree: { name: 'agent-task' } } });
     assert.match(lineOf(named, 1), new RegExp(`^${repo} › wt feat \\(agent-task\\)`));
     const same = runStatusline(f, 'unavailable', { payload: { cwd: wt, worktree: { name: 'feat' } } });
-    assert.match(lineOf(same, 1), new RegExp(`^${repo} › wt feat$`));
+    // a worktree named for its branch is not repeated: the id follows directly
+    assert.match(lineOf(same, 1), new RegExp(`^${repo} › wt feat │ session-$`));
     const main = runStatusline(f, 'unavailable');
     assert.match(lineOf(main, 1), new RegExp(`^${repo} › trunk`));
   } finally { fs.rmSync(f.dir, { recursive: true, force: true }); }
@@ -834,8 +879,10 @@ test('a fresh session renders an empty ctx bar and no cache or quota segments', 
     effort: { level: 'xhigh' },
     cost: { total_cost_usd: 0 },
   } });
-  assert.strictEqual(lineOf(output, 0), `ctx ▕${'░'.repeat(10)}▏  0% 0/1M │ Opus 5 xhigh │ $0.00`);
-  assert.strictEqual(lineOf(output, 2), '3f9c1b2e');
+  assert.strictEqual(lineOf(output, 0), `ctx ${'░'.repeat(8)}  0% 0/1M │ Opus 5 xhigh │ $0.00`);
+  // nothing else for a third row to carry, so the id closes row 2
+  assert.strictEqual(lineOf(output, 1), '~ │ 3f9c1b2e');
+  assert.strictEqual(output.split('\n').length, 2, output);
   assert.doesNotMatch(output, /cache|5h|7d/);
 }));
 
@@ -886,7 +933,7 @@ test('repo-qualified deduplication and cross-owner labels preserve distinct PR i
   writeJob(f, [childPr(7), childPr(7, 'ACME/MAIN'), childPr(7, 'acme/lib'), childPr(7, 'other/lib'), childPr(8, 'other/tool')]);
   const raw = runStatusline(f, 'unavailable', { raw: true, payload: { pr: { number: 7, url: prUrl(7) } } });
   assert.strictEqual(urlsIn(raw).length, 4);
-  assert.match(plain(raw), /PR #7 acme\/lib#7 other\/lib#7 tool#8/);
+  assert.match(plain(raw), /PR #7 · acme\/lib#7 · other\/lib#7 · tool#8/);
   assert.strictEqual(raw.split('\n').length, 3, 'OSC8 target bytes must not consume column budget');
   const unlinked = runStatusline(f, 'unavailable', { raw: true, env: { FORCE_HYPERLINK: '0' }, payload: { pr: { number: 7, url: prUrl(7) } } });
   assert.deepStrictEqual(urlsIn(unlinked), []);
@@ -902,6 +949,13 @@ test('a number-only current PR retains its review label alongside native links',
   assert.match(plain(raw), /#42/);
   assert.match(plain(raw), /#99 changes requested/);
   assert.strictEqual(raw.split('\n').length, 3);
+  // The number-only label has no glyph to fall back to, so on a narrow row it
+  // outlasts the session id and the meters.
+  const narrow = runStatusline(f, 'unavailable', { raw: true, env: { COLUMNS: '60' }, payload: {
+    pr: { number: 99, review_state: 'changes_requested' },
+    rate_limits: { five_hour: { used_percentage: 30 }, seven_day: { used_percentage: 41 } },
+  } });
+  assert.strictEqual(lineOf(plain(narrow), 2), '5h 30% │ 7d 41% │ PR #42 #99 changes requested');
   writeJob(f, Array.from({ length: 25 }, (_, i) => childPr(1000 + i)));
   const crowded = runStatusline(f, 'unavailable', { raw: true, payload: {
     pr: { number: 99, review_state: 'pending' },
@@ -982,6 +1036,18 @@ test('refresh child batches states atomically and colors each exact PR independe
   const raw = runStatusline(f, 'unavailable', { raw: true, payload: { pr: { number: 7, url: prUrl(7), review_state: 'approved' } } });
   for (const [number, color] of [[1, 141], [2, 244], [3, 244], [4, 42], [5, 214], [6, 214], [7, 250]]) {
     assert.ok(raw.includes(`\x1b[38;5;${color}m#${number}\x1b[0m`), `PR ${number} must have its own state color ${color}`);
+  }
+  // Each known state is also a word, so it reads with colour stripped. A draft
+  // and a closed PR share a colour and must not share a word.
+  assert.strictEqual(lineOf(plain(raw), 2), 'PR #1 merged · #2 draft · #3 closed · #4 ready · #5 waiting · #6 waiting · #7 │ session-');
+  for (const [word, color] of [['merged', 141], ['draft', 244], ['closed', 244], ['ready', 42], ['waiting', 214]]) {
+    assert.ok(raw.includes(`\x1b[38;5;${color}m${word}\x1b[0m`), `${word} must carry its state color ${color}`);
+  }
+  // Too narrow for words: a glyph leads each link instead, in the same colour.
+  const narrow = runStatusline(f, 'unavailable', { raw: true, env: { COLUMNS: '60' }, payload: { pr: { number: 7, url: prUrl(7), review_state: 'approved' } } });
+  assert.strictEqual(lineOf(plain(narrow), 2), 'PR ◆#1 ◇#2 ×#3 ✓#4 ○#5 ○#6 #7 │ session-');
+  for (const [link, color] of [['◆#1', 141], ['◇#2', 244], ['×#3', 244], ['✓#4', 42], ['○#5', 214], ['#7', 250]]) {
+    assert.ok(narrow.includes(`\x1b[38;5;${color}m${link}\x1b[0m`), `${link} must carry its state color ${color}`);
   }
   refresh(f, [prUrl(1)]);
   assert.strictEqual(fs.readFileSync(f.env.GH_LOG, 'utf8').trim().split('\n').length, 1, 'fresh cache suppresses a repeat refresh');
@@ -1169,4 +1235,210 @@ test('symlinked renderer entry resolves its versioned helper beside the real sou
   });
   assert.strictEqual(result.status, 0, result.stderr);
   assert.deepStrictEqual(urlsIn(result.stdout), [prUrl(58)]);
+}));
+
+// ---- width from COLUMNS, colour depth, the session name, PR state words ----
+
+const widthOf = (line) => [...line].length;
+const rowsOf = (raw) => plain(raw).split('\n');
+const cp = (...points) => String.fromCodePoint(...points);
+
+test('each row is rebuilt to fit COLUMNS - 4, shedding detail in its stated order', (t) => withFixture((f) => {
+  pinClock(t, f, NOON);
+  const at = (cols) => crowdedRun(f, { COLUMNS: String(cols) }).split('\n');
+  const five = '5h  █▉░░░░░░ 23%';
+  const seven = '7d ███▎░░░░ 41%';
+  const longPath = `~/${'a'.repeat(28)}…${'a'.repeat(29)}`;
+  const shortPath = `~/${'a'.repeat(10)}…${'a'.repeat(11)}`;
+  // 132 columns: row 1 sheds only the reply's age, row 2 only the long route label
+  assert.deepStrictEqual(at(132), [
+    'ctx █▎░░░░░░ 15% 152k/1M │ cache cold · idle 1h10m · re-cache ~155k │ Sonnet 5.5 xhigh │ last reply claude-opus-5-5 │ $18.42',
+    `${longPath} │ last route ● acct-many (5h 1% 5h 2% 5h 3% 5h 4%, age unknown)`,
+    `${five}→13:30 │ ${seven}→Sun 12:00 │ PR #1673 changes requested │ session-`,
+  ]);
+  // 100 columns: row 1 also sheds the token count, the idle time and the
+  // "re-cache" word; row 2 the route's age, two windows and most of the path
+  assert.deepStrictEqual(at(100), [
+    'ctx █▎░░░░░░ 15% │ cache cold · ~155k │ Sonnet 5.5 xhigh │ last reply claude-opus-5-5 │ $18.42',
+    `${shortPath} │ last route ● acct-many (5h 1% 5h 2%)`,
+    `${five}→13:30 │ ${seven}→Sun 12:00 │ PR #1673 changes requested │ session-`,
+  ]);
+  // 80 columns: row 1 sheds the effort, the cache separator, the meter and the
+  // cost; row 3 the review state
+  assert.deepStrictEqual(at(80), [
+    'ctx 15% │ cache cold ~155k │ Sonnet 5.5 │ last reply claude-opus-5-5',
+    `${shortPath} │ last route ● acct-many (5h 1% 5h 2%)`,
+    `${five}→13:30 │ ${seven}→Sun 12:00 │ PR #1673 │ session-`,
+  ]);
+  // 60 columns: row 2 sheds the windows; row 3 the session id and the clocks.
+  // Row 1 has nothing left to shed: with a remapped reply its floor is 68
+  // cells, so under 72 columns Claude Code cuts it.
+  const narrow = at(60);
+  assert.deepStrictEqual(narrow, [
+    'ctx 15% │ cache cold ~155k │ Sonnet 5.5 │ last reply claude-opus-5-5',
+    `${shortPath} │ last route ● acct-many`,
+    `${five} │ ${seven} │ PR #1673`,
+  ]);
+  assert.deepStrictEqual(narrow.map(widthOf), [68, 49, 45]);
+}));
+
+for (const [day, now, clocks] of [
+  ['today', NOON, ['13:30', 'Sun 12:00']],
+  ['tomorrow', LATE, ['Thu 01:00', 'Sun 23:30']],
+]) {
+  test(`no row of a crowded HUD is wider than COLUMNS - 4 from 72 columns up (5h reset ${day})`, (t) => withFixture((f) => {
+    pinClock(t, f, now);
+    for (const cols of [72, 76, 80, 88, 96, 100, 108, 112, 120, 132, 160, 200]) {
+      const lines = crowdedRun(f, { COLUMNS: String(cols) }).split('\n');
+      assert.strictEqual(lines.length, 3, `${cols} columns: ${lines.join(' / ')}`);
+      for (const line of lines) assert.ok(widthOf(line) <= cols - 4, `${cols} columns, ${widthOf(line)} wide: ${line}`);
+    }
+    // at 80 columns the next-day clocks fill row 3 to the last cell (76)
+    assert.strictEqual(lineOf(crowdedRun(f, { COLUMNS: '80' }), 2),
+      `5h  █▉░░░░░░ 23%→${clocks[0]} │ 7d ███▎░░░░ 41%→${clocks[1]} │ PR #1673 │ session-`);
+  }));
+}
+
+test('a COLUMNS value that is not a plain width of 40 or more falls back to 108', (t) => withFixture((f) => {
+  pinClock(t, f, NOON);
+  const unset = crowdedRun(f);
+  for (const bad of ['', 'abc', '0', '39', '-80', '80.5', ' 80', '1e3', '999999']) {
+    assert.strictEqual(crowdedRun(f, { COLUMNS: bad }), unset, JSON.stringify(bad));
+  }
+  // the smallest width that counts, and the largest
+  assert.notStrictEqual(crowdedRun(f, { COLUMNS: '40' }), unset);
+  assert.strictEqual(lineOf(crowdedRun(f, { COLUMNS: '99999' }), 0),
+    'ctx █▎░░░░░░ 15% 152k/1M │ cache cold · idle 1h10m · re-cache ~155k │ Sonnet 5.5 xhigh │ last reply claude-opus-5-5 (age unknown) │ $18.42');
+}));
+
+test('wrapped PR links leave a quota row that fits the terminal, shedding clocks before meters', (t) => withFixture((f) => {
+  pinClock(t, f, NOON);
+  writeJob(f, Array.from({ length: 25 }, (_, i) => childPr(1000 + i)));
+  const all = new Set([...Array.from({ length: 25 }, (_, i) => prUrl(1000 + i)), prUrl(2000)]);
+  const run = (cols, fiveHour) => runStatusline(f, 'unavailable', { raw: true, env: { COLUMNS: String(cols) }, payload: {
+    pr: { number: 2000, url: prUrl(2000) },
+    rate_limits: {
+      five_hour: fiveHour || { used_percentage: 88, resets_at: nowS() + 5400 },
+      seven_day: { used_percentage: 47, resets_at: nowS() + 345600 },
+    },
+  } });
+  const check = (raw, cols) => {
+    assert.deepStrictEqual(new Set(urlsIn(raw)), all, `${cols} columns must keep every link`);
+    for (const line of raw.split('\n')) {
+      assert.ok(widthOf(plain(line)) <= cols - 4, `${cols} columns, ${widthOf(plain(line))} wide: ${plain(line)}`);
+      assert.strictEqual((line.match(/\x1b\]8;;/g) || []).length % 2, 0, 'links must close on their own row');
+    }
+  };
+  // 60 columns: the quota row keeps its meters and clocks and holds no link
+  const wide = run(60);
+  check(wide, 60);
+  assert.strictEqual(rowsOf(wide)[2], '5h  ███████░ 88%→13:30 │ 7d ███▊░░░░ 47%→Sun 12:00');
+  assert.strictEqual(rowsOf(wide)[3], `PR ${Array.from({ length: 9 }, (_, i) => `#${1000 + i}`).join(' ')}`);
+  // 44 columns: the clocks go first
+  const mid = run(44);
+  check(mid, 44);
+  assert.strictEqual(rowsOf(mid)[2], '5h  ███████░ 88% │ 7d ███▊░░░░ 47%');
+  // 40 columns with the 5h window already rolled over: the meters go too, and
+  // the first link then fits beside the quota
+  const tight = run(40, { used_percentage: 88, resets_at: nowS() - 60 });
+  check(tight, 40);
+  assert.strictEqual(rowsOf(tight)[2], '5h reset due │ 7d 47% │ PR #1000');
+}));
+
+test('the session name leads row 2 in the accent colour, and privacy mode hides it', () => withFixture((f) => {
+  const payload = { session_name: 'mods survey' };
+  const raw = runStatusline(f, 'claude', { raw: true, payload });
+  assert.strictEqual(rowsOf(raw)[1], 'mods survey │ ~ │ last session route ● max-acct-c (5h 12% 7d 91%, age unknown) │ session-');
+  assert.ok(raw.includes(`${ESC}[1;38;5;51mmods survey${ESC}[0m`), 'the name is bold, in the accent colour');
+  const masked = runStatusline(f, 'claude', { payload, env: { STATUSLINE_PRIVATE: '1' } });
+  assert.strictEqual(lineOf(masked, 1), '~ │ last session route ● max-••• (5h 12% 7d 91%, age unknown)');
+  assert.doesNotMatch(masked, /mods|survey|acct-c|session-/);
+}));
+
+test('a long session name yields width before any other fact on row 2, but keeps 24 cells while windows show', () => withFixture((f) => {
+  const payload = { session_name: 'n'.repeat(60) };
+  const rows = (cols) => runStatusline(f, 'claude', { payload, env: cols ? { COLUMNS: String(cols) } : {} }).split('\n').slice(1);
+  const windows = '(5h 12% 7d 91%, age unknown)';
+  // unknown width: the name is capped at 40 cells, and the id keeps its own row
+  assert.deepStrictEqual(rows(), [`${'n'.repeat(39)}… │ ~ │ last session route ● max-acct-c ${windows}`, 'session-']);
+  // 100 columns: the name alone gives way, to 29 cells
+  assert.deepStrictEqual(rows(100), [`${'n'.repeat(28)}… │ ~ │ last session route ● max-acct-c ${windows}`, 'session-']);
+  // 90 columns: 24 cells is the floor, so the route label shortens next
+  assert.deepStrictEqual(rows(90), [`${'n'.repeat(26)}… │ ~ │ last route ● max-acct-c ${windows}`, 'session-']);
+  // 70 columns: the windows are gone, and the name takes back what they held
+  assert.deepStrictEqual(rows(70), [`${'n'.repeat(35)}… │ ~ │ last route ● max-acct-c`, 'session-']);
+}));
+
+test('a session id with nothing else to sit beside joins row 2 only when it fits there', () => withFixture((f) => {
+  const payload = { session_name: 'n'.repeat(40) };
+  const rows = (cols) => runStatusline(f, 'unavailable', { payload, env: { COLUMNS: String(cols) } }).split('\n').slice(1);
+  assert.deepStrictEqual(rows(60), [`${'n'.repeat(40)} │ ~ │ session-`]);
+  assert.deepStrictEqual(rows(58), [`${'n'.repeat(40)} │ ~`, 'session-']);
+}));
+
+test('a hostile session name cannot repaint the terminal, add a row or widen one', () => withFixture((f) => {
+  const cases = [
+    [`${ESC}[2J${ESC}[Hpwn`, '[2J[Hpwn'], // clear screen, cursor home
+    [`${ESC}]8;;https://evil.example${ESC}\\click${ESC}]8;;${ESC}\\`, ']8;;https://evil.example\\click]8;;\\'], // a hyperlink
+    ['a\nb\tc\rd', 'a b c d'], // line breaks and tabs become one space
+    [`${RLO}abc`, 'abc'], // right-to-left override
+    [`${cp(0x65e5, 0x672c, 0x8a9e)} title`, 'title'], // double-width CJK
+    [`${cp(0x1f680)} ship it`, 'ship it'], // double-width emoji
+    [`soft${cp(0xad)}hyphen`, 'softhyphen'],
+    [`a${cp(0xa0)}b`, 'a b'], // no-break space
+    [`${cp(0x9b)}2Jx`, '2Jx'], // one-byte C1 control sequence introducer
+    [`a${cp(0x200b)}b`, 'ab'], // zero-width space
+    [`e${cp(0x301)}`, 'e'], // combining accent
+    ['Café München', 'Café München'], // Latin letters stay
+    ['x'.repeat(500), `${'x'.repeat(39)}…`],
+    [42, ''], [true, ''], [{}, ''], [[], ''], [null, ''],
+  ];
+  for (const [name, shown] of cases) {
+    for (const cols of [undefined, '60']) {
+      const raw = runStatusline(f, 'unavailable', { raw: true, payload: { session_name: name }, env: cols ? { COLUMNS: cols } : {} });
+      const text = raw.replace(ANSI, '');
+      const label = `${JSON.stringify(name)} at ${cols || 'unknown'} columns`;
+      assert.ok(!/[\x00-\x09\x0b-\x1f\x7f-\x9f]/.test(text), `a control byte survived: ${label}`);
+      assert.ok(!raw.includes(`${ESC}]`), `an OSC sequence survived: ${label}`);
+      assert.deepStrictEqual(text.split('\n').slice(1), [`${shown ? `${shown} │ ` : ''}~ │ session-`], label);
+    }
+  }
+}));
+
+test('true colour is used only when COLORTERM announces it, and the text is the same either way', () => withFixture((f) => {
+  const run = (value) => runStatusline(f, 'claude', { raw: true, env: value === undefined ? {} : { COLORTERM: value } });
+  const TRUECOLOR = /\x1b\[38;2;\d+;\d+;\d+m/;
+  const base = run(undefined);
+  assert.doesNotMatch(base, TRUECOLOR);
+  for (const value of ['', '256color', 'yes', 'truecolor-ish']) assert.strictEqual(run(value), base, JSON.stringify(value));
+  for (const value of ['truecolor', '24bit', 'TrueColor']) {
+    const raw = run(value);
+    assert.match(raw, TRUECOLOR, value);
+    assert.strictEqual(plain(raw), plain(base), value);
+  }
+}));
+
+test('a cached PR state this renderer does not know draws as unknown, never as a word', () => withFixture((f) => {
+  writeJob(f, [childPr(2), childPr(3)]);
+  fs.mkdirSync(f.env.STATUSLINE_PR_CACHE_DIR, { recursive: true });
+  // 'inactive' is what the helper wrote for closed and draft alike before it
+  // told them apart; 'constructor' is a key every object inherits.
+  fs.writeFileSync(stateFile(f), JSON.stringify({ at: Date.now(), states: { [prUrl(2)]: 'inactive', [prUrl(3)]: 'constructor' } }));
+  const raw = runStatusline(f, 'unavailable', { raw: true });
+  assert.strictEqual(lineOf(plain(raw), 2), 'PR #2 · #3 │ session-');
+  for (const number of [2, 3]) assert.ok(raw.includes(`\x1b[38;5;250m#${number}\x1b[0m`), `PR ${number} must be neutral`);
+  // The payload's review state must not turn that value into a word either: a
+  // PR the old helper cached as closed or draft is not known to be waiting.
+  for (const review of ['pending', 'changes_requested']) {
+    const current = runStatusline(f, 'unavailable', { raw: true, payload: { pr: { number: 2, url: prUrl(2), review_state: review } } });
+    assert.strictEqual(lineOf(plain(current), 2), 'PR #2 · #3 │ session-', review);
+    assert.ok(current.includes(`\x1b[38;5;250m#2\x1b[0m`), `PR 2 must stay neutral under a ${review} payload`);
+  }
+  // The helper's own 'unknown', like a missing entry, still lets the payload
+  // mark its exact current PR waiting.
+  for (const states of [{ [prUrl(2)]: 'unknown' }, {}]) {
+    fs.writeFileSync(stateFile(f), JSON.stringify({ at: Date.now(), states }));
+    const current = runStatusline(f, 'unavailable', { raw: true, payload: { pr: { number: 2, url: prUrl(2), review_state: 'pending' } } });
+    assert.strictEqual(lineOf(plain(current), 2), 'PR #2 waiting · #3 │ session-', JSON.stringify(states));
+  }
 }));

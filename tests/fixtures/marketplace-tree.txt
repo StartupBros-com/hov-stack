@@ -27,6 +27,7 @@ release/scripts/auto-release-tag.sh
 release/scripts/card-source.sh
 release/scripts/check-release-notes.sh
 release/scripts/ci-aggregate.sh
+release/scripts/ci-base-sha.sh
 release/scripts/ci-changed-plugins.sh
 release/scripts/ci-repo-checks.sh
 release/scripts/latest-stable-release.sh
@@ -49,6 +50,7 @@ release/tests/auto-release-tag.test.sh
 release/tests/card-source.test.sh
 release/tests/check-release-notes.test.sh
 release/tests/ci-aggregate.test.sh
+release/tests/ci-base-sha.test.sh
 release/tests/ci-changed-plugins.test.sh
 release/tests/ci-repo-checks.test.sh
 release/tests/latest-stable-release.test.sh

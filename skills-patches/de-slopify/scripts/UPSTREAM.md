@@ -2,7 +2,8 @@
 
 This directory is a dotfiles overlay (skills-patches/de-slopify) applied over the
 jsm-managed `de-slopify` skill (v4, Jeffrey Emanuel, proprietary jsm license) by
-`skills-localize.sh apply` (run by `sync.sh install`; until it runs, the paths the overlay
+`skills-localize.sh apply` (run by `wt-done.sh` after a merge and nightly by the jsm unit;
+until it runs, the paths the overlay
 names under `~/.claude/skills/de-slopify/scripts/` do not exist). Landed as dotfiles PR #893
 (issue #892; eval note: memory `anti-slop-skill-list-vet-2026-09`).
 

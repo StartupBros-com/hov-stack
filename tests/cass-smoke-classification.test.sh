@@ -28,7 +28,7 @@ set -uo pipefail
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 SCRIPT=$REPO/scripts/cass-release-promote.sh
 HERE=$REPO/scripts
-TMP=$(mktemp -d)
+TMP=$(mktemp -d) || exit 1
 trap 'rm -rf "$TMP"' EXIT
 pass=0 fail=0
 ok()  { pass=$((pass + 1)); }

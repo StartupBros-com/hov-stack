@@ -86,7 +86,7 @@ run_one() {
   local kind=$1 path=$2 expect=$3 logdir=$CLAUDE_TESTS_LOGDIR slug log home rc t0 secs status sig note
   slug=${path//\//__}
   log=$logdir/$slug.log
-  home=$(mktemp -d "${TMPDIR:-/tmp}/claude-tests-home.XXXXXX")
+  home=$(mktemp -d "${TMPDIR:-/tmp}/claude-tests-home.XXXXXX") || exit 1
   umask 022
   t0=$(date +%s)
   note=
@@ -271,7 +271,7 @@ fi
 
 # ---- run ---------------------------------------------------------------------
 if [ -z "$logdir" ]; then
-  logdir=$(mktemp -d "${TMPDIR:-/tmp}/claude-tests.XXXXXX")
+  logdir=$(mktemp -d "${TMPDIR:-/tmp}/claude-tests.XXXXXX") || exit 1
 else
   mkdir -p "$logdir" || exit 2
   logdir=$(cd "$logdir" && pwd -P)

@@ -32,7 +32,7 @@
 set -uo pipefail
 
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-TMP=$(mktemp -d)
+TMP=$(mktemp -d) || exit 1
 # Git records only modes 644 and 755, but cp -a carries the checkout's own: a
 # worktree created under umask 0002 holds 664/775, and the literal 644 check on
 # migration-targets.sh read red with nothing wrong in sync.sh (#1647, pro-gate
@@ -106,6 +106,16 @@ export CLAUDE_SYNC_SYSTEM_SYS_DIR="$TMP/etc-systemd-system"
 export CLAUDE_SYNC_MANAGED_LOCK="$TMP/etc-claude-code/managed-settings.json"
 export CLAUDE_WINDOWS_HOME="$TMP/windows-home"
 mkdir -p "$CLAUDE_WINDOWS_HOME"
+
+# install enables tools-auto-update.timer only where tool-update.sh finds one of its
+# tools (hov-stack#632), and the inherited PATH may or may not carry a real xf. Pin the
+# lookup to a fixture tool so the role assertions below mean the same on every host;
+# the no-tools case moves it aside.
+export TOOL_UPDATE_TABLE='hov-smoke-tool|fake/repo|hov-smoke-tool|SHA256SUMS|raw|hov-smoke-tool|hov-smoke-tool'
+export TOOL_UPDATE_BIN_DIR="$TMP/managed-tools"
+mkdir -p "$TOOL_UPDATE_BIN_DIR"
+printf '#!/usr/bin/env bash\necho "hov-smoke-tool 1.0.0"\n' >"$TOOL_UPDATE_BIN_DIR/hov-smoke-tool"
+chmod +x "$TOOL_UPDATE_BIN_DIR/hov-smoke-tool"
 
 SYNC="$REPO/sync.sh"
 
@@ -593,7 +603,7 @@ if jq -e --arg home "$fresh_runtime_home" --arg repo "$REPO" --arg realhome "$HO
     and .env.WACLI_STORE_DIR == ($realhome + "/.local/state/wacli")
     and .env.PRO_GATE_ROUND_GUARD == "1"
     and .env.CLAUDE_CODE_FILE_READ_MAX_OUTPUT_TOKENS == "50000"
-    and .env.CLAUDE_CODE_PLUGIN_DIRS == ($home + "/mods/loop-breaker:" + $home + "/mods/agent-radar:" + $home + "/mods/read-ceiling-pager:" + $home + "/mods/reminder-diet:" + $home + "/mods/lookout:" + $home + "/mods/x-mcp-budget")
+    and .env.CLAUDE_CODE_PLUGIN_DIRS == ($home + "/mods/loop-breaker:" + $home + "/mods/agent-radar:" + $home + "/mods/read-ceiling-pager:" + $home + "/mods/x-mcp-budget:" + $home + "/mods/idle-compact")
     and .permissions.disableAutoMode == "disable"
     and .permissions.defaultMode == "bypassPermissions"
     and .permissions.disableBypassPermissionsMode != "disable"
@@ -982,6 +992,31 @@ cp "$TMP/settings-canonical.before-removed" "$REPO/settings.json"
 if [ "$removed_mod_status" -eq 0 ]; then ok; else bad "reconcile-runtime-env refused a canonical copy that dropped CLAUDE_CODE_PLUGIN_DIRS:"$'\n'"$removed_mod_out"; fi
 if jq -e '(.env | has("CLAUDE_CODE_PLUGIN_DIRS") | not) and .env.CLAUDE_ENV_FILE != null' "$removed_mod_home/settings.json" >/dev/null; then ok; else bad "reconcile-runtime-env left the retired live CLAUDE_CODE_PLUGIN_DIRS in place"; fi
 
+# Retiring one mod is the same edit in small: a live list that still names a
+# folder the canonical list dropped must be rewritten to the canonical list,
+# not merged with it. lookout came back this way once: it was unregistered in
+# the repo this stack was copied from after the copy was taken, and stayed
+# loaded in every session.
+stale_mod_home=$TMP/runtime-env-stale-mod
+mkdir -p "$stale_mod_home"
+ln -s "$REPO/claude-env.sh" "$stale_mod_home/claude-env.sh"
+ln -s "$REPO/mods" "$stale_mod_home/mods"
+stale_mod_want=$(jq -r '.env.CLAUDE_CODE_PLUGIN_DIRS' "$fresh_runtime_home/settings.json" | sed "s|$fresh_runtime_home/|$stale_mod_home/|g")
+jq --arg dirs "$stale_mod_want:$stale_mod_home/mods/lookout" '.env.CLAUDE_CODE_PLUGIN_DIRS = $dirs' \
+  "$fresh_runtime_home/settings.json" > "$stale_mod_home/settings.json"
+chmod 0600 "$stale_mod_home/settings.json"
+stale_mod_out=$(CLAUDE_HOME="$stale_mod_home" "$SYNC" reconcile-runtime-env 2>&1); stale_mod_status=$?
+stale_mod_live=$(jq -r '.env.CLAUDE_CODE_PLUGIN_DIRS' "$stale_mod_home/settings.json")
+if [ "$stale_mod_status" -eq 0 ]; then ok; else bad "reconcile-runtime-env failed on a live list naming a retired mod:"$'\n'"$stale_mod_out"; fi
+if [ "$stale_mod_live" = "$stale_mod_want" ]; then ok; else bad "reconcile-runtime-env kept a retired mod in the live CLAUDE_CODE_PLUGIN_DIRS: $stale_mod_live"; fi
+case "$(jq -r '.env.CLAUDE_CODE_PLUGIN_DIRS' "$REPO/settings.json")" in
+  *lookout*) bad "the canonical CLAUDE_CODE_PLUGIN_DIRS names lookout, which was removed" ;;
+  *) ok ;;
+esac
+# The manifest, not the folder: the engine leaves untracked type files in a mod
+# folder it has loaded, so a checkout that once loaded lookout keeps the folder.
+if [ ! -e "$REPO/mods/lookout/.claude-plugin/plugin.json" ]; then ok; else bad "mods/lookout has a plugin manifest again; the mod was removed"; fi
+
 # -- the EnterPlanMode deny union keeps live deny intact ----------------------
 # reconcile_runtime_env appends the canonical bare-name EnterPlanMode deny only
 # when live lacks it: no re-sort, no second copy, no dropped live entry. A live
@@ -1188,22 +1223,7 @@ else
 fi
 
 # -- StructuredOutput unwrap: the papercut plugin registers it, sync.sh does not
-# The papercut plugin (papercut@hov) registers structured-output-unwrap and
-# read-ceiling-chunk itself, so on a fresh host without it the reconcile exits 0
-# and writes nothing (tests/papercut-plugin-reconcile.test.sh covers retiring a
-# settings copy once the plugin is enabled). The hook must still quietly pass a
-# non-StructuredOutput call through (empty stdout, exit 0 -- issue #1339).
-fresh_unwrap_root=$TMP/unwrap-hook-fresh
-fresh_unwrap_home=$fresh_unwrap_root/.claude
-mkdir -p "$fresh_unwrap_home"
-ln -s "$REPO/hooks" "$fresh_unwrap_home/hooks"
-fresh_unwrap_out=$(env -u CLAUDE_INSTALLED_PLUGINS HOME="$fresh_unwrap_root" CLAUDE_HOME="$fresh_unwrap_home" "$SYNC" reconcile-structured-output-unwrap 2>&1); fresh_unwrap_status=$?
-if [ "$fresh_unwrap_status" -eq 0 ]; then ok; else bad "fresh reconcile-structured-output-unwrap exited $fresh_unwrap_status:"$'\n'"$fresh_unwrap_out"; fi
-if [ ! -e "$fresh_unwrap_home/settings.json" ]; then
-  ok
-else
-  bad "fresh reconcile-structured-output-unwrap wrote a settings.json; the papercut plugin registers that hook"
-fi
+# The hook quietly passes a non-StructuredOutput call through.
 fresh_unwrap_probe='{"tool_name":"Bash","tool_input":{"command":"printf no-unwrap"}}'
 fresh_unwrap_probe_out=$(printf '%s' "$fresh_unwrap_probe" | node "$REPO/hooks/PreToolUse/structured-output-unwrap.js"); fresh_unwrap_probe_status=$?
 if [ "$fresh_unwrap_probe_status" -eq 0 ] && [ -z "$fresh_unwrap_probe_out" ]; then
@@ -1213,17 +1233,6 @@ else
 fi
 
 # -- Read ceiling chunk: the papercut plugin registers it, sync.sh does not -----
-fresh_chunk_root=$TMP/chunk-hook-fresh
-fresh_chunk_home=$fresh_chunk_root/.claude
-mkdir -p "$fresh_chunk_home"
-ln -s "$REPO/hooks" "$fresh_chunk_home/hooks"
-fresh_chunk_out=$(env -u CLAUDE_INSTALLED_PLUGINS HOME="$fresh_chunk_root" CLAUDE_HOME="$fresh_chunk_home" "$SYNC" reconcile-read-ceiling-chunk 2>&1); fresh_chunk_status=$?
-if [ "$fresh_chunk_status" -eq 0 ]; then ok; else bad "fresh reconcile-read-ceiling-chunk exited $fresh_chunk_status:"$'\n'"$fresh_chunk_out"; fi
-if [ ! -e "$fresh_chunk_home/settings.json" ]; then
-  ok
-else
-  bad "fresh reconcile-read-ceiling-chunk wrote a settings.json; the papercut plugin registers that hook"
-fi
 fresh_chunk_probe='{"tool_name":"Read","tool_input":{"file_path":"/nonexistent/first-attempt.txt"},"session_id":"s-fresh0000","cwd":"/tmp"}'
 fresh_chunk_probe_out=$(printf '%s' "$fresh_chunk_probe" | PAPERCUT_STORE="$TMP/chunk-empty-store" node "$REPO/hooks/PreToolUse/read-ceiling-chunk.js"); fresh_chunk_probe_status=$?
 if [ "$fresh_chunk_probe_status" -eq 0 ] && [ -z "$fresh_chunk_probe_out" ]; then
@@ -1244,70 +1253,7 @@ else
   bad "shape-rewrite rewrote a non-isolated call with no worktree cwd (status $fresh_shape_probe_status):"$'\n'"$fresh_shape_probe_out"
 fi
 
-# -- pr-record registration is retired ----------------------------------------
-# The PostToolUse pr-record hook wrote session->PR rows for the Stop hook's
-# hand-back check, retired 2026-11-03 without ever leaving shadow mode.
-# reconcile now only removes the registration, in either spelling; the tracked
-# settings.json no longer carries it, and a fresh host must not get it seeded.
-echo "=== pr-record hook retire ===" >&2
-PR_RECORD_COMMAND='"$HOME/.claude/hooks/bin/node-hook" "$HOME/.claude/hooks/PostToolUse/pr-record.js"'
-if ! grep -qF 'PostToolUse/pr-record.js' "$REPO/settings.json"; then ok; else bad "the tracked settings.json still registers the retired pr-record hook"; fi
-fresh_prrec_root=$TMP/pr-record-hook-fresh
-fresh_prrec_home=$fresh_prrec_root/.claude
-mkdir -p "$fresh_prrec_home"
-ln -s "$REPO/hooks" "$fresh_prrec_home/hooks"
-fresh_prrec_out=$(HOME="$fresh_prrec_root" CLAUDE_HOME="$fresh_prrec_home" "$SYNC" reconcile-pr-record-hook 2>&1); fresh_prrec_status=$?
-if [ "$fresh_prrec_status" -eq 0 ]; then ok; else bad "fresh reconcile-pr-record-hook exited $fresh_prrec_status:"$'\n'"$fresh_prrec_out"; fi
-if [ ! -f "$fresh_prrec_home/settings.json" ] || ! jq -e --arg c "$PR_RECORD_COMMAND" '
-    [.hooks[]?[]?.hooks[]? | .command] | index($c) != null
-  ' "$fresh_prrec_home/settings.json" >/dev/null; then
-  ok
-else
-  bad "fresh reconcile-pr-record-hook registered the retired hook"
-fi
-PRREC_RECON_ROOT=$TMP/pr-record-recon-existing
-PRREC_RECON_HOME=$PRREC_RECON_ROOT/.claude
-mkdir -p "$PRREC_RECON_HOME"
-ln -s "$REPO/hooks" "$PRREC_RECON_HOME/hooks"
-prrec_rendered_cmd="node \"$PRREC_RECON_HOME/hooks/PostToolUse/pr-record.js\""
-jq -n --arg rec "$PR_RECORD_COMMAND" --arg rendered "$prrec_rendered_cmd" '
-  {hooks:{PostToolUse:[
-    {matcher:"Bash",hooks:[{type:"command",command:$rec,timeout:10}]},
-    {matcher:"Bash",hooks:[{type:"command",command:$rendered,timeout:10}]},
-    {matcher:"*",hooks:[{type:"command",command:"keep-this-unrelated-hook"}]}
-  ],
-  # A copy under another event: the retire walks every event, and an event it
-  # empties is left as an empty list rather than a group with no hooks.
-  Stop:[{matcher:"*",hooks:[{type:"command",command:$rec,timeout:10}]}]}}
-' >"$PRREC_RECON_HOME/settings.json"
-chmod 0640 "$PRREC_RECON_HOME/settings.json"
-prrec_recon_out=$(HOME="$PRREC_RECON_ROOT" CLAUDE_HOME="$PRREC_RECON_HOME" \
-  "$SYNC" reconcile-pr-record-hook 2>&1); prrec_recon_status=$?
-if [ "$prrec_recon_status" -eq 0 ]; then ok; else bad "pr-record retire (pre-existing host) exited $prrec_recon_status:"$'\n'"$prrec_recon_out"; fi
-if jq -e '
-    ([.hooks.PostToolUse[]?.hooks[]? | .command] == ["keep-this-unrelated-hook"])
-    and (.hooks.Stop == [])
-  ' "$PRREC_RECON_HOME/settings.json" >/dev/null; then
-  ok
-else
-  bad "pr-record retire (pre-existing host) did not remove exactly the pr-record groups:"$'\n'"$(jq -c '.hooks.PostToolUse' "$PRREC_RECON_HOME/settings.json")"
-fi
-if [ "$(stat -c %a "$PRREC_RECON_HOME/settings.json")" = 640 ]; then ok; else bad "pr-record retire (pre-existing host) changed live settings mode"; fi
-if find "$PRREC_RECON_HOME/backups" -path '*hook-retire-*' -name settings.json -type f -print -quit | grep -q .; then ok; else bad "pr-record retire (pre-existing host) did not back up live settings"; fi
-prrec_recon_after=$(jq -S . "$PRREC_RECON_HOME/settings.json")
-prrec_again_out=$(HOME="$PRREC_RECON_ROOT" CLAUDE_HOME="$PRREC_RECON_HOME" \
-  "$SYNC" reconcile-pr-record-hook 2>&1); prrec_again_status=$?
-prrec_backups_n=$(find "$PRREC_RECON_HOME/backups" -path '*hook-retire-*' -name settings.json -type f 2>/dev/null | wc -l)
-if [ "$prrec_again_status" -eq 0 ] && [ "$(jq -S . "$PRREC_RECON_HOME/settings.json")" = "$prrec_recon_after" ] \
-   && [ "$prrec_backups_n" -eq 1 ]; then
-  ok
-else
-  bad "pr-record retire was not idempotent on a second run (exit $prrec_again_status, backups $prrec_backups_n):"$'\n'"$prrec_again_out"
-fi
-
-# Pulled directly from sync.sh itself so this suite covers whatever units
-# exist there later instead of duplicating (and silently drifting from) a
-# hardcoded list.
+# Pulled from sync.sh so the suite follows its unit list.
 eval "$(grep -E '^(UNITS|SYSTEM_UNITS)=' "$SYNC")"
 
 # A stale symlink-to-directory at a stable-file destination must be replaced,
@@ -1405,6 +1351,25 @@ if ! timer_enabled backup-harness.timer && timer_enabled dcg-auto-update.timer \
   ok
 else
   bad "workstation install enabled the opt-in backup-harness.timer, or skipped its own role set"
+fi
+# With none of tool-update.sh's tools installed the timer can only fail, so install
+# leaves it out of the role set and the reconcile disables it (hov-stack#632), saying
+# why. dcg's timer is unaffected. The next install after a tool appears enables it.
+mv "$TOOL_UPDATE_BIN_DIR/hov-smoke-tool" "$TMP/hov-smoke-tool.aside"
+no_tools_out=$("$SYNC" install 2>&1); no_tools_status=$?
+mv "$TMP/hov-smoke-tool.aside" "$TOOL_UPDATE_BIN_DIR/hov-smoke-tool"
+if [ "$no_tools_status" -eq 0 ] && ! timer_enabled tools-auto-update.timer \
+   && timer_enabled dcg-auto-update.timer \
+   && grep -Fq "none of tool-update.sh's tools is installed here" <<<"$no_tools_out"; then
+  ok
+else
+  bad "install with none of tool-update.sh's tools kept tools-auto-update.timer or did not say why:"$'\n'"$no_tools_out"
+fi
+tools_back_out=$("$SYNC" install 2>&1); tools_back_status=$?
+if [ "$tools_back_status" -eq 0 ] && timer_enabled tools-auto-update.timer; then
+  ok
+else
+  bad "install after a tool appeared did not enable tools-auto-update.timer:"$'\n'"$tools_back_out"
 fi
 
 # -- scheduler ownership/role reconciliation (all hermetic) ----------------
@@ -1523,7 +1488,10 @@ export CCFLARE_URL_SATELLITE=https://proxy-host.example.net
 : >"$CRONTAB_FIXTURE"
 docker_satellite_before=$(sha256sum "$DOCKER_DAEMON_TARGET" "$DOCKER_ADOPTION_STATE" "$DOCKER_ADOPTION_BACKUP")
 docker_satellite_validations_before=$(wc -l <"$DOCKER_VALIDATE_LOG")
-satellite_out=$("$SYNC" install 2>&1); satellite_status=$?
+# An empty system dir for this install alone: the workstation install above already
+# filled the shared one, where an unchanged unit is skipped whatever the role.
+satellite_system=$TMP/satellite-system
+satellite_out=$(CLAUDE_SYNC_SYSTEM_SYS_DIR="$satellite_system" "$SYNC" install 2>&1); satellite_status=$?
 satellite_check_out=$("$SYNC" check 2>&1); satellite_check_status=$?
 satellite_push_out=$("$SYNC" push 2>&1); satellite_push_status=$?
 if [ "$satellite_status" -eq 0 ] \
@@ -1534,6 +1502,14 @@ if [ "$satellite_status" -eq 0 ] \
   ok
 else
   bad "satellite admitted a migrated timer or changed unrelated state:"$'\n'"$satellite_out"
+fi
+# PLANTED NEGATIVE for the role check: sudo works here, so an ungated loop puts
+# all four units into $satellite_system.
+if [ -z "$(find "$satellite_system" -type f 2>/dev/null)" ] \
+   && grep -Fq 'system units skipped (host role satellite' <<<"$satellite_out"; then
+  ok
+else
+  bad "satellite install deployed a system unit or did not say it skipped them:"$'\n'"$(find "$satellite_system" -type f 2>/dev/null)"$'\n'"$satellite_out"
 fi
 if [ "$satellite_push_status" -eq 2 ]; then
   ok
@@ -1878,7 +1854,7 @@ for f in settings.json keybindings.json; do
             # then sets the two env paths below.
             .env |= with_entries(.value |= (if type == "string" and startswith("$HOME/") then $realhome + .[5:] else . end))
             | .env.CLAUDE_ENV_FILE = ($home + "/claude-env.sh")
-            | .env.CLAUDE_CODE_PLUGIN_DIRS = ($home + "/mods/loop-breaker:" + $home + "/mods/agent-radar:" + $home + "/mods/read-ceiling-pager:" + $home + "/mods/reminder-diet:" + $home + "/mods/lookout:" + $home + "/mods/x-mcp-budget")
+            | .env.CLAUDE_CODE_PLUGIN_DIRS = ($home + "/mods/loop-breaker:" + $home + "/mods/agent-radar:" + $home + "/mods/read-ceiling-pager:" + $home + "/mods/x-mcp-budget:" + $home + "/mods/idle-compact")
           ' "$REPO/$f") \
         <(jq -S . "$CLAUDE_HOME/$f"); then
       ok
@@ -1917,7 +1893,7 @@ if jq -e --arg home "$CLAUDE_HOME" --arg realhome "$HOME" '
     and .env.WACLI_STORE_DIR == ($realhome + "/.local/state/wacli")
     and .env.PRO_GATE_ROUND_GUARD == "1"
     and .env.CLAUDE_CODE_FILE_READ_MAX_OUTPUT_TOKENS == "50000"
-    and .env.CLAUDE_CODE_PLUGIN_DIRS == ($home + "/mods/loop-breaker:" + $home + "/mods/agent-radar:" + $home + "/mods/read-ceiling-pager:" + $home + "/mods/reminder-diet:" + $home + "/mods/lookout:" + $home + "/mods/x-mcp-budget")
+    and .env.CLAUDE_CODE_PLUGIN_DIRS == ($home + "/mods/loop-breaker:" + $home + "/mods/agent-radar:" + $home + "/mods/read-ceiling-pager:" + $home + "/mods/x-mcp-budget:" + $home + "/mods/idle-compact")
     and .permissions.disableAutoMode == "disable"
     and .permissions.defaultMode == "bypassPermissions"
     and .permissions.disableBypassPermissionsMode != "disable"
@@ -2016,7 +1992,7 @@ if jq -e --arg home "$CLAUDE_HOME" --arg realhome "$HOME" '
     and .env.WACLI_STORE_DIR == ($realhome + "/.local/state/wacli")
     and .env.PRO_GATE_ROUND_GUARD == "1"
     and .env.CLAUDE_CODE_FILE_READ_MAX_OUTPUT_TOKENS == "50000"
-    and .env.CLAUDE_CODE_PLUGIN_DIRS == ($home + "/mods/loop-breaker:" + $home + "/mods/agent-radar:" + $home + "/mods/read-ceiling-pager:" + $home + "/mods/reminder-diet:" + $home + "/mods/lookout:" + $home + "/mods/x-mcp-budget")
+    and .env.CLAUDE_CODE_PLUGIN_DIRS == ($home + "/mods/loop-breaker:" + $home + "/mods/agent-radar:" + $home + "/mods/read-ceiling-pager:" + $home + "/mods/x-mcp-budget:" + $home + "/mods/idle-compact")
     and .enabledPlugins["typescript-lsp@claude-plugins-official"] == false
     and .enabledPlugins["sync-smoke-keep@example"] == true
     and .permissions.disableAutoMode == "disable"
@@ -2492,7 +2468,7 @@ for bad_global in '50000' '2000000' '"300k"' '300000.5'; do
   global_refusal=$("$SYNC" reconcile-runtime-env 2>&1); global_refusal_status=$?
   if [ "$global_refusal_status" -ne 0 ] \
      && cmp -s "$TMP/global-live-baseline.json" "$CLAUDE_HOME/settings.json"; then ok; else bad "invalid canonical global reconciled/wrote live: $bad_global"$'\n'"$global_refusal"; fi
-  global_invalid_home=$(mktemp -d "$TMP/global-invalid-install.XXXXXX")
+  global_invalid_home=$(mktemp -d "$TMP/global-invalid-install.XXXXXX") || exit 1
   global_install_refusal=$(CLAUDE_HOME="$global_invalid_home" "$SYNC" install 2>&1); global_install_refusal_status=$?
   if [ "$global_install_refusal_status" -ne 0 ] && [ -z "$(find "$global_invalid_home" -mindepth 1 -print -quit)" ]; then ok; else bad "invalid canonical global installed live artifacts: $bad_global"$'\n'"$global_install_refusal"; fi
   # Equal invalid values cannot pass the drift projection by equality alone.

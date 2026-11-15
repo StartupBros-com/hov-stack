@@ -38,7 +38,7 @@ set -euo pipefail
 #   GH_TOKEN           must see the plugin repositories' drafts (push-capable)
 #
 # Exit codes:
-#   0  every pinned release is published, was published now, is still uploading,
+#   0  every pinned release is already published, was published now, is still uploading,
 #      or is no longer pinned on live main
 #   1  a read failure or a card/release disagreement on at least one plugin;
 #      the other plugins are still processed
@@ -108,7 +108,9 @@ publish_card() {
   is_draft="$(jq -r '.draft' <<<"$rel")"
   tag="$(jq -r '.tag_name // ""' <<<"$rel")"
   if [ "$is_draft" = false ]; then
-    printf 'published %s: %s\n' "$name" "$tag"
+    # Not "published": every push to main walks every card, and a bare
+    # "published" per plugin read like a release of all of them.
+    printf 'already published %s: %s\n' "$name" "$tag"
     return 0
   fi
   [ "$is_draft" = true ] || { warn "release $card_id of $repo has no draft flag"; return 1; }

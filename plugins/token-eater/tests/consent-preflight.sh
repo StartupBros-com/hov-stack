@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SUT="$ROOT/skills/token-eater/scripts/consent-preflight.sh"
-TMP="$(mktemp -d)"
+TMP="$(mktemp -d)" || exit 1
 trap 'rm -rf "$TMP"' EXIT
 REPO="$TMP/repo"
 CONSENT="$TMP/operator/config/consent.tsv"

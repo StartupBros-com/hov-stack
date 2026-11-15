@@ -9,7 +9,7 @@ SCRIPT="$HERE/../bin/pro-gate-autoupdate.sh"
 FAILS=0
 check() { if [ "$2" = 0 ]; then echo "ok - $1"; else echo "FAIL - $1: ${3:-}"; FAILS=$((FAILS + 1)); fi; }
 
-TDIR="$(mktemp -d "${TMPDIR:-/tmp}/pg-autoupdate-test.XXXXXX")"
+TDIR="$(mktemp -d "${TMPDIR:-/tmp}/pg-autoupdate-test.XXXXXX")" || exit 1
 trap 'rm -rf "$TDIR"' EXIT
 
 # Inherited operator config must not leak into fixture runs.

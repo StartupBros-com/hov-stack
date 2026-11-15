@@ -36,7 +36,7 @@ jsm() { return 1; }          # command -v finds it; `jsm list` yields nothing ->
 drift=0; errors=0
 INSTALLED_PLUGINS=/nonexistent/installed_plugins.json   # sections 1-7 use no replaced-by= entries
 
-T=$(mktemp -d /tmp/skills-localize-retired.XXXXXX)
+T=$(mktemp -d /tmp/skills-localize-retired.XXXXXX) || exit 1
 trap 'rm -rf "$T" 2>/dev/null || true' EXIT
 SKILLS="$T/skills"; TRASH="$SKILLS/.trash"; RETIRED="$T/retired-skills.txt"
 mkdir -p "$SKILLS/memory-dream" "$SKILLS/memory-eval" "$SKILLS/keep-me"

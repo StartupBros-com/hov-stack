@@ -13,8 +13,9 @@ set -euo pipefail
 # and the manifest at its head is byte-identical to the reconciler's output.
 #
 # A repin PR from an earlier run is closed once a newer one exists, or once main
-# already matches every release. Left open, it either stalls (the required checks
-# demand an up-to-date branch) or, rebased by hand, would pin an older release.
+# already matches every release. Left open with auto-merge requested, it would pin
+# an older release: main's merge queue (since 2026-11-15) lands a green PR that is
+# behind main, where the up-to-date rule alone used to leave it stalled.
 #
 # The same proof and close loop serve any bot-opened, single-file PR family. LAND_PATH
 # names the one file the PR may change, BRANCH_PREFIX the family's branch prefix, and

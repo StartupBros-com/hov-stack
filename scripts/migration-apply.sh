@@ -283,6 +283,8 @@ chmod -R a-w "$DIR/supabase/migrations"
 # PATH lookup inside the lib.
 # shellcheck source=lib/supabase-access-token.sh
 . "$SCRIPT_DIR/lib/supabase-access-token.sh"
+# shellcheck source=lib/supabase-migration-list.sh
+. "$SCRIPT_DIR/lib/supabase-migration-list.sh"
 BWS_BIN=$(resolve_trusted_bin bws) || BWS_BIN=
 resolve_supabase_access_token
 case $? in
@@ -297,11 +299,21 @@ pooler_url=$(read_remote_pooler_url) || exit $?
 printf '%s' "$pooler_url" >"$DIR/supabase/.temp/pooler-url"
 
 # ---- Independent inventory (read-only) ----------------------------------
-listing=$(cd "$DIR" && SUPABASE_ACCESS_TOKEN="$SUPABASE_ACCESS_TOKEN" "$TIMEOUT_BIN" 120 "$SUPABASE_BIN" --workdir "$DIR" migration list --linked 2>&1) || { log "migration list failed:"; printf '%s\n' "$listing" | tail -3 >&2; exit 1; }
-# The 8-14 digit bound is a length test, not an awk interval: mawk, the default
-# awk on Debian and Ubuntu, ignores {8,14} or reads it as {8}, which hides every
-# 14-digit version (#21). Both remote parse sites must stay identical.
-remote=$(printf '%s\n' "$listing" | awk -F'|' 'NF>=2 { gsub(/ /,"",$2); if (length($2) >= 8 && length($2) <= 14 && $2 ~ /^[0-9]+$/) print $2 }' | sort -u)
+# JSON, pinned by flag, through the parse both remote reads share
+# (lib/supabase-migration-list.sh): the CLI's table changed format under the old
+# awk parse, and the CLI prints JSON on its own when run from an agent session
+# (#366). stderr goes to a file in the snapshot root (outside the hashed
+# migrations) so it cannot corrupt the JSON; cleanup() removes it with the
+# snapshot. In JSON mode the CLI reports its own failure as JSON on stdout, with
+# stderr empty or holding progress text, so a failed call names that error and
+# shows stderr's tail only when stdout holds none.
+list_err="$SNAPSHOT_ROOT/migration-list.err"
+listing=$(cd "$DIR" && SUPABASE_ACCESS_TOKEN="$SUPABASE_ACCESS_TOKEN" "$TIMEOUT_BIN" 120 "$SUPABASE_BIN" --workdir "$DIR" migration list --linked --output-format json 2>"$list_err") || {
+  log "migration list failed:"
+  printf '%s' "$listing" | supabase_cli_error >&2 || supabase_cli_redact <"$list_err" | tail -3 >&2
+  exit 1
+}
+remote=$(printf '%s' "$listing" | supabase_remote_versions) || remote=""
 [ -n "$remote" ] || { log "could not parse remote migration history" >&2; exit 1; }
 remote_max=$(printf '%s\n' "$remote" | sort -n | tail -1)
 
@@ -398,8 +410,17 @@ log "applying $(printf '%s\n' "$expected_set" | grep -c .) migration(s) from com
 out=$(cd "$DIR" && SUPABASE_ACCESS_TOKEN="$SUPABASE_ACCESS_TOKEN" "$SUPABASE_BIN" --workdir "$DIR" db push $PUSH_FLAGS 2>&1 <<< "Y") || { log "push FAILED:"; printf '%s\n' "$out" | tail -5 >&2; exit 5; }
 
 # ---- Post-verify: history must now equal the exact approved transition -----
-listing2=$(cd "$DIR" && SUPABASE_ACCESS_TOKEN="$SUPABASE_ACCESS_TOKEN" "$TIMEOUT_BIN" 120 "$SUPABASE_BIN" --workdir "$DIR" migration list --linked 2>/dev/null)
-remote2=$(printf '%s\n' "$listing2" | awk -F'|' 'NF>=2 { gsub(/ /,"",$2); if (length($2) >= 8 && length($2) <= 14 && $2 ~ /^[0-9]+$/) print $2 }' | sort -u)
+list2_rc=0
+listing2=$(cd "$DIR" && SUPABASE_ACCESS_TOKEN="$SUPABASE_ACCESS_TOKEN" "$TIMEOUT_BIN" 120 "$SUPABASE_BIN" --workdir "$DIR" migration list --linked --output-format json 2>/dev/null) || list2_rc=$?
+# The read's exit status is checked apart from its output: the push has already
+# run, so a read that failed leaves the write unverified whatever stdout holds,
+# versions that happen to match included (#366).
+if [ "$list2_rc" -ne 0 ]; then
+  list2_why=$(printf '%s' "$listing2" | supabase_cli_error) || list2_why="no error JSON on stdout"
+  log "POST-VERIFY FAILED: post-push migration list exited $list2_rc: $list2_why" >&2
+  exit 5
+fi
+remote2=$(printf '%s' "$listing2" | supabase_remote_versions) || remote2=""
 # An empty parse would also fail the delta check below, but as a list of every
 # expected version, which reads as "nothing applied"; name the real failure.
 [ -n "$remote2" ] || { log "POST-VERIFY FAILED: could not parse post-push migration history" >&2; exit 5; }

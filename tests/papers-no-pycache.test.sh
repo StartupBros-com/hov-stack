@@ -8,7 +8,7 @@ CLAUDE_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 OVERLAY=$CLAUDE_DIR/skills-patches/papers/scripts/paper_search.py
 [ -f "$OVERLAY" ] || { echo "FAIL: papers overlay not found at $OVERLAY" >&2; exit 1; }
 
-TMP=$(mktemp -d)
+TMP=$(mktemp -d) || exit 1
 trap 'rm -rf "$TMP"' EXIT
 SKILL=$TMP/home/.claude/skills/papers
 ENTRYPOINT=$SKILL/scripts/paper_search.py

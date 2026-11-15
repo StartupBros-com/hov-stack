@@ -126,14 +126,14 @@ EXACT: list[tuple[str, str]] = [
         "> undocumented step, silently-wrong output, a footgun? run the papercut\n"
         "> skill's `add` command",
     ),
-    # USER-FACING REMEDIES, not prose. The general rules translate the private
+    # USER-FACING REMEDY, not prose. The general rules translate the private
     # ADDRESS and stop, which is right for a comment and wrong for a sentence
-    # telling someone what to run: the packaged copy was printing "(your config
-    # sync reconcile-papercut-hook)" at a stranger who has no such command, and
-    # naming a command that does not exist is worse than naming none. The
-    # plugin's real remedy is different, so the sentence is rewritten, not patched.
+    # telling someone what to run. The source tells a harness host to install
+    # the plugin; inside the packaged plugin the sentence is rewritten to check
+    # that it is enabled, because naming a command a stranger does not need is
+    # worse than naming none.
     (
-        '— is the PostToolUseFailure hook registered? (sync.sh reconcile-papercut-hook)")',
+        '— is the PostToolUseFailure hook registered? (claude plugin install papercut@hov --scope user)")',
         '— is the PostToolUseFailure hook registered? Check that the papercut "\n'
         '              "plugin is enabled.")',
     ),

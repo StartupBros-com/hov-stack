@@ -21,7 +21,7 @@ set -uo pipefail
 
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 DOCTOR=$REPO/scripts/harness-doctor.sh
-TMP=$(mktemp -d /tmp/doctor-pc-sdg-test.XXXXXX)
+TMP=$(mktemp -d /tmp/doctor-pc-sdg-test.XXXXXX) || exit 1
 trap 'rm -rf "$TMP" 2>/dev/null || true' EXIT
 
 pass=0 fail=0
@@ -168,7 +168,7 @@ h=$(make_home both); coverage "$h" "$T"; plugin "$h" user true
 drop_settings_hook "$h" '.hooks.PreToolUse[] | select(.matcher == "StructuredOutput")'
 out=$(run_check "$h" "$TMP/check19.sh")
 contains "$out" "papercut-log is registered twice" "plugin plus settings copy is a double registration"
-contains "$out" "fix: sync.sh reconcile-papercut-hook" "the double registration names its fix"
+contains "$out" "fix: delete that entry from ~/.claude/settings.json; papercut@hov registers it" "the double registration names its fix"
 contains "$out" "read-ceiling-chunk is registered twice" "each duplicated hook is named"
 omits "$out" "structured-output-unwrap is registered twice" "a hook only the plugin registers is not a duplicate"
 omits "$out" "NOT registered" "a double registration is not dead capture"

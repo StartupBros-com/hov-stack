@@ -40,7 +40,7 @@
 #
 # usage: scripts/public-safety-scan.sh [--root DIR] [--rev REV] [--allow FILE]
 #          [--repos FILE] [--require-tokens] [--show] [--all]
-# exit:  0 clean, 1 a hit outside the allowlist, 2 usage or a missing input
+# exit:  0 clean, 1 a hit outside the allowlist, 2 the scan could not run
 set -uo pipefail
 
 usage() { sed -n '/^# usage:/,/^# exit:/p' "$0" | sed 's/^# //'; }
@@ -72,7 +72,7 @@ if [ -n "$REV" ]; then
   SHA=$(git -C "$ROOT" rev-parse --verify --quiet "$REV^{commit}") || { echo "no such revision: $REV" >&2; exit 2; }
 fi
 
-WORK=$(mktemp -d "${TMPDIR:-/tmp}/public-safety.XXXXXX")
+WORK=$(mktemp -d "${TMPDIR:-/tmp}/public-safety.XXXXXX") || { echo "could not create a scratch directory under ${TMPDIR:-/tmp}" >&2; exit 2; }
 trap 'rm -rf "$WORK"' EXIT
 
 # ---- the private-token list -----------------------------------------------------------

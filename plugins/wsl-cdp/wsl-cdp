@@ -778,7 +778,7 @@ cmd_mcp_add() {
   # never browse. Register where deep browser work actually happens.
   command -v jq >/dev/null 2>&1 || { echo "wsl-cdp: jq required for mcp-add" >&2; return 1; }
   local f="$PWD/.mcp.json" tmp
-  tmp="$(mktemp)"
+  tmp="$(mktemp)" || { echo "wsl-cdp: could not create a temp file for mcp-add" >&2; return 1; }
   if jq -n --slurpfile cur <(cat "$f" 2>/dev/null || echo '{}') \
         --arg url "http://127.0.0.1:$PORT" '
         ($cur[0] // {}) as $c

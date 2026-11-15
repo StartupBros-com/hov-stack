@@ -10,7 +10,7 @@ set -uo pipefail
 
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 SCRIPT=$REPO/scripts/tool-update.sh
-TMP=$(mktemp -d)
+TMP=$(mktemp -d) || exit 1
 trap 'rm -rf "$TMP"' EXIT
 
 pass=0 fail=0
@@ -194,6 +194,50 @@ out=$(TOOL_UPDATE_BIN_DIR="$TMP/emptybin" PATH="$TMP/bin:/usr/bin:/bin" TOOL_UPD
       TOOL_UPDATE_BACKUP_DIR="$rotdir" DRY_RUN=1 bash "$SCRIPT" 2>&1)
 [ -f "$rotdir/ubs-1.0.0" ] && ok || bad "DRY_RUN=1 actually removed a backup: $out"
 case "$out" in *"would reap ubs-1.0.0"*) ok ;; *) bad "DRY_RUN=1 did not report what it would reap: $out" ;; esac
+
+# ── 12. --any-installed: the installer's timer gate (hov-stack#632) ─────────────────────
+# sync.sh enables tools-auto-update.timer only when this says a run would find a tool. It
+# must agree with the run's own "not installed" test, honour a selection the way a run
+# does, and never reach the network. A gh stub that leaves a marker proves the last.
+mkdir -p "$TMP/anybin" "$TMP/anytools"
+printf '#!/usr/bin/env bash\ntouch "%s"\nexit 1\n' "$TMP/gh-called" >"$TMP/anybin/gh"
+chmod +x "$TMP/anybin/gh"
+any() {
+  TOOL_UPDATE_BIN_DIR="$TMP/anytools" PATH="$TMP/anybin:/usr/bin:/bin" TOOL_UPDATE_TABLE="$TABLE" \
+    bash "$SCRIPT" --any-installed "$@" 2>&1
+}
+out=$(any); st=$?
+[ "$st" -eq 1 ] && ok || bad "--any-installed exited $st with no tool installed: $out"
+make_tool 1.0.0 "$TMP/anytools/faketool"
+out=$(any); st=$?
+[ "$st" -eq 0 ] && ok || bad "--any-installed exited $st with faketool in BIN_DIR: $out"
+out=$(any othertool); st=$?
+[ "$st" -eq 1 ] && ok || bad "--any-installed othertool exited $st; the table holds only faketool: $out"
+# A binary that prints no version is "not installed — skipped" to a run, so a run on this
+# host would hit the all-missing guard; the gate must say no as well.
+printf '#!/usr/bin/env bash\nexit 0\n' >"$TMP/anytools/faketool"; chmod +x "$TMP/anytools/faketool"
+out=$(any); st=$?
+[ "$st" -eq 1 ] && ok || bad "--any-installed counted a binary that reports no version: $out"
+[ ! -e "$TMP/gh-called" ] && ok || bad "--any-installed called gh; the gate must not reach the network"
+
+# ── 13. the gate needs no gh; a run still refuses to start without it ───────────────────
+# The gh/sha256sum/tar check moved behind the mode flag. A PATH with no gh at all must
+# leave the gate working and a normal run refusing, or the move weakened the run.
+mkdir -p "$TMP/nogh"
+for t in bash dirname sha256sum tar timeout grep head; do
+  ln -sf "$(command -v "$t")" "$TMP/nogh/$t"
+done
+make_tool 1.0.0 "$TMP/anytools/faketool"
+out=$(PATH="$TMP/nogh" TOOL_UPDATE_BIN_DIR="$TMP/anytools" TOOL_UPDATE_TABLE="$TABLE" \
+      "$TMP/nogh/bash" "$SCRIPT" --any-installed 2>&1); st=$?
+[ "$st" -eq 0 ] && ok || bad "--any-installed needed gh (exit $st): $out"
+out=$(PATH="$TMP/nogh" TOOL_UPDATE_BIN_DIR="$TMP/anytools" TOOL_UPDATE_TABLE="$TABLE" \
+      "$TMP/nogh/bash" "$SCRIPT" 2>&1); st=$?
+if [ "$st" -eq 1 ] && [ "$out" = "tool-update: missing gh" ]; then
+  ok
+else
+  bad "a normal run without gh did not refuse (exit $st): $out"
+fi
 
 if [ "$fail" -eq 0 ]; then
   echo "ok — tool-update: $pass/$((pass + fail)) assertions passed"

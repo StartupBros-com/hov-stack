@@ -10,7 +10,11 @@ OnFailure=harness-unit-failure-alert@%n.service
 
 [Service]
 Type=oneshot
-TimeoutStartSec=10m
+# Planning stops itself after PLAN_BUDGET_S (20m, in the script); the rest is
+# removal, and the first run on a full disk can face 100+ GB of scratch across
+# millions of files. A kill mid-removal loses nothing: the next run re-plans
+# what is left.
+TimeoutStartSec=3h
 # Promoted RECLAIM_SWEEP_APPLY=0 -> 1 (2026-08-16). The promotion
 # blocker was liveness decided by /proc/*/fd alone, blind to the
 # cwd/environ/cmdline holders an idle background job actually has — since fixed

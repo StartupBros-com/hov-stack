@@ -614,13 +614,6 @@ else
       _hook_base=$(basename "$f")
       _hook_stem=${_hook_base%.*}
       hook_registered "$_hook_base" && continue
-      # Deliberate unregistered no-op: sync.sh removed the pr-record registration
-      # on 2026-11-03, but the file stays so a live session that snapshotted the
-      # old registration does not error after every Bash call (see the header of
-      # hooks/PostToolUse/pr-record.js). Keyed to this one path only; any other
-      # unreferenced hook still warns. DELETE this exception when
-      # hooks/PostToolUse/pr-record.js itself is deleted.
-      [ "${f#"$HOOKS_ROOT"/}" = "PostToolUse/pr-record.js" ] && continue
       hook_required_by_script "${f#"$HOOKS_ROOT"/}" && continue
       _hook_requirers=$(grep -lsF -e "require('./$_hook_stem')" -e "require('./$_hook_base')" \
         -e "require(\"./$_hook_stem\")" -e "require(\"./$_hook_base\")" "$(dirname "$f")"/*.js)
@@ -1452,8 +1445,8 @@ PC_CLI=$HOME/.claude/bin/papercut.py
 [ -f "$PC_CLI" ]  || warn "papercut: CLI missing at ~/.claude/bin/papercut.py"
 [ -x "$PC_CLI" ]  || warn "papercut: ~/.claude/bin/papercut.py is not executable (the ~/.local/bin/papercut symlink will fail)"
 # The papercut plugin (papercut@hov) registers papercut-log, read-ceiling-chunk and
-# structured-output-unwrap itself, and sync.sh retires the settings.json copies once
-# the plugin is installed at user scope and enabled. Either registration is capture.
+# structured-output-unwrap itself. This section reports settings.json copies
+# alongside the plugin. Either registration is capture.
 # Both is a finding too: Claude Code runs the two copies separately, so every
 # failure is logged twice and read-ceiling-chunk counts each denial twice.
 if [ -f "$HOME/.claude/settings.json" ] && command -v jq >/dev/null 2>&1; then
@@ -1464,11 +1457,10 @@ if [ -f "$HOME/.claude/settings.json" ] && command -v jq >/dev/null 2>&1; then
     && jq -e '.enabledPlugins["papercut@hov"] == true' "$HOME/.claude/settings.json" >/dev/null 2>&1 \
     && _pc_plugin=1
   if [ "$_pc_plugin" -eq 1 ]; then
-    for _pc_dup in papercut-log:reconcile-papercut-hook read-ceiling-chunk:reconcile-read-ceiling-chunk \
-        structured-output-unwrap:reconcile-structured-output-unwrap; do
-      jq -e --arg h "${_pc_dup%%:*}.js" '[.hooks[]?[]?.hooks[]? | (.command // "") | select(contains($h))] | length > 0' \
+    for _pc_dup in papercut-log read-ceiling-chunk structured-output-unwrap; do
+      jq -e --arg h "${_pc_dup}.js" '[.hooks[]?[]?.hooks[]? | (.command // "") | select(contains($h))] | length > 0' \
         "$HOME/.claude/settings.json" >/dev/null 2>&1 \
-        && warn "papercut: ${_pc_dup%%:*} is registered twice, by papercut@hov and in settings.json, so it runs twice per event (fix: sync.sh ${_pc_dup#*:})"
+        && warn "papercut: ${_pc_dup} is registered twice, by papercut@hov and in settings.json, so it runs twice per event (fix: delete that entry from ~/.claude/settings.json; papercut@hov registers it)"
     done
   else
     # Without the plugin, each of the three needs its own settings.json copy under its
@@ -1790,7 +1782,7 @@ else
   done <<< "$_suite_list"
 
   if [ "${#_run_args[@]}" -gt 0 ]; then
-    _rlog=$(mktemp -d "${TMPDIR:-/tmp}/doctor-tests.XXXXXX")
+    _rlog=$(mktemp -d "${TMPDIR:-/tmp}/doctor-tests.XXXXXX") || { echo "harness-doctor: could not create a scratch directory for the test run" >&2; exit 1; }
     (cd "$HARNESS_REPO" && CLAUDE_TESTS_TIMEOUT=$BASH_SUITE_TIMEOUT_S timeout -k 10 "$RUNNER_TOTAL_TIMEOUT_S" \
       bash "$TEST_RUNNER" -j "$_jobs" -o "$_rlog/logs" "${_run_args[@]}") >"$_rlog/runner.out" 2>&1 </dev/null
     _rrc=$?
