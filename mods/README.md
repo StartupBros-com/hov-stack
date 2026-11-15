@@ -13,13 +13,26 @@ its own repository and a card in the House of Vibe marketplace.
 | [x-mcp-budget](x-mcp-budget/) | Caps what the X (Twitter) MCP's reads cost: list, search and timeline calls ask for at most 10 results, each post and user returned is priced once per UTC day in a ledger every session on the machine shares, and once the day reaches the budget (default $1) further X MCP calls are refused until 00:00 UTC, naming the free oEmbed route for a single post |
 
 Each house mod's README carries its `hooks:` and `calls:` lines as printed by
-`claude plugin validate`, its options, and its limits. `IDEAS.md` is the ranked
-backlog the house mods were chosen from and records the community-mod
-evaluations that brought in agent-radar, where-am-i and next-steps (the last
-two removed, see below). lookout and reminder-diet, both house mods, were
-removed too (see below).
+`claude plugin validate`, its options, and its limits. where-am-i and
+next-steps, both vendored community mods, and lookout and reminder-diet, both
+house mods, were removed (see below).
+
+The house mods were chosen from a ranked backlog, `IDEAS.md`, generated on
+2026-10-01. It also held the community-mod evaluations that brought in
+agent-radar, where-am-i and next-steps. It was retired on 2026-11-15 on the
+operator's go, once a survey of the published mods on 2026-11-14 had superseded
+its rankings. Its two standing rules are under "Before building one" below, and
+its last version is in git history at `b07b90e` (`mods/IDEAS.md`). The backlog
+ids below (M04, M33) are rows in it.
 
 ## Before building one
+
+Two operator rules, each from a real-use verdict recorded under "Load one":
+
+- No mod that blocks or asks on a guess. A guard earns a place only by removing
+  friction for long-running agents, never by adding a stop to their work
+  (secret-stop, 2026-10-03).
+- No next-prompt picker (next-steps, 2026-10-06).
 
 Claude Code loads its built-in guard on this host (`cc-plugin-sec-default`; its
 docs give the machine's managed settings as the reason). The guard skips a hook
@@ -59,12 +72,17 @@ empty or relative entry or a folder with no `.claude-plugin/plugin.json`;
 `sync.sh check` reports a manifest that disappears later as drift. Because the
 path goes through the symlink, an install run from a worktree re-points the
 link the way it does for hooks and never writes its own path into a live file.
-To unload a mod everywhere, drop its path from that list.
+To unload a mod everywhere, drop its path from that list. Deleting the mod's
+folder from git does not remove the files the engine wrote beside it
+(`<mod>/.claude-plugin/types/` and `<mod>/tsconfig.json`, both gitignored; see
+"Check one"): a checkout that loaded the mod keeps them, and the folder with
+them, until someone removes them by hand, as was done for reminder-diet on
+2026-11-14.
 
 agent-radar was wired on 2026-10-03 by operator decision, in place of a staged
 trial, and is judged by real use; `/radar` had answered in one live session
 before that. where-am-i and next-steps followed the same day on the same terms,
-picked from the ranked shortlist in `IDEAS.md` for returning to a session and
+picked from the backlog's ranked shortlist for returning to a session and
 for the typing a follow-up costs; neither had been loaded live before the wiring
 PR, and each makes one small Haiku completion per main turn, none when nothing
 draws the session. secret-stop was wired with agent-radar and retired the same
