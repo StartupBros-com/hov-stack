@@ -1,6 +1,6 @@
 ---
 name: statusline-ad-stack
-description: "Statusline chain: the local three-line HUD (prompt-cache TTL, quotas, route, privacy toggle) and the removed kickbacks/vibe-ads/onwatch and waitline ad injectors"
+description: "Statusline chain: the local HUD of two or three rows, plus rows for PR links that wrap (prompt-cache TTL, quotas, route, privacy toggle) and the removed kickbacks/vibe-ads/onwatch and waitline ad injectors"
 metadata: 
   node_type: memory
   type: reference
@@ -38,15 +38,65 @@ overrides it, 1-10000 ms), displayed metadata is sanitized, and failures
 leave the rest of the HUD intact. These labels repair the misleading old arrow
 and unqualified account badge; they do not add in-flight progress telemetry.
 
-**Layout (2026-10-07).** Three lines when the PR links fit, with compact PR-only
-rows appended when needed. The renderer is never told the terminal width, so
-each line fits a 108-column budget; links wrap whole, never disappear at a drop level:
+**Layout (2026-11-15).** Up to three rows, with PR-only rows appended when the
+links need them. Claude Code passes the terminal size to the status line command
+as `COLUMNS` and `LINES`, and cuts each row at `COLUMNS - 4` cells with `…`
+(measured on 2.1.325). The renderer reads `COLUMNS` only, and rebuilds each row
+to fit that budget, down to the floor described below. A `COLUMNS` that is
+missing, or is not a whole number from 40 to 99999, falls back to a 108-cell
+budget, so a terminal under 40 columns gets rows built for 108. Links wrap whole and never disappear at a drop level. One session at 132
+columns, then at 60:
 
 ```
-ctx ▕██░░░░░░░░▏ 15% 152k/1M │ cache 48m→15:10 │ Opus 5.5 xhigh │ $18.42
-dotfiles › wt statusline-hud ±1 │ last session route ● acct-c 5h 24% 7d 83% (7s ago)
-5h  ▕██░░░░░░░░▏ 23%→15:52 │ 7d ▕████░░░░░░▏ 41%→Sun 14:22 │ PR #1673 #1682 │ a6eda6ea
+ctx █▉░░░░░░ 23% 230k/1M │ cache 48m→02:30 │ Fable 5.2 xhigh │ $12.34
+reminder-diet cleanup │ hov-stack › wt statusline-refresh ±2 │ last session route ● max-acct-b (5h 33% 7d 58%, 4s ago)
+5h  ███▎░░░░ 41%→03:52 │ 7d █████░░░ 63%→Tue 01:42 │ PR #625 ready │ 7f3a9c21
+
+ctx █▉░░░░░░ 23% │ cache 48m→02:30 │ Fable 5.2 │ $12.34
+reminder-diet cl… │ hov-stack › wt statusline-refresh ±2
+5h  ███▎░░░░ 41% │ 7d █████░░░ 63% │ PR ✓#625
 ```
+
+- **Rows.** Row 1 is context, prompt cache, model and cost. Row 2 is the
+  session's name, where it is working and the last route. Row 3 is the two quota
+  windows, the PR links and the session id. A row with nothing to show is not
+  drawn. A session id with nothing beside it on row 3 moves to the end of the
+  row above when it fits there, so a fresh session draws two rows.
+- **What a row sheds, in order, until it fits.** Row 1: the reply's age, the
+  miss cause, the token count, a cold cache's idle time, the `re-cache` word,
+  the effort, a warm cache's expiry clock (on a cold cache, the separator
+  before the estimate), the meter, the cost, `fast`. Row 2: the session
+  name narrows first, to 24 cells; then `last session route` becomes
+  `last route`; then the worktree name, the route's age, account windows past
+  two, the path and a long account name (trimmed), the remaining windows, the
+  name down to 10 cells, the route, the name down to 4 cells, the name. Row 3:
+  PR state words become glyphs; then the session id, the reset clocks, the
+  meters. A PR known only by its number keeps its review label beside linked
+  PRs at every width, because it has no glyph to fall back to.
+- **The floor.** A row that has shed everything is drawn as it stands, and
+  Claude Code cuts it. Row 1 keeps context percent, cache state, model and a
+  differing last reply at any width. In the suite's crowded fixture, which has a
+  remapped reply with a long model name, that is 68 cells, so it is cut in a
+  terminal under 72 columns. Row 2 keeps the trimmed path, a linked worktree's
+  `wt` marker, the branch and the change count: the path trims to 24 cells but
+  the branch is never shortened below its 40-cell cap, so a long path with a
+  40-cell branch and a one-digit change count is 70 cells and is cut under 74
+  columns (73 cells and 77 columns in a linked worktree). Rows 2 and 3 of the crowded fixture fit at 60.
+- **Meters** are 8 cells filled in eighths (`▏▎▍▌▋▊▉█` over a `░` track), and any
+  use above zero shows at least one eighth. The context meter is coloured by
+  pressure, running green to orange to red, each cell by the level its position
+  stands for. A quota meter is one quiet gray until its window
+  reaches 60%. The track stays in the text, so a meter reads with colour
+  stripped.
+- **Colour depth.** When `COLORTERM` is `truecolor` or `24bit`, pressure
+  colours blend in 24-bit colour between green at 0%, orange at 60%, red at 85%
+  and a deeper red at 100%. Otherwise five 256-colour codes step at 45%, 60%,
+  75% and 85%. The text is identical either way.
+- **Session name.** `session_name` leads row 2 in bold accent colour. It is free
+  text, so it is cleaned before it is drawn: a line break or tab becomes a
+  space, control characters go, and only printable ASCII and Latin-script
+  letters and symbols (U+00A1 to U+024F) stay, so a CJK or emoji title cannot
+  take two cells. It is cut at 40 cells with `…`.
 
 - **cache** reads Claude Code's own `prompt_cache` status-line field (originally
   inspected in 2.1.292; partial-usage behavior checked in 2.1.312). A build
@@ -97,17 +147,25 @@ dotfiles › wt statusline-hud ±1 │ last session route ● acct-c 5h 24% 7d 8
   stdout; `FORCE_HYPERLINK=0` keeps the same plain labels. Both OSC8 and SGR
   escapes are excluded from width calculations. Older number-only payloads
   retain their existing unlinked review label.
-- **PR colors:** purple = merged, gray = draft/closed, green = checks passed
-  with no blocking review decision, yellow = pending/failing checks or blocking
-  review, neutral = unknown. A detached child makes one batched `gh api graphql`
+- **PR states:** each known state has a colour, a word and a glyph, so it reads
+  with colour stripped: purple `merged` `◆`, gray `closed` `×`, gray `draft` `◇`,
+  green `ready` `✓` (checks passed with no blocking review decision), orange
+  `waiting` `○` (pending or failing checks, or a blocking review). Unknown is
+  neutral with neither. The word follows the link (`#625 ready`); when the row
+  is too wide for words the glyph leads it instead (`✓#625`). Closed and draft
+  share a colour and are told apart by word and glyph. A detached child makes one batched `gh api graphql`
   read against github.com; rendering never waits for that network request.
   It kills `gh` after 8 seconds, atomically stores results for two minutes, and
   deduplicates launches with a short-lived lock. Failed reads also get the
   two-minute cooldown. Partial GraphQL errors leave only affected PRs unknown;
   errors without an attributable alias leave all states unknown. Missing
   checks/auth/`gh`, corrupt data and expired cache stay unknown rather than
-  fabricated green. Payload `review_state` can mark
-  only its exact current PR waiting; approval alone does not prove checks passed.
+  fabricated green. A payload `review_state` of `pending` or
+  `changes_requested` can mark only its exact current PR waiting, and only where
+  the cache has no entry for it or the helper's own `unknown`; approval alone
+  does not prove checks passed. A cached state this renderer
+  does not know, such as one written by another version of the helper, draws as
+  unknown.
   No other PR inherits it. `STATUSLINE_PR_REFRESH=0` disables background reads
   for offline use while retaining links and fresh cached states.
   `STATUSLINE_PR_CACHE_DIR` relocates the default `~/.cache/claude-statusline`
@@ -116,13 +174,19 @@ dotfiles › wt statusline-hud ±1 │ last session route ● acct-c 5h 24% 7d 8
   daemon, timer, or plugin discovers or refreshes these links.
 - **Screenshots:** `STATUSLINE_PRIVATE=1`, or `touch ~/.claude/statusline-private`,
   masks the account to its plan family (`max-•••`), or whole (`••••`) when the
-  prefix is not a known plan family, and hides the session id. Repo, branch and
-  PR number still render. Remove the file to undo. The flag is read on every render, so it takes effect
+  prefix is not a known plan family, and hides the session name and the session
+  id. Repo, branch and PR number still render. Remove the file to undo. The flag is read on every render, so it takes effect
   within one refresh.
 - Payload text (model name, cwd, branch, worktree name) has C0/C1 controls and
   bidi overrides stripped. Effort, PR review state and session id must match
-  allowlists or they are dropped. No Nerd Font glyphs are used, so the HUD
-  renders in a stock terminal font, Termius on iOS included.
+  allowlists or they are dropped. No Nerd Font glyphs are used: every character
+  is in a standard Unicode block. The set before 2026-11-15 was checked in a
+  stock terminal font, Termius on iOS included. The meter eighths added then
+  (`▎▍▌▋▊▉`; `▏` was already drawn) and the PR glyphs (`◆ ◇ ✓ ×`; `○` was
+  already drawn) have not been checked there. Widths are counted one cell per character, which holds
+  where the terminal draws East Asian ambiguous-width characters narrow (the
+  default outside CJK locales); a terminal set to draw them wide gives several
+  of these glyphs two cells, and rows run wider than counted.
 
 **onwatch / Kickbacks.ai / vibe-ads — RETIRED 2026-08-06** (one product, three names).
 Backend was `https://kickbacks-public-*.run.app`; daemon `~/.onwatch/bin/onwatch` rotated
