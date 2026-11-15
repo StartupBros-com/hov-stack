@@ -50,7 +50,7 @@ One PR, two delivery routes, one receipt. The receipt was true and covered half 
 **It had happened before.**
 
 - `plugins/papercut/docs/EXTRACTION-DESIGN.md` records a papercut redaction fix that merged in September and "had not reached a single customer twelve days later". It concludes that "a freshness check would" have caught it. That check exists for papercut alone, as `scripts/papercut-vendor.py --verify-delivered`. Since #309 turned the papercut card into a subdirectory pin it cannot read the pinned files, and it answers UNKNOWN (#645).
-- hov #568 changed `plugins/hov/hooks/hooks.json` with no bump, and its body said so: members would get it "with the next hov release". Nothing else changed in hov, so #580 cut 0.1.8 about eight hours later with #568 as its only content. That one was named at merge and released on purpose. It also shows what "the next release" means when none is coming: a release cut for one fix.
+- hov #568 changed `plugins/hov/hooks/hooks.json` with no bump, and its body said so: members would get it "with the next hov release". Nothing else changed in hov, so #580 bumped it to 0.1.8 with #568 as its only content. #590 moved the card and the release published about eight hours after #568 merged. That one was named at merge and released on purpose. It also shows what "the next release" means when none is coming: a release cut for one fix.
 
 ## Guidance
 
@@ -105,7 +105,7 @@ git diff --name-only origin/main...HEAD -- plugins | cut -d/ -f2 | sort -u
 ## Why This Matters
 
 - **It is silent by construction.** CI, the guards, the plugin CI and the activation receipt all pass, and each is right about what it checks. Nothing fails until someone compares the pin with main.
-- **The false "done" removes the prompt.** Closing the issue is what ends the work. Once #443 was closed, nothing was left to ask for a release. hov #568 went the other way: its PR body named the gap, and #580 released it within hours.
+- **The false "done" removes the prompt.** Closing the issue is what ends the work. Once #443 was closed, nothing was left to ask for a release. hov #568 went the other way: its PR body named the gap, #580 carried the bump, and the release published about eight hours after the fix merged.
 - **The author's machine hides it.** Tests and guards run against the checkout, where the fix is present. The people who lack it are the ones who install from the marketplace.
 - **It recurs.** `scripts/harness-weekly.sh` says the September fix sat "unreleased for twelve days and nothing anywhere said so". This one was reported done. The one automated check covers papercut only and currently answers UNKNOWN (#645).
 
@@ -154,4 +154,4 @@ What it should have said, with the last sentence filled in from the real plan:
 - `docs/release/plugin-release-recipe.md` (how to cut the release)
 - `plugins/papercut/docs/EXTRACTION-DESIGN.md` (the September instance and the case for a freshness check)
 - `CONCEPTS.md`: *Marketplace card*, *Activation receipt*
-- #443, #612, #635 (this instance); #568, #580 (hov); #309, #645 (the delivered check)
+- #443, #612, #635 (this instance); #568, #580, #590 (hov); #309, #645 (the delivered check)
