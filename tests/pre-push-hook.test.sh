@@ -9,7 +9,7 @@
 set -uo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 HOOKS=$ROOT/scripts/git-hooks
-WORK=$(mktemp -d "${TMPDIR:-/tmp}/pre-push-test.XXXXXX")
+WORK=$(mktemp -d "${TMPDIR:-/tmp}/pre-push-test.XXXXXX") || exit 1
 trap 'rm -rf "$WORK"' EXIT
 fails=0
 fail() { echo "FAIL: $*"; fails=$((fails + 1)); }
