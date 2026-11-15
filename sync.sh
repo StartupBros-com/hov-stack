@@ -2170,14 +2170,15 @@ install() {
   #   backup-harness      writes a SHARED REMOTE branch. Two machines pushing it
   #                       is a real conflict.
   # It keeps dcg-auto-update (the guard must stay current everywhere) and
-  # tools-auto-update.
+  # tools-auto-update, which the presence gate after this case adds for either
+  # role only where one of its tools is installed.
   case "$(profile_role 2>/dev/null || echo unknown)" in
     workstation)
       _role=workstation
-      _enable="dcg-auto-update.timer tools-auto-update.timer" ;;
+      _enable="dcg-auto-update.timer" ;;
     satellite)
       _role=satellite
-      _enable="dcg-auto-update.timer tools-auto-update.timer" ;;
+      _enable="dcg-auto-update.timer" ;;
     *)
       # FATAL, not a warning. An unrecognised or missing role previously enabled
       # nothing while check() still reported the host as mapped, so a typo on a
@@ -2190,6 +2191,18 @@ install() {
       profile_assert_known >/dev/null || true
       return 1 ;;
   esac
+
+  # tools-auto-update joins the set only where tool-update.sh would find one of
+  # its tools (hov-stack#632). Nothing here installs xf, csctf or ru, and its
+  # all-missing guard fails a run that finds none, so on a host that never
+  # installed them the timer could only fail and page, every night. Left out of
+  # the set, the reconcile below disables it like any timer outside the role
+  # set; the first install after a tool appears enables it again.
+  if bash "$HERE/scripts/tool-update.sh" --any-installed >/dev/null 2>&1; then
+    _enable="$_enable tools-auto-update.timer"
+  else
+    echo "  tools-auto-update.timer: none of tool-update.sh's tools is installed here, so it stays off; install one, then re-run install"
+  fi
 
   reconcile_role_timers "$_role" "$_enable" || return 1
   if [ "$posture_ok" = 1 ] && [ -n "$HYGIENE_POSTURE_DECLARED" ]; then
