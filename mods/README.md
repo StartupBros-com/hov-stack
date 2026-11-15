@@ -19,6 +19,27 @@ evaluations that brought in agent-radar, where-am-i and next-steps (the last
 two removed, see below). lookout and reminder-diet, both house mods, were
 removed too (see below).
 
+## Before building one
+
+Claude Code loads its built-in guard on this host (`cc-plugin-sec-default`; its
+docs give the machine's managed settings as the reason). The guard skips a hook
+that a mod loaded from a plugin folder registers on any of these events:
+`classic.*`, `prompt.compose`, `prompt.section`, `prompt.context`,
+`prompt.attachment`, `skill.prompt`, `attribution.text`, `session.compact`,
+`settings.read`, and `session.append` for the attachment, hook-context and
+compaction rows (Anthropic's mods admin page, "Know which hooks of a user's mod
+don't run", read 2026-11-14). The mod still loads, with a note in `/plugin` and
+no error, and the hook never runs, so check a mod's events against that list
+before building it.
+
+A session's debug log names each skip as `<mod>: <event> bypassed by
+cc-plugin-sec-default`. The list is narrower than the events the guard itself
+hooks, which the debug log prints on the line `hooks module
+cc-plugin-sec-default@builtin loaded`: agent-radar's `agent.spawn` hook is on
+that line and ran in a session checked on 2026-11-14. The page adds that the
+guard passes over a user's hooks in a few other cases with no note, such as
+`tool.describe` for an organization's tools.
+
 ## Load one
 
 For one session:
@@ -82,38 +103,14 @@ value, so it now handles the tail above 50,000.
 reminder-diet was wired on 2026-10-04 and removed on 2026-11-14 on the
 operator's verdict. Built from the backlog (M33), it was meant to leave out an
 engine task reminder that repeated, word for word, the last one the same loop
-was sent: in the 14 days before wiring, 19,794 of 27,432 stored task reminders
-(72%) carried the same task list as the previous one in the same loop, about
-241M characters. On this host it could not do that. Claude Code loads its
-built-in guard here (`cc-plugin-sec-default`; its docs give the machine's
-managed settings as the reason), and the guard sends `prompt.attachment`,
-`session.compact` and `prompt.context` past a mod loaded from a plugin folder.
-Those were the hook that dropped the repeat and the two that reset it; only the
-mod's `session.end` hook was on an event the guard leaves alone. In the 14 days
-to 2026-11-14 the stored sessions hold 1,893 notices that one of its hooks was
-skipped, on every day of the window, and 16,107 of 23,922 main-loop task
-reminders (67%) still repeated the one before. When the skipping began was not
-established, so neither was whether the mod ever worked here.
-
-Nothing of it is kept. The code needs the skipped hooks, and the engine has its
-own switch for the task reminder, `CLAUDE_CODE_TODO_REMINDER_MODE=off` (read in
-the 2.1.325 binary, where it turns off every task reminder, not only repeats;
-not set here and not tried). The mod's last version is in git history at
-`10ea7da` (`mods/reminder-diet/`), and the smoke test holds its removal the way
-it holds lookout's. Before building a mod, check its events against the ones
-the guard holds back from a mod a user loads: `classic.*`, `prompt.compose`,
-`prompt.section`, `prompt.context`, `prompt.attachment`, `skill.prompt`,
-`attribution.text`, `session.compact`, `settings.read`, and `session.append`
-for the attachment, hook-context and compaction rows (Anthropic's mods admin
-page, "Know which hooks of a user's mod don't run", read 2026-11-14). That list
-is narrower than the events the guard itself hooks, which a session's debug log
-prints on the line `hooks module cc-plugin-sec-default@builtin loaded`:
-agent-radar's `agent.spawn` hook is on that line and ran in a session checked
-on 2026-11-14, where the debug log shows it settling and names only
-reminder-diet's hooks as passed over. The debug log names each skip as `<mod>:
-<event> bypassed by cc-plugin-sec-default`; the page adds that the guard passes
-over a user's hooks in a few other cases with no note, such as `tool.describe`
-for an organization's tools.
+was sent. On this host it could not: the built-in guard skips the three hooks
+it worked through (see "Before building one" above). In the 14 days to
+2026-11-14 the stored sessions hold 1,893 notices that one of its hooks was
+skipped, and 16,107 of 23,922 main-loop task reminders (67%) still repeated the
+one before. Nothing of it is kept. The engine has its own switch,
+`CLAUDE_CODE_TODO_REMINDER_MODE=off`, which turns off every task reminder, not
+only repeats; it is not set here and not tried. The mod's last version is in
+git history at `10ea7da` (`mods/reminder-diet/`).
 
 lookout was wired on 2026-10-06 and removed on 2026-11-14 on the operator's
 verdict. Every six main-thread model steps it asked one tool-less fork of the

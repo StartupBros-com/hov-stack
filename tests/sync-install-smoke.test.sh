@@ -986,29 +986,26 @@ if jq -e '(.env | has("CLAUDE_CODE_PLUGIN_DIRS") | not) and .env.CLAUDE_ENV_FILE
 # folder the canonical list dropped must be rewritten to the canonical list,
 # not merged with it. lookout came back this way once: it was unregistered in
 # the repo this stack was copied from after the copy was taken, and stayed
-# loaded in every session. reminder-diet, removed the same day, is held the
-# same way.
+# loaded in every session.
 stale_mod_home=$TMP/runtime-env-stale-mod
 mkdir -p "$stale_mod_home"
 ln -s "$REPO/claude-env.sh" "$stale_mod_home/claude-env.sh"
 ln -s "$REPO/mods" "$stale_mod_home/mods"
 stale_mod_want=$(jq -r '.env.CLAUDE_CODE_PLUGIN_DIRS' "$fresh_runtime_home/settings.json" | sed "s|$fresh_runtime_home/|$stale_mod_home/|g")
-jq --arg dirs "$stale_mod_want:$stale_mod_home/mods/lookout:$stale_mod_home/mods/reminder-diet" '.env.CLAUDE_CODE_PLUGIN_DIRS = $dirs' \
+jq --arg dirs "$stale_mod_want:$stale_mod_home/mods/lookout" '.env.CLAUDE_CODE_PLUGIN_DIRS = $dirs' \
   "$fresh_runtime_home/settings.json" > "$stale_mod_home/settings.json"
 chmod 0600 "$stale_mod_home/settings.json"
 stale_mod_out=$(CLAUDE_HOME="$stale_mod_home" "$SYNC" reconcile-runtime-env 2>&1); stale_mod_status=$?
 stale_mod_live=$(jq -r '.env.CLAUDE_CODE_PLUGIN_DIRS' "$stale_mod_home/settings.json")
 if [ "$stale_mod_status" -eq 0 ]; then ok; else bad "reconcile-runtime-env failed on a live list naming a retired mod:"$'\n'"$stale_mod_out"; fi
 if [ "$stale_mod_live" = "$stale_mod_want" ]; then ok; else bad "reconcile-runtime-env kept a retired mod in the live CLAUDE_CODE_PLUGIN_DIRS: $stale_mod_live"; fi
-for retired_mod in lookout reminder-diet; do
-  case "$(jq -r '.env.CLAUDE_CODE_PLUGIN_DIRS' "$REPO/settings.json")" in
-    *"/mods/$retired_mod"*) bad "the canonical CLAUDE_CODE_PLUGIN_DIRS names $retired_mod, which was removed" ;;
-    *) ok ;;
-  esac
-  # The manifest, not the folder: the engine leaves untracked type files in a mod
-  # folder it has loaded, so a checkout that once loaded the mod keeps the folder.
-  if [ ! -e "$REPO/mods/$retired_mod/.claude-plugin/plugin.json" ]; then ok; else bad "mods/$retired_mod has a plugin manifest again; the mod was removed"; fi
-done
+case "$(jq -r '.env.CLAUDE_CODE_PLUGIN_DIRS' "$REPO/settings.json")" in
+  *lookout*) bad "the canonical CLAUDE_CODE_PLUGIN_DIRS names lookout, which was removed" ;;
+  *) ok ;;
+esac
+# The manifest, not the folder: the engine leaves untracked type files in a mod
+# folder it has loaded, so a checkout that once loaded lookout keeps the folder.
+if [ ! -e "$REPO/mods/lookout/.claude-plugin/plugin.json" ]; then ok; else bad "mods/lookout has a plugin manifest again; the mod was removed"; fi
 
 # -- the EnterPlanMode deny union keeps live deny intact ----------------------
 # reconcile_runtime_env appends the canonical bare-name EnterPlanMode deny only
