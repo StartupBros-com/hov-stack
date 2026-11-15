@@ -1,14 +1,5 @@
 #!/usr/bin/env bash
-# sync.sh's three papercut reconciles (papercut-log, read-ceiling-chunk and
-# structured-output-unwrap). The papercut plugin (papercut@hov) registers those
-# hooks itself and Claude Code runs a plugin copy and a settings.json copy
-# separately, so the reconciles retire the settings.json copy once the plugin is
-# installed at user scope and explicitly enabled, and leave live settings exactly
-# as they are otherwise.
-#
-# Before this, reconcile-papercut-hook asked reconcile_hook_group to copy a
-# group the seed no longer carried, so it exited 1 ("canonical hook is missing
-# or duplicated") and `sync.sh install` aborted on every host. Case 1 pins that.
+# sync.sh papercut plugin installation, enablement and failure handling.
 set -euo pipefail
 
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
@@ -28,23 +19,12 @@ mkdir -p "$SRC/scripts/lib"
 cp "$HERE/sync.sh" "$HERE/settings.json" "$SRC/"
 cp "$HERE/scripts/lib/floor-assert.sh" "$SRC/scripts/lib/"
 SYNC=$SRC/sync.sh
-STEPS="reconcile-papercut-hook reconcile-read-ceiling-chunk reconcile-structured-output-unwrap"
 OWNED='papercut-log\.js|read-ceiling-chunk\.js|structured-output-unwrap\.js'
 
 # The seed carries none of the three: a fresh host gets them from the plugin.
 jq -e --arg re "$OWNED" '[.hooks[][]?.hooks[]?.command | select(test($re))] | length == 0' \
   "$HERE/settings.json" >/dev/null || fail "the seed settings.json still registers a hook the papercut plugin owns"
 ok
-
-# run_steps <home>: run every step against <home>, each must exit 0; prints output.
-run_steps() {
-  local home=$1 step out
-  for step in $STEPS; do
-    out=$(env -u CLAUDE_HOME -u CLAUDE_INSTALLED_PLUGINS HOME="$home" "$SYNC" "$step" 2>&1) ||
-      fail "$step exited non-zero for $home:"$'\n'"$out"
-    printf '%s\n' "$out"
-  done
-}
 
 # new_home <name>: a live settings.json carrying all three hooks -- two in the
 # rendered spelling a host has, one in the template's literal $HOME spelling --
@@ -90,58 +70,6 @@ unchanged() {
   ok
 }
 
-# 1. A fresh host: no live settings, no plugin. Every step exits 0 and writes nothing.
-fresh=$TMP/fresh
-mkdir -p "$fresh/.claude"
-out=$(run_steps "$fresh")
-[ ! -e "$fresh/.claude/settings.json" ] || fail "a fresh host got a settings.json from a papercut reconcile"
-case $out in *"claude plugin install papercut@hov"*) ok ;; *) fail "the fresh-host output does not name the plugin install:"$'\n'"$out" ;; esac
-
-# 2-5. The plugin is not usable, so the settings.json copy is the only capture: keep it.
-h=$(new_home no-plugin); cp "$h/.claude/settings.json" "$h/before.json"
-run_steps "$h" >/dev/null; unchanged "$h" "no plugin installed"
-
-h=$(new_home project-scope); plugin "$h" project true; cp "$h/.claude/settings.json" "$h/before.json"
-run_steps "$h" >/dev/null; unchanged "$h" "a project-scope install only"
-
-h=$(new_home disabled); plugin "$h" user false; cp "$h/.claude/settings.json" "$h/before.json"
-run_steps "$h" >/dev/null; unchanged "$h" "a disabled plugin"
-
-h=$(new_home unenabled); plugin "$h" user absent; cp "$h/.claude/settings.json" "$h/before.json"
-run_steps "$h" >/dev/null; unchanged "$h" "a plugin with no enabledPlugins entry"
-
-# 6. Installed at user scope and enabled: all three settings copies go, in both
-#    spellings; the user's own hook, other keys and enabledPlugins stay; emptied
-#    groups are dropped; the previous file is backed up.
-h=$(new_home active); plugin "$h" user true; cp "$h/.claude/settings.json" "$h/before.json"
-run_steps "$h" >/dev/null
-jq -e --arg re "$OWNED" '
-  ([.hooks[][]?.hooks[]?.command | select(test($re))] | length == 0)
-  and .custom.keep == true
-  and .enabledPlugins == {"other@hov": true, "papercut@hov": true}
-  and (.hooks.PreToolUse | length == 1)
-  and ([.hooks.PreToolUse[] | select(.matcher == "Read") | .hooks[].command] == ["/tmp/own-read-hook"])
-  and ((.hooks.PostToolUseFailure // []) | length == 0)
-' "$h/.claude/settings.json" >/dev/null || fail "an active plugin did not retire exactly the three settings copies:"$'\n'"$(jq -c .hooks "$h/.claude/settings.json")"
-ok
-# Each step that changes the file backs it up; backups made in the same second
-# sort by their random suffix, so look for the original among them, not first.
-found=0
-while IFS= read -r backup; do
-  cmp -s "$h/before.json" "$backup" && found=1
-done < <(find "$h/.claude/backups" -name settings.json -type f)
-[ "$found" -eq 1 ] || fail "no backup holds the settings.json from before the retire"
-ok
-
-# 7. Idempotent: a second run changes nothing and writes no new backup.
-cp "$h/.claude/settings.json" "$h/once.json"
-n_backups=$(find "$h/.claude/backups" -name settings.json -type f | wc -l)
-run_steps "$h" >/dev/null
-cmp -s "$h/once.json" "$h/.claude/settings.json" || fail "a second run changed settings.json"
-[ "$(find "$h/.claude/backups" -name settings.json -type f | wc -l)" -eq "$n_backups" ] ||
-  fail "a second run wrote another backup"
-ok
-
 # ---- ensure-papercut-plugin: `sync.sh install` installs the plugin itself --------
 # A stand-in for the claude CLI: it logs its arguments and the CLAUDE_CONFIG_DIR it
 # saw, then acts like `claude plugin install|enable <id> --scope user` against that
@@ -186,7 +114,7 @@ active() {
 }
 
 # 8. Not installed, the claude on PATH (no override): install runs once at user scope
-#    against the default config dir, then the reconciles retire all three copies.
+#    against the default config dir.
 h=$(new_home ensure-path)
 rc=0
 out=$(env -u CLAUDE_HOME -u CLAUDE_INSTALLED_PLUGINS -u CLAUDE_CONFIG_DIR -u CLAUDE_SYNC_CLAUDE_BIN \
@@ -195,9 +123,6 @@ out=$(env -u CLAUDE_HOME -u CLAUDE_INSTALLED_PLUGINS -u CLAUDE_CONFIG_DIR -u CLA
 [ "$(cat "$h/stub.log")" = "<unset>|plugin install papercut@hov --scope user" ] ||
   fail "ensure did not run one user-scope install against the default config dir: $(cat "$h/stub.log")"
 active "$h/.claude" || fail "ensure left papercut@hov not installed and enabled"
-run_steps "$h" >/dev/null
-jq -e --arg re "$OWNED" '[.hooks[][]?.hooks[]?.command | select(test($re))] | length == 0' "$h/.claude/settings.json" >/dev/null ||
-  fail "the reconciles after an ensure did not retire the three settings copies"
 ok
 
 # 9. Idempotent: an installed and enabled plugin makes no CLI call.
@@ -271,18 +196,15 @@ ensure "$h" STUB_MODE=noop
 [ "$rc" -ne 0 ] || fail "a CLI that installed nothing was taken as success:"$'\n'"$out"
 case $out in *"still not installed"*) ok ;; *) fail "the no-op install was not named:"$'\n'"$out" ;; esac
 
-# 16. install() runs the ensure before the reconciles that depend on it and does not
-#     stop on its failure. This one is structural: a full `sync.sh install` with the
-#     hook block on needs this host's real dcg (see sync-install-smoke.test.sh), so the
-#     behaviour of each step is pinned above and only the wiring is pinned here.
+# install runs dcg before plugin installation and defers plugin failure.
 body=$(sed -n '/^install() {/,/^}/p' "$SYNC")
-order=$(printf '%s\n' "$body" | grep -n -o -E 'ensure_papercut_plugin|reconcile_papercut_hook|reconcile_structured_output_unwrap_hook|reconcile_read_ceiling_chunk_hook' | cut -d: -f2 | tr '\n' ' ')
-[ "$order" = "ensure_papercut_plugin reconcile_papercut_hook reconcile_structured_output_unwrap_hook reconcile_read_ceiling_chunk_hook " ] ||
-  fail "install() does not run ensure_papercut_plugin before the three papercut reconciles: $order"
+order=$(printf '%s\n' "$body" | grep -E '^    (reconcile_dcg_hook|ensure_papercut_plugin) ' | awk '{print $1}' | tr '\n' ' ')
+[ "$order" = "reconcile_dcg_hook ensure_papercut_plugin " ] ||
+  fail "install() does not run dcg before plugin installation: $order"
 grep -q -F 'ensure_papercut_plugin || papercut_failed=1' <<<"$body" ||
   fail "install() no longer defers a failed papercut install to its end"
 grep -q -F 'if [ "$papercut_failed" = 1 ]; then' <<<"$body" ||
   fail "install() never exits non-zero for a failed papercut install"
 ok
 
-echo "papercut plugin reconcile: $pass passed"
+echo "papercut plugin install: $pass passed"

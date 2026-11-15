@@ -53,11 +53,6 @@
 #   sync.sh reconcile-dcg
 #                     Add/update only the canonical DCG PreToolUse hook in an
 #                     existing live settings.json. Backs up before changing it.
-#   sync.sh reconcile-node-launcher
-#                     Move live first-party `node "<home>/hooks/..."` hook commands onto
-#                     hooks/bin/node-hook (skips the version-manager shim). Backs up
-#                     first, idempotent, refuses while the launcher is missing;
-#                     install runs it before the per-hook verbs.
 #   sync.sh reconcile-runtime-env
 #                     Merge portable runtime policy: the durable memory/env-file keys,
 #                     the background-shell pressure-reap opt-out
@@ -331,19 +326,6 @@ MANAGED_REF=$HERE/managed-settings.json               # canonical source, versio
 # write the identical string, and an upgrade that repoints the symlink is picked
 # up automatically. Falls back to the symlink path if resolution fails.
 DCG_COMMAND=$(readlink -f "$HOME/.local/bin/dcg" 2>/dev/null || echo "$HOME/.local/bin/dcg")
-# PostToolUseFailure is a distinct event from PostToolUse (which fires only on
-# SUCCESS), so the papercut logger cannot ride an existing group and needs its own
-# reconcile — otherwise adopting an already-configured machine would leave the
-# automatic capture half silently unregistered while every file looked correct.
-PAPERCUT_HOOK_COMMAND='node "$HOME/.claude/hooks/PostToolUseFailure/papercut-log.js"'
-# Retired 2026-11-03: the pr-record hook wrote session→PR rows for the Stop
-# hook's hand-back check, which never ran past shadow mode and was deleted.
-# Live settings.json is volatile and never copied over once it exists, so
-# reconcile now removes the registration. hooks/PostToolUse/pr-record.js stays
-# as a no-op until no live settings.json registers it.
-PR_RECORD_HOOK_COMMAND='node "$HOME/.claude/hooks/PostToolUse/pr-record.js"'
-STRUCTURED_OUTPUT_UNWRAP_HOOK_COMMAND='node "$HOME/.claude/hooks/PreToolUse/structured-output-unwrap.js"'
-READ_CEILING_CHUNK_HOOK_COMMAND='node "$HOME/.claude/hooks/PreToolUse/read-ceiling-chunk.js"'
 MODE=${1:-check}
 
 # Defensive tripwire: this repo is an explicit allowlist copier (never a
@@ -546,21 +528,6 @@ memory_push() {
   else
     echo "memory push complete (mirror-only paths preserved)"
   fi
-}
-
-# First-party node hooks run through hooks/bin/node-hook (hook-floor #369): it execs
-# the first non-shim node on PATH instead of paying the version-manager shim's
-# 100-140 ms per hook. A hook command therefore has two spellings, the launcher
-# form and the bare `node "<script>"` form older live files carry. This prints the
-# other spelling of a canonical-home command (nothing for any other command), so a
-# retirement matches a live file on either side of the migration.
-NODE_HOOK_LAUNCHER_REF='"$HOME/.claude/hooks/bin/node-hook" '
-hook_command_other_form() {
-  local cmd=$1
-  case $cmd in
-    "$NODE_HOOK_LAUNCHER_REF"*) printf 'node %s' "${cmd#"$NODE_HOOK_LAUNCHER_REF"}" ;;
-    'node "$HOME/.claude/hooks/'*) printf '%s%s' "$NODE_HOOK_LAUNCHER_REF" "${cmd#node }" ;;
-  esac
 }
 
 # settings.json is intentionally not symlinked because Claude rewrites it.
@@ -809,8 +776,7 @@ reconcile_hook_group() {
   # registration. Requiring the target to be missing is what makes the removal
   # provable rather than a guess: a registration pointing at nothing has no
   # behaviour to lose. A twin that is present but SUPERSEDED is a different
-  # case and is retired by name (retire_hook_commands), never by this generic
-  # rule.
+  # case and needs explicit retirement, never this generic rule.
   #
   # Two registrations of UNRELATED hooks can share a basename (two index.js).
   # Retiring the missing one is still correct — it could only fail on every
@@ -1006,16 +972,8 @@ reconcile_dcg_hook() {
   return $rc
 }
 
-# The papercut plugin (papercut@hov) registers papercut-log, structured-output-unwrap
-# and read-ceiling-chunk from its own hooks.json, so it owns those three
-# registrations and the seed settings.json carries none of them. Claude Code runs a
-# plugin's copy of a hook separately from a settings.json copy, so a host with both
-# logs every failure twice (inflating papercut's repeat counts) and read-ceiling-chunk
-# records two denials per refusal, reaching its rewrite threshold early. These three
-# reconciles therefore only retire the settings.json copy, and only once the plugin
-# is installed at user scope and enabled: on a host without it they leave live
-# settings alone, because a settings copy is then the only capture there is.
-# harness-doctor section 19 reports a host with neither and a host with both.
+# The papercut plugin owns its three hooks; the seed carries none.
+# harness-doctor section 19 reports missing or duplicate registrations.
 PAPERCUT_PLUGIN_ID=papercut@hov
 papercut_plugin_active() {
   local registry=${CLAUDE_INSTALLED_PLUGINS:-$H/plugins/installed_plugins.json}
@@ -1024,26 +982,12 @@ papercut_plugin_active() {
   jq -e --arg id "$PAPERCUT_PLUGIN_ID" '(.plugins[$id] // []) | any(.scope == "user")' \
     "$registry" >/dev/null 2>&1 || return 1
   # Only an explicit true: `claude plugin install` writes it, and treating an absent
-  # key as enabled could retire the only working registration.
+  # key as enabled could hide a missing registration.
   jq -e --arg id "$PAPERCUT_PLUGIN_ID" '.enabledPlugins[$id] == true' \
     "$H/settings.json" >/dev/null 2>&1
 }
 
-# retire_papercut_settings_hook <label> <command>
-retire_papercut_settings_hook() {
-  if papercut_plugin_active; then
-    retire_hook_commands "$1" "$2"
-  else
-    echo "  $1 hook: live settings left as they are; $PAPERCUT_PLUGIN_ID is not installed and enabled (it registers this hook itself: claude plugin install $PAPERCUT_PLUGIN_ID)"
-  fi
-}
-
-reconcile_papercut_hook() {
-  retire_papercut_settings_hook "papercut" "$PAPERCUT_HOOK_COMMAND"
-}
-
-# install installs papercut@hov itself, just before the three papercut reconciles, so
-# the settings.json copies are retired in the same run. ./setup installs it too
+# install installs papercut@hov itself. ./setup installs it too
 # (lib/default-plugins.txt), but a host that only ever runs `sync.sh install` never
 # runs ./setup, and the seed carries none of the three hooks: without the plugin, a
 # fresh host captures no failures at all. Left alone: an explicit
@@ -1108,108 +1052,6 @@ ensure_papercut_plugin() {
     return 1
   fi
   echo "  papercut: $PAPERCUT_PLUGIN_ID is now installed at user scope and enabled"
-}
-
-# Retired 2026-11-03 (see PR_RECORD_HOOK_COMMAND): remove the registration.
-reconcile_pr_record_hook() {
-  retire_hook_commands "pr-record" "$PR_RECORD_HOOK_COMMAND"
-}
-
-# StructuredOutput unwrap (PreToolUse, issue #844): subagents handed their
-# schema result back wrapped under a top-level `input` key and regenerated the
-# same wrapper up to 16 times per session; the hook rewrites the retry once
-# the wrapper has demonstrably failed. The papercut plugin registers it; see
-# papercut_plugin_active above.
-reconcile_structured_output_unwrap_hook() {
-  retire_papercut_settings_hook "structured-output-unwrap" "$STRUCTURED_OUTPUT_UNWRAP_HOOK_COMMAND"
-}
-
-# Read ceiling guard (PreToolUse on Read): a Read of a file that already
-# failed the token ceiling for this caller is denied when its window would
-# fail again, and the denial names the window that fits (442 of 535 ceiling
-# failures in one day were such repeats, one agent 104 deep; every one of
-# them carried an explicit limit). The papercut plugin registers it too.
-reconcile_read_ceiling_chunk_hook() {
-  retire_papercut_settings_hook "read-ceiling-chunk" "$READ_CEILING_CHUNK_HOOK_COMMAND"
-}
-
-# Node launcher migration (hook-floor #369). settings.json is volatile, so the seed's
-# switch to hooks/bin/node-hook never reaches a configured machine on its own, and
-# the per-hook verbs above only carry the hooks they name (run-with-flags, the Stop
-# and session hooks, and every other first-party command have none). This rewrites
-# each live first-party `node "<harness home>/hooks/<script>"` command, in place and
-# in the same event order, to `"<harness home>/hooks/bin/node-hook" "<...script>"`:
-# the spelling already in use ($HOME template, this harness home, or this machine's
-# home) is kept. Nothing else is touched (dcg, plugin hooks, python hooks, the
-# statusline, every other key). Idempotent: a command already on the launcher does
-# not match, so a second run changes nothing and writes no backup. Backup-first.
-# Refuses while the launcher is absent, because a registration whose launcher is
-# missing fails every event with 127, which Claude Code treats as non-blocking.
-reconcile_node_launcher_hooks() {
-  local live=$H/settings.json tmp backup mode before after
-  guard_no_credentials || return 1
-  command -v jq >/dev/null 2>&1 || {
-    echo "node-launcher reconcile requires jq; settings.json was not changed" >&2
-    return 1
-  }
-  if [ ! -e "$live" ]; then
-    echo "  node-launcher: no live settings.json yet (install seeds the launcher form)"
-    return 0
-  fi
-  [ -f "$live" ] && [ ! -L "$live" ] && jq -e . "$live" >/dev/null 2>&1 || {
-    echo "node-launcher reconcile: live settings.json is missing, symlinked, not a regular file, or invalid; it was not changed" >&2
-    return 1
-  }
-  if [ ! -x "$H/hooks/bin/node-hook" ]; then
-    echo "node-launcher reconcile: launcher $H/hooks/bin/node-hook is missing or not executable; live settings were not changed" >&2
-    echo "  merge the launcher change and pull the main checkout first" >&2
-    return 1
-  fi
-  tmp=$(mktemp "$H/.settings.json.nodehook.XXXXXX") || return 1
-  if ! jq --arg h "$H" --arg home "$HOME" '
-    def prefixes: ["$HOME/.claude", $h, ($home + "/.claude")] | unique;
-    def conv:
-      if type != "string" then .
-      else . as $c
-        | (prefixes | map(. as $x | select($c | startswith("node \"" + $x + "/hooks/"))) | .[0]) as $p
-        | if $p == null then $c
-          else ($c | ltrimstr("node \"" + $p + "/hooks/")) as $rest
-            | if ($rest | startswith("bin/node-hook")) then $c
-              else "\"" + $p + "/hooks/bin/node-hook\" \"" + $p + "/hooks/" + $rest end
-          end
-      end;
-    if (.hooks | type) != "object" then .
-    else .hooks |= with_entries(.value |= (
-      if type != "array" then .
-      else map(if (.hooks | type) == "array"
-               then .hooks |= map(if type == "object" and has("command") then .command |= conv else . end)
-               else . end)
-      end))
-    end
-  ' "$live" >"$tmp"; then
-    rm -f "$tmp"
-    echo "node-launcher reconcile failed; live settings.json was not changed" >&2
-    return 1
-  fi
-  if cmp -s <(jq -S . "$live") <(jq -S . "$tmp"); then
-    rm -f "$tmp"
-    echo "  node-launcher hooks already reconciled"
-    return 0
-  fi
-  before=$(jq '[.hooks[]?[]?.hooks[]?.command // empty | select(contains("hooks/bin/node-hook"))] | length' "$live")
-  after=$(jq '[.hooks[]?[]?.hooks[]?.command // empty | select(contains("hooks/bin/node-hook"))] | length' "$tmp")
-  mkdir -p "$H/backups" || { rm -f "$tmp"; return 1; }
-  backup=$(mktemp -d "$H/backups/hook-launcher-$(date +%Y%m%d-%H%M%S)-XXXXXX") || {
-    rm -f "$tmp"; return 1;
-  }
-  cp -a "$live" "$backup/settings.json" || { rm -f "$tmp"; return 1; }
-  mode=$(stat -c '%a' "$live" 2>/dev/null || echo 600)
-  if ! chmod "$mode" "$tmp" || ! mv -f "$tmp" "$live"; then
-    rm -f "$tmp"
-    echo "node-launcher reconcile: atomic settings replacement failed; backup remains at $backup/settings.json" >&2
-    return 1
-  fi
-  echo "  moved $((after - before)) first-party hook command(s) onto hooks/bin/node-hook; previous settings backed up to $backup/settings.json"
 }
 
 # A model-initiated EnterPlanMode call drops a session out of bypass
@@ -1648,58 +1490,6 @@ guard_auto_mode_policy_for_push() {
       return 1
     fi
   fi
-}
-
-# Remove obsolete hook commands from every event without replacing unrelated live
-# config. Used after the replacement is registered, so a failed migration never
-# leaves the machine with neither the old nor the new guard.
-retire_hook_commands() {
-  local label=$1; shift
-  local live=$H/settings.json retired tmp backup mode
-  [ -f "$live" ] || return 0
-  command -v jq >/dev/null 2>&1 || return 1
-  # A retired command is named in the template's spelling; a live file written
-  # before the tracked file became a $HOME template carries it rendered with
-  # this harness home or this machine's home. Every spelling is retired.
-  local c other
-  local -a all=()
-  for c in "$@"; do
-    all+=("$c")
-    other=$(hook_command_other_form "$c")
-    [ -z "$other" ] || all+=("$other")
-  done
-  retired=$(printf '%s\n' "${all[@]}" | jq -Rsc --arg h "$H" --arg home "$HOME" '
-    split("\n")[:-1]
-    | map(., gsub("\\$HOME/\\.claude/"; $h + "/"), gsub("\\$HOME/"; $home + "/"))
-    | unique
-  ') || return 1
-  tmp=$(mktemp "$H/.settings.json.retire.XXXXXX") || return 1
-  if ! jq --argjson retired "$retired" '
-    .hooks = ((.hooks // {}) | with_entries(
-      .value = [
-        .value[]?
-        | .hooks = ((.hooks // []) | map(select((.command // "") as $c | ($retired | index($c) | not))))
-        | select((.hooks | length) > 0)
-      ]
-    ))
-  ' "$live" >"$tmp"; then
-    rm -f "$tmp"
-    return 1
-  fi
-  if cmp -s <(jq -S . "$live") <(jq -S . "$tmp"); then
-    rm -f "$tmp"
-    return 0
-  fi
-  mkdir -p "$H/backups" || { rm -f "$tmp"; return 1; }
-  backup=$(mktemp -d "$H/backups/hook-retire-$(date +%Y%m%d-%H%M%S)-XXXXXX") || {
-    rm -f "$tmp"; return 1;
-  }
-  cp -a "$live" "$backup/settings.json" || { rm -f "$tmp"; return 1; }
-  mode=$(stat -c '%a' "$live" 2>/dev/null || echo 600)
-  chmod "$mode" "$tmp" && mv -f "$tmp" "$live" || {
-    rm -f "$tmp"; return 1;
-  }
-  echo "  retired $label hook command(s); previous settings backed up to $backup/settings.json"
 }
 
 # push_shrink_guard <live> <canonical> - refuse a push that would gut a file.
@@ -2213,20 +2003,10 @@ install() {
   if [ "${CLAUDE_SYNC_SKIP_HOOK_RECONCILE:-0}" = 1 ]; then
     echo "  skipped hook reconcile (CLAUDE_SYNC_SKIP_HOOK_RECONCILE=1)"
   else
-    # Before the apply, so the apply finds no `node "..."` spelling of a tracked
-    # hook to register a second time. install runs it (unlike an opt-in verb)
-    # because the seed alone never reaches a configured host; leaving it manual
-    # would strand hooks on the shim path forever.
-    reconcile_node_launcher_hooks || return 1
     reconcile_dcg_hook || return 1
     # Not `|| return 1`: a failed plugin install (offline, marketplace not added)
-    # leaves the settings copies in place below, and the links, units and timers
-    # after this block still matter. install exits non-zero at its end instead.
+    # still allows links, units and timers to install. Report failure at the end.
     ensure_papercut_plugin || papercut_failed=1
-    reconcile_papercut_hook || return 1
-    reconcile_structured_output_unwrap_hook || return 1
-    reconcile_read_ceiling_chunk_hook || return 1
-    reconcile_pr_record_hook || return 1
   fi
   # Link only the portable policy. Never seed or copy the host-local authority
   # state, because that would manufacture a canonical checkout on another host.
@@ -2998,14 +2778,9 @@ case "$MODE" in
   push) push ;;
   install) install ;;
   reconcile-dcg) reconcile_dcg_hook --write-canonical ;;
-  reconcile-papercut-hook) reconcile_papercut_hook ;;
   ensure-papercut-plugin) ensure_papercut_plugin ;;
-  reconcile-structured-output-unwrap) reconcile_structured_output_unwrap_hook ;;
-  reconcile-read-ceiling-chunk) reconcile_read_ceiling_chunk_hook ;;
-  reconcile-pr-record-hook) reconcile_pr_record_hook ;;
   reconcile-runtime-env) reconcile_runtime_env ;;
   reconcile-windows-auto-mode) reconcile_windows_auto_mode ;;
-  reconcile-node-launcher) reconcile_node_launcher_hooks ;;
   reconcile-docker-init)
     if [ "$#" -ne 1 ]; then
       echo "usage: sync.sh reconcile-docker-init" >&2
@@ -3035,5 +2810,5 @@ case "$MODE" in
   check) check ;;
   memory-preview|memory-check) memory_preview ;;
   memory-push) memory_push ;;
-  *) echo "usage: sync.sh apply-settings [--plan] [--quiet] [--seed-base <rev>]|push|install|reconcile-docker-init|adopt-docker-init [--allow-existing-false]|rollback-docker-init|reconcile-dcg|reconcile-runtime-env|reconcile-windows-auto-mode|reconcile-papercut-hook|ensure-papercut-plugin|reconcile-structured-output-unwrap|reconcile-read-ceiling-chunk|reconcile-pr-record-hook|check|memory-preview|memory-check|memory-push" >&2; exit 2 ;;
+  *) echo "usage: sync.sh apply-settings [--plan] [--quiet] [--seed-base <rev>]|push|install|reconcile-docker-init|adopt-docker-init [--allow-existing-false]|rollback-docker-init|reconcile-dcg|reconcile-runtime-env|reconcile-windows-auto-mode|ensure-papercut-plugin|check|memory-preview|memory-check|memory-push" >&2; exit 2 ;;
 esac
