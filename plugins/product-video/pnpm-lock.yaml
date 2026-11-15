@@ -21,8 +21,8 @@ importers:
         specifier: 19.2.3
         version: 19.2.3(react@19.2.3)
       remotion:
-        specifier: 4.0.518
-        version: 4.0.518(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+        specifier: 4.0.543
+        version: 4.0.543(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
       zod:
         specifier: 4.4.3
         version: 4.4.3
