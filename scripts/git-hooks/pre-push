@@ -1,0 +1,89 @@
+#!/usr/bin/env bash
+# scripts/git-hooks/pre-push: the public-safety gate before a push to this public repository.
+# Every commit the push would publish is scanned with scripts/public-safety-scan.sh
+# --require-tokens, the run the scan's header and ci.yml's public-safety job leave to the
+# author's machine: CI never sees the private-token list, so only a checkout that has it
+# can apply it. It is installed per checkout, never for every clone:
+#
+#   git config core.hooksPath <absolute path of a checkout that stays on main>/scripts/git-hooks
+#
+# Use an absolute path to a checkout that tracks main. A relative hooks path runs the hook
+# the checked-out branch carries, and this repository takes outside pull requests. The hook
+# runs the scan that sits beside it and scans the checkout being pushed from.
+#
+# git passes the remote's name and URL and writes one line per pushed ref on stdin:
+# <local ref> <local sha> <remote ref> <remote sha>. A deleted ref (an all-zero local sha)
+# publishes nothing and is skipped. Every commit not yet on the remote's tracking refs is
+# scanned, not only the tips, because history is published too: text added in one commit
+# and removed in the next is still public. A ref's commits are judged by the allowlist and
+# public-repository list committed at that ref's tip, the copies CI judges the head by, so
+# an uncommitted edit to either changes nothing here. A push to a bare URL is refused: with
+# no tracking refs to compare against, the whole history would be scanned.
+set -uo pipefail
+
+HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
+SCAN=$HERE/../public-safety-scan.sh
+remote=${1:?pre-push: git passes the remote name as the first argument}
+say() { echo "public-safety pre-push: $*" >&2; }
+
+[ -f "$SCAN" ] || { say "the scan is missing beside this hook: $SCAN"; exit 1; }
+if ! git config --get "remote.$remote.url" >/dev/null; then
+  say "push through a named remote (git push origin ...), not a URL: the gate scans only the"
+  say "commits the remote's tracking refs do not have, and a URL has none"
+  exit 1
+fi
+ROOT=$(git rev-parse --show-toplevel) || { say "not inside a checkout"; exit 1; }
+
+# Read every pushed ref before scanning anything: the scan must never read this stdin.
+tips=()
+while read -r _lref lsha _rref _rsha; do
+  [[ "$lsha" =~ ^0+$ ]] && continue
+  tips+=("$lsha")
+done
+[ "${#tips[@]}" -gt 0 ] || exit 0
+
+WORK=$(mktemp -d "${TMPDIR:-/tmp}/pre-push-scan.XXXXXX") || { say "mktemp failed"; exit 1; }
+trap 'rm -rf "$WORK"' EXIT
+
+# One row per commit to scan: <commit> TAB <allowlist file> TAB <repository list file>. A
+# commit two pushed refs share is scanned once, with the first ref's lists.
+ROWS=$WORK/rows PLAN=$WORK/plan
+: > "$ROWS"
+n=0
+for lsha in "${tips[@]}"; do
+  n=$((n + 1))
+  tip=$(git rev-parse --verify --quiet "$lsha^{commit}") || { say "$lsha is not a commit; nothing else is pushed here"; exit 1; }
+  allow=$WORK/allow.$n repos=$WORK/repos.$n
+  git show "$tip:.public-safety-allow" > "$allow" || { say "$tip has no committed .public-safety-allow"; exit 1; }
+  git show "$tip:.public-safety-repos" > "$repos" || { say "$tip has no committed .public-safety-repos"; exit 1; }
+  git rev-list "$tip" --not --remotes="$remote" > "$WORK/new" || { say "git rev-list failed for $tip"; exit 1; }
+  awk -v a="$allow" -v r="$repos" '{ printf "%s\t%s\t%s\n", $0, a, r }' "$WORK/new" >> "$ROWS"
+done
+awk -F'\t' '!seen[$1]++' "$ROWS" > "$PLAN"
+
+count=$(wc -l < "$PLAN")
+[ "$count" -gt 0 ] || exit 0
+say "scanning $count commit(s) not yet on $remote"
+failed=0
+while IFS=$'\t' read -r commit allow repos; do
+  bash "$SCAN" --root "$ROOT" --rev "$commit" --allow "$allow" --repos "$repos" --require-tokens \
+    < /dev/null > "$WORK/report" 2>&1
+  rc=$?
+  [ "$rc" -eq 0 ] && continue
+  cat "$WORK/report" >&2
+  if [ "$rc" -ne 1 ]; then
+    say "the scan could not run on $commit (exit $rc); push blocked"
+    exit 1
+  fi
+  say "commit $commit fails the scan"
+  failed=$((failed + 1))
+done < "$PLAN"
+
+if [ "$failed" -gt 0 ]; then
+  say "push blocked: $failed of $count commit(s) carry a hit. Remove the text from every"
+  say "unpushed commit that has it (history is published too), or add a reviewed row to"
+  say ".public-safety-allow when the text is meant to be public"
+  exit 1
+fi
+say "$count commit(s) clean"
+exit 0
