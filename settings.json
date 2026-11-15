@@ -678,7 +678,7 @@
           {
             "type": "command",
             "command": "\"$HOME/.claude/hooks/bin/node-hook\" \"$HOME/.claude/hooks/Stop/verify-on-stop.js\"",
-            "timeout": 190
+            "timeout": 270
           }
         ]
       }
