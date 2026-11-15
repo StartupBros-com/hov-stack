@@ -29,7 +29,7 @@ ALLOWED="${4:-}"
 command -v codex >/dev/null || { echo '{"adapter":"codex","ok":false,"error":"codex not installed"}'; exit 2; }
 
 WT="$(cd "$WT" && pwd)"
-RUNDIR="$(mktemp -d -t te-codex-XXXXXX)" || exit 1
+RUNDIR="$(mktemp -d -t te-codex-XXXXXX)" || { echo '{"adapter":"codex","ok":false,"error":"could not create a run directory"}'; exit 2; }
 RESULT="$RUNDIR/result.json"; STDOUT="$RUNDIR/stdout.log"; ERRLOG="$RUNDIR/stderr.log"
 CB_REGEX='(usage limit reached|rate.?limit|429 too many requests|All accounts are temporarily unavailable)'
 

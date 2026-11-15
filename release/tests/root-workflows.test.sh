@@ -20,13 +20,42 @@ reject() {
 cd "$ROOT"
 files=(plugins-ci.yml auto-release.yml release.yml publish-staged-release.yml release-train.yml)
 for file in "${files[@]}"; do yq -o=json '.' ".github/workflows/$file" >"$TMP/$file.json"; done
-jq -e '.name == "ci" and (.on | keys == ["pull_request","push"]) and .on.push.branches == ["main"]
-  and (.on.push | has("paths") | not) and (.on.pull_request | . == null)
+jq -e '.name == "ci" and (.on | keys == ["merge_group","pull_request","push"]) and .on.push.branches == ["main"]
+  and (.on.push | has("paths") | not) and (.on.pull_request | . == null) and (.on.merge_group | . == null)
   and .jobs.changes.name == "changed plugins" and .jobs.ci.name == "ci"
   and .jobs.ci.needs == ["changes","plugin"] and .jobs.ci.if == "always()"
   and .jobs.plugin.strategy["fail-fast"] == false
   and (.jobs.plugin.if | contains("head.repo.fork == false"))' "$TMP/plugins-ci.yml.json" >/dev/null || die 'CI trigger/aggregate contract'
 pass 'plugin CI always runs the aggregate with the trusted matrix guard'
+
+# One base per run, from ci-base-sha.sh. The base a pull request event names goes stale as
+# soon as main moves, and a run that reads it counts main's later commits as its own: every
+# plugin they touched is then checked on a pull request that changed none.
+base_contract() { # <plugins-ci json>
+  jq -e '.jobs.changes.outputs.base == "${{ steps.base.outputs.base }}"
+    and ([.jobs.changes.steps[] | select(.id == "base")]
+      | (length == 1 and .[0].run == "release/scripts/ci-base-sha.sh >> \"$GITHUB_OUTPUT\""
+        and .[0].env == {"EVENT_NAME":"${{ github.event_name }}","HEAD_SHA":"${{ github.sha }}",
+          "PR_BASE_SHA":"${{ github.event.pull_request.base.sha }}",
+          "MERGE_GROUP_BASE_SHA":"${{ github.event.merge_group.base_sha }}",
+          "PUSH_BEFORE_SHA":"${{ github.event.before }}"}))
+    and ([.jobs.changes.steps[] | select(.id == "changes")]
+      | (length == 1 and .[0].env.BASE_SHA == "${{ steps.base.outputs.base }}"))
+    and ([.jobs.plugin.steps[] | select(.env.BASE_SHA?)]
+      | (length == 1 and .[0].env.BASE_SHA == "${{ needs.changes.outputs.base }}"))' "$1" >/dev/null
+}
+base_contract "$TMP/plugins-ci.yml.json" || die 'plugin CI base contract'
+base_mutants=(
+  "the selector reading the event base|(.jobs.changes.steps[] | select(.id == \"changes\") | .env.BASE_SHA) = \"\${{ github.event.pull_request.base.sha || github.event.before }}\""
+  "the plugin job reading the event base|(.jobs.plugin.steps[] | select(.env.BASE_SHA?) | .env.BASE_SHA) = \"\${{ github.event.pull_request.base.sha || github.event.before }}\""
+  'no merge group base|del(.jobs.changes.steps[] | select(.id == "base") | .env.MERGE_GROUP_BASE_SHA)'
+  'the base step removed|del(.jobs.changes.steps[] | select(.id == "base"))'
+)
+for mutant in "${base_mutants[@]}"; do
+  jq "${mutant#*|}" "$TMP/plugins-ci.yml.json" >"$TMP/base-mutant.json"
+  if base_contract "$TMP/base-mutant.json"; then die "accepted plugin CI base mutant: ${mutant%%|*}"; fi
+done
+pass 'plugin CI takes one base per run from ci-base-sha.sh, never the base a pull request event names'
 jq -e '.on | keys == ["push","workflow_dispatch"]' "$TMP/auto-release.yml.json" >/dev/null || die 'auto events'
 jq -e --arg due "steps.decide.outputs.due == 'true'" \
   --arg tagif "steps.decide.outputs.due == 'true' && steps.identity.outputs.have_app == 'true'" \
@@ -91,8 +120,8 @@ pass 'every run is a short script call; runners, pins and checkouts are hardened
 # the checkout token in its git config.
 yq -o=json '.' .github/workflows/ci.yml >"$TMP/ci.yml.json"
 cat >"$TMP/public-ci.jq" <<'PUBLICCI'
-  (.on | keys == ["pull_request","push"])
-  and .on.pull_request == null and .on.push == {"branches":["main"]}
+  (.on | keys == ["merge_group","pull_request","push"])
+  and .on.pull_request == null and .on.merge_group == null and .on.push == {"branches":["main"]}
   and .permissions == {"contents":"read"}
   and (.jobs | keys == ["public-safety","test"])
   and .jobs.test.name == "setup, hooks, suites, secrets"
@@ -125,19 +154,25 @@ pass 'both general CI jobs reject missing and enabled credential persistence'
 # case-insensitively across workflows, so each file keeps a literal prefix of its
 # own: a `github.workflow` key would put ci.yml's `CI` and plugins-ci.yml's `ci` in
 # one group, each cancelling the other on every push.
+# All three also run on `merge_group`, unfiltered: each holds a check main requires, and a
+# merge queue waits on every required check at the queue's own commit. A workflow without
+# the trigger never reports there, and each queued pull request waits out the queue's
+# timeout and is dropped.
 yq -o=json '.' .github/workflows/validate.yml >"$TMP/validate.yml.json"
 ci_trigger_contract() { # <workflow json> <group prefix>
   jq -e --arg group "$2-\${{ github.event.pull_request.number || github.sha }}" \
     --arg cancel "\${{ github.event_name == 'pull_request' }}" '
-    (.on | keys == ["pull_request","push"]) and .on.pull_request == null
-    and .on.push == {"branches":["main"]}
+    (.on | keys == ["merge_group","pull_request","push"]) and .on.pull_request == null
+    and .on.merge_group == null and .on.push == {"branches":["main"]}
     and .concurrency == {"group":$group,"cancel-in-progress":$cancel}' "$1" >/dev/null
 }
 for row in ci.yml:ci-yml plugins-ci.yml:plugins-ci-yml validate.yml:validate-yml; do
   ci_trigger_contract "$TMP/${row%%:*}.json" "${row#*:}" || die "CI trigger/concurrency contract: ${row%%:*}"
 done
-pass 'the three CI workflows push only on main and cancel only a superseded pull request run, each in a group of its own'
+pass 'the three CI workflows run on a merge group, push only on main and cancel only a superseded pull request run, each in a group of its own'
 ci_mutants=(
+  'no merge group trigger|del(.on.merge_group)'
+  'merge group limited to some branches|.on.merge_group = {"branches":["release"]}'
   'unfiltered push|.on.push = null'
   'push on every branch|.on.push = {"branches":["**"]}'
   'missing concurrency|del(.concurrency)'
@@ -153,7 +188,30 @@ for mutant in "${ci_mutants[@]}"; do
 done
 jq '.on.push = null' "$TMP/ci.yml.json" >"$TMP/ci-trigger-mutant.json"
 if jq -e -f "$TMP/public-ci.jq" "$TMP/ci-trigger-mutant.json" >/dev/null; then die 'public CI contract accepted an unfiltered push'; fi
-pass 'the CI trigger contract rejects an unfiltered or every-branch push, a missing, shared or ref-keyed group, and cancelling outside pull requests'
+pass 'the CI trigger contract rejects a missing or filtered merge group, an unfiltered or every-branch push, a missing, shared or ref-keyed group, and cancelling outside pull requests'
+
+# The trusted jobs run on a push to main, on a merge group and on a pull request from this
+# repository; a pull request from a fork gets none of them. A job whose `if:` left the merge
+# group out would be skipped there, and a skipped required check counts as passed: the queue
+# would land the pull request with that check never run on the commit it tested.
+TRUSTED="github.event_name == 'push' || github.event_name == 'merge_group' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.repo.fork == false)"
+NO_MERGE_GROUP="github.event_name == 'push' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.repo.fork == false)"
+trusted_jobs_contract() { # <plugins-ci json> <validate json>
+  jq -e --arg t "$TRUSTED" '.jobs.plugin.if == "needs.changes.outputs.any == '\''true'\'' && (\($t))"' "$1" >/dev/null \
+    && jq -e --arg t "$TRUSTED" '.jobs.syntax.if == $t
+      and .jobs.full.if == "vars.HOV_SOURCES_PUBLIC == '\''true'\'' && (\($t))"
+      and (.jobs["public-pr-syntax"].if | startswith("github.event_name == '\''pull_request'\'' && "))' "$2" >/dev/null
+}
+trusted_jobs_contract "$TMP/plugins-ci.yml.json" "$TMP/validate.yml.json" || die 'trusted job event contract'
+jq --arg t "$NO_MERGE_GROUP" '.jobs.plugin.if = "needs.changes.outputs.any == '\''true'\'' && (\($t))"' "$TMP/plugins-ci.yml.json" >"$TMP/trusted-mutant.json"
+if trusted_jobs_contract "$TMP/trusted-mutant.json" "$TMP/validate.yml.json"; then die 'accepted a plugin job that skips the merge group'; fi
+jq --arg t "$NO_MERGE_GROUP" '.jobs.syntax.if = $t' "$TMP/validate.yml.json" >"$TMP/trusted-mutant.json"
+if trusted_jobs_contract "$TMP/plugins-ci.yml.json" "$TMP/trusted-mutant.json"; then die 'accepted a syntax job that skips the merge group'; fi
+jq --arg t "$NO_MERGE_GROUP" '.jobs.full.if = "vars.HOV_SOURCES_PUBLIC == '\''true'\'' && (\($t))"' "$TMP/validate.yml.json" >"$TMP/trusted-mutant.json"
+if trusted_jobs_contract "$TMP/plugins-ci.yml.json" "$TMP/trusted-mutant.json"; then die 'accepted a pinned-sources job that skips the merge group'; fi
+jq '.jobs["public-pr-syntax"].if = "github.event_name != '\''push'\''"' "$TMP/validate.yml.json" >"$TMP/trusted-mutant.json"
+if trusted_jobs_contract "$TMP/plugins-ci.yml.json" "$TMP/trusted-mutant.json"; then die 'accepted the fork-only job running on a merge group'; fi
+pass 'the plugin, syntax and pinned-sources jobs run on a merge group; the fork-only job stays on pull requests'
 
 # The pins refresh runs downloaded programs, so only a read-only job with no secret may
 # run them, and the job holding the bot's key takes nothing from it but rows that apply

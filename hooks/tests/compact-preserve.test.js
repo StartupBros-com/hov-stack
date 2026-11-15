@@ -1,6 +1,8 @@
 'use strict';
 const { test } = require('node:test');
 const assert = require('node:assert');
+const fs = require('node:fs');
+const path = require('node:path');
 const { runHook } = require('./lib/harness');
 
 const HOOK = 'PreCompact/compact-preserve.js';
@@ -35,6 +37,51 @@ test('manual trigger with user instructions: silent (user focus wins)', async ()
       hook_event_name: 'PreCompact',
       trigger: 'manual',
       custom_instructions: 'focus on the auth bug fix',
+    })
+  );
+});
+
+// The idle-compact mod's compaction has the same shape as `/compact <focus>`:
+// trigger "manual" with custom text. Build that text from the vendored source,
+// so a re-vendor that rewords the instructions fails here.
+function idleCompactInstructions() {
+  const source = fs.readFileSync(
+    path.join(__dirname, '..', '..', 'mods', 'idle-compact', 'hooks', 'register.ts'),
+    'utf8'
+  );
+  const at = source.indexOf('const instructions = (at: string, idleMin: number) =>');
+  assert.notStrictEqual(at, -1, 'register.ts no longer defines instructions(at, idleMin)');
+  const end = source.indexOf('\n\n', at);
+  const pieces = [];
+  // The body is one template literal followed by plain string literals.
+  for (const m of source.slice(at, end).matchAll(/`([^`]*)`|'([^']*)'/g)) {
+    pieces.push(m[1] !== undefined ? m[1] : m[2]);
+  }
+  assert.ok(pieces.length >= 2, `expected the instruction literals, found ${pieces.length}`);
+  const text = pieces.join('').replace('${at}', '17:36').replace('${idleMin}', '50');
+  assert.doesNotMatch(text, /\$\{/, 'an unfilled placeholder is left in the instructions');
+  return text;
+}
+
+test('idle-compact mod instructions (manual, custom text): emits preserve-list', async () => {
+  const instructions = idleCompactInstructions();
+  // What the mod sends, as its own source builds it.
+  assert.match(instructions, /^This compaction ran automatically at 17:36, after 50 minutes idle/);
+  assertEmits(
+    await runHook(HOOK, {
+      hook_event_name: 'PreCompact',
+      trigger: 'manual',
+      custom_instructions: instructions,
+    })
+  );
+});
+
+test('a user focus that only mentions an automatic compaction: still silent', async () => {
+  assertSilent(
+    await runHook(HOOK, {
+      hook_event_name: 'PreCompact',
+      trigger: 'manual',
+      custom_instructions: 'keep the part where this compaction ran automatically at night',
     })
   );
 });

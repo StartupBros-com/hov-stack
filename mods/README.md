@@ -10,14 +10,49 @@ its own repository and a card in the House of Vibe marketplace.
 | [install-preflight](install-preflight/) | `/preflight <folder or repo>` shows in plain language what a plugin or mod can do before you install it. Not wired globally since 2026-10-04 (see below) |
 | [agent-radar](agent-radar/) | Band line per running subagent in this session (elapsed time, tool count, last tool), and per piece of delegated work it started outside itself (Codex, a Pro review, CE's peer, a headless Claude), with a toast when each ends; `/radar` opens a pane of every agent and its messages. Third-party, vendored at a pinned commit with local fixes and additions; see its `NOTICE.md` |
 | [read-ceiling-pager](read-ceiling-pager/) | A Read whose explicit window would exceed the token cap is clamped to the lines that fit, and the result says which lines came back and where to continue; a Read the engine refuses anyway gets a retry window from the engine's own numbers that the read-ceiling-chunk hook admits after a first refusal |
-| [reminder-diet](reminder-diet/) | Leaves out an engine task reminder that repeats, word for word, the last one the same loop was sent; the first, and any reminder whose task list changed, still goes through, and the comparison starts over after a compaction or `/clear` |
 | [x-mcp-budget](x-mcp-budget/) | Caps what the X (Twitter) MCP's reads cost: list, search and timeline calls ask for at most 10 results, each post and user returned is priced once per UTC day in a ledger every session on the machine shares, and once the day reaches the budget (default $1) further X MCP calls are refused until 00:00 UTC, naming the free oEmbed route for a single post |
+| [idle-compact](idle-compact/) | Compacts a session whose main loop has had no turn for 50 minutes, ten minutes before its one-hour prompt cache expires, so the first turn back does not re-read the whole conversation uncached; a conversation under 100,000 tokens (the floor set here) is left alone. Third-party, vendored unchanged at a pinned commit; see its `NOTICE.md` |
 
 Each house mod's README carries its `hooks:` and `calls:` lines as printed by
-`claude plugin validate`, its options, and its limits. `IDEAS.md` is the ranked
-backlog the house mods were chosen from and records the community-mod
-evaluations that brought in agent-radar, where-am-i and next-steps (the last
-two removed, see below). lookout, a house mod, was removed too (see below).
+`claude plugin validate`, its options, and its limits. where-am-i and
+next-steps, both vendored community mods, and lookout and reminder-diet, both
+house mods, were removed (see below).
+
+The house mods were chosen from a ranked backlog, `IDEAS.md`, generated on
+2026-10-01. It also held the community-mod evaluations that brought in
+agent-radar, where-am-i and next-steps. It was retired on 2026-11-15 on the
+operator's go, once a survey of the published mods on 2026-11-14 had superseded
+its rankings. Its two standing rules are under "Before building one" below, and
+its last version is in git history at `b07b90e` (`mods/IDEAS.md`). The backlog
+ids below (M04, M33) are rows in it.
+
+## Before building one
+
+Two operator rules, each from a real-use verdict recorded under "Load one":
+
+- No mod that blocks or asks on a guess. A guard earns a place only by removing
+  friction for long-running agents, never by adding a stop to their work
+  (secret-stop, 2026-10-03).
+- No next-prompt picker (next-steps, 2026-10-06).
+
+Claude Code loads its built-in guard on this host (`cc-plugin-sec-default`; its
+docs give the machine's managed settings as the reason). The guard skips a hook
+that a mod loaded from a plugin folder registers on any of these events:
+`classic.*`, `prompt.compose`, `prompt.section`, `prompt.context`,
+`prompt.attachment`, `skill.prompt`, `attribution.text`, `session.compact`,
+`settings.read`, and `session.append` for the attachment, hook-context and
+compaction rows (Anthropic's mods admin page, "Know which hooks of a user's mod
+don't run", read 2026-11-14). The mod still loads, with a note in `/plugin` and
+no error, and the hook never runs, so check a mod's events against that list
+before building it.
+
+A session's debug log names each skip as `<mod>: <event> bypassed by
+cc-plugin-sec-default`. The list is narrower than the events the guard itself
+hooks, which the debug log prints on the line `hooks module
+cc-plugin-sec-default@builtin loaded`: agent-radar's `agent.spawn` hook is on
+that line and ran in a session checked on 2026-11-14. The page adds that the
+guard passes over a user's hooks in a few other cases with no note, such as
+`tool.describe` for an organization's tools.
 
 ## Load one
 
@@ -38,12 +73,17 @@ empty or relative entry or a folder with no `.claude-plugin/plugin.json`;
 `sync.sh check` reports a manifest that disappears later as drift. Because the
 path goes through the symlink, an install run from a worktree re-points the
 link the way it does for hooks and never writes its own path into a live file.
-To unload a mod everywhere, drop its path from that list.
+To unload a mod everywhere, drop its path from that list. Deleting the mod's
+folder from git does not remove the files the engine wrote beside it
+(`<mod>/.claude-plugin/types/` and `<mod>/tsconfig.json`, both gitignored; see
+"Check one"): a checkout that loaded the mod keeps them, and the folder with
+them, until someone removes them by hand, as was done for reminder-diet on
+2026-11-14.
 
 agent-radar was wired on 2026-10-03 by operator decision, in place of a staged
 trial, and is judged by real use; `/radar` had answered in one live session
 before that. where-am-i and next-steps followed the same day on the same terms,
-picked from the ranked shortlist in `IDEAS.md` for returning to a session and
+picked from the backlog's ranked shortlist for returning to a session and
 for the typing a follow-up costs; neither had been loaded live before the wiring
 PR, and each makes one small Haiku completion per main turn, none when nothing
 draws the session. secret-stop was wired with agent-radar and retired the same
@@ -79,14 +119,17 @@ tokens (`CLAUDE_CODE_FILE_READ_MAX_OUTPUT_TOKENS`, see `HARNESS.md`): 86% of
 the refused windows in the 14 days before fit under it. The pager reads the same
 value, so it now handles the tail above 50,000.
 
-reminder-diet was wired on 2026-10-04 on the same terms, built from the backlog
-(M33) and narrowed to the one repeat the measurement found worth removing: in the
-14 days before, 19,794 of 27,432 stored task reminders (72%) carried the same
-task list as the previous one in the same loop, about 241M characters, most of
-them in long-running loops. Every other injected reminder is either real context
-sent about once a loop or too small to matter, and is left alone. How often task
-tools are called per loop is the measure that would show the repeats were doing
-work; a drop takes the mod back out of `CLAUDE_CODE_PLUGIN_DIRS`.
+reminder-diet was wired on 2026-10-04 and removed on 2026-11-14 on the
+operator's verdict. Built from the backlog (M33), it was meant to leave out an
+engine task reminder that repeated, word for word, the last one the same loop
+was sent. On this host it could not: the built-in guard skips the three hooks
+it worked through (see "Before building one" above). In the 14 days to
+2026-11-14 the stored sessions hold 1,893 notices that one of its hooks was
+skipped, and 16,107 of 23,922 main-loop task reminders (67%) still repeated the
+one before. Nothing of it is kept. The engine has its own switch,
+`CLAUDE_CODE_TODO_REMINDER_MODE=off`, which turns off every task reminder, not
+only repeats; it is not set here and not tried. The mod's last version is in
+git history at `10ea7da` (`mods/reminder-diet/`).
 
 lookout was wired on 2026-10-06 and removed on 2026-11-14 on the operator's
 verdict. Every six main-thread model steps it asked one tool-less fork of the
@@ -113,6 +156,32 @@ account's daily X MCP spend in the X developer console, against the 30 days
 before. As with the other mods, the operator's verdict from real use decides. A
 budget that keeps refusing useful research is raised under `pluginConfigs`, not
 worked around.
+
+idle-compact was wired on 2026-11-15 on the operator's go, out of the
+2026-11-14 survey of published mods. It is davidar/claude-idle-compact,
+vendored unchanged at one pinned commit; its `NOTICE.md` has the provenance and
+what was checked. Sessions here are often left waiting overnight or for days,
+and the first turn back then re-reads the whole conversation at the uncached
+price. When a session's main loop has had no turn for 50 minutes, the mod
+compacts it through `$.session.compact`, the same model request `/compact`
+makes, while the one-hour cache (`promptCacheTtl`) is still warm. Compaction is
+lossy: the session comes back to a summary. A main loop that has ended its turn
+and is waiting on a subagent, a background shell or a scheduled wake-up counts
+as idle. Two settings are this harness's own. `pluginConfigs` sets `minTokens`
+to 100000 (upstream's default is 40000), so a small session is never compacted
+for being idle. And `hooks/PreCompact/compact-preserve.js` gives the mod's
+compaction the preserve-list, which it withholds from any other manual compact
+that carries instructions. Before wiring, a throwaway session with the floor
+lowered compacted after a minute idle (18k tokens to a 3k summary, 71% of the
+request read from cache), and two more left at the 100,000 floor each logged
+that the conversation was under it. A fourth, with the floor lowered, was
+compacted while a background shell it had started was still running: the hook
+added the preserve-list, and the shell's completion started the session's next
+turn afterwards. Not seen before wiring: a compaction at the real 50-minute
+mark, and one while a subagent was still running. As with the other mods, the operator's verdict from real use decides;
+the cost to watch for is a session that came back to a summary missing
+something it needed. `idleMinutes` and `minTokens` under `pluginConfigs` change
+when it fires, and dropping its path from the list unloads it.
 
 harness-optimizer loaded from this folder between 2026-10-18 and 2026-10-22 as a
 link to an in-tree copy of the plugin. It now ships on its own from the House of

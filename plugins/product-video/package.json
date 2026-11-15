@@ -28,10 +28,10 @@
   },
   "dependencies": {
     "@remotion/bundler": "4.0.518",
-    "@remotion/renderer": "4.0.540",
+    "@remotion/renderer": "4.0.543",
     "react": "19.2.3",
     "react-dom": "19.2.3",
-    "remotion": "4.0.518",
+    "remotion": "4.0.543",
     "zod": "4.4.3"
   },
   "devDependencies": {

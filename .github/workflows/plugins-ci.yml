@@ -4,12 +4,16 @@ on:
   pull_request:
   push:
     branches: [main]
+  # A merge queue on main tests a pull request merged onto main before it lands, and
+  # that test is this event. Without a queue the event never fires.
+  merge_group:
 
 permissions:
   contents: read
 
 # A newer push to a pull request cancels the run it supersedes. A push to main gets
 # a group of its own commit, so the run the release gate reads is never cancelled.
+# A merge group's run is keyed on its commit too, and has finished before main moves.
 # The prefix is literal and unique to this file: GitHub compares group names
 # case-insensitively across workflows (pinned in release/tests/root-workflows.test.sh).
 concurrency:
@@ -22,6 +26,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     outputs:
+      base: ${{ steps.base.outputs.base }}
       plugins: ${{ steps.changes.outputs.plugins }}
       any: ${{ steps.changes.outputs.any }}
     steps:
@@ -29,16 +34,25 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+      # One base for the whole run: the plugin job reads it too.
+      - id: base
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          HEAD_SHA: ${{ github.sha }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: release/scripts/ci-base-sha.sh >> "$GITHUB_OUTPUT"
       - id: changes
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          BASE_SHA: ${{ steps.base.outputs.base }}
           HEAD_SHA: ${{ github.sha }}
         run: release/scripts/ci-changed-plugins.sh "$BASE_SHA" "$HEAD_SHA" >> "$GITHUB_OUTPUT"
 
   plugin:
     name: ${{ matrix.plugin }}
     needs: changes
-    if: needs.changes.outputs.any == 'true' && (github.event_name == 'push' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.repo.fork == false))
+    if: needs.changes.outputs.any == 'true' && (github.event_name == 'push' || github.event_name == 'merge_group' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.repo.fork == false))
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     strategy:
@@ -54,7 +68,7 @@ jobs:
         run: release/scripts/provision-ci-tools.sh
       - name: Check plugin contract and suites
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          BASE_SHA: ${{ needs.changes.outputs.base }}
           PLUGIN: ${{ matrix.plugin }}
         run: release/scripts/plugin-ci.sh "plugins/$PLUGIN"
 

@@ -56,7 +56,7 @@ These carry a `# TEMPLATE:` header at the top that lists the lines to change. "N
 | `disk-watermark` | `OnCalendar=*-*-* 06:30:00` | 22: `WARN_PCT=90` | Tuned to the author's `/mnt/c` drive; the script's own default is 85 |
 | `docker-hygiene` | `OnCalendar=*-*-* 01:50:00` | nothing | Ships plan-only |
 | `reclaim-sweep` | `OnCalendar=Fri *-*-* 02:05:00` | nothing | Ships plan-only |
-| `tools-auto-update` | `OnCalendar=*-*-* 03:45:00` | nothing | The tool set (xf, csctf, ru) lives in `tool-update.sh`, not the unit |
+| `tools-auto-update` | `OnCalendar=*-*-* 03:45:00` | nothing | The tool set (xf, csctf, ru) lives in `tool-update.sh`, not the unit. `sync.sh install` enables the timer only where at least one of them is installed, and disables it elsewhere |
 | `jsm-auto-update` drop-ins and timer | `OnCalendar=*-*-* 03:00:00` | nothing | Drop-ins for jsm's own `jsm-auto-update.service`; install that first |
 | `mcp-servers-update` | `OnCalendar=Sun *-*-* 04:00:00` | nothing | Set `HOV_MCP_EXPECTED_ORIGIN=<owner>/<repo>` in the overlay's `env` file instead: `sync.sh install` overwrites the unit, so a value set there would not last. `update-mcp-servers.sh` reads it through `lib/overlay.sh` (an exported `EXPECTED_ORIGIN` wins for one run), refuses any other origin and, unset, exits 2 before touching git |
 | `harness-unit-failure-alert@` | none (started by `OnFailure=`) | 14: `DISCORD_WEBHOOK_URL` requirement | See the pager section |

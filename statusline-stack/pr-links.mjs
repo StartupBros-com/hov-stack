@@ -140,7 +140,10 @@ function acquire(lock) {
 
 function stateOf(pr) {
   if (pr?.state === 'MERGED') return 'merged';
-  if (pr?.state === 'CLOSED' || pr?.isDraft === true) return 'inactive';
+  // Reported apart: the renderer shows each state as a word, and a draft that
+  // read "closed" would be a false statement on screen.
+  if (pr?.state === 'CLOSED') return 'closed';
+  if (pr?.isDraft === true) return 'draft';
   if (pr?.state !== 'OPEN' || pr?.isDraft !== false) return 'unknown';
   const checks = pr.commits?.nodes?.[0]?.commit?.statusCheckRollup?.state;
   if (pr.reviewDecision === 'CHANGES_REQUESTED' || pr.reviewDecision === 'REVIEW_REQUIRED') return 'waiting';

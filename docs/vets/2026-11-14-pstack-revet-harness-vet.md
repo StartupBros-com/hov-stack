@@ -8,6 +8,22 @@ https://x.com/cu30rry_/status/2119379401842516265 we need to essentially /harnes
 **Prior vet:** `docs/vets/2026-09-18-pstack-harness-vet.md` (pin `1f84288b`); its row
 dispositions live on dotfiles#1202.
 
+**Update, 2026-11-15 (after this note merged).** The rest of the note is the 2026-11-14
+record and is unchanged except for pointers to this block.
+
+- **The two `CLAUDE.md` lines: no deciding run.** #601 was closed as not planned on the
+  operator's decision, with no deciding run. The verdict stays "not adopted". The 4.2 run is
+  not a precondition any more and is not planned. If the behaviour is wanted later, the two
+  lines can be added by hand from the diff in 4.2 and deleted if they get in the way. That
+  edit is still the operator's: `CLAUDE.md` is a permission surface, and nothing here lets an
+  agent add the lines.
+- **Cost from three runs is reported, not gated on.** Audit dividend 1 (section 6) landed in
+  harness-vet 0.3.3 (#606) and was removed in 0.3.4 (#614). Cost from three runs per arm
+  cannot pass or fail a change of a few lines, so the cold-run validity rule of
+  `warm-cache-batch.md` is a record of batch 4, not a rule for later vets.
+- **Not ruled on:** the deciding run for the PARTIAL contenders (section 3). Its validity
+  rule and its 1.10 cost gate on three runs per arm predate 0.3.4.
+
 ---
 
 ## Headline
@@ -36,7 +52,8 @@ dispositions live on dotfiles#1202.
   deciding run an override would need first: multi-site and boundary-guard tasks under the
   full live `CLAUDE.md`, with the pass condition written before launch. It is on a
   needs-human issue because `CLAUDE.md` is the live `~/.claude/CLAUDE.md` and a permission
-  surface only the operator changes.
+  surface only the operator changes. *2026-11-15: #601 closed with no deciding run; see the
+  update under the header.*
 - **The posts' "magic" is two pstack principle leaves reached through `/poteto-mode`.** As
   delivered, a Cursor-first plugin behind a 21.7 KB router, it stays SKIP. The
   plugin-with-router route, as run, cost 1.6 to 2.3 times the incumbent per Sonnet run
@@ -497,12 +514,15 @@ a5 and a6 ran) on Sonnet and Opus t2 and t3, 3 runs each, in warm-cache order
 holding a run over 18,000 cache-creation tokens is invalid and decides nothing. The contender
 replaces a9 as the documented override option only if three things hold: it reaches the best
 outcome in more of those 12 runs, every cell is valid, and its median cost is at most 1.10
-times a9's. Adopting either one would still need the deciding run in 4.2.
+times a9's. Adopting either one would still need the deciding run in 4.2. *2026-11-15: the
+4.2 run was ruled out, and this run's validity rule and cost gate predate harness-vet 0.3.4;
+see the update under the header.*
 
 ### Do-not-retry unless
 
 - The two `CLAUDE.md` lines (not adopted): the deciding run in 4.2 passes a condition
-  written before it launches.
+  written before it launches. *2026-11-15: superseded; no deciding run, and the lines are
+  the operator's to add by hand (update under the header).*
 - pstack or `/poteto-mode` installed: pstack ships a Claude Code install whose per-run median
   cost on this fixture is within 1.10 times a9's, or this harness adopts Cursor.
 - The principle leaves as installed skills: a task appears where invoking a leaf explicitly
@@ -565,7 +585,8 @@ this vet measured as a pair, in batches 3 and 4. No reworded version is offered 
 ```
 
 **Precondition for an override: a deciding run, with its pass condition written before
-launch.**
+launch.** *2026-11-15: superseded; #601 closed with no deciding run (update under the
+header). The run design below is kept as the 2026-11-14 record.*
 
 - **Arms:**
   - a3 is the full live `CLAUDE.md` as each arm's base.
@@ -677,7 +698,8 @@ none of these rules was in any arm.
    time does not prevent cold runs. A vet that uses cost as a countermetric needs two things
    in its report: per-run cache-creation tokens, and a validity rule for cold runs written
    before launch, as `warm-cache-batch.md` was. Candidate line for harness-vet Phase 4; not
-   landed here.
+   landed here. *2026-11-15: landed in harness-vet 0.3.3 (#606) and removed in 0.3.4 (#614),
+   which reports cost from three runs per arm instead of gating on it.*
 2. **`testing-fuzzing/SKILL.md:633` and `:680`** (jsm-managed, outside this repo) point to
    `/lean-formal-feedback-loop`, which is in the jsm catalog (2026-08-06) but not installed
    on this host.

@@ -5,12 +5,16 @@ on:
   push:
     branches:
       - main
+  # A merge queue on main tests a pull request merged onto main before it lands, and
+  # that test is this event. Without a queue the event never fires.
+  merge_group:
 
 permissions:
   contents: read
 
 # A newer push to a pull request cancels the run it supersedes. A push to main gets
 # a group of its own commit, so the run the release gate reads is never cancelled.
+# A merge group's run is keyed on its commit too, and has finished before main moves.
 # The prefix is literal and unique to this file: GitHub compares group names
 # case-insensitively across workflows (pinned in release/tests/root-workflows.test.sh).
 concurrency:
@@ -20,7 +24,7 @@ concurrency:
 jobs:
   syntax:
     name: Trusted syntax and policy
-    if: github.event_name == 'push' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.repo.fork == false)
+    if: github.event_name == 'push' || github.event_name == 'merge_group' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.repo.fork == false)
     runs-on: ubuntu-24.04
     steps:
       - name: Check out repository
@@ -54,6 +58,7 @@ jobs:
           release/tests/repin-publish.test.sh
           release/tests/announce-pin-roll.test.sh
           release/scripts/plugin-tag.sh
+          release/scripts/ci-base-sha.sh
           release/scripts/ci-changed-plugins.sh
           release/scripts/plugin-ci.sh
           release/scripts/ci-aggregate.sh
@@ -66,6 +71,7 @@ jobs:
           release/scripts/publish-staged.sh
           release/scripts/check-release-notes.sh
           release/tests/plugin-tag.test.sh
+          release/tests/ci-base-sha.test.sh
           release/tests/ci-changed-plugins.test.sh
           release/tests/plugin-ci.test.sh
           release/tests/ci-aggregate.test.sh
@@ -83,7 +89,7 @@ jobs:
         run: bash ./release/tests/provision-ci-tools.test.sh
       - name: Validate marketplace without network access
         env:
-          BASE_REF: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          BASE_REF: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
         run: ./release/scripts/validate-marketplace.sh syntax
       - name: Run marketplace fixture tests
         run: ./release/tests/validate-marketplace.test.sh
@@ -112,6 +118,8 @@ jobs:
 
       - name: Run plugin tag tests
         run: bash ./release/tests/plugin-tag.test.sh
+      - name: Run ci base sha tests
+        run: bash ./release/tests/ci-base-sha.test.sh
       - name: Run ci changed plugins tests
         run: bash ./release/tests/ci-changed-plugins.test.sh
       - name: Run plugin ci tests
@@ -159,7 +167,7 @@ jobs:
 
   full:
     name: Pinned sources
-    if: vars.HOV_SOURCES_PUBLIC == 'true' && (github.event_name == 'push' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.repo.fork == false))
+    if: vars.HOV_SOURCES_PUBLIC == 'true' && (github.event_name == 'push' || github.event_name == 'merge_group' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.repo.fork == false))
     needs: syntax
     runs-on: ubuntu-24.04
     steps:
@@ -172,9 +180,9 @@ jobs:
         run: ./release/scripts/provision-ci-tools.sh
       - name: Validate pinned source payloads
         env:
-          BASE_REF: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          BASE_REF: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
         run: ./release/scripts/validate-marketplace.sh full
       - name: Verify install-release pins against their downloads
         env:
-          BASE_REF: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          BASE_REF: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
         run: ./release/scripts/release-pins.sh verify --if-changed-since "$BASE_REF"

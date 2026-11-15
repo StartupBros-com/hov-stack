@@ -37,6 +37,12 @@ value = call({ classification: 'canonical', route: 'r', mode: 'warn' });
 assert.strictEqual(value.hookSpecificOutput.permissionDecision, 'allow', 'warn must allow with advisory');
 value = call({ classification: 'canonical', route: 'r', mode: 'enforce', canonical_path: '/canonical' });
 assert(denied(value), 'enforce rejects direct new creation even on canonical host');
+{
+  const reason = value.hookSpecificOutput.permissionDecisionReason;
+  assert(reason.includes('from /canonical run ~/.claude/scripts/wt-new.sh <repo> <slug>'), 'enforce denial names the command and where to run it');
+  assert(reason.includes('EnterWorktree with path set to'), 'enforce denial names the allowed entry form');
+  assert(!reason.includes('EnterWorktree is not allowed here'), 'enforce denial must not claim every EnterWorktree is refused');
+}
 
 input = { path: '/canonical/.claude/worktrees/x' };
 value = call(
