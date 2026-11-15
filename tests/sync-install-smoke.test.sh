@@ -1213,22 +1213,7 @@ else
 fi
 
 # -- StructuredOutput unwrap: the papercut plugin registers it, sync.sh does not
-# The papercut plugin (papercut@hov) registers structured-output-unwrap and
-# read-ceiling-chunk itself, so on a fresh host without it the reconcile exits 0
-# and writes nothing (tests/papercut-plugin-reconcile.test.sh covers retiring a
-# settings copy once the plugin is enabled). The hook must still quietly pass a
-# non-StructuredOutput call through (empty stdout, exit 0 -- issue #1339).
-fresh_unwrap_root=$TMP/unwrap-hook-fresh
-fresh_unwrap_home=$fresh_unwrap_root/.claude
-mkdir -p "$fresh_unwrap_home"
-ln -s "$REPO/hooks" "$fresh_unwrap_home/hooks"
-fresh_unwrap_out=$(env -u CLAUDE_INSTALLED_PLUGINS HOME="$fresh_unwrap_root" CLAUDE_HOME="$fresh_unwrap_home" "$SYNC" reconcile-structured-output-unwrap 2>&1); fresh_unwrap_status=$?
-if [ "$fresh_unwrap_status" -eq 0 ]; then ok; else bad "fresh reconcile-structured-output-unwrap exited $fresh_unwrap_status:"$'\n'"$fresh_unwrap_out"; fi
-if [ ! -e "$fresh_unwrap_home/settings.json" ]; then
-  ok
-else
-  bad "fresh reconcile-structured-output-unwrap wrote a settings.json; the papercut plugin registers that hook"
-fi
+# The hook quietly passes a non-StructuredOutput call through.
 fresh_unwrap_probe='{"tool_name":"Bash","tool_input":{"command":"printf no-unwrap"}}'
 fresh_unwrap_probe_out=$(printf '%s' "$fresh_unwrap_probe" | node "$REPO/hooks/PreToolUse/structured-output-unwrap.js"); fresh_unwrap_probe_status=$?
 if [ "$fresh_unwrap_probe_status" -eq 0 ] && [ -z "$fresh_unwrap_probe_out" ]; then
@@ -1238,17 +1223,6 @@ else
 fi
 
 # -- Read ceiling chunk: the papercut plugin registers it, sync.sh does not -----
-fresh_chunk_root=$TMP/chunk-hook-fresh
-fresh_chunk_home=$fresh_chunk_root/.claude
-mkdir -p "$fresh_chunk_home"
-ln -s "$REPO/hooks" "$fresh_chunk_home/hooks"
-fresh_chunk_out=$(env -u CLAUDE_INSTALLED_PLUGINS HOME="$fresh_chunk_root" CLAUDE_HOME="$fresh_chunk_home" "$SYNC" reconcile-read-ceiling-chunk 2>&1); fresh_chunk_status=$?
-if [ "$fresh_chunk_status" -eq 0 ]; then ok; else bad "fresh reconcile-read-ceiling-chunk exited $fresh_chunk_status:"$'\n'"$fresh_chunk_out"; fi
-if [ ! -e "$fresh_chunk_home/settings.json" ]; then
-  ok
-else
-  bad "fresh reconcile-read-ceiling-chunk wrote a settings.json; the papercut plugin registers that hook"
-fi
 fresh_chunk_probe='{"tool_name":"Read","tool_input":{"file_path":"/nonexistent/first-attempt.txt"},"session_id":"s-fresh0000","cwd":"/tmp"}'
 fresh_chunk_probe_out=$(printf '%s' "$fresh_chunk_probe" | PAPERCUT_STORE="$TMP/chunk-empty-store" node "$REPO/hooks/PreToolUse/read-ceiling-chunk.js"); fresh_chunk_probe_status=$?
 if [ "$fresh_chunk_probe_status" -eq 0 ] && [ -z "$fresh_chunk_probe_out" ]; then
@@ -1269,70 +1243,7 @@ else
   bad "shape-rewrite rewrote a non-isolated call with no worktree cwd (status $fresh_shape_probe_status):"$'\n'"$fresh_shape_probe_out"
 fi
 
-# -- pr-record registration is retired ----------------------------------------
-# The PostToolUse pr-record hook wrote session->PR rows for the Stop hook's
-# hand-back check, retired 2026-11-03 without ever leaving shadow mode.
-# reconcile now only removes the registration, in either spelling; the tracked
-# settings.json no longer carries it, and a fresh host must not get it seeded.
-echo "=== pr-record hook retire ===" >&2
-PR_RECORD_COMMAND='"$HOME/.claude/hooks/bin/node-hook" "$HOME/.claude/hooks/PostToolUse/pr-record.js"'
-if ! grep -qF 'PostToolUse/pr-record.js' "$REPO/settings.json"; then ok; else bad "the tracked settings.json still registers the retired pr-record hook"; fi
-fresh_prrec_root=$TMP/pr-record-hook-fresh
-fresh_prrec_home=$fresh_prrec_root/.claude
-mkdir -p "$fresh_prrec_home"
-ln -s "$REPO/hooks" "$fresh_prrec_home/hooks"
-fresh_prrec_out=$(HOME="$fresh_prrec_root" CLAUDE_HOME="$fresh_prrec_home" "$SYNC" reconcile-pr-record-hook 2>&1); fresh_prrec_status=$?
-if [ "$fresh_prrec_status" -eq 0 ]; then ok; else bad "fresh reconcile-pr-record-hook exited $fresh_prrec_status:"$'\n'"$fresh_prrec_out"; fi
-if [ ! -f "$fresh_prrec_home/settings.json" ] || ! jq -e --arg c "$PR_RECORD_COMMAND" '
-    [.hooks[]?[]?.hooks[]? | .command] | index($c) != null
-  ' "$fresh_prrec_home/settings.json" >/dev/null; then
-  ok
-else
-  bad "fresh reconcile-pr-record-hook registered the retired hook"
-fi
-PRREC_RECON_ROOT=$TMP/pr-record-recon-existing
-PRREC_RECON_HOME=$PRREC_RECON_ROOT/.claude
-mkdir -p "$PRREC_RECON_HOME"
-ln -s "$REPO/hooks" "$PRREC_RECON_HOME/hooks"
-prrec_rendered_cmd="node \"$PRREC_RECON_HOME/hooks/PostToolUse/pr-record.js\""
-jq -n --arg rec "$PR_RECORD_COMMAND" --arg rendered "$prrec_rendered_cmd" '
-  {hooks:{PostToolUse:[
-    {matcher:"Bash",hooks:[{type:"command",command:$rec,timeout:10}]},
-    {matcher:"Bash",hooks:[{type:"command",command:$rendered,timeout:10}]},
-    {matcher:"*",hooks:[{type:"command",command:"keep-this-unrelated-hook"}]}
-  ],
-  # A copy under another event: the retire walks every event, and an event it
-  # empties is left as an empty list rather than a group with no hooks.
-  Stop:[{matcher:"*",hooks:[{type:"command",command:$rec,timeout:10}]}]}}
-' >"$PRREC_RECON_HOME/settings.json"
-chmod 0640 "$PRREC_RECON_HOME/settings.json"
-prrec_recon_out=$(HOME="$PRREC_RECON_ROOT" CLAUDE_HOME="$PRREC_RECON_HOME" \
-  "$SYNC" reconcile-pr-record-hook 2>&1); prrec_recon_status=$?
-if [ "$prrec_recon_status" -eq 0 ]; then ok; else bad "pr-record retire (pre-existing host) exited $prrec_recon_status:"$'\n'"$prrec_recon_out"; fi
-if jq -e '
-    ([.hooks.PostToolUse[]?.hooks[]? | .command] == ["keep-this-unrelated-hook"])
-    and (.hooks.Stop == [])
-  ' "$PRREC_RECON_HOME/settings.json" >/dev/null; then
-  ok
-else
-  bad "pr-record retire (pre-existing host) did not remove exactly the pr-record groups:"$'\n'"$(jq -c '.hooks.PostToolUse' "$PRREC_RECON_HOME/settings.json")"
-fi
-if [ "$(stat -c %a "$PRREC_RECON_HOME/settings.json")" = 640 ]; then ok; else bad "pr-record retire (pre-existing host) changed live settings mode"; fi
-if find "$PRREC_RECON_HOME/backups" -path '*hook-retire-*' -name settings.json -type f -print -quit | grep -q .; then ok; else bad "pr-record retire (pre-existing host) did not back up live settings"; fi
-prrec_recon_after=$(jq -S . "$PRREC_RECON_HOME/settings.json")
-prrec_again_out=$(HOME="$PRREC_RECON_ROOT" CLAUDE_HOME="$PRREC_RECON_HOME" \
-  "$SYNC" reconcile-pr-record-hook 2>&1); prrec_again_status=$?
-prrec_backups_n=$(find "$PRREC_RECON_HOME/backups" -path '*hook-retire-*' -name settings.json -type f 2>/dev/null | wc -l)
-if [ "$prrec_again_status" -eq 0 ] && [ "$(jq -S . "$PRREC_RECON_HOME/settings.json")" = "$prrec_recon_after" ] \
-   && [ "$prrec_backups_n" -eq 1 ]; then
-  ok
-else
-  bad "pr-record retire was not idempotent on a second run (exit $prrec_again_status, backups $prrec_backups_n):"$'\n'"$prrec_again_out"
-fi
-
-# Pulled directly from sync.sh itself so this suite covers whatever units
-# exist there later instead of duplicating (and silently drifting from) a
-# hardcoded list.
+# Pulled from sync.sh so the suite follows its unit list.
 eval "$(grep -E '^(UNITS|SYSTEM_UNITS)=' "$SYNC")"
 
 # A stale symlink-to-directory at a stable-file destination must be replaced,

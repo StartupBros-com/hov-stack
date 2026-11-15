@@ -67,6 +67,8 @@ reconcile_codex_quota_hook() {
 
 > **Update 2026-11-07 (hov-stack #479).** `codex_quota_routing_twins` and `reconcile_codex_quota_hook` were deleted once neither wm nor xps-omarchy registered a routing-bundle or doghouse twin; the Settings apply (`sync.sh apply-settings`) now delivers the tracked registration. The lesson stands: the apply removes only what its base recorded, so a twin that only live carries still needs a by-name `retire_hook_commands` call.
 
+> **Update 2026-11-14 (hov-stack #479 PR 2).** xps-omarchy, the last sync host, moved to hov-stack and its live file carries none of the twins, so the one-time settings migrations and `retire_hook_commands` were deleted. The lesson still stands: a future live-only twin needs a new by-name retirement in `sync.sh` (the deleted helper is in git history), because the apply never removes an entry its base did not record.
+
 `retire_hook_commands` already backs the live file up (`~/.claude/backups/hook-retire-<ts>-*`), strips exact command strings from every event, and leaves unrelated hooks alone. The bundle **file** is never touched; its statusline half stays in use.
 
 Three companion edits kept the change honest:
