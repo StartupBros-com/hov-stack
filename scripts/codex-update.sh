@@ -21,8 +21,9 @@
 # Why pnpm stays the owner: the live launcher (~/.local/bin/codex) is pnpm's shim, and the
 # native binary arrives as an npm:-aliased optionalDependency that pnpm resolves. This
 # script never writes the launcher or package dirs itself; every install is `pnpm add -g`.
-# tool-update.sh is not extended because its daily timer is enabled by sync.sh install on
-# every role, and this path must stay inert until codex-auto-update.timer is enabled.
+# tool-update.sh is not extended because sync.sh install enables its daily timer on every
+# role wherever one of its tools is installed, codex included once it joined the table, and
+# this path must stay inert until codex-auto-update.timer is enabled.
 #
 # pnpm 11 only (it refuses any other major). pnpm 11 installs each `pnpm add -g` in its own
 # dir, global/v11/<hash>/, and replaces that dir when the package is added again, so the

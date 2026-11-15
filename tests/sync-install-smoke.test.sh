@@ -107,6 +107,16 @@ export CLAUDE_SYNC_MANAGED_LOCK="$TMP/etc-claude-code/managed-settings.json"
 export CLAUDE_WINDOWS_HOME="$TMP/windows-home"
 mkdir -p "$CLAUDE_WINDOWS_HOME"
 
+# install enables tools-auto-update.timer only where tool-update.sh finds one of its
+# tools (hov-stack#632), and the inherited PATH may or may not carry a real xf. Pin the
+# lookup to a fixture tool so the role assertions below mean the same on every host;
+# the no-tools case moves it aside.
+export TOOL_UPDATE_TABLE='hov-smoke-tool|fake/repo|hov-smoke-tool|SHA256SUMS|raw|hov-smoke-tool|hov-smoke-tool'
+export TOOL_UPDATE_BIN_DIR="$TMP/managed-tools"
+mkdir -p "$TOOL_UPDATE_BIN_DIR"
+printf '#!/usr/bin/env bash\necho "hov-smoke-tool 1.0.0"\n' >"$TOOL_UPDATE_BIN_DIR/hov-smoke-tool"
+chmod +x "$TOOL_UPDATE_BIN_DIR/hov-smoke-tool"
+
 SYNC="$REPO/sync.sh"
 
 # Docker init policy uses its real subprocess CLI against asserted scratch
@@ -1341,6 +1351,25 @@ if ! timer_enabled backup-harness.timer && timer_enabled dcg-auto-update.timer \
   ok
 else
   bad "workstation install enabled the opt-in backup-harness.timer, or skipped its own role set"
+fi
+# With none of tool-update.sh's tools installed the timer can only fail, so install
+# leaves it out of the role set and the reconcile disables it (hov-stack#632), saying
+# why. dcg's timer is unaffected. The next install after a tool appears enables it.
+mv "$TOOL_UPDATE_BIN_DIR/hov-smoke-tool" "$TMP/hov-smoke-tool.aside"
+no_tools_out=$("$SYNC" install 2>&1); no_tools_status=$?
+mv "$TMP/hov-smoke-tool.aside" "$TOOL_UPDATE_BIN_DIR/hov-smoke-tool"
+if [ "$no_tools_status" -eq 0 ] && ! timer_enabled tools-auto-update.timer \
+   && timer_enabled dcg-auto-update.timer \
+   && grep -Fq "none of tool-update.sh's tools is installed here" <<<"$no_tools_out"; then
+  ok
+else
+  bad "install with none of tool-update.sh's tools kept tools-auto-update.timer or did not say why:"$'\n'"$no_tools_out"
+fi
+tools_back_out=$("$SYNC" install 2>&1); tools_back_status=$?
+if [ "$tools_back_status" -eq 0 ] && timer_enabled tools-auto-update.timer; then
+  ok
+else
+  bad "install after a tool appeared did not enable tools-auto-update.timer:"$'\n'"$tools_back_out"
 fi
 
 # -- scheduler ownership/role reconciliation (all hermetic) ----------------
