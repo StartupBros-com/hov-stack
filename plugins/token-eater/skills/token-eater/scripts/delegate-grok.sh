@@ -37,7 +37,7 @@ ALLOWED="${4:-}"
 command -v grok >/dev/null || { echo '{"adapter":"grok","ok":false,"error":"grok not installed"}'; exit 2; }
 
 WT="$(cd "$WT" && pwd)"
-RUNDIR="$(mktemp -d -t te-grok-XXXXXX)" || exit 1
+RUNDIR="$(mktemp -d -t te-grok-XXXXXX)" || { echo '{"adapter":"grok","ok":false,"error":"could not create a run directory"}'; exit 2; }
 ENVRAW="$RUNDIR/stdout.json"
 ERRLOG="$RUNDIR/stderr.log"
 CB_REGEX='(usage limit reached|rate.?limit|out of credits|429|All accounts are temporarily unavailable)'
