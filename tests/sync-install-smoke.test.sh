@@ -1462,7 +1462,10 @@ export CCFLARE_URL_SATELLITE=https://proxy-host.example.net
 : >"$CRONTAB_FIXTURE"
 docker_satellite_before=$(sha256sum "$DOCKER_DAEMON_TARGET" "$DOCKER_ADOPTION_STATE" "$DOCKER_ADOPTION_BACKUP")
 docker_satellite_validations_before=$(wc -l <"$DOCKER_VALIDATE_LOG")
-satellite_out=$("$SYNC" install 2>&1); satellite_status=$?
+# An empty system dir for this install alone: the workstation install above already
+# filled the shared one, where an unchanged unit is skipped whatever the role.
+satellite_system=$TMP/satellite-system
+satellite_out=$(CLAUDE_SYNC_SYSTEM_SYS_DIR="$satellite_system" "$SYNC" install 2>&1); satellite_status=$?
 satellite_check_out=$("$SYNC" check 2>&1); satellite_check_status=$?
 satellite_push_out=$("$SYNC" push 2>&1); satellite_push_status=$?
 if [ "$satellite_status" -eq 0 ] \
@@ -1473,6 +1476,14 @@ if [ "$satellite_status" -eq 0 ] \
   ok
 else
   bad "satellite admitted a migrated timer or changed unrelated state:"$'\n'"$satellite_out"
+fi
+# PLANTED NEGATIVE for the role check: sudo works here, so an ungated loop puts
+# all four units into $satellite_system.
+if [ -z "$(find "$satellite_system" -type f 2>/dev/null)" ] \
+   && grep -Fq 'system units skipped (host role satellite' <<<"$satellite_out"; then
+  ok
+else
+  bad "satellite install deployed a system unit or did not say it skipped them:"$'\n'"$(find "$satellite_system" -type f 2>/dev/null)"$'\n'"$satellite_out"
 fi
 if [ "$satellite_push_status" -eq 2 ]; then
   ok

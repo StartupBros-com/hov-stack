@@ -2105,22 +2105,29 @@ install() {
   # here, unlike the --user timers below — this is new, load-bearing memory-tier
   # infrastructure on a box already under pressure, and its activation belongs
   # to the operator (see the introducing PR's OPERATOR ACTIVATION CHECKLIST).
-  for u in $SYSTEM_UNITS; do
-    [ -f "$HERE/systemd-system/$u" ] || continue
-    rendered=$(mktemp) || exit 3
-    render_system_unit "$HERE/systemd-system/$u" "$rendered"
-    if cmp -s "$rendered" "$SYSTEM_SYS/$u" 2>/dev/null; then
-      rm -f "$rendered"
-      continue
-    fi
-    if sudo -n true 2>/dev/null; then
-      sudo install -D -m 0644 -o root -g root "$rendered" "$SYSTEM_SYS/$u" &&
-        echo "  installed system unit $u -> $SYSTEM_SYS/$u (NOT enabled — see operator activation checklist)"
-      rm -f "$rendered"
-    else
-      echo "  system unit $u needs sudo — run: sudo install -D -m 0644 -o root -g root $rendered $SYSTEM_SYS/$u (systemd-system/$u rendered for this account)"
-    fi
-  done
+  # Workstation only: they size and trim the workstation's own WSL box. With no
+  # role check, a satellite with passwordless sudo got all four in /etc on its
+  # first install (xps-omarchy, 2026-11-14).
+  if profile_is workstation; then
+    for u in $SYSTEM_UNITS; do
+      [ -f "$HERE/systemd-system/$u" ] || continue
+      rendered=$(mktemp) || exit 3
+      render_system_unit "$HERE/systemd-system/$u" "$rendered"
+      if cmp -s "$rendered" "$SYSTEM_SYS/$u" 2>/dev/null; then
+        rm -f "$rendered"
+        continue
+      fi
+      if sudo -n true 2>/dev/null; then
+        sudo install -D -m 0644 -o root -g root "$rendered" "$SYSTEM_SYS/$u" &&
+          echo "  installed system unit $u -> $SYSTEM_SYS/$u (NOT enabled — see operator activation checklist)"
+        rm -f "$rendered"
+      else
+        echo "  system unit $u needs sudo — run: sudo install -D -m 0644 -o root -g root $rendered $SYSTEM_SYS/$u (systemd-system/$u rendered for this account)"
+      fi
+    done
+  else
+    echo "  system units skipped (host role $(profile_role 2>/dev/null || echo undeclared); they are workstation-only)"
+  fi
   if systemctl --user show-environment >/dev/null 2>&1; then
     if ! systemctl --user daemon-reload; then
       echo "  systemd user manager is reachable but daemon-reload failed; refusing install success" >&2
