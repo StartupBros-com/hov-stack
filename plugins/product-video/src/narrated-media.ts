@@ -223,6 +223,18 @@ export function assertCaptureWindow(window: CaptureWindow) {
   }
 }
 
+// Start after the clapperboard. It is recorded on purpose so alignment can be
+// verified, but it is a diagnostic and must never reach the deliverable.
+export function getDefaultCaptureWindow(capture: {
+  durationMs: number;
+  marker: { tMs: number };
+}): CaptureWindow {
+  return {
+    startMs: capture.marker.tMs + captureMarkerVisibleMs,
+    endMs: capture.durationMs,
+  };
+}
+
 export function assertNarrationMatchesWindow(
   media: Pick<ProbedMedia, 'durationMs'>,
   window: CaptureWindow,
@@ -361,12 +373,7 @@ export async function prepareNarratedCapture({
   });
   const allowedDriftMs = getNarratedDurationToleranceMs(capture.fps);
 
-  // Start after the clapperboard. It is recorded on purpose so alignment can be
-  // verified, but it is a diagnostic and must never reach the deliverable.
-  const selectedWindow = window ?? {
-    startMs: capture.marker.tMs + captureMarkerVisibleMs,
-    endMs: capture.durationMs,
-  };
+  const selectedWindow = window ?? getDefaultCaptureWindow(capture);
   assertCaptureWindow(selectedWindow);
   if (selectedWindow.endMs > capture.durationMs) {
     throw new Error(

@@ -19,6 +19,7 @@ import {
   writeNarratedJsonAtomically,
   writeNarratedTextAtomically,
 } from './narrated-files';
+import { getDefaultCaptureWindow } from './narrated-media';
 
 export const syntheticNarratedDurationMs = 6_000;
 
@@ -44,6 +45,17 @@ export const syntheticNarratedMarker = {
   type: 'clapperboard',
   tMs: 500,
 } as const;
+
+// Narration covers only the part of the capture that reaches the video: the
+// default window prepareNarratedCapture uses, which opens once the clapperboard
+// has been shown. A narration as long as the whole capture fails its duration
+// check.
+const syntheticNarrationWindow = getDefaultCaptureWindow({
+  durationMs: syntheticNarratedDurationMs,
+  marker: syntheticNarratedMarker,
+});
+export const syntheticNarrationDurationMs =
+  syntheticNarrationWindow.endMs - syntheticNarrationWindow.startMs;
 
 const syntheticMarkerEnable = "enable='between(t,0.5,1.1)'";
 
@@ -195,7 +207,7 @@ export async function createSyntheticNarratedFixture(runId: string) {
       '-f',
       'lavfi',
       '-i',
-      `sine=frequency=440:sample_rate=48000:duration=${syntheticNarratedDurationMs / 1_000}`,
+      `sine=frequency=440:sample_rate=48000:duration=${syntheticNarrationDurationMs / 1_000}`,
       '-ac',
       '2',
       '-ar',

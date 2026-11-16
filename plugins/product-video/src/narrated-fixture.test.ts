@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
+import { assertRenderableNarratedCapture } from './narrated-contracts';
+import { getNarratedDurationToleranceMs } from './narrated-duration';
 import {
   buildSyntheticNarratedCaptureBundle,
   buildSyntheticNarratedTelemetry,
@@ -8,8 +10,13 @@ import {
   syntheticNarratedCaptions,
   syntheticNarratedDurationMs,
   syntheticNarratedMarker,
+  syntheticNarrationDurationMs,
 } from './narrated-fixture';
-import { parseStrictSrt } from './narrated-media';
+import {
+  assertNarrationMatchesWindow,
+  getDefaultCaptureWindow,
+  parseStrictSrt,
+} from './narrated-media';
 
 test('synthetic narrated fixture uses only canonical local assets and safe telemetry', () => {
   const runId = 'synthetic-test-run';
@@ -28,6 +35,29 @@ test('synthetic narrated fixture uses only canonical local assets and safe telem
   assert.deepEqual(
     telemetry.events.map((event) => event.channel),
     ['cursor', 'click', 'element', 'scroll', 'route'],
+  );
+});
+
+test('synthetic narration fits the default window narrated:smoke prepares', () => {
+  // narrated:smoke calls prepareNarratedCapture without a window, so its
+  // narration is checked against the default window, within the frame-rate
+  // tolerance.
+  const capture = assertRenderableNarratedCapture(
+    buildSyntheticNarratedCaptureBundle('synthetic-test-run', {
+      telemetrySha256: '1'.repeat(64),
+      videoSha256: '2'.repeat(64),
+    }),
+  );
+  const window = getDefaultCaptureWindow(capture);
+
+  assert.ok(window.startMs > syntheticNarratedMarker.tMs);
+  assert.equal(window.endMs, syntheticNarratedDurationMs);
+  assert.doesNotThrow(() =>
+    assertNarrationMatchesWindow(
+      { durationMs: syntheticNarrationDurationMs },
+      window,
+      getNarratedDurationToleranceMs(capture.fps),
+    ),
   );
 });
 
