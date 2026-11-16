@@ -1,6 +1,6 @@
 {
   "name": "@startupbros/product-video",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Agent-native product walkthrough videos: safe authenticated browser capture, telemetry-driven cursor and click overlays, Remotion composition, and verified H.264 render.",
   "license": "MIT",
   "type": "module",
@@ -27,7 +27,7 @@
     "verify": "tsx src/cli/verify.ts"
   },
   "dependencies": {
-    "@remotion/bundler": "4.0.518",
+    "@remotion/bundler": "4.0.543",
     "@remotion/renderer": "4.0.543",
     "react": "19.2.3",
     "react-dom": "19.2.3",
