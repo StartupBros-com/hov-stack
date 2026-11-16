@@ -145,7 +145,8 @@ under it (section 2.4 of the note).
 - A re-vet fired by one of the note's re-audit triggers. It reuses the fixture, the arms
   and the grader.
 - The deciding run named for each PARTIAL contender row. It runs a contender through
-  `make-runs.sh` and `launch-seq.sh` against `a9-trimmed`.
+  `make-runs.sh` and `launch-seq.sh` against `a9-trimmed`. *Retired 2026-11-15: ruled out
+  on the operator's decision (see the update under the note's header).*
 - The deciding run the note requires before anyone overrides its verdict on the two
   `CLAUDE.md` lines. It reuses `run_arm.sh`, `launch-seq.sh` and `grade.py` with new tasks.
   *Retired 2026-11-15: #601 closed with no deciding run (see the update under the note's
