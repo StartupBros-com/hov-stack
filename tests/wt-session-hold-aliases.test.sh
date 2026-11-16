@@ -21,7 +21,10 @@
 #   through a real `old -> new` repo link that keeps the held worktree and removes
 #   an unheld one. Last, the shape the #661 swap leaves (folder renamed, link at the
 #   old name, git records still naming the old spelling): a job recorded under the new
-#   spelling and a process handed the old one both keep their worktrees.
+#   spelling and a process handed the old one both keep their worktrees. Then the
+#   same checkout once git lists the new spelling (worktrees added after the rename,
+#   and one after `git worktree repair`): processes handed the old spelling in argv or
+#   environment still hold them, through proc_liveness's alias spellings.
 #
 #   Hermetic: everything under mktemp; a fake Claude home per case. Never touches
 #   the operator's tree, ~/.claude, ~/.cache, remotes or gh.
@@ -210,8 +213,8 @@ echo "wt-sweep — the renamed checkout: git still lists the old spelling (no wo
 # The shape the #661 swap leaves: the folder moved to its new name with a link at the old
 # one, and git's worktree records still naming the old spelling. A job started after the
 # move records the new spelling; a process started before it was handed the old one.
-# Running `git worktree repair` here would relist v3 under the new spelling and lose the
-# argv hold, which is why the swap leaves the records alone until the link goes.
+# Without proc_liveness's alias spellings, `git worktree repair` here would relist v3
+# under the new spelling and lose the argv hold; the next block covers that shape.
 F="$TMP/f"
 {
   mkdir -p "$F/sites"
@@ -239,6 +242,36 @@ kept "a running job names v1 under the new spelling: kept" "$F/sites/new/.claude
 has "the sweep says why" "$OUT" "job jf"
 kept "a process handed v3's old spelling in its argv: kept" "$F/sites/new/.claude/worktrees/v3"
 gone "v2, held by nothing, is removed (the sweep did run)" "$F/sites/new/.claude/worktrees/v2"
+
+echo "wt-sweep — the renamed checkout: git lists the new spelling, a process holds the old"
+# git records a worktree added after the rename under its physical path, even when it
+# is added through the old spelling or from a shell whose \$PWD is the old spelling.
+# `git worktree repair` does the same to one added before (v3). A process handed the
+# old spelling must still hold each of them: proc_liveness spells through the link.
+{
+  git -C "$F/sites/old" worktree add -q "$F/sites/old/.claude/worktrees/v4" -b v4 main
+  (cd "$F/sites/old" && git worktree add -q .claude/worktrees/v5 -b v5 main)
+  git -C "$F/sites/old" worktree add -q "$F/sites/old/.claude/worktrees/v6" -b v6 main
+  for n in v4 v5 v6; do git -C "$F/sites/new/.claude/worktrees/$n" push -q -u origin "$n"; done
+  git -C "$F/sites/new" worktree repair "$F/sites/new/.claude/worktrees/v3"
+} >/dev/null 2>&1
+L=$(git -C "$F/sites/new" worktree list --porcelain)
+has "git lists v4, added through the old spelling, under the new one" "$L" "worktree $F/sites/new/.claude/worktrees/v4"
+has "git lists v5, added from an old-spelling \$PWD, under the new one" "$L" "worktree $F/sites/new/.claude/worktrees/v5"
+has "after repair, git lists v3 under the new spelling" "$L" "worktree $F/sites/new/.claude/worktrees/v3"
+(cd "$TMP" && exec python3 -c 'import time; time.sleep(300)' "$F/sites/old/.claude/worktrees/v3") & H3=$!
+(cd "$TMP" && exec python3 -c 'import time; time.sleep(300)' "$F/sites/old/.claude/worktrees/v4") & H4=$!
+(cd "$TMP" && exec env HOLDPATH="$F/sites/old/.claude/worktrees/v5" sleep 300) & H5=$!
+sleep 1
+OUT=$(unset WT_ALIAS_ROOTS; DRY_RUN=0 ROOT="$F/sites" WT_CLAUDE_HOME="$TMP/h-f" WT_HOLD_CACHE_DIR="$TMP/cache" \
+  WT_DONE_BIN="$TMP/no-wt-done" REPO_ROUTE_RESOLVER="$TMP/scan-ok.py" WT_SWEEP_ALLOW_TMP=1 ACTIVE_MIN=0 PUSH=0 \
+  IDLE_RELEASE_HOURS=24 WT_SWEEP_LIB="$LIB" bash "$SCRIPT" 2>&1)
+kill "$H3" "$H4" "$H5" 2>/dev/null; wait "$H3" "$H4" "$H5" 2>/dev/null
+kept "repaired v3, its old spelling in a process's argv: kept" "$F/sites/new/.claude/worktrees/v3"
+kept "v4, its old spelling in a process's argv: kept" "$F/sites/new/.claude/worktrees/v4"
+kept "v5, its old spelling in a process's environment: kept" "$F/sites/new/.claude/worktrees/v5"
+has "the sweep says a live process holds them" "$OUT" "held by live process"
+gone "v6, held by nothing, is removed (the sweep did run)" "$F/sites/new/.claude/worktrees/v6"
 
 echo
 echo "wt-session-hold-aliases: $pass passed, $fail failed"

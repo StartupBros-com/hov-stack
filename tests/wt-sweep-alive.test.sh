@@ -77,6 +77,17 @@ sleep 1
 check "process holding worktree via environment only" 0 "$FAKE"
 kill "$envpid" 2>/dev/null; wait "$envpid" 2>/dev/null
 
+# hov-stack#661: a checkout renamed with a link left at its old name. git lists a
+# worktree added after the rename under the real path, while a process may have been
+# handed the old spelling. alive() holds it once given the roots the link sits in.
+mkdir -p "$TMP/sites/new/wt"; ln -s new "$TMP/sites/old"
+( cd / && exec python3 -c "import time; time.sleep(30)" --cwd "$TMP/sites/old/wt" ) &
+aliaspid=$!
+sleep 1
+ALIAS_ROOTS="" check "old spelling in argv, no alias roots: not alive" 1 "$TMP/sites/new/wt"
+ALIAS_ROOTS="$TMP/sites" check "old spelling in argv, link's root given: alive" 0 "$TMP/sites/new/wt"
+kill "$aliaspid" 2>/dev/null; wait "$aliaspid" 2>/dev/null
+
 # Fail-closed: a checker that cannot run must read ALIVE, never dead — a gate
 # that cannot compare must fail. (LIB pointed somewhere empty; rc>=2 path.)
 if LIB="$TMP/no-such-lib" alive "$FAKE" 2>/dev/null; then

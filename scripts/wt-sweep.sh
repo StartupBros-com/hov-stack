@@ -190,6 +190,10 @@ done < <(wt_roots)
 run(){ local out; if [ "$DRY_RUN" = 1 ]; then echo "      would: $*"; return 0; fi
   if out=$(eval "$@" 2>&1); then echo "      ok: $*"; return 0; fi
   echo "      !! FAILED: $*"; [ -n "$out" ] && printf '%s\n' "$out" | head -n 5 | sed 's/^/         /'; return 1; }
+# The directories alive() spells each worktree through: WT_ALIAS_ROOTS when set, as
+# for the session-hold helper (lib/wt-preserve.sh), else the repo roots (hov-stack#661).
+if [ -n "${WT_ALIAS_ROOTS+x}" ]; then ALIAS_ROOTS=$WT_ALIAS_ROOTS
+else ALIAS_ROOTS=$(wt_roots | paste -sd: -); fi
 # ALIVE_BEGIN (extracted verbatim by tests/wt-sweep-alive.test.sh — keep markers)
 # a worktree is live if ANY process holds an open fd inside it, has its cwd at/inside
 # it, carries it in its environment, or names it in its cmdline. A daemon can hold a
@@ -204,7 +208,9 @@ run(){ local out; if [ "$DRY_RUN" = 1 ]; then echo "      would: $*"; return 0; 
 # Erring toward "alive" only defers a sweep; erring the other way silently burns SSD
 # endurance, so the asymmetry is intentional — and a checker that cannot answer
 # (missing lib, unreadable /proc: rc>=2) reads as ALIVE, never as dead.
-alive(){ python3 "${LIB:?}/proc_liveness.py" --quiet -- "$1" >/dev/null 2>&1
+# ALIAS_ROOTS (set above this block) adds the spellings a renamed checkout's compat
+# link gives a worktree, so a process handed the old one still holds it (#661).
+alive(){ python3 "${LIB:?}/proc_liveness.py" --quiet --alias-roots="${ALIAS_ROOTS-}" -- "$1" >/dev/null 2>&1
   case $? in 0) return 0;; 1) return 1;;
     *) echo "      !! proc_liveness unavailable — treating as live: $1" >&2; return 0;; esac; }
 # ALIVE_END
