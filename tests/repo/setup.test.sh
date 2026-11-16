@@ -404,6 +404,9 @@ node -e '
   const s = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
   for (const groups of Object.values(s.hooks)) for (const g of groups) for (const h of g.hooks) console.log(h.command);
 ' "$S" > "$WORK/cmds"
+# What a hook prints when a file it needs is gone: node's own error, a shell's, or
+# hooks/run-with-flags.js's, which exits 0 after it.
+MISSING='Cannot find module|ENOENT|No such file|\[Hook\] Script not found|\[Hook\] Path traversal rejected'
 n_cmds=0
 while IFS= read -r cmd; do
   n_cmds=$((n_cmds + 1))
@@ -411,7 +414,7 @@ while IFS= read -r cmd; do
   out=$(cd "$HOME" && echo '{}' | bash -c "$cmd" 2>&1)
   rc=$?
   set -e
-  if grep -q -E "Cannot find module|ENOENT|No such file" <<<"$out"; then
+  if grep -q -E "$MISSING" <<<"$out"; then
     fail "hook command broke on a clean HOME: $cmd :: $out"
   fi
   echo "    rc=$rc  ${cmd:0:100}"
@@ -444,7 +447,7 @@ while IFS= read -r cmd; do
   out=$(cd "$HOME" && printf '%s' "$armed_payload" | PATH="$WORK/countbin:$PATH" CLAUDE_LOOP_GUARD=1 timeout 120 bash -c "$cmd" 2>&1)
   rc=$?
   set -e
-  if grep -q -E "Cannot find module|ENOENT|No such file" <<<"$out"; then
+  if grep -q -E "$MISSING" <<<"$out"; then
     fail "hook command broke on a clean HOME when armed: $cmd :: $out"
   fi
   case $cmd in

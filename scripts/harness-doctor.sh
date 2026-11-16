@@ -614,6 +614,11 @@ else
       _hook_base=$(basename "$f")
       _hook_stem=${_hook_base%.*}
       hook_registered "$_hook_base" && continue
+      # A retired hook kept as a no-op, because an install seeded while the template
+      # registered it may register it still (hooks/PostToolUse/pr-record.js).
+      # tests/hook-registrations.test.py keeps the marker honest: only a path some
+      # template revision registered may carry it, and only in a file with no code.
+      grep -qsF 'hov-stack:retired-hook-stub' "$f" && continue
       hook_required_by_script "${f#"$HOOKS_ROOT"/}" && continue
       _hook_requirers=$(grep -lsF -e "require('./$_hook_stem')" -e "require('./$_hook_base')" \
         -e "require(\"./$_hook_stem\")" -e "require(\"./$_hook_base\")" "$(dirname "$f")"/*.js)
