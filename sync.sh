@@ -2294,14 +2294,19 @@ apply_settings() (
     esac
     shift
   done
-  if ! command -v node >/dev/null || ! command -v jq >/dev/null; then
+  role=$(profile_role 2>/dev/null) || role=undeclared
+  # A host that does not apply only writes the stamp below, which needs node
+  # alone; every ./setup starter file registers the SessionStart hook that
+  # lands here, and ./setup asks for git and node, not jq (#651). A plan and
+  # an applying host read the template with jq.
+  if ! command -v node >/dev/null \
+    || { ! command -v jq >/dev/null && { [ "$plan" = 1 ] || [[ "$role" == workstation || "$role" == satellite ]]; }; }; then
     echo 'settings: node and jq are required' >&2
     return 1
   fi
   if [ -n "$rev" ]; then
     git -C "$HERE" rev-parse --verify "$rev^{commit}" >/dev/null 2>&1 || { echo "invalid seed revision" >&2; return 2; }
   fi
-  role=$(profile_role 2>/dev/null) || role=undeclared
   if [ "$plan" = 0 ]; then
     if [ -n "$rev" ] && [[ "$role" != workstation && "$role" != satellite ]]; then
       echo "settings: skipped (host role $role: --seed-base needs a workstation or satellite host)"; return 2

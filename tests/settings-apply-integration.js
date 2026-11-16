@@ -132,6 +132,27 @@ const hook = () => ({
 });
 const addHook = (f) =>
   f.edit(f.tracked, (v) => v.hooks.SessionStart.push(hook()));
+// The caller's PATH with one command gone: a directory that holds it is
+// swapped for a mirror linking to everything else there, so every other
+// lookup resolves as it did.
+let mirrors;
+const pathWithout = (name) => {
+  mirrors ??= fs.mkdtempSync(path.join(os.tmpdir(), "settings-apply-path-"));
+  return (process.env.PATH || "")
+    .split(":")
+    .map((dir, i) => {
+      if (!fs.existsSync(path.join(dir, name))) return dir;
+      const mirror = path.join(mirrors, name + "-" + i);
+      if (!fs.existsSync(mirror)) {
+        fs.mkdirSync(mirror);
+        for (const entry of fs.readdirSync(dir))
+          if (entry !== name)
+            fs.symlinkSync(path.join(dir, entry), path.join(mirror, entry));
+      }
+      return mirror;
+    })
+    .join(":");
+};
 const target = (f) =>
   fs.writeFileSync(
     path.join(f.root, "hooks/SessionStart/planted.js"),
@@ -489,6 +510,70 @@ const target = (f) =>
     assert.deepEqual(fs.readFileSync(f.live), before);
     assert.match(f.apply("--plan"), /settings: plan/);
   });
+  await test("no jq: a host that does not apply skips quietly", (f) => {
+    // Every ./setup starter file registers the SessionStart hook, and such a
+    // host only ever takes the skipped branch, which needs node alone (#651).
+    fs.writeFileSync(path.join(f.root, "hosts.tsv"), "");
+    const env = { ...f.env, PATH: pathWithout("jq") };
+    const session = (extra = {}) =>
+      spawnSync(
+        "node",
+        [path.join(f.root, "hooks/SessionStart/settings-apply.js")],
+        {
+          env: { ...env, ...extra },
+          stdio: ["ignore", "pipe", "pipe"],
+          encoding: "utf8",
+        },
+      );
+    const stamp = path.join(f.cfg, ".hov-stack/settings-apply.stamp");
+    const before = fs.readFileSync(f.live);
+    const first = session();
+    assert.equal(first.status, 0);
+    assert.equal(first.stdout, "", "a skip must not read as a failed apply");
+    assert.ok(fs.existsSync(stamp), "the skip must write the stamp");
+    assert.deepEqual(fs.readFileSync(f.live), before);
+    // With the stamp written, the next session stays out of bash.
+    const trap = path.join(f.tmp, "trap"),
+      started = path.join(f.tmp, "bash-started");
+    fs.mkdirSync(trap);
+    fs.writeFileSync(
+      path.join(trap, "bash"),
+      `#!/bin/sh\n: > "${started}"\nexit 1\n`,
+      { mode: 0o755 },
+    );
+    const trapped = { PATH: trap + ":" + env.PATH };
+    const written = fs.readFileSync(stamp);
+    const second = session(trapped);
+    assert.equal(second.status, 0);
+    assert.equal(second.stdout, "");
+    assert.ok(!fs.existsSync(started), "the second session must not start bash");
+    assert.deepEqual(fs.readFileSync(stamp), written);
+    // The trap itself: a session with no stamp does start bash.
+    fs.rmSync(stamp);
+    session(trapped);
+    assert.ok(fs.existsSync(started), "the trap must see a bash start");
+  });
+  await test("no jq: plan and applying hosts still refuse", (f) => {
+    const PATH = pathWithout("jq");
+    const stamp = path.join(f.cfg, ".hov-stack/settings-apply.stamp");
+    const refused = (...args) => {
+      const r = f.run(["apply-settings", ...args], { PATH });
+      assert.equal(r.status, 1, r.stdout + r.stderr);
+      assert.match(r.stderr, /settings: node and jq are required/);
+      assert.ok(!fs.existsSync(stamp));
+    };
+    for (const role of ["workstation", "satellite"]) {
+      fs.writeFileSync(
+        path.join(f.root, "hosts.tsv"),
+        os.hostname().split(".")[0] + "\t" + role + "\n",
+      );
+      refused();
+      refused("--quiet");
+      refused("--plan");
+    }
+    fs.writeFileSync(path.join(f.root, "hosts.tsv"), "");
+    refused("--plan");
+  });
   await test("seed-base previews without writes and bootstraps removals", (f) => {
     const git = (args) => {
       const r = spawnSync("git", ["-C", f.root, ...args], {
@@ -665,6 +750,7 @@ const target = (f) =>
     assert.match(r.stderr,/settings apply failed/);
     assert.match(r.stderr,/FAILED to install/);
   });
+  if (mirrors) fs.rmSync(mirrors, { recursive: true, force: true });
   console.log(`${pass} passed; ${fail} failed`);
   process.exitCode = fail ? 1 : 0;
 })();
