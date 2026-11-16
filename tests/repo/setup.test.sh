@@ -5,7 +5,7 @@
 #   - an existing CLAUDE.md is backed up, never deleted
 #   - the seeded settings.json parses, names no home directory but this one, no API gateway, no login method
 #   - every hook command in the seed runs under the temp HOME without a missing module or file
-#   - a second run moves nothing and leaves an existing settings.json alone
+#   - a second run moves nothing and leaves a settings.json setup has no record of creating alone
 #   - CLAUDE_CONFIG_DIR is honoured
 #   - every skill in the plugin pack is linked except the ones a default plugin provides,
 #     each skip is reported, and none linked is one the pinned record of the default
@@ -43,6 +43,13 @@
 #     install; setup then turns auto-update on for hov in its own unedited seed and says
 #     how to turn it off, a rerun leaves it on and writes nothing, and a settings.json of
 #     the user's own keeps no autoUpdate key while setup says /hov-setup asks first
+#   - merging (#650): a settings.json setup creates gets a record of the seed; with it, a run
+#     (and --update) merges the template's added and dropped rules, env values and hooks,
+#     lists them, keeps one copy of the old file and the owner's own edits, model and
+#     statusLine; --check reports it behind and writes nothing; a rerun is byte-identical;
+#     sync.sh's record, or no record, leaves the file alone; an unparseable file, a race, a
+#     refused overlay and an unfinished write are failures that say what state the file is
+#     in; dcg's hook follows dcg's install both ways; no run leaves a temporary file
 #   - the private overlay (U16, #65): settings.json merges into the seed (its keys win, lists
 #     add without repeats across spellings, a null removes, its dcg hooks follow the template's
 #     rule, another kind of value is refused with no seed); CLAUDE.md is imported from rules/
@@ -1066,6 +1073,399 @@ grep -q -E "^  plugins +skipped +not installed: $(default_names | tr '\n' ' ' | 
 [ "$(grep -c '^plugin install ' "$FI/calls")" = "$(default_names | wc -l | tr -d ' ')" ] || fail "offline installs were not each tried once"
 ok "offline installs: each default plugin is tried once and the ones not installed are listed"
 
+# Merging into a settings.json setup has a record of creating (#650). A run that creates
+# settings.json from nothing keeps that seed at .hov-stack/setup-settings-base.json; a later run
+# merges the template's changes into the file against it with lib/settings-apply.js, after
+# copying the old file to ~/.hov-stack-backups. A private copy of the checkout lets these cases
+# change the template without touching the ones above; each home has its own fake claude, and
+# every run's temporary files go under one directory that must be empty at the end.
+MC=$WORK/copy-merge
+cp -a "$copy" "$MC"
+mkdir -p "$WORK/merge-tmp"
+merge_setup() {  # merge_setup <state dir> <home> <log> [args]: the private copy's setup, the fake claude first on PATH
+  local f=$1 h=$2 log=$3
+  shift 3
+  FAKE=$f HOME=$h TMPDIR=$WORK/merge-tmp PATH=$WORK/fake-bin:$PATH bash "$MC/setup" "$@" > "$log" 2>&1
+}
+tmpl() {  # tmpl <js>: run <js> on the private copy's template, as s, and write it back
+  node -e '
+    const fs = require("fs"), f = process.argv[1], s = JSON.parse(fs.readFileSync(f, "utf8"));
+    new Function("s", process.argv[2])(s);
+    fs.writeFileSync(f, JSON.stringify(s, null, 2) + "\n");
+  ' "$MC/settings.json" "$1"
+}
+edit_json() {  # edit_json <file> <js>: run <js> on the JSON in <file>, as s, and write it back
+  node -e '
+    const fs = require("fs"), f = process.argv[1], s = JSON.parse(fs.readFileSync(f, "utf8"));
+    new Function("s", process.argv[2])(s);
+    fs.writeFileSync(f, JSON.stringify(s, null, 2) + "\n");
+  ' "$1" "$2"
+}
+json_ok() {  # json_ok <file> <js expression on s>: 0 when it holds
+  node -e 'const s = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")); process.exit(new Function("s", "return (" + process.argv[2] + ")")(s) ? 0 : 1);' "$1" "$2"
+}
+seed_now() {  # seed_now <home> <out> [dcg path]: the seed the private copy's template gives that home today
+  node "$MC/lib/settings-seed.js" "$MC/settings.json" "$2" "$1/.claude" "$1" "${3:-}" > /dev/null
+}
+same_settings() {  # same_settings <a> <b> <home>: the same apart from key and list order, $HOME/ spelled out, and the keys Claude Code writes
+  node -e '
+    const fs = require("fs"), home = process.argv[3], key = (v) => JSON.stringify(v);
+    const canon = (v) => typeof v === "string" ? v.split("$HOME/").join(home + "/")
+      : Array.isArray(v) ? v.map(canon).sort((x, y) => (key(x) < key(y) ? -1 : key(x) > key(y) ? 1 : 0))
+      : v && typeof v === "object" ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, canon(v[k])])) : v;
+    const [a, b] = process.argv.slice(1, 3).map((p) => {
+      const s = JSON.parse(fs.readFileSync(p, "utf8"));
+      delete s.enabledPlugins; delete s.extraKnownMarketplaces;
+      return canon(s);
+    });
+    const diff = [...new Set([...Object.keys(a), ...Object.keys(b)])].filter((k) => key(a[k]) !== key(b[k]));
+    if (diff.length) { console.log("differ at: " + diff.join(", ")); process.exit(1); }
+  ' "$1" "$2" "$3"
+}
+merge_copies() {  # merge_copies <home>: the copies the merge made of the old settings.json, oldest first
+  [ -d "$1/.hov-stack-backups" ] || return 0
+  find "$1/.hov-stack-backups" -path '*/settings-apply-*/settings.json' -type f | LC_ALL=C sort
+}
+item_count() { grep -c -E '^    (add|remove|update) ' "$1" || true; }  # item_count <log>: the changes a merge listed
+
+# A first run that creates settings.json keeps its seed as the record.
+HM=$WORK/home-merge
+FM=$WORK/fake-merge
+new_fake "$FM" 2.1.310
+SM=$HM/.claude/settings.json
+BM=$HM/.claude/.hov-stack/setup-settings-base.json
+merge_setup "$FM" "$HM" "$WORK/merge-1.log" --no-dcg || { cat "$WORK/merge-1.log"; fail "the first run of the merge cases exited non-zero"; }
+[ -f "$BM" ] && [ ! -L "$BM" ] || { cat "$WORK/merge-1.log"; fail "a first run that created settings.json kept no record of its seed"; }
+[ "$(stat -c %a "$BM")" = 600 ] && [ "$(stat -c %a "${BM%/*}")" = 700 ] || fail "the record is $(stat -c %a "$BM") in a $(stat -c %a "${BM%/*}") directory, not 600 in 700"
+seed_now "$HM" "$WORK/merge-seed-a.json"
+cmp -s "$BM" "$WORK/merge-seed-a.json" || fail "the record is not, byte for byte, the seed the first run wrote"
+grep -q -x -F "  kept a record of this seed at ~/.claude/.hov-stack/setup-settings-base.json: later runs of ./setup merge the template's changes into settings.json, and leave it alone once that record is deleted" "$WORK/merge-1.log" \
+  || { cat "$WORK/merge-1.log"; fail "the first run did not say where it kept the record and that deleting it stops the merge"; }
+[ "$(au_of "$SM")" = true ] || fail "the first run's seed did not get auto-update turned on"
+[ ! -e "$HM/.hov-stack-backups" ] || fail "a first run on a fresh HOME made a backup"
+ok "a run that creates settings.json keeps its seed, byte for byte, as .hov-stack/setup-settings-base.json (0600 in a 0700 directory) and says deleting it stops the merge"
+# The homes for the stand-down and the sync.sh-record cases take their first run now, on the
+# template as it was.
+HS=$WORK/home-merge-sync
+FS=$WORK/fake-merge-sync
+new_fake "$FS" 2.1.310
+merge_setup "$FS" "$HS" "$WORK/merge-sync-1.log" --no-dcg || { cat "$WORK/merge-sync-1.log"; fail "the first run of the sync.sh-record case exited non-zero"; }
+[ -f "$HS/.claude/.hov-stack/setup-settings-base.json" ] || fail "the sync.sh-record case's first run kept no record"
+# The template changes: an allow rule added and one dropped, a deny rule added, an env value
+# changed, a hook added under a new matcher, and the PreCompact hook dropped.
+tmpl '
+  s.permissions.allow.push("Bash(merge-probe:*)");
+  s.permissions.allow = s.permissions.allow.filter((e) => e !== "Bash(vast-ssh:*)");
+  s.permissions.deny.push("Bash(merge-probe-deny:*)");
+  s.env.API_TIMEOUT_MS = "600000";
+  s.hooks.PreToolUse.push({ matcher: "NotebookEdit", hooks: [{ type: "command", command: "\"$HOME/.claude/hooks/bin/node-hook\" \"$HOME/.claude/hooks/PreToolUse/settings-guard.js\"", timeout: 5 }] });
+  delete s.hooks.PreCompact;
+'
+merge_items_b=(
+  '    add permissions.allow "Bash(merge-probe:*)"'
+  '    remove permissions.allow "Bash(vast-ssh:*)"'
+  '    add permissions.deny "Bash(merge-probe-deny:*)"'
+  '    update env.API_TIMEOUT_MS'
+)
+has_items_b() {  # has_items_b <log>: the six changes above, each listed once, and nothing else
+  local want
+  for want in "${merge_items_b[@]}"; do
+    [ "$(grep -c -x -F "$want" "$1")" = 1 ] || { echo "not listed once: $want"; return 1; }
+  done
+  [ "$(grep -c -E '^    add hook PreToolUse \[NotebookEdit\] .*/hooks/PreToolUse/settings-guard\.js' "$1")" = 1 ] || { echo "the added hook is not listed once"; return 1; }
+  [ "$(grep -c -E '^    remove hook PreCompact \[\] .*/hooks/PreCompact/compact-preserve\.js' "$1")" = 1 ] || { echo "the dropped hook is not listed once"; return 1; }
+  [ "$(item_count "$1")" = 6 ] || { echo "$(item_count "$1") changes listed, not 6"; return 1; }
+}
+# --check names each change it would merge, exits 1, and writes nothing.
+cp "$SM" "$WORK/merge-before-b.json"
+tree_before=$(tree_state "$HM")
+rc=0; merge_setup "$FM" "$HM" "$WORK/merge-check-b.log" --check --no-dcg || rc=$?
+[ "$rc" = 1 ] || { cat "$WORK/merge-check-b.log"; fail "--check with the template ahead of settings.json exited $rc, not 1"; }
+grep -E '^  settings +behind ' "$WORK/merge-check-b.log" | grep -q -x -F "  settings     behind   $SM is 6 change(s) behind this checkout's template: run ./setup, which merges them in and keeps a copy of the old file" \
+  || { cat "$WORK/merge-check-b.log"; fail "--check did not say settings.json is 6 changes behind and that ./setup merges them"; }
+grep -q -x -F "  settings.json: ./setup would merge 6 change(s) from this checkout's template into ~/.claude/settings.json:" "$WORK/merge-check-b.log" \
+  || { cat "$WORK/merge-check-b.log"; fail "--check did not head the changes it would merge"; }
+has_items_b "$WORK/merge-check-b.log" || { cat "$WORK/merge-check-b.log"; fail "--check did not list exactly the template's six changes (above)"; }
+[ "$(tree_state "$HM")" = "$tree_before" ] || fail "--check changed the config dir"
+ok "--check names the six changes it would merge into settings.json, says it is 6 behind, exits 1, and writes nothing"
+# A run merges them, with a copy of the old file.
+rc=0; merge_setup "$FM" "$HM" "$WORK/merge-2.log" --no-dcg || rc=$?
+[ "$rc" = 0 ] || { cat "$WORK/merge-2.log"; fail "the run that merges the template's changes exited $rc"; }
+grep -q -x -F "  settings.json: merged 6 change(s) from this checkout's template into ~/.claude/settings.json:" "$WORK/merge-2.log" \
+  || { cat "$WORK/merge-2.log"; fail "the run did not say it merged 6 changes"; }
+has_items_b "$WORK/merge-2.log" || { cat "$WORK/merge-2.log"; fail "the run did not list exactly the template's six changes (above)"; }
+copies=$(merge_copies "$HM")
+[ "$(printf '%s\n' "$copies" | grep -c .)" = 1 ] || fail "the merge did not make exactly one copy of the old file: '$copies'"
+cmp -s "$copies" "$WORK/merge-before-b.json" || fail "the copy is not, byte for byte, the settings.json from before the merge"
+grep -q -x -F "  the settings.json from before is at $copies" "$WORK/merge-2.log" || fail "the run did not say where the old settings.json is"
+grep -E '^  settings +ok ' "$WORK/merge-2.log" | grep -q -F "merged 6 change(s) from the template into $SM; the file from before is at $copies" \
+  || { cat "$WORK/merge-2.log"; fail "the settings row does not name the merge and the copy"; }
+grep -q -x -F "  ./setup merges into it because it has a record of creating it at ~/.claude/.hov-stack/setup-settings-base.json; delete that file and ./setup leaves settings.json alone" "$WORK/merge-2.log" \
+  || fail "the run did not name the record and say deleting it stops the merge"
+[ ! -e "$HM/.claude/settings.hov-stack.json" ] || fail "a run that merged also wrote settings.hov-stack.json"
+seed_now "$HM" "$WORK/merge-seed-b.json"
+same_settings "$SM" "$WORK/merge-seed-b.json" "$HM" || fail "the merged settings.json is not today's seed plus Claude Code's keys (above)"
+same_settings "$BM" "$WORK/merge-seed-b.json" "$HM" || fail "the record after the merge is not today's seed (above)"
+node -e '
+  const fs = require("fs"), [a, b] = process.argv.slice(1).map((p) => JSON.parse(fs.readFileSync(p, "utf8")));
+  for (const k of ["enabledPlugins", "extraKnownMarketplaces"]) if (JSON.stringify(a[k]) !== JSON.stringify(b[k])) { console.log(k); process.exit(1); }
+' "$SM" "$WORK/merge-before-b.json" || fail "the merge changed a key Claude Code wrote (above)"
+grep -q -x -F "  hov: auto-update is on, set in $SM" "$WORK/merge-2.log" || { cat "$WORK/merge-2.log"; fail "after the merge, setup did not say auto-update is still on"; }
+ok "a run merges them into settings.json: the file is today's seed with Claude Code's keys kept, one copy of the old file, the record moved on, no settings.hov-stack.json"
+# Nothing left to merge: the file is untouched and no copy is made.
+cp "$SM" "$WORK/merge-after-b.json"
+rc=0; merge_setup "$FM" "$HM" "$WORK/merge-3.log" --no-dcg || rc=$?
+[ "$rc" = 0 ] || { cat "$WORK/merge-3.log"; fail "the run with nothing to merge exited $rc"; }
+cmp -s "$SM" "$WORK/merge-after-b.json" || fail "a run with nothing to merge changed settings.json"
+[ "$(merge_copies "$HM")" = "$copies" ] || fail "a run with nothing to merge made a copy"
+grep -q -x -F "  settings.json: nothing to merge from this checkout's template" "$WORK/merge-3.log" || { cat "$WORK/merge-3.log"; fail "the run did not say there was nothing to merge"; }
+grep -E '^  settings +ok ' "$WORK/merge-3.log" | grep -q -F "$SM, up to date with the template" || { cat "$WORK/merge-3.log"; fail "the settings row does not say up to date"; }
+tree_before=$(tree_state "$HM")
+rc=0; merge_setup "$FM" "$HM" "$WORK/merge-check-b2.log" --check --no-dcg || rc=$?
+[ "$rc" = 0 ] || { cat "$WORK/merge-check-b2.log"; fail "--check after the merge exited $rc"; }
+grep -E '^  settings +ok ' "$WORK/merge-check-b2.log" | grep -q -F "$SM, up to date with the template" || { cat "$WORK/merge-check-b2.log"; fail "--check after the merge does not say up to date"; }
+[ "$(tree_state "$HM")" = "$tree_before" ] || fail "--check after the merge changed the config dir"
+ok "with nothing left to merge, a run leaves settings.json byte for byte and makes no copy, and --check is green"
+
+# Where sync.sh keeps its own record (.hov-stack/settings-base.json, on the hosts it applies
+# settings to), its merge owns the file: setup merges nothing and makes no copy, writes the seed
+# beside it as before, and says sync.sh merges into it.
+SS=$HS/.claude/settings.json
+cp "$HS/.claude/.hov-stack/setup-settings-base.json" "$HS/.claude/.hov-stack/settings-base.json"
+edit_json "$SS" 'delete s.extraKnownMarketplaces.hov.autoUpdate;'
+cp "$SS" "$WORK/merge-sync-before.json"
+rc=0; merge_setup "$FS" "$HS" "$WORK/merge-sync-2.log" --no-dcg || rc=$?
+[ "$rc" = 0 ] || { cat "$WORK/merge-sync-2.log"; fail "the run beside sync.sh's record exited $rc"; }
+cmp -s "$SS" "$WORK/merge-sync-before.json" || fail "setup changed a settings.json sync.sh keeps a record of"
+[ -z "$(merge_copies "$HS")" ] || fail "setup made a merge copy beside sync.sh's record"
+json_ok "$HS/.claude/settings.hov-stack.json" 's.permissions.allow.includes("Bash(merge-probe:*)")' || fail "the seed beside a settings.json sync.sh keeps a record of is not today's"
+grep -q -x -F '  sync.sh merges into this settings.json, so setup leaves it alone; /hov-setup asks before turning auto-update on.' "$WORK/merge-sync-2.log" \
+  || { cat "$WORK/merge-sync-2.log"; fail "setup did not say sync.sh merges into the file when it left auto-update alone"; }
+[ "$(au_of "$SS")" = none ] || fail "setup set auto-update in a settings.json sync.sh keeps a record of"
+rm "$HS/.claude/.hov-stack/settings-base.json"
+rc=0; merge_setup "$FS" "$HS" "$WORK/merge-sync-check.log" --check --no-dcg || rc=$?
+[ "$rc" = 1 ] && grep -q -E '^  settings +behind ' "$WORK/merge-sync-check.log" || { cat "$WORK/merge-sync-check.log"; fail "with sync.sh's record gone, --check did not show setup's own record behind the template"; }
+ok "beside sync.sh's own record setup merges nothing, makes no copy and says sync.sh merges into the file; with that record gone, setup's own is in force again"
+# A first run beside sync.sh's record seeds settings.json and keeps no record of its own, so
+# setup's merge never starts there, even after sync.sh's record goes.
+HF=$WORK/home-merge-sync-first
+FF=$WORK/fake-merge-sync-first
+new_fake "$FF" 2.1.310
+mkdir -p "$HF/.claude/.hov-stack"
+printf '{}\n' > "$HF/.claude/.hov-stack/settings-base.json"
+merge_setup "$FF" "$HF" "$WORK/merge-sync-first.log" --no-dcg || { cat "$WORK/merge-sync-first.log"; fail "a first run beside sync.sh's record exited non-zero"; }
+[ -f "$HF/.claude/settings.json" ] || fail "a first run beside sync.sh's record seeded no settings.json"
+[ ! -e "$HF/.claude/.hov-stack/setup-settings-base.json" ] || fail "a first run beside sync.sh's record kept a record of its own"
+! grep -q -F 'kept a record of this seed' "$WORK/merge-sync-first.log" || fail "a first run beside sync.sh's record said it kept a record"
+ok "a first run beside sync.sh's record seeds settings.json and keeps no record of its own"
+
+# A settings.json its owner replaced while the record stayed is merged into all the same: their
+# file is kept, and every deny rule of the template comes back (the engine never leaves one
+# out). Once the record is deleted, setup leaves the file alone.
+HW=$WORK/home-merge-replaced
+FW=$WORK/fake-merge-replaced
+new_fake "$FW" 2.1.310
+merge_setup "$FW" "$HW" "$WORK/merge-own-1.log" --no-dcg || { cat "$WORK/merge-own-1.log"; fail "the first run of the replaced-file case exited non-zero"; }
+SW=$HW/.claude/settings.json
+printf '{\n  "theme": "dark"\n}\n' > "$SW"
+rc=0; merge_setup "$FW" "$HW" "$WORK/merge-own-2.log" --no-dcg || rc=$?
+[ "$rc" = 0 ] || { cat "$WORK/merge-own-2.log"; fail "the run over a replaced settings.json exited $rc"; }
+n_deny=$(node -e 'console.log(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).permissions.deny.length)' "$MC/settings.json")
+[ "$(grep -c -E '^    add permissions\.deny ' "$WORK/merge-own-2.log")" = "$n_deny" ] && [ "$(item_count "$WORK/merge-own-2.log")" = "$n_deny" ] \
+  || { cat "$WORK/merge-own-2.log"; fail "a replaced settings.json did not get exactly the template's $n_deny deny rules back"; }
+json_ok "$SW" 's.theme === "dark" && s.permissions.deny.length === '"$n_deny"' && !s.permissions.allow && !s.hooks' || { cat "$SW"; fail "the replaced settings.json is not the owner's plus the deny rules"; }
+copies=$(merge_copies "$HW")
+[ -n "$copies" ] && [ "$(cat "$copies")" = "$(printf '{\n  "theme": "dark"\n}')" ] || fail "the owner's file was not copied before the merge"
+grep -q -x -F "  ./setup merges into it because it has a record of creating it at ~/.claude/.hov-stack/setup-settings-base.json; delete that file and ./setup leaves settings.json alone" "$WORK/merge-own-2.log" \
+  || fail "the merge into a replaced settings.json did not name the record and how to stop it"
+forget_base "$HW"
+cp "$SW" "$WORK/merge-own-before.json"
+rc=0; merge_setup "$FW" "$HW" "$WORK/merge-own-3.log" --no-dcg || rc=$?
+[ "$rc" = 0 ] || { cat "$WORK/merge-own-3.log"; fail "the run after the record was deleted exited $rc"; }
+cmp -s "$SW" "$WORK/merge-own-before.json" || fail "setup changed settings.json after its record was deleted"
+[ "$(merge_copies "$HW")" = "$copies" ] || fail "setup made a merge copy after the record was deleted"
+[ -f "$HW/.claude/settings.hov-stack.json" ] || fail "with the record deleted, the seed was not written beside settings.json"
+ok "a settings.json replaced while the record stays keeps the owner's keys and gets the template's $n_deny deny rules back, with a copy; with the record deleted it is left byte for byte"
+
+# An owner's edits survive a merge: a rule they added, one they removed, keys of their own and
+# the keys the merge never touches (model, statusLine), and a value both they and the template
+# changed. The auto-update helper turns auto-update back on in such a file, with a copy.
+HE=$WORK/home-merge-edited
+FE=$WORK/fake-merge-edited
+new_fake "$FE" 2.1.310
+SE=$HE/.claude/settings.json
+merge_setup "$FE" "$HE" "$WORK/merge-edit-1.log" --no-dcg || { cat "$WORK/merge-edit-1.log"; fail "the first run of the edited case exited non-zero"; }
+json_ok "$SE" 's.permissions.allow.includes("Bash(dcg test:*)") && !s.model && !s.statusLine' || fail "the edited case's seed is not what its edits assume"
+edit_json "$SE" '
+  s.permissions.allow.push("mcp__supabase__*");
+  s.permissions.allow = s.permissions.allow.filter((e) => e !== "Bash(dcg test:*)");
+  s.env.API_TIMEOUT_MS = "999";
+  s.model = "mine";
+  s.statusLine = { type: "command", command: "echo mine" };
+  s.theirOwnKey = 1;
+  delete s.extraKnownMarketplaces.hov.autoUpdate;
+'
+tmpl 's.env.API_TIMEOUT_MS = "700000"; s.permissions.allow.push("Bash(merge-probe-2:*)");'
+rc=0; merge_setup "$FE" "$HE" "$WORK/merge-edit-2.log" --no-dcg || rc=$?
+[ "$rc" = 0 ] || { cat "$WORK/merge-edit-2.log"; fail "the run over an edited settings.json exited $rc"; }
+json_ok "$SE" '
+  s.permissions.allow.includes("mcp__supabase__*") && !s.permissions.allow.includes("Bash(dcg test:*)")
+  && s.permissions.allow.includes("Bash(merge-probe-2:*)") && s.env.API_TIMEOUT_MS === "999"
+  && s.model === "mine" && s.statusLine.command === "echo mine" && s.theirOwnKey === 1
+' || { cat "$WORK/merge-edit-2.log"; fail "the merge lost an edit of the owner's or missed the template's new rule"; }
+grep -q -x -F '    add permissions.allow "Bash(merge-probe-2:*)"' "$WORK/merge-edit-2.log" && [ "$(item_count "$WORK/merge-edit-2.log")" = 1 ] \
+  || { cat "$WORK/merge-edit-2.log"; fail "the merge into an edited file did not list exactly the one new rule"; }
+grep -q -x -F '    conflict env.API_TIMEOUT_MS (you and the template both changed it; yours is kept)' "$WORK/merge-edit-2.log" \
+  || { cat "$WORK/merge-edit-2.log"; fail "the run did not name the value both the owner and the template changed"; }
+[ "$(au_of "$SE")" = true ] || fail "auto-update was not turned back on in an edited settings.json setup has a record of creating"
+grep -q -F "  hov: auto-update turned on in $SE (the old file is at " "$WORK/merge-edit-2.log" || { cat "$WORK/merge-edit-2.log"; fail "turning auto-update on in an edited file did not keep a copy of it"; }
+rc=0; merge_setup "$FE" "$HE" "$WORK/merge-edit-check.log" --check --no-dcg || rc=$?
+[ "$rc" = 0 ] || { cat "$WORK/merge-edit-check.log"; fail "--check after merging into an edited file exited $rc"; }
+grep -E '^  settings +ok ' "$WORK/merge-edit-check.log" | grep -q -F "$SE, up to date with the template apart from 1 setting(s) you changed, which ./setup keeps" \
+  || { cat "$WORK/merge-edit-check.log"; fail "--check does not say the file is up to date apart from the owner's one change"; }
+ok "an owner's added and removed rules, own keys, model and statusLine survive a merge, a value both changed keeps theirs and is named, and auto-update comes back on with a copy"
+
+# A merge that cannot be made leaves settings.json as it was and fails the run: a settings.json
+# that does not parse, one changed under the merge twice, and an overlay the seed refuses. One
+# that fails after the file was replaced says so and names the copy. $HM is two changes behind.
+# Auto-update is off in it here, so a helper that wrote after a failed merge would show.
+cp "$SM" "$WORK/merge-good-au.json"
+edit_json "$SM" 'delete s.extraKnownMarketplaces.hov.autoUpdate;'
+cp "$SM" "$WORK/merge-good.json"
+cp "$BM" "$WORK/merge-base-good.json"
+n_copies=$(merge_copies "$HM" | grep -c . || true)
+printf '{ "permissions":\n' > "$SM"
+rc=0; merge_setup "$FM" "$HM" "$WORK/merge-bad.log" --no-dcg || rc=$?
+[ "$rc" = 1 ] || { cat "$WORK/merge-bad.log"; fail "a merge into a settings.json that does not parse exited $rc, not 1"; }
+grep -E '^  settings +failed ' "$WORK/merge-bad.log" | grep -q -F "could not merge the template's changes into $SM, which is as it was: $SM is not a JSON object (" \
+  || { cat "$WORK/merge-bad.log"; fail "the run did not say the file does not parse and is as it was"; }
+[ "$(cat "$SM")" = '{ "permissions":' ] || fail "a failed merge changed a settings.json that does not parse"
+cp "$WORK/merge-good.json" "$SM"
+printf '#!/bin/sh\nprintf " " >> "$1"\n' > "$WORK/merge-touch"
+chmod +x "$WORK/merge-touch"
+rc=0; HOV_SETTINGS_APPLY_TEST_BEFORE_RECHECK=$WORK/merge-touch merge_setup "$FM" "$HM" "$WORK/merge-race.log" --no-dcg || rc=$?
+[ "$rc" = 1 ] || { cat "$WORK/merge-race.log"; fail "a merge whose file changed under it twice exited $rc, not 1"; }
+grep -E '^  settings +failed ' "$WORK/merge-race.log" | grep -q -x -F "  settings     failed   could not merge the template's changes into $SM: live settings changed twice during the apply; nothing written" \
+  || { cat "$WORK/merge-race.log"; fail "the run did not name the race and say nothing was written"; }
+{ cat "$WORK/merge-good.json"; printf '  '; } | cmp -s - "$SM" || fail "the merge wrote into a file that changed under it (only the two spaces the stand-in added belong there)"
+cmp -s "$BM" "$WORK/merge-base-good.json" || fail "a merge that wrote nothing moved the record"
+grep -q -x -F '  the merge into this settings.json did not finish, so setup leaves auto-update alone this run.' "$WORK/merge-race.log" \
+  || { cat "$WORK/merge-race.log"; fail "after a failed merge setup did not say it leaves auto-update alone"; }
+cp "$WORK/merge-good.json" "$SM"
+OVB=$WORK/overlay-merge-refused
+mkdir -p "$OVB"
+printf '{ "permissions": "x" }\n' > "$OVB/settings.json"
+rc=0; HOV_STACK_OVERLAY=$OVB merge_setup "$FM" "$HM" "$WORK/merge-ovbad.log" --no-dcg || rc=$?
+[ "$rc" = 1 ] || { cat "$WORK/merge-ovbad.log"; fail "a merge with an overlay the seed refuses exited $rc, not 1"; }
+grep -E '^  settings +failed ' "$WORK/merge-ovbad.log" | grep -q -F "lib/settings-seed.js built no seed to merge into $SM, which is as it was; the lines above say why" \
+  || { cat "$WORK/merge-ovbad.log"; fail "the run did not say no seed was built and the file is as it was"; }
+grep -q -F 'settings-seed: ' "$WORK/merge-ovbad.log" || fail "the run did not show why the seed was refused"
+cmp -s "$SM" "$WORK/merge-good.json" || fail "a merge with no seed changed settings.json"
+grep -q -x -F '  the merge into this settings.json did not finish, so setup leaves auto-update alone this run.' "$WORK/merge-ovbad.log" \
+  || { cat "$WORK/merge-ovbad.log"; fail "after a merge with no seed setup did not say it leaves auto-update alone"; }
+[ "$(merge_copies "$HM" | grep -c . || true)" = "$n_copies" ] || fail "a merge that wrote nothing made a copy"
+printf '#!/bin/sh\nb=$(dirname "$1")/.hov-stack/setup-settings-base.json\nrm -f "$b" && mkdir -p "$b/blocked"\n' > "$WORK/merge-block-record"
+chmod +x "$WORK/merge-block-record"
+rc=0; HOV_SETTINGS_APPLY_TEST_BEFORE_RECHECK=$WORK/merge-block-record merge_setup "$FM" "$HM" "$WORK/merge-half.log" --no-dcg || rc=$?
+[ "$rc" = 1 ] || { cat "$WORK/merge-half.log"; fail "a merge whose record could not be written exited $rc, not 1"; }
+half_row=$(grep -E '^  settings +failed ' "$WORK/merge-half.log") || { cat "$WORK/merge-half.log"; fail "no failed settings row when the record could not be written"; }
+half_copy=${half_row##*; the file from before is at }
+grep -q -F "the merge into $SM was written but did not finish (" <<<"$half_row" && [ -f "$half_copy" ] && cmp -s "$half_copy" "$WORK/merge-good.json" \
+  || { cat "$WORK/merge-half.log"; fail "a merge that wrote settings.json but not the record did not say so and name a copy of the old file"; }
+json_ok "$SM" 's.permissions.allow.includes("Bash(merge-probe-2:*)")' || fail "the half-finished merge is not the one it says it wrote"
+[ "$(au_of "$SM")" = none ] || fail "setup turned auto-update on in a settings.json whose merge did not finish"
+chmod 700 "$BM"  # the engine set the record's mode (0600) on the directory standing in its way
+rm -rf "$BM"
+cp "$WORK/merge-base-good.json" "$BM"
+chmod 600 "$BM"
+cp "$WORK/merge-good.json" "$SM"
+# A temporary directory the merge cannot make is a failed merge too, not a run cut short.
+rc=0; FAKE=$FM HOME=$HM TMPDIR=$WORK/no-such-tmp PATH=$WORK/fake-bin:$PATH bash "$MC/setup" --no-dcg > "$WORK/merge-notmp.log" 2>&1 || rc=$?
+[ "$rc" = 1 ] || { cat "$WORK/merge-notmp.log"; fail "a merge with no temporary directory exited $rc, not 1"; }
+grep -E '^  settings +failed ' "$WORK/merge-notmp.log" | grep -q -x -F "  settings     failed   could not merge the template's changes into $SM, which is as it was: could not make a temporary directory" \
+  || { cat "$WORK/merge-notmp.log"; fail "a merge with no temporary directory did not say so and that the file is as it was"; }
+grep -q -F 'left alone on purpose: ' "$WORK/merge-notmp.log" || { cat "$WORK/merge-notmp.log"; fail "a merge with no temporary directory cut the run short of its closing lines"; }
+cmp -s "$SM" "$WORK/merge-good.json" || fail "a merge with no temporary directory changed settings.json"
+cp "$WORK/merge-good-au.json" "$SM"
+ok "a merge that cannot be made (a file that does not parse, one changed under it twice, an overlay the seed refuses) exits 1 and leaves settings.json as it was, auto-update included; one cut short after the write names the copy"
+
+# The overlay reaches a settings.json setup has a record of creating, on every run, except for
+# the keys the merge never touches: an owner's model stays. (The overlay section below has the
+# negative: with no record, the overlay reaches only the seed beside settings.json.)
+OVM=$WORK/overlay-merge
+mkdir -p "$OVM"
+printf '{ "model": "overlay-model", "autoCompactWindow": 123456, "permissions": { "allow": ["Bash(overlay-merge-tool:*)"] } }\n' > "$OVM/settings.json"
+edit_json "$SM" 's.model = "mine";'
+tree_before=$(tree_state "$HM")
+rc=0; HOV_STACK_OVERLAY=$OVM merge_setup "$FM" "$HM" "$WORK/merge-ov-check.log" --check --no-dcg || rc=$?
+[ "$rc" = 1 ] || { cat "$WORK/merge-ov-check.log"; fail "--check with an overlay ahead of settings.json exited $rc, not 1"; }
+grep -E '^  overlay +ok ' "$WORK/merge-ov-check.log" | grep -q -F "$OVM: settings.json merged on each run into $SM, which ./setup has a record of creating" \
+  || { cat "$WORK/merge-ov-check.log"; fail "--check's overlay row does not say the overlay is merged on each run into settings.json"; }
+grep -q -x -F '    update autoCompactWindow' "$WORK/merge-ov-check.log" && grep -q -x -F '    add permissions.allow "Bash(overlay-merge-tool:*)"' "$WORK/merge-ov-check.log" \
+  || { cat "$WORK/merge-ov-check.log"; fail "--check did not list the overlay's changes"; }
+! grep -q -E '^    [a-z]+ model' "$WORK/merge-ov-check.log" || fail "--check listed a change to model, which the merge never touches"
+[ "$(tree_state "$HM")" = "$tree_before" ] || fail "--check with an overlay changed the config dir"
+rc=0; HOV_STACK_OVERLAY=$OVM merge_setup "$FM" "$HM" "$WORK/merge-ov.log" --no-dcg || rc=$?
+[ "$rc" = 0 ] || { cat "$WORK/merge-ov.log"; fail "the run with an overlay exited $rc"; }
+json_ok "$SM" 's.autoCompactWindow === 123456 && s.permissions.allow.includes("Bash(overlay-merge-tool:*)") && s.model === "mine"' \
+  || { cat "$WORK/merge-ov.log"; fail "the overlay's settings did not reach settings.json, or the owner's model did not stay"; }
+grep -E '^  overlay +ok ' "$WORK/merge-ov.log" | grep -q -F "$OVM: settings.json merged into $SM, which ./setup has a record of creating" \
+  || { cat "$WORK/merge-ov.log"; fail "the run's overlay row does not say the overlay was merged into settings.json"; }
+ok "an overlay's settings reach a settings.json setup has a record of creating, --check lists them first, and the owner's model stays"
+
+# dcg's hook follows dcg: a merge adds it once dcg is installed, keeps it while the dcg it runs
+# is still there whatever PATH says, takes it out with DCG_FAIL_CLOSED once that dcg is gone,
+# and adds it back after a reinstall. A hook the owner took out stays out, and setup says how
+# to put it back. The stand-in dcg here is the only one these runs can find.
+DRT=$WORK/dcg-rt
+mkdir -p "$DRT"
+printf '#!/bin/sh\nexit 0\n' > "$DRT/dcg"
+chmod +x "$DRT/dcg"
+dcg_rt_hooks() { json_ok "$1" '((s.hooks && s.hooks.PreToolUse) || []).flatMap((g) => g.hooks || []).filter((h) => h.command === "'"$DRT/dcg"'").length === '"$2"; }
+dcg_rt_line() { printf '    %s hook PreToolUse [Bash|PowerShell|Monitor] "%s"' "$1" "$DRT/dcg"; }
+HG=$WORK/home-merge-dcg
+FG=$WORK/fake-merge-dcg
+new_fake "$FG" 2.1.310
+SG=$HG/.claude/settings.json
+merge_setup "$FG" "$HG" "$WORK/merge-dcg-1.log" --no-dcg || { cat "$WORK/merge-dcg-1.log"; fail "the first run of the dcg case exited non-zero"; }
+dcg_rt_hooks "$SG" 0 || fail "a run with no dcg seeded a dcg hook"
+rc=0; PATH=$DRT:$PATH merge_setup "$FG" "$HG" "$WORK/merge-dcg-2.log" --no-dcg || rc=$?
+[ "$rc" = 0 ] || { cat "$WORK/merge-dcg-2.log"; fail "the run once dcg was installed exited $rc"; }
+dcg_rt_hooks "$SG" 1 && json_ok "$SG" 's.env.DCG_FAIL_CLOSED !== undefined' || { cat "$WORK/merge-dcg-2.log"; fail "the merge did not add dcg's hook and DCG_FAIL_CLOSED once dcg was installed"; }
+grep -q -x -F "$(dcg_rt_line add)" "$WORK/merge-dcg-2.log" && grep -q -x -F '    add env.DCG_FAIL_CLOSED' "$WORK/merge-dcg-2.log" \
+  || { cat "$WORK/merge-dcg-2.log"; fail "the merge did not list dcg's hook and DCG_FAIL_CLOSED"; }
+[ ! -e "$HG/.claude/settings.hov-stack.json" ] || fail "the merge that added dcg's hook also wrote settings.hov-stack.json"
+cp "$SG" "$WORK/merge-dcg-on.json"
+rc=0; merge_setup "$FG" "$HG" "$WORK/merge-dcg-3.log" --no-dcg || rc=$?
+[ "$rc" = 0 ] && cmp -s "$SG" "$WORK/merge-dcg-on.json" || { cat "$WORK/merge-dcg-3.log"; fail "a run whose PATH lacks dcg changed settings.json while the dcg its hook runs is still there"; }
+rm "$DRT/dcg"
+rc=0; merge_setup "$FG" "$HG" "$WORK/merge-dcg-4.log" --no-dcg || rc=$?
+[ "$rc" = 0 ] || { cat "$WORK/merge-dcg-4.log"; fail "the run once dcg was gone exited $rc"; }
+dcg_rt_hooks "$SG" 0 && json_ok "$SG" 's.env.DCG_FAIL_CLOSED === undefined' || { cat "$WORK/merge-dcg-4.log"; fail "the merge left dcg's hook or DCG_FAIL_CLOSED once dcg was gone"; }
+grep -q -x -F "$(dcg_rt_line remove)" "$WORK/merge-dcg-4.log" && grep -q -x -F '    remove env.DCG_FAIL_CLOSED' "$WORK/merge-dcg-4.log" \
+  || { cat "$WORK/merge-dcg-4.log"; fail "the merge did not list taking out dcg's hook and DCG_FAIL_CLOSED"; }
+printf '#!/bin/sh\nexit 0\n' > "$DRT/dcg"
+chmod +x "$DRT/dcg"
+rc=0; PATH=$DRT:$PATH merge_setup "$FG" "$HG" "$WORK/merge-dcg-5.log" --no-dcg || rc=$?
+[ "$rc" = 0 ] && dcg_rt_hooks "$SG" 1 || { cat "$WORK/merge-dcg-5.log"; fail "the merge did not add dcg's hook back after dcg was reinstalled"; }
+edit_json "$SG" '
+  for (const g of s.hooks.PreToolUse) g.hooks = g.hooks.filter((h) => h.command !== "'"$DRT/dcg"'");
+  s.hooks.PreToolUse = s.hooks.PreToolUse.filter((g) => g.hooks.length);
+'
+cp "$SG" "$WORK/merge-dcg-off.json"
+rc=0; PATH=$DRT:$PATH merge_setup "$FG" "$HG" "$WORK/merge-dcg-6.log" || rc=$?
+[ "$rc" = 0 ] || { cat "$WORK/merge-dcg-6.log"; fail "the run after the owner took dcg's hook out exited $rc"; }
+cmp -s "$SG" "$WORK/merge-dcg-off.json" || fail "the merge put back a dcg hook the owner took out"
+dcg_rt_hooks "$HG/.claude/settings.hov-stack.json" 1 || fail "the seed beside settings.json does not carry dcg's hook"
+dcg_fix="$HG/.claude/settings.json has no PreToolUse hook that runs dcg, so dcg guards nothing, and the merge ./setup runs into it does not put back a hook that was removed or changed there: copy the entry that runs dcg from $HG/.claude/settings.hov-stack.json, which ./setup writes, into it"
+grep -E '^  settings +missing ' "$WORK/merge-dcg-6.log" | grep -q -F "$dcg_fix" || { cat "$WORK/merge-dcg-6.log"; fail "the run did not say the merge leaves dcg's hook out and how to put it back"; }
+rc=0; PATH=$DRT:$PATH merge_setup "$FG" "$HG" "$WORK/merge-dcg-check.log" --check || rc=$?
+[ "$rc" = 1 ] && grep -E '^  settings +missing ' "$WORK/merge-dcg-check.log" | grep -q -F "$dcg_fix" \
+  || { cat "$WORK/merge-dcg-check.log"; fail "--check did not say the merge leaves dcg's hook out and how to put it back"; }
+ok "a merge adds dcg's hook once dcg is installed, keeps it while that dcg is there, takes it and DCG_FAIL_CLOSED out once it is gone and adds them back after a reinstall; a hook the owner took out stays out, with the fix named"
+[ -z "$(ls -A "$WORK/merge-tmp")" ] || fail "setup left temporary files behind: $(ls -A "$WORK/merge-tmp")"
+ok "no merge run, failed ones included, left a temporary file"
+
 # The private overlay (restructure plan U16, #65): <overlay>/settings.json is merged into the
 # seed, <overlay>/CLAUDE.md is imported from the rules directory, and <overlay>/env is read by
 # claude-env.sh before every Bash call. The overlay is HOV_STACK_OVERLAY, else
@@ -1996,6 +2396,40 @@ for mac_case in intel rosetta failed malformed override arm64; do
   [ "$got_uv" = "$want_uv" ] || { cat "$log" "$u/calls"; fail "$mac_case did not upgrade exactly its supported uv tools"; }
   ok "setup --update for $mac_case upgrades exactly its supported uv tools"
 done
+
+# A template change upstream reaches, through --update, a settings.json setup has a record of
+# creating (#650), with a copy of the old file. One with no record is left byte for byte, and the
+# seed written beside it carries the change.
+[ -f "$HA/.claude/.hov-stack/setup-settings-base.json" ] || fail "the first --update home kept no record of its seed, so this case tests nothing"
+forget_base "$UP/home-sh"
+cp "$HA/.claude/settings.json" "$WORK/upd-merge-a-before.json"
+cp "$UP/home-sh/.claude/settings.json" "$WORK/upd-merge-sh-before.json"
+node -e '
+  const fs = require("fs"), f = process.argv[1], s = JSON.parse(fs.readFileSync(f, "utf8"));
+  s.permissions.allow.push("Bash(update-merge-probe:*)");
+  fs.writeFileSync(f, JSON.stringify(s, null, 2) + "\n");
+' "$SEED/settings.json"
+gitc -C "$SEED" commit -q -am "template: one more allow rule"
+git -C "$SEED" push -q origin main
+C2=$(git -C "$SEED" rev-parse HEAD)
+rc=0; UPD_TABLE=$T_NEW UPD_PATH=$HA/.local/bin upd_run "$UP/clone-a" "$HA" "$FA" "$UA" "$WORK/upd-merge-a.log" || rc=$?
+[ "$rc" = 0 ] || { cat "$WORK/upd-merge-a.log"; fail "--update after a template change exited $rc"; }
+grep -q -E "^  checkout +ok +updated ${C1:0:7} -> ${C2:0:7}\$" "$WORK/upd-merge-a.log" || { cat "$WORK/upd-merge-a.log"; fail "--update did not move the checkout to the template change"; }
+grep -q -x -F '    add permissions.allow "Bash(update-merge-probe:*)"' "$WORK/upd-merge-a.log" && [ "$(grep -c -E '^    (add|remove|update) ' "$WORK/upd-merge-a.log")" = 1 ] \
+  || { cat "$WORK/upd-merge-a.log"; fail "--update did not merge exactly the template's one new rule"; }
+node -e 'process.exit(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).permissions.allow.includes("Bash(update-merge-probe:*)") ? 0 : 1)' "$HA/.claude/settings.json" \
+  || fail "the template's new rule did not reach settings.json through --update"
+upd_copy=$(find "$HA/.hov-stack-backups" -path '*/settings-apply-*/settings.json' -type f 2>/dev/null)
+[ -n "$upd_copy" ] && [ "$(printf '%s\n' "$upd_copy" | wc -l | tr -d ' ')" = 1 ] && cmp -s "$upd_copy" "$WORK/upd-merge-a-before.json" \
+  || fail "--update's merge did not make exactly one copy of the old settings.json ('$upd_copy')"
+rc=0; UPD_TABLE=$T_NEW UPD_PATH='' upd_run "$UP/clone-sh" "$UP/home-sh" "$UP/fake-sh" "$UP/uv-sh" "$WORK/upd-merge-sh.log" || rc=$?
+[ "$rc" = 0 ] || { cat "$WORK/upd-merge-sh.log"; fail "--update on a home with no record exited $rc"; }
+[ "$(git -C "$UP/clone-sh" rev-parse HEAD)" = "$C2" ] || fail "the shallow clone did not move to the template change"
+cmp -s "$UP/home-sh/.claude/settings.json" "$WORK/upd-merge-sh-before.json" || fail "--update changed a settings.json setup has no record of creating"
+node -e 'process.exit(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).permissions.allow.includes("Bash(update-merge-probe:*)") ? 0 : 1)' "$UP/home-sh/.claude/settings.hov-stack.json" \
+  || fail "the seed beside a settings.json with no record does not carry the template's change"
+[ -z "$(find "$UP/home-sh/.hov-stack-backups" -path '*/settings-apply-*' 2>/dev/null)" ] || fail "--update made a merge copy in a home with no record"
+ok "--update merges a template change into a settings.json setup has a record of creating, with one copy of the old file, and leaves one with no record byte for byte, the change in the seed beside it"
 
 export CLAUDE_CONFIG_DIR=$WORK/cfg
 bash "$ROOT/setup" > "$WORK/run3.log" 2>&1 || { cat "$WORK/run3.log"; fail "setup with CLAUDE_CONFIG_DIR exited non-zero"; }
