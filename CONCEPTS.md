@@ -468,7 +468,7 @@ Two kinds of path are never touched: live-owned paths (`model`, `statusLine` and
 
 Deny entries are asymmetric. A tracked deny entry missing from live is put back. A deny entry the repo drops is held and reported, never removed.
 
-Where it runs, on workstation and satellite hosts: closeout after freshening the harness checkout, a hash-gated SessionStart hook, and install. `sync.sh apply-settings --plan` and `sync.sh check` show the conflicts and held removals.
+Where it runs, on workstation and satellite hosts: closeout after freshening the harness checkout, a hash-gated SessionStart hook, and install. `sync.sh apply-settings --plan` and `sync.sh check` show the conflicts and held removals. On any other machine `./setup` runs the same engine, on every run but `--check`, into a `settings.json` it has a record of creating, against `<config dir>/.hov-stack/setup-settings-base.json`; where sync.sh's base exists, setup's merge stands down.
 *Avoid:* settings sync, settings push
 
 ### Reconciler

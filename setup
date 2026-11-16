@@ -57,11 +57,21 @@
 #      checked against its checksum and a minisign signature before it lands. Its licence
 #      is shown first. A platform with no build, a missing tool or no network is a skip; a
 #      refused verification is a failure and installs nothing.
-#   3. Seeds settings.json only when none exists. The seed is an allow-list taken from
+#   3. Seeds settings.json only when none exists, and keeps a record of that seed at
+#      <config dir>/.hov-stack/setup-settings-base.json. The seed is an allow-list taken from
 #      settings.json: permissions, hooks (paths rewritten to this config dir),
 #      attribution, cache and compaction settings, and the Claude Code env knobs.
 #      Everything bound to my machine (API gateway, login method, pinned model, plugins,
-#      status line) is dropped and listed. An existing settings.json is left untouched
+#      status line) is dropped and listed. Every later run but --check merges the
+#      template's changes into a settings.json setup has a record of creating, with
+#      lib/settings-apply.js against that record: it adds what the template gained, takes
+#      out what it dropped, keeps a setting you and the template both changed as yours and
+#      names it, puts back a deny rule of the template's that you took out, and never sets
+#      model, statusLine, spinnerVerbs or feedbackSurveyState. It lists every change and
+#      copies the old file to ~/.hov-stack-backups/settings-apply-<timestamp>-*/ first.
+#      Delete the record and setup leaves that settings.json alone; where sync.sh keeps a
+#      record of its own (.hov-stack/settings-base.json), sync.sh's merge owns the file.
+#      Any other settings.json is left untouched
 #      and the seed is written next to it as settings.hov-stack.json for you to merge,
 #      with one exception: a settings.json that holds just the seed setup writes without
 #      dcg, plus the plugin keys Claude Code adds to it (in any key order), so one an
@@ -77,7 +87,9 @@
 #        settings.json  merged into step 3's seed: its keys win, its lists add to the
 #                       template's, a null removes a key, and its hooks get the same dcg
 #                       rule. A value of another kind than the template's writes no seed.
-#                       It never changes an existing settings.json, only a seed setup writes.
+#                       It reaches no settings.json but a seed setup writes and, through
+#                       step 3's merge, one setup has a record of creating, where its model
+#                       and statusLine never go. Any other settings.json it never changes.
 #        CLAUDE.md      imported by rules/hov-stack-overlay.md in the config dir, which
 #                       Claude Code loads in every project. A file of anyone else's at that
 #                       path is moved to the backup first, like step 1's. A rules/ that is a
@@ -91,8 +103,9 @@
 #   5. With Claude Code 2.1.76 or later on PATH (older releases refuse the hov manifest),
 #      adds the hov marketplace and installs the plugins lib/default-plugins.txt names.
 #      Then it turns on auto-update for the hov marketplace when settings.json is setup's
-#      own unedited seed (step 3's exception), so those plugins get new versions by
-#      themselves; for a settings.json you made it only says whether auto-update is on.
+#      own unedited seed (step 3's exception) or one setup has a record of creating (with a
+#      copy of the old file kept), so those plugins get new versions by themselves; for
+#      any other settings.json it only says whether auto-update is on.
 #      --check reads what Claude Code reports installed; it writes no record of its own.
 #      Then it regenerates rules/hov-stack-tools.md: a line for each installed gh, ast-grep,
 #      codex, pro-gate and cass whose program is on PATH, and one naming the data commands
@@ -110,12 +123,14 @@
 # Exit status: 0 when every step is in place or was skipped with its fix printed; 1 when
 # git or node is missing, dcg's verification refused an artifact, a link or the overlay's
 # import could not be made, no seed could be written (an overlay settings.json that is not
-# a JSON object, or gives a setting another kind of value than the template's), or --check
-# found a step not in place; 2 for an unknown option, or --update with --check. With
+# a JSON object, or gives a setting another kind of value than the template's), the merge
+# into a settings.json setup has a record of creating failed, or --check found a step not
+# in place; 2 for an unknown option, or --update with --check. With
 # --update a program whose install-release.sh run fails (download, checksum or its own
 # --version check) also makes it 1; a refused pull, a program left alone and a command that
 # needs the network and could not reach it are rows with their fix, not failures.
-# Re-running is a no-op. To undo: remove the symlinks it lists and restore the backup dir.
+# Re-running from the same checkout is a no-op. To undo: remove the symlinks it lists and
+# restore what it moved or copied to ~/.hov-stack-backups/.
 set -euo pipefail
 
 HOV_STACK=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
@@ -130,6 +145,15 @@ OVERLAY_RULE=$CFG/rules/hov-stack-overlay.md
 OVERLAY_RULE_HEAD='Private additions from the hov-stack overlay, imported by ./setup (edit the file named below, not this one):'
 STAMP=$(date +%Y%m%d-%H%M%S)
 BACKUP=$HOME/.hov-stack-backups/$STAMP
+# Setup's record of the settings.json it created from nothing (#650): the seed as written. A
+# later run merges the template's changes into that file against it with lib/settings-apply.js,
+# which copies the old file into SETTINGS_BACKUPS first. Only a settings.json with this record
+# is merged into: delete the record and setup leaves the file alone. Where sync.sh keeps its own
+# record (SYNC_BASE, on the hosts it applies settings to), its merge owns the file and setup's
+# stands down.
+SEED_BASE=$CFG/.hov-stack/setup-settings-base.json
+SYNC_BASE=$CFG/.hov-stack/settings-base.json
+SETTINGS_BACKUPS=$HOME/.hov-stack-backups
 T0=$(date +%s)
 # 2.1.68 to 2.1.75 refuse `marketplace add` on the manifest's metadata and card keys
 # (restructure plan gate-2 record); 2.1.76 is the first release that accepts it.
@@ -305,6 +329,7 @@ dcg_hooked() {
 dcg_hook_fix() {  # dcg_hook_fix <dcg_hooked status>
   local none="$CFG/settings.json has no PreToolUse hook that runs dcg, so dcg guards nothing"
   if [ "$1" = 2 ]; then echo "$CFG/settings.json does not parse, so no hook in it runs dcg"
+  elif settings_mergeable; then echo "$none, and the merge ./setup runs into it does not put back a hook that was removed or changed there: copy the entry that runs dcg from $CFG/settings.hov-stack.json, which ./setup writes, into it"
   elif untouched_seed "$CFG/settings.json"; then echo "$none: run ./setup, which seeds it again with the hook (it is the unedited seed of a run made before dcg was installed)"
   else echo "$none: copy the entry that runs dcg from $CFG/settings.hov-stack.json, which ./setup writes, into it"
   fi
@@ -830,12 +855,16 @@ overlay_row() {  # overlay_row check|run
     elif [ "$mode" = check ]; then
       # The merge itself, into /dev/null: the one way to see an overlay the run would refuse.
       if why=$(node "$HOV_STACK/lib/settings-seed.js" "$HOV_STACK/settings.json" /dev/null "$CFG" "$HOME" "" "$OVERLAY/settings.json" 2>&1 >/dev/null); then
-        parts+=("settings.json merged only into a seed ./setup writes, never an existing settings.json")
+        if settings_mergeable; then parts+=("settings.json merged on each run into $CFG/settings.json, which ./setup has a record of creating")
+        else parts+=("settings.json merged only into a seed ./setup writes or a settings.json it has a record of creating, never any other settings.json")
+        fi
       else
         why=${why%%$'\n'*}
         why=${why#settings-seed: }
         overlay_problem invalid "${why%; no seed was written}, so ./setup writes no seed"
       fi
+    elif [ "$merge_state" = done ]; then parts+=("settings.json merged into $CFG/settings.json, which ./setup has a record of creating")
+    elif [ "$merge_state" = failed ]; then overlay_problem failed "$OVERLAY/settings.json was not merged: the merge into $CFG/settings.json did not finish (see the settings row)"
     elif [ "$seed_ok" = 1 ]; then parts+=("settings.json merged into the seed at $seed_target")
     else overlay_problem failed "$OVERLAY/settings.json was not merged: lib/settings-seed.js wrote no seed (see above)"
     fi
@@ -877,6 +906,132 @@ overlay_row() {  # overlay_row check|run
     row overlay ok "nothing at $OVERLAY (settings.json, CLAUDE.md and env there are optional)"
   fi
 }
+
+# Merging into a settings.json setup created (#650). settings_mergeable: 0 when
+# $CFG/settings.json is a regular file setup has a record of creating (SEED_BASE) and sync.sh
+# keeps no record of its own there. Every other settings.json is left alone, as it always was.
+settings_mergeable() {
+  [ -f "$SEED_BASE" ] && [ ! -L "$SEED_BASE" ] && [ ! -e "$SYNC_BASE" ] && [ ! -L "$SYNC_BASE" ] \
+    && [ -f "$CFG/settings.json" ] && [ ! -L "$CFG/settings.json" ]
+}
+# record_seed_base <seed file>: keep the seed setup just wrote as its record; 0 when kept.
+record_seed_base() {
+  local dir=${SEED_BASE%/*} tmp
+  [ ! -d "$SEED_BASE" ] || return 1
+  { mkdir -p "$dir" && chmod 700 "$dir"; } || return 1
+  tmp=$(mktemp "$dir/.setup-settings-base.XXXXXX") || return 1
+  if cat "$1" > "$tmp" && chmod 600 "$tmp" && mv -f "$tmp" "$SEED_BASE"; then return 0; fi
+  rm -f "$tmp"
+  return 1
+}
+# hook_dcg <settings file>: the dcg the file's own PreToolUse hook runs, when that command is
+# one absolute path (or $HOME/...) to an executable named dcg; nothing otherwise.
+hook_dcg() {
+  node -e '
+    const fs = require("fs");
+    let s;
+    try { s = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); } catch { process.exit(0); }
+    const groups = (s && s.hooks && s.hooks.PreToolUse) || [];
+    if (!Array.isArray(groups)) process.exit(0);
+    for (const g of groups) for (const h of (g && Array.isArray(g.hooks) ? g.hooks : [])) {
+      if (!h || typeof h.command !== "string") continue;
+      let c = h.command;
+      if (c.startsWith("$HOME/")) c = process.argv[2] + c.slice(5);
+      if (!/^\/[^\s"\x27$;|&<>()]*\/dcg$/.test(c)) continue;
+      try { fs.accessSync(c, fs.constants.X_OK); } catch { continue; }
+      console.log(c);
+      process.exit(0);
+    }
+  ' "$1" "$HOME"
+}
+# The dcg path the merge builds today's seed with: the one the file's hook already runs while it
+# is still there, so a caller whose PATH finds another dcg does not rewrite the hook; else
+# find_dcg's, as a first run would; else none, and the merge takes out a dcg hook nobody changed.
+merge_dcg() {
+  local d
+  d=$(hook_dcg "$CFG/settings.json") || d=
+  if [ -n "$d" ]; then echo "$d"; else find_dcg; fi
+}
+same_bytes() {  # same_bytes <a> <b>: 0 when both files hold the same bytes
+  node -e 'const fs = require("fs"); process.exit(fs.readFileSync(process.argv[1]).equals(fs.readFileSync(process.argv[2])) ? 0 : 1);' "$1" "$2" 2>/dev/null
+}
+# settings_merge plan|run: merge this checkout's template into $CFG/settings.json (a file
+# settings_mergeable accepts) with lib/settings-apply.js, against setup's record. It builds
+# today's seed the way a first run would (template, config dir, HOME, overlay, dcg path); the
+# engine adds what the template gained, takes out what it dropped, keeps a value both you and the
+# template changed as yours and names it, never merges the keys a session owns (model,
+# statusLine and the like), and in a run copies the old file to
+# SETTINGS_BACKUPS/settings-apply-<timestamp>-*/ before it writes, then updates the record.
+# plan writes nothing. Sets merge_rc (0 done, 1 the merge failed, 2 no seed could be built),
+# merge_n (changes made or planned), merge_conflicts, merge_backup, merge_why, merge_lines (the
+# engine's item lines), merge_dcg_path and merge_changed (1 when a failed run still left the
+# file with other bytes). merge_tmp keeps today's seed for the caller; merge_done removes it.
+settings_merge() {
+  local mode=$1 rc=0 final f
+  local -a flags=()
+  merge_rc=0 merge_n=0 merge_conflicts=0 merge_backup= merge_why= merge_lines= merge_changed=0
+  merge_dcg_path=$(merge_dcg)
+  merge_tmp=$(mktemp -d "${TMPDIR:-/tmp}/hov-stack-merge.XXXXXX") || {
+    merge_tmp= merge_rc=1 merge_why="could not make a temporary directory"
+    return 0
+  }
+  for f in "$CFG/settings.json" "$SEED_BASE"; do
+    if ! merge_why=$(node -e "$JS_OBJECT" "$f"); then
+      merge_why="$f is not a JSON object (${merge_why%%$'\n'*})"
+      merge_rc=1
+      return 0
+    fi
+  done
+  if ! node "$HOV_STACK/lib/settings-seed.js" "$HOV_STACK/settings.json" "$merge_tmp/seed.json" "$CFG" "$HOME" \
+    "$merge_dcg_path" "$overlay_settings" > "$merge_tmp/seed.out" 2> "$merge_tmp/seed.err"; then
+    merge_why=$(head -n 1 "$merge_tmp/seed.err")
+    merge_why=${merge_why#settings-seed: }
+    merge_rc=2
+    return 0
+  fi
+  if [ "$mode" = plan ]; then
+    flags+=(--plan)
+  elif ! cp "$CFG/settings.json" "$merge_tmp/before.json"; then
+    merge_rc=1 merge_why="could not copy $CFG/settings.json before the merge"
+    return 0
+  fi
+  node "$HOV_STACK/lib/settings-apply.js" --desired "$merge_tmp/seed.json" --live "$CFG/settings.json" \
+    --base "$SEED_BASE" --config-dir "$CFG" --home "$HOME" --backup-root "$SETTINGS_BACKUPS" \
+    ${flags[@]+"${flags[@]}"} > "$merge_tmp/out" 2> "$merge_tmp/err" || rc=$?
+  merge_lines=$(grep -v '^settings: ' "$merge_tmp/out" || :)
+  if [ "$rc" -ne 0 ]; then
+    merge_why=$(head -n 1 "$merge_tmp/err")
+    merge_why=${merge_why#settings-apply: }
+    [ -n "$merge_why" ] || merge_why="lib/settings-apply.js exited $rc"
+    merge_rc=1
+    if [ "$mode" = run ] && ! same_bytes "$CFG/settings.json" "$merge_tmp/before.json"; then
+      merge_changed=1
+      # Written but not finished (the record could not be updated): name the copy of the old file.
+      for f in "$SETTINGS_BACKUPS"/settings-apply-*/settings.json; do
+        if [ -f "$f" ] && same_bytes "$f" "$merge_tmp/before.json"; then merge_backup=$f; fi
+      done
+    fi
+    return 0
+  fi
+  final=$(grep '^settings: ' "$merge_tmp/out" | tail -n 1 || :)
+  case $final in
+    "settings: applied "*) merge_n=${final#settings: applied }; merge_n=${merge_n%%;*} ;;
+    "settings: plan "*) merge_n=${final#settings: plan }; merge_n=${merge_n%% *} ;;
+  esac
+  case $merge_n in ''|*[!0-9]*) merge_n=0 ;; esac
+  case $final in *"; backup at "*) merge_backup=${final##*; backup at } ;; esac
+  merge_conflicts=$(printf '%s\n' "$merge_lines" | grep -c '^  conflict ' || :)
+}
+merge_show() {  # the engine's item lines, under setup's own heading and in setup's words
+  [ -n "$merge_lines" ] || return 0
+  printf '%s\n' "$merge_lines" | sed \
+    -e 's/ (live and the repo both changed it since the last apply; live kept)$/ (you and the template both changed it; yours is kept)/' \
+    -e 's/ (removals from deny are never applied automatically)$/ (the template dropped this deny rule; setup never takes one out)/' \
+    -e 's/^/  /'
+}
+merge_done() { [ -z "$merge_tmp" ] || rm -rf "$merge_tmp"; merge_tmp=; }
+merge_state=  # done, failed or noseed once a run merged into settings.json; empty when it did not
+merge_tmp=
 seed_ok=0
 au_on=0
 plugins_ready=0  # the hov marketplace is added and its plugins were read (--update refreshes only then)
@@ -977,6 +1132,21 @@ if [ "$check" = 1 ]; then
   hooked=0
   if [ -e "$CFG/settings.json" ] && [ -n "$dcg_path" ]; then dcg_hooked "$CFG/settings.json" || hooked=$?; fi
   if [ ! -e "$CFG/settings.json" ]; then row settings missing "no settings.json: run ./setup to seed it"
+  elif settings_mergeable; then
+    # The merge a run would make, as a plan: nothing is written.
+    settings_merge plan
+    if [ "$merge_rc" != 0 ]; then
+      row settings unknown "could not work out whether $CFG/settings.json is behind this checkout's template: $merge_why"
+    elif [ "$merge_n" -gt 0 ]; then
+      echo "  settings.json: ./setup would merge $merge_n change(s) from this checkout's template into $(_lf_display "$CFG/settings.json"):"
+      merge_show
+      row settings behind "$CFG/settings.json is $merge_n change(s) behind this checkout's template: run ./setup, which merges them in and keeps a copy of the old file"
+    elif [ "$hooked" != 0 ]; then row settings missing "$(dcg_hook_fix "$hooked")"
+    elif [ "$merge_conflicts" -gt 0 ]; then
+      row settings ok "$CFG/settings.json, up to date with the template apart from $merge_conflicts setting(s) you changed, which ./setup keeps"
+    else row settings ok "$CFG/settings.json, up to date with the template"
+    fi
+    merge_done
   elif [ "$hooked" != 0 ]; then row settings missing "$(dcg_hook_fix "$hooked")"
   else row settings ok "$CFG/settings.json"
   fi
@@ -1055,41 +1225,105 @@ fi
 
 dcg_path=$(find_dcg)
 seed_target=$CFG/settings.json
-# A settings.json an earlier run seeded before dcg was installed, unedited since, lacks the
-# hook only because dcg was absent then: move it aside and seed it again with the hook (#371).
 moved_seed=
-if [ -n "$dcg_path" ] && [ -f "$seed_target" ] && [ ! -L "$seed_target" ] \
-  && ! dcg_hooked "$seed_target" && untouched_seed "$seed_target"; then
-  rel=${seed_target#"$HOME"/}
-  [ "$rel" != "$seed_target" ] || rel=$(basename "$seed_target")
-  if mkdir -p "$BACKUP/$(dirname "$rel")" && mv "$seed_target" "$BACKUP/$rel"; then
-    moved_seed=$BACKUP/$rel
-    echo "  backed up $(_lf_display "$seed_target") -> $moved_seed: it was an earlier run's seed, unedited and written before dcg was installed, so it is seeded again with dcg's hook"
-  fi
-fi
-if [ -e "$seed_target" ] || [ -L "$seed_target" ]; then
-  seed_target=$CFG/settings.hov-stack.json
-  echo "  settings.json already exists and was left alone; the hov-stack seed is at $seed_target"
-fi
-if node "$HOV_STACK/lib/settings-seed.js" "$HOV_STACK/settings.json" "$seed_target" "$CFG" "$HOME" "$dcg_path" "$overlay_settings"; then
-  seed_ok=1
-  hooked=0
-  if [ -n "$moved_seed" ] && ! carry_claude_writes "$moved_seed" "$seed_target"; then
-    row settings failed "seeded $seed_target with dcg's hook, but could not copy the plugin keys Claude Code had written from $moved_seed; copy enabledPlugins and extraKnownMarketplaces from it"
-  else
-    if [ -n "$dcg_path" ] && [ "$no_dcg" = 0 ]; then dcg_hooked "$CFG/settings.json" || hooked=$?; fi
-    if [ "$hooked" != 0 ]; then row settings missing "$(dcg_hook_fix "$hooked")"
-    else row settings ok "seed written to $seed_target"
+if settings_mergeable; then
+  # A settings.json setup has a record of creating (#650): merge the template's changes into it.
+  settings_merge run
+  dcg_path=$merge_dcg_path
+  case $merge_rc in
+    0)
+      merge_state=done
+      seed_ok=1
+      if [ "$merge_n" -gt 0 ]; then
+        echo "  settings.json: merged $merge_n change(s) from this checkout's template into $(_lf_display "$CFG/settings.json"):"
+        merge_show
+        echo "  the settings.json from before is at $merge_backup"
+      elif [ -n "$merge_lines" ]; then
+        echo "  settings.json: nothing to merge from this checkout's template; left as they are:"
+        merge_show
+      else
+        echo "  settings.json: nothing to merge from this checkout's template"
+      fi
+      if [ -n "$merge_lines" ]; then
+        echo "  ./setup merges into it because it has a record of creating it at $(_lf_display "$SEED_BASE"); delete that file and ./setup leaves settings.json alone"
+      fi
+      hooked=0
+      if [ -n "$dcg_path" ] && [ "$no_dcg" = 0 ]; then dcg_hooked "$CFG/settings.json" || hooked=$?; fi
+      if [ "$hooked" != 0 ]; then
+        seed_target=$CFG/settings.hov-stack.json
+        if cp "$merge_tmp/seed.json" "$seed_target"; then echo "  the hov-stack seed, with dcg's hook, is at $seed_target"; fi
+        row settings missing "$(dcg_hook_fix "$hooked")"
+      elif [ "$merge_n" -gt 0 ]; then
+        row settings ok "merged $merge_n change(s) from the template into $CFG/settings.json; the file from before is at $merge_backup"
+      elif [ "$merge_conflicts" -gt 0 ]; then
+        row settings ok "$CFG/settings.json, up to date with the template apart from $merge_conflicts setting(s) you changed, which ./setup keeps"
+      else
+        row settings ok "$CFG/settings.json, up to date with the template"
+      fi
+      ;;
+    2)
+      merge_state=noseed
+      cat "$merge_tmp/seed.err" >&2
+      row settings failed "lib/settings-seed.js built no seed to merge into $CFG/settings.json, which is as it was; the lines above say why"
+      ;;
+    *)
+      merge_state=failed
+      if [ "$merge_changed" = 0 ]; then
+        row settings failed "could not merge the template's changes into $CFG/settings.json, which is as it was: $merge_why"
+      elif [ -n "$merge_backup" ]; then
+        row settings failed "the merge into $CFG/settings.json was written but did not finish ($merge_why); the file from before is at $merge_backup"
+      else
+        row settings failed "could not merge the template's changes into $CFG/settings.json: $merge_why"
+      fi
+      ;;
+  esac
+  merge_done
+else
+  # A settings.json an earlier run seeded before dcg was installed, unedited since, lacks the
+  # hook only because dcg was absent then: move it aside and seed it again with the hook (#371).
+  if [ -n "$dcg_path" ] && [ -f "$seed_target" ] && [ ! -L "$seed_target" ] \
+    && ! dcg_hooked "$seed_target" && untouched_seed "$seed_target"; then
+    rel=${seed_target#"$HOME"/}
+    [ "$rel" != "$seed_target" ] || rel=$(basename "$seed_target")
+    if mkdir -p "$BACKUP/$(dirname "$rel")" && mv "$seed_target" "$BACKUP/$rel"; then
+      moved_seed=$BACKUP/$rel
+      echo "  backed up $(_lf_display "$seed_target") -> $moved_seed: it was an earlier run's seed, unedited and written before dcg was installed, so it is seeded again with dcg's hook"
     fi
   fi
-else
-  # Never leave the config dir without the settings.json an upgrade moved aside. Anything at
-  # seed_target now is this run's own failed write (the old file was moved away just above),
-  # so the old one goes back over it.
-  if [ -n "$moved_seed" ] && mv -f -- "$moved_seed" "$seed_target"; then
-    echo "  put $(_lf_display "$seed_target") back from $moved_seed: the new seed was not written"
+  if [ -e "$seed_target" ] || [ -L "$seed_target" ]; then
+    seed_target=$CFG/settings.hov-stack.json
+    echo "  settings.json already exists and was left alone; the hov-stack seed is at $seed_target"
   fi
-  row settings failed "lib/settings-seed.js wrote no seed; the lines above say why"
+  if node "$HOV_STACK/lib/settings-seed.js" "$HOV_STACK/settings.json" "$seed_target" "$CFG" "$HOME" "$dcg_path" "$overlay_settings"; then
+    seed_ok=1
+    hooked=0
+    # A settings.json this run created from nothing gets setup's record (#650), so later runs
+    # merge the template's changes into it. An existing one, and one sync.sh keeps a record of,
+    # get none. The record is the seed itself, taken before Claude Code adds its plugin keys.
+    if [ "$seed_target" = "$CFG/settings.json" ] && [ -z "$moved_seed" ] && [ ! -e "$SYNC_BASE" ] && [ ! -L "$SYNC_BASE" ]; then
+      if record_seed_base "$seed_target"; then
+        echo "  kept a record of this seed at $(_lf_display "$SEED_BASE"): later runs of ./setup merge the template's changes into settings.json, and leave it alone once that record is deleted"
+      else
+        echo "  could not keep a record of this seed at $(_lf_display "$SEED_BASE"), so later runs of ./setup leave settings.json alone"
+      fi
+    fi
+    if [ -n "$moved_seed" ] && ! carry_claude_writes "$moved_seed" "$seed_target"; then
+      row settings failed "seeded $seed_target with dcg's hook, but could not copy the plugin keys Claude Code had written from $moved_seed; copy enabledPlugins and extraKnownMarketplaces from it"
+    else
+      if [ -n "$dcg_path" ] && [ "$no_dcg" = 0 ]; then dcg_hooked "$CFG/settings.json" || hooked=$?; fi
+      if [ "$hooked" != 0 ]; then row settings missing "$(dcg_hook_fix "$hooked")"
+      else row settings ok "seed written to $seed_target"
+      fi
+    fi
+  else
+    # Never leave the config dir without the settings.json an upgrade moved aside. Anything at
+    # seed_target now is this run's own failed write (the old file was moved away just above),
+    # so the old one goes back over it.
+    if [ -n "$moved_seed" ] && mv -f -- "$moved_seed" "$seed_target"; then
+      echo "  put $(_lf_display "$seed_target") back from $moved_seed: the new seed was not written"
+    fi
+    row settings failed "lib/settings-seed.js wrote no seed; the lines above say why"
+  fi
 fi
 overlay_row run
 skill_plugins_row run
@@ -1097,8 +1331,9 @@ if [ -z "$dcg_path" ]; then
   echo "  dcg (the destructive-command guard) is not installed, so its hook was left out."
   echo "  It is the one third-party guard this setup leans on:"
   echo "    https://github.com/Dicklesworthstone/destructive_command_guard"
-  echo "  Install it, then re-run ./setup: a settings.json this run seeded and nobody edited"
-  echo "  gets the hook then; an edited one is left alone and the hook is in settings.hov-stack.json."
+  echo "  Install it, then re-run ./setup: a settings.json setup has a record of creating gets the"
+  echo "  hook merged in, an unedited seed from a run that kept no record is seeded again with it,"
+  echo "  and any other settings.json is left alone, with the hook in settings.hov-stack.json."
 fi
 
 claude_row
@@ -1156,22 +1391,33 @@ else
       row plugins ok "${defaults[*]} were already installed"
     fi
     # Claude Code leaves auto-update off for a marketplace from another publisher, and every
-    # 'marketplace add' drops the setting, so it is set again after the add (#395). Only in
-    # setup's own unedited seed (with this run's dcg hook, or the one written before dcg was
-    # installed): the README promises to leave a settings.json you have alone, so for yours
-    # setup only reports, and /hov-setup asks before turning it on. No status row, so
-    # --check and the exit status do not change.
+    # 'marketplace add' drops the setting, so it is set again after the add (#395). In setup's
+    # own unedited seed (with this run's dcg hook, or the one written before dcg was
+    # installed) it is set with no backup, since nothing of yours is in the file. In a
+    # settings.json setup has a record of creating (#650) it is set too, and the helper
+    # keeps a copy of the old file, because a merged or edited one no longer reads as the
+    # seed. A merge this run could not finish leaves the file as the settings row says, so
+    # setup only reports. Any other settings.json is yours: the README promises to leave it
+    # alone, so setup only reports, and /hov-setup asks before turning it on. No status row,
+    # so --check and the exit status do not change.
     au_helper=$HOV_STACK/plugins/hov-stack/skills/hov-setup/scripts/autoupdate.mjs
     au_rc=0
     if untouched_seed "$CFG/settings.json" "$dcg_path" \
       || { [ -n "$dcg_path" ] && untouched_seed "$CFG/settings.json"; }; then
       au_out=$(node "$au_helper" --config-dir "$CFG" --no-backup "$MARKETPLACE" 2>&1) || au_rc=$?
       printf '%s\n' "$au_out" | sed 's/^/  /'
+    elif settings_mergeable && [ "$merge_state" != failed ] && [ "$merge_state" != noseed ]; then
+      au_out=$(node "$au_helper" --config-dir "$CFG" "$MARKETPLACE" 2>&1) || au_rc=$?
+      printf '%s\n' "$au_out" | sed 's/^/  /'
     else
       au_out=$(node "$au_helper" --config-dir "$CFG" --check "$MARKETPLACE" 2>&1) || au_rc=$?
       printf '%s\n' "$au_out" | sed 's/^/  /'
-      if [ "$au_rc" -eq 3 ]; then
-        echo "  setup does not change a settings.json you already have; /hov-setup asks before it does."
+      if [ "$au_rc" -eq 3 ] && { [ "$merge_state" = failed ] || [ "$merge_state" = noseed ]; }; then
+        echo "  the merge into this settings.json did not finish, so setup leaves auto-update alone this run."
+      elif [ "$au_rc" -eq 3 ] && { [ -e "$SYNC_BASE" ] || [ -L "$SYNC_BASE" ]; }; then
+        echo "  sync.sh merges into this settings.json, so setup leaves it alone; /hov-setup asks before turning auto-update on."
+      elif [ "$au_rc" -eq 3 ]; then
+        echo "  setup has no record of creating this settings.json, so it leaves it alone; /hov-setup asks before turning auto-update on."
       fi
     fi
     if [ "$au_rc" -eq 0 ]; then au_on=1; fi
