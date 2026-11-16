@@ -10,6 +10,8 @@
 #     all — are swept too; see lib/wt-roots.sh and issue #511.
 #   ONLY=<name> restrict to one repo. ACTIVE_MIN=120 — skip worktrees touched
 #   within this many minutes (assumed owned by a live session).
+#   IDLE_RELEASE_HOURS=24 — a worktree held only by a session transcript that has
+#   not named it for this many hours may be released (see Policy); 0 turns that off.
 #
 # Policy (smart-selective, zero-loss):
 #   clean & all commits on remote ............ remove worktree
@@ -18,7 +20,14 @@
 #   no remote configured ..................... bundle --all as backup, leave worktree in place
 #   recently active / under /tmp or .claude/jobs ..... SKIP (a live job owns it)
 #   any live process has its cwd inside ...... SKIP (/proc scan — mtime alone is not liveness)
+#   locked (git worktree lock) ............... SKIP, before any other check
 #   a Claude Code job/session holds it ....... SKIP (lib/wt_session_hold.py; a done job only warns)
+#     held only by a transcript that has not named it for IDLE_RELEASE_HOURS
+#     (hov-stack#644) ........................ remove, on the clean path, only when it is on a
+#                                               branch, `git status` is clean, every ignored file
+#                                               is a cache or a rescued deliverable, and HEAD is
+#                                               on origin/<default> or wt-done reconciles it to a
+#                                               merged PR; otherwise SKIP. Plan and apply agree.
 #   before ANY removal ........................ copy ignored .claude/deliverables/ files to the
 #                                               main checkout; a detached HEAD on the preserve
 #                                               path is pinned at refs/heads/recovered/... first
@@ -30,7 +39,7 @@ set -uo pipefail
 # ROOT is deliberately NOT defaulted here — lib/wt-roots.sh owns the default so
 # this script and wt-new.sh cannot silently drift apart again (issue #511).
 DRY_RUN="${DRY_RUN:-1}"; PUSH="${PUSH:-0}"
-ONLY="${ONLY:-}"; ACTIVE_MIN="${ACTIVE_MIN:-120}"
+ONLY="${ONLY:-}"; ACTIVE_MIN="${ACTIVE_MIN:-120}"; IDLE_RELEASE_HOURS="${IDLE_RELEASE_HOURS:-24}"
 # Preview reads must not refresh an index or acquire optional Git locks. Every
 # mutation is separately routed through run(), but status itself may otherwise
 # rewrite index metadata while answering a read-only question.
@@ -66,8 +75,9 @@ LIB="${WT_SWEEP_LIB:-$(dirname "$(readlink -f "$0")")/lib}"
 # never to an error.
 WT_DONE="${WT_DONE_BIN:-$(dirname "$(readlink -f "$0")")/wt-done.sh}"
 STAMP="$(date +%Y%m%d)"; AGE_ALIVE_DAYS=14; BEHIND_STALE=150
-now=$(date +%s); declare -A seen
+now=$(date +%s); declare -A seen locked
 n_rm=0; n_keep=0; n_drop=0; n_bundle=0; n_skip=0; n_leave=0; n_route=0; n_anchor=0; n_resume=0
+n_locked=0; n_idle=0
 HERE="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 # shellcheck source=SCRIPTDIR/lib/pr-owner-state.sh
 . "$HERE/lib/pr-owner-state.sh" || { echo 'wt-sweep: cannot load PR-owner state contract' >&2; exit 1; }
@@ -267,6 +277,13 @@ except Exception:
     continue ;;
   esac
   mapfile -t paths < <(git -C "$repo" worktree list --porcelain 2>/dev/null|awk '/^worktree /{print $2}')
+  # `git worktree lock` is an owner's explicit "keep": honoured before anything else
+  # looks at the worktree (hov-stack#644). Same field split as the paths above.
+  locked=()
+  while IFS=$'\t' read -r _lp _lr; do
+    [ -n "$_lp" ] && locked[$_lp]=${_lr:-no reason given}
+  done < <(git -C "$repo" worktree list --porcelain 2>/dev/null |
+           awk '/^worktree /{w=$2} /^locked( |$)/{r=$0; sub(/^locked ?/, "", r); print w "\t" r}')
   # Before the worktree pass too, so a repo with no linked worktree left still sheds
   # the anchors of branches deleted since the last sweep.
   prune_anchors "$repo"
@@ -278,6 +295,9 @@ except Exception:
   echo "### $name (def=$def remote=$([ $has_remote = 1 ]&&echo yes||echo no))"
   for wt in "${paths[@]:1}"; do
     [ -d "$wt" ] || continue
+    if [ -n "${locked[$wt]+set}" ]; then
+      echo "  ~ skip (locked: ${locked[$wt]}): $(basename "$wt")"; n_locked=$((n_locked+1)); continue
+    fi
     # --- skip live worktrees ---
     if [ "${WT_SWEEP_ALLOW_TMP:-0}" != 1 ]; then
       case "$wt" in */.claude/jobs/*|/tmp/*) echo "  ~ skip (job/tmp): $wt"; n_skip=$((n_skip+1)); continue;; esac
@@ -287,13 +307,33 @@ except Exception:
     if pr_owner_worktree_owned "$wt"; then echo "  ~ skip (PR owner): $(basename "$wt")"; n_skip=$((n_skip+1)); continue; fi
     # A session idling in a worktree it entered shows up in neither check above
     # (hov-stack#384: a working job lost its worktree on 2026-11-03).
-    if hold=$(wt_session_hold "$wt"); then echo "  ~ skip (Claude session: $hold): $(basename "$wt")"; n_skip=$((n_skip+1)); continue; fi
-    if [ -n "$hold" ]; then printf '%s\n' "$hold" | sed 's/^/  ~ /'; n_resume=$((n_resume+1)); fi
+    # Unless the one hold left is a transcript that has not named it for
+    # IDLE_RELEASE_HOURS (hov-stack#644): then it is released below, or skipped there.
+    idle=0
+    if hold=$(wt_session_hold "$wt" "" "$IDLE_RELEASE_HOURS"); then
+      case $hold in
+        'idle: '*) idle=1 ;;
+        *) echo "  ~ skip (Claude session: $hold): $(basename "$wt")"; n_skip=$((n_skip+1)); continue ;;
+      esac
+    fi
+    if [ $idle = 0 ] && [ -n "$hold" ]; then printf '%s\n' "$hold" | sed 's/^/  ~ /'; n_resume=$((n_resume+1)); fi
     base=$(basename "$wt"); bf="${base//\//_}"
     br=$(git -C "$wt" symbolic-ref --short HEAD 2>/dev/null||echo ""); det=0; [ -z "$br" ]&&det=1
     porc=$(git -C "$wt" status --porcelain 2>/dev/null)
     trk=$(printf '%s' "$porc"|grep -vc '^??'); [ -z "$porc" ]&&trk=0
     unt=$(printf '%s' "$porc"|grep -c '^??'); [ -z "$porc" ]&&unt=0
+    # An idle release never takes the WIP-commit, bundle or preserve paths: no session
+    # is left to say what local state was for, so only a clean, cache-only worktree on
+    # a branch goes on, and only to the clean path once it is proven shipped below.
+    if [ $idle = 1 ]; then
+      if [ $det = 1 ] || [ -n "$porc" ]; then
+        echo "  ~ skip (Claude session, idle but not clean on a branch: ${hold#idle: }): $base"; n_skip=$((n_skip+1)); continue
+      fi
+      if ! extra=$(wt_cache_only "$wt"); then
+        echo "  ~ skip (Claude session, idle but keeps ignored $extra: ${hold#idle: }): $base"; n_skip=$((n_skip+1)); continue
+      fi
+      echo "  ~ $hold"
+    fi
     # pr-merged anchors are excluded: they make a proven tip closable in Agent View,
     # but the branch is only dropped below when wt-done re-proves it and prints
     # WT_DONE_PROOF=head. Counting them would send an anchored worktree down the
@@ -309,9 +349,13 @@ except Exception:
     # DRY_RUN=0 will actually do instead of reporting a removal it would skip.
     # --reconcile-only: this loop already owns worktree removal, and it must stay
     # the single place that decides it.
-    shipped_tip=0
+    shipped_tip=0; rec_ok=0
     if [ "$unp" -gt 0 ] && [ $det = 0 ] && [ "$trk" = 0 ] && [ "$unt" = 0 ] && [ -x "$WT_DONE" ]; then
-      if rec_out=$(DRY_RUN="$DRY_RUN" "$WT_DONE" --reconcile-only "$wt" 2>&1); then
+      # An idle-held worktree reads as held to wt-done too, unless it is told the window.
+      rec_args=(--reconcile-only)
+      [ $idle = 1 ] && rec_args+=(--idle-release-hours "$IDLE_RELEASE_HOURS")
+      if rec_out=$(DRY_RUN="$DRY_RUN" "$WT_DONE" "${rec_args[@]}" "$wt" 2>&1); then
+        rec_ok=1
         echo "      ~ merge-anchored reconcile: branch shipped via a merged PR (wt-done.sh)"
         # Proof A (GitHub's exact merged head; trees differ because main moved on): the
         # pointer stays put on purpose, so re-reading `unp` would still count shipped
@@ -329,6 +373,17 @@ except Exception:
     [ $has_def = 1 ] && behind=$(git -C "$wt" rev-list --count "HEAD..origin/$def" 2>/dev/null) || behind=0; behind=${behind:-0}
     ct=$(git -C "$wt" log -1 --format=%ct 2>/dev/null||echo "$now"); age=$(( (now-ct)/86400 ))
     printf '  • %-44s trk:%s unt:%s unpush:%s behind:%s age:%sd\n' "${br:-$base}" "$trk" "$unt" "$unp" "$behind" "$age"
+    # Shipped, for an idle release: HEAD is on origin/<default>, or wt-done proved it
+    # against a merged PR. A branch that is merely pushed (unpush:0, no merge) stays.
+    # Nothing here reads DRY_RUN, so a plan lists exactly what an apply removes.
+    if [ $idle = 1 ]; then
+      if [ "$unp" != 0 ] || { [ "$rec_ok" = 0 ] && [ "$shipped_tip" = 0 ] &&
+           ! { [ $has_def = 1 ] && git -C "$wt" merge-base --is-ancestor HEAD "origin/$def" 2>/dev/null; }; }; then
+        echo "      => SKIP (idle, but not proven shipped: not on origin/$def and no merged PR found; nothing removed)"
+        n_skip=$((n_skip+1)); continue
+      fi
+      echo "      => release (idle ${IDLE_RELEASE_HOURS}h+, clean, cache-only, shipped)"
+    fi
 
     if [ $has_remote = 0 ]; then
       run "mkdir -p '$arch'"; run "git -C '$wt' bundle create '$arch/$bf.bundle' --all"
@@ -345,7 +400,7 @@ except Exception:
         echo "      => SKIP (worktree changed after wt-done's proof; nothing removed)"; n_skip=$((n_skip+1)); continue
       fi
       if remove_wt "$repo" "$wt"; then
-        n_rm=$((n_rm+1))
+        n_rm=$((n_rm+1)); [ $idle = 1 ] && n_idle=$((n_idle+1))
         # Head-proof branches sit on no durable ref by construction, so `branch -d` would
         # refuse; -D is authorised by GitHub naming this exact tip as the commit it merged.
         # Counted as dropped, not preserved: the first draft of this path reported one
@@ -423,8 +478,8 @@ done < <(wt_roots | while IFS= read -r r; do ls -d "$r"/*__*_workspace 2>/dev/nu
 
 echo; echo "===== wt-sweep $([ $DRY_RUN = 1 ]&&echo '(DRY RUN)') ====="
 printf 'scope: %d repos under %s\n' "${#_candidates[@]}" "$(wt_roots | paste -sd' ' -)"
-printf 'removed:%d  preserved-local:%d  dropped:%d  bundled:%d  kept-in-place:%d  skipped-active:%d  stale-workspaces:%d  skipped-route:%d  anchors-pruned:%d  resumable-warned:%d\n' \
-  "$n_rm" "$n_keep" "$n_drop" "$n_bundle" "$n_leave" "$n_skip" "$n_ws" "$n_route" "$n_anchor" "$n_resume"
+printf 'removed:%d  preserved-local:%d  dropped:%d  bundled:%d  kept-in-place:%d  skipped-active:%d  stale-workspaces:%d  skipped-route:%d  anchors-pruned:%d  resumable-warned:%d  locked:%d  released-idle:%d\n' \
+  "$n_rm" "$n_keep" "$n_drop" "$n_bundle" "$n_leave" "$n_skip" "$n_ws" "$n_route" "$n_anchor" "$n_resume" "$n_locked" "$n_idle"
 [ $DRY_RUN = 1 ] && echo "(dry run — re-run with DRY_RUN=0 to apply)"
 # Exit status stays 0 (OnFailure= must not page weekly for a missing authority record),
 # but the skip must not be silent either: the journal's stderr is what an operator reads.

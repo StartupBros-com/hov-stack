@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Tests for scripts/disk-watermark.sh -- the disk-fill watchdog added
-# for the 2026-08-21 emergency-reset incident (dotfiles#428).
+# for the 2026-08-21 emergency-reset incident (dotfiles#428), which alerts only
+# when a breach is new or worse since hov-stack#644 made its timer hourly.
 #
 # Hermetic, same shape as sync-install-smoke.test.sh: copies disk-watermark.sh
 # into a scratch $TMP/scripts alongside a stub notify.sh, so `$HERE/notify.sh`
@@ -16,6 +17,8 @@
 # and because the real box's own `/` and `/mnt/c` fill levels are outside this
 # test's control. The stub `df` returns canned pct/avail values per fixture
 # directory, driven by env vars the test sets per scenario.
+# DISK_WATERMARK_STATE_DIR keeps the alert state under $TMP, never the real
+# ~/.local/state.
 set -uo pipefail
 
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
@@ -58,66 +61,172 @@ EOF
 chmod +x "$TMP/bin/df"
 
 export DISK_WATERMARK_PATHS="$TMP/fs/root $TMP/fs/mntc"
+export DISK_WATERMARK_STATE_DIR="$TMP/state"
 export PATH="$TMP/bin:$PATH"
 
-run_case() {
-  # $1 = label, $2 = expected exit code, $3 = expected flagged count
-  local label="$2_ignored" expect_exit="$2" expect_flagged="$3"
-  : > "$NOTIFY_LOG"
-  local out status
-  out=$("$TMP/scripts/disk-watermark.sh" 2>&1); status=$?
-  local counter
-  counter=$(printf '%s\n' "$out" | grep -o 'disk-watermark-flagged:[0-9]*' | tail -n1)
-  local calls
-  calls=$(wc -l < "$NOTIFY_LOG" 2>/dev/null || echo 0)
+gb() { echo $(( $1 * 1024 * 1024 )); }   # GB -> the KB df -k reports
+root() { export DW_STUB_PCT_ROOT="$1" DW_STUB_AVAIL_ROOT_KB; DW_STUB_AVAIL_ROOT_KB=$(gb "$2"); }
+mntc() { export DW_STUB_PCT_MNTC="$1" DW_STUB_AVAIL_MNTC_KB; DW_STUB_AVAIL_MNTC_KB=$(gb "$2"); }
+fresh() { rm -rf "$TMP/state"; }
 
-  if [ "$status" -eq "$expect_exit" ]; then ok; else bad "$1: exit $status, expected $expect_exit"$'\n'"$out"; fi
-  if [ "$counter" = "disk-watermark-flagged:$expect_flagged" ]; then
-    ok
-  else
-    bad "$1: counter line '$counter', expected 'disk-watermark-flagged:$expect_flagged'"$'\n'"$out"
-  fi
-  echo "$out|$calls"
+# run_case <label> <exit> <flagged> <alerted> <notify calls>: runs the script in
+# this shell (no command substitution around the call), so ok/bad counts land;
+# leaves the output in $OUT for the caller's own checks.
+OUT=""
+run_case() {
+  local label="$1" expect_exit="$2" expect_flagged="$3" expect_alerted="$4" expect_calls="$5"
+  local status calls
+  : > "$NOTIFY_LOG"
+  OUT=$("$TMP/scripts/disk-watermark.sh" 2>&1); status=$?
+  calls=$(wc -l < "$NOTIFY_LOG")
+  [ "$status" -eq "$expect_exit" ] && ok || bad "$label: exit $status, expected $expect_exit"$'\n'"$OUT"
+  grep -qx "disk-watermark-flagged:$expect_flagged" <<<"$OUT" && ok \
+    || bad "$label: expected disk-watermark-flagged:$expect_flagged"$'\n'"$OUT"
+  grep -qx "disk-watermark-alerted:$expect_alerted" <<<"$OUT" && ok \
+    || bad "$label: expected disk-watermark-alerted:$expect_alerted"$'\n'"$OUT"
+  [ "$calls" -eq "$expect_calls" ] && ok || bad "$label: notifier fired $calls time(s), expected $expect_calls"
 }
+has() { grep -qF -- "$2" <<<"$OUT" && ok || bad "$1: expected output to contain: $2"$'\n'"$OUT"; }
 
 # -- clear: both filesystems well under every threshold -----------------------
 echo "=== case: clear ===" >&2
-export DW_STUB_PCT_ROOT=50 DW_STUB_AVAIL_ROOT_KB=500000000
-export DW_STUB_PCT_MNTC=40 DW_STUB_AVAIL_MNTC_KB=600000000
-result=$(run_case clear 0 0)
-calls=${result##*|}
-if [ "$calls" -eq 0 ]; then ok; else bad "clear: notifier fired $calls time(s), expected 0"; fi
-if grep -q ' — OK$' <<<"$result"; then ok; else bad "clear: expected an OK line in output"; fi
+fresh; root 50 476; mntc 40 572
+run_case clear 0 0 0 0
+grep -q ' — OK$' <<<"$OUT" && ok || bad "clear: expected an OK line in output"
 
 # -- warn: root crosses WARN_PCT but not CRIT_PCT, floor untouched ------------
 echo "=== case: warn ===" >&2
-export DW_STUB_PCT_ROOT=87 DW_STUB_AVAIL_ROOT_KB=500000000
-export DW_STUB_PCT_MNTC=40 DW_STUB_AVAIL_MNTC_KB=600000000
-result=$(run_case warn 1 1)
-calls=${result##*|}
-if [ "$calls" -eq 1 ]; then ok; else bad "warn: notifier fired $calls time(s), expected exactly 1"; fi
-if grep -q ' — WARN$' <<<"$result"; then ok; else bad "warn: expected a WARN line in output"; fi
+fresh; root 87 476; mntc 40 572
+run_case warn 1 1 1 1
+grep -q ' — WARN$' <<<"$OUT" && ok || bad "warn: expected a WARN line in output"
+has warn "(new breach)"
 
 # -- crit: root crosses CRIT_PCT ----------------------------------------------
 echo "=== case: crit ===" >&2
-export DW_STUB_PCT_ROOT=95 DW_STUB_AVAIL_ROOT_KB=500000000
-export DW_STUB_PCT_MNTC=40 DW_STUB_AVAIL_MNTC_KB=600000000
-result=$(run_case crit 1 1)
-calls=${result##*|}
-if [ "$calls" -eq 1 ]; then ok; else bad "crit: notifier fired $calls time(s), expected exactly 1"; fi
-if grep -q ' — CRIT$' <<<"$result"; then ok; else bad "crit: expected a CRIT line in output"; fi
+fresh; root 95 476; mntc 40 572
+run_case crit 1 1 1 1
+grep -q ' — CRIT$' <<<"$OUT" && ok || bad "crit: expected a CRIT line in output"
 
 # -- floor-breach: pct is fine but free space is below MIN_FREE_GB ------------
-# 30,000,000 KB =~ 28.6GB, under the default 40GB floor, while 50% used stays
-# below WARN_PCT entirely -- this is the case a pct-only check would miss.
+# 28GB is under the default 40GB floor, while 50% used stays below WARN_PCT
+# entirely -- this is the case a pct-only check would miss.
 echo "=== case: floor-breach ===" >&2
-export DW_STUB_PCT_ROOT=50 DW_STUB_AVAIL_ROOT_KB=30000000
-export DW_STUB_PCT_MNTC=40 DW_STUB_AVAIL_MNTC_KB=600000000
-result=$(run_case floor 1 1)
-calls=${result##*|}
-if [ "$calls" -eq 1 ]; then ok; else bad "floor-breach: notifier fired $calls time(s), expected exactly 1"; fi
-if grep -q ' — CRIT$' <<<"$result"; then ok; else bad "floor-breach: expected the floor breach to read as CRIT"; fi
-if grep -q 'free < .*GB floor' <<<"$result"; then ok; else bad "floor-breach: expected the floor-breach reason text in output"; fi
+fresh; root 50 28; mntc 40 572
+run_case floor 1 1 1 1
+grep -q ' — CRIT$' <<<"$OUT" && ok || bad "floor-breach: expected the floor breach to read as CRIT"
+has floor-breach "28GB free < 40GB floor"
+
+# -- repeat: the same breach on the next run is suppressed, exit 0 -------------
+echo "=== case: repeat ===" >&2
+fresh; root 87 400; mntc 40 572
+run_case repeat-first 1 1 1 1
+run_case repeat-again 0 1 0 0
+has repeat "suppressed: no worse than at the last alert (400GB free then; alerts again at 390GB free"
+has repeat "1 breach(es) no worse than at their last alert"
+[ -f "$TMP/state/fs${TMP//[^A-Za-z0-9._-]/_}_fs_root" ] && ok || bad "repeat: no state file for the root fixture: $(ls "$TMP/state" 2>&1)"
+
+# -- fall: under 10GB lost stays quiet; 10GB lost alerts, from the alert's baseline
+echo "=== case: fall ===" >&2
+root 87 391
+run_case fall-9 0 1 0 0
+root 87 390
+run_case fall-10 1 1 1 1
+has fall "free space fell from 400GB to 390GB since the last alert"
+
+# -- rebase: free space up by 10GB moves the baseline, so the next 10 lost alert
+echo "=== case: rebase ===" >&2
+root 87 405
+run_case rebase-up 0 1 0 0
+root 87 396
+run_case rebase-9 0 1 0 0
+root 87 395
+run_case rebase-10 1 1 1 1
+has rebase "free space fell from 405GB to 395GB"
+
+# -- level: WARN -> CRIT alerts; a drop back counts only once 10GB is recovered
+echo "=== case: level ===" >&2
+root 95 395
+run_case level-rise 1 1 1 1
+has level-rise "(rose from WARN to CRIT)"
+root 87 395
+run_case level-flap-down 0 1 0 0
+root 95 395
+run_case level-flap-up 0 1 0 0
+root 87 405
+run_case level-recover 0 1 0 0
+root 95 405
+run_case level-rerise 1 1 1 1
+has level-rerise "(rose from WARN to CRIT)"
+
+# -- floor after CRIT: the first floor breach alerts though the level holds ----
+echo "=== case: floor-new ===" >&2
+root 95 39
+run_case floor-new 1 1 1 1
+has floor-new "(fell below the 40GB floor)"
+run_case floor-repeat 0 1 0 0
+
+# -- floor hover: 39 -> 41 -> 39 alerts once; 10GB recovered re-arms the floor -
+echo "=== case: floor-hover ===" >&2
+root 95 41
+run_case floor-hover-up 0 1 0 0
+root 95 39
+run_case floor-hover-down 0 1 0 0
+root 95 49
+run_case floor-recover 0 1 0 0
+root 95 39
+run_case floor-rearmed 1 1 1 1
+has floor-rearmed "(fell below the 40GB floor)"
+
+# -- near full: the step shrinks to half of what was free at the last alert ----
+echo "=== case: near-full ===" >&2
+fresh; root 99 9
+run_case near-first 1 1 1 1
+root 99 5
+run_case near-5 0 1 0 0
+root 99 4
+run_case near-4 1 1 1 1
+has near-4 "free space fell from 9GB to 4GB"
+
+# -- reset: back under every watermark with 10GB recovered clears state ---------
+echo "=== case: reset ===" >&2
+fresh; root 87 400
+run_case reset-first 1 1 1 1
+root 50 405
+run_case reset-hover 0 0 0 0
+has reset-hover "its last alert stands until 410GB free"
+[ -n "$(ls -A "$TMP/state" 2>/dev/null)" ] && ok || bad "reset: a hover under the watermarks dropped the record"
+root 87 400
+run_case reset-hover-back 0 1 0 0
+root 50 410
+run_case reset-clear 0 0 0 0
+[ -z "$(ls -A "$TMP/state" 2>/dev/null)" ] && ok || bad "reset: state left after clearing: $(ls -A "$TMP/state")"
+root 87 400
+run_case reset-again 1 1 1 1
+has reset-again "(new breach)"
+
+# -- corrupt state alerts and is rewritten -------------------------------------
+echo "=== case: corrupt ===" >&2
+for f in "$TMP"/state/*; do printf 'garbage here\n' >"$f"; done
+run_case corrupt 1 1 1 1
+has corrupt "(state file unreadable)"
+run_case corrupt-after 0 1 0 0
+
+# -- unwritable state: every breach alerts, and the run says why ---------------
+echo "=== case: no-state ===" >&2
+: >"$TMP/not-a-dir"
+DISK_WATERMARK_STATE_DIR="$TMP/not-a-dir" run_case no-state-1 1 1 1 1
+has no-state "cannot keep alert state in $TMP/not-a-dir"
+DISK_WATERMARK_STATE_DIR="$TMP/not-a-dir" run_case no-state-2 1 1 1 1
+
+# -- mixed: one filesystem alerts, one is suppressed; one notify names only the first
+echo "=== case: mixed ===" >&2
+fresh; root 87 400; mntc 40 572
+run_case mixed-root 1 1 1 1
+mntc 95 400
+run_case mixed-both 1 2 1 1
+grep -qF "$TMP/fs/mntc: CRIT" "$NOTIFY_LOG" && ok || bad "mixed: notify should name the mntc fixture: $(cat "$NOTIFY_LOG")"
+grep -qF "$TMP/fs/root:" "$NOTIFY_LOG" && bad "mixed: notify should not name the suppressed root fixture: $(cat "$NOTIFY_LOG")" || ok
+has mixed "$TMP/fs/root — suppressed"
 
 if [ "$fail" -eq 0 ]; then
   echo "ok — disk-watermark: $pass/$((pass + fail)) assertions passed"

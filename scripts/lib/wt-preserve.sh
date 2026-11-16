@@ -16,17 +16,64 @@ WT_PRESERVE_DIR="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
 
 # Prints why a Claude Code session holds worktree $1 and returns 0, or prints any
 # `resumable:` notes and returns 1. $2, when set, is a session id that never counts
-# as a holder (wt-done passes its caller's). A check that cannot answer reads as
-# held, like alive(): erring that way only defers a removal.
+# as a holder (wt-done passes its caller's). $3, when above 0, is an idle window in
+# hours (hov-stack#644): a worktree held only by a transcript that has not named it
+# for that long prints `idle: <holder>; last named <N>h ago` and still returns 0,
+# so a caller that does not look for the `idle: ` prefix reads it as held. A check
+# that cannot answer reads as held, like alive(): erring that way only defers a
+# removal.
 wt_session_hold() {
   local out rc
   out=$(python3 "$WT_PRESERVE_DIR/wt_session_hold.py" --active-min "${ACTIVE_MIN:-120}" \
-    --exclude-session "${2:-}" -- "$1"); rc=$?
+    --idle-hours "${3:-0}" --exclude-session "${2:-}" -- "$1"); rc=$?
   case $rc in
     0) printf '%s' "$out"; return 0 ;;
     1) printf '%s' "$out"; return 1 ;;
+    3) case $out in
+         'idle: '*) printf '%s' "$out" ;;
+         *) printf 'idle check gave no idle line; treating as held' ;;
+       esac
+       return 0 ;;
     *) printf 'session check unavailable (exit %s); treating as held' "$rc"; return 0 ;;
   esac
+}
+
+# Returns 0 when every gitignored file in worktree $1 is a rebuildable cache or
+# sits where wt_rescue_deliverables copies it out from; otherwise prints the first
+# other entry and returns 1. A worktree released as idle (hov-stack#644) has no
+# session left to say an ignored .env, build output or venv can go, so only these
+# can: node_modules, __pycache__, .pytest_cache, .mypy_cache, .ruff_cache, .turbo,
+# .next, .velite, .svelte-kit, .nuxt and .parcel-cache directories, *.pyc,
+# .eslintcache and *.tsbuildinfo files, and .claude/deliverables/ and .context/.
+# With --directory git also lists each untracked directory that holds only ignored
+# content (`.claude/` around `.claude/deliverables/`) and then lists that content
+# itself, so such a directory is skipped when an entry below it is listed.
+wt_cache_only() {
+  local list entry p
+  local -a entries
+  local -A parent=()
+  list=$(mktemp) || { printf 'cannot make a temp file'; return 1; }
+  if ! git -C "$1" ls-files -z --others --ignored --exclude-standard --directory >"$list" 2>/dev/null; then
+    rm -f "$list"; printf 'cannot list ignored files'; return 1
+  fi
+  mapfile -d '' -t entries <"$list"; rm -f "$list"
+  for entry in "${entries[@]}"; do
+    p=${entry%/}
+    while [[ $p == */* ]]; do p=${p%/*}; parent["$p/"]=1; done
+  done
+  for entry in "${entries[@]}"; do
+    [ -n "${parent[$entry]+set}" ] && continue
+    case "/${entry%/}" in
+      /.claude/deliverables|/.claude/deliverables/*|/.context|/.context/*) ;;
+      */node_modules|*/node_modules/*|*/__pycache__|*/__pycache__/*) ;;
+      */.pytest_cache|*/.pytest_cache/*|*/.mypy_cache|*/.mypy_cache/*|*/.ruff_cache|*/.ruff_cache/*) ;;
+      */.turbo|*/.turbo/*|*/.next|*/.next/*|*/.velite|*/.velite/*) ;;
+      */.svelte-kit|*/.svelte-kit/*|*/.nuxt|*/.nuxt/*|*/.parcel-cache|*/.parcel-cache/*) ;;
+      *.pyc|*/.eslintcache|*.tsbuildinfo) ;;
+      *) printf '%s' "$entry"; return 1 ;;
+    esac
+  done
+  return 0
 }
 
 # Copies the gitignored files under .claude/deliverables/ and .context/ of worktree

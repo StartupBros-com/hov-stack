@@ -264,7 +264,10 @@ mkfix gitc
 H="$TMP/h-gitc"; WT="$TMP/gitc/repo-wt"; T="$H/projects/-elsewhere/s17.jsonl"
 mkdir -p "$H/sessions" "$(dirname "$T")"
 printf '{"pid":%s,"procStart":"%s","sessionId":"s17","cwd":"%s","name":"driver"}\n' "$$" "$(starttime $$)" "$TMP" >"$H/sessions/$$.json"
-call "$TMP" Bash "{\"command\":\"git -C $WT status --short\"}" >"$T"; touch -d '-1 day' "$T"
+# Two hours old: inside the sweep's default idle window (IDLE_RELEASE_HOURS=24), so
+# the mention still holds. Past that window a mention alone no longer holds a
+# shipped, clean, cache-only worktree (hov-stack#644; wt-sweep-idle-release.test.sh).
+call "$TMP" Bash "{\"command\":\"git -C $WT status --short\"}" >"$T"; touch -d '-2 hours' "$T"
 out=$(sweep "$TMP/gitc" 0 "$H")
 kept "git -C from a live session: worktree kept" "$WT"
 has "git -C from a live session: skip names the session" "$out" "session pid $$ \"driver\" is live; its transcript $T names $WT"
