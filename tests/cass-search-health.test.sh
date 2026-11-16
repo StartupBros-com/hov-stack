@@ -321,6 +321,14 @@ grep -qF 'doctor' "$SCRIPT" && ok \
 # 7. Not here: the unit wiring that runs this check after every index pass (a
 #    cass-index.service drop-in) is not in this repo, so neither is its test.
 
+# 8. Run through a symlink in another directory, the way ~/.local/bin/cass-search-health
+#    reaches it: lib/group-timeout.sh is found beside the real file, not beside the link.
+mkdir -p "$TMP/linkbin"
+ln -s "$SCRIPT" "$TMP/linkbin/cass-search-health"
+rc=$(SCRIPT=$TMP/linkbin/cass-search-health run "$(make_cass good ok)")
+[ "$rc" = 0 ] && ok || bad "through a symlink the healthy index exited $rc (want 0) :: $(tail -1 "$TMP/err")"
+if grep -qF 'No such file' "$TMP/err"; then bad "through a symlink a file beside the script was not found :: $(head -1 "$TMP/err")"; else ok; fi
+
 if [ "$fail" -eq 0 ]; then
   echo "ok — cass search health contract: $pass/$((pass + fail)) assertions passed"
 else

@@ -211,6 +211,11 @@
 # ceiling says, so the fixer prompt tells it to run suites in the foreground.
 set -uo pipefail
 
+# This file's own directory, followed through any symlink to it: a ~/.local/bin link
+# reaches the loop from another directory, and lib/ and the prose checker sit beside
+# the real file, not beside the link.
+SELF_DIR=$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")") || exit 1
+
 TREE="${1:-}"
 PR="${2:-}"
 WORK="${3:-}"
@@ -226,7 +231,7 @@ done
 STOP_REASON=setup-error STOP_DECISION=""
 OWNER_INITIALIZED=0 OWNER_CODE=''
 if [ -n "$OWNER_STATE" ]; then
-  SCRIPT_DIR=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P) || exit 1
+  SCRIPT_DIR=$SELF_DIR
   # shellcheck source=/dev/null
   source "$SCRIPT_DIR/lib/pr-owner-state.sh" || exit 1
   pr_owner_prepare "$OWNER_STATE" || exit 1
@@ -374,7 +379,7 @@ case "$WORK" in *\\*|*$'\r'*)
   exit 1 ;;
 esac
 
-PROSE_CHECKER_DIR=$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P) || exit 1
+PROSE_CHECKER_DIR=$SELF_DIR
 PROSE_CHECKER="$PROSE_CHECKER_DIR/review-prose-exemption.py"
 # Both CI waits read only the check runs that describe the head now.
 # shellcheck source=lib/ci-current-check-runs.sh

@@ -35,9 +35,12 @@ LIB_ROOT=${CASS_RELEASE_LIB:-${HOME}/.local/lib/cass}
 STATE_ROOT=${CASS_RELEASE_STATE:-${XDG_STATE_HOME:-$HOME/.local/state}/cass}
 PROVENANCE=$STATE_ROOT/provenance.json
 CHECK_RECEIPT=$STATE_ROOT/last-check.json
-PIN_FILE=${CASS_PIN_FILE:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/tool-staleness.sh}
+# This file's own directory, followed through any symlink to it: notify.sh,
+# cass-search-health.sh and the pin file sit beside the real file, not beside a
+# ~/.local/bin link to it.
+HERE=$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")
+PIN_FILE=${CASS_PIN_FILE:-$HERE/tool-staleness.sh}
 DRY_RUN=${DRY_RUN:-1}
-HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
 say() { [ -x "$HERE/notify.sh" ] && "$HERE/notify.sh" "$1" "${2:-default}" >/dev/null 2>&1; return 0; }
 fail() { echo "FAIL cass-release-promote: $*" >&2; say "cass release promotion FAILED: $*" input; return 1; }

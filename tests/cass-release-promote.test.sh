@@ -365,6 +365,16 @@ grep -qF 'live archive degraded' "$TMP/said" && ok || bad "ahead degraded archiv
 jq -e '.outcome == "ahead"' "$TMP/state/last-check.json" >/dev/null && ok || bad "ahead binary receipt missing"
 [ "$(awk -F'|' '$2 == "" && $3 == "search" {n++} END {print n+0}' "$TMP/calls")" = 5 ] && ok || bad "ahead archive not queried"
 
+# The same run through a symlink in another directory, the way ~/.local/bin/cass-release-promote
+# reaches it: notify.sh and cass-search-health.sh are found beside the real file, so the
+# advisory still runs and still reaches notify.sh.
+mkdir -p "$TMP/linkbin"
+ln -s "$SCRIPT" "$TMP/linkbin/cass-release-promote"
+out=$(SCRIPT=$TMP/linkbin/cass-release-promote TEST_LIVE_MODE=empty run); rc=$?
+[ "$rc" = 0 ] && ok || bad "through a symlink the ahead check failed: $out"
+case "$out" in *'helper unavailable'*) bad "through a symlink cass-search-health.sh was not found: $out" ;; *) ok ;; esac
+grep -qF 'live archive degraded' "$TMP/said" && ok || bad "through a symlink the degraded archive never reached notify.sh"
+
 # Each unhealthy/unevaluable condition is visible but cannot reject or roll back
 # a candidate that passed hermetic gates, before OR after the live-link swap.
 for mode in empty malformed nonzero unevaluable unavailable; do
