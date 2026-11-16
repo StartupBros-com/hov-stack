@@ -580,6 +580,16 @@ rc=0; HOME=$WORK/home-bogus bash "$ROOT/setup" --bogus > "$WORK/bogus.log" 2>&1 
 grep -q -F 'unknown option --bogus' "$WORK/bogus.log" || fail "the unknown option was not named"
 [ ! -e "$WORK/home-bogus" ] || fail "an unknown option still made files"
 ok "--help prints the header; an unknown option exits 2 and makes nothing"
+grep -q -F './setup --adopt --yes' "$WORK/help.log" || fail "--help does not show --adopt --yes"
+for usage in 'yes|--yes|--yes goes with --adopt' 'acheck|--adopt --check|--adopt runs on its own' 'aupdate|--adopt --update|--adopt runs on its own'; do
+  name=${usage%%|*}; rest=${usage#*|}; why=${rest#*|}; rest=${rest%%|*}
+  read -r -a usage_args <<<"$rest"
+  rc=0; HOME=$WORK/home-usage-$name bash "$ROOT/setup" "${usage_args[@]}" > "$WORK/usage-$name.log" 2>&1 || rc=$?
+  [ "$rc" = 2 ] || { cat "$WORK/usage-$name.log"; fail "setup $rest exited $rc, not 2"; }
+  grep -q -F -- "$why" "$WORK/usage-$name.log" || { cat "$WORK/usage-$name.log"; fail "setup $rest did not say why"; }
+  [ ! -e "$WORK/home-usage-$name" ] || fail "setup $rest still made files"
+done
+ok "--yes without --adopt, and --adopt with --check or --update, exit 2, say why and make nothing"
 
 # dcg, the other ways it can go (U15). Each run has a fresh HOME and no claude on PATH.
 n=$(curl_calls)
@@ -2430,6 +2440,294 @@ node -e 'process.exit(JSON.parse(require("fs").readFileSync(process.argv[1], "ut
   || fail "the seed beside a settings.json with no record does not carry the template's change"
 [ -z "$(find "$UP/home-sh/.hov-stack-backups" -path '*/settings-apply-*' 2>/dev/null)" ] || fail "--update made a merge copy in a home with no record"
 ok "--update merges a template change into a settings.json setup has a record of creating, with one copy of the old file, and leaves one with no record byte for byte, the change in the seed beside it"
+
+# --adopt (#650): a settings.json setup has no record of creating gets one on its owner's yes. The
+# checkout's history says which seed setup wrote: each revision of the template is built for the
+# home, and the nearest is taken, the latest on a tie. home-sh was seeded by C1's run, whose
+# template and seed builder are C0's, and lost its record before C2 added one allow rule.
+adopt_run() {  # adopt_run <checkout> <home> <log> [args]: the checkout's setup --adopt (ADOPT_TMP: its TMPDIR)
+  local c=$1 h=$2 log=$3
+  shift 3
+  HOME=$h TMPDIR=${ADOPT_TMP:-$WORK/merge-tmp} bash "$c/setup" --adopt "$@" > "$log" 2>&1
+}
+same_across() {  # same_across <a> <home a> <b> <home b>: same_settings for files of two homes, each home spelled the same
+  node -e '
+    const fs = require("fs"), key = (v) => JSON.stringify(v);
+    const canon = (v, h) => typeof v === "string" ? v.split("$HOME/").join("<home>/").split(h + "/").join("<home>/")
+      : Array.isArray(v) ? v.map((x) => canon(x, h)).sort((x, y) => (key(x) < key(y) ? -1 : key(x) > key(y) ? 1 : 0))
+      : v && typeof v === "object" ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, canon(v[k], h)])) : v;
+    const read = (p, h) => { const s = JSON.parse(fs.readFileSync(p, "utf8")); delete s.enabledPlugins; delete s.extraKnownMarketplaces; return canon(s, h); };
+    const a = read(process.argv[1], process.argv[2]), b = read(process.argv[3], process.argv[4]);
+    const diff = [...new Set([...Object.keys(a), ...Object.keys(b)])].filter((k) => key(a[k]) !== key(b[k]));
+    if (diff.length) { console.log("differ at: " + diff.join(", ")); process.exit(1); }
+  ' "$1" "$2" "$3" "$4"
+}
+PROBE_LINE='    add permissions.allow "Bash(update-merge-probe:*)"'
+
+# A plan from the README's install, cloned again: it deepens the shallow clone (saying so first),
+# names C0's seed, lists the template's one change since, and changes nothing in the home.
+git clone -q --depth 1 "file://$UPSTREAM" "$UP/clone-re"
+[ "$(git -C "$UP/clone-re" rev-parse --is-shallow-repository)" = true ] || fail "the re-clone is not shallow"
+sh_state=$(tree_state "$UP/home-sh")
+rc=0; adopt_run "$UP/clone-re" "$UP/home-sh" "$WORK/adopt-plan.log" || rc=$?
+[ "$rc" = 0 ] || { cat "$WORK/adopt-plan.log"; fail "--adopt exited $rc"; }
+grep -q -x -F "hov-stack: adopting $UP/home-sh/.claude/settings.json into ./setup's merge, as a plan (settings.json is not changed)" "$WORK/adopt-plan.log" \
+  || { cat "$WORK/adopt-plan.log"; fail "--adopt did not say it only plans"; }
+grep -q -x -F '  this checkout is a shallow clone: fetching its history with git fetch --unshallow, to find the seed setup wrote' "$WORK/adopt-plan.log" \
+  || { cat "$WORK/adopt-plan.log"; fail "--adopt did not say it deepens the shallow clone"; }
+[ "$(git -C "$UP/clone-re" rev-parse --is-shallow-repository)" = false ] || fail "--adopt did not deepen the shallow clone"
+grep -q -F "  the nearest seed in this checkout's history is the one setup writes from its template at ${C0:0:7} " "$WORK/adopt-plan.log" \
+  || { cat "$WORK/adopt-plan.log"; fail "--adopt did not name the seed setup wrote (${C0:0:7})"; }
+grep -q -x -F "$PROBE_LINE" "$WORK/adopt-plan.log" && [ "$(item_count "$WORK/adopt-plan.log")" = 1 ] \
+  || { cat "$WORK/adopt-plan.log"; fail "the plan is not the template's one change since the seed"; }
+grep -q -F '  ./setup --adopt --yes makes them, copying the old file to ~/.hov-stack-backups/ first' "$WORK/adopt-plan.log" \
+  || { cat "$WORK/adopt-plan.log"; fail "the plan does not say what --yes does"; }
+cmp -s "$UP/home-sh/.claude/settings.json" "$WORK/upd-merge-sh-before.json" || fail "an --adopt plan changed settings.json"
+[ "$(tree_state "$UP/home-sh")" = "$sh_state" ] || fail "an --adopt plan changed something in the home"
+ok "--adopt in a shallow re-clone says it deepens it, does, names the seed setup wrote (${C0:0:7}), plans exactly the template's one change since, and changes nothing in the home"
+
+# --yes makes that merge with one copy of the old file and keeps the record; the result, and the
+# record, are what --update's merge gave the home that kept its record all along.
+rc=0; adopt_run "$UP/clone-sh" "$UP/home-sh" "$WORK/adopt-yes.log" --yes || rc=$?
+[ "$rc" = 0 ] || { cat "$WORK/adopt-yes.log"; fail "--adopt --yes exited $rc"; }
+grep -q -F "  the nearest seed in this checkout's history is the one setup writes from its template at ${C0:0:7} " "$WORK/adopt-yes.log" \
+  || { cat "$WORK/adopt-yes.log"; fail "--adopt --yes did not name the seed setup wrote (${C0:0:7})"; }
+grep -q -x -F "$PROBE_LINE" "$WORK/adopt-yes.log" && [ "$(item_count "$WORK/adopt-yes.log")" = 1 ] \
+  || { cat "$WORK/adopt-yes.log"; fail "--adopt --yes did not merge exactly the template's one change"; }
+json_ok "$UP/home-sh/.claude/settings.json" 's.permissions.allow.includes("Bash(update-merge-probe:*)")' || fail "the template's change did not reach settings.json"
+ad_copy=$(merge_copies "$UP/home-sh")
+[ -n "$ad_copy" ] && [ "$(printf '%s\n' "$ad_copy" | wc -l | tr -d ' ')" = 1 ] && cmp -s "$ad_copy" "$WORK/upd-merge-sh-before.json" \
+  || fail "--adopt --yes did not make exactly one copy of the old settings.json ('$ad_copy')"
+grep -q -x -F "  the settings.json from before is at $ad_copy" "$WORK/adopt-yes.log" || { cat "$WORK/adopt-yes.log"; fail "--adopt --yes did not name the copy"; }
+AREC=$UP/home-sh/.claude/.hov-stack/setup-settings-base.json
+[ -f "$AREC" ] && [ "$(stat -c %a "$AREC")" = 600 ] && [ "$(stat -c %a "${AREC%/*}")" = 700 ] || fail "--adopt --yes kept no record at mode 600 in a 700 directory"
+grep -q -F '  kept a record at ' "$WORK/adopt-yes.log" || { cat "$WORK/adopt-yes.log"; fail "--adopt --yes did not say it kept the record"; }
+same_across "$HA/.claude/settings.json" "$HA" "$UP/home-sh/.claude/settings.json" "$UP/home-sh" \
+  || fail "the adopted settings.json is not what --update's merge gave a home that kept its record (above)"
+same_across "$HA/.claude/.hov-stack/setup-settings-base.json" "$HA" "$AREC" "$UP/home-sh" \
+  || fail "the adopted record is not the one --update's merge left in a home that kept its record (above)"
+ok "--adopt --yes merges the change with one copy of the old file and keeps the record (600 in 700); file and record match a home that kept its record through --update"
+
+# Adopted once, a second --adopt, plan or --yes, has nothing to do, and --check finds the file up to date.
+cp "$UP/home-sh/.claude/settings.json" "$WORK/adopt-again-before.json"
+rc=0; adopt_run "$UP/clone-sh" "$UP/home-sh" "$WORK/adopt-again-plan.log" || rc=$?
+[ "$rc" = 0 ] && grep -q -F 'nothing to adopt' "$WORK/adopt-again-plan.log" && [ "$(item_count "$WORK/adopt-again-plan.log")" = 0 ] \
+  || { cat "$WORK/adopt-again-plan.log"; fail "a second --adopt plan exited $rc or did not say there is nothing to adopt"; }
+rc=0; adopt_run "$UP/clone-sh" "$UP/home-sh" "$WORK/adopt-again.log" --yes || rc=$?
+[ "$rc" = 0 ] || { cat "$WORK/adopt-again.log"; fail "a second --adopt exited $rc"; }
+grep -q -F 'already has a record of creating it' "$WORK/adopt-again.log" && grep -q -F 'nothing to adopt' "$WORK/adopt-again.log" \
+  || { cat "$WORK/adopt-again.log"; fail "a second --adopt did not say there is nothing to adopt"; }
+cmp -s "$UP/home-sh/.claude/settings.json" "$WORK/adopt-again-before.json" || fail "a second --adopt changed settings.json"
+[ "$(merge_copies "$UP/home-sh" | wc -l | tr -d ' ')" = 1 ] || fail "a second --adopt made another copy"
+rc=0; HOME=$UP/home-sh TMPDIR=$WORK/merge-tmp bash "$UP/clone-sh/setup" --check --no-dcg > "$WORK/adopt-check.log" 2>&1 || rc=$?
+grep -E '^  settings +ok +' "$WORK/adopt-check.log" | grep -q -F "$UP/home-sh/.claude/settings.json, up to date with the template" \
+  || { cat "$WORK/adopt-check.log"; fail "--check after --adopt --yes does not find settings.json up to date"; }
+ok "a second --adopt says there is nothing to adopt and changes nothing; --check finds the adopted file up to date with the template"
+
+# Two revisions that build the same seed tie, and the latest is named. C3 changes only a comment
+# in the seed builder, so its seed and C2's are the same; a home seeded at C2 has nothing to merge,
+# and --yes still keeps the record, with no copy of a file it did not change.
+HT=$UP/home-tie
+rc=0; HOME=$HT TMPDIR=$WORK/merge-tmp bash "$UP/clone-re/setup" --no-dcg > "$WORK/adopt-tie-seed.log" 2>&1 || rc=$?
+[ "$rc" = 0 ] || { cat "$WORK/adopt-tie-seed.log"; fail "seeding the tie home exited $rc"; }
+forget_base "$HT"
+cp "$HT/.claude/settings.json" "$WORK/adopt-tie-before.json"
+printf '%s\n' '// a comment only: this revision builds the seed the one before it builds' >> "$SEED/lib/settings-seed.js"
+gitc -C "$SEED" commit -q -am "seed builder: a comment only"
+git -C "$SEED" push -q origin main
+C3=$(git -C "$SEED" rev-parse HEAD)
+git -C "$UP/clone-re" pull -q --ff-only
+[ "$(git -C "$UP/clone-re" rev-parse HEAD)" = "$C3" ] || fail "the re-clone did not move to the comment-only commit"
+rc=0; adopt_run "$UP/clone-re" "$HT" "$WORK/adopt-tie.log" || rc=$?
+[ "$rc" = 0 ] || { cat "$WORK/adopt-tie.log"; fail "--adopt on a tie exited $rc"; }
+grep -q -F "  the nearest seed in this checkout's history is the one setup writes from its template at ${C3:0:7} " "$WORK/adopt-tie.log" \
+  || { cat "$WORK/adopt-tie.log"; fail "on a tie --adopt did not name the latest revision (${C3:0:7}, not ${C2:0:7})"; }
+grep -q -F '  nothing to merge from this checkout' "$WORK/adopt-tie.log" && [ "$(item_count "$WORK/adopt-tie.log")" = 0 ] \
+  || { cat "$WORK/adopt-tie.log"; fail "a home seeded from today's template has something to merge"; }
+grep -q -F '  ./setup --adopt --yes changes nothing in settings.json and keeps the record' "$WORK/adopt-tie.log" \
+  || { cat "$WORK/adopt-tie.log"; fail "the plan does not say --yes changes nothing and keeps the record"; }
+rc=0; adopt_run "$UP/clone-re" "$HT" "$WORK/adopt-zero.log" --yes || rc=$?
+[ "$rc" = 0 ] || { cat "$WORK/adopt-zero.log"; fail "--adopt --yes with nothing to merge exited $rc"; }
+grep -q -F '  settings.json: nothing to merge from this checkout' "$WORK/adopt-zero.log" || { cat "$WORK/adopt-zero.log"; fail "--adopt --yes did not say there is nothing to merge"; }
+! grep -q -F 'the settings.json from before is at' "$WORK/adopt-zero.log" || fail "--adopt --yes named a copy it did not make"
+[ -f "$HT/.claude/.hov-stack/setup-settings-base.json" ] || fail "--adopt --yes with nothing to merge kept no record"
+cmp -s "$HT/.claude/settings.json" "$WORK/adopt-tie-before.json" || fail "--adopt --yes with nothing to merge changed settings.json"
+[ -z "$(merge_copies "$HT")" ] || fail "--adopt --yes with nothing to merge made a copy"
+ok "on a tie (${C3:0:7} and ${C2:0:7} build the same seed) --adopt names the latest; with nothing to merge --yes keeps the record, changes nothing and makes no copy"
+
+# A file seeded with dcg's hook, whose dcg has since gone: the seed it came from is the one built
+# with the dcg its hook names, so the merge takes the hook and DCG_FAIL_CLOSED out, as it does for
+# a file with a record when dcg is uninstalled.
+HG=$UP/home-dcg-gone
+mkdir -p "$UP/dcg-gone"
+cp "$WORK/dcg-bin/dcg" "$UP/dcg-gone/dcg"
+rc=0; HOME=$HG TMPDIR=$WORK/merge-tmp PATH=$UP/dcg-gone:$PATH bash "$UP/clone-re/setup" > "$WORK/adopt-dcg-seed.log" 2>&1 || rc=$?
+[ "$rc" = 0 ] || { cat "$WORK/adopt-dcg-seed.log"; fail "seeding a home with dcg's hook exited $rc"; }
+HG_DCG=$UP/dcg-gone/dcg json_ok "$HG/.claude/settings.json" 'JSON.stringify(s.hooks).includes(process.env.HG_DCG) && s.env && "DCG_FAIL_CLOSED" in s.env' \
+  || fail "the home was not seeded with dcg's hook and DCG_FAIL_CLOSED"
+forget_base "$HG"
+# While that dcg is there, today's seed carries the same hook, so there is nothing to merge.
+HG_before=$(tree_state "$HG")
+rc=0; adopt_run "$UP/clone-re" "$HG" "$WORK/adopt-dcg-present.log" || rc=$?
+[ "$rc" = 0 ] && grep -q -F ", with dcg's hook: settings.json holds 100% of that seed's entries" "$WORK/adopt-dcg-present.log" \
+  && grep -q -F '  nothing to merge from this checkout' "$WORK/adopt-dcg-present.log" && [ "$(item_count "$WORK/adopt-dcg-present.log")" = 0 ] \
+  || { cat "$WORK/adopt-dcg-present.log"; fail "--adopt on a file whose dcg is still there did not take the dcg seed with nothing to merge (exit $rc)"; }
+[ "$(tree_state "$HG")" = "$HG_before" ] || fail "an --adopt plan with dcg present changed something in the home"
+rm "$UP/dcg-gone/dcg"
+rc=0; adopt_run "$UP/clone-re" "$HG" "$WORK/adopt-dcg.log" --yes || rc=$?
+[ "$rc" = 0 ] || { cat "$WORK/adopt-dcg.log"; fail "--adopt --yes on a file whose dcg is gone exited $rc"; }
+grep -q -F "  the nearest seed in this checkout's history is the one setup writes from its template at ${C3:0:7} (" "$WORK/adopt-dcg.log" && grep -q -F ", with dcg's hook: settings.json holds 100% of that seed's entries" "$WORK/adopt-dcg.log" \
+  || { cat "$WORK/adopt-dcg.log"; fail "--adopt did not take the seed built with the dcg the hook names"; }
+grep -q -x -F '    remove env.DCG_FAIL_CLOSED' "$WORK/adopt-dcg.log" && grep -E '^    remove hook PreToolUse ' "$WORK/adopt-dcg.log" | grep -q -F "$UP/dcg-gone/dcg" \
+  && [ "$(item_count "$WORK/adopt-dcg.log")" = 2 ] || { cat "$WORK/adopt-dcg.log"; fail "--adopt did not take out exactly the hook of the dcg that is gone and DCG_FAIL_CLOSED"; }
+HG_DCG=$UP/dcg-gone/dcg json_ok "$HG/.claude/settings.json" '!JSON.stringify(s.hooks).includes(process.env.HG_DCG) && !(s.env && "DCG_FAIL_CLOSED" in s.env)' \
+  || fail "the hook of the dcg that is gone, or DCG_FAIL_CLOSED, is still in settings.json"
+[ -f "$HG/.claude/.hov-stack/setup-settings-base.json" ] || fail "--adopt --yes on a file whose dcg is gone kept no record"
+ok "a file seeded with dcg's hook: --adopt takes the seed built with the dcg it names, with nothing to merge while that dcg is there; once it is gone the merge takes out its hook and DCG_FAIL_CLOSED, as a recorded file's merge does"
+
+SEEDED=$WORK/upd-merge-sh-before.json
+adopt_home() {  # adopt_home <name> <settings.json content file>: a home whose settings.json has no record
+  mkdir -p "$UP/home-ad-$1/.claude"
+  cp "$2" "$UP/home-ad-$1/.claude/settings.json"
+}
+# A seed its owner edited heavily (every other permission rule taken out) is still taken as
+# setup's: --adopt names the seed, plans the template's change since, and puts back each deny
+# rule taken out (the engine never lets a template deny rule go), writing nothing.
+node -e '
+  const fs = require("fs"), s = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+  let denied = 0;
+  for (const k of ["allow", "deny", "ask"]) s.permissions[k] = s.permissions[k].filter((x, i) => {
+    if (i % 2 === 0) return true;
+    if (k === "deny") denied++;
+    return false;
+  });
+  fs.writeFileSync(process.argv[2], JSON.stringify(s, null, 2) + "\n");
+  fs.writeFileSync(process.argv[3], denied + "\n");
+' "$SEEDED" "$WORK/adopt-edited.json" "$WORK/adopt-edited.denied"
+adopt_home edited "$WORK/adopt-edited.json"
+ED_before=$(tree_state "$UP/home-ad-edited")
+rc=0; adopt_run "$UP/clone-re" "$UP/home-ad-edited" "$WORK/adopt-edited.log" || rc=$?
+ed_pct=$(sed -n "s/.*: settings.json holds \([0-9]*\)% of that seed's entries\$/\1/p" "$WORK/adopt-edited.log")
+[ "$rc" = 0 ] && [ -n "$ed_pct" ] && [ "$ed_pct" -ge 50 ] && [ "$ed_pct" -lt 80 ] \
+  && grep -q -F " from its template at ${C0:0:7} " "$WORK/adopt-edited.log" \
+  || { cat "$WORK/adopt-edited.log"; fail "--adopt did not take a heavily edited seed as C0's (exit $rc, ${ed_pct:-no}%)"; }
+grep -q -x -F "$PROBE_LINE" "$WORK/adopt-edited.log" \
+  && [ "$(grep -c -E '^    add permissions\.deny ' "$WORK/adopt-edited.log")" = "$(cat "$WORK/adopt-edited.denied")" ] \
+  && [ "$(grep -E '^    add permissions\.(allow|ask) ' "$WORK/adopt-edited.log" | grep -c -v -F 'update-merge-probe')" = 0 ] \
+  || { cat "$WORK/adopt-edited.log"; fail "--adopt on an edited seed did not plan exactly the template's change and the deny rules taken out"; }
+[ "$(tree_state "$UP/home-ad-edited")" = "$ED_before" ] || fail "an --adopt plan on an edited seed changed something in the home"
+ok "a seed with every other permission rule taken out (${ed_pct}% held) is still taken as ${C0:0:7}'s; the plan keeps the allow and ask rules taken out, puts back the deny rules, and writes nothing"
+
+# It leaves the file alone, exits 1 and says why when the file is missing, a symlink, not JSON or
+# not seeded by setup, when sync.sh keeps its record, when the checkout has no history of its own,
+# or when deepening it or a temporary directory fails; --yes changes none of that.
+adopt_refused() {  # adopt_refused <checkout> <name> <why>: --adopt, then --adopt --yes, on home-ad-<name> each exit 1, name why, change nothing there
+  local c=$1 name=$2 why=$3 h=$UP/home-ad-$2 before rc log mode
+  before=$(tree_state "$h")
+  for mode in plan yes; do
+    log=$WORK/adopt-$name-$mode.log rc=0
+    if [ "$mode" = yes ]; then adopt_run "$c" "$h" "$log" --yes || rc=$?; else adopt_run "$c" "$h" "$log" || rc=$?; fi
+    [ "$rc" = 1 ] || { cat "$log"; fail "--adopt ($name, $mode) exited $rc, not 1"; }
+    grep -q -F "hov-stack --adopt: left $h/.claude/settings.json as it was: " "$log" && grep -q -F -- "$why" "$log" \
+      || { cat "$log"; fail "--adopt ($name, $mode) did not say it left the file and why ($why)"; }
+    [ "$(tree_state "$h")" = "$before" ] || fail "--adopt ($name, $mode) changed something in the home"
+  done
+}
+adopt_home nohist "$SEEDED"
+adopt_refused "$copy" nohist "has no git history of its own (it is not a git clone)"
+adopt_home inner "$SEEDED"
+adopt_refused "$UP/outer/inner" inner "has no git history of its own (it is not a git clone)"
+printf '{"theme":"dark","permissions":{"allow":["Bash(ls:*)"]}}\n' > "$WORK/adopt-foreign.json"
+adopt_home foreign "$WORK/adopt-foreign.json"
+adopt_refused "$UP/clone-re" foreign "so it does not look like a settings.json setup seeded"
+adopt_home sync "$SEEDED"
+mkdir -p "$UP/home-ad-sync/.claude/.hov-stack"
+cp "$SEEDED" "$UP/home-ad-sync/.claude/.hov-stack/settings-base.json"
+adopt_refused "$UP/clone-re" sync "sync.sh keeps its own record of it"
+mkdir -p "$UP/home-ad-link/.claude"
+cp "$SEEDED" "$WORK/adopt-link-target.json"
+ln -s "$WORK/adopt-link-target.json" "$UP/home-ad-link/.claude/settings.json"
+adopt_refused "$UP/clone-re" link "it is a symlink, and setup never writes through one"
+printf 'not json\n' > "$WORK/adopt-notjson.json"
+adopt_home notjson "$WORK/adopt-notjson.json"
+adopt_refused "$UP/clone-re" notjson "it is not a JSON object"
+printf '[]\n' > "$WORK/adopt-array.json"
+adopt_home array "$WORK/adopt-array.json"
+adopt_refused "$UP/clone-re" array "it is not a JSON object"
+git clone -q --depth 1 "file://$UPSTREAM" "$UP/clone-cut"
+git -C "$UP/clone-cut" remote set-url origin "$UP/no-such-origin.git"
+adopt_home cut "$SEEDED"
+LC_ALL=C adopt_refused "$UP/clone-cut" cut "git fetch --unshallow did not finish (fatal: "
+[ "$(git -C "$UP/clone-cut" rev-parse --is-shallow-repository)" = true ] || fail "a failed deepening left the clone not shallow"
+adopt_home notmp "$SEEDED"
+ADOPT_TMP=$WORK/no-such-tmp adopt_refused "$UP/clone-re" notmp "could not make a temporary directory"
+rc=0; adopt_run "$UP/clone-re" "$UP/home-ad-none" "$WORK/adopt-none.log" --yes || rc=$?
+[ "$rc" = 1 ] && grep -q -F 'there is none: ./setup seeds one and keeps its record' "$WORK/adopt-none.log" \
+  || { cat "$WORK/adopt-none.log"; fail "--adopt --yes with no settings.json did not exit 1 and say so"; }
+[ ! -e "$UP/home-ad-none" ] || fail "--adopt --yes with no settings.json made files"
+cmp -s "$WORK/adopt-link-target.json" "$SEEDED" || fail "a refused --adopt wrote through the symlink"
+ok "--adopt, plan and --yes, leaves the file and home alone and exits 1, saying why, for: no history (a copy, and one inside another repository), a file setup did not seed, sync.sh's record, a symlink, not JSON, JSON that is not an object, a failed deepening (still shallow), no temporary directory, and no settings.json"
+
+# A run killed mid-merge (here while the engine plans) still removes its temporary directories,
+# which hold copies of settings.json.
+REAL_NODE=$(command -v node)
+mkdir -p "$UP/slow-node" "$WORK/kill-tmp"
+cat > "$UP/slow-node/node" <<EOF
+#!/usr/bin/env bash
+case "\$1" in
+  */lib/settings-apply.js) echo "\$\$" > "$WORK/slow-node.pid"; exec sleep 60 ;;
+esac
+exec "$REAL_NODE" "\$@"
+EOF
+chmod +x "$UP/slow-node/node"
+adopt_home kill "$SEEDED"
+HOME=$UP/home-ad-kill TMPDIR=$WORK/kill-tmp PATH=$UP/slow-node:$PATH bash "$UP/clone-re/setup" --adopt > "$WORK/adopt-kill.log" 2>&1 &
+kill_pid=$!
+for _ in $(seq 1 600); do [ -s "$WORK/slow-node.pid" ] && break; sleep 0.1; done
+[ -s "$WORK/slow-node.pid" ] || { kill "$kill_pid"; cat "$WORK/adopt-kill.log"; fail "--adopt never reached the engine, so the kill case tests nothing"; }
+[ "$(ls -A "$WORK/kill-tmp" | wc -l | tr -d ' ')" = 2 ] || fail "--adopt had not made its two temporary directories when the engine ran: $(ls -A "$WORK/kill-tmp")"
+kill -TERM "$kill_pid"
+rc=0; wait "$kill_pid" || rc=$?
+kill -TERM "$(cat "$WORK/slow-node.pid")" 2>/dev/null || :
+[ "$rc" = 143 ] || { cat "$WORK/adopt-kill.log"; fail "the killed --adopt exited $rc, not 143"; }
+[ -z "$(ls -A "$WORK/kill-tmp")" ] || fail "a killed --adopt left its temporary directories: $(ls -A "$WORK/kill-tmp")"
+ok "an --adopt killed while the engine runs exits 143 and removes its temporary directories"
+
+# A record that cannot be kept after the merge: it says the file changed, names the copy, exits 1.
+adopt_home norec "$SEEDED"
+: > "$UP/home-ad-norec/.claude/.hov-stack"
+rc=0; adopt_run "$UP/clone-re" "$UP/home-ad-norec" "$WORK/adopt-norec.log" --yes || rc=$?
+[ "$rc" = 1 ] || { cat "$WORK/adopt-norec.log"; fail "--adopt --yes that could not keep its record exited $rc, not 1"; }
+nr_copy=$(merge_copies "$UP/home-ad-norec")
+[ -n "$nr_copy" ] && [ "$(printf '%s\n' "$nr_copy" | wc -l | tr -d ' ')" = 1 ] && cmp -s "$nr_copy" "$SEEDED" \
+  || { cat "$WORK/adopt-norec.log"; fail "the merge before the record failed did not make exactly one copy of the old file ('$nr_copy')"; }
+grep -q -F "so later runs of ./setup leave settings.json alone; the merge above stays, and the file from before is at $nr_copy" "$WORK/adopt-norec.log" \
+  && grep -q -x -F "hov-stack --adopt: $UP/home-ad-norec/.claude/settings.json was changed but the adopt did not finish (see above)" "$WORK/adopt-norec.log" \
+  || { cat "$WORK/adopt-norec.log"; fail "--adopt --yes did not say the file changed, name the copy and say no record was kept"; }
+json_ok "$UP/home-ad-norec/.claude/settings.json" 's.permissions.allow.includes("Bash(update-merge-probe:*)")' || fail "the merge before the record failed did not stay"
+[ -f "$UP/home-ad-norec/.claude/.hov-stack" ] || fail "the file standing in for the record directory was replaced"
+ok "--adopt --yes that merged but could not keep the record exits 1, says the file changed and no record was kept, and names the one copy"
+
+# A run that leaves a settings.json with no record alone points at --adopt; one beside sync.sh's
+# record does not, since sync.sh's merge owns that file.
+rc=0; HOME=$UP/home-ad-foreign TMPDIR=$WORK/merge-tmp bash "$UP/clone-re/setup" --no-dcg > "$WORK/adopt-own-run.log" 2>&1 || rc=$?
+[ "$rc" = 0 ] || { cat "$WORK/adopt-own-run.log"; fail "a run on a settings.json of the user's own exited $rc"; }
+grep -q -x -F "  ./setup --adopt shows how ./setup would merge the template's changes into it from here on; ./setup --adopt --yes does it" "$WORK/adopt-own-run.log" \
+  || { cat "$WORK/adopt-own-run.log"; fail "a run that left a settings.json of the user's own alone did not point at --adopt"; }
+! grep -q -F './setup --adopt' "$WORK/run-own.log" || fail "a run from the scratch copy, which has no history, pointed at --adopt"
+! grep -q -F './setup --adopt' "$WORK/merge-sync-2.log" || fail "a run beside sync.sh's record pointed at --adopt"
+rc=0; HOME=$UP/home-ad-sync TMPDIR=$WORK/merge-tmp bash "$UP/clone-re/setup" --no-dcg > "$WORK/adopt-sync-run.log" 2>&1 || rc=$?
+[ "$rc" = 0 ] || { cat "$WORK/adopt-sync-run.log"; fail "a run beside sync.sh's record, with none of setup's, exited $rc"; }
+grep -q -F '  settings.json already exists and was left alone' "$WORK/adopt-sync-run.log" || { cat "$WORK/adopt-sync-run.log"; fail "a run beside sync.sh's record did not leave settings.json alone"; }
+! grep -q -F './setup --adopt' "$WORK/adopt-sync-run.log" || fail "a run beside sync.sh's record, with none of setup's, pointed at --adopt, which refuses that file"
+rc=0; HOME=$UP/home-ad-nohist TMPDIR=$WORK/merge-tmp bash "$copy/setup" --no-dcg > "$WORK/adopt-nohist-run.log" 2>&1 || rc=$?
+grep -q -F '  settings.json already exists and was left alone' "$WORK/adopt-nohist-run.log" || { cat "$WORK/adopt-nohist-run.log"; fail "a run from a copy with no history did not leave settings.json alone (exit $rc)"; }
+! grep -q -F './setup --adopt' "$WORK/adopt-nohist-run.log" || fail "a run from a copy with no history pointed at --adopt, which refuses there"
+rc=0; HOME=$UP/home-ad-array TMPDIR=$WORK/merge-tmp bash "$UP/clone-re/setup" --no-dcg > "$WORK/adopt-array-run.log" 2>&1 || rc=$?
+grep -q -F '  settings.json already exists and was left alone' "$WORK/adopt-array-run.log" || { cat "$WORK/adopt-array-run.log"; fail "a run on a settings.json that is not an object did not leave it alone (exit $rc)"; }
+! grep -q -F './setup --adopt' "$WORK/adopt-array-run.log" || fail "a run on a settings.json that is not an object pointed at --adopt, which refuses it"
+[ -z "$(ls -A "$WORK/merge-tmp")" ] || fail "--adopt left temporary files behind: $(ls -A "$WORK/merge-tmp")"
+ok "a run that leaves a settings.json with no record alone points at --adopt, not beside sync.sh's record, from a copy with no history, or for a file that is not an object; --adopt left no temporary files"
 
 export CLAUDE_CONFIG_DIR=$WORK/cfg
 bash "$ROOT/setup" > "$WORK/run3.log" 2>&1 || { cat "$WORK/run3.log"; fail "setup with CLAUDE_CONFIG_DIR exited non-zero"; }
