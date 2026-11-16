@@ -24,6 +24,18 @@ Claude Code itself records, under the Claude home directory:
 The slug is the worktree path with every character outside [A-Za-z0-9] replaced
 by `-`, which is how Claude Code names transcript project directories.
 
+A worktree can be spelled more than one way. Records keep whatever path their
+session saw, and a checkout reached through a link, or renamed with a compat link
+left at the old name (hov-stack#661), has two spellings. Every check here matches
+any of the worktree's spellings, and every slug check accepts each spelling's
+slug. The spellings are the path as given, its real path, and the same real path
+under each symlink that sits directly in an alias root and points at the worktree
+or one of its ancestors. The alias roots are WT_ALIAS_ROOTS (colon-separated);
+wt-sweep passes its repo roots (wt-roots.sh). Without it they default to ~/SITES
+and ~, the same as REPO_ROOTS's default. The paths a record names are compared as
+written, never resolved: a link inside a worktree may point outside it. The given
+spelling is always one of them, so an extra spelling can only add a hold.
+
 What drives a worktree is a record's `cwd` (it follows EnterWorktree) and the
 paths a tool call is given: `file_path`, `path`, `notebook_path`, and every
 absolute path in a Bash `command`. Tool results and the text a tool writes
@@ -104,6 +116,43 @@ def slug(path: str) -> str:
 def inside(child: str, root: str) -> bool:
     child, root = os.path.normpath(child), os.path.normpath(root)
     return child == root or child.startswith(root.rstrip("/") + "/")
+
+
+def _alias_roots() -> list:
+    raw = os.environ.get("WT_ALIAS_ROOTS")
+    if raw is None:
+        home = os.path.expanduser("~")
+        return [os.path.join(home, "SITES"), home]
+    return [r for r in raw.split(":") if r]
+
+
+def spellings(wt: str) -> list:
+    """The worktree as given, then its real path, then that real path under each
+    symlink directly in an alias root that points at it or an ancestor of it."""
+    given = os.path.normpath(wt)
+    out = [given]
+    real = os.path.realpath(given)
+    if real not in out:
+        out.append(real)
+    for root in _alias_roots():
+        try:
+            it = os.scandir(root)
+        except OSError:
+            continue
+        with it:
+            for e in it:
+                try:
+                    if not e.is_symlink():
+                        continue
+                    target = os.path.realpath(e.path)
+                except OSError:
+                    continue
+                if target == "/" or not (real == target or real.startswith(target + "/")):
+                    continue
+                s = os.path.normpath(e.path + real[len(target):])
+                if s not in out:
+                    out.append(s)
+    return out
 
 
 def load(path: str):
@@ -357,8 +406,13 @@ def check(wt: str, home: str, active_min: int, procfs: str, cache_dir: str = "",
           idle_hours: float = 0.0):
     """Return (holder or None, [resumable lines], idle). `idle` is True only when
     idle_hours is set and the one hold left is a transcript hold that lapsed."""
-    wt = os.path.normpath(wt)
-    wt_slug = slug(wt)
+    names = spellings(wt)
+    wt = names[0]
+    slugs = list(dict.fromkeys(slug(s) for s in names))
+
+    def within(p: str) -> bool:
+        return any(inside(p, s) for s in names)
+
     resumable = []
     owners = []  # (session id, why) of every job not done and every live session
 
@@ -380,7 +434,7 @@ def check(wt: str, home: str, active_min: int, procfs: str, cache_dir: str = "",
                     owners.append((sid, why))
         named = [p for p in (d.get("worktreePath"), d.get("cwd")) if isinstance(p, str) and p]
         project = os.path.basename(os.path.dirname(link)) if link else ""
-        if not (any(inside(p, wt) for p in named) or project == wt_slug):
+        if not (any(within(p) for p in named) or project in slugs):
             continue
         if state == "done":
             resumable.append(f"resumable: {label} is done; resuming it would find this worktree gone")
@@ -398,26 +452,29 @@ def check(wt: str, home: str, active_min: int, procfs: str, cache_dir: str = "",
             continue
         label = f'session pid {d.get("pid")} "{d.get("name") or ""}"'
         cwd = d.get("cwd")
-        if isinstance(cwd, str) and cwd and inside(cwd, wt):
+        if isinstance(cwd, str) and cwd and within(cwd):
             return f"{label} has its cwd here", resumable, False
         if isinstance(sid, str) and sid:
             owners.append((sid, f"{label} is live"))
 
     now = time.time()
-    project_dir = os.path.join(home, "projects", wt_slug)
-    newest = 0.0
-    for path in glob.glob(os.path.join(glob.escape(project_dir), "**", "*.jsonl"), recursive=True):
-        rel = os.path.relpath(path, project_dir).split(os.sep)
-        if exclude and (rel[0][:-6] if len(rel) == 1 else rel[0]) == exclude:
-            continue
-        try:
-            newest = max(newest, os.stat(path).st_mtime)
-        except OSError:
-            continue
+    newest, newest_dir = 0.0, ""
+    for wt_slug in slugs:
+        project_dir = os.path.join(home, "projects", wt_slug)
+        for path in glob.glob(os.path.join(glob.escape(project_dir), "**", "*.jsonl"), recursive=True):
+            rel = os.path.relpath(path, project_dir).split(os.sep)
+            if exclude and (rel[0][:-6] if len(rel) == 1 else rel[0]) == exclude:
+                continue
+            try:
+                mtime = os.stat(path).st_mtime
+            except OSError:
+                continue
+            if mtime > newest:
+                newest, newest_dir = mtime, project_dir
     if newest:
         age_min = (now - newest) / 60
         if age_min < active_min:
-            return f"a transcript under {project_dir} was written {int(age_min)}m ago", resumable, False
+            return f"a transcript under {newest_dir} was written {int(age_min)}m ago", resumable, False
 
     # Transcripts filed under any project: those of a job not done or a live
     # session, and any written within active_min (hov-stack#394). With an idle
@@ -444,10 +501,10 @@ def check(wt: str, home: str, active_min: int, procfs: str, cache_dir: str = "",
         why.setdefault(path, f"a transcript written {age}m ago")
         candidates[path] = owner
 
-    prefix = wt.rstrip("/") + "/"
+    prefixes = tuple(s.rstrip("/") + "/" for s in names)
 
     def here(p: str) -> bool:
-        return p == wt or p.startswith(prefix)
+        return p in names or p.startswith(prefixes)
 
     cache_file = _cache_path(cache_dir, home) if cache_dir else ""
     driven = driven_paths({**fresh, **candidates}, cache_file)
@@ -466,7 +523,7 @@ def check(wt: str, home: str, active_min: int, procfs: str, cache_dir: str = "",
         return holder, resumable, False
     for t, sid in sorted(candidates.items()):
         cwd = driven.get(t, ({}, None))[1]
-        if cwd and inside(cwd, wt) and transcript_owner(t) == sid:
+        if cwd and within(cwd) and transcript_owner(t) == sid:
             return f"{holder}; its session last recorded its cwd at {cwd}", resumable, False
     return f"idle: {holder}; last named {int((now - last) // 3600)}h ago", resumable, True
 

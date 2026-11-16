@@ -94,6 +94,46 @@ class FakeProcfsSignalTests(unittest.TestCase):
         h = self._snap().holder(self.target)
         self.assertEqual((h.signal, h.pid), ("environ", 107))
 
+    def _renamed(self):
+        """hov-stack#661's shape: the checkout lives at sites/new, a link at
+        sites/old points at it, and the worktree is queried by its real path."""
+        sites = os.path.join(self._tmp.name, "sites")
+        wt = os.path.join(sites, "new", ".claude", "worktrees", "w1")
+        os.makedirs(wt)
+        os.symlink("new", os.path.join(sites, "old"))
+        return sites, wt, os.path.join(sites, "old", ".claude", "worktrees", "w1")
+
+    def test_old_spelling_in_argv_holds_with_alias_roots(self):
+        sites, wt, old = self._renamed()
+        _fake_proc(self.proc, 108, cwd="/", argv=["daemon", "--cwd", old])
+        self.assertIsNone(self._snap().holder(wt))
+        h = self._snap().holder(wt, alias_roots=[sites])
+        self.assertEqual((h.signal, h.pid), ("cmdline", 108))
+
+    def test_old_spelling_in_environ_holds_with_alias_roots(self):
+        sites, wt, old = self._renamed()
+        _fake_proc(self.proc, 109, cwd="/", argv=["claude"], env=[f"CLAUDE_JOB_DIR={old}/x"])
+        self.assertIsNone(self._snap().holder(wt))
+        h = self._snap().holder(wt, alias_roots=[sites])
+        self.assertEqual((h.signal, h.pid), ("environ", 109))
+
+    def test_alias_roots_never_drop_a_hold(self):
+        sites, wt, _ = self._renamed()
+        _fake_proc(self.proc, 110, cwd="/", argv=["daemon", wt])
+        self.assertEqual(self._snap().holder(wt, alias_roots=[sites]).pid, 110)
+
+    def test_alias_spellings_rule(self):
+        sites, wt, old = self._renamed()
+        real = os.path.realpath(wt)
+        self.assertEqual(PL.alias_spellings(real, [sites]), [old])
+        os.symlink("/", os.path.join(sites, "slash"))
+        os.symlink(self.target, os.path.join(sites, "elsewhere"))
+        self.assertEqual(PL.alias_spellings(real, [sites]), [old],
+                         "a link to / or to an unrelated dir adds nothing")
+        self.assertEqual(PL.alias_spellings(real, ["sites", os.path.join(sites, "nope")]), [],
+                         "relative and unreadable roots are skipped")
+        self.assertEqual(PL.alias_spellings(real, []), [])
+
     def test_unheld_path_is_not_flagged(self):
         _fake_proc(self.proc, 105, cwd="/", fd_targets=["/var/log/x"], argv=["sleep", "1"])
         self.assertIsNone(self._snap().holder(self.target))
@@ -249,6 +289,20 @@ class CliContractTests(unittest.TestCase):
             self.assertIn("pid:231", r.stdout)
             r = self._run("--procfs", proc, "--comm", "bash", "--", tgt)
             self.assertEqual(r.returncode, 1)
+
+    def test_alias_roots_on_the_cli(self):
+        with tempfile.TemporaryDirectory() as d:
+            proc = os.path.join(d, "proc"); os.makedirs(proc)
+            sites = os.path.join(d, "sites"); wt = os.path.join(sites, "new", "w")
+            os.makedirs(wt); os.symlink("new", os.path.join(sites, "old"))
+            _fake_proc(proc, 241, cwd="/", argv=["x", os.path.join(sites, "old", "w")])
+            r = self._run("--procfs", proc, "--quiet", "--", wt)
+            self.assertEqual(r.returncode, 1)
+            r = self._run("--procfs", proc, f"--alias-roots=/nonexistent:{sites}", "--", wt)
+            self.assertEqual(r.returncode, 0)
+            self.assertIn("cmdline", r.stdout)
+            r = self._run("--procfs", proc, "--alias-roots=", "--", wt)
+            self.assertEqual(r.returncode, 1, "an empty root list adds nothing")
 
     def test_answerless_scan_exits_2_not_1(self):
         """A scan that saw nothing must ERROR — the fail-closed contract."""

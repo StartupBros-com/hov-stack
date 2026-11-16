@@ -331,12 +331,19 @@ pr_owner_expire() {
 }
 
 # Read-only sweep predicate. Ownership outlives processes and timer pauses.
+# A record names its worktree as its owner saw it; a checkout reached through a
+# link, or renamed with a compat link at its old name (hov-stack#661), lists the
+# same worktree under another spelling, so a record whose path resolves to the
+# same directory owns it too.
 pr_owner_worktree_owned() {
-  local record root="$HOME/.claude/.loop-state/pr-owner"
+  local record root="$HOME/.claude/.loop-state/pr-owner" owned real
   [ -d "$root" ] || return 1
+  real=$(realpath -m -- "$1" 2>/dev/null) || real=$1
   for record in "$root"/*/owner.json; do
     [ -f "$record" ] || continue
-    if jq -e --arg path "$1" '.state == "owned" and .worktree == $path' "$record" >/dev/null 2>&1; then return 0; fi
+    owned=$(jq -er 'select(.state == "owned") | .worktree | strings' "$record" 2>/dev/null) || continue
+    [ "$owned" = "$1" ] && return 0
+    [ "$(realpath -m -- "$owned" 2>/dev/null)" = "$real" ] && return 0
   done
   return 1
 }

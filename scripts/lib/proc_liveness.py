@@ -33,10 +33,14 @@ FAILURE DIRECTION
   false dead, which is the direction that deletes live state.
 
 CLI (the bash callers' entry point, e.g. wt-sweep.sh alive()):
-    proc_liveness.py [--quiet] [--procfs DIR] [--comm NAME] -- PATH [PATH...]
+    proc_liveness.py [--quiet] [--procfs DIR] [--comm NAME] [--alias-roots DIRS]
+                     -- PATH [PATH...]
   --comm NAME counts only processes whose /proc/<pid>/comm is NAME, for a
   caller that asks "is a git on this gitdir" rather than "is anything"
   (wt-unlock.sh, dotfiles#1590); a pid with no readable comm never matches.
+  --alias-roots DIR[:DIR...] also matches environ/cmdline against each PATH
+  spelled through a symlink sitting directly in one of those directories
+  (wt-sweep.sh passes its repo roots; hov-stack#661). It only adds holds.
   exit 0  at least one PATH is held (each holder printed unless --quiet)
   exit 1  no PATH is held
   exit 2  cannot answer (unreadable procfs, bad usage) — treat as held
@@ -53,10 +57,48 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+from collections.abc import Sequence
 from typing import NamedTuple, Optional
 
 
 NAME_MAX = 255  # longest single path component Linux allows
+
+
+def alias_spellings(real: str, roots: Sequence[str]) -> list:
+    """`real` as reached through each symlink sitting directly in one of `roots`
+    that points at `real` or an ancestor of it.
+
+    A checkout renamed with a link left at its old name (hov-stack#661) gives a
+    process two ways to be handed a worktree: one started before the rename
+    carries the old spelling, while git lists a worktree added after it under
+    the real one. environ/cmdline match text, so without this the old spelling
+    reads as "not held". wt_session_hold.py applies the same rule to session
+    records; it keeps its own copy because a failed import there would read as
+    "not held". Only absolute roots count, an unreadable root is skipped, and a
+    link to / is ignored: it would spell every path.
+    """
+    out = []
+    for root in roots:
+        if not os.path.isabs(root):
+            continue
+        try:
+            it = os.scandir(root)
+        except OSError:
+            continue
+        with it:
+            for e in it:
+                try:
+                    if not e.is_symlink():
+                        continue
+                    target = os.path.realpath(e.path)
+                except OSError:
+                    continue
+                if target == os.sep or not (real == target or real.startswith(target + os.sep)):
+                    continue
+                s = os.path.normpath(e.path + real[len(target):])
+                if s != real and s not in out:
+                    out.append(s)
+    return out
 
 
 class Holder(NamedTuple):
@@ -130,10 +172,13 @@ class ProcSnapshot:
         """False when the scan saw no processes at all — an answerless scan."""
         return self.pids_scanned > 0
 
-    def holder(self, path: str, comm: Optional[str] = None) -> Optional[Holder]:
+    def holder(self, path: str, comm: Optional[str] = None,
+               alias_roots: Sequence[str] = ()) -> Optional[Holder]:
         """First live holder of `path` (itself or anything under it), or None.
 
         `comm` restricts holders to processes whose comm is that name.
+        `alias_roots` adds the spellings of `path` reached through symlinks
+        sitting directly in those directories (see alias_spellings).
         """
         real = os.path.realpath(path)
         pref = real + os.sep
@@ -141,7 +186,12 @@ class ProcSnapshot:
         # environ/cmdline hold whatever the process was HANDED, so also match
         # the caller's unresolved spelling — absolute only: a relative query
         # would make everything "alive" by matching its short substring anywhere.
-        raw = path if os.path.isabs(path) and path != real else None
+        handed = [real]
+        if os.path.isabs(path) and path != real:
+            handed.append(path)
+        for s in alias_spellings(real, alias_roots):
+            if s not in handed:
+                handed.append(s)
         for tgt, pid in self._fd_targets:
             if comm is not None and self._comm.get(pid) != comm:
                 continue
@@ -156,7 +206,7 @@ class ProcSnapshot:
             for blob, pid in blobs:
                 if comm is not None and self._comm.get(pid) != comm:
                     continue
-                if real in blob or (raw is not None and raw in blob):
+                if any(s in blob for s in handed):
                     return Holder(signal, pid)
         return None
 
@@ -211,8 +261,12 @@ def main(argv=None) -> int:
     ap.add_argument("--procfs", default="/proc", help="procfs root (tests)")
     ap.add_argument("--comm", default=None, metavar="NAME",
                     help="count only processes whose /proc/<pid>/comm is NAME")
+    ap.add_argument("--alias-roots", default="", metavar="DIR[:DIR...]",
+                    help="also match each PATH as spelled through symlinks "
+                         "sitting directly in these directories")
     ap.add_argument("paths", nargs="+", metavar="PATH")
     args = ap.parse_args(argv)
+    roots = [r for r in args.alias_roots.split(":") if r]
 
     snap = ProcSnapshot(procfs=args.procfs)
     if not snap.ok:
@@ -222,7 +276,7 @@ def main(argv=None) -> int:
 
     any_held = False
     for p in args.paths:
-        h = snap.holder(p, comm=args.comm)
+        h = snap.holder(p, comm=args.comm, alias_roots=roots)
         if h:
             any_held = True
             if not args.quiet:

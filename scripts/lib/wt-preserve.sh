@@ -21,11 +21,18 @@ WT_PRESERVE_DIR="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
 # for that long prints `idle: <holder>; last named <N>h ago` and still returns 0,
 # so a caller that does not look for the `idle: ` prefix reads it as held. A check
 # that cannot answer reads as held, like alive(): erring that way only defers a
-# removal.
+# removal. A caller that loaded wt-roots.sh (wt-sweep) passes its repo roots as the
+# helper's alias roots, so a compat link left at a checkout's old name counts as a
+# spelling of every worktree under it (hov-stack#661); WT_ALIAS_ROOTS, when set,
+# wins, and without either the helper uses ~/SITES and ~.
 wt_session_hold() {
-  local out rc
-  out=$(python3 "$WT_PRESERVE_DIR/wt_session_hold.py" --active-min "${ACTIVE_MIN:-120}" \
-    --idle-hours "${3:-0}" --exclude-session "${2:-}" -- "$1"); rc=$?
+  local out rc roots=""
+  if [ -z "${WT_ALIAS_ROOTS+x}" ] && declare -F wt_roots >/dev/null; then
+    roots=$(wt_roots | paste -sd: -)
+  fi
+  out=$(if [ -n "$roots" ]; then export WT_ALIAS_ROOTS="$roots"; fi
+    python3 "$WT_PRESERVE_DIR/wt_session_hold.py" --active-min "${ACTIVE_MIN:-120}" \
+      --idle-hours "${3:-0}" --exclude-session "${2:-}" -- "$1"); rc=$?
   case $rc in
     0) printf '%s' "$out"; return 0 ;;
     1) printf '%s' "$out"; return 1 ;;
