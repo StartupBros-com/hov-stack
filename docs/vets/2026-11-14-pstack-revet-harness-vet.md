@@ -21,8 +21,9 @@ record and is unchanged except for pointers to this block.
   harness-vet 0.3.3 (#606) and was removed in 0.3.4 (#614). Cost from three runs per arm
   cannot pass or fail a change of a few lines, so the cold-run validity rule of
   `warm-cache-batch.md` is a record of batch 4, not a rule for later vets.
-- **Not ruled on:** the deciding run for the PARTIAL contenders (section 3). Its validity
-  rule and its 1.10 cost gate on three runs per arm predate 0.3.4.
+- **The PARTIAL contenders: ruled out, no deciding run.** On the operator's decision
+  (2026-11-15), no contender in section 3 is run, adopted or installed, and the deciding run
+  defined under the verdict table is not planned. The rows stay PARTIAL as the triage record.
 
 ---
 
@@ -515,8 +516,8 @@ holding a run over 18,000 cache-creation tokens is invalid and decides nothing. 
 replaces a9 as the documented override option only if three things hold: it reaches the best
 outcome in more of those 12 runs, every cell is valid, and its median cost is at most 1.10
 times a9's. Adopting either one would still need the deciding run in 4.2. *2026-11-15: the
-4.2 run was ruled out, and this run's validity rule and cost gate predate harness-vet 0.3.4;
-see the update under the header.*
+4.2 run and this one were both ruled out on the operator's decision; see the update under
+the header.*
 
 ### Do-not-retry unless
 
