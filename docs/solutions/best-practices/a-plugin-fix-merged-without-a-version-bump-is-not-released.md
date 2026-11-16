@@ -1,6 +1,7 @@
 ---
 title: "A plugin fix merged without a version bump is merged, not released"
 date: "2026-11-15"
+last_updated: "2026-11-15"
 category: best-practices
 module: plugin-release-delivery
 problem_type: best_practice
@@ -98,9 +99,15 @@ The file list is everything under the plugin that differs since the pin. It incl
 git diff --name-only origin/main...HEAD -- plugins | cut -d/ -f2 | sort -u
 ```
 
-**pro-gate has a second step.** Its README says: "The plugin updates itself through the marketplace; the privileged runtime deliberately does not." After a pro-gate release moves the card, the runtime still needs its own update through `plugins/pro-gate/install.sh` at the new version.
+**pro-gate has a second step.** Its README says: "The plugin updates itself through the marketplace; the privileged runtime deliberately does not. To automate that last step on a box you control:" and then describes an opt-in auto-update. So after a pro-gate release moves the card, how the runtime follows depends on the host.
 
-**Until a report does this, it is a manual step.** #645 asks for a delivered report that covers every card: shipped files on main ahead of each pin, printed as warnings in the weekly report. It should report and not fail a merge, because some differences are deliberate. `.github/workflows/release-pins-refresh.yml` edits a hov-stack plugin file on main and "never bumps plugins/hov-stack/VERSION". When that report exists and covers every card, the manual check above can go and this doc should point at the report.
+- On a host installed with `install.sh --auto-update` (systemd only), an hourly timer moves the runtime to the installed plugin's version. Normally nobody installs anything by hand there; a refused or failed update may need a person. The installer writes that timer under `/etc/systemd/system`, so `systemctl list-timers` lists it and `systemctl --user list-timers` does not.
+- On a host that schedules `pro-gate-autoupdate.sh` itself (cron or launchd, which the installer suggests where it cannot set up the timer), that schedule does the same job.
+- On any other host, someone runs `plugins/pro-gate/install.sh` at the new version.
+
+Find out which kind of host it is before reporting the runtime as waiting on a person. On the 0.65.9 release one host's runtime followed by itself 19 minutes after its plugin copy updated, while the release's author, who had listed user timers only, reported it as waiting on someone to run `install.sh`. Then confirm the result, because the updater can refuse or fail a version and writes the reason to its log: read the runtime's `VERSION` file and `logs/autoupdate.log`, and run `pro-gate-doctor.sh`, which also warns after three failed updates in a row. Until the runtime matches the plugin, `/pro-gate` stops at its version check.
+
+**Checking each card against main is a manual step until a report does it.** #645 asks for a delivered report that covers every card: shipped files on main ahead of each pin, printed as warnings in the weekly report. It should report and not fail a merge, because some differences are deliberate. `.github/workflows/release-pins-refresh.yml` edits a hov-stack plugin file on main and "never bumps plugins/hov-stack/VERSION". When that report exists and covers every card, the manual card check above can go and this doc should point at the report.
 
 ## Why This Matters
 
