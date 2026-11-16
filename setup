@@ -34,6 +34,21 @@
 #                          account's skills, so setup does not run it.
 #                      Claude Code itself, the codex CLI and anything installed some other way
 #                      are not touched.
+#   ./setup --adopt    for a settings.json setup has no record of creating (one seeded before
+#                      setup kept records, or one you merged settings.hov-stack.json into):
+#                      takes the seed nearest the file of those this checkout's git history
+#                      gives (setup's seed at each revision), and prints how ./setup would
+#                      merge the template's changes into the file against it. settings.json is not changed. A shallow checkout (the
+#                      README's git clone --depth 1) is deepened first with
+#                      `git fetch --unshallow`, which uses the network. It leaves the file
+#                      alone, and exits 1, when the file is missing, a symlink or not JSON,
+#                      when sync.sh keeps its own record of it, when this checkout has no
+#                      git history (a zip), or when the file holds less than half of the
+#                      nearest seed's entries. Not with --check or --update (exit 2).
+#   ./setup --adopt --yes
+#                      makes that merge, copying the old file to ~/.hov-stack-backups/
+#                      first, and keeps the record, so every later run merges the template's
+#                      changes into it as into a settings.json setup created (step 3).
 #
 # Each step is reported ok, skipped with the command to run later, or failed:
 #   1. Symlinks the harness into $CLAUDE_CONFIG_DIR (default ~/.claude):
@@ -71,9 +86,10 @@
 #      copies the old file to ~/.hov-stack-backups/settings-apply-<timestamp>-*/ first.
 #      Delete the record and setup leaves that settings.json alone; where sync.sh keeps a
 #      record of its own (.hov-stack/settings-base.json), sync.sh's merge owns the file.
-#      Any other settings.json is left untouched
-#      and the seed is written next to it as settings.hov-stack.json for you to merge,
-#      with one exception: a settings.json that holds just the seed setup writes without
+#      Any other settings.json is left untouched and the seed is written next to it as
+#      settings.hov-stack.json; ./setup --adopt (above) shows how setup would merge into
+#      it, and --adopt --yes does that and keeps the record. One exception to leaving it
+#      untouched: a settings.json that holds just the seed setup writes without
 #      dcg, plus the plugin keys Claude Code adds to it (in any key order), so one an
 #      earlier run seeded and nobody has edited, is moved to ~/.hov-stack-backups/<timestamp>/
 #      once dcg is installed and seeded again with dcg's hook, keeping those plugin keys.
@@ -116,16 +132,19 @@
 #      dir, ~/.hov-stack-backups, ~/.local (dcg and the data commands' links in ~/.local/bin;
 #      with --update also the install records under ~/.local/state/hov-stack and gh, uv,
 #      cass and jsm in ~/.local/bin) and this
-#      checkout (its git state, with --update), apart from reading the overlay. No sudo.
+#      checkout (its git state, with --update, and with --adopt in a shallow checkout),
+#      apart from reading the overlay. No sudo.
 #      Only dcg's download and the claude plugin commands use the network; with --update
-#      also git fetch, the program downloads of install-release.sh and uv.
+#      also git fetch, the program downloads of install-release.sh and uv; with --adopt in
+#      a shallow checkout, git fetch --unshallow.
 #
 # Exit status: 0 when every step is in place or was skipped with its fix printed; 1 when
 # git or node is missing, dcg's verification refused an artifact, a link or the overlay's
 # import could not be made, no seed could be written (an overlay settings.json that is not
 # a JSON object, or gives a setting another kind of value than the template's), the merge
-# into a settings.json setup has a record of creating failed, or --check found a step not
-# in place; 2 for an unknown option, or --update with --check. With
+# into a settings.json setup has a record of creating failed, --adopt left the file alone
+# or its merge failed, or --check found a step not in place; 2 for an unknown option,
+# --update with --check, --adopt with either, or --yes without --adopt. With
 # --update a program whose install-release.sh run fails (download, checksum or its own
 # --version check) also makes it 1; a refused pull, a program left alone and a command that
 # needs the network and could not reach it are rows with their fix, not failures.
@@ -169,6 +188,8 @@ usage() { awk 'NR == 1 { next } /^#/ { sub(/^# ?/, ""); print; next } { exit }' 
 check=0
 no_dcg=0
 update=0
+adopt=0
+yes=0
 # The arguments as given, so --update can run the new setup with the same ones. The id in
 # HOV_STACK_UPDATE_FROM is the checkout --update left; it is read once and removed from the
 # environment so nothing setup runs inherits it.
@@ -181,11 +202,21 @@ for arg in "$@"; do
     --check) check=1 ;;
     --no-dcg) no_dcg=1 ;;
     --update) update=1 ;;
-    *) echo "setup: unknown option $arg (--no-dcg, --check, --update, --help)" >&2; exit 2 ;;
+    --adopt) adopt=1 ;;
+    --yes) yes=1 ;;
+    *) echo "setup: unknown option $arg (--no-dcg, --check, --update, --adopt, --yes, --help)" >&2; exit 2 ;;
   esac
 done
 if [ "$update" = 1 ] && [ "$check" = 1 ]; then
   echo "setup: --update changes things and --check changes nothing; use one of them" >&2
+  exit 2
+fi
+if [ "$adopt" = 1 ] && { [ "$check" = 1 ] || [ "$update" = 1 ]; }; then
+  echo "setup: --adopt runs on its own (with --yes to make the merge): run ./setup --update or ./setup --check separately" >&2
+  exit 2
+fi
+if [ "$yes" = 1 ] && [ "$adopt" = 0 ]; then
+  echo "setup: --yes goes with --adopt: ./setup --adopt shows the merge, ./setup --adopt --yes makes it" >&2
   exit 2
 fi
 
@@ -924,8 +955,10 @@ record_seed_base() {
   rm -f "$tmp"
   return 1
 }
-# hook_dcg <settings file>: the dcg the file's own PreToolUse hook runs, when that command is
-# one absolute path (or $HOME/...) to an executable named dcg; nothing otherwise.
+# hook_dcg <settings file> [any]: the dcg the file's own PreToolUse hook runs, when that command
+# is one absolute path (or $HOME/...) to an executable named dcg; nothing otherwise. With any,
+# the path is given whether or not anything is there now (the seed the file came from was built
+# with it).
 hook_dcg() {
   node -e '
     const fs = require("fs");
@@ -938,11 +971,11 @@ hook_dcg() {
       let c = h.command;
       if (c.startsWith("$HOME/")) c = process.argv[2] + c.slice(5);
       if (!/^\/[^\s"\x27$;|&<>()]*\/dcg$/.test(c)) continue;
-      try { fs.accessSync(c, fs.constants.X_OK); } catch { continue; }
+      if (process.argv[3] !== "any") { try { fs.accessSync(c, fs.constants.X_OK); } catch { continue; } }
       console.log(c);
       process.exit(0);
     }
-  ' "$1" "$HOME"
+  ' "$1" "$HOME" "${2:-}"
 }
 # The dcg path the merge builds today's seed with: the one the file's hook already runs while it
 # is still there, so a caller whose PATH finds another dcg does not rewrite the hook; else
@@ -955,8 +988,9 @@ merge_dcg() {
 same_bytes() {  # same_bytes <a> <b>: 0 when both files hold the same bytes
   node -e 'const fs = require("fs"); process.exit(fs.readFileSync(process.argv[1]).equals(fs.readFileSync(process.argv[2])) ? 0 : 1);' "$1" "$2" 2>/dev/null
 }
-# settings_merge plan|run: merge this checkout's template into $CFG/settings.json (a file
-# settings_mergeable accepts) with lib/settings-apply.js, against setup's record. It builds
+# settings_merge plan|run [base]: merge this checkout's template into $CFG/settings.json (a file
+# settings_mergeable accepts) with lib/settings-apply.js, against setup's record, or against
+# <base> (--adopt's pick, which the engine rewrites in a run as it would the record). It builds
 # today's seed the way a first run would (template, config dir, HOME, overlay, dcg path); the
 # engine adds what the template gained, takes out what it dropped, keeps a value both you and the
 # template changed as yours and names it, never merges the keys a session owns (model,
@@ -967,7 +1001,7 @@ same_bytes() {  # same_bytes <a> <b>: 0 when both files hold the same bytes
 # engine's item lines), merge_dcg_path and merge_changed (1 when a failed run still left the
 # file with other bytes). merge_tmp keeps today's seed for the caller; merge_done removes it.
 settings_merge() {
-  local mode=$1 rc=0 final f
+  local mode=$1 base=${2:-$SEED_BASE} rc=0 final f
   local -a flags=()
   merge_rc=0 merge_n=0 merge_conflicts=0 merge_backup= merge_why= merge_lines= merge_changed=0
   merge_dcg_path=$(merge_dcg)
@@ -975,7 +1009,7 @@ settings_merge() {
     merge_tmp= merge_rc=1 merge_why="could not make a temporary directory"
     return 0
   }
-  for f in "$CFG/settings.json" "$SEED_BASE"; do
+  for f in "$CFG/settings.json" "$base"; do
     if ! merge_why=$(node -e "$JS_OBJECT" "$f"); then
       merge_why="$f is not a JSON object (${merge_why%%$'\n'*})"
       merge_rc=1
@@ -996,7 +1030,7 @@ settings_merge() {
     return 0
   fi
   node "$HOV_STACK/lib/settings-apply.js" --desired "$merge_tmp/seed.json" --live "$CFG/settings.json" \
-    --base "$SEED_BASE" --config-dir "$CFG" --home "$HOME" --backup-root "$SETTINGS_BACKUPS" \
+    --base "$base" --config-dir "$CFG" --home "$HOME" --backup-root "$SETTINGS_BACKUPS" \
     ${flags[@]+"${flags[@]}"} > "$merge_tmp/out" 2> "$merge_tmp/err" || rc=$?
   merge_lines=$(grep -v '^settings: ' "$merge_tmp/out" || :)
   if [ "$rc" -ne 0 ]; then
@@ -1110,6 +1144,210 @@ commands_row() {  # commands_row run|check
 helpers_row() {  # helpers_row run|check
   link_cmds_row helpers "helper command" "$1" "${HELPER_CLIS[@]}"
 }
+
+# --adopt (#650): give a settings.json setup has no record of creating the record it would have
+# had, on its owner's yes, so later runs merge into it. That record is the seed setup most likely
+# wrote: the nearest of those this checkout's history gives. Each
+# revision of this checkout's template is built by that revision's own lib/settings-seed.js for
+# this config dir, HOME and overlay, without dcg and with the dcg the file's hook names; the seed
+# nearest the file, counted in entries (a setting, a list entry, a hook), is taken, the latest on
+# a tie. The file must hold ADOPT_FLOOR percent of that seed's entries. Measured for #650: a
+# seeded file holds 70% or more of its nearest seed's however it was edited, and a settings.json
+# that never came from setup held 1.8%.
+ADOPT_FLOOR=50
+JS_NEAREST='
+const fs = require("fs");
+const atoms = (s) => {
+  const out = new Set();
+  const walk = (v, p) => {
+    if (p === "hooks" && v && typeof v === "object" && !Array.isArray(v)) {
+      for (const [ev, gs] of Object.entries(v)) for (const g of Array.isArray(gs) ? gs : [])
+        for (const h of (g && Array.isArray(g.hooks) ? g.hooks : [])) out.add("hook " + ev + " " + JSON.stringify([(g && g.matcher) || "", h && h.command]));
+      return;
+    }
+    if (Array.isArray(v)) { for (const e of v) out.add(p + " has " + JSON.stringify(e)); return; }
+    if (v && typeof v === "object") { for (const k of Object.keys(v)) walk(v[k], p ? p + "." + k : k); return; }
+    out.add(p + " = " + JSON.stringify(v));
+  };
+  walk(s, "");
+  return out;
+};
+const live = atoms(JSON.parse(fs.readFileSync(process.argv[1], "utf8")));
+let best = null;
+for (const line of fs.readFileSync(process.argv[2], "utf8").split("\n")) {
+  if (!line) continue;
+  const [file, rev, day, kind] = line.split("\t");
+  const seed = atoms(JSON.parse(fs.readFileSync(file, "utf8")));
+  let held = 0, d = 0;
+  for (const x of seed) if (live.has(x)) held++; else d++;
+  for (const x of live) if (!seed.has(x)) d++;
+  // The list is newest first, so only a nearer seed displaces one already taken: the latest wins a tie.
+  if (!best || d < best.d) best = { file, rev, day, kind, d, pct: seed.size ? Math.floor((100 * held) / seed.size) : 0 };
+}
+if (!best) process.exit(1);
+console.log([best.file, best.rev, best.day, best.kind, best.pct].join("\t"));'
+# adopt_candidates <dir> <dcg path or empty>: the seed each revision of this checkout's template
+# gives this config dir, built by that revision's own generator, in <dir>/<n>.json, listed newest
+# first in <dir>/list as "<file>\t<revision>\t<date>\t<nodcg|dcg>". A revision with no generator
+# gives none, and so does one whose generator writes no seed (an overlay it refuses); the first
+# such refusal is kept in <dir>/first.err. 1 when the history cannot be read.
+adopt_candidates() {
+  local dir=$1 dcg=$2 rev day v d n=0
+  : > "$dir/list" || return 1
+  git_in log --format='%H %cs' HEAD -- settings.json lib/settings-seed.js > "$dir/revs" 2> "$dir/log.err" < /dev/null || return 1
+  while read -r rev day; do
+    mkdir -p "$dir/$rev/lib" || return 1
+    git_in show "$rev:settings.json" > "$dir/$rev/settings.json" 2> /dev/null < /dev/null || continue
+    git_in show "$rev:lib/settings-seed.js" > "$dir/$rev/lib/settings-seed.js" 2> /dev/null < /dev/null || continue
+    for v in nodcg dcg; do
+      d=
+      if [ "$v" = dcg ]; then
+        [ -n "$dcg" ] || continue
+        d=$dcg
+      fi
+      n=$((n + 1))
+      if node "$dir/$rev/lib/settings-seed.js" "$dir/$rev/settings.json" "$dir/$n.json" "$CFG" "$HOME" "$d" "$overlay_settings" \
+        > /dev/null 2> "$dir/$n.err" < /dev/null; then
+        printf '%s\t%s\t%s\t%s\n' "$dir/$n.json" "$rev" "$day" "$v" >> "$dir/list" || return 1
+      elif [ ! -e "$dir/first.err" ]; then
+        cp "$dir/$n.err" "$dir/first.err" || :
+      fi
+    done
+  done < "$dir/revs"
+}
+adopt_tmp=
+adopt_why=
+adopt_done() { [ -z "$adopt_tmp" ] || rm -rf "$adopt_tmp"; adopt_tmp=; merge_done; }
+# A run that is killed (a closed pipe, kill) removes them too: they hold copies of settings.json.
+trap adopt_done EXIT
+# adopt_settings: what --adopt does, a plan, or with --yes the merge and the record. It prints its
+# own lines and returns 0 when done (or there was nothing to adopt), 1 when settings.json was left
+# as it was (adopt_why says why), 2 when a merge changed the file and did not finish (said above).
+adopt_settings() {
+  local f=$CFG/settings.json dcg pick out with a_file a_rev a_day a_kind a_pct
+  if [ -L "$f" ]; then adopt_why="it is a symlink, and setup never writes through one"; return 1; fi
+  if [ ! -e "$f" ]; then adopt_why="there is none: ./setup seeds one and keeps its record"; return 1; fi
+  if [ ! -f "$f" ]; then adopt_why="it is not a regular file"; return 1; fi
+  if [ -e "$SYNC_BASE" ] || [ -L "$SYNC_BASE" ]; then
+    adopt_why="sync.sh keeps its own record of it ($(_lf_display "$SYNC_BASE")), and sync.sh's merge owns it"
+    return 1
+  fi
+  if settings_mergeable; then
+    echo "  ./setup already has a record of creating it ($(_lf_display "$SEED_BASE")) and merges the template's changes into it on every run; nothing to adopt"
+    return 0
+  fi
+  if [ -e "$SEED_BASE" ] || [ -L "$SEED_BASE" ]; then adopt_why="$SEED_BASE is there but is not a regular file"; return 1; fi
+  if ! out=$(node -e "$JS_OBJECT" "$f"); then adopt_why="it is not a JSON object (${out%%$'\n'*})"; return 1; fi
+  if [ ! -e "$HOV_STACK/.git" ]; then
+    adopt_why="$HOV_STACK has no git history of its own (it is not a git clone), which --adopt needs to find the seed setup wrote"
+    return 1
+  fi
+  if [ "$(git_in rev-parse --is-shallow-repository 2>/dev/null)" = true ]; then
+    echo "  this checkout is a shallow clone: fetching its history with git fetch --unshallow, to find the seed setup wrote"
+    if ! out=$(GIT_TERMINAL_PROMPT=0 git_in fetch -q --unshallow 2>&1 < /dev/null); then
+      adopt_why="git fetch --unshallow did not finish (${out%%$'\n'*}), and without its history this checkout cannot say which seed setup wrote"
+      return 1
+    fi
+  fi
+  adopt_tmp=$(mktemp -d "${TMPDIR:-/tmp}/hov-stack-adopt.XXXXXX") || {
+    adopt_tmp= adopt_why="could not make a temporary directory"
+    return 1
+  }
+  dcg=$(hook_dcg "$f" any) || dcg=
+  if ! adopt_candidates "$adopt_tmp" "$dcg"; then
+    adopt_why="could not read this checkout's history"
+    if [ -s "$adopt_tmp/log.err" ]; then adopt_why="$adopt_why ($(head -n 1 "$adopt_tmp/log.err"))"; fi
+    return 1
+  fi
+  if [ ! -s "$adopt_tmp/list" ]; then
+    adopt_why="no revision of this checkout's template built a seed"
+    if [ -s "$adopt_tmp/first.err" ]; then adopt_why="$adopt_why ($(head -n 1 "$adopt_tmp/first.err"))"; fi
+    return 1
+  fi
+  if ! pick=$(node -e "$JS_NEAREST" "$f" "$adopt_tmp/list" 2>&1); then
+    adopt_why="could not compare it with the seeds in this checkout's history (${pick%%$'\n'*})"
+    return 1
+  fi
+  IFS=$'\t' read -r a_file a_rev a_day a_kind a_pct <<<"$pick"
+  case $a_pct in ''|*[!0-9]*) adopt_why="could not compare it with the seeds in this checkout's history ($pick)"; return 1 ;; esac
+  if [ "$a_pct" -lt "$ADOPT_FLOOR" ]; then
+    adopt_why="it holds $a_pct% of the entries of the nearest seed in this checkout's history (${a_rev:0:7}, $a_day), less than $ADOPT_FLOOR%, so it does not look like a settings.json setup seeded"
+    return 1
+  fi
+  if [ "$a_kind" = dcg ]; then with="with dcg's hook"; else with="without dcg's hook"; fi
+  echo "  the nearest seed in this checkout's history is the one setup writes from its template at ${a_rev:0:7} ($a_day), $with: settings.json holds $a_pct% of that seed's entries"
+  if ! cp "$a_file" "$adopt_tmp/base.json"; then adopt_why="could not copy that seed"; return 1; fi
+  if [ "$yes" = 0 ]; then
+    settings_merge plan "$adopt_tmp/base.json"
+    case $merge_rc in
+      0) ;;
+      2) adopt_why="lib/settings-seed.js built no seed of today's template to merge ($merge_why)"; return 1 ;;
+      *) adopt_why="could not work out the merge: $merge_why"; return 1 ;;
+    esac
+    if [ "$merge_n" -gt 0 ]; then
+      echo "  ./setup --adopt --yes would merge $merge_n change(s) from this checkout's template into $(_lf_display "$f"):"
+      merge_show
+      echo "  ./setup --adopt --yes makes them, copying the old file to ~/.hov-stack-backups/ first, and keeps the record at $(_lf_display "$SEED_BASE"), so every later run of ./setup merges the template's changes into settings.json"
+    else
+      if [ -n "$merge_lines" ]; then
+        echo "  nothing to merge from this checkout's template; left as they are:"
+        merge_show
+      else
+        echo "  nothing to merge from this checkout's template"
+      fi
+      echo "  ./setup --adopt --yes changes nothing in settings.json and keeps the record at $(_lf_display "$SEED_BASE"), so every later run of ./setup merges the template's changes into it"
+    fi
+    return 0
+  fi
+  settings_merge run "$adopt_tmp/base.json"
+  case $merge_rc in
+    0) ;;
+    2) adopt_why="lib/settings-seed.js built no seed of today's template to merge ($merge_why)"; return 1 ;;
+    *)
+      if [ "$merge_changed" = 0 ]; then adopt_why="could not merge the template's changes into it: $merge_why"; return 1; fi
+      if [ -n "$merge_backup" ]; then
+        echo "  the merge into $f was written but did not finish ($merge_why); the file from before is at $merge_backup"
+      else
+        echo "  could not merge the template's changes into $f: $merge_why"
+      fi
+      return 2
+      ;;
+  esac
+  if [ "$merge_n" -gt 0 ]; then
+    echo "  settings.json: merged $merge_n change(s) from this checkout's template into $(_lf_display "$f"):"
+    merge_show
+    echo "  the settings.json from before is at $merge_backup"
+  elif [ -n "$merge_lines" ]; then
+    echo "  settings.json: nothing to merge from this checkout's template; left as they are:"
+    merge_show
+  else
+    echo "  settings.json: nothing to merge from this checkout's template"
+  fi
+  # The engine rewrote base.json as its record of this merge, as it does the record on a run.
+  if record_seed_base "$adopt_tmp/base.json"; then
+    echo "  kept a record at $(_lf_display "$SEED_BASE"): every later run of ./setup merges the template's changes into settings.json, and leaves it alone once that record is deleted"
+    return 0
+  fi
+  if [ "$merge_n" -eq 0 ]; then
+    adopt_why="could not keep a record at $(_lf_display "$SEED_BASE")"
+    return 1
+  fi
+  echo "  could not keep a record at $(_lf_display "$SEED_BASE"), so later runs of ./setup leave settings.json alone; the merge above stays, and the file from before is at $merge_backup"
+  return 2
+}
+if [ "$adopt" = 1 ]; then
+  if [ "$yes" = 1 ]; then echo "hov-stack: adopting $CFG/settings.json into ./setup's merge"
+  else echo "hov-stack: adopting $CFG/settings.json into ./setup's merge, as a plan (settings.json is not changed)"
+  fi
+  adopt_rc=0
+  adopt_settings || adopt_rc=$?
+  adopt_done
+  case $adopt_rc in
+    0) exit 0 ;;
+    1) echo "hov-stack --adopt: left $CFG/settings.json as it was: $adopt_why"; exit 1 ;;
+    *) echo "hov-stack --adopt: $CFG/settings.json was changed but the adopt did not finish (see above)"; exit 1 ;;
+  esac
+fi
 
 if [ "$check" = 1 ]; then
   echo "hov-stack: checking $HOV_STACK against $CFG (nothing is changed)"
@@ -1293,6 +1531,13 @@ else
   if [ -e "$seed_target" ] || [ -L "$seed_target" ]; then
     seed_target=$CFG/settings.hov-stack.json
     echo "  settings.json already exists and was left alone; the hov-stack seed is at $seed_target"
+    # Only where --adopt would not refuse at once: a regular JSON-object file with neither record,
+    # in a checkout with git history of its own.
+    if [ -f "$CFG/settings.json" ] && [ ! -L "$CFG/settings.json" ] && [ ! -e "$SYNC_BASE" ] && [ ! -L "$SYNC_BASE" ] \
+      && [ ! -e "$SEED_BASE" ] && [ ! -L "$SEED_BASE" ] && [ -e "$HOV_STACK/.git" ] \
+      && node -e "$JS_OBJECT" "$CFG/settings.json" > /dev/null 2>&1; then
+      echo "  ./setup --adopt shows how ./setup would merge the template's changes into it from here on; ./setup --adopt --yes does it"
+    fi
   fi
   if node "$HOV_STACK/lib/settings-seed.js" "$HOV_STACK/settings.json" "$seed_target" "$CFG" "$HOME" "$dcg_path" "$overlay_settings"; then
     seed_ok=1
