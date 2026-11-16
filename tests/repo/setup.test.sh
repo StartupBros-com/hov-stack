@@ -114,6 +114,10 @@ EOF
 printf '#!/bin/sh\necho "minisign stub: no case in this test verifies a signature" >&2\nexit 1\n' > "$WORK/bin/minisign"
 chmod +x "$WORK/bin/curl" "$WORK/bin/minisign"
 curl_calls() { if [ -f "$STUB_LOG/curl" ]; then wc -l < "$STUB_LOG/curl" | tr -d ' '; else echo 0; fi; }
+# forget_base <home>: drop setup's record of the seed it wrote (#650), which leaves the config
+# dir as an install from before setup kept one: setup then leaves settings.json alone, as it
+# always did there. The cases that call it are about such a settings.json.
+forget_base() { rm -f "$1/.claude/.hov-stack/setup-settings-base.json"; }
 
 mkdir -p "$HOME/.claude/projects/-home-someone-app/memory" "$HOME/.claude/memory"
 echo "# My notes" > "$HOME/.claude/projects/-home-someone-app/memory/MEMORY.md"
@@ -451,7 +455,9 @@ done < "$WORK/cmds"
 ok "$n_armed_node of $n_armed hook commands are node hooks; each started node on the armed payload with no missing module or file"
 
 # Second run against a settings.json the user customized: it must survive byte-for-byte,
-# with the seed written beside it, and nothing moved to a backup.
+# with the seed written beside it, and nothing moved to a backup. Setup has no record of
+# creating it (an install from before #650); the recorded case is in the merge section below.
+forget_base "$HOME"
 printf '{\n  "permissions": {"allow": ["Bash(echo theirs)"]},\n  "theirOwnKey": true\n}\n' > "$S"
 theirs_before=$(sha256sum < "$S")
 n_backups=$(ls -d "$HOME"/.hov-stack-backups/*/ | wc -l)
@@ -598,7 +604,9 @@ ok "an archive that fails its checksum exits 1, installs nothing, and the links 
 # dcg installed after a run that seeded settings.json without it (#371). A dcg on PATH stands
 # in for the install; the download stays stubbed, so dcg/install.sh still skips offline.
 # OBSERVED 2026-11-03 on a clean Mac: the rerun put the hook only in settings.hov-stack.json,
-# and --check said settings ok while no hook ran dcg.
+# and --check said settings ok while no hook ran dcg. Every home from here to probe_hook is an
+# install from before setup kept a record of its seed (#650), so each calls forget_base after
+# its first run; the recorded cases are in the merge section below.
 mkdir -p "$WORK/dcg-bin"
 printf '#!/bin/sh\nexit 0\n' > "$WORK/dcg-bin/dcg"
 chmod +x "$WORK/dcg-bin/dcg"
@@ -612,6 +620,7 @@ dcg_hooks() {  # dcg_hooks <settings file>: how many PreToolUse hook commands ru
 }
 HU=$WORK/home-upgrade
 HOME=$HU bash "$ROOT/setup" --no-dcg > "$WORK/run-up1.log" 2>&1 || { cat "$WORK/run-up1.log"; fail "setup --no-dcg before dcg exited non-zero"; }
+forget_base "$HU"
 SU=$HU/.claude/settings.json
 [ "$(dcg_hooks "$SU")" = 0 ] || fail "a run without dcg seeded a dcg hook"
 # What Claude Code did to the seed during that first run's plugin step, as OBSERVED on the
@@ -654,6 +663,7 @@ ok "dcg installed after the first run: --check names the missing hook, and a rer
 # Planted negative: one permission taken out of the seed is an edit, whatever else matches.
 HN=$WORK/home-narrowed
 HOME=$HN bash "$ROOT/setup" --no-dcg > "$WORK/run-nr1.log" 2>&1 || { cat "$WORK/run-nr1.log"; fail "setup --no-dcg before dcg exited non-zero"; }
+forget_base "$HN"
 node -e '
   const fs = require("fs"), s = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
   s.permissions.allow.pop();
@@ -688,6 +698,7 @@ chmod -- 0755 "$WORK/node-fail/node"
 # file, byte for byte, and says so.
 HP=$WORK/home-putback
 HOME=$HP bash "$ROOT/setup" --no-dcg > "$WORK/run-pb1.log" 2>&1 || { cat "$WORK/run-pb1.log"; fail "setup --no-dcg before dcg exited non-zero"; }
+forget_base "$HP"
 claude_writes "$HP/.claude/settings.json"
 pb_before=$(sha256sum < "$HP/.claude/settings.json")
 rc=0; HOME=$HP NODE_FAIL=seed PATH=$WORK/node-fail:$WORK/dcg-bin:$PATH bash "$ROOT/setup" > "$WORK/run-pb2.log" 2>&1 || rc=$?
@@ -702,6 +713,7 @@ ok "an upgrade whose new seed is not written puts the old settings.json back ove
 # backup still holds them.
 HC=$WORK/home-carryfail
 HOME=$HC bash "$ROOT/setup" --no-dcg > "$WORK/run-cf1.log" 2>&1 || { cat "$WORK/run-cf1.log"; fail "setup --no-dcg before dcg exited non-zero"; }
+forget_base "$HC"
 claude_writes "$HC/.claude/settings.json"
 cf_before=$(sha256sum < "$HC/.claude/settings.json")
 rc=0; HOME=$HC NODE_FAIL=carry PATH=$WORK/node-fail:$WORK/dcg-bin:$PATH bash "$ROOT/setup" > "$WORK/run-cf2.log" 2>&1 || rc=$?
@@ -717,6 +729,7 @@ ok "an upgrade that cannot copy Claude Code's plugin keys says so, keeps the hoo
 # settings.hov-stack.json, and both the run and --check say settings.json still lacks it.
 HE=$WORK/home-edited
 HOME=$HE bash "$ROOT/setup" --no-dcg > "$WORK/run-ed1.log" 2>&1 || { cat "$WORK/run-ed1.log"; fail "setup --no-dcg before dcg exited non-zero"; }
+forget_base "$HE"
 SE=$HE/.claude/settings.json
 node -e '
   const fs = require("fs"), s = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
@@ -961,8 +974,9 @@ grep -q -E '^  plugins +ok +.* were already installed$' "$WORK/run-fake2.log" ||
 grep -q -x -F "  hov: auto-update is on, set in $HF/.claude/settings.json" "$WORK/run-fake2.log" \
   || { cat "$WORK/run-fake2.log"; fail "a rerun did not say auto-update is on"; }
 ok "a rerun adds and installs nothing, says the plugins were already installed and auto-update is on, and moves nothing"
-# A settings.json of the user's own: the README promises setup leaves it alone, so auto-update
-# stays as Claude Code left it and setup says /hov-setup asks first.
+# A settings.json of the user's own, which setup has no record of creating: the README promises
+# setup leaves it alone, so auto-update stays as Claude Code left it and setup says /hov-setup
+# asks first. (#650 replaced the line it prints; the recorded case is in the merge section.)
 FKO=$WORK/fake-own
 new_fake "$FKO" 2.1.310
 HOWN=$WORK/home-own
@@ -974,8 +988,9 @@ node -e 'process.exit(JSON.parse(require("fs").readFileSync(process.argv[1], "ut
   || fail "the user's own setting is gone"
 grep -q -x -F "  hov: auto-update is off, Claude Code's default for a marketplace from another publisher" "$WORK/run-own.log" \
   || { cat "$WORK/run-own.log"; fail "setup did not report auto-update off for a settings.json of the user's own"; }
-grep -q -x -F '  setup does not change a settings.json you already have; /hov-setup asks before it does.' "$WORK/run-own.log" \
+grep -q -x -F '  setup has no record of creating this settings.json, so it leaves it alone; /hov-setup asks before turning auto-update on.' "$WORK/run-own.log" \
   || fail "setup did not say /hov-setup asks before turning auto-update on"
+[ ! -e "$HOWN/.claude/.hov-stack/setup-settings-base.json" ] || fail "setup kept a record of a settings.json it did not create"
 ! grep -q -F 'Auto-update for the hov plugins' "$WORK/run-own.log" || fail "the ending claims auto-update is on when it was left off"
 [ ! -e "$HOWN/.hov-stack-backups" ] || fail "a settings.json of the user's own was backed up"
 ok "a settings.json of the user's own gets no autoUpdate key, and setup says /hov-setup asks first"
@@ -1128,6 +1143,10 @@ R=$HO/.claude/rules/hov-stack-overlay.md
 [ -f "$R" ] && [ ! -L "$R" ] || fail "no rules file imports the overlay's CLAUDE.md"
 [ "$(wc -l < "$R" | tr -d ' ')" = 2 ] && [ "$(sed -n 2p "$R")" = "@$OV/CLAUDE.md" ] || { cat "$R"; fail "the rules file is not one header line and one import of $OV/CLAUDE.md"; }
 rule_before=$(ls -l --time-style=+%s.%N "$R" | sha256sum)
+# From here on $HO is an install from before setup kept a record of its seed (#650): its
+# settings.json is left alone and the overlay reaches only the seed beside it. The recorded
+# case, where the overlay is merged into settings.json, is in the merge section below.
+forget_base "$HO"
 HOV_STACK_OVERLAY=$OV fake_setup "$FOV" "$HO" "$WORK/run-ov2.log" --no-dcg || { cat "$WORK/run-ov2.log"; fail "a rerun with an overlay exited non-zero"; }
 [ "$(ls -l --time-style=+%s.%N "$R" | sha256sum)" = "$rule_before" ] || fail "a rerun rewrote the rules file"
 [ ! -e "$HO/.hov-stack-backups" ] || fail "an overlay run on a fresh HOME moved something to a backup"
@@ -1136,9 +1155,9 @@ node -e 'process.exit(JSON.parse(require("fs").readFileSync(process.argv[1], "ut
 ok "CLAUDE.md is imported by rules/hov-stack-overlay.md; a rerun leaves it alone, moves nothing, and merges the overlay into the seed beside settings.json"
 rc=0; HOV_STACK_OVERLAY=$OV fake_setup "$FOV" "$HO" "$WORK/check-ov.log" --check --no-dcg || rc=$?
 [ "$rc" = 0 ] || { cat "$WORK/check-ov.log"; fail "--check with the overlay in place exited $rc"; }
-grep -q -E "^  overlay +ok +$OV: settings\.json merged only into a seed \./setup writes, never an existing settings\.json; CLAUDE\.md imported by rules/hov-stack-overlay\.md; env read before each Bash call$" "$WORK/check-ov.log" \
+grep -q -E "^  overlay +ok +$OV: settings\.json merged only into a seed \./setup writes or a settings\.json it has a record of creating, never any other settings\.json; CLAUDE\.md imported by rules/hov-stack-overlay\.md; env read before each Bash call$" "$WORK/check-ov.log" \
   || { cat "$WORK/check-ov.log"; fail "--check with the overlay in place has no 'overlay ok' row naming its three files"; }
-ok "--check with the overlay in place is green and says the overlay's settings reach only a seed setup writes"
+ok "--check with the overlay in place is green and says the overlay's settings reach only a seed setup writes or a settings.json it has a record of creating"
 # The overlay's CLAUDE.md removed: --check names the dangling import and changes nothing; a
 # rerun takes the import away, and --check is green again.
 rm "$OV/CLAUDE.md"
@@ -1214,6 +1233,9 @@ printf '# Another machine\n' > "$OVY/CLAUDE.md"
 HXY=$WORK/home-overlay-switch
 RXY=$HXY/.claude/rules/hov-stack-overlay.md
 HOV_STACK_OVERLAY=$OV HOME=$HXY bash "$ROOT/setup" --no-dcg > "$WORK/run-ov-switch1.log" 2>&1 || { cat "$WORK/run-ov-switch1.log"; fail "setup for the switched-overlay case exited non-zero"; }
+# No record of the seed (#650), so the switch of overlay reaches the import alone; with one, the
+# rerun would also merge the first overlay's settings out of settings.json, with a backup.
+forget_base "$HXY"
 rule_head=$(sed -n 1p "$RXY")
 rc=0; HOV_STACK_OVERLAY=$OVY HOME=$HXY bash "$ROOT/setup" --check --no-dcg > "$WORK/check-ov-switch.log" 2>&1 || rc=$?
 [ "$rc" = 1 ] || { cat "$WORK/check-ov-switch.log"; fail "--check with an import of another overlay's CLAUDE.md exited $rc, not 1"; }
