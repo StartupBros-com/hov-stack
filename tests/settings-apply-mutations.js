@@ -38,6 +38,8 @@ const cases = [
   ["T6 plugin-dirs manifest","sync.sh",'[ -f "$folder/.claude-plugin/plugin.json" ] || why=','true || why=',"T6 overlay plugin-dirs"],
   ["T6 plugin-dirs colon","sync.sh","*:*) why='it contains a colon","*::::*) why='it contains a colon","T6 overlay plugin-dirs"],
   ["T6 plugin-dirs check exit","sync.sh","sed 's/^/DRIFT: /'; drift=1; }","sed 's/^/DRIFT: /'; }","T6 overlay plugin-dirs"],
+  ["jq asked of a host that skips","sync.sh",'|| { ! command -v jq >/dev/null && { [ "$plan" = 1 ] || [[ "$role" == workstation || "$role" == satellite ]]; }; }; then','|| ! command -v jq >/dev/null; then',"no jq: a host"],
+  ["jq not asked of a plan or an apply","sync.sh",'|| { ! command -v jq >/dev/null && { [ "$plan" = 1 ] || [[ "$role" == workstation || "$role" == satellite ]]; }; }; then','; then',"no jq: plan"],
 ];
 let killed=0;
 for (const [name,file,from,to,pattern,unit,second] of cases) {
