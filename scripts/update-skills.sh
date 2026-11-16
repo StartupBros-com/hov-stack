@@ -7,6 +7,11 @@
 #
 # node/npx are mise-managed, so resolve them robustly (the service has no interactive shell activation).
 set -uo pipefail
+# It takes no arguments. Without this, any argument (an agent's --help) started a real update.
+if [ "$#" -ne 0 ]; then
+  echo 'usage: update-skills.sh   (no arguments; it updates every globally installed skill now)' >&2
+  exit 2
+fi
 export PATH="$HOME/.local/bin:$PATH"
 
 if command -v mise >/dev/null 2>&1; then

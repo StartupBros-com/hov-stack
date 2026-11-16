@@ -5482,6 +5482,18 @@ grep -q -F "8 PR comment(s) posted omit $DF24_OMITTED bytes from 3 finding(s); c
   && ! grep -q -F 'preserved in' "$GH_COMMENTS" && grep -q -F 'END-OF-FINDING' "$TMP/df24-cap-work/q2/deferred-findings.md" && ok \
   || bad 'DF24 capped comments were recorded as preservation, or the complete artifact was not named or kept'
 
+# Run through a symlink in another directory, the way ~/.local/bin/pro-gate-loop reaches it:
+# the loop sources lib/ from beside its real file. --owner-state reaches the first source;
+# the tree that is not a git checkout then stops the loop before it calls anything else.
+mkdir -p "$TMP/linkbin"
+ln -s "$LOOPSH" "$TMP/linkbin/pro-gate-loop"
+OUT=$("$TMP/linkbin/pro-gate-loop" "$TMP/linkbin" 42 "$TMP/link-unused-work" --owner-state "$TMP/link-owner" 2>&1); RC=$?
+case "$OUT" in
+  *'No such file'*) bad "through a symlink the loop could not source its lib/ (exit $RC): $OUT" ;;
+  *'is not a git working tree'*) ok ;;
+  *) bad "through a symlink the loop stopped somewhere unexpected (exit $RC): $OUT" ;;
+esac
+
 echo
 echo "pro-gate-loop: $pass passed, $fail failed"
 [ "$fail" = 0 ]

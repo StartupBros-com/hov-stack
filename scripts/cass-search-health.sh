@@ -54,8 +54,13 @@
 # read as a pass -- that is the same defect class as doctor's false green.
 set -uo pipefail
 
+# lib/ sits beside the real file, so follow any symlink to it (a ~/.local/bin link).
+# readlink is optional: the check runs on a bare PATH, and without readlink it reads lib/
+# beside the path it was called by, as it always did.
+_self=${BASH_SOURCE[0]}
+_real=$(readlink -f -- "$_self" 2>/dev/null) && [ -n "$_real" ] && _self=$_real
 # shellcheck source=lib/group-timeout.sh
-_here=${BASH_SOURCE[0]%/*}; [ "$_here" != "${BASH_SOURCE[0]}" ] || _here=.
+_here=${_self%/*}; [ "$_here" != "$_self" ] || _here=.
 . "$_here/lib/group-timeout.sh"
 
 # WHICH cass. An explicit CASS_HEALTH_BIN wins and is never second-guessed: an
