@@ -19,7 +19,9 @@
 #   other direction does not, which shows the alias scan does that work). Then the
 #   PR-owner predicate, the wrapper passing wt-roots' roots, and one wt-sweep apply
 #   through a real `old -> new` repo link that keeps the held worktree and removes
-#   an unheld one.
+#   an unheld one. Last, the shape the #661 swap leaves (folder renamed, link at the
+#   old name, git records still naming the old spelling): a job recorded under the new
+#   spelling and a process handed the old one both keep their worktrees.
 #
 #   Hermetic: everything under mktemp; a fake Claude home per case. Never touches
 #   the operator's tree, ~/.claude, ~/.cache, remotes or gh.
@@ -203,6 +205,40 @@ OUT=$(unset WT_ALIAS_ROOTS; DRY_RUN=0 ROOT="$E/sites" WT_CLAUDE_HOME="$TMP/h-e" 
 kept "a running job names w1 under the old spelling: kept" "$E/sites/new/.claude/worktrees/w1"
 has "the sweep says why" "$OUT" "job je"
 gone "w2, held by nothing, is removed (the sweep did run)" "$E/sites/new/.claude/worktrees/w2"
+
+echo "wt-sweep — the renamed checkout: git still lists the old spelling (no worktree repair)"
+# The shape the #661 swap leaves: the folder moved to its new name with a link at the old
+# one, and git's worktree records still naming the old spelling. A job started after the
+# move records the new spelling; a process started before it was handed the old one.
+# Running `git worktree repair` here would relist v3 under the new spelling and lose the
+# argv hold, which is why the swap leaves the records alone until the link goes.
+F="$TMP/f"
+{
+  mkdir -p "$F/sites"
+  git init --bare -q -b main "$F/origin.git"
+  git init -q -b main "$F/sites/old"
+  git -C "$F/sites/old" remote add origin "$F/origin.git"
+  printf '.claude/\n' >"$F/sites/old/.gitignore"
+  echo base >"$F/sites/old/base.txt"; git -C "$F/sites/old" add -A; git -C "$F/sites/old" commit -qm base
+  git -C "$F/sites/old" push -q -u origin main
+  for n in v1 v2 v3; do
+    git -C "$F/sites/old" worktree add -q "$F/sites/old/.claude/worktrees/$n" -b "$n" main
+    git -C "$F/sites/old/.claude/worktrees/$n" push -q -u origin "$n"
+  done
+  mv "$F/sites/old" "$F/sites/new"; ln -s new "$F/sites/old"
+} >/dev/null 2>&1
+has "git lists v1 under the old spelling" "$(git -C "$F/sites/new" worktree list --porcelain)" "$F/sites/old/.claude/worktrees/v1"
+home f; job f running "$F/sites/new/.claude/worktrees/v1"
+(cd "$TMP" && exec python3 -c 'import time; time.sleep(300)' "$F/sites/old/.claude/worktrees/v3") & HOLDER=$!
+sleep 1
+OUT=$(unset WT_ALIAS_ROOTS; DRY_RUN=0 ROOT="$F/sites" WT_CLAUDE_HOME="$TMP/h-f" WT_HOLD_CACHE_DIR="$TMP/cache" \
+  WT_DONE_BIN="$TMP/no-wt-done" REPO_ROUTE_RESOLVER="$TMP/scan-ok.py" WT_SWEEP_ALLOW_TMP=1 ACTIVE_MIN=0 PUSH=0 \
+  IDLE_RELEASE_HOURS=24 WT_SWEEP_LIB="$LIB" bash "$SCRIPT" 2>&1)
+kill "$HOLDER" 2>/dev/null; wait "$HOLDER" 2>/dev/null
+kept "a running job names v1 under the new spelling: kept" "$F/sites/new/.claude/worktrees/v1"
+has "the sweep says why" "$OUT" "job jf"
+kept "a process handed v3's old spelling in its argv: kept" "$F/sites/new/.claude/worktrees/v3"
+gone "v2, held by nothing, is removed (the sweep did run)" "$F/sites/new/.claude/worktrees/v2"
 
 echo
 echo "wt-session-hold-aliases: $pass passed, $fail failed"
