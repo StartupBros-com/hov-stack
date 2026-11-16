@@ -37,7 +37,8 @@ HELPER="$LIB/wt_session_hold.py"
 [ -f "$HELPER" ] || { echo "FAIL: cannot find $HELPER"; exit 1; }
 
 # The physical path: realpath must not differ from the spelling the test builds.
-TMP="$(cd "$(mktemp -d)" && pwd -P)" || exit 1
+TMP=$(mktemp -d) || exit 1
+TMP=$(cd "$TMP" && pwd -P) || exit 1
 trap 'rm -rf "$TMP"' EXIT
 export PYTHONDONTWRITEBYTECODE=1
 export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@example.invalid
