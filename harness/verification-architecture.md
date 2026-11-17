@@ -52,8 +52,8 @@ self-evaluation-bias finding: 34% of their features were validator-triggered
 fixes). For PR-sized work, a fresh-context subagent checks the diff against
 the DoD before the PR is marked ready; below that (typo-class diffs), the PR
 template's pre-completion checklist alone is enough. CI, plus the one
-`/pro-gate` review on billing, auth, migration or CI diffs (merge-and-end in
-`CLAUDE.md`), judges code quality; the DoD check judges "did it do
+gated `/pro-gate` review (merge-and-end in `CLAUDE.md`; its trigger is in
+`plugins/hov-stack/skills/hov-setup/instructions/pro-gate.md`), judges code quality; the DoD check judges "did it do
 what it said"; different questions, don't stack tiers.
 
 ## Workflow/background runs

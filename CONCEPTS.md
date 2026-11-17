@@ -231,7 +231,7 @@ The vocabulary for finishing a PR after its author stops. Settled by the 2026-10
 The rule that the session which authored a PR also finishes it: it opens the PR ready for review, waits for CI, merges once the checks are green, and ends by reporting the merge commit, or leaves the PR open with the reason when CI stays red or the merge is refused.
 *Replaced:* Owned PR, Parked PR
 
-Only a diff touching billing, auth, migrations or CI gets a terminal review, one round, whose P0 and P1 findings are fixed before the merge; every other diff merges on CI alone. A red check the diff did not cause gets one retrigger before it counts as blocking: a merge of main into the branch when main has moved, since a rerun replays the branch's own workflow, else a failed-only rerun. Nothing runs after the session ends, so a PR left open is ordinary work for the next session.
+Only a diff touching billing, auth, migrations or CI, or code that moves real money or paid credits or deletes or overwrites user or operator data (widened on 2026-11-17), gets a terminal review, one round, whose P0 and P1 findings are fixed before the merge; every other diff merges on CI alone. A red check the diff did not cause gets one retrigger before it counts as blocking: a merge of main into the branch when main has moved, since a rerun replays the branch's own workflow, else a failed-only rerun. Nothing runs after the session ends, so a PR left open is ordinary work for the next session.
 
 ### Owned PR
 
@@ -263,7 +263,7 @@ The vocabulary for the always-on work dispatcher. Settled by the 2026-08-21 Alwa
 
 ### Disposition
 
-The merge-or-close act on an autonomous PR by an actor other than the run that produced it — the keep-rate's only input. Until 2026-10-06 that actor was the operator. Since the operator's ruling that day (#1652), an unfenced agent session dispositions `loop-run` PRs, merging under merge-and-end (after CI, with one `/pro-gate` review only on billing, auth, migration or CI diffs); the producing run stays fenced from ready and merge (`CLAUDE_LOOP_GUARD=1`). Merging marks the run `kept`; closing unmerged marks it `waste`. Closing a bad autonomous PR is therefore a metric act that teaches the system what not to attempt, not cleanup.
+The merge-or-close act on an autonomous PR by an actor other than the run that produced it — the keep-rate's only input. Until 2026-10-06 that actor was the operator. Since the operator's ruling that day (#1652), an unfenced agent session dispositions `loop-run` PRs, merging under merge-and-end (after CI, with one `/pro-gate` review only on the diffs the Merge-and-end entry names); the producing run stays fenced from ready and merge (`CLAUDE_LOOP_GUARD=1`). Merging marks the run `kept`; closing unmerged marks it `waste`. Closing a bad autonomous PR is therefore a metric act that teaches the system what not to attempt, not cleanup.
 
 ### Keep-rate
 

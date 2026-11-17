@@ -321,8 +321,9 @@ Disposition of a `loop-run` PR (merge or close) is the keep-rate's only input
 mechanics. Since 2026-10-06 (#1652) these PRs are agent work, never queued
 for the operator. Since the owner fleet and dispatcher retired on 2026-10-17
 (dotfiles#1873) nothing finishes them unattended: a session finishes one
-in-session under merge-and-end (`CLAUDE.md`), merging after CI with one
-`/pro-gate` review only on billing, auth, migration or CI diffs, or closes it.
+in-session under merge-and-end (`CLAUDE.md`), merging after CI with the one gated
+`/pro-gate` review (its trigger is in `plugins/hov-stack/skills/hov-setup/instructions/pro-gate.md`),
+or closes it.
 Pick one up only after its run has ended: the branch is
 `loop/<run_id>`, and the ledger (`~/.claude/logs/dispatcher-ledger.jsonl`
 unless `DISPATCHER_LEDGER_FILE` is set) holds an `"event":"ended"` row for

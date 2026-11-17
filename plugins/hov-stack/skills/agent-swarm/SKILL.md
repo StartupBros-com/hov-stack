@@ -164,8 +164,8 @@ Full mechanism: `harness/gh-tracking-and-claims.md`.
 
 ## Verification ladder (compose, don't stack)
 
-Follow merge-and-end in CLAUDE.md: CI, then one `/pro-gate` review only when the diff touches billing,
-auth, migrations or CI. `/review-adversarial-first` and `/ce-code-review` run only when the operator names
+Follow merge-and-end in CLAUDE.md: CI, then one `/pro-gate` review only when the diff matches its trigger (billing,
+auth, migrations, CI, money movement or data overwrite; `plugins/hov-stack/skills/hov-setup/instructions/pro-gate.md`). `/review-adversarial-first` and `/ce-code-review` run only when the operator names
 them. `/codex-consult` is an optional cross-model second opinion and bundled
 `/code-review` a worker's in-progress bug check on its own diff; neither is a tier. For findings, prefer *diverse-lens*
 verification (correctness / security / does-it-reproduce) over N identical refuters.
