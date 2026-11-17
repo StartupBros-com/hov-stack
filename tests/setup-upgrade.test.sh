@@ -82,7 +82,7 @@ done < <(git -C "$ROOT" log --reverse --format=%H HEAD -- settings.json lib/sett
 # Main's tip is a seed already when its own commit changed the template (#707 did), and in a
 # merge-queue run HEAD sits on top of it: a second copy would clone into the first one's directory.
 if main_tip=$(git -C "$ROOT" rev-parse -q --verify origin/main 2>/dev/null) && [ "$(git -C "$ROOT" rev-parse HEAD)" != "$main_tip" ] \
-  && ! printf '%s\n' "${seeds[@]}" | grep -qxF "$main_tip"; then
+  && [[ " ${seeds[*]} " != *" $main_tip "* ]]; then
   seeds+=("$main_tip")
 fi
 echo "# ${#seeds[@]} seeds: $(for s in "${seeds[@]}"; do printf '%s ' "${s:0:7}"; done)"
