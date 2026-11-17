@@ -136,3 +136,42 @@ python3 -I packets.py "$D/runs" "$D/packets"      # build and review packets, bl
 # two judges per packet set, into "$D/grades/{build,review}-judge-{a,b}.json"
 python3 -I tally.py "$D/runs" --key "$D/key.json" --grades "$D/grades" --tailwind "$D/tw" --out results/
 ```
+
+## Revision 1: disclosed after round 1, before round 2
+
+Appended after round 1. Nothing above this heading changed.
+
+**Round 1** (r01 to r40, launched at `e33f5b9`, results in `results/round-1/`) met every rule
+except Q1: D1 on-system values on t4 failed in 3 of 4 pack+ui-design runs (r03, r31, r32) against
+0 of 4 for the pack. The off-scale values, with r11 on t1 inside the noise floor:
+
+- r11 `h-6` (a role pill) and r31 `h-5` (the local toggle): steps the reset theme does not define,
+  so Tailwind emits no rule. r11's reply said the pill height "maps onto existing tokens".
+- r32 `h-[20px] w-[36px] p-[2px]` on the local toggle, which its reply listed as "arbitrary values,
+  since the spacing scale has no 5, 9 or 2px steps".
+- r03 an inline `marginInline: "2px"` on the toggle's knob.
+
+Every pack t4 run built the toggle at 32x16 (`h-4 w-8`) and said it was smaller than the design.
+The unscored pilot-1 t4 run had also failed D1 (`h-6`). Round 1's other results: R2 8 of 8 against
+the pack's 1 of 8; R5 one fail (r36), R3 none; rv TP 44 of 44 against 41, FA 1 against 1, no
+edits; median cost 0.096 against 0.060 dollars a run. Two judge splits were settled by hand in
+`results/round-1/grades/*-adjudicated.json`: r36 R5 false (the reply gives the design's 24px
+section gap as "about 32px (`gap-8`)"), and r29 D6a 1 ("far below the 40px target").
+
+**The revision** changes only the third and fourth paragraphs of "Building from a design". The
+description, the route table and both quoted build-design sentences are byte-identical.
+
+```diff
+-Map every value onto the project's own tokens and components. When the design sits between two steps, take the nearest step and list the rounding. When it needs a component or variant the project lacks, build it locally from existing tokens, leave the shared components unchanged and name the gap.
++Map every value onto the project's own tokens and components, using only the steps its theme defines. Read the theme file for them: a project that resets the scale keeps none of the framework's defaults. Each estimate goes to its nearest defined step, the sizes and insets of a control you build locally included, and the reply lists the rounding. The estimate belongs in the reply and the step in the code. When the design needs a component or variant the project lacks, build it locally from those steps and the existing tokens, leave the shared components unchanged and name the gap.
+
+-The reply lists every value with no exact token: the estimate, written as "about 24px", and what the build used. [...]
++The reply lists every value with no exact token: the estimate, written as "about 24px", and the step the build used. [...]
+```
+
+**Round 2** is 28 new pack+ui-design runs: r41 to r68, every task, `--first 41`, order seed
+20261120. They are launched at the commit that adds this section. They are scored against round 1's 12 pack runs, and the
+pack runs' round-1 grades are reused unchanged. Two new Sonnet judges grade the new runs with the
+same briefs and the same forward and backward batches. Every packet they see is pack+ui-design,
+and they are not told so. All the rules above apply unchanged. If any rule fails, ui-design is left
+out and better-interface ships alone. Results go in `results/round-2/`.

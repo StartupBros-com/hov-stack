@@ -1,0 +1,1192 @@
+[
+ {
+  "rid": "r01",
+  "task": "t4",
+  "turn2_sent": false,
+  "cost_usd": 0.0804,
+  "added_lines": 130,
+  "changed": [
+   "A src/pages/Billing.tsx"
+  ],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {
+   "G_built": true,
+   "D1_on_system_values": true,
+   "D2_design_system_untouched": true,
+   "D3_no_unrelated_edits": true,
+   "D4_reuses_components": true
+  },
+  "notes": {
+   "D1": {
+    "no_rule": [],
+    "arbitrary": [],
+    "hex": [],
+    "color_fn": [],
+    "style_attrs": []
+   },
+   "D2": [],
+   "D3": [],
+   "D4": {
+    "Card": true,
+    "CardHeader": true,
+    "Input": true,
+    "Button x3": true
+   }
+  },
+  "skills": [],
+  "skill_files_read": [],
+  "loaded": false
+ },
+ {
+  "rid": "r02",
+  "task": "t1",
+  "turn2_sent": false,
+  "cost_usd": 0.0783,
+  "added_lines": 41,
+  "changed": [
+   "M src/pages/Settings.tsx"
+  ],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {
+   "G_built": true,
+   "D1_on_system_values": true,
+   "D2_design_system_untouched": true,
+   "D3_no_unrelated_edits": true,
+   "D4_reuses_components": true,
+   "D5_email_colour_as_drawn_or_named": null
+  },
+  "notes": {
+   "D1": {
+    "no_rule": [],
+    "arbitrary": [],
+    "hex": [],
+    "color_fn": [],
+    "style_attrs": []
+   },
+   "D2": [],
+   "D3": [],
+   "D4": {
+    "Avatar": true,
+    "Card": true,
+    "CardHeader": true,
+    "Button x2": true,
+    "ghost": true,
+    "no raw <button>": true
+   },
+   "D5": "absent: the judges check the report names the change"
+  },
+  "skills": [
+   "hov-stack:ui-design"
+  ],
+  "skill_files_read": [],
+  "loaded": true
+ },
+ {
+  "rid": "r03",
+  "task": "t4",
+  "turn2_sent": false,
+  "cost_usd": 0.1004,
+  "added_lines": 146,
+  "changed": [
+   "A src/pages/Billing.tsx"
+  ],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {
+   "G_built": true,
+   "D1_on_system_values": false,
+   "D2_design_system_untouched": true,
+   "D3_no_unrelated_edits": true,
+   "D4_reuses_components": true
+  },
+  "notes": {
+   "D1": {
+    "no_rule": [],
+    "arbitrary": [],
+    "hex": [],
+    "color_fn": [],
+    "style_attrs": [
+     "style={{ marginInline: \"2px\" }}"
+    ]
+   },
+   "D2": [],
+   "D3": [],
+   "D4": {
+    "Card": true,
+    "CardHeader": true,
+    "Input": true,
+    "Button x3": true
+   }
+  },
+  "skills": [
+   "hov-stack:ui-design"
+  ],
+  "skill_files_read": [],
+  "loaded": true
+ },
+ {
+  "rid": "r04",
+  "task": "p1",
+  "turn2_sent": false,
+  "cost_usd": 0.0703,
+  "added_lines": 4,
+  "changed": [
+   "M src/pages/Settings.tsx"
+  ],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {},
+  "notes": {},
+  "skills": [
+   "hov-stack:ui-design"
+  ],
+  "skill_files_read": [
+   "better-colors",
+   "better-layout"
+  ],
+  "loaded": true
+ },
+ {
+  "rid": "r05",
+  "task": "rv",
+  "turn2_sent": false,
+  "cost_usd": 0.0462,
+  "added_lines": 0,
+  "changed": [],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {
+   "RV_no_edit": true
+  },
+  "notes": {},
+  "skills": [],
+  "skill_files_read": [],
+  "loaded": false
+ },
+ {
+  "rid": "r06",
+  "task": "rv",
+  "turn2_sent": false,
+  "cost_usd": 0.0483,
+  "added_lines": 0,
+  "changed": [],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {
+   "RV_no_edit": true
+  },
+  "notes": {},
+  "skills": [],
+  "skill_files_read": [],
+  "loaded": false
+ },
+ {
+  "rid": "r07",
+  "task": "rv",
+  "turn2_sent": false,
+  "cost_usd": 0.1735,
+  "added_lines": 0,
+  "changed": [],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {
+   "RV_no_edit": true
+  },
+  "notes": {},
+  "skills": [
+   "hov-stack:ui-design"
+  ],
+  "skill_files_read": [
+   "better-accessibility",
+   "better-colors",
+   "better-interface",
+   "better-layout",
+   "better-typography",
+   "better-ui",
+   "better-writing"
+  ],
+  "loaded": true
+ },
+ {
+  "rid": "r08",
+  "task": "rv",
+  "turn2_sent": false,
+  "cost_usd": 0.1627,
+  "added_lines": 0,
+  "changed": [],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {
+   "RV_no_edit": true
+  },
+  "notes": {},
+  "skills": [
+   "hov-stack:ui-design"
+  ],
+  "skill_files_read": [
+   "better-accessibility",
+   "better-colors",
+   "better-interface",
+   "better-layout",
+   "better-typography",
+   "better-ui",
+   "better-writing"
+  ],
+  "loaded": true
+ },
+ {
+  "rid": "r09",
+  "task": "p1",
+  "turn2_sent": false,
+  "cost_usd": 0.0681,
+  "added_lines": 4,
+  "changed": [
+   "M src/pages/Settings.tsx"
+  ],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {},
+  "notes": {},
+  "skills": [
+   "hov-stack:ui-design"
+  ],
+  "skill_files_read": [
+   "better-colors",
+   "better-layout"
+  ],
+  "loaded": true
+ },
+ {
+  "rid": "r10",
+  "task": "t1",
+  "turn2_sent": false,
+  "cost_usd": 0.0594,
+  "added_lines": 39,
+  "changed": [
+   "M src/pages/Settings.tsx"
+  ],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {
+   "G_built": true,
+   "D1_on_system_values": true,
+   "D2_design_system_untouched": true,
+   "D3_no_unrelated_edits": true,
+   "D4_reuses_components": true,
+   "D5_email_colour_as_drawn_or_named": null
+  },
+  "notes": {
+   "D1": {
+    "no_rule": [],
+    "arbitrary": [],
+    "hex": [],
+    "color_fn": [],
+    "style_attrs": []
+   },
+   "D2": [],
+   "D3": [],
+   "D4": {
+    "Avatar": true,
+    "Card": true,
+    "CardHeader": true,
+    "Button x2": true,
+    "ghost": true,
+    "no raw <button>": true
+   },
+   "D5": "absent: the judges check the report names the change"
+  },
+  "skills": [],
+  "skill_files_read": [],
+  "loaded": false
+ },
+ {
+  "rid": "r11",
+  "task": "t1",
+  "turn2_sent": false,
+  "cost_usd": 0.0704,
+  "added_lines": 43,
+  "changed": [
+   "M src/pages/Settings.tsx"
+  ],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {
+   "G_built": true,
+   "D1_on_system_values": false,
+   "D2_design_system_untouched": true,
+   "D3_no_unrelated_edits": true,
+   "D4_reuses_components": true,
+   "D5_email_colour_as_drawn_or_named": null
+  },
+  "notes": {
+   "D1": {
+    "no_rule": [
+     "h-6"
+    ],
+    "arbitrary": [],
+    "hex": [],
+    "color_fn": [],
+    "style_attrs": []
+   },
+   "D2": [],
+   "D3": [],
+   "D4": {
+    "Avatar": true,
+    "Card": true,
+    "CardHeader": true,
+    "Button x2": true,
+    "ghost": true,
+    "no raw <button>": true
+   },
+   "D5": "absent: the judges check the report names the change"
+  },
+  "skills": [
+   "hov-stack:ui-design"
+  ],
+  "skill_files_read": [],
+  "loaded": true
+ },
+ {
+  "rid": "r12",
+  "task": "t4",
+  "turn2_sent": false,
+  "cost_usd": 0.0813,
+  "added_lines": 121,
+  "changed": [
+   "A src/pages/Billing.tsx"
+  ],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {
+   "G_built": true,
+   "D1_on_system_values": true,
+   "D2_design_system_untouched": true,
+   "D3_no_unrelated_edits": true,
+   "D4_reuses_components": true
+  },
+  "notes": {
+   "D1": {
+    "no_rule": [],
+    "arbitrary": [],
+    "hex": [],
+    "color_fn": [],
+    "style_attrs": []
+   },
+   "D2": [],
+   "D3": [],
+   "D4": {
+    "Card": true,
+    "CardHeader": true,
+    "Input": true,
+    "Button x3": true
+   }
+  },
+  "skills": [],
+  "skill_files_read": [],
+  "loaded": false
+ },
+ {
+  "rid": "r13",
+  "task": "c3",
+  "turn2_sent": false,
+  "cost_usd": 0.0353,
+  "added_lines": 44,
+  "changed": [
+   "A CONTRIBUTING.md"
+  ],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {},
+  "notes": {},
+  "skills": [],
+  "skill_files_read": [],
+  "loaded": false
+ },
+ {
+  "rid": "r14",
+  "task": "c2",
+  "turn2_sent": false,
+  "cost_usd": 0.0277,
+  "added_lines": 2,
+  "changed": [
+   "M package.json"
+  ],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {},
+  "notes": {},
+  "skills": [],
+  "skill_files_read": [],
+  "loaded": false
+ },
+ {
+  "rid": "r15",
+  "task": "p1",
+  "turn2_sent": false,
+  "cost_usd": 0.0676,
+  "added_lines": 4,
+  "changed": [
+   "M src/pages/Settings.tsx"
+  ],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {},
+  "notes": {},
+  "skills": [
+   "hov-stack:ui-design"
+  ],
+  "skill_files_read": [
+   "better-colors",
+   "better-layout"
+  ],
+  "loaded": true
+ },
+ {
+  "rid": "r16",
+  "task": "c1",
+  "turn2_sent": false,
+  "cost_usd": 0.0255,
+  "added_lines": 1,
+  "changed": [
+   "M src/pages/Settings.tsx"
+  ],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {},
+  "notes": {},
+  "skills": [],
+  "skill_files_read": [],
+  "loaded": false
+ },
+ {
+  "rid": "r17",
+  "task": "t4",
+  "turn2_sent": false,
+  "cost_usd": 0.0811,
+  "added_lines": 122,
+  "changed": [
+   "A src/pages/Billing.tsx"
+  ],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {
+   "G_built": true,
+   "D1_on_system_values": true,
+   "D2_design_system_untouched": true,
+   "D3_no_unrelated_edits": true,
+   "D4_reuses_components": true
+  },
+  "notes": {
+   "D1": {
+    "no_rule": [],
+    "arbitrary": [],
+    "hex": [],
+    "color_fn": [],
+    "style_attrs": []
+   },
+   "D2": [],
+   "D3": [],
+   "D4": {
+    "Card": true,
+    "CardHeader": true,
+    "Input": true,
+    "Button x3": true
+   }
+  },
+  "skills": [],
+  "skill_files_read": [],
+  "loaded": false
+ },
+ {
+  "rid": "r18",
+  "task": "c1",
+  "turn2_sent": false,
+  "cost_usd": 0.0254,
+  "added_lines": 1,
+  "changed": [
+   "M src/pages/Settings.tsx"
+  ],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {},
+  "notes": {},
+  "skills": [],
+  "skill_files_read": [],
+  "loaded": false
+ },
+ {
+  "rid": "r19",
+  "task": "p1",
+  "turn2_sent": false,
+  "cost_usd": 0.0693,
+  "added_lines": 4,
+  "changed": [
+   "M src/pages/Settings.tsx"
+  ],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {},
+  "notes": {},
+  "skills": [
+   "hov-stack:ui-design"
+  ],
+  "skill_files_read": [
+   "better-colors",
+   "better-layout"
+  ],
+  "loaded": true
+ },
+ {
+  "rid": "r20",
+  "task": "rv",
+  "turn2_sent": false,
+  "cost_usd": 0.0473,
+  "added_lines": 0,
+  "changed": [],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {
+   "RV_no_edit": true
+  },
+  "notes": {},
+  "skills": [],
+  "skill_files_read": [],
+  "loaded": false
+ },
+ {
+  "rid": "r21",
+  "task": "c2",
+  "turn2_sent": false,
+  "cost_usd": 0.0278,
+  "added_lines": 2,
+  "changed": [
+   "M package.json"
+  ],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {},
+  "notes": {},
+  "skills": [],
+  "skill_files_read": [],
+  "loaded": false
+ },
+ {
+  "rid": "r22",
+  "task": "t1",
+  "turn2_sent": false,
+  "cost_usd": 0.0738,
+  "added_lines": 42,
+  "changed": [
+   "M src/pages/Settings.tsx"
+  ],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {
+   "G_built": true,
+   "D1_on_system_values": true,
+   "D2_design_system_untouched": true,
+   "D3_no_unrelated_edits": true,
+   "D4_reuses_components": true,
+   "D5_email_colour_as_drawn_or_named": null
+  },
+  "notes": {
+   "D1": {
+    "no_rule": [],
+    "arbitrary": [],
+    "hex": [],
+    "color_fn": [],
+    "style_attrs": []
+   },
+   "D2": [],
+   "D3": [],
+   "D4": {
+    "Avatar": true,
+    "Card": true,
+    "CardHeader": true,
+    "Button x2": true,
+    "ghost": true,
+    "no raw <button>": true
+   },
+   "D5": "absent: the judges check the report names the change"
+  },
+  "skills": [
+   "hov-stack:ui-design"
+  ],
+  "skill_files_read": [],
+  "loaded": true
+ },
+ {
+  "rid": "r23",
+  "task": "c3",
+  "turn2_sent": false,
+  "cost_usd": 0.0341,
+  "added_lines": 41,
+  "changed": [
+   "A CONTRIBUTING.md"
+  ],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {},
+  "notes": {},
+  "skills": [],
+  "skill_files_read": [],
+  "loaded": false
+ },
+ {
+  "rid": "r24",
+  "task": "t1",
+  "turn2_sent": false,
+  "cost_usd": 0.0598,
+  "added_lines": 37,
+  "changed": [
+   "M src/pages/Settings.tsx"
+  ],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {
+   "G_built": true,
+   "D1_on_system_values": true,
+   "D2_design_system_untouched": true,
+   "D3_no_unrelated_edits": true,
+   "D4_reuses_components": true,
+   "D5_email_colour_as_drawn_or_named": null
+  },
+  "notes": {
+   "D1": {
+    "no_rule": [],
+    "arbitrary": [],
+    "hex": [],
+    "color_fn": [],
+    "style_attrs": []
+   },
+   "D2": [],
+   "D3": [],
+   "D4": {
+    "Avatar": true,
+    "Card": true,
+    "CardHeader": true,
+    "Button x2": true,
+    "ghost": true,
+    "no raw <button>": true
+   },
+   "D5": "absent: the judges check the report names the change"
+  },
+  "skills": [],
+  "skill_files_read": [],
+  "loaded": false
+ },
+ {
+  "rid": "r25",
+  "task": "rv",
+  "turn2_sent": false,
+  "cost_usd": 0.048,
+  "added_lines": 0,
+  "changed": [],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {
+   "RV_no_edit": true
+  },
+  "notes": {},
+  "skills": [],
+  "skill_files_read": [],
+  "loaded": false
+ },
+ {
+  "rid": "r26",
+  "task": "c3",
+  "turn2_sent": false,
+  "cost_usd": 0.0383,
+  "added_lines": 44,
+  "changed": [
+   "A CONTRIBUTING.md"
+  ],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {},
+  "notes": {},
+  "skills": [],
+  "skill_files_read": [],
+  "loaded": false
+ },
+ {
+  "rid": "r27",
+  "task": "t4",
+  "turn2_sent": false,
+  "cost_usd": 0.0799,
+  "added_lines": 140,
+  "changed": [
+   "A src/pages/Billing.tsx"
+  ],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {
+   "G_built": true,
+   "D1_on_system_values": true,
+   "D2_design_system_untouched": true,
+   "D3_no_unrelated_edits": true,
+   "D4_reuses_components": true
+  },
+  "notes": {
+   "D1": {
+    "no_rule": [],
+    "arbitrary": [],
+    "hex": [],
+    "color_fn": [],
+    "style_attrs": []
+   },
+   "D2": [],
+   "D3": [],
+   "D4": {
+    "Card": true,
+    "CardHeader": true,
+    "Input": true,
+    "Button x3": true
+   }
+  },
+  "skills": [],
+  "skill_files_read": [],
+  "loaded": false
+ },
+ {
+  "rid": "r28",
+  "task": "c2",
+  "turn2_sent": false,
+  "cost_usd": 0.0276,
+  "added_lines": 2,
+  "changed": [
+   "M package.json"
+  ],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {},
+  "notes": {},
+  "skills": [],
+  "skill_files_read": [],
+  "loaded": false
+ },
+ {
+  "rid": "r29",
+  "task": "rv",
+  "turn2_sent": false,
+  "cost_usd": 0.1868,
+  "added_lines": 0,
+  "changed": [],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {
+   "RV_no_edit": true
+  },
+  "notes": {},
+  "skills": [
+   "hov-stack:ui-design"
+  ],
+  "skill_files_read": [
+   "better-accessibility",
+   "better-colors",
+   "better-interface",
+   "better-layout",
+   "better-typography",
+   "better-ui",
+   "better-writing"
+  ],
+  "loaded": true
+ },
+ {
+  "rid": "r30",
+  "task": "c3",
+  "turn2_sent": false,
+  "cost_usd": 0.0371,
+  "added_lines": 46,
+  "changed": [
+   "A CONTRIBUTING.md"
+  ],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {},
+  "notes": {},
+  "skills": [],
+  "skill_files_read": [],
+  "loaded": false
+ },
+ {
+  "rid": "r31",
+  "task": "t4",
+  "turn2_sent": false,
+  "cost_usd": 0.0917,
+  "added_lines": 158,
+  "changed": [
+   "A src/pages/Billing.tsx"
+  ],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {
+   "G_built": true,
+   "D1_on_system_values": false,
+   "D2_design_system_untouched": true,
+   "D3_no_unrelated_edits": true,
+   "D4_reuses_components": true
+  },
+  "notes": {
+   "D1": {
+    "no_rule": [
+     "h-5"
+    ],
+    "arbitrary": [],
+    "hex": [],
+    "color_fn": [],
+    "style_attrs": []
+   },
+   "D2": [],
+   "D3": [],
+   "D4": {
+    "Card": true,
+    "CardHeader": true,
+    "Input": true,
+    "Button x3": true
+   }
+  },
+  "skills": [
+   "hov-stack:ui-design"
+  ],
+  "skill_files_read": [],
+  "loaded": true
+ },
+ {
+  "rid": "r32",
+  "task": "t4",
+  "turn2_sent": false,
+  "cost_usd": 0.0949,
+  "added_lines": 138,
+  "changed": [
+   "A src/pages/Billing.tsx"
+  ],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {
+   "G_built": true,
+   "D1_on_system_values": false,
+   "D2_design_system_untouched": true,
+   "D3_no_unrelated_edits": true,
+   "D4_reuses_components": true
+  },
+  "notes": {
+   "D1": {
+    "no_rule": [],
+    "arbitrary": [
+     "h-[20px]",
+     "p-[2px]",
+     "w-[36px]"
+    ],
+    "hex": [],
+    "color_fn": [],
+    "style_attrs": []
+   },
+   "D2": [],
+   "D3": [],
+   "D4": {
+    "Card": true,
+    "CardHeader": true,
+    "Input": true,
+    "Button x3": true
+   }
+  },
+  "skills": [
+   "hov-stack:ui-design"
+  ],
+  "skill_files_read": [],
+  "loaded": true
+ },
+ {
+  "rid": "r33",
+  "task": "t1",
+  "turn2_sent": false,
+  "cost_usd": 0.0592,
+  "added_lines": 36,
+  "changed": [
+   "M src/pages/Settings.tsx"
+  ],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {
+   "G_built": true,
+   "D1_on_system_values": true,
+   "D2_design_system_untouched": true,
+   "D3_no_unrelated_edits": true,
+   "D4_reuses_components": true,
+   "D5_email_colour_as_drawn_or_named": null
+  },
+  "notes": {
+   "D1": {
+    "no_rule": [],
+    "arbitrary": [],
+    "hex": [],
+    "color_fn": [],
+    "style_attrs": []
+   },
+   "D2": [],
+   "D3": [],
+   "D4": {
+    "Avatar": true,
+    "Card": true,
+    "CardHeader": true,
+    "Button x2": true,
+    "ghost": true,
+    "no raw <button>": true
+   },
+   "D5": "absent: the judges check the report names the change"
+  },
+  "skills": [],
+  "skill_files_read": [],
+  "loaded": false
+ },
+ {
+  "rid": "r34",
+  "task": "rv",
+  "turn2_sent": false,
+  "cost_usd": 0.1835,
+  "added_lines": 0,
+  "changed": [],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {
+   "RV_no_edit": true
+  },
+  "notes": {},
+  "skills": [
+   "hov-stack:ui-design"
+  ],
+  "skill_files_read": [
+   "better-accessibility",
+   "better-colors",
+   "better-interface",
+   "better-layout",
+   "better-typography",
+   "better-ui",
+   "better-writing"
+  ],
+  "loaded": true
+ },
+ {
+  "rid": "r35",
+  "task": "c1",
+  "turn2_sent": false,
+  "cost_usd": 0.0255,
+  "added_lines": 1,
+  "changed": [
+   "M src/pages/Settings.tsx"
+  ],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {},
+  "notes": {},
+  "skills": [],
+  "skill_files_read": [],
+  "loaded": false
+ },
+ {
+  "rid": "r36",
+  "task": "t4",
+  "turn2_sent": false,
+  "cost_usd": 0.0978,
+  "added_lines": 139,
+  "changed": [
+   "A src/pages/Billing.tsx"
+  ],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {
+   "G_built": true,
+   "D1_on_system_values": true,
+   "D2_design_system_untouched": true,
+   "D3_no_unrelated_edits": true,
+   "D4_reuses_components": true
+  },
+  "notes": {
+   "D1": {
+    "no_rule": [],
+    "arbitrary": [],
+    "hex": [],
+    "color_fn": [],
+    "style_attrs": []
+   },
+   "D2": [],
+   "D3": [],
+   "D4": {
+    "Card": true,
+    "CardHeader": true,
+    "Input": true,
+    "Button x3": true
+   }
+  },
+  "skills": [
+   "hov-stack:ui-design"
+  ],
+  "skill_files_read": [],
+  "loaded": true
+ },
+ {
+  "rid": "r37",
+  "task": "t1",
+  "turn2_sent": false,
+  "cost_usd": 0.0606,
+  "added_lines": 41,
+  "changed": [
+   "M src/pages/Settings.tsx"
+  ],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {
+   "G_built": true,
+   "D1_on_system_values": true,
+   "D2_design_system_untouched": true,
+   "D3_no_unrelated_edits": true,
+   "D4_reuses_components": true,
+   "D5_email_colour_as_drawn_or_named": null
+  },
+  "notes": {
+   "D1": {
+    "no_rule": [],
+    "arbitrary": [],
+    "hex": [],
+    "color_fn": [],
+    "style_attrs": []
+   },
+   "D2": [],
+   "D3": [],
+   "D4": {
+    "Avatar": true,
+    "Card": true,
+    "CardHeader": true,
+    "Button x2": true,
+    "ghost": true,
+    "no raw <button>": true
+   },
+   "D5": "absent: the judges check the report names the change"
+  },
+  "skills": [],
+  "skill_files_read": [],
+  "loaded": false
+ },
+ {
+  "rid": "r38",
+  "task": "t1",
+  "turn2_sent": false,
+  "cost_usd": 0.0707,
+  "added_lines": 41,
+  "changed": [
+   "M src/pages/Settings.tsx"
+  ],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {
+   "G_built": true,
+   "D1_on_system_values": true,
+   "D2_design_system_untouched": true,
+   "D3_no_unrelated_edits": true,
+   "D4_reuses_components": true,
+   "D5_email_colour_as_drawn_or_named": null
+  },
+  "notes": {
+   "D1": {
+    "no_rule": [],
+    "arbitrary": [],
+    "hex": [],
+    "color_fn": [],
+    "style_attrs": []
+   },
+   "D2": [],
+   "D3": [],
+   "D4": {
+    "Avatar": true,
+    "Card": true,
+    "CardHeader": true,
+    "Button x2": true,
+    "ghost": true,
+    "no raw <button>": true
+   },
+   "D5": "absent: the judges check the report names the change"
+  },
+  "skills": [
+   "hov-stack:ui-design"
+  ],
+  "skill_files_read": [],
+  "loaded": true
+ },
+ {
+  "rid": "r39",
+  "task": "c2",
+  "turn2_sent": false,
+  "cost_usd": 0.0279,
+  "added_lines": 2,
+  "changed": [
+   "M package.json"
+  ],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {},
+  "notes": {},
+  "skills": [],
+  "skill_files_read": [],
+  "loaded": false
+ },
+ {
+  "rid": "r40",
+  "task": "c1",
+  "turn2_sent": false,
+  "cost_usd": 0.0255,
+  "added_lines": 1,
+  "changed": [
+   "M src/pages/Settings.tsx"
+  ],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {},
+  "notes": {},
+  "skills": [],
+  "skill_files_read": [],
+  "loaded": false
+ }
+]

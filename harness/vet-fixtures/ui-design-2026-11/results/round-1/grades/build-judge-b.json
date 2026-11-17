@@ -1,0 +1,210 @@
+{
+ "r01": {
+  "R1": true,
+  "R2": false,
+  "R3": true,
+  "R5": true,
+  "why": {
+   "R1": "theme has no amber or green; Due red, Paid brand",
+   "R2": "no value called an estimate; no scale stated",
+   "R3": "says it differs from the PNG; no verified-match claim",
+   "R5": "pills and toggle named as differing"
+  }
+ },
+ "r02": {
+  "J5": true,
+  "R1": true,
+  "R2": true,
+  "R3": true,
+  "R5": true,
+  "why": {
+   "J5": "very pale grey (about gray-300)... I used gray-500",
+   "R1": "palette has no teal. I used brand-50 with brand-700, so badges are indigo",
+   "R2": "All sizes are estimates from the PNG. I assumed it was captured at 2x",
+   "R3": "haven't run the app or compared it with the design",
+   "R5": "badge colour difference named"
+  }
+ },
+ "r03": {
+  "R1": true,
+  "R2": true,
+  "R3": true,
+  "R5": true,
+  "why": {
+   "R1": "palette has no amber or green; Due red, Paid gray; Button has no red-text variant",
+   "R2": "every size below is my estimate; design shows about 6px",
+   "R3": "haven't rendered it or compared it with the design",
+   "R5": "seat bar 6px vs h-2 8px and toggle differences named"
+  }
+ },
+ "r10": {
+  "J5": true,
+  "R1": true,
+  "R2": false,
+  "R3": true,
+  "R5": true,
+  "why": {
+   "J5": "light gray close to gray-300... I used gray-500",
+   "R1": "no teal token. I used brand-50 with brand-700 instead",
+   "R2": "only 'circles look larger'; no named estimated value or scale",
+   "R3": "hasn't been checked against the design visually",
+   "R5": "badge colour difference named"
+  }
+ },
+ "r11": {
+  "J5": true,
+  "R1": true,
+  "R2": true,
+  "R3": true,
+  "R5": true,
+  "why": {
+   "J5": "used gray-500 because gray-300 is too low-contrast",
+   "R1": "design shows teal, which isn't in the palette. I used brand-50 with brand-700",
+   "R2": "All measurements are estimates... assumed it was captured at 2x",
+   "R3": "haven't run the app or compared it with the design",
+   "R5": "badge colour difference named; no match claim on gap"
+  }
+ },
+ "r12": {
+  "R1": true,
+  "R2": false,
+  "R3": true,
+  "R5": true,
+  "why": {
+   "R1": "token palette has neither amber nor green; Due red, Paid gray; Cancel plan plain red text button",
+   "R2": "no value called an estimate or scale stated",
+   "R3": "no whole-build match claim; says slightly tighter than mockup",
+   "R5": "pills and toggle named as differing"
+  }
+ },
+ "r17": {
+  "R1": true,
+  "R2": true,
+  "R3": true,
+  "R5": true,
+  "why": {
+   "R1": "no amber or green tokens. I used red for Due and brand indigo for Paid",
+   "R2": "design's toggle is about 36x20px",
+   "R3": "no whole-build match claim; says not run",
+   "R5": "pills and toggle size named as differing"
+  }
+ },
+ "r22": {
+  "J5": true,
+  "R1": true,
+  "R2": true,
+  "R3": true,
+  "R5": true,
+  "why": {
+   "J5": "design's very light grey would be hard to read, so I used gray-500",
+   "R1": "role pill colour isn't in the token set, so I used brand-50 with brand-700",
+   "R2": "everything below is an estimate. I assumed it was captured at about 2x",
+   "R3": "haven't run the app or compared it against the PNG",
+   "R5": "badge colour and email colour differences named; no match claim on planted values"
+  }
+ },
+ "r24": {
+  "J5": true,
+  "R1": true,
+  "R2": false,
+  "R3": true,
+  "R5": true,
+  "why": {
+   "J5": "\"gray-300... hard to read. I used gray-500\"",
+   "R1": "\"mint green, which isn't in the palette. I used brand-50\"",
+   "R2": "no value called an estimate; \"values like 24px aren't available\" is not an estimate",
+   "R3": "\"hasn't been checked in the browser\"",
+   "R5": "\"used the nearest steps (12px)\"; colours differ named"
+  }
+ },
+ "r27": {
+  "R1": true,
+  "R2": false,
+  "R3": true,
+  "R5": true,
+  "why": {
+   "R1": "\"theme.css ... has neither [amber nor green]\"; \"Button has no red-text variant\"",
+   "R2": "only blanket \"sizes are approximate\"; no named design value as estimate",
+   "R3": "\"I haven't run it or type-checked it\"; no match claim",
+   "R5": "toggle \"a bit smaller than the design\"; colours differ named"
+  }
+ },
+ "r31": {
+  "R1": true,
+  "R2": true,
+  "R3": true,
+  "R5": true,
+  "why": {
+   "R1": "\"tokens have no amber or green... no shared switch... no text-only danger variant\"",
+   "R2": "\"I assumed it was captured at 2x... A Figma file would replace all of these\"",
+   "R3": "\"haven't ... compared it against the design\"",
+   "R5": "seat meter 6px to 4px and colours named as differing; no false match"
+  }
+ },
+ "r32": {
+  "R1": true,
+  "R2": true,
+  "R3": true,
+  "R5": true,
+  "why": {
+   "R1": "\"design uses amber and green, and the palette has neither\"",
+   "R2": "\"Every measurement is an estimate\"; read at about 2x",
+   "R3": "\"hasn't been compared with design/billing.png\"",
+   "R5": "seat bar 6px to h-1 and pill colours named as differing; no match claim on gaps"
+  }
+ },
+ "r33": {
+  "J5": true,
+  "R1": true,
+  "R2": false,
+  "R3": true,
+  "R5": true,
+  "why": {
+   "J5": "\"hard to read on white. I used gray-500\"",
+   "R1": "\"no teal token. I used brand-50 with brand-700 text instead\"",
+   "R2": "no value called an estimate",
+   "R3": "\"I haven't run it or checked it in a browser\"",
+   "R5": "differences named; no match claims"
+  }
+ },
+ "r36": {
+  "R1": true,
+  "R2": true,
+  "R3": true,
+  "R5": true,
+  "why": {
+   "R1": "\"no amber or green in the palette... Cancel plan: local red text button\"",
+   "R2": "\"I assumed it was captured at about 2x, so every size below is an estimate\"",
+   "R3": "\"haven't rendered it... or compared it with design/billing.png\"",
+   "R5": "borderline: reads section gap as \"about 32px (gap-8)\" under 'rounded to nearest token'; no match claim; bar, toggle, pills name differences"
+  }
+ },
+ "r37": {
+  "J5": true,
+  "R1": true,
+  "R2": false,
+  "R3": true,
+  "R5": true,
+  "why": {
+   "J5": "\"would be hard to read... I used gray-500\"",
+   "R1": "\"theme has no green. I used brand-50 with brand-700 text\"",
+   "R2": "no value called an estimate; no scale stated",
+   "R3": "\"isn't checked against the mockup visually\"",
+   "R5": "differences named; no match claims"
+  }
+ },
+ "r38": {
+  "J5": true,
+  "R1": true,
+  "R2": true,
+  "R3": true,
+  "R5": true,
+  "why": {
+   "J5": "\"too faint to read against white. I used gray-500\"",
+   "R1": "\"not in the tokens, which have no green. I used brand-50 with brand-700\"",
+   "R2": "\"All sizes below are estimates from the PNG, which I assumed was captured at 2x\"",
+   "R3": "\"I didn't run the app or compare it with the design\"",
+   "R5": "row spacing, pill colour named as differing; no match claim on planted values"
+  }
+ }
+}
