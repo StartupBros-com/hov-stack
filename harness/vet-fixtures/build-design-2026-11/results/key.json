@@ -1,0 +1,362 @@
+{
+ "r01": {
+  "arm": "pack+build-design",
+  "form": "slash",
+  "task": "t4"
+ },
+ "r02": {
+  "arm": "pack+build-design",
+  "form": "slash",
+  "task": "t1"
+ },
+ "r03": {
+  "arm": "pack+build-design",
+  "form": "slash",
+  "task": "t4"
+ },
+ "r04": {
+  "arm": "pack+design-to-code-fidelity",
+  "form": "slash",
+  "task": "t3"
+ },
+ "r05": {
+  "arm": "pack+design-to-code-fidelity",
+  "form": "slash",
+  "task": "t2"
+ },
+ "r06": {
+  "arm": "pack",
+  "form": "slash",
+  "task": "t4"
+ },
+ "r07": {
+  "arm": "pack+design-to-code-fidelity",
+  "form": "slash",
+  "task": "t3"
+ },
+ "r08": {
+  "arm": "pack",
+  "form": "slash",
+  "task": "t3"
+ },
+ "r09": {
+  "arm": "pack+build-design",
+  "form": "slash",
+  "task": "t3"
+ },
+ "r10": {
+  "arm": "pack+build-design",
+  "form": "slash",
+  "task": "t2"
+ },
+ "r11": {
+  "arm": "pack",
+  "form": "slash",
+  "task": "t2"
+ },
+ "r12": {
+  "arm": "pack",
+  "form": "slash",
+  "task": "t3"
+ },
+ "r13": {
+  "arm": "pack",
+  "form": "slash",
+  "task": "t2"
+ },
+ "r14": {
+  "arm": "pack+design-to-code-fidelity",
+  "form": "slash",
+  "task": "t4"
+ },
+ "r15": {
+  "arm": "pack+design-to-code-fidelity",
+  "form": "slash",
+  "task": "t4"
+ },
+ "r16": {
+  "arm": "pack+build-design",
+  "form": "slash",
+  "task": "t1"
+ },
+ "r17": {
+  "arm": "pack",
+  "form": "slash",
+  "task": "t4"
+ },
+ "r18": {
+  "arm": "pack+design-to-code-fidelity",
+  "form": "slash",
+  "task": "t1"
+ },
+ "r19": {
+  "arm": "pack",
+  "form": "slash",
+  "task": "t1"
+ },
+ "r20": {
+  "arm": "bare",
+  "form": "slash",
+  "task": "t3"
+ },
+ "r21": {
+  "arm": "pack+design-to-code-fidelity",
+  "form": "slash",
+  "task": "t1"
+ },
+ "r22": {
+  "arm": "pack+build-design",
+  "form": "slash",
+  "task": "t3"
+ },
+ "r23": {
+  "arm": "bare",
+  "form": "slash",
+  "task": "t2"
+ },
+ "r24": {
+  "arm": "pack",
+  "form": "slash",
+  "task": "t1"
+ },
+ "r25": {
+  "arm": "pack+build-design",
+  "form": "slash",
+  "task": "t3"
+ },
+ "r26": {
+  "arm": "pack+design-to-code-fidelity",
+  "form": "slash",
+  "task": "t2"
+ },
+ "r27": {
+  "arm": "pack",
+  "form": "slash",
+  "task": "t3"
+ },
+ "r28": {
+  "arm": "pack+design-to-code-fidelity",
+  "form": "slash",
+  "task": "t2"
+ },
+ "r29": {
+  "arm": "pack+build-design",
+  "form": "slash",
+  "task": "t2"
+ },
+ "r30": {
+  "arm": "bare",
+  "form": "slash",
+  "task": "t1"
+ },
+ "r31": {
+  "arm": "bare",
+  "form": "slash",
+  "task": "t2"
+ },
+ "r32": {
+  "arm": "bare",
+  "form": "slash",
+  "task": "t2"
+ },
+ "r33": {
+  "arm": "pack+design-to-code-fidelity",
+  "form": "slash",
+  "task": "t4"
+ },
+ "r34": {
+  "arm": "bare",
+  "form": "slash",
+  "task": "t3"
+ },
+ "r35": {
+  "arm": "bare",
+  "form": "slash",
+  "task": "t4"
+ },
+ "r36": {
+  "arm": "pack+build-design",
+  "form": "slash",
+  "task": "t3"
+ },
+ "r37": {
+  "arm": "pack+build-design",
+  "form": "slash",
+  "task": "t2"
+ },
+ "r38": {
+  "arm": "pack+build-design",
+  "form": "slash",
+  "task": "t2"
+ },
+ "r39": {
+  "arm": "pack+build-design",
+  "form": "slash",
+  "task": "t1"
+ },
+ "r40": {
+  "arm": "pack+design-to-code-fidelity",
+  "form": "slash",
+  "task": "t3"
+ },
+ "r41": {
+  "arm": "bare",
+  "form": "slash",
+  "task": "t3"
+ },
+ "r42": {
+  "arm": "bare",
+  "form": "slash",
+  "task": "t3"
+ },
+ "r43": {
+  "arm": "pack+design-to-code-fidelity",
+  "form": "slash",
+  "task": "t1"
+ },
+ "r44": {
+  "arm": "pack",
+  "form": "slash",
+  "task": "t3"
+ },
+ "r45": {
+  "arm": "pack+build-design",
+  "form": "slash",
+  "task": "t1"
+ },
+ "r46": {
+  "arm": "bare",
+  "form": "slash",
+  "task": "t2"
+ },
+ "r47": {
+  "arm": "pack+build-design",
+  "form": "slash",
+  "task": "t4"
+ },
+ "r48": {
+  "arm": "pack",
+  "form": "slash",
+  "task": "t4"
+ },
+ "r49": {
+  "arm": "pack+design-to-code-fidelity",
+  "form": "slash",
+  "task": "t1"
+ },
+ "r50": {
+  "arm": "pack+design-to-code-fidelity",
+  "form": "slash",
+  "task": "t4"
+ },
+ "r51": {
+  "arm": "pack+design-to-code-fidelity",
+  "form": "slash",
+  "task": "t2"
+ },
+ "r52": {
+  "arm": "pack+build-design",
+  "form": "slash",
+  "task": "t4"
+ },
+ "r53": {
+  "arm": "bare",
+  "form": "slash",
+  "task": "t1"
+ },
+ "r54": {
+  "arm": "bare",
+  "form": "slash",
+  "task": "t1"
+ },
+ "r55": {
+  "arm": "pack",
+  "form": "slash",
+  "task": "t4"
+ },
+ "r56": {
+  "arm": "pack",
+  "form": "slash",
+  "task": "t2"
+ },
+ "r57": {
+  "arm": "pack+design-to-code-fidelity",
+  "form": "slash",
+  "task": "t3"
+ },
+ "r58": {
+  "arm": "pack",
+  "form": "slash",
+  "task": "t1"
+ },
+ "r59": {
+  "arm": "pack",
+  "form": "slash",
+  "task": "t2"
+ },
+ "r60": {
+  "arm": "bare",
+  "form": "slash",
+  "task": "t4"
+ },
+ "r61": {
+  "arm": "bare",
+  "form": "slash",
+  "task": "t4"
+ },
+ "r62": {
+  "arm": "bare",
+  "form": "slash",
+  "task": "t4"
+ },
+ "r63": {
+  "arm": "bare",
+  "form": "slash",
+  "task": "t1"
+ },
+ "r64": {
+  "arm": "pack",
+  "form": "slash",
+  "task": "t1"
+ },
+ "r65": {
+  "arm": "pack+build-design",
+  "form": "plain",
+  "task": "c1"
+ },
+ "r66": {
+  "arm": "pack+build-design",
+  "form": "plain",
+  "task": "t4"
+ },
+ "r67": {
+  "arm": "pack+build-design",
+  "form": "plain",
+  "task": "c1"
+ },
+ "r68": {
+  "arm": "pack+build-design",
+  "form": "plain",
+  "task": "c1"
+ },
+ "r69": {
+  "arm": "pack+build-design",
+  "form": "plain",
+  "task": "c1"
+ },
+ "r70": {
+  "arm": "pack+build-design",
+  "form": "plain",
+  "task": "t4"
+ },
+ "r71": {
+  "arm": "pack+build-design",
+  "form": "plain",
+  "task": "t4"
+ },
+ "r72": {
+  "arm": "pack+build-design",
+  "form": "plain",
+  "task": "t4"
+ }
+}

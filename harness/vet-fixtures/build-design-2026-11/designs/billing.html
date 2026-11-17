@@ -1,0 +1,93 @@
+<!doctype html>
+<!--
+  Source of design/billing.png: a whole page, the realistic load case. Exact values, kept out of the
+  arms' repo. Planted (see answer-key.md): 24px gaps between sections (no spacing step), a 6px
+  progress bar (between 4 and 8; no Progress component), status pills in green and amber (no
+  palette step; no Badge), pill padding 2px 8px (2 is not a step), table cell padding 10px 12px
+  (10 is within 2px of 8 and 12), a red text-only "Cancel plan" button (Button has filled danger
+  and brand ghost, no red ghost), a 36x20 toggle (no Toggle component), and every other value on a
+  token (Card, CardHeader, Button primary/secondary/ghost, Input).
+-->
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  * { box-sizing: border-box; margin: 0; }
+  body { background: #f9fafb; padding: 32px; font-family: Inter, "Helvetica Neue", Arial, sans-serif; width: 784px; }
+  .page { width: 720px; display: flex; flex-direction: column; gap: 24px; }
+  .top { display: flex; justify-content: space-between; align-items: center; }
+  .h1 { font-size: 18px; line-height: 28px; font-weight: 600; color: #111827; }
+  .card { background: #ffffff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 16px; }
+  .header { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
+  .title { font-size: 16px; line-height: 24px; font-weight: 600; color: #111827; }
+  .desc { font-size: 14px; line-height: 20px; color: #6b7280; }
+  .btn { display: inline-flex; align-items: center; height: 32px; padding: 0 12px; border-radius: 8px; font-size: 14px; line-height: 20px; font-weight: 500; border: 0; background: transparent; }
+  .btn-primary { background: #4f46e5; color: #ffffff; }
+  .btn-secondary { background: #ffffff; color: #111827; border: 1px solid #e5e7eb; }
+  .btn-ghost { color: #4f46e5; }
+  .btn-red { color: #dc2626; padding: 0; }
+  .seats { margin-top: 16px; display: flex; justify-content: space-between; font-size: 14px; line-height: 20px; }
+  .seats .l { color: #374151; }
+  .seats .r { color: #6b7280; }
+  .track { margin-top: 8px; height: 6px; border-radius: 9999px; background: #f3f4f6; }
+  .fill { width: 70%; height: 6px; border-radius: 9999px; background: #4f46e5; }
+  .cancel { margin-top: 16px; }
+  table { margin-top: 16px; width: 100%; border-collapse: collapse; }
+  th { text-align: left; font-size: 12px; line-height: 16px; font-weight: 500; letter-spacing: 0.05em; text-transform: uppercase; color: #6b7280; padding: 10px 12px; }
+  td { font-size: 14px; line-height: 20px; color: #111827; padding: 10px 12px; border-top: 1px solid #e5e7eb; }
+  td.end { text-align: right; padding-top: 4px; padding-bottom: 4px; }
+  .pill { display: inline-flex; padding: 2px 8px; border-radius: 9999px; font-size: 12px; line-height: 16px; font-weight: 500; }
+  .paid { background: #dcfce7; color: #15803d; }
+  .due { background: #fef3c7; color: #b45309; }
+  .field { margin-top: 16px; display: flex; flex-direction: column; gap: 4px; font-size: 14px; line-height: 20px; color: #374151; }
+  .input { height: 32px; border: 1px solid #e5e7eb; border-radius: 8px; padding: 0 12px; font-size: 14px; color: #111827; display: flex; align-items: center; }
+  .toggle-row { margin-top: 16px; display: flex; align-items: center; gap: 12px; font-size: 14px; line-height: 20px; color: #374151; }
+  .switch { width: 36px; height: 20px; border-radius: 9999px; background: #4f46e5; position: relative; flex: none; }
+  .knob { position: absolute; top: 2px; left: 18px; width: 16px; height: 16px; border-radius: 9999px; background: #ffffff; }
+  .save { margin-top: 16px; }
+</style>
+</head>
+<body>
+  <div class="page">
+    <div class="top">
+      <div class="h1">Billing</div>
+      <button class="btn btn-secondary">Download invoices</button>
+    </div>
+
+    <div class="card">
+      <div class="header">
+        <div>
+          <div class="title">Team plan</div>
+          <div class="desc">$48 per month · renews Dec 1, 2026</div>
+        </div>
+        <button class="btn btn-primary">Change plan</button>
+      </div>
+      <div class="seats"><span class="l">Seats</span><span class="r">7 of 10 used</span></div>
+      <div class="track"><div class="fill"></div></div>
+      <div class="cancel"><button class="btn btn-red">Cancel plan</button></div>
+    </div>
+
+    <div class="card">
+      <div class="header"><div class="title">Invoices</div></div>
+      <table>
+        <tr><th>Date</th><th>Amount</th><th>Status</th><th></th></tr>
+        <tr><td>Nov 1, 2026</td><td>$48.00</td><td><span class="pill due">Due</span></td><td class="end"><button class="btn btn-ghost">Download</button></td></tr>
+        <tr><td>Oct 1, 2026</td><td>$48.00</td><td><span class="pill paid">Paid</span></td><td class="end"><button class="btn btn-ghost">Download</button></td></tr>
+        <tr><td>Sep 1, 2026</td><td>$36.00</td><td><span class="pill paid">Paid</span></td><td class="end"><button class="btn btn-ghost">Download</button></td></tr>
+      </table>
+    </div>
+
+    <div class="card">
+      <div class="header">
+        <div>
+          <div class="title">Billing details</div>
+          <div class="desc">Where we send receipts.</div>
+        </div>
+      </div>
+      <div class="field">Billing email<div class="input">billing@acme.example</div></div>
+      <div class="toggle-row"><span class="switch"><span class="knob"></span></span>Email me a receipt for each payment</div>
+      <div class="save"><button class="btn btn-primary">Save</button></div>
+    </div>
+  </div>
+</body>
+</html>

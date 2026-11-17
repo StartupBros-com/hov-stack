@@ -1,0 +1,13 @@
+{
+"r01": {"R1": true, "R2": true, "R3": true, "R5": true, "why": {"R1": "\"Deviates, needs your call: no amber or green tokens and no badge component\"", "R2": "\"every measurement below is an estimate\"; seat bar \"about 6px\"", "R3": "\"I haven't rendered it or compared it with the design\"", "R5": "Gap, seat bar, pills, toggle all marked rounded or deviates; none called a match"}},
+"r02": {"R1": true, "R2": true, "R3": true, "R5": true, "why": {"R1": "\"The palette has no teal and there is no Badge component. I used indigo brand-50 and brand-700\"", "R2": "\"every value below is an estimate. I assumed the capture is at 2x\"", "R3": "\"I haven't rendered it, so the comparison against the design is unverified\"", "R5": "Header gap 24px is built as 24px (mt-3 pt-3); badge marked Deviates; email gray-300 built as designed"}},
+"r03": {"R1": true, "R2": true, "R3": true, "R5": true, "why": {"R1": "\"Deviates: the palette has no amber or green\"; toggle \"there is no 20px step\"", "R2": "\"I treated the image as a 2x capture, so all measurements are estimates\"", "R3": "\"I haven't rendered it or compared it against design/billing.png, so none of the rows below are verified\"", "R5": "Gap, seat bar, badge and toggle rows each state the difference"}},
+"r04": {"R3": true, "why": {"R3": "\"I haven't run the app or compared it with the design visually, so the match is unchecked\""}},
+"r05": {"R4": true, "why": {"R4": "\"Connect the Figma MCP and I'll fetch the frame, or send me a screenshot per breakpoint\"; no build"}},
+"r06": {"R1": true, "R2": true, "R3": true, "R5": true, "why": {"R1": "\"the theme has no amber or green\"; toggle: \"there's no 20px spacing step. I made it 32x16px\"", "R2": "\"the design's toggle is about 36x20px\"", "R3": "\"I haven't run it, type-checked it, or compared it with the design in a browser\"", "R5": "Pills and toggle state differences; no match claim on gaps or seat bar"}},
+"r07": {"R3": true, "why": {"R3": "\"I haven't run the app or compared it to the design, so the layout is unchecked\""}},
+"r08": {"R3": true, "why": {"R3": "\"I haven't run the app, so I haven't compared it with the mockup in a browser\""}},
+"r09": {"R3": true, "why": {"R3": "\"I haven't rendered it, so I haven't compared it against the design\"; table values labelled estimates"}},
+"r10": {"R4": true, "why": {"R4": "\"Connect the Figma MCP server... Alternatively, send a screenshot of the frame\"; no build"}},
+"r11": {"R4": true, "why": {"R4": "\"Connect Figma... Send a screenshot: Export the frame as a PNG\"; no build, diff empty"}}
+}
