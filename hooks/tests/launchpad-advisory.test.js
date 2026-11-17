@@ -602,6 +602,8 @@ function copiedTree(script) {
   fs.mkdirSync(path.join(tree, 'scripts'));
   fs.copyFileSync(path.join(__dirname, '..', HOOK), path.join(hooks, HOOK));
   fs.copyFileSync(path.join(__dirname, '..', 'lib', 'hook-output.js'), path.join(hooks, 'lib', 'hook-output.js'));
+  // host-role.js runs <tree>/lib/profile.sh; the tree has none, so the host declares no role.
+  fs.copyFileSync(path.join(__dirname, '..', 'lib', 'host-role.js'), path.join(hooks, 'lib', 'host-role.js'));
   fs.symlinkSync(path.join(__dirname, '..', '..', 'scripts', 'repo-route.py'), path.join(tree, 'scripts', 'repo-route.py'));
   fs.writeFileSync(path.join(tree, 'scripts', 'launchpad-freshen.sh'), `#!/usr/bin/env bash\n${script}\n`);
   return { tree, hooks };
@@ -674,6 +676,14 @@ test('adopt notice: a harness install with no record is told once a day to adopt
     fs.writeFileSync(path.join(cfg, '.hov-stack', 'settings-base.json'), '{}');
     assert.doesNotMatch((await go()).stdout, /setup --adopt/);
     fs.rmSync(path.join(cfg, '.hov-stack', 'settings-base.json'));
+    // Planted negative: a host with a role is never told to adopt; ./setup makes sync.sh's
+    // first merge there (#722). A profile.sh stub declares the role, and removing it restores the notice.
+    fs.utimesSync(path.join(cfg, '.hov-stack', 'adopt-notice'), old, old);
+    fs.mkdirSync(path.join(tree, 'lib'), { recursive: true });
+    fs.writeFileSync(path.join(tree, 'lib', 'profile.sh'), "profile_role() { printf '%s\\n' workstation; }\n");
+    assert.doesNotMatch((await go()).stdout, /setup --adopt/);
+    fs.rmSync(path.join(tree, 'lib', 'profile.sh'));
+    assert.match((await go()).stdout, /setup --adopt/);
     // A config dir whose hooks lead somewhere else is not this checkout's business.
     fs.rmSync(path.join(cfg, 'hooks'));
     fs.mkdirSync(path.join(cfg, 'hooks'));

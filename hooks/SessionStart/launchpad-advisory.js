@@ -250,6 +250,8 @@ function adoptNotice() {
     const state = path.join(cfg, '.hov-stack');
     const has = (f) => { try { fs.lstatSync(path.join(state, f)); return true; } catch { return false; } };
     if (has('setup-settings-base.json') || has('settings-base.json')) return '';
+    // A host with a role is not adopted: sync.sh's first merge owns its settings.json (#722).
+    if (require('../lib/host-role').hostRole()) return '';
     const stamp = path.join(state, 'adopt-notice');
     try {
       if (Date.now() - fs.statSync(stamp).mtimeMs < ADOPT_NOTICE_SECONDS * 1000) return '';
