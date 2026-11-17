@@ -106,6 +106,9 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
+      # repin-land.sh reads the pins PR's check runs with this job's token; the bot App
+      # has no checks permission.
+      checks: read
     steps:
       # The default branch, never a commit the refresh job names: that job runs downloaded
       # programs, so all it can hand over is rows, and apply checks those against this table.
@@ -134,7 +137,9 @@ jobs:
             # produce the same branch, so a second run finds the PR already open and
             # opens nothing. The key holds main's table blob, not main's sha: main's merge
             # queue lands a PR that is behind main, so a day's pushes that leave the table
-            # alone keep the open PR the owner may be reviewing instead of replacing it. A
+            # alone keep the open PR the owner may be reviewing instead of replacing it. If
+            # its required checks failed, repin-land.sh merges main into it once main
+            # moves, so a fix on main reaches it. A
             # push that edits the table changes the key, so a PR cut from an older table
             # is superseded and repin-land.sh closes it. The new table's blob is in it
             # too: a publisher that replaces a release's assets at the same version changes
@@ -231,6 +236,7 @@ jobs:
         if: steps.bot_identity.outputs.have_bot == 'true'
         env:
           GH_TOKEN: ${{ steps.bot.outputs.token }}
+          CHECKS_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           BOT_SLUG: ${{ steps.bot.outputs.app-slug }}
           DESIRED_BRANCH: ${{ steps.apply.outputs.drift == 'true' && format('pins/auto-{0}', steps.apply.outputs.key) || '' }}

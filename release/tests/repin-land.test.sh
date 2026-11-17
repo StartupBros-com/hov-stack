@@ -18,16 +18,17 @@ pass() { printf 'ok - %s\n' "$1"; PASS=$((PASS + 1)); }
 die() { printf 'not ok - %s\n' "$1" >&2; exit 1; }
 
 mkdir -p "$TMP/bin"
-export FIX="$TMP/fix" CALLS="$TMP/calls"
+export FIX="$TMP/fix" CALLS="$TMP/calls" READS="$TMP/reads"
 mkdir -p "$FIX"
 
-# Stub gh: serves PR metadata from $FIX and records every merge and close in
-# $CALLS. It honours --jq, as the real gh does.
+# Stub gh: serves PR metadata from $FIX and records every merge, close and branch
+# update in $CALLS, and the refresh reads, with the token each used, in $READS. It
+# honours --jq, as the real gh does.
 cat > "$TMP/bin/gh" <<'STUBGH'
 #!/usr/bin/env bash
 set -e
 cmd="$1 $2"; shift 2
-jqexpr='' num='' head='' disable=''
+jqexpr='' num='' head='' disable='' method='' field=''
 case "$cmd" in 'pr view'|'pr merge'|'pr close') num="$1"; shift ;; esac
 path=''
 while [ $# -gt 0 ]; do
@@ -35,6 +36,8 @@ while [ $# -gt 0 ]; do
     --jq) jqexpr="$2"; shift 2 ;;
     --match-head-commit) head="$2"; shift 2 ;;
     --disable-auto) disable=1; shift ;;
+    -X) method="$2"; shift 2 ;;
+    -f) field="$2"; shift 2 ;;
     --repo|--json|--state|--limit|--comment) shift 2 ;;
     -*) shift ;;
     *) path="$1"; shift ;;
@@ -58,6 +61,22 @@ case "$cmd" in
       printf 'merge %s %s\n' "$num" "$head" >> "$CALLS"
     fi ;;
   'pr close') printf 'close %s\n' "$num" >> "$CALLS" ;;
+  'api repos/acme/market/rules/branches/main?per_page=100')
+    printf 'rules %s\n' "${GH_TOKEN:-}" >> "$READS"
+    emit < "$FIX/rules.json" ;;
+  'api repos/acme/market/commits/'*'/check-runs?filter=latest&per_page=100')
+    sha="${cmd#api repos/acme/market/commits/}"; sha="${sha%%/*}"
+    printf 'checks %s %s\n' "$sha" "${GH_TOKEN:-}" >> "$READS"
+    [ ! -e "$FIX/checks-fail" ] || { printf 'HTTP 403: Resource not accessible by integration\n' >&2; exit 1; }
+    emit < "$FIX/checks.json" ;;
+  'api repos/acme/market/compare/'*)
+    printf 'compare %s %s\n' "${cmd#api repos/acme/market/compare/}" "${GH_TOKEN:-}" >> "$READS"
+    printf '{"ahead_by":%s}\n' "$(cat "$FIX/ahead")" | emit ;;
+  'api repos/acme/market/pulls/'*'/update-branch')
+    [ "$method" = PUT ] || { printf 'update-branch is a PUT\n' >&2; exit 1; }
+    [ ! -e "$FIX/update-fails" ] || { printf 'HTTP 422\n' >&2; exit 1; }
+    num="${cmd#api repos/acme/market/pulls/}"; num="${num%%/*}"
+    printf 'update %s %s %s\n' "$num" "$field" "${GH_TOKEN:-}" >> "$CALLS" ;;
   *) printf 'unexpected gh: %s\n' "$cmd" >&2; exit 1 ;;
 esac
 STUBGH
@@ -76,7 +95,7 @@ BLOB=dddddddddddddddddddddddddddddddddddddddd
 pr() { # $1 number $2 branch $3 author $4 cross $5 automerge(false|true=bot-requested|person|unknown)
   jq -n --argjson n "$1" --arg b "$2" --arg a "$3" --argjson x "$4" --arg m "$5" --arg h "$HEAD_SHA" \
     --arg slug "$SLUG" \
-    '{number: $n, headRefName: $b, headRefOid: $h,
+    '{number: $n, headRefName: $b, headRefOid: $h, baseRefName: "main",
       author: {login: $a, is_bot: ($a | startswith("app/") or endswith("[bot]"))},
       isCrossRepository: $x,
       autoMergeRequest: (if $m == "false" then null
@@ -101,9 +120,29 @@ standard_prs() { # $1 = whether #10 already has auto-merge
 printf '{"files":[{"path":".claude-plugin/marketplace.json"}]}\n' > "$FIX/files-10.json"
 printf '%s\n' "$BLOB" > "$FIX/blob"
 
+# main's required checks, as GET rules/branches/main returns them beside other rules.
+jq -n '[{type: "pull_request"},
+        {type: "required_status_checks", parameters: {required_status_checks:
+          [{context: "ci"}, {context: "setup, hooks, suites, secrets"}]}}]' > "$FIX/rules.json"
+# The check runs at the head, one name:status:conclusion per argument.
+checks() {
+  local spec name status conclusion
+  for spec in "$@"; do
+    IFS=: read -r name status conclusion <<<"$spec"
+    jq -n --arg n "$name" --arg s "$status" --arg c "$conclusion" \
+      '{name: $n, status: $s, conclusion: (if $c == "" then null else $c end)}'
+  done | jq -s '{total_count: length, check_runs: .}' > "$FIX/checks.json"
+}
+passing_checks() {
+  checks 'ci:completed:success' 'setup, hooks, suites, secrets:completed:success' 'CodeQL:completed:success'
+}
+passing_checks
+printf '3\n' > "$FIX/ahead"
+
+# The bot's token and the job's own; the stub records which one made each call.
 run_land() { # extra env as arguments
-  : > "$CALLS"
-  env PATH="$TMP/bin:$PATH" REPO=acme/market BOT_SLUG="$SLUG" "$@" \
+  : > "$CALLS"; : > "$READS"
+  env PATH="$TMP/bin:$PATH" REPO=acme/market BOT_SLUG="$SLUG" GH_TOKEN=bot-token CHECKS_TOKEN=job-token "$@" \
     bash "$ROOT/release/scripts/repin-land.sh" >"$TMP/out" 2>"$TMP/err"
 }
 
@@ -285,5 +324,99 @@ mixed_prs true
 run_pins DESIRED_BRANCH=pins/auto-new EXPECTED_BLOB="$PINS_BLOB" || die "an auto-merge-on rerun failed: $(cat "$TMP/err")"
 if grep -q -e '^disable-auto' -e '^merge' "$CALLS"; then die "an auto-merge-on rerun changed the request: $(cat "$CALLS")"; fi
 pass 'with auto-merge on, an existing request is kept and not requested again'
+
+# --- a failed card is refreshed from main, and only then -------------------------
+# A card is kept while main moves, so a fix main gains reaches a failed card only if
+# the bot merges main into it. The refresh comes last, pinned to the proved head, made
+# with the bot's token; the check runs are read with the job's.
+standard_prs false
+checks 'ci:completed:failure' 'setup, hooks, suites, secrets:completed:success'
+run_land DESIRED_BRANCH=repin/auto-new EXPECTED_BLOB="$BLOB" || die "refreshing a failed card failed: $(cat "$TMP/err")"
+[ "$(cut -d' ' -f1-2 "$CALLS" | tr '\n' ';')" = 'merge 10;close 9;update 10;' ] \
+  || die "expected merge, close, then refresh of #10, got: $(cat "$CALLS")"
+grep -qx "update 10 expected_head_sha=$HEAD_SHA bot-token" "$CALLS" \
+  || die "the refresh was not pinned to the proved head or not made as the bot: $(cat "$CALLS")"
+grep -qx "checks $HEAD_SHA job-token" "$READS" || die "the check runs were not read at the head with the job token: $(cat "$READS")"
+grep -qx "compare $HEAD_SHA...main bot-token" "$READS" || die "main was not compared with the head: $(cat "$READS")"
+grep -q "#10: ci failed at ${HEAD_SHA:0:12}; merged 3 new commit(s) from main" "$TMP/out" \
+  || die "the refresh did not name the failed check: $(cat "$TMP/out")"
+pass 'a card whose required check failed is refreshed from main last, at its proved head, as the bot'
+
+checks 'ci:completed:timed_out' 'setup, hooks, suites, secrets:completed:cancelled'
+run_land DESIRED_BRANCH=repin/auto-new EXPECTED_BLOB="$BLOB" ONLY_PLUGIN=widget \
+  || die "a targeted refresh failed: $(cat "$TMP/err")"
+grep -qx "update 10 expected_head_sha=$HEAD_SHA bot-token" "$CALLS" || die "a targeted run did not refresh: $(cat "$CALLS")"
+if grep -q '^close' "$CALLS"; then die 'a targeted run closed a PR'; fi
+grep -q 'ci, setup, hooks, suites, secrets failed' "$TMP/out" || die "both failed checks were not named: $(cat "$TMP/out")"
+pass 'a targeted run refreshes its failed card too and still closes nothing; timed out and cancelled count as failed'
+
+checks 'ci:completed:failure'
+run_land DESIRED_BRANCH=repin/auto-new EXPECTED_BLOB="$BLOB" || die "a refresh with an unreported check failed: $(cat "$TMP/err")"
+grep -q '^update 10 ' "$CALLS" || die "a required check with no run yet blocked the refresh: $(cat "$CALLS")"
+pass 'a required check with no run yet decides nothing'
+
+run_land CHECKS_TOKEN= DESIRED_BRANCH=repin/auto-new EXPECTED_BLOB="$BLOB" || die "a run without CHECKS_TOKEN failed: $(cat "$TMP/err")"
+grep -qx "checks $HEAD_SHA bot-token" "$READS" || die "without CHECKS_TOKEN the bot token did not read: $(cat "$READS")"
+pass 'without CHECKS_TOKEN the check runs are read with the bot token'
+
+# Left alone: passing, still running (a rerun of the failed check, or another check),
+# a failure only outside the required set, and a failure with nothing newer on main.
+no_refresh() { # $1 why
+  run_land DESIRED_BRANCH=repin/auto-new EXPECTED_BLOB="$BLOB" || die "$1: the run failed: $(cat "$TMP/err")"
+  if grep -q '^update' "$CALLS"; then die "$1: the card was refreshed: $(cat "$CALLS")"; fi
+}
+checks 'ci:completed:success' 'setup, hooks, suites, secrets:completed:skipped' 'CodeQL:completed:neutral'
+no_refresh 'passing'
+if grep -q '^compare' "$READS"; then die "a passing card was compared with main: $(cat "$READS")"; fi
+grep -qx "#10: 2 required check(s), 2 reported, none failed at ${HEAD_SHA:0:12}" "$TMP/out" \
+  || die "a passing card's read was not counted in the log: $(cat "$TMP/out")"
+checks 'ci:completed:success' 'setup, hooks, suites, secrets:completed:success' 'CodeQL:completed:failure'
+no_refresh 'a failure outside the required checks'
+checks 'CodeQL:completed:failure'
+no_refresh 'no required check reported yet'
+grep -qx "#10: 2 required check(s), 0 reported, none failed at ${HEAD_SHA:0:12}" "$TMP/out" \
+  || die "a card with no required check reported did not say so: $(cat "$TMP/out")"
+pass 'a passing card is left behind main with its checks counted in the log, and a failure outside the required checks refreshes nothing'
+
+checks 'ci:in_progress:' 'setup, hooks, suites, secrets:completed:success'
+no_refresh 'a rerun still going'
+checks 'ci:completed:failure' 'setup, hooks, suites, secrets:queued:'
+no_refresh 'another required check still queued'
+grep -q 'required checks are still running' "$TMP/out" || die "the wait was not reported: $(cat "$TMP/out")"
+if grep -q '^compare' "$READS"; then die "a card with checks running was compared with main: $(cat "$READS")"; fi
+pass 'a card whose required checks are still running is left, whether the running one is a rerun or another check'
+
+checks 'ci:completed:failure' 'setup, hooks, suites, secrets:completed:success'
+printf '0\n' > "$FIX/ahead"
+no_refresh 'main has nothing newer'
+grep -q 'ci failed at .*, and main has nothing newer to retry it with' "$TMP/out" || die "the hold was not reported: $(cat "$TMP/out")"
+printf '3\n' > "$FIX/ahead"
+pass 'a failed card is left when main has nothing newer, so one refresh waits for the next move of main'
+
+# The pins family, with auto-merge off: the owner's PR is refreshed too, and nothing merges.
+mixed_prs
+run_pins REQUEST_AUTO_MERGE=false DESIRED_BRANCH=pins/auto-new EXPECTED_BLOB="$PINS_BLOB" \
+  || die "refreshing a failed pins PR failed: $(cat "$TMP/err")"
+[ "$(cut -d' ' -f1-2 "$CALLS" | tr '\n' ';')" = 'close 19;update 20;' ] \
+  || die "expected #19 closed then #20 refreshed, got: $(cat "$CALLS")"
+pass 'a failed pins PR is refreshed from main with auto-merge off, and nothing is merged'
+
+# Failures are loud, and come after the merge request and the closes, which stand.
+standard_prs false
+: > "$FIX/checks-fail"
+if run_land DESIRED_BRANCH=repin/auto-new EXPECTED_BLOB="$BLOB"; then die 'an unreadable check-runs list exited 0'; fi
+rm "$FIX/checks-fail"
+[ "$(cut -d' ' -f1-2 "$CALLS" | tr '\n' ';')" = 'merge 10;close 9;' ] \
+  || die "the merge request and the close did not stand before the failed read: $(cat "$CALLS")"
+grep -q "could not read the check runs of #10 at ${HEAD_SHA:0:12}" "$TMP/err" || die "the failed read was not named: $(cat "$TMP/err")"
+grep -q 'Resource not accessible by integration' "$TMP/err" || die "gh's own error was hidden: $(cat "$TMP/err")"
+pass "an unreadable check-runs list fails the run with gh's error, after the merge request and the closes"
+
+: > "$FIX/update-fails"
+if run_land DESIRED_BRANCH=repin/auto-new EXPECTED_BLOB="$BLOB"; then die 'a failed refresh exited 0'; fi
+rm "$FIX/update-fails"
+grep -q 'could not merge main into #10' "$TMP/err" || die "the failed refresh was not named: $(cat "$TMP/err")"
+pass 'a refresh GitHub refuses fails the run'
+passing_checks
 
 printf '%s repin land checks passed\n' "$PASS"

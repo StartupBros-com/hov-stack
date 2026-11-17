@@ -17,6 +17,18 @@ set -euo pipefail
 # an older release: main's merge queue (since 2026-11-15) lands a green PR that is
 # behind main, where the up-to-date rule alone used to leave it stalled.
 #
+# A card is kept while main moves, because its key holds as long as the plan and main's
+# copy of the file do. So a card whose required checks failed would wait for good on a
+# fix that lands on main without touching either: the run finds the card already open,
+# and the merge queue admits only a PR whose checks passed. Last of all, when this run's
+# PR has finished its required checks with at least one failed, and main has commits its
+# head lacks, the bot merges main into it (GitHub's update-branch, pinned to the head
+# proved above), so the checks run again with main's fix. A card whose checks pass or are
+# still running is left behind main for the merge queue, and after a refresh the next
+# one comes only when main moves again. The merge adds main's commits and nothing else to
+# the proved head; if main changed the file meanwhile, the next run's key differs and
+# that run supersedes this card.
+#
 # The same proof and close loop serve any bot-opened, single-file PR family. LAND_PATH
 # names the one file the PR may change, BRANCH_PREFIX the family's branch prefix, and
 # REQUEST_AUTO_MERGE=false runs the proof but leaves the merge to the owner, cancelling
@@ -42,11 +54,16 @@ set -euo pipefail
 #                   leaves it waiting for the owner to merge it
 #   ONLY_PLUGIN     set for a targeted run: its PR covers one plugin, so nothing is closed
 #   GH_TOKEN        the marketplace bot's token
+#   CHECKS_TOKEN    a token that can read check runs (the workflow's own, with checks: read);
+#                   the bot App has no checks permission. Unset, GH_TOKEN is used.
 #
 # Exit codes:
-#   0  the PR is queued for auto-merge (or already was, or REQUEST_AUTO_MERGE=false), and superseded PRs are closed
-#   1  a read failure, this run's PR is not provably the reconciler's output, or a bot's
-#      auto-merge request could not be cancelled with REQUEST_AUTO_MERGE=false
+#   0  the PR is queued for auto-merge (or already was, or REQUEST_AUTO_MERGE=false),
+#      superseded PRs are closed, and a failed PR is refreshed from main when main moved
+#   1  a read failure, this run's PR is not provably the reconciler's output, a bot's
+#      auto-merge request could not be cancelled with REQUEST_AUTO_MERGE=false, or the
+#      PR's checks could not be read or the PR not refreshed (after the merge request and
+#      the closes, which stand)
 
 fail() { printf 'error: %s\n' "$*" >&2; exit 1; }
 
@@ -58,6 +75,61 @@ BOT_SLUG="${BOT_SLUG:-}"
 DESIRED_BRANCH="${DESIRED_BRANCH:-}"
 EXPECTED_BLOB="${EXPECTED_BLOB:-}"
 ONLY_PLUGIN="${ONLY_PLUGIN:-}"
+CHECKS_TOKEN="${CHECKS_TOKEN:-}"
+
+# The card's check runs are read with CHECKS_TOKEN; every other call uses the bot's.
+checks_api() {
+  if [ -n "$CHECKS_TOKEN" ]; then GH_TOKEN="$CHECKS_TOKEN" gh api "$@"; else gh api "$@"; fi
+}
+
+# Merge main into this run's PR when its required checks finished with a failure and
+# main has commits its head lacks (see the header). Reads keep gh's own error on stderr,
+# so a token that cannot read check runs says so in the run's log.
+refresh_failed_card() {
+  local base required runs verdict failed ahead
+  base="$(jq -r '.baseRefName // "main"' <<<"$pr")"
+  required="$(gh api "repos/$REPO/rules/branches/$base?per_page=100" \
+      --jq '[.[] | select(.type == "required_status_checks") | .parameters.required_status_checks[].context] | unique')" \
+    || fail "could not read the required checks of $base"
+  # filter=latest keeps the newest run of each name, so a rerun that is still going
+  # reads as running, not as the failure it replaces.
+  runs="$(checks_api "repos/$REPO/commits/$head/check-runs?filter=latest&per_page=100" --paginate \
+      --jq '.check_runs[] | {name, status, conclusion}')" \
+    || fail "could not read the check runs of #$desired_pr at ${head:0:12}"
+  # One verdict per required check that has runs: running, passed, or failed (finished,
+  # and no run passed). A required check with no run yet decides nothing.
+  verdict="$(jq -sc --argjson req "$required" '
+      [ $req[] as $name | [ .[] | select(.name == $name) ] | select(length > 0)
+        | {name: $name,
+           v: (if any(.status != "completed") then "running"
+               elif any(.conclusion | IN("success", "neutral", "skipped")) then "pass"
+               else "fail" end)} ]' <<<"$runs")" \
+    || fail "could not read the check runs of #$desired_pr"
+  if jq -e 'any(.v == "running")' <<<"$verdict" >/dev/null; then
+    printf '#%s: required checks are still running at %s\n' "$desired_pr" "${head:0:12}"
+    return 0
+  fi
+  failed="$(jq -r '[.[] | select(.v == "fail") | .name] | join(", ")' <<<"$verdict")"
+  if [ -z "$failed" ]; then
+    # Counted, so a log shows the read worked, and an empty rules read or a renamed
+    # check (no required check reported) is visible instead of silently refreshing nothing.
+    printf '#%s: %s required check(s), %s reported, none failed at %s\n' \
+      "$desired_pr" "$(jq 'length' <<<"$required")" "$(jq 'length' <<<"$verdict")" "${head:0:12}"
+    return 0
+  fi
+  ahead="$(gh api "repos/$REPO/compare/$head...$base" --jq '.ahead_by')" \
+    || fail "could not compare #$desired_pr at ${head:0:12} with $base"
+  case "$ahead" in ''|*[!0-9]*) fail "compare of #$desired_pr with $base gave no commit count: '$ahead'" ;; esac
+  if [ "$ahead" -eq 0 ]; then
+    printf '#%s: %s failed at %s, and %s has nothing newer to retry it with\n' \
+      "$desired_pr" "$failed" "${head:0:12}" "$base"
+    return 0
+  fi
+  gh api "repos/$REPO/pulls/$desired_pr/update-branch" -X PUT -f "expected_head_sha=$head" >/dev/null \
+    || fail "could not merge $base into #$desired_pr at ${head:0:12}"
+  printf '#%s: %s failed at %s; merged %s new commit(s) from %s into it, so its checks run again\n' \
+    "$desired_pr" "$failed" "${head:0:12}" "$ahead" "$base"
+}
 
 [ -n "$REPO" ] || fail 'REPO is not set'
 [ -n "$BOT_SLUG" ] || fail 'BOT_SLUG is not set'
@@ -69,7 +141,7 @@ case "$REQUEST_AUTO_MERGE" in true|false) ;; *) fail "REQUEST_AUTO_MERGE must be
 # app/<slug> (observed on #205-#207); the REST spelling <slug>[bot] is accepted too,
 # since both name the same App account.
 open_prs="$(gh pr list --repo "$REPO" --state open --limit 100 \
-    --json number,headRefName,headRefOid,author,isCrossRepository,autoMergeRequest 2>/dev/null)" \
+    --json number,headRefName,headRefOid,baseRefName,author,isCrossRepository,autoMergeRequest 2>/dev/null)" \
   || fail "could not list open pull requests in $REPO"
 repins="$(jq -c --arg slug "$BOT_SLUG" --arg prefix "$BRANCH_PREFIX" '
     [ .[] | select((.headRefName | startswith($prefix))
@@ -127,20 +199,21 @@ fi
 
 if [ -n "$ONLY_PLUGIN" ]; then
   printf 'targeted run for %s: leaving other repin PRs open\n' "$ONLY_PLUGIN"
-  exit 0
+else
+  if [ -n "$desired_pr" ]; then
+    reason="Superseded by #$desired_pr, which carries the current plan."
+  else
+    reason='Closed by the repin reconciler: main already matches every plugin release.'
+  fi
+  stale="$(jq -r --arg b "$DESIRED_BRANCH" '.[] | select(.headRefName != $b) | .number' <<<"$repins")"
+  closed=0
+  while IFS= read -r n; do
+    [ -n "$n" ] || continue
+    gh pr close "$n" --repo "$REPO" --delete-branch --comment "$reason" \
+      || fail "could not close superseded repin PR #$n"
+    closed=$((closed + 1))
+  done <<<"$stale"
+  printf 'closed %s superseded repin PR(s)\n' "$closed"
 fi
 
-if [ -n "$desired_pr" ]; then
-  reason="Superseded by #$desired_pr, which carries the current plan."
-else
-  reason='Closed by the repin reconciler: main already matches every plugin release.'
-fi
-stale="$(jq -r --arg b "$DESIRED_BRANCH" '.[] | select(.headRefName != $b) | .number' <<<"$repins")"
-closed=0
-while IFS= read -r n; do
-  [ -n "$n" ] || continue
-  gh pr close "$n" --repo "$REPO" --delete-branch --comment "$reason" \
-    || fail "could not close superseded repin PR #$n"
-  closed=$((closed + 1))
-done <<<"$stale"
-printf 'closed %s superseded repin PR(s)\n' "$closed"
+[ -z "$desired_pr" ] || refresh_failed_card

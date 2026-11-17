@@ -41,7 +41,8 @@ on:
   # Every push to main. A merged repin publishes its draft at once. A push that leaves
   # an open card behind main keeps that card: its key is the plan plus main's manifest,
   # so this run finds it already open, and the merge queue lands it on top of the new
-  # main. A push that changes the plan or main's manifest gets a fresh card, and
+  # main. If that card's required checks failed, repin-land.sh merges main into it so
+  # they run again with whatever main fixed. A push that changes the plan or main's manifest gets a fresh card, and
   # repin-land.sh closes the stale one. A run with no drift opens nothing and takes
   # under a minute.
   push:
@@ -86,6 +87,9 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
+      # repin-land.sh reads the card's check runs with this job's token; the bot App
+      # has no checks permission.
+      checks: read
     steps:
       - name: Check out main
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -147,7 +151,9 @@ jobs:
             # is behind main, so a push that leaves the manifest alone keeps the open card
             # and its finished checks. Keyed on main's sha, every push replaced the card
             # and restarted its checks; on 2026-11-17 five of seven cards were replaced
-            # with an unchanged plan. A push that edits the manifest still changes the
+            # with an unchanged plan. A kept card whose required checks failed is not
+            # stuck on its old main: repin-land.sh merges main into it once main moves.
+            # A push that edits the manifest still changes the
             # key, so a card cut from an older manifest is superseded, not left to conflict.
             # The rebuilt manifest's own blob is in it too, as in the pins key: a reconciler
             # change that rebuilds different bytes from the same plan and main manifest
@@ -243,6 +249,7 @@ jobs:
         if: steps.bot_identity.outputs.have_bot == 'true'
         env:
           GH_TOKEN: ${{ steps.bot.outputs.token }}
+          CHECKS_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           BOT_SLUG: ${{ steps.bot.outputs.app-slug }}
           DESIRED_BRANCH: ${{ steps.reconcile.outputs.drift == 'true' && format('repin/auto-{0}', steps.reconcile.outputs.key) || '' }}
