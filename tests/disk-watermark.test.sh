@@ -51,7 +51,8 @@ chmod +x "$TMP/scripts/notify.sh"
 # equivalents, keyed off the fixture directory name in the queried path (the
 # real script always invokes `df -Pk "$fs"`, so the last arg is the path).
 # DW_STUB_DF_FAIL=root makes it fail for the root fixture; DW_STUB_DF_GARBAGE=root
-# makes it print a line with no numbers there.
+# makes it print a line with no numbers there; DW_STUB_DF_PARTIAL=root makes it
+# print a good line there and still exit 1.
 cat > "$TMP/bin/df" <<'EOF'
 #!/usr/bin/env bash
 path="${*: -1}"
@@ -67,6 +68,7 @@ case "$path" in
 esac
 echo "Filesystem     1024-blocks      Used Available Capacity Mounted on"
 echo "/dev/stub          9999999    111111    ${avail}      ${pct}% ${path}"
+case "$path" in */"${DW_STUB_DF_PARTIAL:-none}") echo "df: stub partial read of $path" >&2; exit 1 ;; esac
 EOF
 chmod +x "$TMP/bin/df"
 
@@ -254,6 +256,9 @@ has df-fail "$TMP/fs/root — df failed (exit 1), cannot evaluate"
 has df-fail "df: stub cannot stat $TMP/fs/root"
 DW_STUB_DF_GARBAGE=root run_case df-garbage 2 0 0 0 1
 has df-garbage "$TMP/fs/root — unparseable df output, cannot evaluate"
+# A df that prints a line that parses but exits non-zero is still a failed check.
+DW_STUB_DF_PARTIAL=root run_case df-partial 2 0 0 0 1
+has df-partial "$TMP/fs/root — df failed (exit 1), cannot evaluate"
 # An error outranks an alert on the other filesystem, which still goes out.
 mntc 95 400
 DW_STUB_DF_FAIL=root run_case df-fail-and-alert 2 1 1 1 1
