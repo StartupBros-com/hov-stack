@@ -35,7 +35,9 @@ Two arms were not run.
 
 - `BayramAnnakov/claude-reflect` @ `b6c4232`. Its `/reflect` is an interactive
   flow with about 10 `AskUserQuestion` stops, and it spawns a nested
-  `claude -p` for each message. It has no headless form.
+  `claude -p` for each message. It has no headless form. *(Wrong, from reading alone.
+  Probes showed it runs headless, and it was run as an added arm. See "Added arm:
+  claude-reflect" below.)*
 - `davidparys/claude-mods` rule-keeper @ `7aa4eb9`. It is a UI band on typed
   prompts in a live session, and cannot read a past transcript.
 

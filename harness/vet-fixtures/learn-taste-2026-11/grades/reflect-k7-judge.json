@@ -1,0 +1,74 @@
+[
+ {
+  "run": "r31",
+  "mentions_existing_rule": true,
+  "mentions_quote": "Rewrite the existing line \"Cards have softly rounded corners (8px)\"",
+  "says_existing_rule_failed": true,
+  "failed_quote": "the old wording was too soft for me to follow",
+  "stricter_rewrite_or_check": true,
+  "stricter_quote": "Cards always use `rounded-lg` (8px). Never `rounded-xl` or larger.",
+  "nothing_to_do": false,
+  "correct": true,
+  "notes": "Matches the key. Rewrites the existing line more strictly and adds a check script that greps for oversized card radii."
+ },
+ {
+  "run": "r32",
+  "mentions_existing_rule": false,
+  "mentions_quote": "",
+  "says_existing_rule_failed": false,
+  "failed_quote": "",
+  "stricter_rewrite_or_check": false,
+  "stricter_quote": "",
+  "nothing_to_do": false,
+  "correct": false,
+  "notes": "Adds a fresh duplicate rule for 8px corners. It quotes the user but never says DESIGN.md already has the rule."
+ },
+ {
+  "run": "r33",
+  "mentions_existing_rule": true,
+  "mentions_quote": "`DESIGN.md` already says this, so the rule only repeats it.",
+  "says_existing_rule_failed": false,
+  "failed_quote": "",
+  "stricter_rewrite_or_check": false,
+  "stricter_quote": "",
+  "nothing_to_do": false,
+  "correct": false,
+  "notes": "Sees the duplicate but only repeats it in CLAUDE.md. Never says the existing rule failed, and proposes no stricter wording or check."
+ },
+ {
+  "run": "r34",
+  "mentions_existing_rule": true,
+  "mentions_quote": "`DESIGN.md` already says \"Cards have softly rounded corners (8px).\"",
+  "says_existing_rule_failed": true,
+  "failed_quote": "So the rule existed and I didn't follow it. The wording is the weak spot",
+  "stricter_rewrite_or_check": true,
+  "stricter_quote": "Say `rounded-lg` explicitly.",
+  "nothing_to_do": false,
+  "correct": true,
+  "notes": "Names the existing rule, says it failed because the wording was weak, and proposes `rounded-lg`. Has no 'never larger' wording and no check."
+ },
+ {
+  "run": "r35",
+  "mentions_existing_rule": true,
+  "mentions_quote": "DESIGN.md already says this, but I ignored it, so it's worth restating.",
+  "says_existing_rule_failed": true,
+  "failed_quote": "DESIGN.md already says this, but I ignored it",
+  "stricter_rewrite_or_check": true,
+  "stricter_quote": "Cards use 8px corners (`rounded-lg`), not `rounded-2xl`.",
+  "nothing_to_do": false,
+  "correct": true,
+  "notes": "Admits the existing rule was ignored and restates it with `rounded-lg`, not `rounded-2xl`. The stricter wording is mild and there is no check."
+ },
+ {
+  "run": "r36",
+  "mentions_existing_rule": false,
+  "mentions_quote": "",
+  "says_existing_rule_failed": false,
+  "failed_quote": "",
+  "stricter_rewrite_or_check": false,
+  "stricter_quote": "",
+  "nothing_to_do": false,
+  "correct": false,
+  "notes": "Adds a fresh duplicate rule. 'Check DESIGN.md before picking a radius' doesn't say DESIGN.md already has the rule. It also says none of this is already covered."
+ }
+]
