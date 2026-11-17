@@ -14,7 +14,8 @@ import re
 import subprocess
 import sys
 
-REDACT = re.compile(r"/?\b(learn-taste|ce-retro|compound-engineering|craftwork-design|claude-reflect)(:[\w-]+)?\b"
+REDACT = re.compile(r"/?\b(learn-taste|ce-retro|compound-engineering|craftwork-design|claude-reflect|context-lens"
+                    r"|self-review)(:[\w-]+)?\b"
                     r"|(?<![\w-])/(retro|reflect)\b|--scan-history\b|\blearnings[- ]queue\b|\.reflect-initialized\b",
                     re.I)
 RULE_HOME = re.compile(r"^user/(\.claude/(CLAUDE\.md|rules/|projects/[^/]+/memory/|skills/|agents/|commands/"
@@ -76,7 +77,7 @@ def main():
         for line in status.splitlines():
             if line.startswith("?? "):
                 rel = line[3:].strip()
-                if rel.startswith(".context/"):
+                if rel.startswith((".context/", ".context-lens/")):
                     continue
                 new_files.append(("code/acme-notes/" + rel, load(os.path.join(repo, rel))))
         for line in section(c2, "new or changed files under home").splitlines() + \

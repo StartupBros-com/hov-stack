@@ -115,13 +115,17 @@ instead. Its history scan needs no hook-captured queue. So the two-turn form fit
   is namespaced. The transcript holds an `unknown_command_fallback` for `reflect`, so the
   prompt went through as plain text. No plugin script ran and no nested call was made. r19
   is void: it never ran the arm, and it is kept out of every count. The invocation above is
-  the only change. The smoke rule below applies to the next run, r20.
+  the only change. The smoke rule below applies to the next run, r20. r19's checker row
+  shows `unresolved_command: False` only because its tool log predates that field.
 - **Scope.** Its scan reads this project's sessions only (`project_paths.py`). X3, from
   billing-portal, is outside that scope by default. It is graded as for the scored arms.
-- **Measurement.** It classifies messages with nested `claude -p` calls. `run_arm.sh`
-  routes them through a logging shim, and `check_runs.py` adds their cost to the arm's.
-  Nested transcripts are counted (`nested_sessions`) and left out of the arm's tool log.
-  They land in the same folder its scan reads. That is reported, not corrected.
+- **Measurement.** Its command prefers classifying messages with nested `claude -p` calls
+  (`semantic_detector.py`). `run_arm.sh` routes any such call through a logging shim, and
+  `check_runs.py` adds its cost to the arm's. Nested transcripts are counted
+  (`nested_sessions`) and left out of the arm's tool log. *Observed:* in r20–r22 the detector
+  was never called. No shim log exists, no tool call names it, and the model classified
+  the messages itself. So the nested-call path, and the interpolation of message text into
+  its prompt, were read but not exercised.
 - **Rule.** I is now the best of ce-retro, retro and claude-reflect by median K-correct.
   Rule 1(a) needs median(LT) ≥ median(I) + 1. With LT at 7, it holds only if claude-reflect's
   median is 6 or less. The declared rule left one case open, claude-reflect at 7 or 8: (a)
@@ -140,6 +144,39 @@ instead. Its history scan needs no hook-captured queue. So the two-turn form fit
   rebuilt with the current `packets.py` under new numbers. That keeps a one-arm batch blind
   and shows drift against the first grades. Those three re-grades are reported as drift
   only, and the scored matrix keeps its recorded grades.
+
+## Added arms: self-review and context-lens (declared after claude-reflect's grades, before their runs)
+
+Discovery recorded `nvie/skills` self-review and `AaryanJ45/context-lens` `--learn`, and
+dropped both from reading alone. That is the same call that was wrong for claude-reflect.
+Their files at the pins show both do this job, so both are run. A third contender,
+`dopiotrek/dotclaude` session-mining @ `2ede3c4`, is dropped as a hard mismatch, from its
+own files. The skill body is not in the repo; the only tracked `mining/` files are its outputs.
+And `skills/README.md:68` describes it as "mine session history into content ideas".
+
+- **self-review** @ `2458bd9`, a skill. Turn 1 is `/self-review ` + the ask. By design it
+  scans every project (its Step 1), and it ranks cross-project recurrence highest. X3 is
+  therefore in its reach under the scoped ask. It is graded as for the scored arms.
+- **context-lens** @ `18d8d21`, a plugin (`plugin/` at the pin, loaded with `--plugin-dir`).
+  Turn 1 is `/context-lens:doctor Use the learn-from-corrections step; I'm fine with sending the redacted
+  excerpts. ` + the ask. Its learn step asks for consent before sending anything, and the
+  two-turn form has no turn for that, so the prompt gives it. The plugin's `run.sh` installs
+  the unpinned HEAD unless a `context-lens` command is already on PATH. So the pinned clone
+  is installed into a venv, without the `[exact]` extra, and linked first on the arm's PATH.
+  Without that extra, its `auto` backend falls back to `claude -p`. That call goes through
+  the logging shim, so its cost is counted. Its nested call passes `--tools ""`,
+  `--setting-sources ""`, an empty MCP config and `--no-session-persistence`. Its reports in
+  `.context-lens/` are tool scratch, like ce-retro's `.context/`, not premature writes.
+- **Both.** `BROWSER=true` is now set for every arm, so `--open` cannot launch a host
+  browser. No arm run before this used a browser call.
+- **Rule.** I is the best of ce-retro, retro, claude-reflect, self-review and context-lens,
+  by median K-correct. The claude-reflect clause applies unchanged. If either new arm's
+  median is 7 or 8, learn-taste is **SKIP**, and nothing lands.
+- **Smoke.** One run of each first, under the claude-reflect smoke rule. A failed smoke
+  makes that arm PARTIAL, and learn-taste is SKIP pending it.
+- **Grading.** One batch of these six runs, plus drift re-grades of r09 (learn-taste), r04
+  (bare) and r11 (retro). None of those three had a split grade. Same briefs, judges in
+  opposite orders, plus the K7-only judge. Drift rows are reported, never re-scored.
 
 ## Running it
 

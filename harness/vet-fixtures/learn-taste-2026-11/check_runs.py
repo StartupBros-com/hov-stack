@@ -25,8 +25,9 @@ RULE_FILES = ("DESIGN.md", "design/DESIGN.md", "CLAUDE.md", "AGENTS.md", "global
 # results, session env) is Claude Code housekeeping.
 RULE_HOME = re.compile(r"^user/(\.claude/(CLAUDE\.md|rules/|projects/[^/]+/memory/|skills/|agents/|commands/"
                        r"|settings(\.local)?\.json)|code/billing-portal/|AGENTS\.md|CLAUDE\.md)")
-# A skill's own declared scratch or ledger inside the repo (ce-retro keeps its ledger in .context/).
-SKILL_SCRATCH = re.compile(r"^\S+\s+\.context/")
+# A skill's own declared scratch or ledger inside the repo (ce-retro keeps its ledger in .context/;
+# context-lens writes its reports to .context-lens/).
+SKILL_SCRATCH = re.compile(r"^\S+\s+\.context(-lens)?/")
 # A shell write to the shared /tmp: it escapes the run dir that TMPDIR points at, and two
 # parallel runs that pick the same name would share the file (r17 wrote /tmp/extract.py).
 SHARED_TMP_WRITE = re.compile(r">\s?/tmp/\S+")

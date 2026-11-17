@@ -40,6 +40,15 @@ ARMS = {
     # bare /reflect did not resolve (r19, README).
     "claude-reflect": {"prompt": "/claude-reflect:reflect --scan-history " + ASK, "skill": None,
                        "plugin": "claude-reflect"},
+    # Added after claude-reflect (README, "Added arms: self-review and context-lens").
+    "self-review": {"prompt": "/self-review " + ASK, "skill": "self-review"},
+    # Its learn step is opt-in and asks for consent first; the two-turn form has no turn for
+    # that, so the prompt gives it. The CLI comes from the pinned clone (--src
+    # context-lens-bin=<venv>/bin/context-lens), linked first on the arm's PATH, because the
+    # plugin's run.sh otherwise installs the unpinned HEAD.
+    "context-lens": {"prompt": "/context-lens:doctor Use the learn-from-corrections step; I'm fine with sending "
+                               "the redacted excerpts. " + ASK, "skill": None, "plugin": "context-lens",
+                     "bins": {"context-lens": "context-lens-bin"}},
 }
 TURN2 = "write all"
 
@@ -68,6 +77,9 @@ def main():
         plugin = ARMS[arm].get("plugin")
         if plugin and not os.path.isfile(os.path.join(srcs.get(plugin, ""), ".claude-plugin", "plugin.json")):
             raise SystemExit("make_runs: arm %s needs --src %s=<plugin root>" % (arm, plugin))
+        for src_key in ARMS[arm].get("bins", {}).values():
+            if not os.access(srcs.get(src_key, ""), os.X_OK):
+                raise SystemExit("make_runs: arm %s needs --src %s=<executable>" % (arm, src_key))
 
     jobs = [arm for arm in arms for _ in range(a.reps)]
     random.Random(a.order_seed).shuffle(jobs)
@@ -92,6 +104,10 @@ def main():
             shutil.copytree(srcs[plugin], dest, ignore=shutil.ignore_patterns(".git"))
             with open(os.path.join(run, "plugin-dir.txt"), "w", encoding="utf-8") as fh:
                 fh.write(dest + "\n")
+        for name, src_key in ARMS[arm].get("bins", {}).items():
+            # run_arm.sh puts <run>/bin first on PATH and adds its claude shim beside these.
+            os.makedirs(os.path.join(run, "bin"), exist_ok=True)
+            os.symlink(os.path.abspath(srcs[src_key]), os.path.join(run, "bin", name))
         for name, text in (("prompt.txt", ARMS[arm]["prompt"]), ("turn2.txt", TURN2), ("model.txt", a.model),
                            ("planted.txt", "\n".join(sessions.PLANTED_IDS))):
             with open(os.path.join(run, name), "w", encoding="utf-8") as fh:

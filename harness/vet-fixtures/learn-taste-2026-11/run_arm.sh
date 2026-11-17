@@ -68,6 +68,9 @@ SET=(
   XDG_CACHE_HOME="$RUN/xdg-cache"
   CLAUDE_CONFIG_DIR="$RUN/user/.claude"
   DISABLE_AUTOUPDATER=1
+  # No arm opens a browser on the host (context-lens's --open calls webbrowser.open).
+  # Added before the self-review and context-lens runs.
+  BROWSER=true
 )
 
 MODEL=sonnet
