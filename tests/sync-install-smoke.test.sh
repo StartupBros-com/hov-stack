@@ -2288,7 +2288,7 @@ hp_mark=$(hp_log_mark)
 hp_decl_out=$(setup_phases 2>&1); hp_decl_status=$?
 if [ "$hp_decl_status" -eq 0 ]; then ok; else bad "install with a valid hygiene posture exited $hp_decl_status:"$'\n'"$hp_decl_out"; fi
 hp_header="# Written by ./setup --enable-units from the overlay's hygiene-posture file.
-# Edit that file, not this one; install rewrites or removes this drop-in."
+# Edit that file, not this one; ./setup rewrites or removes this drop-in."
 hp_expect_dropin() {
   local path=$1 expected=$2
   if [ -f "$path" ] && [ "$(cat "$path")" = "$expected" ]; then ok; else bad "posture drop-in $path is not as declared:"$'\n'"$(cat "$path" 2>&1)"; fi
@@ -2679,22 +2679,28 @@ else
 fi
 
 pure_before=$(cd "$PURE" && find . -type f -exec sha256sum {} + | sort)
-# CLAUDE_SYNC_CLAUDE_BIN names a missing CLI: with the hook block on, install would
+# CLAUDE_SYNC_CLAUDE_BIN names a missing CLI: with the hook block on, the owner phase would
 # otherwise run the real `claude plugin install papercut@hov` from PATH on a dev box.
 pure_out=$(env -u CLAUDE_SYNC_SKIP_HOOK_RECONCILE \
   HOME="$PURE_HOME" \
   CLAUDE_SYNC_CLAUDE_BIN="$TMP/no-claude" \
   CLAUDE_SYNC_SYSTEM_SYS_DIR="$TMP/pure-etc-systemd" \
   CLAUDE_SYNC_MANAGED_LOCK="$TMP/pure-etc-claude/managed-settings.json" \
-  "$PURE/sync.sh" install 2>&1)
+  "$PURE/sync.sh" role owner 2>&1)
 pure_after=$(cd "$PURE" && find . -type f -exec sha256sum {} + | sort)
-# Deliberately NOT gated on install's exit code. On a host without the real dcg
+# Zero-run guard: the owner phase must reach the dcg reconcile, or an early
+# refusal (no role, a removed verb) would leave the tree pure without trying.
+case "$pure_out" in
+  *"dcg hook"*) ok ;;
+  *) bad "purity run never reached the dcg reconcile, so purity was not exercised:"$'\n'"$pure_out" ;;
+esac
+# Deliberately NOT gated on the owner phase's exit code. On a host without the real dcg
 # binary the reconcile can legitimately fail late, but the canonical rewrite this
 # guards happens BEFORE that point — so purity must hold either way.
 if [ "$pure_before" = "$pure_after" ]; then
   ok
 else
-  bad "./setup modified its own source tree:"$'\n'"$(diff <(echo "$pure_before") <(echo "$pure_after") | head -20)"$'\n'"install said:"$'\n'"$pure_out"
+  bad "./setup modified its own source tree:"$'\n'"$(diff <(echo "$pure_before") <(echo "$pure_after") | head -20)"$'\n'"role owner said:"$'\n'"$pure_out"
 fi
 
 # The converse: the EXPLICIT verb migrates a versioned canonical to the symlink

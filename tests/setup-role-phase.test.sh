@@ -136,7 +136,7 @@ assert_end_state() {
     if [ "$kind" = service ]; then body=$'[Service]\nEnvironment=DRY_RUN=1'
     else body=$'[Timer]\nOnCalendar=\nOnCalendar=daily'; fi
     printf '%s\n' "# Written by ./setup --enable-units from the overlay's hygiene-posture file." \
-      '# Edit that file, not this one; install rewrites or removes this drop-in.' "$body" \
+      '# Edit that file, not this one; ./setup rewrites or removes this drop-in.' "$body" \
       | cmp - "$HOME/.config/systemd/user/wt-sweep.$kind.d/50-hygiene-posture.conf" || fail "$role posture $kind differs"
   done
   for entry in hooks scripts bin commands agents workflows mods CLAUDE.md claude-env.sh memory-dream.json; do

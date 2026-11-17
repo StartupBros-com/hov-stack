@@ -27,9 +27,30 @@ export DOTFILES_ROLE_FILE
 # shellcheck source=../lib/profile.sh
 . "$REPO/lib/profile.sh"
 
-# 1. Zero-run-green guard: the table must actually contain hosts.
-n=$(grep -cvE '^\s*(#|$)' "$DOTFILES_ROLE_FILE")
-[ "$n" -ge 2 ] && ok || bad "hosts.tsv declares $n hosts, expected >=2"
+# The role cases below resolve against the scratch roster above. Cases 1, 4 and 5
+# check the host's real roster, which lives in the private overlay; a public
+# checkout has none, and says so rather than checking the scratch copy it wrote.
+REAL_ROSTER=""
+if command -v overlay_dir >/dev/null 2>&1 && real_ov=$(overlay_dir 2>/dev/null) \
+   && [ -r "$real_ov/hosts.tsv" ]; then
+  REAL_ROSTER=$real_ov/hosts.tsv
+fi
+if [ -n "$REAL_ROSTER" ]; then
+  # 1. Zero-run-green guard: the table must actually contain hosts.
+  n=$(grep -cvE '^\s*(#|$)' "$REAL_ROSTER")
+  [ "$n" -ge 1 ] && ok || bad "$REAL_ROSTER declares $n hosts, expected >=1"
+
+  # 4. EXACTLY ONE workstation. Two would mean two machines pushing canonical
+  #    state, which is the corruption the whole model exists to prevent.
+  c=$(awk -F'\t' '!/^#/ && NF>=2 && $2=="workstation"' "$REAL_ROSTER" | wc -l)
+  [ "$c" -eq 1 ] && ok || bad "$REAL_ROSTER declares $c workstations, must be exactly 1"
+
+  # 5. Every declared role is one of the two known ones.
+  u=$(awk -F'\t' '!/^#/ && NF>=2 && $2!="workstation" && $2!="satellite" {print $2}' "$REAL_ROSTER")
+  [ -z "$u" ] && ok || bad "unknown role(s) in $REAL_ROSTER: $u"
+else
+  echo "host-roles: no overlay hosts.tsv here; roster cases 1, 4 and 5 not checked" >&2
+fi
 
 # 2. An UNMAPPED host resolves to nothing and returns non-zero. Defaulting would
 #    be silent either way: "satellite" disables a workstation's timers,
@@ -42,15 +63,6 @@ w=$( unset DOTFILES_ROLE; profile_role workstation-host 2>&1 )
 x=$( unset DOTFILES_ROLE; profile_role satellite-host 2>&1 )
 [ "$w" = workstation ] && [ "$x" = satellite ] \
   && ok || bad "expected workstation-host=workstation satellite-host=satellite, got workstation-host=$w satellite-host=$x"
-
-# 4. EXACTLY ONE workstation. Two would mean two machines pushing canonical
-#    state, which is the corruption the whole model exists to prevent.
-c=$(awk -F'\t' '!/^#/ && NF>=2 && $2=="workstation"' "$DOTFILES_ROLE_FILE" | wc -l)
-[ "$c" -eq 1 ] && ok || bad "hosts.tsv declares $c workstations, must be exactly 1"
-
-# 5. Every declared role is one of the two known ones.
-u=$(awk -F'\t' '!/^#/ && NF>=2 && $2!="workstation" && $2!="satellite" {print $2}' "$DOTFILES_ROLE_FILE")
-[ -z "$u" ] && ok || bad "unknown role(s) in hosts.tsv: $u"
 
 # 6. No role's timer set enables backup-harness.timer: it is opt-in, because
 #    scripts/backup-harness.sh refuses a public origin. A satellite install still

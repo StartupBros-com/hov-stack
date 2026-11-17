@@ -69,19 +69,19 @@ expect_eq "declared stems, file order, once each" \
 
 expect_eq "service drop-in text" \
   "# Written by ./setup --enable-units from the overlay's hygiene-posture file.
-# Edit that file, not this one; install rewrites or removes this drop-in.
+# Edit that file, not this one; ./setup rewrites or removes this drop-in.
 [Service]
 Environment=DRY_RUN=0
 Environment=PUSH=0" "$(hygiene_posture_render wt-sweep service)"
 expect_eq "timer drop-in text (empty OnCalendar resets the shipped schedule)" \
   "# Written by ./setup --enable-units from the overlay's hygiene-posture file.
-# Edit that file, not this one; install rewrites or removes this drop-in.
+# Edit that file, not this one; ./setup rewrites or removes this drop-in.
 [Timer]
 OnCalendar=
 OnCalendar=Thu *-*-* 01:15:00" "$(hygiene_posture_render wt-sweep timer)"
 expect_eq "reclaim-sweep service drop-in" \
   "# Written by ./setup --enable-units from the overlay's hygiene-posture file.
-# Edit that file, not this one; install rewrites or removes this drop-in.
+# Edit that file, not this one; ./setup rewrites or removes this drop-in.
 [Service]
 Environment=RECLAIM_SWEEP_APPLY=1" "$(hygiene_posture_render reclaim-sweep service)"
 expect_eq "bare stem renders no service drop-in" "" "$(hygiene_posture_render pkg-cache-prune service)"
@@ -96,7 +96,7 @@ unset HYGIENE_POSTURE_ROWS
 # render without preloaded rows loads the file itself
 expect_eq "render loads the overlay file when no rows are preloaded" \
   "# Written by ./setup --enable-units from the overlay's hygiene-posture file.
-# Edit that file, not this one; install rewrites or removes this drop-in.
+# Edit that file, not this one; ./setup rewrites or removes this drop-in.
 [Service]
 Environment=RECLAIM_SWEEP_APPLY=1" "$(hygiene_posture_render reclaim-sweep service)"
 

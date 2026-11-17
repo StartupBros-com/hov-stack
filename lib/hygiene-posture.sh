@@ -182,6 +182,6 @@ hygiene_posture_render() {
   esac
   printf '%s\n%s\n%s%s' \
     "# Written by ./setup --enable-units from the overlay's hygiene-posture file." \
-    "# Edit that file, not this one; install rewrites or removes this drop-in." \
+    "# Edit that file, not this one; ./setup rewrites or removes this drop-in." \
     "$header" "$body"
 }

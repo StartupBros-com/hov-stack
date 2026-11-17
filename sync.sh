@@ -1937,28 +1937,6 @@ apply_hygiene_posture() {
   done
 }
 
-install_harness_links() {
-  ts=$(date +%Y%m%d-%H%M%S)
-  mkdir -p "$H" "$SYS"
-  for d in $STABLE_DIRS; do
-    [ -d "$HERE/$d" ] || continue
-    if [ -L "$H/$d" ]; then
-      [ "$(readlink -f "$H/$d")" = "$(readlink -f "$HERE/$d")" ] && continue
-      rm "$H/$d"
-    elif [ -d "$H/$d" ]; then
-      backup=$H/backups/dotfiles-adopt-$ts; mkdir -p "$backup"; mv "$H/$d" "$backup/$d"
-    fi
-    ln -sfn "$HERE/$d" "$H/$d" && echo "  linked $d/"
-  done
-  for f in $STABLE_FILES; do
-    [ -f "$HERE/$f" ] || continue
-    if [ -e "$H/$f" ] && [ ! -L "$H/$f" ]; then
-      backup=$H/backups/dotfiles-adopt-$ts; mkdir -p "$backup"; mv "$H/$f" "$backup/$f"
-    fi
-    ln -sfn "$HERE/$f" "$H/$f" && echo "  linked $f"
-  done
-}
-
 install_volatile_seed() {
   for f in $VOLATILE_FILES; do
     # Never clobber a live config — the live copy is authoritative once it exists.
@@ -2041,32 +2019,6 @@ install_runtime_policy() {
   # a foreign-host smoke test explicitly skips absolute hook registrations.
   reconcile_runtime_env || return 1
   reconcile_windows_auto_mode || return 1
-}
-
-install_settings() {
-  if [ "${CLAUDE_SYNC_SKIP_HOOK_RECONCILE:-}" = 1 ]; then
-    echo '  skipped settings apply (CLAUDE_SYNC_SKIP_HOOK_RECONCILE=1)'
-  else
-    apply_settings || settings_apply_failed=1
-  fi
-  echo "  note: active Claude sessions cache settings and hooks; restart or cycle existing Auto sessions after install"
-}
-
-install_papercut_link() {
-  # Stdlib-only, so a bare symlink is enough — no venv to create or rot (same
-  # reasoning as dfs; see the data-source-clis skill, "prefer a CLI over an MCP server").
-  if [ -d "$HOME/.local/bin" ]; then
-    ln -sf "$HERE/bin/papercut.py" "$HOME/.local/bin/papercut" && echo "  linked bin/papercut"
-  fi
-}
-
-install_deliverable_link() {
-  # open-deliverable (dotfiles #908): the one place per-host "show this file to the operator"
-  # logic lives, so skills call it by name instead of carrying WSL/macOS/Linux branches.
-  # Plain bash, no deps — a symlink is enough, same shape as papercut above.
-  if [ -d "$HOME/.local/bin" ]; then
-    ln -sf "$HERE/bin/open-deliverable" "$HOME/.local/bin/open-deliverable" && echo "  linked bin/open-deliverable"
-  fi
 }
 
 install_watchdog_link() {
@@ -2279,22 +2231,6 @@ install_role_timers() {
       echo "  WARN systemd user manager unavailable; hygiene timers declared in the overlay posture not enabled: $HYGIENE_POSTURE_DECLARED" >&2
     fi
   fi
-}
-
-install_summary() {
-  [ -n "$backup" ] && echo "  originals backed up to $backup"
-  if [ "$settings_apply_failed" = 1 ]; then
-    echo 'install finished everything else, but settings apply failed (see above)' >&2
-  fi
-  if [ "$papercut_failed" = 1 ]; then
-    echo "install finished everything else, but FAILED to install $PAPERCUT_PLUGIN_ID: $PAPERCUT_INSTALL_ERROR" >&2
-    echo "  The settings.json copies of its three hooks were left in place. Fix the cause above, then re-run ./setup." >&2
-  fi
-  if [ "$posture_failed" = 1 ]; then
-    echo "install finished everything else, but the hygiene posture from the overlay was not applied in full (see above); fix it and re-run ./setup --enable-units." >&2
-  fi
-  if [ "$settings_apply_failed$papercut_failed$posture_failed" != 000 ]; then return 1; fi
-  echo "install done. Restore separately: credentials (claude login), skills (jsm sync), plugins (claude plugin — enabledPlugins already in settings.json)."
 }
 
 role_unit_files() {
