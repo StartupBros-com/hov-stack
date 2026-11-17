@@ -344,41 +344,66 @@ test('capture scale must divide the viewport into whole CSS pixels', () => {
 });
 
 test('narrated scenario reports unparseable URLs instead of throwing', () => {
-  for (const overrides of [
-    { baseUrl: 'not a url' },
-    { baseUrl: 'not a url', unexpected: true },
-  ]) {
-    const result = narratedScenarioSchema.safeParse({
-      ...validNarratedScenario,
-      ...overrides,
-    });
+  const issuesOf = (input: unknown) => {
+    const result = narratedScenarioSchema.safeParse(input);
     assert.equal(result.success, false);
-    if (!result.success)
-      assert.ok(
-        result.error.issues.some(
-          (issue) =>
-            issue.code === 'invalid_format' && issue.path[0] === 'baseUrl',
-        ),
-      );
-  }
+    return result.success
+      ? []
+      : result.error.issues.map((issue) => [
+          issue.code,
+          issue.path.join('.'),
+          issue.message,
+        ]);
+  };
+  const badBaseIssues = [
+    ['invalid_format', 'baseUrl', 'Invalid URL'],
+    [
+      'custom',
+      'baseUrl',
+      'Use an HTTP(S) base URL without credentials, query, or hash',
+    ],
+  ];
+
+  // The base URL's own checks are the only issues: no route is reported as
+  // failing to resolve against a base URL that does not parse.
+  assert.deepEqual(
+    issuesOf({ ...validNarratedScenario, baseUrl: 'not a url' }),
+    badBaseIssues,
+  );
+  assert.deepEqual(
+    issuesOf({
+      ...validNarratedScenario,
+      baseUrl: 'not a url',
+      unexpected: true,
+    }),
+    [
+      ...badBaseIssues,
+      ['unrecognized_keys', '', 'Unrecognized key: "unexpected"'],
+    ],
+  );
 
   for (const path of ['http://[bad', '//[bad']) {
-    const result = narratedScenarioSchema.safeParse({
-      ...validNarratedScenario,
-      routes: [
-        { id: 'home', path },
-        { id: 'reports', path: '/reports' },
+    assert.deepEqual(
+      issuesOf({
+        ...validNarratedScenario,
+        routes: [
+          { id: 'home', path },
+          { id: 'reports', path: '/reports' },
+        ],
+      }),
+      [
+        [
+          'custom',
+          'routes.0.path',
+          'Use an absolute route path without query, hash, URL schemes, or dot segments',
+        ],
+        [
+          'custom',
+          'routes.0.path',
+          'Route paths must resolve against the base URL',
+        ],
       ],
-    });
-    assert.equal(result.success, false);
-    if (!result.success)
-      assert.ok(
-        result.error.issues.some(
-          (issue) =>
-            issue.message === 'Route paths must resolve against the base URL' &&
-            issue.path.join('.') === 'routes.0.path',
-        ),
-      );
+    );
   }
 });
 
