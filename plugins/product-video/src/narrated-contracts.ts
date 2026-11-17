@@ -13,6 +13,7 @@ import {
   narratedCompositionId,
   narratedSchemaVersion,
   normalizedNumberSchema,
+  parseUrl,
   positiveNormalizedNumberSchema,
   prohibitedTargetPattern,
   publicAssetPathSchema,
@@ -187,8 +188,10 @@ export const narratedScenarioSchema = z
   })
   .strict()
   .superRefine((scenario, context) => {
-    const baseUrl = new URL(scenario.baseUrl);
-    if (!scenario.allowedHosts.includes(baseUrl.hostname)) {
+    // An unparseable base URL already fails its own format check, so the
+    // checks that need it are skipped rather than allowed to throw.
+    const baseUrl = parseUrl(scenario.baseUrl);
+    if (baseUrl && !scenario.allowedHosts.includes(baseUrl.hostname)) {
       context.addIssue({
         code: 'custom',
         message: 'The base URL host must appear in allowedHosts',
@@ -248,8 +251,17 @@ export const narratedScenarioSchema = z
       }
       routePaths.add(route.path);
 
-      const target = new URL(route.path, scenario.baseUrl);
-      if (!scenario.allowedHosts.includes(target.hostname)) {
+      if (!baseUrl) {
+        return;
+      }
+      const target = parseUrl(route.path, baseUrl);
+      if (!target) {
+        context.addIssue({
+          code: 'custom',
+          message: 'Route paths must resolve against the base URL',
+          path: ['routes', index, 'path'],
+        });
+      } else if (!scenario.allowedHosts.includes(target.hostname)) {
         context.addIssue({
           code: 'custom',
           message: `Route host ${target.hostname} is not allowlisted`,

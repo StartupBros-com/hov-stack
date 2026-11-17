@@ -122,6 +122,16 @@ export const captureDurationSchema = z
 export const prohibitedTargetPattern =
   /password|passcode|credential|secret|token|api[-_ ]?key|one[-_ ]?time|otp|mfa|two[-_ ]?factor|login|log[-_ ]?in|sign[-_ ]?in|recover|recovery|forgot|e-?mail|user[-_ ]?name|consent|captcha|cookie|microphone|\bmic\b|voice[-_ ]?clone|text[-_ ]?to[-_ ]?speech|\btts\b|upload|publish|send|share|download|install|profile|create[-_ ]?(?:an?[-_ ]?)?account/i;
 
+// Refinements still run after a URL field fails its format check, so they must
+// not let `new URL` throw out of safeParse.
+export function parseUrl(value: string, base?: string | URL) {
+  try {
+    return new URL(value, base);
+  } catch {
+    return undefined;
+  }
+}
+
 function isSafeBaseUrl(value: string) {
   try {
     const url = new URL(value);

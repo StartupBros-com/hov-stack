@@ -156,6 +156,13 @@ for (const type of ['click', 'move'] as const) {
     for (const selector of ['', ' \t\n '])
       expectIssues({ type, selector }, [emptyIssue]);
     expectIssues({ type, selector: 'x'.repeat(301) }, [tooLongIssue]);
+    // Since zod 4.5.0 the limit counts characters, not UTF-16 code units, so 300
+    // emoji fit and 301 do not.
+    assert.equal(
+      parse({ type, selector: '\u{1F600}'.repeat(300) }).success,
+      true,
+    );
+    expectIssues({ type, selector: '\u{1F600}'.repeat(301) }, [tooLongIssue]);
     expectIssues({ type, selector: 'password' + 'x'.repeat(293) }, [
       tooLongIssue,
       prohibitedIssue,
@@ -192,17 +199,22 @@ for (const type of ['click', 'move'] as const) {
     }
   });
 
-  test(`${type} preserves strict-object abort behavior`, () => {
-    for (const selector of ['reports', 'password']) {
-      expectIssues({ type, selector, unexpected: true }, [
-        {
-          code: 'unrecognized_keys',
-          keys: ['unexpected'],
-          path: ['steps', 0],
-          message: 'Unrecognized key: "unexpected"',
-        },
-      ]);
-    }
+  // Since zod 4.5.0 an unknown key no longer stops the step's own checks, so a
+  // prohibited selector is reported next to the unknown key instead of hidden by it.
+  test(`${type} reports unknown keys alongside selector issues`, () => {
+    const unknownKeyIssue = {
+      code: 'unrecognized_keys',
+      keys: ['unexpected'],
+      path: ['steps', 0],
+      message: 'Unrecognized key: "unexpected"',
+    };
+    expectIssues({ type, selector: 'reports', unexpected: true }, [
+      unknownKeyIssue,
+    ]);
+    expectIssues({ type, selector: 'password', unexpected: true }, [
+      unknownKeyIssue,
+      prohibitedIssue,
+    ]);
   });
 
   test(`${type} preserves ordered combined timing and selector issues`, () => {

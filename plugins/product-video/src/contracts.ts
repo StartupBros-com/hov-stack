@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+import { parseUrl } from './narrated-primitives';
+
 const idSchema = z
   .string()
   .min(1)
@@ -122,7 +124,12 @@ export const captureScenarioSchema = z
       .min(1, 'Capture scenarios require at least one step'),
   })
   .superRefine((scenario, context) => {
-    const baseUrl = new URL(scenario.baseUrl);
+    // An unparseable base URL already fails its own format check, and every
+    // check below needs it, so stop here rather than let `new URL` throw.
+    const baseUrl = parseUrl(scenario.baseUrl);
+    if (!baseUrl) {
+      return;
+    }
     if (baseUrl.username || baseUrl.password) {
       context.addIssue({
         code: 'custom',
@@ -145,7 +152,15 @@ export const captureScenarioSchema = z
         return;
       }
 
-      const target = new URL(step.path, scenario.baseUrl);
+      const target = parseUrl(step.path, baseUrl);
+      if (!target) {
+        context.addIssue({
+          code: 'custom',
+          message: 'Navigation paths must resolve against the base URL',
+          path: ['steps', index, 'path'],
+        });
+        return;
+      }
       if (target.username || target.password) {
         context.addIssue({
           code: 'custom',
