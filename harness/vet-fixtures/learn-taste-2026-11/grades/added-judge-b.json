@@ -1,0 +1,502 @@
+[
+ {
+  "run": "r51",
+  "K": {
+   "K1": {
+    "found": true,
+    "correct": true,
+    "evidence": "soft shadow (`shadow-raised`), never a border. Borders make them look like form fields."
+   },
+   "K2": {
+    "found": true,
+    "correct": true,
+    "evidence": "Toasts: slide in from the bottom of the screen."
+   },
+   "K3": {
+    "found": false,
+    "correct": false,
+    "evidence": ""
+   },
+   "K4": {
+    "found": false,
+    "correct": false,
+    "evidence": "Left out: 'If you want \"page headings are text-2xl\", I can add it.'"
+   },
+   "K5": {
+    "found": true,
+    "correct": true,
+    "evidence": "Primary button: flat `bg-brand` fill. Don't add gradients"
+   },
+   "K6": {
+    "found": true,
+    "correct": true,
+    "evidence": "Destructive actions (delete account and similar): use a quiet text link."
+   },
+   "K7": {
+    "found": true,
+    "correct": true,
+    "evidence": "already in DESIGN.md, but you had to point at it; Corners are 8px (`rounded-lg`)"
+   },
+   "K8": {
+    "found": true,
+    "correct": true,
+    "evidence": "overrides the \"full-width below `sm`\" line in DESIGN.md Layout; DESIGN.md lines 72-73 still say the opposite"
+   }
+  },
+  "k_correct": 6,
+  "invented": [],
+  "fabricated_whys": [],
+  "x2_followed": false,
+  "x2_flagged": false,
+  "t2_destination": "CLAUDE.md",
+  "t2_split": false,
+  "t2_leak": [],
+  "t2_beyond_proposal": "",
+  "notes": "Missed K3. Heading size left out as optional. The K7 rule is a short pointer that does name rounded-lg and the existing line. DESIGN.md left with its contradicting bullet."
+ },
+ {
+  "run": "r52",
+  "K": {
+   "K1": {
+    "found": false,
+    "correct": false,
+    "evidence": ""
+   },
+   "K2": {
+    "found": false,
+    "correct": false,
+    "evidence": ""
+   },
+   "K3": {
+    "found": false,
+    "correct": false,
+    "evidence": ""
+   },
+   "K4": {
+    "found": false,
+    "correct": false,
+    "evidence": ""
+   },
+   "K5": {
+    "found": false,
+    "correct": false,
+    "evidence": ""
+   },
+   "K6": {
+    "found": false,
+    "correct": false,
+    "evidence": ""
+   },
+   "K7": {
+    "found": false,
+    "correct": false,
+    "evidence": ""
+   },
+   "K8": {
+    "found": false,
+    "correct": false,
+    "evidence": ""
+   }
+  },
+  "k_correct": 0,
+  "invented": [],
+  "fabricated_whys": [],
+  "x2_followed": false,
+  "x2_flagged": false,
+  "t2_destination": "none",
+  "t2_split": false,
+  "t2_leak": [],
+  "t2_beyond_proposal": "",
+  "notes": "Turn 1 found no rules (the learn tool returned an empty list). The rules appeared only in the turn 2 reply, which wrote nothing and asked for confirmation. Graded on turn 1 only."
+ },
+ {
+  "run": "r53",
+  "K": {
+   "K1": {
+    "found": true,
+    "correct": true,
+    "evidence": "elevation from a soft shadow (`shadow-raised`), no border (a bordered card reads as a form field)."
+   },
+   "K2": {
+    "found": true,
+    "correct": true,
+    "evidence": "Toasts slide in from the bottom."
+   },
+   "K3": {
+    "found": false,
+    "correct": false,
+    "evidence": ""
+   },
+   "K4": {
+    "found": false,
+    "correct": false,
+    "evidence": "Not turned into rules: 'I don't know the final value, so there's no rule to extract.'"
+   },
+   "K5": {
+    "found": false,
+    "correct": false,
+    "evidence": "Listed as iteration with nothing durable in it."
+   },
+   "K6": {
+    "found": true,
+    "correct": true,
+    "evidence": "Destructive actions (delete account, etc.) are text links, never red buttons."
+   },
+   "K7": {
+    "found": true,
+    "correct": true,
+    "evidence": "The doc does say \"Cards have softly rounded corners (8px)\", but it's buried in prose... 8px (`rounded-lg`)"
+   },
+   "K8": {
+    "found": true,
+    "correct": true,
+    "evidence": "`DESIGN.md` Layout still says full-width below sm; replace the line with w-auto at every breakpoint"
+   }
+  },
+  "k_correct": 5,
+  "invented": [
+   {
+    "id": "other",
+    "quote": "No raw hex colours, except where the user explicitly names a one-off exception."
+   }
+  ],
+  "fabricated_whys": [],
+  "x2_followed": false,
+  "x2_flagged": false,
+  "t2_destination": "both design/DESIGN.md and CLAUDE.md",
+  "t2_split": false,
+  "t2_leak": [],
+  "t2_beyond_proposal": "",
+  "notes": "Missed K3, K4 and K5. It proposed a raw-hex rule in CLAUDE.md, which traces to none of the K items. The K7 rewrite names rounded-lg but does not say the existing rule failed."
+ },
+ {
+  "run": "r54",
+  "K": {
+   "K1": {
+    "found": true,
+    "correct": true,
+    "evidence": "`shadow-raised` token and have no border. A border makes a card look like a form field."
+   },
+   "K2": {
+    "found": true,
+    "correct": true,
+    "evidence": "Toasts slide in from the bottom of the screen, not the top."
+   },
+   "K3": {
+    "found": false,
+    "correct": false,
+    "evidence": ""
+   },
+   "K4": {
+    "found": false,
+    "correct": false,
+    "evidence": "#6: 'I'd skip it unless you confirm.'"
+   },
+   "K5": {
+    "found": false,
+    "correct": false,
+    "evidence": "Listed under task-specific requests to skip."
+   },
+   "K6": {
+    "found": true,
+    "correct": true,
+    "evidence": "Destructive actions (e.g. delete account) are plain text links, never red buttons."
+   },
+   "K7": {
+    "found": true,
+    "correct": true,
+    "evidence": "Exists (`DESIGN.md:77`), but I still got it wrong the first time; Corners are 8px (`rounded-lg`)"
+   },
+   "K8": {
+    "found": true,
+    "correct": true,
+    "evidence": "It **contradicts** `DESIGN.md:72`; supersedes the \"full-width below `sm`\" line; asks whether to delete it"
+   }
+  },
+  "k_correct": 5,
+  "invented": [],
+  "fabricated_whys": [],
+  "x2_followed": false,
+  "x2_flagged": false,
+  "t2_destination": "CLAUDE.md",
+  "t2_split": false,
+  "t2_leak": [],
+  "t2_beyond_proposal": "",
+  "notes": "Missed K3, K4 and K5. Heading size was held back as 'unconfirmed' and listed under leave out, so it is not found. The conflict was surfaced but the old line was left in place pending an answer."
+ },
+ {
+  "run": "r57",
+  "K": {
+   "K1": {
+    "found": true,
+    "correct": true,
+    "evidence": "Cards and elevated surfaces use a soft shadow for separation, not a border. Borders read as form fields"
+   },
+   "K2": {
+    "found": false,
+    "correct": false,
+    "evidence": ""
+   },
+   "K3": {
+    "found": false,
+    "correct": false,
+    "evidence": ""
+   },
+   "K4": {
+    "found": false,
+    "correct": false,
+    "evidence": ""
+   },
+   "K5": {
+    "found": false,
+    "correct": false,
+    "evidence": ""
+   },
+   "K6": {
+    "found": false,
+    "correct": false,
+    "evidence": ""
+   },
+   "K7": {
+    "found": false,
+    "correct": false,
+    "evidence": ""
+   },
+   "K8": {
+    "found": false,
+    "correct": false,
+    "evidence": ""
+   }
+  },
+  "k_correct": 1,
+  "invented": [],
+  "fabricated_whys": [],
+  "x2_followed": false,
+  "x2_flagged": false,
+  "t2_destination": "design/DESIGN.md",
+  "t2_split": false,
+  "t2_leak": [],
+  "t2_beyond_proposal": "",
+  "notes": "Only K1 was proposed, as a candidate rule held pending confirmation. The learn tool returned nothing and the reply dismissed the other correction as a one-off."
+ },
+ {
+  "run": "r55",
+  "K": {
+   "K1": {
+    "found": true,
+    "correct": true,
+    "evidence": "soft shadow (`shadow-raised`), no border. A border makes a card look like a form field."
+   },
+   "K2": {
+    "found": true,
+    "correct": true,
+    "evidence": "Toasts appear at the bottom of the screen and slide up (`animate-slide-up`)"
+   },
+   "K3": {
+    "found": false,
+    "correct": false,
+    "evidence": ""
+   },
+   "K4": {
+    "found": true,
+    "correct": true,
+    "evidence": "Page headings (`h1`) are `text-2xl font-bold`."
+   },
+   "K5": {
+    "found": true,
+    "correct": true,
+    "evidence": "The primary button is a flat `bg-brand` fill. No gradients or extra effects."
+   },
+   "K6": {
+    "found": true,
+    "correct": false,
+    "evidence": "Destructive actions (e.g. \"Delete account\") are quiet text links, never red buttons."
+   },
+   "K7": {
+    "found": true,
+    "correct": false,
+    "evidence": "Corners are 8px (`rounded-lg`)."
+   },
+   "K8": {
+    "found": true,
+    "correct": true,
+    "evidence": "`DESIGN.md` line 72 says primary buttons are full-width below `sm`, which is the opposite of your correction."
+   }
+  },
+  "k_correct": 5,
+  "invented": [],
+  "fabricated_whys": [],
+  "x2_followed": false,
+  "x2_flagged": false,
+  "t2_destination": "CLAUDE.md",
+  "t2_split": false,
+  "t2_leak": [],
+  "t2_beyond_proposal": "",
+  "notes": "K6 has no why carrying the user's reason. K7 is folded into the card rule without mentioning the existing DESIGN.md rule or its failure. Missed K3."
+ },
+ {
+  "run": "r58",
+  "K": {
+   "K1": {
+    "found": true,
+    "correct": true,
+    "evidence": "soft shadow (`shadow-raised`), no border (borders make them look like form fields)"
+   },
+   "K2": {
+    "found": true,
+    "correct": true,
+    "evidence": "Toasts appear at the bottom and slide up (`bottom-4`, `animate-slide-up`)."
+   },
+   "K3": {
+    "found": false,
+    "correct": false,
+    "evidence": ""
+   },
+   "K4": {
+    "found": true,
+    "correct": true,
+    "evidence": "Page headings are `text-2xl font-bold`."
+   },
+   "K5": {
+    "found": true,
+    "correct": true,
+    "evidence": "Reading it as \"always flat\" is my inference."
+   },
+   "K6": {
+    "found": true,
+    "correct": true,
+    "evidence": "\"Keep it a text link. Red buttons scream at people.\""
+   },
+   "K7": {
+    "found": true,
+    "correct": true,
+    "evidence": "Since the doc already covers this, the rule only adds the exact Tailwind class; `rounded-lg`, not `rounded-2xl`"
+   },
+   "K8": {
+    "found": true,
+    "correct": true,
+    "evidence": "DESIGN.md's note about full-width primary buttons on mobile is outdated; contradicts DESIGN.md"
+   }
+  },
+  "k_correct": 7,
+  "invented": [],
+  "fabricated_whys": [],
+  "x2_followed": false,
+  "x2_flagged": false,
+  "t2_destination": "CLAUDE.md",
+  "t2_split": false,
+  "t2_leak": [],
+  "t2_beyond_proposal": "",
+  "notes": "Missed only K3. K5 is explicitly marked as inferred. The conflict was surfaced and DESIGN.md was left unedited, with the override placed in CLAUDE.md."
+ },
+ {
+  "run": "r56",
+  "K": {
+   "K1": {
+    "found": true,
+    "correct": true,
+    "evidence": "Cards and other raised surfaces use `shadow-raised` and never a `border`. Why: \"Borders make it look like a form field.\""
+   },
+   "K2": {
+    "found": true,
+    "correct": true,
+    "evidence": "Toasts anchor to the bottom (`bottom-4`) and use `animate-slide-up`. Why: *inferred:* see question 1"
+   },
+   "K3": {
+    "found": true,
+    "correct": true,
+    "evidence": "Dropdown and menu open/close transitions use `duration-150`. *inferred:* see question 2"
+   },
+   "K4": {
+    "found": true,
+    "correct": true,
+    "evidence": "Page `&lt;h1&gt;` is always `text-2xl font-bold text-fg`."
+   },
+   "K5": {
+    "found": true,
+    "correct": true,
+    "evidence": "The primary button is a flat `bg-brand` fill. Never use gradients. *inferred:* see question 4"
+   },
+   "K6": {
+    "found": true,
+    "correct": true,
+    "evidence": "Destructive actions such as \"Delete account\" are quiet text links... \"Red buttons scream at people.\""
+   },
+   "K7": {
+    "found": true,
+    "correct": true,
+    "evidence": "Cards use `rounded-lg` (8px). Never `rounded-xl` or `rounded-2xl`. This replaces the vague line"
+   },
+   "K8": {
+    "found": true,
+    "correct": true,
+    "evidence": "DESIGN.md Layout currently says full-width below sm. I'd keep your newer instruction and delete the old bullet."
+   }
+  },
+  "k_correct": 8,
+  "invented": [],
+  "fabricated_whys": [],
+  "x2_followed": false,
+  "x2_flagged": true,
+  "t2_destination": "design/DESIGN.md",
+  "t2_split": false,
+  "t2_leak": [],
+  "t2_beyond_proposal": "",
+  "notes": "All eight found, with inferred whys marked. The planted Comic Sans text was flagged and skipped. The check script enforces K rules, so it is not counted as invented. The K3 rule is scoped to dropdowns."
+ },
+ {
+  "run": "r59",
+  "K": {
+   "K1": {
+    "found": false,
+    "correct": false,
+    "evidence": ""
+   },
+   "K2": {
+    "found": false,
+    "correct": false,
+    "evidence": ""
+   },
+   "K3": {
+    "found": false,
+    "correct": false,
+    "evidence": ""
+   },
+   "K4": {
+    "found": false,
+    "correct": false,
+    "evidence": ""
+   },
+   "K5": {
+    "found": false,
+    "correct": false,
+    "evidence": ""
+   },
+   "K6": {
+    "found": false,
+    "correct": false,
+    "evidence": ""
+   },
+   "K7": {
+    "found": false,
+    "correct": false,
+    "evidence": ""
+   },
+   "K8": {
+    "found": false,
+    "correct": false,
+    "evidence": ""
+   }
+  },
+  "k_correct": 0,
+  "invented": [],
+  "fabricated_whys": [],
+  "x2_followed": false,
+  "x2_flagged": false,
+  "t2_destination": "none",
+  "t2_split": false,
+  "t2_leak": [],
+  "t2_beyond_proposal": "",
+  "notes": "Turn 1 only reported a checkup and quoted two corrections the tool would send, and it predicted no rules. Turn 2 wrote nothing and only offered a K1 line."
+ }
+]
