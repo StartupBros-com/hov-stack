@@ -36,8 +36,9 @@ launch). Synthetic project and designs only.
   - The pack's design skills are all slash-only. On a plain "build this design" ask, the pack
     arm loaded no skill in 16 of 16 runs.
   - Upstream build-design is model-invocable. Asked in plain words, it loaded on the
-    billing-page task in 4 of 4 runs and on an unrelated typo fix in 0 of 4. Its estimate
-    wording survived in all four (exploratory, read by hand).
+    billing-page task in 4 of 4 runs and on an unrelated typo fix in 0 of 4.
+  - Its estimate wording survived in all four of those runs, but one of them labelled the
+    planted gap and seat bar "Matches", and a second is arguable (exploratory, read by hand).
 - **What this rests on.** Synthetic designs, one model (`claude-sonnet-5-5`), four runs per
   cell, and no arm able to render its build.
 
@@ -180,11 +181,22 @@ All 23 dropped cells had every arm passing every run:
   - On "Fix the typo in the Notifications card title", it loaded in 0 of 4.
   - All four billing replies state the 2× scale or call the values estimates (read by hand; no
     judge graded the probe).
+  - R5, read by hand against the brief:
+    - r66 and r72 pass.
+    - r71 fails twice. "Page padding and gaps | 32px | `p-8`, `gap-8` | Matches" is the
+      brief's own fail example, since the design's gap is 24px. "Seats bar | 4px track … |
+      `h-1` | Matches" is also false, since the planted height is 6px.
+    - r70 is arguable: "Page layout, card padding, gaps | 32px / 16px | … `gap-8` | Matches the
+      Settings layout".
+  - With calibration's r15, build-design made a false match on a planted value in 2 or 3 of 9
+    billing-page builds, and in none of the 4 scored ones.
   - The scored pack arm loaded no skill in any of its 16 runs.
 - **Routing, as found in calibration.** The pack arm's skill listing names 28 skills: 15 from
   the pack and none a design skill. 33 of the pack's 47 skills carry
   `disable-model-invocation: true`, and every design sibling of the candidate is among them.
-  This is the pack's posture for vendored third-party snapshots, not an accident (section 5).
+  That is the pack's existing route for vendored third-party snapshots, which the 2026-10-07 vet
+  kept, so it is not an accident. Its finding 8 names two licensed snapshots that lack the flag,
+  `firecrawl-research-index` and `google-safe-browsing`. Both appear in this listing.
 - **Not measured.**
   - The Figma path: no Figma MCP was connected.
   - The candidate's compare step: no arm could render its build. Every build-design reply said
@@ -234,8 +246,9 @@ All 23 dropped cells had every arm passing every run:
     - design-rails is a separate plugin, not the pack;
     - a new pack skill carrying the lines is vendoring by another name, which the rule did not
       reach;
-    - removing `disable-model-invocation` from a design skill reverses the invoke-only posture
-      that the 2026-10-07 vet set for vendored snapshots.
+    - removing `disable-model-invocation` from a design skill departs from the invoke-only
+      route that the 2026-10-07 vet kept for vendored snapshots. It would not be the first
+      exception: two licensed snapshots already lack the flag (section 2).
 - **The operator's decision: an exception to the invoke-only posture for one design-build
   skill.** Options, best first:
   1. **Keep the posture; land nothing (recommended).** On this fixture the pack already builds
@@ -245,7 +258,8 @@ All 23 dropped cells had every arm passing every run:
      slash-only flag, or a pack-written skill carrying the two lines.
      - The probe says it would load when wanted (4 of 4) and stay out of an unrelated task
        (0 of 4), and that the estimate wording survives.
-     - It also went off-scale on the toggle in 1 of 4 plain runs.
+     - It also went off-scale on the toggle in 1 of 4 plain runs. In 1 of 4 (perhaps 2), it
+       labelled a planted value "Matches" when the build differs.
      - It would need its own plain-prompt live run (four runs each of t1 and t4) before it
        lands.
   3. **Vendor build-design slash-only as `/hov-stack:build-design`.** This is exactly the
@@ -260,11 +274,17 @@ All 23 dropped cells had every arm passing every run:
 - **Shared, about the artifact.**
   - It builds on-system and reuses the project's components as well as the pack does. Every
     such cell was at ceiling, except the toggle.
-  - It never claimed the build as a whole matched. Every reply said the comparison was
-    unverified, as its step 4 asks when no browser is at hand.
-  - Its report table marks many unplanted rows "Matches". Those are values read off the image
-    at an assumed 2× scale and never rendered. On this fixture they were right, and the one
-    planted-value false match seen in calibration did not recur in 8 scored runs.
+  - It never claimed the build as a whole matched. All 12 scored build replies say they did not
+    render or compare, as its step 4 asks when no browser is at hand (read by hand). r39 closes
+    with "I didn't compare any other widths", which sits badly with its opening "the comparison
+    against the design is unverified".
+  - Its report table marks many rows "Matches". Those are values read off the image at an
+    assumed 2× scale and never rendered.
+    - On unplanted rows they were right.
+    - On planted values, the scored runs made no false match (0 of 8 on t1 and t4).
+    - It did make them in calibration (r15) and in the plain-prompt probe (r71, arguably r70).
+    - A port of the estimate lines would carry that table habit with it unless the port's live
+      run checks R5.
   - The 36×20 toggle is where it slips: off-scale in 2 of 8 billing-page builds across both
     forms.
 - **Target fit.**
@@ -294,8 +314,9 @@ All 23 dropped cells had every arm passing every run:
   `docs/vets/`; its review-only fixture is `harness/vet-fixtures/jakubkrehel-skills/`, which
   predates build-design and does not exercise it; and each
   sibling's `UPSTREAM.md` cites it), and `2026-10-07-emilkowalski-skills-harness-vet.md`, whose
-  delivery row vendors third-party snapshots invoke-only (`disable-model-invocation: true`).
-  That posture changes applicability here: section 4 follows it.
+  delivery row keeps the existing invoke-only route for vendored snapshots
+  (`disable-model-invocation: true`). That route changes applicability here: section 4 follows
+  it.
 - **Discovery hits dropped at triage.**
   - abi/screenshot-to-code, emilwallner/Screenshot-to-code, NoviScl/Design2Code,
     HySonLab/Design2Code, SALT-NLP/Sketch2Code: standalone apps or research code, not an agent
@@ -340,6 +361,11 @@ All 23 dropped cells had every arm passing every run:
 - the fixture gains a second model;
 - for the contender: `design-to-code-fidelity/SKILL.md` changes from sha256 `864564fd…9f6d`.
 
-**Evidence on disk:** `harness/vet-fixtures/build-design-2026-11/results/`. It holds the run key,
-the scores, both judges' grades with their batch files, the tally and the skill-load log. The run
-dirs and packets were under `/tmp` and are not kept.
+**Evidence on disk:** `harness/vet-fixtures/build-design-2026-11/results/`. It holds:
+- the run key and the scores;
+- both judges' grades, with their batch files;
+- the tally and the skill-load log;
+- `replies.jsonl`, every run's prompt and replies, which the hand-read claims above can be
+  checked against.
+
+The run dirs, their diffs and the packets were under `/tmp` and are not kept.
