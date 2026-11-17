@@ -377,7 +377,10 @@ ok 'owner merge failure is reported and apply-settings stderr remains visible'
 select_home "$WORK/papercut-and-merge-failure" workstation
 printf '{"permissions":{"deny":"invalid"}}\n' | tee "$HOV_STACK_OVERLAY/settings.json" >/dev/null
 CLAUDE_SYNC_SKIP_HOOK_RECONCILE=0 CLAUDE_SYNC_CLAUDE_BIN="$WORK/claude-fails" run 1 setup --no-dcg
-grep -q '^  settings *failed .*the merge into.*papercut install failed' <<<"$output" || fail 'settings row did not name both the merge and the papercut failure'
+grep -q '^  settings *failed .*apply-settings exited.*papercut install failed' <<<"$output" || {
+  printf '%s\n' "$output"
+  fail 'settings row did not name both the merge and the papercut failure'
+}
 quiet_managers
 ok 'papercut and merge failures are reported together'
 

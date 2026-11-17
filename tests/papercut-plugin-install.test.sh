@@ -210,9 +210,10 @@ grep -q -F 'papercut_failed=0' <<<"$body" ||
 steps=$(grep -E '^      (install_hooks|install_runtime_policy)( |$)' <<<"$summary_body" | awk '{print $1}' | tr '\n' ' ') || true
 [ "$steps" = "install_hooks install_runtime_policy " ] ||
   fail "owner does not run install_hooks before install_runtime_policy: '$steps'"
-grep -q -F 'if [ "$papercut_failed" = 1 ]; then' <<<"$summary_body" &&
-  grep -q -F 'return 3' <<<"$summary_body" ||
+if ! grep -q -F 'if [ "$papercut_failed" = 1 ]; then' <<<"$summary_body" ||
+   ! grep -q -F 'return 3' <<<"$summary_body"; then
   fail "owner never returns the deferred papercut failure status"
+fi
 ok
 
 echo "papercut plugin install: $pass passed"
