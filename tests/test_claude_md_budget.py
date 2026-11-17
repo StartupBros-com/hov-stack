@@ -245,8 +245,14 @@ MERGE_AND_END_KEEPS = (
 
 PRO_GATE_MD = CLAUDE_DIR / "plugins" / "hov-stack" / "skills" / "hov-setup" / "instructions" / "pro-gate.md"
 
+# The operator widened the gate on 2026-11-17 to money and data-overwrite code:
+# the ladder-removal audit found the dropped tiers' real catches sat there,
+# where no later fix commit records the bug, so those clauses are pinned too.
 PRO_GATE_KEEPS = (
     "One `/pro-gate` review runs only when the diff touches billing, auth, migrations or CI",
+    "or changes code that moves real money or paid credits",
+    "or that deletes or overwrites user or operator data",
+    "worktrees that may hold uncommitted work; not caches or build output",
     "A Pro stop (governor, delivery failure, loop cap) is reported, never re-queried",
     "never report that merge as a Pro pass",
     "`PRO_GATE_ROUNDS_CONTINUE=1` and `PRO_GATE_FORCE_ROUND=1` are operator-only",

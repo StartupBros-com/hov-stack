@@ -53,7 +53,7 @@ Length was not the card's only change to a line. Per the recipe's Highlights rul
 
 ## Guidance
 
-The review rule is the operator's merge-and-end ruling of 2026-10-17 (global instructions, "Worktree & Branch Lifecycle", bullet "Merge-and-end"): one `/pro-gate` review runs only when the diff touches billing, auth, migrations or CI (`.github/`, runner or workflow config); every other diff gets no review tier; `/review-adversarial-first`, `/ce-code-review` and `/codex:adversarial-review` run only when the operator names them. This doc adds no gate to that rule.
+The review rule is the operator's merge-and-end ruling of 2026-10-17 (global instructions, "Worktree & Branch Lifecycle", bullet "Merge-and-end"): one `/pro-gate` review runs only when the diff touches billing, auth, migrations or CI (`.github/`, runner or workflow config), or, since 2026-11-17, code that moves real money or paid credits or deletes or overwrites user or operator data (`plugins/hov-stack/skills/hov-setup/instructions/pro-gate.md`); every other diff gets no review tier; `/review-adversarial-first`, `/ce-code-review` and `/codex:adversarial-review` run only when the operator names them. This doc adds no gate to that rule.
 
 What it records is the consequence of the train. Merged, tagged and staged is not reviewed, and after the merge nothing in the train waits for a person. A review the operator names for a range only changes what ships if it finishes before the VERSION-bump merge. A finding that arrives later, as v0.9.0's did, arrives after publish under today's train and ships as the next patch.
 

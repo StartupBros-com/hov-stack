@@ -31,7 +31,8 @@ tags:
 
 > **Retired machinery (2026-10-18).** The default review ladder this doc
 > measured was retired by #1862: a PR now gets at most one `/pro-gate`
-> review, only for billing, auth, migrations or CI diffs, and
+> review, only for billing, auth, migrations or CI diffs (since 2026-11-17
+> also money-moving and data-overwriting code), and
 > `/review-adversarial-first` and `/ce-code-review` run only when the
 > operator names them (`CLAUDE.md`, "Merge-and-end"). "The ladder
 > itself is intact" below describes #1578 and no longer holds. The

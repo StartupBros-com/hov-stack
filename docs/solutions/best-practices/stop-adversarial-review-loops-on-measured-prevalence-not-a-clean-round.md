@@ -25,7 +25,8 @@ tags:
 
 > **Retired machinery (2026-10-18).** The default review ladder was retired
 > by #1862: a PR now gets at most one `/pro-gate` review, only for billing,
-> auth, migrations or CI diffs, and `/review-adversarial-first` runs only
+> auth, migrations or CI diffs (since 2026-11-17 also money-moving and
+> data-overwriting code), and `/review-adversarial-first` runs only
 > when the operator names it (`CLAUDE.md`, "Merge-and-end"). The
 > skill, `review-rounds.py` and `red-first.sh` still exist, so what follows
 > about rounds, freezes and the automatic red-first check applies to an
