@@ -2,7 +2,7 @@
 set -euo pipefail
 umask 022
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
-WORK=$(mktemp -d)
+WORK=$(mktemp -d) || exit 1
 trap 'rm -rf -- "$WORK"' EXIT
 pass=0
 fail() { printf 'FAIL: %s\npassed: %s; failed: 1\n' "$*" "$pass" >&2; exit 1; }
@@ -27,7 +27,11 @@ printf '#!/bin/sh\necho "role-tool 1.0.0"\n' | tee "$TOOL_UPDATE_BIN_DIR/role-to
 chmod +x "$TOOL_UPDATE_BIN_DIR/role-tool"
 cp "$ROOT/tests/fixtures/role-systemctl.sh" "$WORK/bin/systemctl"
 cp "$ROOT/tests/fixtures/role-sudo.sh" "$WORK/bin/sudo"
-printf '#!/bin/sh\n[ "%s" = -l ] || exit 98\nexit 0\n' "\$1" | tee "$WORK/bin/crontab" >/dev/null
+cat <<'EOF' | tee "$WORK/bin/crontab" >/dev/null
+#!/bin/sh
+[ "$1" = -l ] || { printf '%s\n' "$*" >> "$HOME/crontab.log"; exit 98; }
+exit 0
+EOF
 printf '#!/bin/sh\nprintf "unexpected docker: %%s\\n" "$*" >&2\nexit 98\n' | tee "$WORK/bin/docker" >/dev/null
 printf '#!/bin/sh\nprintf "offline fixture\\n" >&2\nexit 1\n' | tee "$WORK/bin/curl" >/dev/null
 chmod +x "$WORK/bin/systemctl" "$WORK/bin/sudo" "$WORK/bin/crontab" "$WORK/bin/docker" "$WORK/bin/curl"
@@ -64,10 +68,11 @@ select_home() {
   ln -s "$REPO/CLAUDE.md" "$CLAUDE_HOME/CLAUDE.md"
   ln -s "$REPO/claude-env.sh" "$CLAUDE_HOME/claude-env.sh"
   ln -s "$REPO/memory-dream.json" "$CLAUDE_HOME/memory-dream.json"
+  ln -s /usr/bin/true "$HOME/.local/bin/dcg"
 }
 
 contains() {
-  if ! printf '%s\n' "$output" | grep -Fq -- "$1"; then
+  if ! grep -Fq -- "$1" <<<"$output"; then
     printf '%s\n' "$output"
     fail "missing: $1"
   fi
@@ -75,6 +80,7 @@ contains() {
 
 quiet_managers() {
   local call
+  [ ! -e "$HOME/crontab.log" ] || fail 'routine setup edited crontab'
   if [ -s "$HOME/sudo.log" ]; then cat "$HOME/sudo.log"; fail 'routine setup called sudo'; fi
   if [ -s "$HOME/systemctl.log" ]; then
     while IFS= read -r call; do
@@ -85,9 +91,9 @@ quiet_managers() {
     done < "$HOME/systemctl.log"
   fi
 }
-clear_logs() { rm -f -- "$HOME/sudo.log" "$HOME/systemctl.log"; }
+clear_logs() { rm -f -- "$HOME/sudo.log" "$HOME/systemctl.log" "$HOME/crontab.log"; }
 calls() {
-  awk '$2 == "enable" || $2 == "disable" { for (index_unit=3; index_unit<=NF; index_unit++) if ($index_unit !~ /^--/) print $2, $index_unit }' "$1/systemctl.log" | sort -u
+  cat "$1/systemctl.log"
 }
 
 run() {
@@ -105,9 +111,11 @@ for role in workstation satellite; do
   first=$WORK/$role-install
   second=$WORK/$role-setup
   select_home "$first" "$role"
-  run 0 sync install
+  printf 'wt-sweep DRY_RUN=1\nwt-sweep OnCalendar=daily\n' >> "$HOV_STACK_OVERLAY/hygiene-posture"
+  CLAUDE_SYNC_SKIP_HOOK_RECONCILE=0 run 0 sync install
   select_home "$second" "$role"
-  run 0 setup
+  printf 'wt-sweep DRY_RUN=1\nwt-sweep OnCalendar=daily\n' >> "$HOV_STACK_OVERLAY/hygiene-posture"
+  CLAUDE_SYNC_SKIP_HOOK_RECONCILE=0 run 0 setup
   quiet_managers
   ok "$role plain setup does not elevate or change schedules"
   run 0 setup --enable-units
@@ -117,6 +125,11 @@ for role in workstation satellite; do
   diff -r "$first/system-units" "$second/system-units" || fail "$role system units differ"
   cmp "$first/managed/settings.json" "$second/managed/settings.json" || fail "$role managed lock differs"
   diff <(calls "$first") <(calls "$second") || fail "$role timer calls differ"
+  cmp "$first/.claude/settings.json" "$second/.claude/settings.json" || { diff -u "$first/.claude/settings.json" "$second/.claude/settings.json"; fail "$role settings differ"; }
+  diff -r "$first/docker-policy" "$second/docker-policy" || fail "$role Docker policy differs"
+  [ -f "$second/.config/systemd/user/wt-sweep.service.d/50-hygiene-posture.conf" ] || fail "$role posture service drop-in missing"
+  [ -f "$second/.config/systemd/user/wt-sweep.timer.d/50-hygiene-posture.conf" ] || fail "$role posture timer drop-in missing"
+  grep -q '^--user enable --now wt-sweep.timer$' "$second/systemctl.log" || fail "$role posture timer not enabled"
   for entry in .local/bin/papercut .local/bin/open-deliverable .local/bin/wsl-watchdog.sh \
     .config/statusline-stack/local-statusline.mjs .claude/config/repo-routes.json; do
     [ -L "$first/$entry" ] && [ -L "$second/$entry" ] || fail "$role missing link: $entry"
@@ -126,31 +139,38 @@ for role in workstation satellite; do
   diff -r "$first/.claude/projects" "$second/.claude/projects" || fail "$role memory differs"
   ok "$role install equals setup + enable + root (files, links, memory, timer calls)"
   clear_logs
+  TMPDIR="$HOME/no-temp" run 0 sync role check
+  contains 'role: nothing to change'
+  printf '\nchanged\n' >>"$CLAUDE_SYNC_MANAGED_LOCK"
+  if [ "$role" = workstation ]; then
+    printf '\nchanged\n' >>"$CLAUDE_SYNC_SYSTEM_SYS_DIR/zram-swap.service"
+  fi
   run 0 setup --sync --no-pull
+  contains 'managed lock differs: ./setup --root'
+  if [ "$role" = workstation ]; then contains '1 system unit(s) differ: ./setup --root'; fi
   quiet_managers
   ok "$role sync does not elevate or change schedules"
   clear_logs
   run 0 setup --update --no-dcg
   contains 'nothing to merge into settings.json'
+  contains 'managed lock differs: ./setup --root'
+  if [ "$role" = workstation ]; then contains '1 system unit(s) differ: ./setup --root'; fi
   quiet_managers
   ok "$role update keeps role steps unprivileged"
   clear_logs
+  before=$(find "$HOME/" -type f -printf '%P %s %T@\n' | sort)
   TMPDIR="$HOME/no-temp" run 0 sync role check
-  contains 'role: nothing to change'
-  if [ "$role" = workstation ]; then
-    printf '\nchanged\n' >>"$CLAUDE_SYNC_SYSTEM_SYS_DIR/zram-swap.service"
-    printf '\nchanged\n' >>"$CLAUDE_SYNC_MANAGED_LOCK"
-    before=$(find "$HOME/" -type f -printf '%P %s %T@\n' | sort)
-    TMPDIR="$HOME/no-temp" run 0 sync role check
-    contains '1 system unit(s) differ: ./setup --root'
-    contains 'managed lock differs: ./setup --root'
-    TMPDIR="$HOME/no-temp" run 0 sync role refresh
-    contains '1 system unit(s) differ: ./setup --root'
-    after=$(find "$HOME/" -type f -printf '%P %s %T@\n' | sort)
-    diff <(printf '%s\n' "$before") <(printf '%s\n' "$after") || fail 'drift report wrote files'
-    [ ! -e "$HOME/systemctl.log" ] && [ ! -e "$HOME/sudo.log" ] || fail 'drift report called manager or sudo'
-    ok 'workstation drift rendering writes nothing, including temporary files'
-  fi
+  if [ "$role" = workstation ]; then contains '1 system unit(s) differ: ./setup --root'
+  else [[ "$output" != *'system unit'* ]] || fail 'satellite check reported system-unit drift'; fi
+  contains 'managed lock differs: ./setup --root'
+  TMPDIR="$HOME/no-temp" run 0 sync role refresh
+  if [ "$role" = workstation ]; then contains '1 system unit(s) differ: ./setup --root'
+  else [[ "$output" != *'system unit'* ]] || fail 'satellite refresh reported system-unit drift'; fi
+  contains 'managed lock differs: ./setup --root'
+  after=$(find "$HOME/" -type f -printf '%P %s %T@\n' | sort)
+  diff <(printf '%s\n' "$before") <(printf '%s\n' "$after") || fail 'drift report wrote files'
+  [ ! -e "$HOME/systemctl.log" ] && [ ! -e "$HOME/sudo.log" ] || fail 'drift report called manager or sudo'
+  ok "$role drift rendering writes nothing, including temporary files"
 done
 
 rm -- "$HOME/.config/systemd/user/dcg-auto-update.timer"
@@ -238,4 +258,145 @@ printf 'malformed\n' | tee "$HOV_STACK_OVERLAY/commands" >/dev/null
 run 0 setup --no-dcg
 contains 'malformed line(s) skipped: 1'
 ok 'empty and entirely malformed overlay lists are safe'
+
+printf '# CRLF list\r\n\r\nrelative\trelative\r\nabsolute\t%s/absolute\r\n' "$HOME" | tee "$HOV_STACK_OVERLAY/commands" >/dev/null
+rm -- "$HOME/.local/bin/relative" "$HOME/.local/bin/absolute"
+run 0 setup --no-dcg
+contains '2 overlay commands linked'
+[[ "$output" != *'malformed line'* ]] || fail 'CRLF commands reported malformed lines'
+[ -L "$HOME/.local/bin/relative" ] && [ -L "$HOME/.local/bin/absolute" ] || fail 'CRLF commands were not linked'
+ok 'CRLF commands link without malformed blank lines'
+
+for role in workstation satellite; do
+  select_home "$WORK/$role-overlay" "$role"
+  printf '{"env":{"ROLE_OVERLAY_TEST":"merged"}}\n' | tee "$HOV_STACK_OVERLAY/settings.json" >/dev/null
+  run 0 setup --no-dcg
+  contains "settings.json merged through sync.sh into $CLAUDE_HOME/settings.json"
+  grep -q '^  overlay *ok ' <<<"$output" || fail "$role owner overlay row is not ok"
+  jq -e '.env.ROLE_OVERLAY_TEST == "merged"' "$CLAUDE_HOME/settings.json" >/dev/null || fail "$role owner overlay key was not merged"
+  quiet_managers
+  ok "$role owner overlay merge is reported correctly"
+done
+
+select_home "$WORK/papercut-failure" workstation
+printf '{"env":{"ROLE_OVERLAY_TEST":"merged"}}\n' | tee "$HOV_STACK_OVERLAY/settings.json" >/dev/null
+cat <<'EOF' | tee "$WORK/claude-fails" >/dev/null
+#!/bin/sh
+[ "$1 $2" != "plugin install" ] || { echo 'papercut install fixture failure'; exit 19; }
+exit 0
+EOF
+chmod +x "$WORK/claude-fails"
+CLAUDE_SYNC_SKIP_HOOK_RECONCILE=0 CLAUDE_SYNC_CLAUDE_BIN="$WORK/claude-fails" run 0 setup --no-dcg
+jq -e '.env.ROLE_OVERLAY_TEST == "merged"' "$CLAUDE_HOME/settings.json" >/dev/null || fail 'papercut failure blocked owner settings merge'
+grep -q '^  settings *warning .*papercut install failed' <<<"$output" || fail 'papercut failure did not produce settings warning'
+contains 'exited 19'
+CLAUDE_SYNC_SKIP_HOOK_RECONCILE=0 CLAUDE_SYNC_CLAUDE_BIN="$WORK/claude-fails" run 3 sync role owner
+contains 'role: owner steps complete; papercut install failed'
+quiet_managers
+ok 'papercut soft failure still merges settings and exits with a named warning'
+
+select_home "$WORK/hard-failure" satellite
+printf '{"env":{"ROLE_OVERLAY_TEST":"not-merged"}}\n' | tee "$HOV_STACK_OVERLAY/settings.json" >/dev/null
+CCFLARE_URL_SATELLITE='' run 1 setup --no-dcg
+contains 'settings merge not run'
+contains 'the merge into'
+jq -e '.env.ROLE_OVERLAY_TEST == null' "$CLAUDE_HOME/settings.json" >/dev/null || fail 'hard owner failure allowed merge'
+ok 'hard owner step failure blocks merge and reports overlay failure'
+
+select_home "$WORK/merge-failure" workstation
+printf '{"permissions":{"deny":"invalid"}}\n' | tee "$HOV_STACK_OVERLAY/settings.json" >/dev/null
+run 1 setup --no-dcg
+contains 'the merge into'
+[[ "$output" != *'wrote no seed'* ]] || fail 'failed owner merge reported missing seed'
+contains 'permissions.deny'
+ok 'owner merge failure is reported and apply-settings stderr remains visible'
+
+select_home "$WORK/partial-refresh" satellite
+mkdir -p "$HOME/.config/systemd/user"
+printf 'first hand edit\n' | tee "$HOME/.config/systemd/user/backup-harness.service" >/dev/null
+printf 'outside hand edit\n' | tee "$HOME/outside-unit" >/dev/null
+ln -s "$HOME/outside-unit" "$HOME/.config/systemd/user/backup-harness.timer"
+printf 'third hand edit\n' | tee "$HOME/.config/systemd/user/dcg-auto-update.service" >/dev/null
+run 0 setup --sync --no-pull --no-dcg
+contains 'sync: warning:'
+cmp "$HOME/.config/systemd/user/backup-harness.service" "$REPO/systemd/backup-harness.service" || fail 'partial refresh missed first unit'
+cmp "$HOME/.config/systemd/user/dcg-auto-update.service" "$REPO/systemd/dcg-auto-update.service" || fail 'partial refresh missed third unit'
+[ "$(cat "$HOME/outside-unit")" = 'outside hand edit' ] && [ -L "$HOME/.config/systemd/user/backup-harness.timer" ] || fail 'partial refresh touched refused symlink'
+[ "$(grep -c '^--user daemon-reload$' "$HOME/systemctl.log")" = 1 ] || fail 'partial refresh did not reload exactly once'
+contains '2 unit file(s) updated; 1 refused; 0 failed'
+quiet_managers
+ok 'partial refresh continues past refusal and reloads successful changes once'
+
+select_home "$WORK/deferred-reload" satellite
+mkdir -p "$HOME/.config/systemd/user"
+printf 'hand edit\n' | tee "$HOME/.config/systemd/user/dcg-auto-update.service" >/dev/null
+MANAGER_EXIT=1 run 0 sync role refresh
+[ -f "$CLAUDE_HOME/.hov-stack/units-reload-pending" ] || fail 'deferred reload marker missing'
+cmp "$HOME/.config/systemd/user/dcg-auto-update.service" "$REPO/systemd/dcg-auto-update.service" || fail 'deferred refresh did not rewrite unit'
+! grep -q 'daemon-reload' "$HOME/systemctl.log" || fail 'unavailable manager was reloaded'
+clear_logs
+before=$(find "$HOME/" -type f -printf '%P %s %T@\n' | sort)
+TMPDIR="$HOME/no-temp" run 0 sync role check
+contains 'user unit reload pending'
+after=$(find "$HOME/" -type f -printf '%P %s %T@\n' | sort)
+diff <(printf '%s\n' "$before") <(printf '%s\n' "$after") || fail 'pending reload check wrote files'
+[ ! -e "$HOME/systemctl.log" ] || fail 'pending reload check called manager'
+run 0 sync role refresh
+[ "$(grep -c '^--user daemon-reload$' "$HOME/systemctl.log")" = 1 ] || fail 'pending reload not retried exactly once'
+[ ! -e "$CLAUDE_HOME/.hov-stack/units-reload-pending" ] || fail 'pending reload marker not removed'
+quiet_managers
+ok 'deferred reload survives identical files and check remains read-only'
+
+select_home "$WORK/backup-refresh" satellite
+mkdir -p "$HOME/.config/systemd/user/jsm-auto-update.service.d"
+printf 'hand edit\n' | tee "$HOME/.config/systemd/user/dcg-auto-update.service" >/dev/null
+printf 'drop-in hand edit\n' | tee "$HOME/.config/systemd/user/jsm-auto-update.service.d/override.conf" >/dev/null
+run 0 setup --sync --no-pull --no-dcg
+backups=("$CLAUDE_HOME"/backups/unit-refresh-*)
+[ "${#backups[@]}" = 1 ] && [ -d "${backups[0]}" ] || fail 'refresh backup directory missing or duplicated'
+contains "unit refresh backup: ${backups[0]}"
+[ "$(cat "${backups[0]}/dcg-auto-update.service")" = 'hand edit' ] || fail 'refresh backup lost hand-edited bytes'
+[ "$(cat "${backups[0]}/jsm-auto-update.service.d/override.conf")" = 'drop-in hand edit' ] || fail 'refresh backup lost drop-in path or bytes'
+cmp "$HOME/.config/systemd/user/dcg-auto-update.service" "$REPO/systemd/dcg-auto-update.service" || fail 'backed-up unit was not refreshed'
+cmp "$HOME/.config/systemd/user/jsm-auto-update.service.d/override.conf" "$REPO/systemd/jsm-auto-update.service.d/override.conf" || fail 'backed-up drop-in was not refreshed'
+before=$(find "$CLAUDE_HOME/backups" -printf '%P %s %T@\n' | sort)
+clear_logs
+run 0 sync role refresh
+after=$(find "$CLAUDE_HOME/backups" -printf '%P %s %T@\n' | sort)
+diff <(printf '%s\n' "$before") <(printf '%s\n' "$after") || fail 'no-diff refresh created or changed backups'
+[ ! -e "$HOME/systemctl.log" ] || fail 'no-diff refresh called manager'
+ok 'routine refresh preserves hand edits and drop-in paths in one backup; no diff creates none'
+
+cat <<'EOF' | tee "$WORK/bin/cp" >/dev/null
+#!/usr/bin/env bash
+case "${COPY_FAILURE:-}:$*" in
+  backup:'-a -- '*dcg-auto-update.service*) exit 17 ;;
+  install:*repo/systemd/dcg-auto-update.service*) exit 18 ;;
+esac
+exec /usr/bin/cp "$@"
+EOF
+chmod +x "$WORK/bin/cp"
+for failure in backup install; do
+  printf 'first edit\n' | tee "$HOME/.config/systemd/user/backup-harness.service" >/dev/null
+  printf 'keep this edit\n' | tee "$HOME/.config/systemd/user/dcg-auto-update.service" >/dev/null
+  printf 'later edit\n' | tee "$HOME/.config/systemd/user/jsm-auto-update.service.d/override.conf" >/dev/null
+  clear_logs
+  COPY_FAILURE="$failure" run 1 sync role refresh
+  contains '2 unit file(s) updated; 0 refused; 1 failed'
+  [ "$(cat "$HOME/.config/systemd/user/dcg-auto-update.service")" = 'keep this edit' ] || fail "$failure failure overwrote the unit"
+  cmp "$HOME/.config/systemd/user/backup-harness.service" "$REPO/systemd/backup-harness.service" || fail "$failure failure lost first update"
+  cmp "$HOME/.config/systemd/user/jsm-auto-update.service.d/override.conf" "$REPO/systemd/jsm-auto-update.service.d/override.conf" || fail "$failure failure lost later update"
+  [ "$(grep -c '^--user daemon-reload$' "$HOME/systemctl.log")" = 1 ] || fail "$failure failure skipped reload"
+  quiet_managers
+  ok "$failure copy failure preserves the unit, continues and reloads"
+done
+rm -- "$WORK/bin/cp"
+
+select_home "$WORK/profile-stderr" none
+DOTFILES_ROLE=workstation run 0 setup --no-dcg
+[[ "$output" != *'profile:'* ]] || fail 'host_role leaked profile stderr'
+DOTFILES_ROLE=workstation run 1 setup --enable-units
+contains 'needs a host role'
+[[ "$output" != *'profile:'* ]] || fail 'standalone host_role leaked profile stderr'
+ok 'host_role silences profile stderr but retains setup guidance'
 printf 'passed: %s; failed: 0\n' "$pass"

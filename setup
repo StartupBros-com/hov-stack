@@ -303,7 +303,7 @@ fi
 host_role() {
   [ -x "$HOV_STACK/sync.sh" ] && [ -r "$HOV_STACK/lib/profile.sh" ] || return 1
   local role
-  role=$( ( . "$HOV_STACK/lib/profile.sh"; profile_role ) ) || return 1
+  role=$( ( . "$HOV_STACK/lib/profile.sh"; profile_role ) 2>/dev/null ) || return 1
   case "$role" in workstation|satellite) printf '%s\n' "$role" ;; *) return 1 ;; esac
 }
 
@@ -1053,6 +1053,7 @@ overlay_row() {  # overlay_row check|run
         why=${why#settings-seed: }
         overlay_problem invalid "${why%; no seed was written}, so ./setup writes no seed"
       fi
+    elif [ "$merge_state" = synced ]; then parts+=("settings.json merged through sync.sh into $CFG/settings.json")
     elif [ "$merge_state" = done ]; then parts+=("settings.json merged into $CFG/settings.json, which ./setup has a record of creating")
     elif [ "$merge_state" = failed ]; then overlay_problem failed "$OVERLAY/settings.json was not merged: the merge into $CFG/settings.json did not finish (see the settings row)"
     elif [ "$seed_ok" = 1 ]; then parts+=("settings.json merged into the seed at $seed_target")
@@ -1224,7 +1225,7 @@ merge_show() {  # the engine's item lines, under setup's own heading and in setu
     -e 's/^/  /'
 }
 merge_done() { [ -z "$merge_tmp" ] || rm -rf "$merge_tmp"; merge_tmp=; }
-merge_state=  # done, failed or noseed once a run merged into settings.json; empty when it did not
+merge_state=  # synced (owner), done, failed or noseed; empty when no merge ran
 merge_tmp=
 seed_ok=0
 au_on=0
@@ -1317,6 +1318,7 @@ overlay_commands_row() {
   overlay_real=$(cd "$OVERLAY" && pwd -P) || return 1
   while IFS= read -r line || [ -n "$line" ]; do
     number=$((number + 1))
+    line=${line%$'\r'}
     case "$line" in ''|\#*) continue ;; esac
     name=${line%%$'\t'*}
     source=${line#*$'\t'}
@@ -2147,14 +2149,23 @@ seed_target=$CFG/settings.json
 moved_seed=
 sync_route_find
 if [ "$sync_route" = owner ]; then
-  if role_run owner; then
+  owner_rc=0
+  role_run owner || owner_rc=$?
+  if [ "$owner_rc" = 0 ] || [ "$owner_rc" = 3 ]; then
     sync_merge
     if [ "$sync_merge_failed" = 0 ]; then
-      row settings ok "$sync_merge_text${sync_merge_warn:+; $sync_merge_warn}"
+      merge_state=synced
+      if [ "$owner_rc" = 3 ]; then
+        row settings warning "$sync_merge_text; $role_text${sync_merge_warn:+; $sync_merge_warn}"
+      else
+        row settings ok "$sync_merge_text${sync_merge_warn:+; $sync_merge_warn}"
+      fi
     else
+      merge_state=failed
       row settings failed "$sync_merge_text"
     fi
   else
+    merge_state=failed
     row settings failed "$role_text; settings merge not run"
   fi
 elif settings_mergeable; then

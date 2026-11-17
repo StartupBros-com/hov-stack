@@ -2320,7 +2320,8 @@ install() {
 }
 
 role_unit_files() {
-  local phase=$1 unit changed=0 new=0
+  local phase=$1 unit changed=0 new=0 refused=0 failed=0 reload_failed=0 backup=""
+  local pending="$H/.hov-stack/units-reload-pending"
   for unit in $UNITS; do
     [ -f "$HERE/systemd/$unit" ] || continue
     if [ ! -f "$SYS/$unit" ]; then
@@ -2330,9 +2331,25 @@ role_unit_files() {
       if [ "$phase" = refresh ]; then
         case "$(readlink -f "$SYS/$unit")" in
           "$(readlink -f "$SYS")"/*) ;;
-          *) echo "  refusing unit outside user unit directory: $unit" >&2; return 1 ;;
+          *) echo "  refusing unit outside user unit directory: $unit" >&2; refused=$((refused + 1)); continue ;;
         esac
-        install_user_unit "$unit" || return 1
+        if [ -z "$backup" ]; then
+          if ! mkdir -p "$H/backups" || ! backup=$(mktemp -d "$H/backups/unit-refresh-$(date +%Y%m%d-%H%M%S)-XXXXXX"); then
+            echo "  failed to create unit refresh backup for $unit" >&2
+            failed=$((failed + 1))
+            continue
+          fi
+          echo "  unit refresh backup: $backup"
+        fi
+        if ! (cd "$backup" && mkdir -p "./$(dirname "$unit")" && cp -a -- "$SYS/$unit" "./$unit"); then
+          echo "  failed to back up user unit $unit; leaving it alone" >&2
+          failed=$((failed + 1))
+          continue
+        fi
+        if ! install_user_unit "$unit"; then
+          failed=$((failed + 1))
+          continue
+        fi
         echo "  updated unit: $unit"
       else
         echo "  unit differs: $unit"
@@ -2342,11 +2359,35 @@ role_unit_files() {
   done
   if [ "$changed" -gt 0 ]; then
     if [ "$phase" = refresh ]; then
-      install_daemon_reload || return 1
       role_summary="$changed unit file(s) updated"
     else
       role_summary="$changed unit file(s) differ"
     fi
+  fi
+  if [ "$phase" = refresh ]; then
+    if [ "$refused" -gt 0 ] || [ "$failed" -gt 0 ]; then
+      role_summary="$changed unit file(s) updated; $refused refused; $failed failed"
+    fi
+    if [ "$changed" -gt 0 ] || [ -f "$pending" ]; then
+      if ! mkdir -p "$(dirname "$pending")" || ! touch "$pending"; then
+        echo "  failed to record pending user-unit reload" >&2
+        reload_failed=1
+      fi
+      if systemctl --user show-environment >/dev/null 2>&1; then
+        if systemctl --user daemon-reload; then
+          rm -f -- "$pending" || reload_failed=1
+        else
+          echo "  systemd user manager is reachable but daemon-reload failed" >&2
+          reload_failed=1
+        fi
+      else
+        echo "  WARN systemd user manager unavailable; units copied but daemon-reload deferred" >&2
+      fi
+    fi
+  fi
+  if [ -f "$pending" ]; then
+    echo "  user unit reload pending: re-run ./setup when the user manager is available"
+    role_summary="${role_summary:+$role_summary; }user unit reload pending"
   fi
   [ "$new" -eq 0 ] || role_summary="${role_summary:+$role_summary; }$new new unit(s): ./setup --enable-units"
   if [ -f "$MANAGED_REF" ] && ! cmp -s "$MANAGED_REF" "$MANAGED_LOCK"; then
@@ -2364,7 +2405,7 @@ role_unit_files() {
     done
   fi
   [ "$changed" -eq 0 ] || role_summary="${role_summary:+$role_summary; }$changed system unit(s) differ: ./setup --root"
-  return 0
+  [ "$refused" -eq 0 ] && [ "$failed" -eq 0 ] && [ "$reload_failed" -eq 0 ]
 }
 
 role_steps() {
@@ -2383,7 +2424,8 @@ role_steps() {
       role_summary="owner steps complete"
       if [ "$papercut_failed" = 1 ]; then
         echo "  FAILED to install $PAPERCUT_PLUGIN_ID: $PAPERCUT_INSTALL_ERROR" >&2
-        return 1
+        role_summary="owner steps complete; papercut install failed: $PAPERCUT_INSTALL_ERROR"
+        return 3
       fi
       ;;
     enable)
@@ -2416,8 +2458,8 @@ role_phase() {
     echo "usage: sync.sh role <refresh|owner|enable|root|check>" >&2
     return 2
   fi
-  role_steps "$1" || rc=1
-  if [ "$rc" = 1 ]; then role_summary="$1 failed (see above)"; fi
+  role_steps "$1" || rc=$?
+  if [ "$rc" = 1 ]; then role_summary="${role_summary:+$role_summary; }$1 failed (see above)"; fi
   echo "role: ${role_summary:-nothing to change}"
   return "$rc"
 }

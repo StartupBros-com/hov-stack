@@ -6,7 +6,7 @@ shift
 action=$1
 shift
 case "$action" in
-  show-environment) exit 0 ;;
+  show-environment) exit "${MANAGER_EXIT:-0}" ;;
   daemon-reload) exit "${RELOAD_EXIT:-0}" ;;
   is-enabled) [ -f "$HOME/enabled/$1" ] ;;
   is-active) echo inactive; exit 3 ;;

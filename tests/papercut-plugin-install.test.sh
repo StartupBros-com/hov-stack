@@ -196,15 +196,25 @@ ensure "$h" STUB_MODE=noop
 [ "$rc" -ne 0 ] || fail "a CLI that installed nothing was taken as success:"$'\n'"$out"
 case $out in *"still not installed"*) ok ;; *) fail "the no-op install was not named:"$'\n'"$out" ;; esac
 
-# install runs dcg before plugin installation and defers plugin failure.
+# install runs dcg before plugin installation and defers plugin failure. Since
+# #713 install() is a list of step functions: install_hooks holds the two calls,
+# install_summary turns papercut_failed into the exit status, and install()
+# declares the flag and runs the hooks step before the settings apply.
 body=$(sed -n '/^install() {/,/^}/p' "$SYNC")
-order=$(printf '%s\n' "$body" | grep -E '^    (reconcile_dcg_hook|ensure_papercut_plugin) ' | awk '{print $1}' | tr '\n' ' ')
+hooks_body=$(sed -n '/^install_hooks() {/,/^}/p' "$SYNC")
+summary_body=$(sed -n '/^install_summary() {/,/^}/p' "$SYNC")
+order=$(grep -E '^    (reconcile_dcg_hook|ensure_papercut_plugin) ' <<<"$hooks_body" | awk '{print $1}' | tr '\n' ' ') || true
 [ "$order" = "reconcile_dcg_hook ensure_papercut_plugin " ] ||
-  fail "install() does not run dcg before plugin installation: $order"
-grep -q -F 'ensure_papercut_plugin || papercut_failed=1' <<<"$body" ||
-  fail "install() no longer defers a failed papercut install to its end"
-grep -q -F 'if [ "$papercut_failed" = 1 ]; then' <<<"$body" ||
-  fail "install() never exits non-zero for a failed papercut install"
+  fail "install_hooks() does not run dcg before plugin installation: '$order'"
+grep -q -F 'ensure_papercut_plugin || papercut_failed=1' <<<"$hooks_body" ||
+  fail "install_hooks() no longer defers a failed papercut install to the end of install"
+grep -q -F 'papercut_failed=0' <<<"$body" ||
+  fail "install() no longer declares papercut_failed for its steps"
+steps=$(grep -E '^  (install_hooks|install_settings|install_summary)( |$)' <<<"$body" | awk '{print $1}' | tr '\n' ' ') || true
+[ "$steps" = "install_hooks install_settings install_summary " ] ||
+  fail "install() does not run install_hooks, then install_settings, then install_summary: '$steps'"
+grep -q -F 'if [ "$papercut_failed" = 1 ]; then' <<<"$summary_body" ||
+  fail "install_summary() never exits non-zero for a failed papercut install"
 ok
 
 echo "papercut plugin install: $pass passed"
