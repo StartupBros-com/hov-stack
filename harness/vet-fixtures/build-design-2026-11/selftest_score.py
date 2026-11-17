@@ -79,7 +79,7 @@ DANGER = '''
       </Card>
 '''
 BADGE = 'export function Badge({ children }: { children: string }) {\n  return <span className="bg-teal-100">{children}</span>;\n}\n'
-BILLING_GOOD = '''import { Button } from "../components/ui/Button";
+T4_PAGE_GOOD = '''import { Button } from "../components/ui/Button";
 import { Card, CardHeader } from "../components/ui/Card";
 import { Input } from "../components/ui/Input";
 
@@ -142,7 +142,7 @@ export function Billing() {
   );
 }
 '''
-BILLING_BAD = (BILLING_GOOD.replace('<div className="mt-2 h-2 rounded-full bg-gray-100">',
+T4_PAGE_BAD = (T4_PAGE_GOOD.replace('<div className="mt-2 h-2 rounded-full bg-gray-100">',
                                     '<div className="mt-2 h-1.5 w-[36px] rounded-full bg-gray-100">')
                .replace("rounded-full bg-gray-100 px-2 text-xs", "rounded-full bg-green-100 px-2 text-xs text-green-700")
                .replace('<Input id="billing-email" label="Billing email" defaultValue="billing@acme.example" />',
@@ -157,7 +157,7 @@ def build(repo, task, variant):
         return
     if task == "t4":
         with open(os.path.join(repo, "src", "pages", "Billing.tsx"), "w", encoding="utf-8") as fh:
-            fh.write(BILLING_GOOD if variant == "good" else BILLING_BAD)
+            fh.write(T4_PAGE_GOOD if variant == "good" else T4_PAGE_BAD)
         if variant == "bad":
             with open(os.path.join(repo, "src", "components", "ui", "Toggle.tsx"), "w", encoding="utf-8") as fh:
                 fh.write(TOGGLE)
