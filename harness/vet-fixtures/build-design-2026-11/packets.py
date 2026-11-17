@@ -49,17 +49,23 @@ def main():
     ap.add_argument("root")
     ap.add_argument("dest")
     ap.add_argument("--scores")
+    ap.add_argument("--key", help="skip the invocation probe's plain-form runs (the key never enters a packet)")
     a = ap.parse_args()
-    d5 = {}
+    d5, void = {}, set()
     if a.scores:
         for s in json.load(open(a.scores)):
             d5[s["rid"]] = s["items"].get("D5_email_colour_as_drawn_or_named", "n/a")
+            if s.get("void"):
+                void.add(s["rid"])
+    plain = set()
+    if a.key:
+        plain = {rid for rid, meta in json.load(open(a.key)).items() if meta.get("form", "slash") != "slash"}
     os.makedirs(a.dest, exist_ok=True)
     index = {}
     for rid in sorted(os.listdir(a.root)):
         run = os.path.join(a.root, rid)
         out = os.path.join(run, "out")
-        if not os.path.isfile(os.path.join(out, "result-t1.json")):
+        if rid in void or rid in plain or not os.path.isfile(os.path.join(out, "result-t1.json")):
             continue
         task = open(os.path.join(run, "task.txt")).read().strip()
         if task not in ITEMS:

@@ -163,13 +163,25 @@ def score_run(run, rid, twdir):
     tools = open(os.path.join(out, "tools.txt"), encoding="utf-8").read() if os.path.exists(
         os.path.join(out, "tools.txt")) else ""
     outside = re.search(r"^paths_outside_run=(.*)$", tools, re.M)
+    # run_arm.sh's status: ok and arm-stop (own turn or budget cap) count; a harness failure, or a
+    # run with no status at all (crashed before the end), is void and re-run (README).
+    spath = os.path.join(out, "status.txt")
+    run_status = open(spath, encoding="utf-8").read() if os.path.exists(spath) else ""
+    overall = re.search(r"^run=(\S+)$", run_status, re.M)
+    overall = overall.group(1) if overall else "missing"
+    void_reason = []
+    if outside and outside.group(1).strip():
+        void_reason.append("paths outside the run dir")
+    if overall not in ("ok", "arm-stop"):
+        void_reason.append("run status %s" % overall)
     s = {
         "rid": rid, "task": task,
         "turn2_sent": os.path.exists(os.path.join(out, "turn2-sent.txt")),
         "cost_usd": round(sum(float(r.get("total_cost_usd") or 0) for r in (r1, r2)), 4),
         "added_lines": len(all_added),
         "changed": ["%s %s" % c for c in status],
-        "void": bool(outside and outside.group(1).strip()),
+        "status": overall,
+        "void": bool(void_reason), "void_reason": "; ".join(void_reason),
         "items": {}, "notes": {},
     }
     it = s["items"]
@@ -274,6 +286,7 @@ REPORT_TASKS = {"R1_badge_gap_reported": ("t1", "t4"), "R2_values_called_estimat
 SCORED_TASKS = ("t1", "t2", "t3", "t4")
 CAND, INC, CONT, BARE_ARM = "pack+build-design", "pack", "pack+design-to-code-fidelity", "bare"
 JUDGES = 2
+REPS = 4  # counted runs per arm and task (README, "Runs")
 
 
 def _full(label):
@@ -316,7 +329,7 @@ def load_grades(grades_dir, problems):
     return grades, settled
 
 
-def joined_rows(scores, key, grades_dir):
+def joined_rows(scores, key, grades_dir, reps):
     """[(arm, score, {item: bool})] for the scored runs; SystemExit listing every gap instead of guessing.
 
     A report item counts only when both judges agree or a split is settled in adjudicated.json; a
@@ -354,18 +367,39 @@ def joined_rows(scores, key, grades_dir):
                 items[n] = vals[0]
         if J5 in items:
             items[D5] = items.pop(J5)
+        # Report items are gated like the negative outcome items: a run that built nothing cannot pass
+        # "no false match" or "no match claim" by staying silent.
+        if task in ("t1", "t3", "t4") and items.get("G_built") is False:
+            for n in REPORT:
+                if n in items:
+                    items[n] = False
         for n, v in items.items():
             if not isinstance(v, bool) and not (n in need or n == D5):
                 problems.append("%s (%s): %s is %r" % (rid, task, n, v))
         rows.append((meta["arm"], s, items))
+    # Every arm needs the same number of counted runs per task, or raw fail counts (the regression rule)
+    # and pass totals compare unequal cells. A void leaves a gap until its re-run is scored.
+    counts = {}
+    for arm, s, _ in rows:
+        counts[(arm, s["task"])] = counts.get((arm, s["task"]), 0) + 1
+    for arm in sorted({r[0] for r in rows}):
+        for task in SCORED_TASKS:
+            got = counts.get((arm, task), 0)
+            if got != reps:
+                problems.append("%s on %s has %d counted run(s), needs %d (re-run each void under a new number)"
+                                % (arm, task, got, reps))
     if problems:
         raise SystemExit("tally refused (%d problem(s)):\n- " % len(problems) + "\n- ".join(problems))
     return rows
 
 
-def tally(scores, key, grades_dir):
-    rows = joined_rows(scores, key, grades_dir)
+def tally(scores, key, grades_dir, reps=REPS):
+    rows = joined_rows(scores, key, grades_dir, reps)
     arms = sorted({r[0] for r in rows})
+    voids = ["%s (%s, %s): %s" % (s["rid"], key.get(s["rid"], {}).get("arm", "?"), s["task"], s["void_reason"])
+             for s in scores if s["void"]]
+    stops = ["%s (%s, %s)" % (s["rid"], key.get(s["rid"], {}).get("arm", "?"), s["task"])
+             for s in scores if not s["void"] and s.get("status") == "arm-stop"]
     order = {n: i for i, n in enumerate(OUTCOME + REPORT)}
     # cells[(item, task)][arm] = [pass per run]
     cells = {}
@@ -389,7 +423,9 @@ def tally(scores, key, grades_dir):
         lines.append("| %s (%s)%s | %s |" % (c[0], c[1], "" if c in kept else " (dropped)", " | ".join(cellstr)))
     dropped = [c for c in names if c not in kept]
     lines += ["", "Dropped (every arm passed every run, or failed every run): %s" % (
-        ", ".join("%s (%s)" % c for c in dropped) or "none")]
+        ", ".join("%s (%s)" % c for c in dropped) or "none"),
+              "Void, not counted (each re-run under a new number): %s" % ("; ".join(voids) or "none"),
+              "Stopped at the arm's own turn or budget cap, counted: %s" % (", ".join(stops) or "none")]
 
     def passes(a, c):
         return sum(cells[c].get(a, []))
@@ -514,16 +550,19 @@ def main():
     ap.add_argument("--tally")
     a = ap.parse_args()
     scores = []
+    # Every run dir make_runs.py built, whether or not it finished: a crashed run is listed as void,
+    # never skipped in silence.
     for rid in sorted(os.listdir(a.root)):
         run = os.path.join(a.root, rid)
-        if not os.path.isfile(os.path.join(run, "out", "result-t1.json")):
+        if not os.path.isfile(os.path.join(run, "prompt.txt")):
             continue
         scores.append(score_run(run, rid, os.path.abspath(a.tailwind)))
     if a.out:
         with open(a.out, "w", encoding="utf-8") as fh:
             json.dump(scores, fh, indent=1)
     for s in scores:
-        print(s["rid"], s["task"], "VOID" if s["void"] else "", json.dumps(s["items"]), json.dumps(s["notes"]))
+        print(s["rid"], s["task"], s["status"], ("VOID (%s)" % s["void_reason"]) if s["void"] else "",
+              json.dumps(s["items"]), json.dumps(s["notes"]))
     if a.key and a.grades:
         text = tally(scores, json.load(open(a.key)), a.grades)
         print(text)

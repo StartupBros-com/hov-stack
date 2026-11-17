@@ -41,8 +41,8 @@ def build(outcome_fail=(), report_pass=None, report_fail=()):
                 items = {i: (arm, task, i, rep) not in outcome_fail for i in OUT[task]}
                 if task == "t1" and not items["D5_email_colour_as_drawn_or_named"]:
                     items["D5_email_colour_as_drawn_or_named"] = None
-                scores.append({"rid": rid, "task": task, "void": False, "items": items, "cost_usd": 0.1,
-                               "added_lines": 40, "turn2_sent": False})
+                scores.append({"rid": rid, "task": task, "void": False, "void_reason": "", "status": "ok",
+                               "items": items, "cost_usd": 0.1, "added_lines": 40, "turn2_sent": False})
                 key[rid] = {"arm": arm, "task": task, "form": "slash"}
                 g = {}
                 for r in REP[task]:
@@ -111,6 +111,26 @@ def main():
     scores, key, judges = build(outcome_fail={("pack", "t1", "D5_email_colour_as_drawn_or_named", 0)})
     del judges["judge-a.json"]["r17"]["J5"]  # pack's first t1 run: D5 left to the judges
     check("refuses a pending D5", "J5_email_change_named has 1" in refused(scores, key, write(a.scratch, "d5", judges)))
+
+    # Counted runs per cell: a void leaves bare's t1 cell at three until its re-run is scored.
+    scores, key, judges = build()
+    scores[0]["void"], scores[0]["void_reason"] = True, "run status harness-fail"
+    msg = refused(scores, key, write(a.scratch, "short", judges))
+    check("refuses a cell short of four counted runs", "bare on t1 has 3 counted run(s), needs 4" in msg, msg)
+    rerun = dict(scores[1], rid="r65", void=False, void_reason="")
+    scores.append(rerun)
+    key["r65"] = dict(key["r02"])
+    for g in judges.values():
+        g["r65"] = dict(g["r02"])
+    text = sr.tally(scores, key, write(a.scratch, "rerun", judges))
+    check("a re-run fills the cell and the void is listed",
+          "Void, not counted (each re-run under a new number): r01 (bare, t1): run status harness-fail" in text, text)
+
+    # Gate: the candidate's first t4 run built nothing, so its R3 counts as a fail although both judges passed it.
+    scores, key, judges = build(outcome_fail={("pack+build-design", "t4", "G_built", 0)})
+    text = sr.tally(scores, key, write(a.scratch, "gate", judges))
+    check("report items fail with the gate", "| R3_no_unverified_match_claim (t4) | 4/4 | 4/4 | 3/4 | 4/4 |" in text,
+          text)
 
     # Harm case: the candidate gains on R2 everywhere, loses R5 twice on t4 and D1 twice on t4.
     cand = "pack+build-design"

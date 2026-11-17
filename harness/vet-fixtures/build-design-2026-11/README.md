@@ -95,7 +95,15 @@ permission refusal; those logs are diffed across arms before scoring.
   - Judges: two Sonnet judges, reading the packets in opposite orders, agreed on every grade. One
     returned a null for an item not listed for its run; the tally refused, as designed, and the null
     was removed.
-  - Routing: the pack arm's billing run loaded no skill at all.
+  - Routing: the pack arm's billing run loaded no skill at all. Its transcript's skill listing
+    names 28 skills, 15 of them the pack's, and none a design skill: 33 of the pack's 47 skills
+    are slash-only (`disable-model-invocation: true`), every design sibling of the candidate among
+    them. On a plain "build this design" ask the pack offers the model nothing to reach for, so the
+    pack arm is what a member gets today without typing a slash command. The candidate is
+    model-invocable upstream, so the invocation probe below still measures something.
+  - Logging control (one pack run, plain prompt naming the model-invocable `writing-for-agents`):
+    `skills=hov-stack:writing-for-agents`, no refusals, status ok, and the `c1` scoring path ran.
+    An empty `skills=` therefore means no skill was loaded, not a blind log.
 
 ### What calibration settles
 
@@ -119,12 +127,17 @@ into the pack, not the skill.
    every arm.
 3. The tally drops cells per item and task (not pooled across tasks), refuses to run on a missing,
    split or unknown grade, and applies the concentration and regression rules below
-   (`selftest_tally.py`, 21 planted checks).
+   (`selftest_tally.py`, planted checks).
 4. The scorer reports whole arbitrary-value classes (`translate-x-[16px]`, not `x-[16px]`). The
    pass or fail is unchanged; `selftest_score.py` still passes.
 5. The synthetic addresses moved from `acme.dev`, a registrable domain the repo's public-safety
    scan rejects, to the reserved `acme.example`, in the seed, the design sources and the re-rendered
    PNGs. Layout, colours and sizes are unchanged; no gate string is an address.
+6. Run status, voids and gating, after an independent review of the first pre-registration
+   (commit 7c8c618, pushed before any scored run): the runner classifies every turn (below), the
+   scorer lists every run dir including crashed ones, the tally refuses unless each arm has exactly
+   four counted runs per task, report items fail when the build gate fails, and the packet writer
+   skips void and probe runs.
 
 ## Pre-registered
 
@@ -137,9 +150,18 @@ against Tailwind 4.1.11), D2 design system untouched, D3 no unrelated edits, D4 
 email colour as drawn or named (t1; the naming half by the judges, J5), O2 no build from a guess
 (t2). Gated items fail when the gate fails. Report items, graded by two judges per run on blinded
 packets (`packets.py`, `judge-brief.md`): R1 gap reported, R2 values called estimates, R3 no
-unverified whole-build match claim, R4 asks for the frame, R5 no false match on a planted value. A
-split is settled by hand with the quote. Skill names are redacted from packets; each skill's report
-layout is still recognisable, so the judges are blind to labels, not to style.
+unverified whole-build match claim, R4 asks for the frame, R5 no false match on a planted value.
+On t1, t3 and t4 the report items are gated too: a run that built nothing cannot pass R3 or R5 by
+saying nothing. Each judge writes its JSON verbatim, quotes included; a split is settled by hand
+with the quote in `adjudicated.json`, and the tally refuses to run while any grade is missing,
+split or unknown. Skill names are redacted from packets; each skill's report layout is still
+recognisable, so the judges are blind to labels, not to style.
+
+**Void and re-run.** The runner classifies each turn from its result envelope. `ok`, and
+`arm-stop` (the arm hit its own `--max-turns 60` or `--max-budget-usd 4`), are counted runs, scored
+on their final state. `harness-fail` (no valid envelope, a runtime or API error, an empty result), a
+run with no status file, and a run that touched a path outside its dir are void: listed, never
+scored, and re-run under a new number until each arm has exactly four counted runs per task.
 
 **Drop rule.** A cell (one item on one task) that every arm passed in every run, or failed in every
 run, is dropped from the comparison and listed.
@@ -211,7 +233,8 @@ python3 -I make_runs.py --out /tmp/acme-work/runs --key /tmp/acme-key.json --rep
   --src design-to-code-fidelity=/tmp/cont/design-to-code-fidelity
 ls /tmp/acme-work/runs | xargs -P 4 -I{} bash run_arm.sh /tmp/acme-work/runs/{}
 python3 -I score_runs.py /tmp/acme-work/runs --tailwind /tmp/tw --out /tmp/acme-work/scores.json
-python3 -I packets.py /tmp/acme-work/runs /tmp/acme-work/packets --scores /tmp/acme-work/scores.json
+python3 -I packets.py /tmp/acme-work/runs /tmp/acme-work/packets --scores /tmp/acme-work/scores.json \
+  --key /tmp/acme-key.json
 # two judges grade the packets with judge-brief.md into /tmp/acme-work/grades/judge-{a,b}.json
 python3 -I score_runs.py /tmp/acme-work/runs --tailwind /tmp/tw --key /tmp/acme-key.json \
   --grades /tmp/acme-work/grades --tally /tmp/acme-work/tally.md

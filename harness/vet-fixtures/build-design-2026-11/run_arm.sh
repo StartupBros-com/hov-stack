@@ -1,8 +1,12 @@
 #!/usr/bin/env bash
 # run_arm.sh <run-dir> - run one blinded arm of the build-design-2026-11 fixture.
 #
-# Not a quality gate: score_runs.py and the graders score the output. Exit 0
-# means only that every `claude` turn run exited 0 and left a non-error result.
+# Not a quality gate: score_runs.py and the graders score the output. Each turn
+# is classified into out/status.txt (README, "Void and re-run"): ok; arm-stop,
+# the arm hit its own --max-turns or budget cap, a counted run scored on its final
+# state; or harness-fail, no valid result envelope, a runtime or API error, or an
+# empty result. Exit 1 means a harness failure: the run is void and is re-run
+# under a new number. Exit 0 means the run counts.
 #
 # <run-dir> (built by make_runs.py) holds:
 #   prompt.txt   turn 1, the ask
@@ -94,14 +98,44 @@ turn() {
   return "$rc"
 }
 
+# classify <tag> <exit code>: ok | arm-stop:<subtype> | harness-fail:<reason>
+classify() {
+  python3 -I - "$2" "$RUN/out/result-$1.json" <<'PY'
+import json, sys
+rc, path = sys.argv[1], sys.argv[2]
+try:
+    data = json.load(open(path, encoding="utf-8"))
+except (OSError, ValueError):
+    sys.exit(print("harness-fail:no valid result envelope (exit %s)" % rc))
+if not isinstance(data, dict):
+    sys.exit(print("harness-fail:result envelope is not an object (exit %s)" % rc))
+sub = str(data.get("subtype") or "")
+if sub.startswith("error_max_"):
+    sys.exit(print("arm-stop:" + sub))
+if rc != "0" or data.get("is_error") is not False or sub not in ("", "success"):
+    sys.exit(print("harness-fail:exit %s, subtype %s, is_error %s" % (rc, sub or "-", data.get("is_error"))))
+if not str(data.get("result") or "").strip():
+    sys.exit(print("harness-fail:empty result"))
+print("ok")
+PY
+}
+
 rc1=0
 turn t1 "$RUN/prompt.txt" || rc1=$?
+S1="$(classify t1 "$rc1")"
 SID="$(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1])).get("session_id",""))' "$RUN/out/result-t1.json" 2>/dev/null)"
-rc2=0
-if [ "$rc1" = 0 ] && [ -n "$SID" ] && [ -f "$RUN/turn2.txt" ] && unchanged; then
-  echo "turn 1 left the working copy unchanged; sending turn2.txt" > "$RUN/out/turn2-sent.txt"
-  turn t2 "$RUN/turn2.txt" "$SID" || rc2=$?
-fi
+S2=none
+case "$S1" in
+  harness-fail*) ;;
+  *)
+    if [ -n "$SID" ] && [ -f "$RUN/turn2.txt" ] && unchanged; then
+      echo "turn 1 left the working copy unchanged; sending turn2.txt" > "$RUN/out/turn2-sent.txt"
+      rc2=0
+      turn t2 "$RUN/turn2.txt" "$SID" || rc2=$?
+      S2="$(classify t2 "$rc2")"
+    fi
+    ;;
+esac
 
 # What the arm reached for: tool counts, skills invoked, slash commands resolved,
 # every file read, every path a tool touched outside the run dir, and any tool
@@ -179,18 +213,13 @@ else:
     print("denied=" + "|".join(denied))
 PY
 
-python3 -I - "$rc1" "$RUN/out/result-t1.json" <<'PY'
-import json, sys
-rc, path = sys.argv[1], sys.argv[2]
-if rc != "0":
-    sys.exit("run_arm: turn 1 exited %s; see out/stderr-t1.txt" % rc)
-try:
-    data = json.load(open(path, encoding="utf-8"))
-except (OSError, ValueError) as exc:
-    sys.exit("run_arm: %s lacks a valid result (%s)" % (path, exc))
-if not isinstance(data, dict) or data.get("is_error") is not False:
-    sys.exit("run_arm: %s is an error envelope" % path)
-if not str(data.get("result") or "").strip():
-    sys.exit("run_arm: %s has an empty result" % path)
-PY
-[ "$rc2" = 0 ] || { echo "run_arm: turn 2 exited $rc2; see out/stderr-t2.txt" >&2; exit 1; }
+RUN_STATUS=ok
+case "$S1 $S2" in
+  *harness-fail*) RUN_STATUS=harness-fail ;;
+  *arm-stop*) RUN_STATUS=arm-stop ;;
+esac
+printf 't1=%s\nt2=%s\nrun=%s\n' "$S1" "$S2" "$RUN_STATUS" > "$RUN/out/status.txt"
+if [ "$RUN_STATUS" = harness-fail ]; then
+  echo "run_arm: $RUN harness failure (t1=$S1; t2=$S2): void, re-run under a new number" >&2
+  exit 1
+fi

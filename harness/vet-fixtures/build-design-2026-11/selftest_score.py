@@ -223,6 +223,8 @@ def main():
             json.dump({"is_error": False, "result": "planted", "total_cost_usd": 0.5}, fh)
         with open(os.path.join(run, "out", "tools.txt"), "w") as fh:
             fh.write("paths_outside_run=\n")
+        with open(os.path.join(run, "out", "status.txt"), "w") as fh:
+            fh.write("t1=ok\nt2=none\nrun=ok\n")
         build(os.path.join(run, "user", "code", "acme-console"), task, variant)
         got = score_runs.score_run(run, rid, os.path.abspath(a.tailwind))
         want = EXPECT["%s-%s" % (variant, task)]
@@ -233,6 +235,26 @@ def main():
                                                            got["items"].get(item), "" if ok else got["notes"]))
         if variant == "bad":
             print("     bad-run notes:", json.dumps(got["notes"]))
+    # Run status (run_arm.sh): a harness failure or a crash before the status file is void; an arm that
+    # hit its own turn or budget cap is a counted run.
+    for i, (status, want_void) in enumerate([("t1=harness-fail:empty result\nt2=none\nrun=harness-fail\n", True),
+                                             (None, True),
+                                             ("t1=arm-stop:error_max_turns\nt2=none\nrun=arm-stop\n", False)],
+                                            start=len(plan) + 1):
+        subprocess.run([sys.executable, "-I", os.path.join(HERE, "make_runs.py"), "--out", root,
+                        "--key", os.path.join(a.scratch, "key-%d.json" % i), "--reps", "1", "--arm", "bare",
+                        "--task", "t3", "--first", str(i)], check=True, capture_output=True)
+        rid = "r%02d" % i
+        run = os.path.join(root, rid)
+        os.makedirs(os.path.join(run, "out"), exist_ok=True)
+        if status is not None:
+            with open(os.path.join(run, "out", "status.txt"), "w") as fh:
+                fh.write(status)
+        got = score_runs.score_run(run, rid, os.path.abspath(a.tailwind))
+        ok = got["void"] == want_void
+        failures += not ok
+        print("%s %-8s %-36s want=%-5s got=%-5s %s" % ("ok  " if ok else "FAIL", rid + " t3", "void", want_void,
+                                                       got["void"], got["void_reason"]))
     print("selftest: %d failure(s)" % failures)
     return 1 if failures else 0
 
