@@ -109,7 +109,6 @@ const TOOL_GROUPS: Array<{ title: string; items: Array<{ name: string; summary: 
 			{ name: "session_list", summary: "browse prior Pi sessions" },
 			{ name: "ask_user_question", summary: "interrupt for fast choices" },
 			{ name: "ssh_hosts", summary: "discover saved SSH aliases" },
-			{ name: "generate_image", summary: "Gemini/Imagen image generation" },
 		],
 	},
 ];

@@ -80,9 +80,6 @@ DOTFILES_LINKS=(
   # (dotfiles#991). Node, no deps; reaches hooks/lib through its own
   # real path, so it works from a worktree before deploy.
   "bin/codex-pick|.local/bin/codex-pick"
-  # Explicit Gemini sandbox injection. The key is no longer sourced into every
-  # shell, Claude/Codex session, or worktree; only the child command receives it.
-  "bin/with-gemini-sandbox|.local/bin/with-gemini-sandbox"
   # tokscale custom pricing — the $0 overrides that keep local-model tokens in
   # leaderboard submissions (dotfiles#446). pnpm-rc precedent: live config nothing
   # owned. settings.json is deliberately ABSENT: tokscale rewrites it via atomic
