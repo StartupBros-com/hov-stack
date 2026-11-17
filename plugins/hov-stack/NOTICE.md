@@ -36,6 +36,7 @@ and the `NOTICE` that ux-writing carries.
 | `improve-animations` | https://github.com/emilkowalski/skills | MIT | Emil Kowalski |
 | `interface-review` | https://github.com/jakubkrehel/skills | MIT | Jakub Krehel |
 | `kill-ai-slop` | https://github.com/yetone/kill-ai-slop | Apache-2.0 | yetone |
+| `learn-taste` | https://github.com/emilkowalski/skills | MIT | Emil Kowalski |
 | `maintain-verification-skill` | https://github.com/cursor/plugins | MIT | Lauren Tan |
 | `pick-ui-library` | https://github.com/emilkowalski/skills | MIT | Emil Kowalski |
 | `posthog-cli` | https://github.com/PostHog/posthog | MIT | PostHog Inc. |
