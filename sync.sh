@@ -1939,15 +1939,7 @@ apply_hygiene_posture() {
   done
 }
 
-install() {
-  local ts backup="" papercut_failed=0 posture_failed=0 posture_ok=0 settings_apply_failed=0
-  # install seeds settings and changes other live artifacts before the runtime
-  # reconciler runs, so validate this canonical policy before any of those writes.
-  validate_canonical_compact_window || return 1
-  # First adoption is never an install side effect. This validates and reports a
-  # pending policy when unadopted, finalizes already-published recovery state,
-  # and makes any already-adopted policy failure fatal to the caller.
-  docker_init_policy reconcile || return 1
+install_harness_links() {
   ts=$(date +%Y%m%d-%H%M%S)
   mkdir -p "$H" "$SYS"
   for d in $STABLE_DIRS; do
@@ -1967,10 +1959,16 @@ install() {
     fi
     ln -sfn "$HERE/$f" "$H/$f" && echo "  linked $f"
   done
+}
+
+install_volatile_seed() {
   for f in $VOLATILE_FILES; do
     # Never clobber a live config — the live copy is authoritative once it exists.
     [ -f "$H/$f" ] || { [ -f "$HERE/$f" ] && cp "$HERE/$f" "$H/$f" && echo "  seeded $f"; }
   done
+}
+
+install_statusline() {
   # The statusline directory also holds runtime-owned stack.sh/original-statusline.json,
   # so adopting the whole directory would destroy that state. Version and link only
   # the renderer, backup-first, exactly like the individual CLI links below.
@@ -1990,6 +1988,9 @@ install() {
       return 1
     fi
   fi
+}
+
+install_hooks() {
   # apply_settings below adds and removes the tracked hooks. These reconcilers
   # do what it cannot (hov-stack #479): respell a live `node "..."` hook onto
   # the launcher (the apply keys the two spellings as different hooks and would
@@ -2003,17 +2004,30 @@ install() {
   if [ "${CLAUDE_SYNC_SKIP_HOOK_RECONCILE:-0}" = 1 ]; then
     echo "  skipped hook reconcile (CLAUDE_SYNC_SKIP_HOOK_RECONCILE=1)"
   else
-    reconcile_dcg_hook || return 1
+    # ./setup sets CLAUDE_SYNC_SKIP_DCG_RECONCILE=1 when there is no dcg at
+    # ~/.local/bin/dcg (--no-dcg, or a dcg elsewhere on PATH): reconcile_dcg_hook
+    # refuses to register a missing target, and setup accepts a run without one.
+    if [ "${CLAUDE_SYNC_SKIP_DCG_RECONCILE:-0}" = 1 ]; then
+      echo "  skipped dcg hook reconcile (no dcg at ~/.local/bin/dcg)"
+    else
+      reconcile_dcg_hook || return 1
+    fi
     # Not `|| return 1`: a failed plugin install (offline, marketplace not added)
     # still allows links, units and timers to install. Report failure at the end.
     ensure_papercut_plugin || papercut_failed=1
   fi
+}
+
+install_repo_routes() {
   # Link only the portable policy. Never seed or copy the host-local authority
   # state, because that would manufacture a canonical checkout on another host.
   if [ -f "$HERE/config/repo-routes.json" ]; then
     mkdir -p "$H/config"
     ln -sfn "$HERE/config/repo-routes.json" "$H/config/repo-routes.json" && echo "  linked config/repo-routes.json"
   fi
+}
+
+install_retire_loop_quality() {
   # Preserve the retired controller's regular config beside its former path.
   _qp="$H/config/loop-quality.json"
   if [ -f "$_qp" ] && [ ! -L "$_qp" ]; then
@@ -2021,28 +2035,43 @@ install() {
     mv -Tn "$_qp" "$_qbak" && [ ! -e "$_qp" ] || return 1
     echo "  retired config/loop-quality.json (loop_quality removed, #1914) -> $_qbak"
   fi
+}
+
+install_runtime_policy() {
   # Unlike hook commands, these settings are portable and their CLAUDE_ENV_FILE
   # target was just linked through STABLE_FILES above. Reconcile them even when
   # a foreign-host smoke test explicitly skips absolute hook registrations.
   reconcile_runtime_env || return 1
   reconcile_windows_auto_mode || return 1
+}
+
+install_settings() {
   if [ "${CLAUDE_SYNC_SKIP_HOOK_RECONCILE:-}" = 1 ]; then
     echo '  skipped settings apply (CLAUDE_SYNC_SKIP_HOOK_RECONCILE=1)'
   else
     apply_settings || settings_apply_failed=1
   fi
   echo "  note: active Claude sessions cache settings and hooks; restart or cycle existing Auto sessions after install"
+}
+
+install_papercut_link() {
   # Stdlib-only, so a bare symlink is enough — no venv to create or rot (same
   # reasoning as dfs; see the data-source-clis skill, "prefer a CLI over an MCP server").
   if [ -d "$HOME/.local/bin" ]; then
     ln -sf "$HERE/bin/papercut.py" "$HOME/.local/bin/papercut" && echo "  linked bin/papercut"
   fi
+}
+
+install_deliverable_link() {
   # open-deliverable (dotfiles #908): the one place per-host "show this file to the operator"
   # logic lives, so skills call it by name instead of carrying WSL/macOS/Linux branches.
   # Plain bash, no deps — a symlink is enough, same shape as papercut above.
   if [ -d "$HOME/.local/bin" ]; then
     ln -sf "$HERE/bin/open-deliverable" "$HOME/.local/bin/open-deliverable" && echo "  linked bin/open-deliverable"
   fi
+}
+
+install_watchdog_link() {
   # The 5-minute memory watchdog is invoked by crontab as ~/.local/bin/wsl-watchdog.sh
   # and lived ONLY there, unversioned, until 2026-08-06 — the most active piece of
   # self-healing automation on the box with no history and no backup. Symlinking that
@@ -2067,6 +2096,9 @@ install() {
       rm -f "$_wd.tmp.$$"; echo "  WARN failed to link bin/wsl-watchdog.sh"
     fi
   fi
+}
+
+install_managed_lock() {
   # Deploy the root-owned managed-settings lock (the one immutable, YOLO-proof
   # deny floor). Can't symlink a root policy file, so install a copy with sudo.
   if [ -f "$MANAGED_REF" ] && ! cmp -s "$MANAGED_REF" "$MANAGED_LOCK" 2>/dev/null; then
@@ -2077,12 +2109,18 @@ install() {
       echo "  managed-settings lock needs sudo — run: sudo install -D -m 0644 -o root -g root $MANAGED_REF $MANAGED_LOCK"
     fi
   fi
+}
+
+install_memory_seed() {
   for m in "$MEMORY_MIRROR_ROOT"/*/; do
     [ -d "$m" ] || continue
     proj=$(basename "$m")
     dest=$MEMORY_LIVE_ROOT/$proj/memory
     [ -d "$dest" ] || { mkdir -p "$dest"; rsync -a "$m" "$dest/"; echo "  seeded memory/$proj"; }
   done
+}
+
+install_user_units() {
   # Copy each declared user unit into the user unit directory. The standalone
   # and root installers share this path.
   for u in $UNITS; do
@@ -2091,14 +2129,25 @@ install() {
       echo "  failed to create user-unit destination for $u" >&2
       return 1
     }
-    if ! cp "$HERE/systemd/$u" "$SYS/$u" || ! cmp -s "$HERE/systemd/$u" "$SYS/$u"; then
-      echo "  failed to deploy user unit $u; refusing to report harness install success" >&2
-      return 1
-    fi
+    install_user_unit "$u" || return 1
   done
+}
+
+install_user_unit() {
+  local unit=$1
+  if ! cp "$HERE/systemd/$unit" "$SYS/$unit" || ! cmp -s "$HERE/systemd/$unit" "$SYS/$unit"; then
+    echo "  failed to deploy user unit $unit; refusing to report harness install success" >&2
+    return 1
+  fi
+}
+
+install_hygiene_posture() {
   # Host-declared hygiene posture (lib/hygiene-posture.sh). An invalid file is reported
   # and fails the install at the end, after everything unrelated has been updated.
   if apply_hygiene_posture; then posture_ok=1; else posture_failed=1; fi
+}
+
+install_system_units() {
   # System-level units (root-owned, privileged setup — see SYSTEM_UNITS above).
   # Same deploy pattern as the managed lock: sudo install, graceful no-sudo
   # fallback that prints the manual command. Deliberately NOT enabled/started
@@ -2128,6 +2177,9 @@ install() {
   else
     echo "  system units skipped (host role $(profile_role 2>/dev/null || echo undeclared); they are workstation-only)"
   fi
+}
+
+install_daemon_reload() {
   if systemctl --user show-environment >/dev/null 2>&1; then
     if ! systemctl --user daemon-reload; then
       echo "  systemd user manager is reachable but daemon-reload failed; refusing install success" >&2
@@ -2141,6 +2193,9 @@ install() {
   # lists in step; a unit installed and never enabled is the silent-failure shape this
   # whole dcg-auto-update change exists to remove.
   #
+}
+
+install_role_selection() {
   # DELIBERATE EXCEPTION — the four hygiene timers (wt-sweep, pkg-cache-prune,
   # docker-hygiene, reclaim-sweep) are NOT in this list, on purpose, even though
   # they ship in an observe-only/plan-only stage. Every routine `sync.sh install`
@@ -2192,6 +2247,9 @@ install() {
       return 1 ;;
   esac
 
+}
+
+install_tools_gate() {
   # tools-auto-update joins the set only where tool-update.sh would find one of
   # its tools (hov-stack#632). Nothing here installs xf, csctf or ru, and its
   # all-missing guard fails a run that finds none, so on a host that never
@@ -2204,6 +2262,9 @@ install() {
     echo "  tools-auto-update.timer: none of tool-update.sh's tools is installed here, so it stays off; install one, then re-run install"
   fi
 
+}
+
+install_role_timers() {
   reconcile_role_timers "$_role" "$_enable" || return 1
   if [ "$posture_ok" = 1 ] && [ -n "$HYGIENE_POSTURE_DECLARED" ]; then
     if systemctl --user show-environment >/dev/null 2>&1; then
@@ -2220,6 +2281,9 @@ install() {
       echo "  WARN systemd user manager unavailable; hygiene timers declared in the overlay posture not enabled: $HYGIENE_POSTURE_DECLARED" >&2
     fi
   fi
+}
+
+install_summary() {
   [ -n "$backup" ] && echo "  originals backed up to $backup"
   if [ "$settings_apply_failed" = 1 ]; then
     echo 'install finished everything else, but settings apply failed (see above)' >&2
@@ -2233,6 +2297,187 @@ install() {
   fi
   if [ "$settings_apply_failed$papercut_failed$posture_failed" != 000 ]; then return 1; fi
   echo "install done. Restore separately: credentials (claude login), skills (jsm sync), plugins (claude plugin — enabledPlugins already in settings.json)."
+}
+
+install() {
+  local ts backup="" papercut_failed=0 posture_failed=0 posture_ok=0 settings_apply_failed=0
+  validate_canonical_compact_window || return 1
+  docker_init_policy reconcile || return 1
+  install_harness_links
+  install_volatile_seed
+  install_statusline || return 1
+  install_hooks || return 1
+  install_repo_routes
+  install_retire_loop_quality || return 1
+  install_runtime_policy || return 1
+  install_settings
+  install_papercut_link
+  install_deliverable_link
+  install_watchdog_link
+  install_managed_lock
+  install_memory_seed
+  install_user_units || return 1
+  install_hygiene_posture
+  install_system_units
+  install_daemon_reload || return 1
+  install_role_selection || return 1
+  install_tools_gate
+  install_role_timers || return 1
+  install_summary
+}
+
+role_unit_files() {
+  local phase=$1 unit changed=0 new=0 refused=0 failed=0 reload_failed=0 backup="" marked=0
+  local pending="$H/.hov-stack/units-reload-pending"
+  for unit in $UNITS; do
+    [ -f "$HERE/systemd/$unit" ] || continue
+    if [ ! -f "$SYS/$unit" ]; then
+      new=$((new + 1))
+      echo "  new unit: $unit (not installed)"
+    elif ! cmp -s "$HERE/systemd/$unit" "$SYS/$unit"; then
+      if [ "$phase" = refresh ]; then
+        case "$(readlink -f "$SYS/$unit")" in
+          "$(readlink -f "$SYS")"/*) ;;
+          *) echo "  refusing unit outside user unit directory: $unit" >&2; refused=$((refused + 1)); continue ;;
+        esac
+        if [ -z "$backup" ]; then
+          if ! mkdir -p "$H/backups" || ! backup=$(mktemp -d "$H/backups/unit-refresh-$(date +%Y%m%d-%H%M%S)-XXXXXX"); then
+            echo "  failed to create unit refresh backup for $unit" >&2
+            failed=$((failed + 1))
+            continue
+          fi
+          echo "  unit refresh backup: $backup"
+        fi
+        # -L: a unit that is a symlink inside the unit directory is overwritten
+        # through the link, so the backup keeps the bytes behind it, not the link.
+        if ! (cd "$backup" && mkdir -p "./$(dirname "$unit")" && cp -pL -- "$SYS/$unit" "./$unit"); then
+          echo "  failed to back up user unit $unit; leaving it alone" >&2
+          failed=$((failed + 1))
+          continue
+        fi
+        [ ! -L "$SYS/$unit" ] || echo "  $unit was a symlink to $(readlink -f "$SYS/$unit"); the backup holds its contents"
+        # The marker goes down before the first write, so a refresh killed between
+        # a write and the reload still reloads on the next run.
+        if [ "$marked" -eq 0 ]; then
+          if ! mkdir -p "$(dirname "$pending")" || ! touch "$pending"; then
+            echo "  failed to record pending user-unit reload; leaving $unit alone" >&2
+            failed=$((failed + 1))
+            continue
+          fi
+          marked=1
+        fi
+        if ! install_user_unit "$unit"; then
+          failed=$((failed + 1))
+          continue
+        fi
+        echo "  updated unit: $unit"
+      else
+        echo "  unit differs: $unit"
+      fi
+      changed=$((changed + 1))
+    fi
+  done
+  if [ "$changed" -gt 0 ]; then
+    if [ "$phase" = refresh ]; then
+      role_summary="$changed unit file(s) updated"
+    else
+      role_summary="$changed unit file(s) differ"
+    fi
+  fi
+  if [ "$phase" = refresh ]; then
+    if [ "$refused" -gt 0 ] || [ "$failed" -gt 0 ]; then
+      role_summary="$changed unit file(s) updated; $refused refused; $failed failed"
+    fi
+    if [ -f "$pending" ]; then
+      if systemctl --user show-environment >/dev/null 2>&1; then
+        if systemctl --user daemon-reload; then
+          rm -f -- "$pending" || reload_failed=1
+        else
+          echo "  systemd user manager is reachable but daemon-reload failed" >&2
+          reload_failed=1
+        fi
+      else
+        echo "  WARN systemd user manager unavailable; units copied but daemon-reload deferred" >&2
+      fi
+    fi
+  fi
+  if [ -f "$pending" ]; then
+    echo "  user unit reload pending: re-run ./setup when the user manager is available"
+    role_summary="${role_summary:+$role_summary; }user unit reload pending"
+  fi
+  [ "$new" -eq 0 ] || role_summary="${role_summary:+$role_summary; }$new new unit(s): ./setup --enable-units"
+  if [ -f "$MANAGED_REF" ] && ! cmp -s "$MANAGED_REF" "$MANAGED_LOCK"; then
+    echo "  managed lock differs: ./setup --root"
+    role_summary="${role_summary:+$role_summary; }managed lock differs: ./setup --root"
+  fi
+  changed=0
+  if profile_is workstation; then
+    for unit in $SYSTEM_UNITS; do
+      [ -f "$HERE/systemd-system/$unit" ] || continue
+      if ! cmp -s <(render_system_unit "$HERE/systemd-system/$unit" /dev/stdout) "$SYSTEM_SYS/$unit"; then
+        echo "  system unit differs: $unit"
+        changed=$((changed + 1))
+      fi
+    done
+  fi
+  [ "$changed" -eq 0 ] || role_summary="${role_summary:+$role_summary; }$changed system unit(s) differ: ./setup --root"
+  [ "$refused" -eq 0 ] && [ "$failed" -eq 0 ] && [ "$reload_failed" -eq 0 ]
+}
+
+role_steps() {
+  case "$1" in
+    refresh|check) role_unit_files "$1" || return 1 ;;
+    owner)
+      validate_canonical_compact_window || return 1
+      install_volatile_seed
+      install_statusline || return 1
+      install_hooks || return 1
+      install_repo_routes
+      install_retire_loop_quality || return 1
+      install_runtime_policy || return 1
+      install_watchdog_link || return 1
+      install_memory_seed
+      role_summary="owner steps complete"
+      if [ "$papercut_failed" = 1 ]; then
+        echo "  FAILED to install $PAPERCUT_PLUGIN_ID: $PAPERCUT_INSTALL_ERROR" >&2
+        role_summary="owner steps complete; papercut install failed: $PAPERCUT_INSTALL_ERROR"
+        return 3
+      fi
+      ;;
+    enable)
+      install_user_units || return 1
+      install_hygiene_posture
+      install_daemon_reload || return 1
+      install_role_selection || return 1
+      install_tools_gate
+      install_role_timers || return 1
+      [ "$posture_failed" = 0 ] || return 1
+      role_summary="role timers reconciled"
+      ;;
+    root)
+      docker_init_policy reconcile || return 1
+      install_managed_lock
+      install_system_units
+      role_summary="root steps complete (see any sudo instructions above)"
+      ;;
+  esac
+  return 0
+}
+
+role_phase() {
+  local role_summary="" papercut_failed=0 posture_failed=0 posture_ok=0 rc=0
+  case "${1:-}" in
+    refresh|owner|enable|root|check) [ "$#" -eq 1 ] || rc=2 ;;
+    *) rc=2 ;;
+  esac
+  if [ "$rc" = 2 ]; then
+    echo "usage: sync.sh role <refresh|owner|enable|root|check>" >&2
+    return 2
+  fi
+  role_steps "$1" || rc=$?
+  if [ "$rc" = 1 ]; then role_summary="${role_summary:+$role_summary; }$1 failed (see above)"; fi
+  echo "role: ${role_summary:-nothing to change}"
+  return "$rc"
 }
 
 # live_tree_is_here: true when the live ~/.claude runs from this tree, i.e. one of its
@@ -2795,6 +3040,7 @@ case "$MODE" in
   apply-settings) apply_settings "${@:2}" ;;
   push) push ;;
   install) install ;;
+  role) role_phase "${@:2}" ;;
   reconcile-dcg) reconcile_dcg_hook --write-canonical ;;
   ensure-papercut-plugin) ensure_papercut_plugin ;;
   reconcile-runtime-env) reconcile_runtime_env ;;
@@ -2828,5 +3074,5 @@ case "$MODE" in
   check) check ;;
   memory-preview|memory-check) memory_preview ;;
   memory-push) memory_push ;;
-  *) echo "usage: sync.sh apply-settings [--plan] [--quiet] [--seed-base <rev>]|push|install|reconcile-docker-init|adopt-docker-init [--allow-existing-false]|rollback-docker-init|reconcile-dcg|reconcile-runtime-env|reconcile-windows-auto-mode|ensure-papercut-plugin|check|memory-preview|memory-check|memory-push" >&2; exit 2 ;;
+  *) echo "usage: sync.sh apply-settings [--plan] [--quiet] [--seed-base <rev>]|push|install|role <refresh|owner|enable|root|check>|reconcile-docker-init|adopt-docker-init [--allow-existing-false]|rollback-docker-init|reconcile-dcg|reconcile-runtime-env|reconcile-windows-auto-mode|ensure-papercut-plugin|check|memory-preview|memory-check|memory-push" >&2; exit 2 ;;
 esac

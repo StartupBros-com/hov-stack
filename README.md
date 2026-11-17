@@ -43,6 +43,8 @@ To see later whether everything setup put in place is still there, run `./setup 
 
 ## Updating
 
+`./setup --enable-units` installs user units and reconciles role timers; `./setup --root` runs the role's privileged setup steps.
+
 Run `./setup --update` in the checkout. It fast-forwards the checkout to the latest `main`, runs the new copy of setup, and then updates what setup and `/hov-setup` installed:
 
 - `dcg`, to the version the checkout now names (never to an older one).

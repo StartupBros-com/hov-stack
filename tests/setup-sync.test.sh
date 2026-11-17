@@ -71,7 +71,12 @@ world() {
     cat > "$SEED/sync.sh" <<'EOF'
 #!/usr/bin/env bash
 printf '%s|%s\n' "$*" "$CLAUDE_HOME" >> "$CLAUDE_HOME/../sync-calls"
-case "$*" in *--plan*) exit "${SYNC_PLAN_RC:-0}" ;; esac
+case "$*" in
+  *--plan*) exit "${SYNC_PLAN_RC:-0}" ;;
+  'role refresh')
+    echo "role: ${SYNC_ROLE_STATUS:-nothing to change}"
+    exit "${SYNC_ROLE_RC:-0}" ;;
+esac
 echo "settings: ${SYNC_STATUS:-applied 2}"
 exit "${SYNC_APPLY_RC:-0}"
 EOF
@@ -335,6 +340,10 @@ grep -q '^sync: moved: .*merged 2 change(s) into settings.json' <<<"$OUT" || { e
 calls=$(cat "$H/sync-calls")
 [ "$(grep -c -- '--plan --quiet' <<<"$calls")" -ge 1 ] || fail "owner: the plan did not run before the move"
 grep -q -- "^apply-settings --quiet|$H/.claude\$" <<<"$calls" || { echo "$calls"; fail "owner: the apply did not run after the move"; }
+grep -q -- "^role refresh|$H/.claude\$" <<<"$calls" || fail 'owner: sync did not refresh role units'
+sy DOTFILES_ROLE_FILE="$roles" SYNC_ROLE_RC=1 SYNC_ROLE_STATUS="refresh failed fixture" --sync --no-pull
+[ "$RC" = 0 ] && grep -q '^sync: warning: .*refresh failed fixture' <<<"$OUT" || { echo "$OUT"; fail 'owner: role refresh failure is not a warning'; }
+ok 'owner sync calls role refresh and reports its failure as a warning'
 # A refused plan stops the move.
 advance README.md "another upstream line"
 before=$(head_of)
