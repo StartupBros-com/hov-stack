@@ -190,7 +190,7 @@ context-lens made one per run, and claude-reflect made none.
 
 | component | target | verdict | placement | activation | evidence | state |
 |---|---|---|---|---|---|---|
-| learn-taste @ `64eb3de` | hov-stack skill pack | **ADAPT** (strict reading; the lenient reading gives SKIP) | `plugins/hov-stack/skills/learn-taste/`, unchanged | slash-only, `/hov-stack:learn-taste` | sections 2 and 4 | proposed in this PR, then released as 0.3.4 |
+| learn-taste @ `64eb3de` | hov-stack skill pack | **ADAPT** (strict reading; the lenient reading gives SKIP) | `plugins/hov-stack/skills/learn-taste/`, unchanged | slash-only, `/hov-stack:learn-taste` | sections 2 and 4 | merged in #688; staged as 0.3.4, superseded before publish, shipped to members in 0.3.5 |
 | claude-reflect @ `b6c4232` | none | not adopted. It ties learn-taste by the tie rule, but it ships four hooks, and enabling a plugin is the operator's call. | no installation | none | median 6, CLAUDE.md 3/3 | alternatives/GitHub, deep-vetted |
 | nvie self-review @ `2458bd9` | none | not adopted. It ties learn-taste by the tie rule, and its all-history design is the closest match to the operator's idea, but that reach is unmeasured. | no installation | none | median 6 (5 by the K7 judge) | implementation/Web, deep-vetted |
 | context-lens @ `18d8d21` | none | SKIP for this job | no installation | none | median 0 | alternatives/Web, deep-vetted |
@@ -217,9 +217,15 @@ context-lens made one per run, and claude-reflect made none.
 - **Update owner.** hov-stack maintainers. It is deliberately not auto-tracked: re-pull by
   hand and re-run this fixture.
 - **Rollback.** Delete the skill folder and its NOTICE row, then bump the patch version.
-- **Shipped state.**
-  - Merged, released and runtime-verified are recorded separately, in the PR and in #683.
-  - The placement probe ran against this worktree's plugin dir, not the published build.
+- **Shipped state** (2026-11-17).
+  - Merged in #688 at `98822236`.
+  - Staged as 0.3.4, but #691's 0.3.5 bump superseded its card PR before it landed.
+    The publisher leaves a draft no card names alone, so v0.3.4 stays unpublished.
+  - Shipped to members in hov-stack 0.3.5 (`9bac68cf`, published 06:43Z). The 0.3.5
+    release body and notes carry the learn-taste Highlights (#704). Root cause: #702.
+  - Runtime: on the maintainer host, a fresh session lists `/learn-taste`, which comes from
+    the shared skills folder. The placement probe ran `/hov-stack:learn-taste` against this
+    worktree's plugin dir. In the published build the file is checked by sha256, not run.
 
 ## 5. Findings
 
