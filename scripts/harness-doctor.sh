@@ -1075,15 +1075,23 @@ fi
 # fxBridgeError = fx bridge). Until this check those fields had ZERO readers,
 # so a bridge failing every night was indistinguishable from one that never
 # ran — the write-a-field-nobody-reads shape this repo treats as a defect.
-# Since #670 option 3 that hook is the maintainer's own, run from a private plugin,
-# and it runs each bridge only when the bridge's script exists. So the cache is read
-# only where one does: an outside install keeps the cache the old template hook
-# wrote, and with nothing rewriting it, its age would read as a stale bridge forever.
+# Since #670 option 3 the template no longer registers that hook; a private plugin
+# runs it. So the cache is read only while a loaded plugin's hooks/hooks.json names
+# the hook: an install that once ran the template's copy keeps the cache it wrote,
+# and with nothing rewriting it, its age would read as a stale bridge forever.
+# Where a plugin does run it, a stale cache still warns.
 _puc="$HOME/.claude/cache/plugin-update-check.json"
-_puc_bridge=0
-[ -f "$HOME/dotfiles/windows/sync-claude-skills-to-codex.sh" ] && _puc_bridge=1
-[ -f "$HOME/dotfiles/fx/sync.sh" ] && _puc_bridge=1
-if [ "$_puc_bridge" -eq 1 ] && [ -f "$_puc" ] && command -v jq >/dev/null 2>&1; then
+_puc_writer=0
+if command -v jq >/dev/null 2>&1; then
+  _puc_dirs="${CLAUDE_CODE_PLUGIN_DIRS-}:$(jq -r '.env.CLAUDE_CODE_PLUGIN_DIRS // empty' "$HOME/.claude/settings.json" 2>/dev/null)"
+  IFS=: read -r -a _puc_list <<< "$_puc_dirs"
+  for _puc_d in ${_puc_list[@]+"${_puc_list[@]}"}; do
+    [ -n "$_puc_d" ] || continue
+    _puc_d=${_puc_d/#\$HOME/$HOME}
+    grep -q -F 'plugin-auto-update.js' "$_puc_d/hooks/hooks.json" 2>/dev/null && _puc_writer=1
+  done
+fi
+if [ "$_puc_writer" -eq 1 ] && [ -f "$_puc" ] && command -v jq >/dev/null 2>&1; then
   w0=$WARNS
   _puc_fx=$(jq -r '.fxBridgeError // empty' "$_puc" 2>/dev/null)
   _puc_cx=$(jq -r '.bridgeError // empty' "$_puc" 2>/dev/null)
