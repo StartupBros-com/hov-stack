@@ -1,0 +1,30 @@
+<!doctype html>
+<!--
+  Source of design/danger-zone.png: the clean-mapping control. Every value is an existing token,
+  and Card + CardHeader + Button variant="danger" express it exactly. Nothing to ask about.
+-->
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  * { box-sizing: border-box; margin: 0; }
+  body { background: #f9fafb; padding: 32px; font-family: Inter, "Helvetica Neue", Arial, sans-serif; width: 784px; }
+  .card { width: 720px; background: #ffffff; border: 1px solid #fecaca; border-radius: 12px; padding: 16px; }
+  .header { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }
+  .title { font-size: 16px; line-height: 24px; font-weight: 600; color: #111827; }
+  .desc { font-size: 14px; line-height: 20px; color: #6b7280; }
+  .btn { display: inline-flex; align-items: center; height: 32px; padding: 0 12px; border-radius: 8px; font-size: 14px; line-height: 20px; font-weight: 500; border: 0; background: #dc2626; color: #ffffff; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="header">
+      <div>
+        <div class="title">Delete workspace</div>
+        <div class="desc">Permanently delete this workspace and all of its data.</div>
+      </div>
+      <button class="btn">Delete workspace</button>
+    </div>
+  </div>
+</body>
+</html>
