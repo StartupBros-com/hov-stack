@@ -71,7 +71,12 @@ world() {
     cat > "$SEED/sync.sh" <<'EOF'
 #!/usr/bin/env bash
 printf '%s|%s\n' "$*" "$CLAUDE_HOME" >> "$CLAUDE_HOME/../sync-calls"
-case "$*" in *--plan*) exit "${SYNC_PLAN_RC:-0}" ;; esac
+case "$*" in
+  *--plan*) exit "${SYNC_PLAN_RC:-0}" ;;
+  'role refresh')
+    echo "role: ${SYNC_ROLE_STATUS:-nothing to change}"
+    exit "${SYNC_ROLE_RC:-0}" ;;
+esac
 echo "settings: ${SYNC_STATUS:-applied 2}"
 exit "${SYNC_APPLY_RC:-0}"
 EOF

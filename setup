@@ -6,6 +6,8 @@
 #   ./setup --no-dcg   the same, without downloading or installing dcg
 #   ./setup --check    change nothing: print each step's state, exit 1 if any is not in place
 #                      (add --no-dcg to leave dcg out of the check)
+#   ./setup --enable-units  install user units and reconcile this host role's timers
+#   ./setup --root    reconcile Docker policy, managed lock and workstation system units
 #   ./setup --update   bring hov-stack and what it installed up to date, then run every step
 #                      below. Not with --check (exit 2). In order:
 #                        - fast-forwards this checkout with `git fetch` and `git merge --ff-only`
@@ -244,6 +246,8 @@ adopt=0
 yes=0
 sync=0
 no_pull=0
+enable_units=0
+root=0
 # The arguments as given, so --update can run the new setup with the same ones. The id in
 # HOV_STACK_UPDATE_FROM is the checkout --update left; it is read once and removed from the
 # environment so nothing setup runs inherits it.
@@ -263,10 +267,18 @@ for arg in "$@"; do
     --adopt) adopt=1 ;;
     --yes) yes=1 ;;
     --sync) sync=1 ;;
+    --enable-units) enable_units=1 ;;
+    --root) root=1 ;;
     --no-pull) no_pull=1 ;;
-    *) echo "setup: unknown option $arg (--no-dcg, --check, --update, --adopt, --yes, --sync, --no-pull, --help)" >&2; exit 2 ;;
+    *) echo "setup: unknown option $arg (--no-dcg, --check, --update, --adopt, --yes, --sync, --no-pull, --enable-units, --root, --help)" >&2; exit 2 ;;
   esac
 done
+if [ "$enable_units" = 1 ] || [ "$root" = 1 ]; then
+  if [ $((enable_units + root + check + update + adopt + yes + sync + no_pull + no_dcg)) -ne 1 ]; then
+    echo "setup: --enable-units and --root each run on their own" >&2
+    exit 2
+  fi
+fi
 if [ "$update" = 1 ] && [ "$check" = 1 ]; then
   echo "setup: --update changes things and --check changes nothing; use one of them" >&2
   exit 2
@@ -286,6 +298,24 @@ fi
 if [ "$yes" = 1 ] && [ "$adopt" = 0 ]; then
   echo "setup: --yes goes with --adopt: ./setup --adopt shows the merge, ./setup --adopt --yes makes it" >&2
   exit 2
+fi
+
+host_role() {
+  [ -x "$HOV_STACK/sync.sh" ] && [ -r "$HOV_STACK/lib/profile.sh" ] || return 1
+  local role
+  role=$( ( . "$HOV_STACK/lib/profile.sh"; profile_role ) ) || return 1
+  case "$role" in workstation|satellite) printf '%s\n' "$role" ;; *) return 1 ;; esac
+}
+
+if [ "$enable_units" = 1 ] || [ "$root" = 1 ]; then
+  role_flag=--root role_mode=root
+  if [ "$enable_units" = 1 ]; then role_flag=--enable-units role_mode=enable; fi
+  if ! host_role >/dev/null; then
+    echo "setup: $role_flag needs a host role: add this host's row to hosts.tsv in the overlay ($OVERLAY)" >&2
+    exit 1
+  fi
+  export CLAUDE_HOME="$CFG"
+  exec bash "$HOV_STACK/sync.sh" role "$role_mode"
 fi
 
 missing=()
@@ -312,7 +342,8 @@ st_claude="" st_overlay="" st_links="" st_commands="" st_dcg="" st_settings="" s
 row_uncounted=0
 row() {  # row <step> <state> <detail>
   rows+=("$(printf '  %-12s %-8s %s' "$1" "$2" "$3")")
-  printf -v "st_${1//-/_}" '%s' "$2"
+  local rowkey=${1//-/_}
+  printf -v "st_${rowkey// /_}" '%s' "$2"
   case "$2" in ok|off) ;; *) [ "$row_uncounted" = 1 ] || not_ok=$((not_ok + 1)) ;; esac
   [ "$2" != failed ] || failed=1
 }
@@ -1226,9 +1257,12 @@ link_cmds_row() {
     name=${entry%%|*}
     file=$name
     case "$entry" in *'|'*) file=${entry#*|} ;; esac
-    src=$HOV_STACK/bin/$file
+    case "$file" in /*) src=$file ;; *) src=$HOV_STACK/bin/$file ;; esac
     dst=$CLI_DIR/$name
-    if [ -e "$dst" ] && [ "$dst" -ef "$src" ]; then
+    if [ ! -e "$src" ]; then
+      broken="$broken $name"
+      echo "  could not link $name: source does not exist: $src" >&2
+    elif [ -e "$dst" ] && [ "$dst" -ef "$src" ]; then
       have=$((have + 1))
     elif [ -e "$dst" ]; then
       kept="$kept, $name"
@@ -1257,12 +1291,14 @@ link_cmds_row() {
   [ -z "$absent" ] || detail="$detail; not linked:$absent; run ./setup"
   [ -z "$broken" ] || detail="$detail; could not link:$broken (see above)"
   [ -z "$kept" ] || detail="$detail; left alone, not hov-stack's: ${kept#, } (ours runs as $(_lf_display "$CFG")/bin/<name>)"
+  [ -z "${link_notice:-}" ] || detail="$detail; $link_notice"
   case ":$PATH:" in
     *":$CLI_DIR:"*) ;;
     *) detail="$detail; $(_lf_display "$CLI_DIR") is not on this shell's PATH: a new login shell may add it, else add it yourself" ;;
   esac
   if [ -n "$broken" ]; then row "$rowname" failed "$detail"
   elif [ -n "$absent" ]; then row "$rowname" missing "$detail"
+  elif [ -n "${link_notice:-}" ]; then row "$rowname" warning "$detail"
   else row "$rowname" ok "$detail"
   fi
 }
@@ -1272,6 +1308,48 @@ commands_row() {  # commands_row run|check
 # The helper commands CLAUDE.md names (papercut, open-deliverable): HELPER_CLIS in lib/manifest.sh.
 helpers_row() {  # helpers_row run|check
   link_cmds_row helpers "helper command" "$1" "${HELPER_CLIS[@]}"
+}
+
+overlay_commands_row() {
+  overlay_usable && [ -f "$OVERLAY/commands" ] || return 0
+  local line name source overlay_real number=0 malformed="" link_notice=""
+  local entries=()
+  overlay_real=$(cd "$OVERLAY" && pwd -P) || return 1
+  while IFS= read -r line || [ -n "$line" ]; do
+    number=$((number + 1))
+    case "$line" in ''|\#*) continue ;; esac
+    name=${line%%$'\t'*}
+    source=${line#*$'\t'}
+    if [[ "$line" != *$'\t'* ]] || [[ ! "$name" =~ ^[A-Za-z0-9._-]+$ ]] \
+      || [ -z "$source" ] || [[ "$source" == *$'\t'* ]] || [ "$name" = . ] || [ "$name" = .. ]; then
+      malformed="$malformed $number"
+      echo "  overlay commands: malformed line $number: $line" >&2
+      continue
+    fi
+    case "$source" in /*) ;; *) source=$overlay_real/$source ;; esac
+    entries+=("$name|$source")
+  done < "$OVERLAY/commands"
+  [ -z "$malformed" ] || link_notice="malformed line(s) skipped:$malformed"
+  link_cmds_row "overlay commands" "overlay command" "$1" ${entries[@]+"${entries[@]}"}
+}
+
+role_run() {
+  local output rc=0
+  role_text=
+  host_role >/dev/null || return 0
+  output=$(CLAUDE_HOME="$CFG" bash "$HOV_STACK/sync.sh" role "$1") || rc=$?
+  [ -z "$output" ] || printf '%s\n' "$output" | sed '/^role: /d'
+  role_text=$(printf '%s\n' "$output" | sed -n 's/^role: //p' | tail -n 1)
+  if [ -z "$role_text" ]; then role_text="$1 gave no role summary (exit $rc)"; rc=1; fi
+  return "$rc"
+}
+
+role_row() {
+  local state=ok
+  role_run "$1" || state=failed
+  [ -n "$role_text" ] || return 0
+  if [ "$1" = check ] && [ "$role_text" != "nothing to change" ] && [ "$state" = ok ]; then state=missing; fi
+  row role "$state" "$role_text"
 }
 
 # --adopt (#650): give a settings.json setup has no record of creating the record it would have
@@ -1606,7 +1684,7 @@ sync_route_find() {
     sync_why="$CFG/settings.json is not a regular file"
   elif [ -e "$SYNC_BASE" ] || [ -L "$SYNC_BASE" ]; then
     if [ -f "$SYNC_BASE" ] && [ ! -L "$SYNC_BASE" ] && [ -x "$HOV_STACK/sync.sh" ]; then
-      role=$( ( . "$HOV_STACK/lib/profile.sh"; profile_role ) 2>/dev/null ) || role=
+      role=$(host_role) || role=
       case $role in
         workstation|satellite) sync_route=owner ;;
         *) sync_why="sync.sh keeps its own record of $CFG/settings.json, but this host has no workstation or satellite role to apply it (hosts.tsv), so sync.sh's merge does not run here and neither does setup's" ;;
@@ -1786,7 +1864,7 @@ sync_merge() {
       esac
       merge_done ;;
     owner)
-      out=$(CLAUDE_HOME="$CFG" bash "$HOV_STACK/sync.sh" apply-settings --quiet 2>/dev/null < /dev/null) || rc=$?
+      out=$(CLAUDE_HOME="$CFG" bash "$HOV_STACK/sync.sh" apply-settings --quiet < /dev/null) || rc=$?
       status=$(printf '%s\n' "$out" | sed -n 's/^settings: //p' | tail -n 1)
       case $status in
         '')
@@ -1890,10 +1968,14 @@ sync_main() {
   fi
   commands_row run
   helpers_row run
+  overlay_commands_row run
   [ "$failed" = 0 ] || sync_bad=$((sync_bad + 1))
   # 5. Merge.
   sync_merge
   text=$sync_merge_text
+  role_refresh_failed=0
+  role_run refresh || role_refresh_failed=1
+  if [ -n "$role_text" ] && [ "$role_text" != "nothing to change" ]; then text="$text; $role_text"; fi
   [ "$sync_kept" = 0 ] || text="$text; $sync_kept path(s) left alone"
   if [ "$moved" = 1 ]; then
     n=$(git_in rev-list --count "$from..$to" 2>/dev/null) || n="?"
@@ -1910,7 +1992,7 @@ sync_main() {
   [ -z "$sync_merge_warn" ] || text="$text; the merge left something for you: $sync_merge_warn"
   # 6. Result.
   if [ "$moved" = 1 ]; then
-    if [ -n "$sync_merge_warn" ]; then sync_finish warning "$mv_text; $text"
+    if [ -n "$sync_merge_warn" ] || [ "$role_refresh_failed" = 1 ]; then sync_finish warning "$mv_text; $text"
     else sync_finish moved "$mv_text; $text"
     fi
   else
@@ -1918,7 +2000,7 @@ sync_main() {
     if [ "$pulled" = 1 ]; then text="hov-stack is up to date at ${head:0:7}; $text"
     else text="hov-stack is at ${head:0:7} (no pull); $text"
     fi
-    if [ -n "$sync_merge_warn" ]; then sync_finish warning "$text"
+    if [ -n "$sync_merge_warn" ] || [ "$role_refresh_failed" = 1 ]; then sync_finish warning "$text"
     else sync_finish current "$text"
     fi
   fi
@@ -1955,6 +2037,8 @@ if [ "$check" = 1 ]; then
   if [ -z "$absent" ]; then row links ok "${#srcs[@]} links in place"; else row links missing "not linked:$absent; run ./setup"; fi
   commands_row check
   helpers_row check
+  overlay_commands_row check
+  role_row check
 
   if [ "$no_dcg" = 1 ]; then
     row dcg off "left out of the check (--no-dcg)"
@@ -2037,6 +2121,7 @@ overlay_import || echo "  could not import $OVERLAY/CLAUDE.md from $(_lf_display
 if [ "$unlinked" -eq 0 ]; then row links ok "$linked links in place"; else row links failed "$unlinked could not be made (see above)"; fi
 commands_row run
 helpers_row run
+overlay_commands_row run
 
 if [ "$no_dcg" = 1 ]; then
   echo "dcg: skipped (--no-dcg). Run ./dcg/install.sh to add it later, then re-run ./setup."
@@ -2060,7 +2145,19 @@ fi
 dcg_path=$(find_dcg)
 seed_target=$CFG/settings.json
 moved_seed=
-if settings_mergeable; then
+sync_route_find
+if [ "$sync_route" = owner ]; then
+  if role_run owner; then
+    sync_merge
+    if [ "$sync_merge_failed" = 0 ]; then
+      row settings ok "$sync_merge_text${sync_merge_warn:+; $sync_merge_warn}"
+    else
+      row settings failed "$sync_merge_text"
+    fi
+  else
+    row settings failed "$role_text; settings merge not run"
+  fi
+elif settings_mergeable; then
   # A settings.json setup has a record of creating (#650): merge the template's changes into it.
   settings_merge run
   dcg_path=$merge_dcg_path
@@ -2280,6 +2377,7 @@ if [ "$update" = 1 ]; then
 fi
 
 instructions_row
+role_row refresh
 echo "hov-stack: status"
 printf '%s\n' "${rows[@]}"
 echo "  left alone on purpose: memory, projects/, credentials, settings.local.json, shell rc files."

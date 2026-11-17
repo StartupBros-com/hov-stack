@@ -1,5 +1,7 @@
 # Harness Runbook
 
+On a host with a role, plain `./setup` runs the owner steps and settings merge when an owner record exists, then refreshes installed user units. `--sync` also rewrites installed unit files and reports new units and lock drift, without changing schedules or using sudo. Run `./setup --enable-units` for user-unit installation and schedules, and `./setup --root` for Docker policy, the managed lock and workstation system units (never enabled).
+
 How this machine's Claude Code harness is wired, and the standing decisions that
 govern it. Detail docs live in `harness/` — grep there before changing anything.
 Always-on behavioral rules stay in `CLAUDE.md`; this file is the on-demand
