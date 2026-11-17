@@ -570,6 +570,118 @@ grep -q "^sync: skipped (another sync is running, pid $holder_pid)" <<<"$OUT" ||
 kill "$holder_pid" 2>/dev/null || :; wait "$holder_pid" 2>/dev/null || :; holder_pid=
 ok "lock races: a lock gone between mkdir and the check is retried, and a stale judgement is re-checked so a live owner's lock is not reaped"
 
+# ---- 18. a reap acting on an old judgement must not remove the lock another run took since ----
+# Run B judges a dead owner's lock stale and pauses where it is about to reap: a stand-in cat
+# sleeps 2 s on B's second read of the pid file before answering with what it read. Run A starts
+# during the pause, finds the same dead lock and takes it. Without the reap claim B then removes
+# the lock A holds and both are inside at once. A stand-in git logs start and end around each
+# fetch, which runs inside the lock, so the two fetches must come one after the other.
+world reap
+real_git=$(readlink -f "$(command -v git)")
+mkdir -p "$WORK/shim-reap-cat" "$WORK/shim-reap-git"
+cat > "$WORK/shim-reap-cat/cat" <<EOF
+#!/bin/sh
+case "\$*" in *sync.lock/pid)
+  n=\$(( \$($real_cat "\$SHIM_COUNT" 2>/dev/null || echo 0) + 1 ))
+  echo "\$n" > "\$SHIM_COUNT"
+  if [ "\$n" = 2 ]; then
+    rc=0; out=\$($real_cat "\$@" 2>/dev/null) || rc=\$?
+    : > "\$SHIM_PAUSED"
+    sleep 2
+    [ "\$rc" != 0 ] || printf '%s\n' "\$out"
+    exit "\$rc"
+  fi ;;
+esac
+exec $real_cat "\$@"
+EOF
+cat > "$WORK/shim-reap-git/git" <<EOF
+#!/bin/sh
+case " \$* " in *" fetch "*)
+  echo start >> "\$FETCH_LOG"
+  sleep 4
+  rc=0; $real_git "\$@" || rc=\$?
+  echo end >> "\$FETCH_LOG"
+  exit "\$rc" ;;
+esac
+exec $real_git "\$@"
+EOF
+chmod +x "$WORK/shim-reap-cat/cat" "$WORK/shim-reap-git/git"
+mkdir -p "$H/.claude/.hov-stack"
+true & dead_pid=$!; wait "$dead_pid" 2>/dev/null || :
+lock=$H/.claude/.hov-stack/sync.lock
+mkdir "$lock"; echo "$dead_pid" > "$lock/pid"
+: > "$S/fetch.log"
+run_clean "$H" PATH="$WORK/shim-reap-cat:$WORK/shim-reap-git:$BASE_PATH" SHIM_COUNT="$S/cat.count" \
+  SHIM_PAUSED="$S/paused" FETCH_LOG="$S/fetch.log" HOV_SYNC_LOCK_WAIT=30 \
+  bash "$C/setup" --sync > "$S/reap-b.out" 2>&1 < /dev/null & pb=$!
+n=0; while [ ! -e "$S/paused" ] && [ "$n" -lt 100 ]; do sleep 0.1; n=$((n + 1)); done
+[ -e "$S/paused" ] || { kill "$pb" 2>/dev/null || :; fail "reap: run B never reached its second read of the pid, so nothing was tested"; }
+run_clean "$H" PATH="$WORK/shim-reap-git:$BASE_PATH" FETCH_LOG="$S/fetch.log" HOV_SYNC_LOCK_WAIT=30 \
+  bash "$C/setup" --sync > "$S/reap-a.out" 2>&1 < /dev/null & pa=$!
+ra=0; rb=0
+wait "$pa" || ra=$?
+wait "$pb" || rb=$?
+[ "$ra" = 0 ] && [ "$rb" = 0 ] || { cat "$S/reap-a.out" "$S/reap-b.out"; fail "reap: exits $ra (A) and $rb (B)"; }
+grep -q '^sync: current: ' "$S/reap-a.out" && grep -q '^sync: current: ' "$S/reap-b.out" || { cat "$S/reap-a.out" "$S/reap-b.out"; fail "reap: a run did not finish"; }
+[ "$(tr '\n' ' ' < "$S/fetch.log")" = "start end start end " ] || { cat "$S/fetch.log"; fail "reap: the two runs were inside the lock at once (fetch log: $(tr '\n' ' ' < "$S/fetch.log"))"; }
+no_lock reap
+[ ! -e "$H/.claude/.hov-stack/sync.lock.reap" ] || fail "reap: the reap claim was left behind"
+# An orphaned claim (a reaper that died holding it) older than a minute is cleared, and the dead
+# owner's lock is then taken.
+mkdir "$lock"; echo "$dead_pid" > "$lock/pid"
+mkdir "$H/.claude/.hov-stack/sync.lock.reap"
+touch -d '5 minutes ago' "$H/.claude/.hov-stack/sync.lock.reap"
+sy HOV_SYNC_LOCK_WAIT=0 --sync
+[ "$RC" = 0 ] && grep -q '^sync: current: ' <<<"$OUT" || { echo "$OUT"; fail "reap: an orphaned claim kept the dead owner's lock from being taken"; }
+no_lock reap
+[ ! -e "$H/.claude/.hov-stack/sync.lock.reap" ] || fail "reap: the orphaned claim was not cleared"
+ok "reap claim: a run acting on an old stale judgement leaves the lock another run took since (the two never overlap), and an orphaned claim is cleared"
+
+# ---- 19. the repository-route gate: --sync refuses what launchpad-freshen.sh refuses ----------
+# A stub resolver stands in for the host's route registration. Each refusal leaves HEAD and the
+# remote-tracking ref where they were (the gate runs before the fetch), exits 1 and says why in
+# freshen's words; --no-pull never consults it; observe mode lets the move through.
+world routegate
+advance README.md "an upstream line"
+gate_stub() { printf 'import json, sys\n%s\n' "$2" > "$S/route-$1.py"; }
+gate_stub enforce 'print(json.dumps({"classification": "noncanonical-independent-clone", "mode": "enforce", "route": "r1", "canonical_path": "/srv/canonical"}))'
+gate_stub unregistered 'print(json.dumps({"classification": "unregistered", "mode": "warn", "route": "r1"}))'
+gate_stub missing 'print(json.dumps({"classification": "canonical-sibling", "mode": "observe", "route": "r1", "canonical_missing": True}))'
+gate_stub unverified 'print(json.dumps({"classification": "unverified", "verified": False}))'
+gate_stub broken 'sys.exit(3)'
+gate_stub garbage 'print("not json")'
+gate_stub observe 'print(json.dumps({"classification": "noncanonical-independent-clone", "mode": "observe", "route": "r1", "canonical_path": "/srv/canonical"}))'
+before=$(head_of)
+tracking=$(git -C "$C" rev-parse origin/main)
+for gate_case in \
+  'enforce|noncanonical-independent-clone for enrolled route; skipped mutation (canonical: /srv/canonical)' \
+  'unregistered|enrolled route r1 has no authority registered on this host' \
+  'missing|canonical launchpad is absent' \
+  'unverified|repo route unverified; skipped before mutation' \
+  'broken|repo-route resolver failed; skipped before mutation' \
+  'garbage|repo-route resolver returned invalid JSON'; do
+  gate_name=${gate_case%%|*} gate_want=${gate_case#*|}
+  sy REPO_ROUTE_RESOLVER="$S/route-$gate_name.py" --sync
+  expect_refusal "route gate ($gate_name)" blocked 'the repository-route gate refuses to fetch into or move ' "$before"
+  grep -Fq "$gate_want" <<<"$OUT" || { echo "$OUT"; fail "route gate ($gate_name): the reason is not freshen's ($gate_want)"; }
+  [ "$(git -C "$C" rev-parse origin/main)" = "$tracking" ] || fail "route gate ($gate_name): the fetch ran before the gate"
+done
+# The same stub refuses freshen too, with the same reason.
+FOUT=$(env -i HOME="$H" PATH="$BASE_PATH" LANG=C.UTF-8 REPO_ROUTE_RESOLVER="$S/route-enforce.py" \
+  FRESHEN_FETCH_TIMEOUT=1 bash "$C/scripts/launchpad-freshen.sh" --repo "$C" 2>&1 < /dev/null) || :
+grep -Fq "WARN launchpad clone: noncanonical-independent-clone for enrolled route; skipped mutation (canonical: /srv/canonical)" <<<"$FOUT" \
+  || { echo "$FOUT"; fail "route gate: freshen does not refuse with the same words"; }
+# --no-pull merges without consulting the gate (nothing is fetched or moved).
+sy REPO_ROUTE_RESOLVER="$S/route-enforce.py" --sync --no-pull
+[ "$RC" = 0 ] && grep -q '^sync: current: ' <<<"$OUT" || { echo "$OUT"; fail "route gate: --no-pull was refused"; }
+[ "$(head_of)" = "$before" ] || fail "route gate: --no-pull moved HEAD"
+# Planted negative: observe mode is not a refusal.
+sy REPO_ROUTE_RESOLVER="$S/route-observe.py" --sync
+[ "$RC" = 0 ] && grep -q '^sync: moved: ' <<<"$OUT" || { echo "$OUT"; fail "route gate: observe mode blocked the move"; }
+[ "$(head_of)" = "$(head_of "$SEED")" ] || fail "route gate: observe mode did not move HEAD"
+no_lock routegate
+ok "route gate: enforce/warn refusals, an absent canonical, an unverified route and a failing or garbled resolver block --sync before the fetch (exit 1, freshen's reason, which freshen prints too); --no-pull is not gated; observe moves"
+
 # ---- no detached sync outlived the run --------------------------------------------------------
 if pgrep -f "$WORK/.*/setup --sync" > /dev/null 2>&1; then
   fail "a setup --sync from this suite is still running"

@@ -70,11 +70,27 @@ try {
     // shows it; a result equal to the one shown before stays quiet (an owner host syncs every
     // few minutes and a standing refusal must not print at every start). Nothing is shown
     // while a sync still holds its lock. Returns whether a result was claimed.
+    //
+    // Claim first, read after: the rename to a name of this process's own takes the result, and
+    // what is shown, and kept as shown, is exactly what was taken. A sync that writes a newer
+    // result after the lock check lands a new sync-result for the next session instead of being
+    // marked shown unread, and two sessions starting at once never both take one.
     const showResult = () => {
+      const result = path.join(state, "sync-result");
+      const shown = path.join(state, "sync-result.shown");
+      const claim = `${result}.claim.${process.pid}`;
+      const drop = () => {
+        try {
+          fs.unlinkSync(claim);
+        } catch {}
+      };
       try {
-        const result = path.join(state, "sync-result");
-        const shown = path.join(state, "sync-result.shown");
         if (!exists(result) || lockLive()) return false;
+        try {
+          fs.renameSync(result, claim);
+        } catch {
+          return false;
+        }
         const parse = (f) => {
           const [epoch, kind, ...rest] = fs
             .readFileSync(f, "utf8")
@@ -82,15 +98,21 @@ try {
             .split("\t");
           return { epoch, kind, text: rest.join("\t") };
         };
-        const now = parse(result);
+        let now;
+        try {
+          now = parse(claim);
+        } catch {
+          drop();
+          return false;
+        }
         let before = null;
         try {
           before = parse(shown);
         } catch {}
         try {
-          fs.renameSync(result, shown);
+          fs.renameSync(claim, shown);
         } catch {
-          return false;
+          drop();
         }
         const speak = ["moved", "notice", "warning", "blocked", "failed", "moving"];
         if (
@@ -104,6 +126,7 @@ try {
           );
         return true;
       } catch {
+        drop();
         return false;
       }
     };

@@ -60,10 +60,12 @@
 #                          reports how far behind the checkout is and moves nothing;
 #                          HOV_UPDATE=off, or --no-pull, skips the fetch and the move and
 #                          still merges. A fetch is capped at HOV_SYNC_FETCH_TIMEOUT seconds
-#                          (60; 0 for no cap), with or without `timeout`. A refusal (detached
-#                          HEAD, no upstream, commits of yours, a collision with a local edit)
-#                          leaves everything as it was and says the fix; git's own error text
-#                          is never kept.
+#                          (60; 0 for no cap), by setup itself rather than `timeout`. Before
+#                          the fetch, the repository-route gate launchpad-freshen.sh applies
+#                          (lib/repo-route-gate.sh) must allow an unattended change to this
+#                          checkout. A refusal (the route gate, detached HEAD, no upstream,
+#                          commits of yours, a collision with a local edit) leaves everything
+#                          as it was and says the fix; git's own error text is never kept.
 #                        - links what is missing (a path that is absent, or a link to nothing),
 #                          and leaves anything else at a link's path alone, counted: only a
 #                          full ./setup moves a file of yours into ~/.hov-stack-backups/. Then
@@ -326,6 +328,7 @@ git_in() { git -C "$HOV_STACK" "$@"; }
 # --update's "fetching" line and keeps no git text but --update's first error line; the caller
 # words each outcome. Sets pull_status to one of
 #   notgit nocommits handoff detached noupstream fetchfail current diverged ffrefused moved
+# and, for sync only, routegate (the repository-route gate refused before the fetch)
 # and, for sync only, whatever sync_before_move sets (it can stop the move before it is made).
 # pull_head is HEAD when it started, pull_new HEAD after a move, pull_old the hand-off's id.
 checkout_advance() {  # checkout_advance update|sync
@@ -375,6 +378,9 @@ checkout_advance() {  # checkout_advance update|sync
       pull_status=fetchfail
       return 0
     fi
+  elif ! sync_route_gate; then
+    pull_status=routegate
+    return 0
   elif ! sync_fetch "$remote"; then
     pull_status=fetchfail
     return 0
@@ -1503,8 +1509,34 @@ sync_lock_stale() {  # sync_lock_stale <pid read from the lock, or empty>
   if ! kill -0 "$1" 2>/dev/null; then return 0; fi
   [ -n "$(find "$sync_lock_dir" -prune -mmin +15 2>/dev/null)" ]
 }
+# Removing a stale lock is serialized by a second directory, the reap claim: only the run that
+# made it may remove the lock, and only after reading the pid again while it holds the claim and
+# finding the same stale owner. Two runs that both judged one dead owner stale otherwise race:
+# the first removes the lock and takes it, and the second, acting on its old judgement, removes
+# the lock the first now holds, so both merge at once. A run that took the lock in between has a
+# different pid (and a young directory), so the claim's holder leaves it alone. The claim is held
+# for a few milliseconds; one older than a minute was left by a run that died holding it and is
+# cleared. Clearing it can race only when two runs find that same orphaned claim within the same
+# instant, which needs a reaper killed inside those milliseconds first.
+sync_reap_dir=$CFG/.hov-stack/sync.lock.reap
+sync_reaping=0
+sync_lock_reap() {  # sync_lock_reap <pid judged stale>: 0 looked again under the claim, 1 another run holds it
+  local again
+  if ! mkdir "$sync_reap_dir" 2>/dev/null; then
+    if [ -n "$(find "$sync_reap_dir" -prune -mmin +1 2>/dev/null)" ]; then rmdir "$sync_reap_dir" 2>/dev/null || :; fi
+    return 1
+  fi
+  sync_reaping=1
+  again=$(cat "$sync_lock_dir/pid" 2>/dev/null) || again=
+  if [ -d "$sync_lock_dir" ] && [ "$again" = "$1" ] && sync_lock_stale "$again"; then
+    if mv "$sync_lock_dir" "$sync_lock_dir.stale.$$" 2>/dev/null; then rm -rf "$sync_lock_dir.stale.$$"; fi
+  fi
+  rmdir "$sync_reap_dir" 2>/dev/null || :
+  sync_reaping=0
+  return 0
+}
 sync_lock() {  # 0 held by this run, 1 held by another run past the wait, 2 could not be made
-  local wait=${HOV_SYNC_LOCK_WAIT:-120} waited=0 retaken=0 gone=0 pid again
+  local wait=${HOV_SYNC_LOCK_WAIT:-120} waited=0 retaken=0 gone=0 pid
   case $wait in ''|*[!0-9]*) wait=120 ;; esac
   { mkdir -p "$CFG/.hov-stack" && chmod 700 "$CFG/.hov-stack"; } 2>/dev/null || return 2
   while :; do
@@ -1528,13 +1560,7 @@ sync_lock() {  # 0 held by this run, 1 held by another run past the wait, 2 coul
     fi
     if [ "$retaken" -lt 5 ] && sync_lock_stale "$pid"; then
       retaken=$((retaken + 1))
-      # Reap atomically: only the run that still sees the pid it judged stale moves the
-      # directory aside (mv of a directory is one rename, so a second reaper finds nothing to
-      # move) and only then removes it. A lock another run just took has a different pid.
-      again=$(cat "$sync_lock_dir/pid" 2>/dev/null) || again=
-      if [ "$again" = "$pid" ] && mv "$sync_lock_dir" "$sync_lock_dir.stale.$$" 2>/dev/null; then
-        rm -rf "$sync_lock_dir.stale.$$"
-      fi
+      sync_lock_reap "$pid" || sleep 0.1 2>/dev/null || sleep 1
       continue
     fi
     sync_holder=${pid:-unknown}
@@ -1544,6 +1570,8 @@ sync_lock() {  # 0 held by this run, 1 held by another run past the wait, 2 coul
   done
 }
 sync_unlock() {
+  # A run that ends while it holds the reap claim (a signal mid-reap) gives it back.
+  if [ "$sync_reaping" = 1 ]; then rmdir "$sync_reap_dir" 2>/dev/null || :; sync_reaping=0; fi
   [ "$sync_locked" = 1 ] || return 0
   if [ "$(cat "$sync_lock_dir/pid" 2>/dev/null)" = "$$" ]; then rm -rf "$sync_lock_dir"; fi
   sync_locked=0
@@ -1580,7 +1608,28 @@ sync_route_find() {
   fi
 }
 
-# git fetch, capped where `timeout` exists, never prompting, never showing git's text.
+# The repository-route gate launchpad-freshen.sh applies to every launch pad (one copy, in
+# lib/repo-route-gate.sh): --sync may not fetch into or move a checkout the routes registered on
+# this host protect. It runs before the fetch, and only on --sync's pull; ./setup --update is a
+# move made by hand. A lib that does not load, or no python3 for the resolver, refuses.
+sync_gate_why=
+sync_route_gate() {
+  local resolver=${REPO_ROUTE_RESOLVER:-$HOV_STACK/scripts/repo-route.py}
+  # shellcheck source=lib/repo-route-gate.sh
+  if ! . "$HOV_STACK/lib/repo-route-gate.sh" 2>/dev/null || ! declare -F repo_route_gate > /dev/null; then
+    sync_gate_why="lib/repo-route-gate.sh did not load"
+    return 1
+  fi
+  if ! command -v python3 > /dev/null 2>&1; then
+    sync_gate_why="python3 is not on PATH, and the route resolver that decides this needs it"
+    return 1
+  fi
+  repo_route_gate "$HOV_STACK" "$resolver" && return 0
+  sync_gate_why=$route_gate_why
+  return 1
+}
+
+# git fetch, capped by setup itself, never prompting, never showing git's text.
 sync_fetch() {  # sync_fetch <remote>
   local t=${HOV_SYNC_FETCH_TIMEOUT:-60}
   case $t in ''|*[!0-9]*) t=60 ;; esac
@@ -1588,22 +1637,21 @@ sync_fetch() {  # sync_fetch <remote>
   if [ "$t" = 0 ]; then
     # 0 is no cap, as it is for `timeout`.
     GIT_TERMINAL_PROMPT=0 git -C "$HOV_STACK" fetch --quiet "$1" > /dev/null 2>&1 < /dev/null
-  elif command -v timeout >/dev/null 2>&1; then
-    GIT_TERMINAL_PROMPT=0 timeout "$t" git -C "$HOV_STACK" fetch --quiet "$1" > /dev/null 2>&1 < /dev/null
   else
-    # No `timeout` (macOS): run the fetch in the background and watch it from here, in 0.1 s
-    # steps, so nothing is left behind (no separate watchdog process to clean up) and the cap
-    # holds under bash 3.2.
+    # The cap is setup's own, not `timeout`'s: macOS has none, and the ones that exist differ
+    # on a stopped process group (Ubuntu 26.04's sends TERM to it and waits for ever). The
+    # fetch runs in the background and is watched from here, in 0.1 s steps, so nothing is
+    # left behind (no separate watchdog process to clean up) and the cap holds under bash 3.2.
     local fpid steps=0 limit=$((t * 10)) frc=0
     # Job control gives the background fetch its own process group, so the cap can end the
-    # transport child (ssh) with it, as `timeout` does.
+    # transport child (ssh) with it.
     set -m
     GIT_TERMINAL_PROMPT=0 git -C "$HOV_STACK" fetch --quiet "$1" > /dev/null 2>&1 < /dev/null &
     fpid=$!
     set +m
     while kill -0 "$fpid" 2>/dev/null; do
       if [ "$steps" -eq "$limit" ]; then
-        # TERM, then CONT, as `timeout` does: in a hand run, an ssh that reads the terminal
+        # TERM, then CONT, as GNU `timeout` does: in a hand run, an ssh that reads the terminal
         # stops this background group (SIGTTIN), and a stopped process holds TERM until it is
         # continued. KILL two seconds on if anything in the group is still there.
         kill -TERM -- "-$fpid" 2>/dev/null || kill "$fpid" 2>/dev/null || :
@@ -1801,6 +1849,9 @@ sync_main() {
         return 1 ;;
       fetchfail)
         sync_finish failed "hov-stack not updated: could not fetch $pull_remote (offline?): ./setup --sync tries again when online"
+        return 1 ;;
+      routegate)
+        sync_finish blocked "hov-stack not updated: the repository-route gate refuses to fetch into or move $HOV_STACK ($sync_gate_why); ./setup --update moves it by hand"
         return 1 ;;
       diverged)
         sync_finish blocked "hov-stack not updated: $pull_branch has $pull_ahead commits $pull_up lacks and $pull_up has $pull_behind you lack, so it cannot fast-forward; setup never rebases or resets: rebase or merge in $HOV_STACK yourself, then ./setup --sync"

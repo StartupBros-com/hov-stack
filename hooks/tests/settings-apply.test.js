@@ -658,6 +658,53 @@ test("result: the last background result is shown once, claimed by rename, dedup
   }
 });
 
+test("result: a newer result a sync writes while the hook reads one is kept for the next session, not marked shown", () => {
+  const f = syncFixture();
+  try {
+    const { run, state } = f;
+    f.quiet();
+    // The race made deterministic: on the hook's first read of the pending result (sync-result
+    // itself, or its claimed name), this preload lands a newer failure the way setup writes one
+    // (a temp file renamed over sync-result), then hands the hook the bytes it read.
+    const preload = path.join(f.tmp, "race-preload.js");
+    fs.writeFileSync(
+      preload,
+      `const fs = require("fs"), path = require("path");
+const real = fs.readFileSync;
+let done = false;
+fs.readFileSync = function (p, ...rest) {
+  const out = real.call(fs, p, ...rest);
+  const base = path.basename(String(p));
+  if (!done && (base === "sync-result" || base.startsWith("sync-result.claim."))) {
+    done = true;
+    const tmp = path.join(path.dirname(String(p)), ".sync-result.race");
+    fs.writeFileSync(tmp, "1700000001\\tfailed\\thov-stack not updated: could not fetch origin (offline?)\\n");
+    fs.renameSync(tmp, path.join(path.dirname(String(p)), "sync-result"));
+    fs.writeFileSync(process.env.RACE_MARK, "");
+  }
+  return out;
+};
+`,
+    );
+    const mark = path.join(f.tmp, "race.done");
+    fs.writeFileSync(state("sync-result"), "1700000000\tcurrent\thov-stack is up to date at abc1234\n");
+    const r1 = run({ NODE_OPTIONS: `--require ${preload}`, RACE_MARK: mark });
+    assert.ok(fs.existsSync(mark), "the preload never fired, so nothing was tested");
+    // The session that took the `current` result says nothing (current is quiet)...
+    assert.equal(r1.stdout, "");
+    // ...and the failure written meanwhile is still pending, not swallowed into .shown.
+    assert.ok(fs.existsSync(state("sync-result")), "the newer failure was marked shown unread");
+    assert.match(fs.readFileSync(state("sync-result"), "utf8"), /\tfailed\t/);
+    assert.match(fs.readFileSync(state("sync-result.shown"), "utf8"), /\tcurrent\t/, "shown is not the result that was handled");
+    assert.deepEqual(fs.readdirSync(state("")).filter((n) => n.startsWith("sync-result.claim.")), [], "a claim file was left behind");
+    // The next session shows it.
+    assert.equal(run().stdout, "[hov-stack] hov-stack not updated: could not fetch origin (offline?)\n");
+    assert.equal(fs.existsSync(state("sync-result")), false);
+  } finally {
+    fs.rmSync(f.tmp, { recursive: true, force: true });
+  }
+});
+
 test("gate: a refusal from the member gate is claimed and shown once, not printed inline at every start", () => {
   const f = syncFixture();
   try {

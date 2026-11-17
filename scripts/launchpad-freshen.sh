@@ -47,40 +47,17 @@ ROUTE_RESOLVER="${REPO_ROUTE_RESOLVER:-$HERE/repo-route.py}"
 # shellcheck source=../lib/repo-update.sh
 . "$HERE/../lib/repo-update.sh" 2>/dev/null || true
 
+# The route gate is shared with ./setup --sync (lib/repo-route-gate.sh), so both refuse the same
+# checkouts for the same reasons. Without the lib every repo is refused: a freshen that cannot
+# apply the gate changes nothing.
+# shellcheck source=../lib/repo-route-gate.sh
+if ! . "$HERE/../lib/repo-route-gate.sh" 2>/dev/null || ! declare -F repo_route_gate > /dev/null; then
+  repo_route_gate() { route_gate_why="lib/repo-route-gate.sh did not load; skipped before mutation"; return 1; }
+fi
 route_gate() {
-  local repo=$1 result state mode route canonical
-  result=$(python3 "$ROUTE_RESOLVER" resolve --repo "$repo" --format json 2>/dev/null) || {
-    echo "WARN launchpad $(basename "$repo"): repo-route resolver failed; skipped before mutation"
-    return 1
-  }
-  state=$(printf '%s' "$result" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("classification","unverified"))' 2>/dev/null) || {
-    echo "WARN launchpad $(basename "$repo"): repo-route resolver returned invalid JSON; skipped before mutation"
-    return 1
-  }
-  mode=$(printf '%s' "$result" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("mode","observe"))' 2>/dev/null)
-  route=$(printf '%s' "$result" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("route",""))' 2>/dev/null)
-  canonical=$(printf '%s' "$result" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("canonical_path","(unknown canonical)"))' 2>/dev/null)
-  missing=$(printf '%s' "$result" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("canonical_missing",False))' 2>/dev/null)
-  if [ "$missing" = True ]; then
-    echo "WARN launchpad $(basename "$repo"): canonical launchpad is absent; only a linked sibling may be resumed/adopted, skipped before mutation"
-    return 1
-  fi
-  case "$state" in
-    unverified|ambiguous|misconfigured|error)
-      echo "WARN launchpad $(basename "$repo"): repo route $state; skipped before mutation"
-      return 1 ;;
-    unregistered)
-      if [ -n "$route" ] && { [ "$mode" = warn ] || [ "$mode" = enforce ]; }; then
-        echo "WARN launchpad $(basename "$repo"): enrolled route $route has no authority registered on this host; skipped mutation"
-        return 1
-      fi ;;
-    noncanonical-independent-clone|canonical-sibling)
-      if [ "$mode" = warn ] || [ "$mode" = enforce ]; then
-        echo "WARN launchpad $(basename "$repo"): $state for enrolled route; skipped mutation (canonical: $canonical)"
-        return 1
-      fi ;;
-  esac
-  return 0
+  repo_route_gate "$1" "$ROUTE_RESOLVER" && return 0
+  echo "WARN launchpad $(basename "$1"): $route_gate_why"
+  return 1
 }
 
 default_of() {
