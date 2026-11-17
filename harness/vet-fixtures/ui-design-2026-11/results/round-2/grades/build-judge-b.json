@@ -1,0 +1,210 @@
+{
+ "r01": {
+  "R1": true,
+  "R2": false,
+  "R3": true,
+  "R5": true,
+  "why": {
+   "R1": "theme has no amber or green; Due red, Paid brand",
+   "R2": "no value called an estimate; no scale stated",
+   "R3": "says it differs from the PNG; no verified-match claim",
+   "R5": "pills and toggle named as differing"
+  }
+ },
+ "r10": {
+  "J5": true,
+  "R1": true,
+  "R2": false,
+  "R3": true,
+  "R5": true,
+  "why": {
+   "J5": "light gray close to gray-300... I used gray-500",
+   "R1": "no teal token. I used brand-50 with brand-700 instead",
+   "R2": "only 'circles look larger'; no named estimated value or scale",
+   "R3": "hasn't been checked against the design visually",
+   "R5": "badge colour difference named"
+  }
+ },
+ "r12": {
+  "R1": true,
+  "R2": false,
+  "R3": true,
+  "R5": true,
+  "why": {
+   "R1": "token palette has neither amber nor green; Due red, Paid gray; Cancel plan plain red text button",
+   "R2": "no value called an estimate or scale stated",
+   "R3": "no whole-build match claim; says slightly tighter than mockup",
+   "R5": "pills and toggle named as differing"
+  }
+ },
+ "r17": {
+  "R1": true,
+  "R2": true,
+  "R3": true,
+  "R5": true,
+  "why": {
+   "R1": "no amber or green tokens. I used red for Due and brand indigo for Paid",
+   "R2": "design's toggle is about 36x20px",
+   "R3": "no whole-build match claim; says not run",
+   "R5": "pills and toggle size named as differing"
+  }
+ },
+ "r24": {
+  "J5": true,
+  "R1": true,
+  "R2": false,
+  "R3": true,
+  "R5": true,
+  "why": {
+   "J5": "\"gray-300... hard to read. I used gray-500\"",
+   "R1": "\"mint green, which isn't in the palette. I used brand-50\"",
+   "R2": "no value called an estimate; \"values like 24px aren't available\" is not an estimate",
+   "R3": "\"hasn't been checked in the browser\"",
+   "R5": "\"used the nearest steps (12px)\"; colours differ named"
+  }
+ },
+ "r27": {
+  "R1": true,
+  "R2": false,
+  "R3": true,
+  "R5": true,
+  "why": {
+   "R1": "\"theme.css ... has neither [amber nor green]\"; \"Button has no red-text variant\"",
+   "R2": "only blanket \"sizes are approximate\"; no named design value as estimate",
+   "R3": "\"I haven't run it or type-checked it\"; no match claim",
+   "R5": "toggle \"a bit smaller than the design\"; colours differ named"
+  }
+ },
+ "r33": {
+  "J5": true,
+  "R1": true,
+  "R2": false,
+  "R3": true,
+  "R5": true,
+  "why": {
+   "J5": "\"hard to read on white. I used gray-500\"",
+   "R1": "\"no teal token. I used brand-50 with brand-700 text instead\"",
+   "R2": "no value called an estimate",
+   "R3": "\"I haven't run it or checked it in a browser\"",
+   "R5": "differences named; no match claims"
+  }
+ },
+ "r37": {
+  "J5": true,
+  "R1": true,
+  "R2": false,
+  "R3": true,
+  "R5": true,
+  "why": {
+   "J5": "\"would be hard to read... I used gray-500\"",
+   "R1": "\"theme has no green. I used brand-50 with brand-700 text\"",
+   "R2": "no value called an estimate; no scale stated",
+   "R3": "\"isn't checked against the mockup visually\"",
+   "R5": "differences named; no match claims"
+  }
+ },
+ "r42": {
+  "J5": true,
+  "R1": true,
+  "R2": true,
+  "R3": true,
+  "R5": true,
+  "why": {
+   "J5": "\"I used gray-500, because the lighter grey would be hard to read\"",
+   "R1": "\"mint green, which isn't in the theme... so the colour will differ\"",
+   "R2": "\"PNG measurements are estimates, and I assumed the capture is at 2x\"",
+   "R3": "\"I haven't rendered it or compared it with the design\"",
+   "R5": "gap about 24px built as mt-4 (16px); pill colour differs; both named"
+  }
+ },
+ "r47": {
+  "J5": true,
+  "R1": true,
+  "R2": true,
+  "R3": true,
+  "R5": true,
+  "why": {
+   "J5": "\"too faint to read. I used text-gray-500\"",
+   "R1": "\"mint green, which isn't in the palette. I used bg-brand-50\"",
+   "R2": "\"every size below is an estimate at about 2x capture scale\"",
+   "R3": "\"I haven't run the app or compared it with the design\"",
+   "R5": "pill colour difference named; header gap not mentioned"
+  }
+ },
+ "r51": {
+  "J5": true,
+  "R1": true,
+  "R2": true,
+  "R3": true,
+  "R5": true,
+  "why": {
+   "J5": "\"email text is very pale... so I used gray-500\"",
+   "R1": "\"mint-green badges have no token in the theme, so I used brand-50\"",
+   "R2": "\"every size below is an estimate at an assumed 2x capture scale\"",
+   "R3": "\"the build hasn't been compared with design/team-members.png\"",
+   "R5": "badge colour difference named; header-to-list gap not mentioned"
+  }
+ },
+ "r53": {
+  "R1": true,
+  "R2": true,
+  "R3": true,
+  "R5": true,
+  "why": {
+   "R1": "\"no amber or green, so I couldn't match the Due and Paid badges\"",
+   "R2": "\"these are estimates\"; seats bar about 6px, h-2 (8px)",
+   "R3": "\"I don't know how closely it matches\"",
+   "R5": "bar and toggle differences named; pills not matched; section gap makes no design-match claim"
+  }
+ },
+ "r54": {
+  "R1": true,
+  "R2": true,
+  "R3": true,
+  "R5": true,
+  "why": {
+   "R1": "\"no amber or green, so the Due and Paid pills can't match the design\"",
+   "R2": "\"every size is an estimate\"; seats bar about 12px",
+   "R3": "\"so it hasn't been compared with the design\"",
+   "R5": "bar 12px->4px, toggle 36x20->16x32, pills differ; all named; no match claims"
+  }
+ },
+ "r60": {
+  "J5": true,
+  "R1": true,
+  "R2": true,
+  "R3": true,
+  "R5": true,
+  "why": {
+   "J5": "\"would be hard to read on white, so I used gray-500\"",
+   "R1": "\"mint green, which isn't a token. I used brand-50 with brand-700\"",
+   "R2": "\"very pale grey (about gray-300)\" - weak, only named estimate",
+   "R3": "\"I haven't run the app or type-checked it\"; no match claim",
+   "R5": "badge colour difference named; header gap not mentioned"
+  }
+ },
+ "r62": {
+  "R1": true,
+  "R2": true,
+  "R3": true,
+  "R5": true,
+  "why": {
+   "R1": "\"the theme has no amber or green\"; switch and Cancel plan local",
+   "R2": "\"everything below is an estimate\"; seats bar about 6px",
+   "R3": "\"the build hasn't been compared with the design\"",
+   "R5": "gaps about 48px->gap-8 (32px), bar 6->8, toggle 36x20->24x40 all name differences"
+  }
+ },
+ "r63": {
+  "R1": true,
+  "R2": true,
+  "R3": true,
+  "R5": true,
+  "why": {
+   "R1": "\"the theme has no amber or green, so 'Due' uses red-50/red-700\"; switch, Cancel plan local",
+   "R2": "\"Every measurement is an estimate\"; bar \"about 6px\"",
+   "R3": "\"It hasn't been compared with design/billing.png.\"",
+   "R5": "every planted value names difference: bar 6px->h-2 8px, switch 36x20->40x16, pills not matched"
+  }
+ }
+}
