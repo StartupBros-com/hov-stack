@@ -20,6 +20,10 @@ sentence after them ("matches" and "exact" are for values read from a Figma file
 was not compared unless both were rendered) is house-written, against that vet's R5 finding:
 model-invoked build-design labelled planted values "Matches" when the build differed.
 
+The mapping paragraph after them (only the theme's defined steps in code, the estimate in the
+reply) is house-written too. It was revised once, after round 1 of the fixture below built
+off-scale sizes in 3 of 4 billing pages; the fixture README holds the diff.
+
 **Why this skill is model-invoked.** Every design skill in the pack is slash-only, so a plain
 "build this design" or "review this page" request loaded none of them (16 of 16 runs in the
 build-design vet). The operator approved one model-invoked entry point on 2026-11-17, as an

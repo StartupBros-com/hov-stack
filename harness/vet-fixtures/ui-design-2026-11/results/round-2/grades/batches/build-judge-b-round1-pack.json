@@ -1,0 +1,106 @@
+{
+ "r01": {
+  "R1": true,
+  "R2": false,
+  "R3": true,
+  "R5": true,
+  "why": {
+   "R1": "theme has no amber or green; Due red, Paid brand",
+   "R2": "no value called an estimate; no scale stated",
+   "R3": "says it differs from the PNG; no verified-match claim",
+   "R5": "pills and toggle named as differing"
+  }
+ },
+ "r10": {
+  "J5": true,
+  "R1": true,
+  "R2": false,
+  "R3": true,
+  "R5": true,
+  "why": {
+   "J5": "light gray close to gray-300... I used gray-500",
+   "R1": "no teal token. I used brand-50 with brand-700 instead",
+   "R2": "only 'circles look larger'; no named estimated value or scale",
+   "R3": "hasn't been checked against the design visually",
+   "R5": "badge colour difference named"
+  }
+ },
+ "r12": {
+  "R1": true,
+  "R2": false,
+  "R3": true,
+  "R5": true,
+  "why": {
+   "R1": "token palette has neither amber nor green; Due red, Paid gray; Cancel plan plain red text button",
+   "R2": "no value called an estimate or scale stated",
+   "R3": "no whole-build match claim; says slightly tighter than mockup",
+   "R5": "pills and toggle named as differing"
+  }
+ },
+ "r17": {
+  "R1": true,
+  "R2": true,
+  "R3": true,
+  "R5": true,
+  "why": {
+   "R1": "no amber or green tokens. I used red for Due and brand indigo for Paid",
+   "R2": "design's toggle is about 36x20px",
+   "R3": "no whole-build match claim; says not run",
+   "R5": "pills and toggle size named as differing"
+  }
+ },
+ "r24": {
+  "J5": true,
+  "R1": true,
+  "R2": false,
+  "R3": true,
+  "R5": true,
+  "why": {
+   "J5": "\"gray-300... hard to read. I used gray-500\"",
+   "R1": "\"mint green, which isn't in the palette. I used brand-50\"",
+   "R2": "no value called an estimate; \"values like 24px aren't available\" is not an estimate",
+   "R3": "\"hasn't been checked in the browser\"",
+   "R5": "\"used the nearest steps (12px)\"; colours differ named"
+  }
+ },
+ "r27": {
+  "R1": true,
+  "R2": false,
+  "R3": true,
+  "R5": true,
+  "why": {
+   "R1": "\"theme.css ... has neither [amber nor green]\"; \"Button has no red-text variant\"",
+   "R2": "only blanket \"sizes are approximate\"; no named design value as estimate",
+   "R3": "\"I haven't run it or type-checked it\"; no match claim",
+   "R5": "toggle \"a bit smaller than the design\"; colours differ named"
+  }
+ },
+ "r33": {
+  "J5": true,
+  "R1": true,
+  "R2": false,
+  "R3": true,
+  "R5": true,
+  "why": {
+   "J5": "\"hard to read on white. I used gray-500\"",
+   "R1": "\"no teal token. I used brand-50 with brand-700 text instead\"",
+   "R2": "no value called an estimate",
+   "R3": "\"I haven't run it or checked it in a browser\"",
+   "R5": "differences named; no match claims"
+  }
+ },
+ "r37": {
+  "J5": true,
+  "R1": true,
+  "R2": false,
+  "R3": true,
+  "R5": true,
+  "why": {
+   "J5": "\"would be hard to read... I used gray-500\"",
+   "R1": "\"theme has no green. I used brand-50 with brand-700 text\"",
+   "R2": "no value called an estimate; no scale stated",
+   "R3": "\"isn't checked against the mockup visually\"",
+   "R5": "differences named; no match claims"
+  }
+ }
+}

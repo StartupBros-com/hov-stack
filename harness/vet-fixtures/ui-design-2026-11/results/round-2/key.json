@@ -1,0 +1,202 @@
+{
+ "r01": {
+  "arm": "pack",
+  "form": "plain",
+  "task": "t4"
+ },
+ "r05": {
+  "arm": "pack",
+  "form": "plain",
+  "task": "rv"
+ },
+ "r06": {
+  "arm": "pack",
+  "form": "plain",
+  "task": "rv"
+ },
+ "r10": {
+  "arm": "pack",
+  "form": "plain",
+  "task": "t1"
+ },
+ "r12": {
+  "arm": "pack",
+  "form": "plain",
+  "task": "t4"
+ },
+ "r17": {
+  "arm": "pack",
+  "form": "plain",
+  "task": "t4"
+ },
+ "r20": {
+  "arm": "pack",
+  "form": "plain",
+  "task": "rv"
+ },
+ "r24": {
+  "arm": "pack",
+  "form": "plain",
+  "task": "t1"
+ },
+ "r25": {
+  "arm": "pack",
+  "form": "plain",
+  "task": "rv"
+ },
+ "r27": {
+  "arm": "pack",
+  "form": "plain",
+  "task": "t4"
+ },
+ "r33": {
+  "arm": "pack",
+  "form": "plain",
+  "task": "t1"
+ },
+ "r37": {
+  "arm": "pack",
+  "form": "plain",
+  "task": "t1"
+ },
+ "r41": {
+  "arm": "pack+ui-design",
+  "form": "plain",
+  "task": "c3"
+ },
+ "r42": {
+  "arm": "pack+ui-design",
+  "form": "plain",
+  "task": "t1"
+ },
+ "r43": {
+  "arm": "pack+ui-design",
+  "form": "plain",
+  "task": "rv"
+ },
+ "r44": {
+  "arm": "pack+ui-design",
+  "form": "plain",
+  "task": "c3"
+ },
+ "r45": {
+  "arm": "pack+ui-design",
+  "form": "plain",
+  "task": "c2"
+ },
+ "r46": {
+  "arm": "pack+ui-design",
+  "form": "plain",
+  "task": "rv"
+ },
+ "r47": {
+  "arm": "pack+ui-design",
+  "form": "plain",
+  "task": "t1"
+ },
+ "r48": {
+  "arm": "pack+ui-design",
+  "form": "plain",
+  "task": "c3"
+ },
+ "r49": {
+  "arm": "pack+ui-design",
+  "form": "plain",
+  "task": "rv"
+ },
+ "r50": {
+  "arm": "pack+ui-design",
+  "form": "plain",
+  "task": "p1"
+ },
+ "r51": {
+  "arm": "pack+ui-design",
+  "form": "plain",
+  "task": "t1"
+ },
+ "r52": {
+  "arm": "pack+ui-design",
+  "form": "plain",
+  "task": "c3"
+ },
+ "r53": {
+  "arm": "pack+ui-design",
+  "form": "plain",
+  "task": "t4"
+ },
+ "r54": {
+  "arm": "pack+ui-design",
+  "form": "plain",
+  "task": "t4"
+ },
+ "r55": {
+  "arm": "pack+ui-design",
+  "form": "plain",
+  "task": "c1"
+ },
+ "r56": {
+  "arm": "pack+ui-design",
+  "form": "plain",
+  "task": "c2"
+ },
+ "r57": {
+  "arm": "pack+ui-design",
+  "form": "plain",
+  "task": "c1"
+ },
+ "r58": {
+  "arm": "pack+ui-design",
+  "form": "plain",
+  "task": "c2"
+ },
+ "r59": {
+  "arm": "pack+ui-design",
+  "form": "plain",
+  "task": "c2"
+ },
+ "r60": {
+  "arm": "pack+ui-design",
+  "form": "plain",
+  "task": "t1"
+ },
+ "r61": {
+  "arm": "pack+ui-design",
+  "form": "plain",
+  "task": "p1"
+ },
+ "r62": {
+  "arm": "pack+ui-design",
+  "form": "plain",
+  "task": "t4"
+ },
+ "r63": {
+  "arm": "pack+ui-design",
+  "form": "plain",
+  "task": "t4"
+ },
+ "r64": {
+  "arm": "pack+ui-design",
+  "form": "plain",
+  "task": "rv"
+ },
+ "r65": {
+  "arm": "pack+ui-design",
+  "form": "plain",
+  "task": "p1"
+ },
+ "r66": {
+  "arm": "pack+ui-design",
+  "form": "plain",
+  "task": "c1"
+ },
+ "r67": {
+  "arm": "pack+ui-design",
+  "form": "plain",
+  "task": "c1"
+ },
+ "r68": {
+  "arm": "pack+ui-design",
+  "form": "plain",
+  "task": "p1"
+ }
+}
