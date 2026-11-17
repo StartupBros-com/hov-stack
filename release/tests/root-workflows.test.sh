@@ -284,6 +284,24 @@ replaced="$(apply_key 'table v2 sha256 bbbb')"
 [ "${replaced#* }" = "$(sbgit hash-object "$INSTALLER")" ] || die 'the blob output is not the new table'
 pass 'pins branch key: the same rows on the same main repeat it; replaced bytes at the same version change it'
 
+# Main moves without touching the table, as any other merge does: the key must hold, so
+# the open PR the owner may be reviewing is kept. Keyed on main's sha, each day's run on
+# a moved main replaced it. A push that edits the table changes the key, so a PR cut from
+# the older table is superseded instead of conflicting.
+printf 'unrelated\n' >"$SB/NOTES.txt"
+sbgit add NOTES.txt
+sbgit -c user.name=t -c user.email=t@example.invalid commit -qm 'unrelated merge'
+moved="$(apply_key 'table v2 sha256 aaaa')"
+[ "$moved" = "$first" ] || die "a main push that left the table alone changed the key: $first / $moved"
+sbgit checkout -q -- "$INSTALLER"
+printf 'table v1 edited\n' >"$SB/$INSTALLER"
+sbgit add "$INSTALLER"
+sbgit -c user.name=t -c user.email=t@example.invalid commit -qm 'table edit'
+edited="$(apply_key 'table v2 sha256 aaaa')"
+[ "${edited%% *}" != "${first%% *}" ] || die "a main push that edited the table kept the key ${first%% *}"
+[ "${edited#* }" = "${first#* }" ] || die 'the same rows wrote a different table'
+pass 'pins branch key: a main push that leaves the table alone keeps it; one that edits the table changes it'
+
 # A script a workflow runs as ./release/scripts/X needs its exec bit in git, or the step
 # fails with "Permission denied" on the first scheduled run.
 grep -ohE '(run: |^[[:space:]]+)\./release/scripts/[A-Za-z0-9_.-]+' .github/workflows/*.yml | sed 's#.*\./##' | sort -u >"$TMP/run-scripts"

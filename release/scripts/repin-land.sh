@@ -131,7 +131,7 @@ if [ -n "$ONLY_PLUGIN" ]; then
 fi
 
 if [ -n "$desired_pr" ]; then
-  reason="Superseded by #$desired_pr, the reconciler's repin against current main."
+  reason="Superseded by #$desired_pr, which carries the current plan."
 else
   reason='Closed by the repin reconciler: main already matches every plugin release.'
 fi

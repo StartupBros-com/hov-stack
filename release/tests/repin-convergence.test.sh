@@ -172,7 +172,7 @@ blob2="$(git -C "$TEST_REPO" hash-object .claude-plugin/marketplace.json)"
 open_repin "$branch2"
 land DESIRED_BRANCH="$branch2" EXPECTED_BLOB="$blob2" || die 'tick 2 land failed'
 assert_state 2 '.state == "OPEN" and .autoMergeRequest.head == .headRefOid'
-assert_state 1 '.state == "CLOSED" and .deleteBranch == true and .closeComment == "Superseded by #2, the reconciler\u0027s repin against current main."'
+assert_state 1 '.state == "CLOSED" and .deleteBranch == true and .closeComment == "Superseded by #2, which carries the current plan."'
 [ "$(pr_count)" -eq 2 ] || die 'tick 2 PR count differs'
 pass 'tick 2 queues both plugin bumps in PR 2 and supersedes PR 1 with its recorded comment'
 
@@ -185,10 +185,55 @@ open_repin "$branch2"
 assert_state 2 '.state == "OPEN" and .autoMergeRequest != null'
 pass 'repeating tick 2 has the same key, finds PR 2 open and creates no third PR'
 
-# The repeat left its generated manifest on main. Restore main's fixture bytes
-# before merging the already committed PR branch.
+# Main moves under the waiting card without touching the manifest, as any other merge
+# does. The key must hold: the run finds PR 2 open, land keeps it and closes nothing,
+# and PR 2 stays behind main for the merge queue to land on top of it. Keyed on main's
+# sha, this push replaced PR 2 and restarted its checks.
+git -C "$TEST_REPO" checkout -q -- .claude-plugin/marketplace.json
+printf 'unrelated\n' > "$TEST_REPO/NOTES.txt"
+git -C "$TEST_REPO" add NOTES.txt
+git -C "$TEST_REPO" commit -qm 'unrelated merge'
+git -C "$TEST_REPO" push -q origin main
+moved="$(git -C "$TEST_REPO" rev-parse main)"
+[ "$moved" != "$base" ] || die 'main did not move'
+reconcile || die "moved-main reconcile: $(cat "$TMP/reconcile-err")"
+cp "$PLAN_FILE" "$TMP/plan-moved"
+[ "$(compute_key)" = "$key2" ] || die "a main push that left the manifest alone changed the key"
+blob_moved="$(git -C "$TEST_REPO" hash-object .claude-plugin/marketplace.json)"
+[ "$blob_moved" = "$blob2" ] || die "the reconciled manifest changed although main's manifest did not"
+# A reconciler change that rebuilds different bytes from the same plan and main manifest
+# must change the key, or the kept card would fail repin-land.sh's blob proof every run.
+cp "$TEST_REPO/.claude-plugin/marketplace.json" "$TMP/rebuilt.json"
+printf '\n' >>"$TEST_REPO/.claude-plugin/marketplace.json"
+[ "$(compute_key)" != "$key2" ] || die 'different rebuilt bytes from the same plan and main manifest kept the key'
+cp "$TMP/rebuilt.json" "$TEST_REPO/.claude-plugin/marketplace.json"
+open_repin "$branch2"
+[ "$(pr_count)" -eq 2 ] || die 'a main push that left the manifest alone opened a PR'
+land DESIRED_BRANCH="$branch2" EXPECTED_BLOB="$blob_moved" || die "moved-main land: $(cat "$TMP/land-err")"
+assert_state 2 '.state == "OPEN" and .autoMergeRequest != null and (has("closeComment") | not)'
+if git -C "$TEST_REPO" merge-base --is-ancestor "$moved" "$branch2"; then die 'PR 2 was rebuilt on the moved main'; fi
+pass 'a main push that leaves the manifest alone keeps the key, and PR 2 stays open behind main with nothing closed'
+
+# A push that edits main's manifest must change the key, or a card cut from the older
+# manifest would be kept and then conflict. Checked on a scratch branch, so main stays
+# as the merge queue sees it.
+git -C "$TEST_REPO" checkout -q -- .claude-plugin/marketplace.json
+git -C "$TEST_REPO" switch -q -c manifest-edit
+jq '.owner = {name: "Fixture"}' "$TEST_REPO/.claude-plugin/marketplace.json" > "$TMP/edited.json"
+cp "$TMP/edited.json" "$TEST_REPO/.claude-plugin/marketplace.json"
+git -C "$TEST_REPO" commit -qam 'hand edit of the manifest'
+reconcile || die "manifest-edit reconcile: $(cat "$TMP/reconcile-err")"
+cmp -s "$PLAN_FILE" "$TMP/plan-moved" || die 'the manifest edit changed the plan, so this case proves nothing'
+[ "$(compute_key)" != "$key2" ] || die 'a main push that edited the manifest kept the key'
+git -C "$TEST_REPO" checkout -q -- .claude-plugin/marketplace.json
+git -C "$TEST_REPO" switch -q main
+git -C "$TEST_REPO" branch -q -D manifest-edit
+pass 'a main push that edits the manifest changes the key with the plan unchanged'
+
+# The repeat left its generated manifest on main. Restore main's fixture bytes, then
+# land PR 2 on top of the moved main, as the merge queue does with a card behind main.
 git -C "$TEST_REPO" show main:.claude-plugin/marketplace.json > "$TEST_REPO/.claude-plugin/marketplace.json"
-git -C "$TEST_REPO" merge -q --ff-only "$branch2"
+git -C "$TEST_REPO" merge -q --no-edit "$branch2"
 state_tmp="$(mktemp)" || exit 1
 jq '.state = "MERGED"' "$STATE/pr-2.json" > "$state_tmp"
 mv "$state_tmp" "$STATE/pr-2.json"

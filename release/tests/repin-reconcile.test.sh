@@ -199,7 +199,7 @@ workflow_contract() {
   [ "$(yq -r '.on.workflow_dispatch.inputs.migrate_plugin.required' "$workflow")" = false ] || die 'optional migrate_plugin missing'
   run="$(yq -r '.jobs.reconcile.steps[] | select(.id == "reconcile") | .run' "$workflow")"
   grep -Fq 'repin-migrate.sh "$MIGRATE_PLUGIN"' <<<"$run" || die 'migration dispatch missing'
-  grep -Fxq '  key="$( { cat "$PLAN_FILE"; git rev-parse HEAD; } | sha256sum | cut -c1-12)"' <<<"$run" || die 'branch key changed'
+  grep -Fxq '  key="$( { cat "$PLAN_FILE"; git rev-parse HEAD:.claude-plugin/marketplace.json; git hash-object .claude-plugin/marketplace.json; } | sha256sum | cut -c1-12)"' <<<"$run" || die 'branch key changed'
   [ "$(yq -r '.jobs.reconcile.steps[] | select(.run == "./release/scripts/repin-land.sh") | .env.ONLY_PLUGIN' "$workflow")" = '${{ inputs.migrate_plugin || inputs.only_plugin }}' ] || die 'land targeting missing'
   [ "$(yq -r '.jobs.reconcile.steps[] | select(.name == "Publish staged releases the card on main already pins") | .env.ONLY_PLUGIN' "$workflow")" = '${{ inputs.migrate_plugin || inputs.only_plugin }}' ] || die 'publish targeting missing'
   pass 'workflow uses repository configuration, migration dispatch, exact key and targeted land/publish'
