@@ -32,8 +32,10 @@ Drift detection: `~/.claude/scripts/harness-doctor.sh` runs `sync.sh check`
 2026-10-17). It checks the author's machines, such as the Windows stub, the
 managed-settings lock and the host roster, so on a machine set up with
 `./setup` it warns about things setup never installs; check that machine with
-`./setup --check` instead. When it warns on the author's machines:
-`sync.sh push`, then commit and push this repo.
+`./setup --check` instead. When it warns on the author's machines, each
+line names both fixes: the `./setup` step that puts the repo's copy back,
+and `sync.sh push`, then a commit and push of this repo, when the live edit
+is the one to keep. Read the live side before pushing: this repo is public.
 
 ## Outside the mirror
 
