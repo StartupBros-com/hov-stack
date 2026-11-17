@@ -69,7 +69,34 @@ newer than H hours, in the candidates or in any transcript written within H
 hours, and no candidate session's own transcript last recorded its cwd there (a
 resume would carry on in it). A record's time is its `timestamp`; a record
 without a readable one counts as written at its file's mtime, which is never
-earlier. The job, live-session and project-directory holds never lapse.
+earlier. The live-session and project-directory holds never lapse.
+
+With H set, a job that is not done lapses too once it is dead and stale
+(hov-stack#403): no running session record carries its `sessionId`,
+`resumeSessionId` or transcript id, and its state.json was last written more than
+H hours ago. On 2026-11-16 every `working` job on the author's host had such a
+record, and five `blocked` jobs had none and held their own merged worktrees for
+up to 21 days. A lapsed job no longer holds the worktree it names; its state.json
+counts as a record naming that worktree at the file's mtime; and its own
+transcript's last cwd no longer holds either (a resume of it would find the
+worktree gone, as a done job's would). Such a worktree is reported idle, never
+unheld, so a sweep releases it only if it is clean, cache-only and shipped.
+
+Nothing is reported idle when a job or session record, or a candidate transcript,
+could not be read (hov-stack#660), or when the sessions, jobs or projects
+directory, or one under it, exists but could not be listed: unread bytes may name
+the worktree inside the window, and a failed listing is not an empty one. No job
+lapses unless every session record was read, since its running session may be
+among the unread, and a session whose process status cannot be read counts as
+live (hov-stack#695). Each such path is reported on stderr and the hold stays. It never
+makes a hold where none exists: a worktree nothing readable names stays unheld,
+as before, and takes the sweep's normal path, which commits, bundles or pushes
+its work before any removal; holding every worktree on one bad file would stop
+the sweep for as long as the file stays bad. A transcript
+whose new bytes cannot be read still holds through what its cache entry had
+recorded. Without --idle-hours the skip described below stands. A session record
+that cannot be read, from a pid (its file name) that is not running, holds nothing
+either way, so it is skipped without a note and without this effect.
 
 Exit 0: held; one line on stdout names the holder.
 Exit 1: not held; stdout may carry `resumable:` lines naming finished jobs whose
@@ -87,7 +114,6 @@ working keeps writing its transcript.
 """
 
 import argparse
-import glob
 import json
 import os
 import re
@@ -155,23 +181,81 @@ def spellings(wt: str) -> list:
     return out
 
 
-def load(path: str):
+_BAD = object()  # load()'s answer for a file that exists but cannot be read or parsed
+
+
+def load(path: str, quiet: bool = False):
+    """The JSON in `path`; None if there is no such file; _BAD, after a note on
+    stderr unless `quiet`, if it exists but cannot be read or parsed."""
     try:
         with open(path, encoding="utf-8") as f:
             return json.load(f)
     except FileNotFoundError:
         return None
     except (OSError, ValueError) as e:
-        print(f"wt_session_hold: skipped unreadable {path}: {e}", file=sys.stderr)
-        return None
+        if not quiet:
+            print(f"wt_session_hold: skipped unreadable {path}: {e}", file=sys.stderr)
+        return _BAD
 
 
-def pid_running(pid, proc_start, procfs: str) -> bool:
+def _record(path: str, quiet: bool, bad: list):
+    """A job or session record as a dict, or None. One that exists but is not a
+    readable JSON object is skipped, and unless `quiet` it is noted on stderr and
+    appended to `bad`."""
+    d = load(path, quiet)
+    if d is None or isinstance(d, dict):
+        return d
+    if not quiet:
+        if d is not _BAD:
+            print(f"wt_session_hold: skipped unreadable {path}: not a JSON object", file=sys.stderr)
+        bad.append(path)
+    return None
+
+
+def _unlisted(path: str, err: OSError, bad: list) -> None:
+    print(f"wt_session_hold: could not list {path}: {err}", file=sys.stderr)
+    bad.append(path)
+
+
+def _entries(path: str, bad: list) -> list:
+    """The entries of directory `path`, sorted by name: none if it is missing or
+    not a directory. One that exists but cannot be listed is not an empty one
+    (hov-stack#695): it is noted on stderr, appended to `bad`, and yields none."""
     try:
-        with open(os.path.join(procfs, str(int(pid)), "stat"), encoding="utf-8") as f:
-            stat = f.read()
-    except (OSError, ValueError, TypeError):
+        with os.scandir(path) as it:
+            return sorted(it, key=lambda e: e.name)
+    except (FileNotFoundError, NotADirectoryError):
+        return []
+    except OSError as err:
+        _unlisted(path, err, bad)
+        return []
+
+
+def _is_dir(e, bad: list, follow: bool = True) -> bool:
+    try:
+        return e.is_dir(follow_symlinks=follow)
+    except FileNotFoundError:
         return False
+    except OSError as err:
+        _unlisted(e.path, err, bad)
+        return False
+
+
+def pid_running(pid, proc_start, procfs: str):
+    """True if process `pid` runs (and, given `proc_start`, is the one started then);
+    False if it does not; None if its status could not be read. A process whose
+    status is unknown is not called stopped (hov-stack#695)."""
+    try:
+        path = os.path.join(procfs, str(int(pid)), "stat")
+    except (ValueError, TypeError):
+        return False
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            stat = f.read()
+    except (FileNotFoundError, ProcessLookupError):
+        return False
+    except OSError:
+        return None
     if proc_start in (None, ""):
         return True
     # Field 22 (starttime). comm may contain spaces, so split after its ')'.
@@ -289,10 +373,13 @@ def _entry_ok(e, st) -> bool:
     return all(isinstance(w, (int, float)) and not isinstance(w, bool) for w in e["paths"].values())
 
 
-def driven_paths(transcripts: dict, cache_file: str) -> dict:
+def driven_paths(transcripts: dict, cache_file: str):
     """Map each readable transcript (a dict of path -> owning session id) to
     (paths, last cwd): each path its records drive with the newest record time
-    naming it, and the last cwd it recorded.
+    naming it, and the last cwd it recorded. Return that map and the list of
+    transcripts that could not be read. One whose new bytes cannot be read keeps
+    what its cache entry, and any lines read before the error, recorded; the rest
+    of it is unknown, so the caller must not call a worktree idle on it.
 
     The cache also keeps entries for transcripts that are not asked about now but
     were written within RETAIN_DAYS: wt-sweep (no exclusion, an idle window) and
@@ -304,7 +391,7 @@ def driven_paths(transcripts: dict, cache_file: str) -> dict:
     entries = cache.get("entries") if isinstance(cache, dict) and cache.get("version") == CACHE_VERSION else None
     if not isinstance(entries, dict):
         entries = {}
-    kept, out, dirty = {}, {}, False
+    kept, out, skipped, dirty = {}, {}, [], False
     horizon = time.time() - RETAIN_DAYS * 86400
     for t, e in entries.items():
         if t in transcripts or not isinstance(e, dict):
@@ -317,11 +404,16 @@ def driven_paths(transcripts: dict, cache_file: str) -> dict:
     for t in sorted(transcripts):
         try:
             st = os.stat(t)
-        except OSError:
+        except FileNotFoundError:
+            continue
+        except OSError as err:
+            print(f"wt_session_hold: skipped unreadable {t}: {err}", file=sys.stderr)
+            skipped.append(t)
             continue
         e = entries.get(t)
         offset, found, cwd = 0, {}, None
-        if _entry_ok(e, st):
+        cached = _entry_ok(e, st)
+        if cached:
             offset, found, cwd = e["offset"], dict(e["paths"]), e.get("cwd")
         transient = {}
         if offset < st.st_size:
@@ -329,6 +421,13 @@ def driven_paths(transcripts: dict, cache_file: str) -> dict:
                 new_offset, last = scan(t, offset, found, transient, st.st_mtime)
             except OSError as err:
                 print(f"wt_session_hold: skipped unreadable {t}: {err}", file=sys.stderr)
+                skipped.append(t)
+                if cached:
+                    kept[t] = e
+                for p, w in transient.items():
+                    found[p] = max(w, found.get(p, w))
+                if found:
+                    out[t] = (found, cwd)
                 continue
             dirty = dirty or new_offset != offset or e is None
             offset, cwd = new_offset, last or cwd
@@ -353,59 +452,62 @@ def driven_paths(transcripts: dict, cache_file: str) -> dict:
                     os.unlink(tmp)
                 except OSError:
                     pass
-    return out
+    return out, skipped
 
 
-def _jsonl_under(top: str, owner: str, out: list) -> None:
-    stack = [top]
+def _jsonl(e, owner: str, out: list, bad: list) -> None:
+    try:
+        out.append((e.path, owner, e.stat().st_mtime))
+    except FileNotFoundError:
+        pass
+    except OSError as err:
+        _unlisted(e.path, err, bad)
+
+
+def _jsonl_under(top: str, owner: str, out: list, bad: list, follow: bool = False) -> None:
+    """Every `.jsonl` under `top` as (path, owner, mtime). Directory symlinks are
+    followed only with `follow`, and then each directory is walked once."""
+    stack, seen = [top], set()
     while stack:
-        try:
-            it = os.scandir(stack.pop())
-        except OSError:
-            continue
-        with it:
-            for e in it:
-                try:
-                    if e.is_dir(follow_symlinks=False):
-                        stack.append(e.path)
-                    elif e.name.endswith(".jsonl"):
-                        out.append((e.path, owner, e.stat().st_mtime))
-                except OSError:
+        d = stack.pop()
+        if follow:
+            try:
+                st = os.stat(d)
+            except OSError:
+                pass  # _entries notes it if it exists and cannot be listed
+            else:
+                if (st.st_dev, st.st_ino) in seen:
                     continue
+                seen.add((st.st_dev, st.st_ino))
+        for e in _entries(d, bad):
+            if _is_dir(e, bad, follow=follow):
+                stack.append(e.path)
+            elif e.name.endswith(".jsonl"):
+                _jsonl(e, owner, out, bad)
 
 
-def walk_transcripts(projects: str) -> list:
+def walk_transcripts(projects: str, bad: list) -> list:
     """(path, session id, mtime) for every transcript under projects/: a session's
     own `<slug>/<sid>.jsonl`, and every file under `<slug>/<sid>/subagents/` (agents
-    and workflow agents, owned by that session). One walk, one stat each."""
+    and workflow agents, owned by that session). One walk, one stat each. A
+    directory on the way that cannot be listed is appended to `bad`."""
     out = []
-    try:
-        slugs = list(os.scandir(projects))
-    except OSError:
-        return out
-    for s in slugs:
-        try:
-            if not s.is_dir(follow_symlinks=False):
-                continue
-            it = os.scandir(s.path)
-        except OSError:
+    for s in _entries(projects, bad):
+        if not _is_dir(s, bad, follow=False):
             continue
-        with it:
-            for e in it:
-                try:
-                    if e.is_dir(follow_symlinks=False):
-                        _jsonl_under(os.path.join(e.path, "subagents"), e.name, out)
-                    elif e.name.endswith(".jsonl"):
-                        out.append((e.path, e.name[:-6], e.stat().st_mtime))
-                except OSError:
-                    continue
+        for e in _entries(s.path, bad):
+            if _is_dir(e, bad, follow=False):
+                _jsonl_under(os.path.join(e.path, "subagents"), e.name, out, bad)
+            elif e.name.endswith(".jsonl"):
+                _jsonl(e, e.name[:-6], out, bad)
     return out
 
 
 def check(wt: str, home: str, active_min: int, procfs: str, cache_dir: str = "", exclude: str = "",
           idle_hours: float = 0.0):
     """Return (holder or None, [resumable lines], idle). `idle` is True only when
-    idle_hours is set and the one hold left is a transcript hold that lapsed."""
+    idle_hours is set and the holds left are transcript holds, or dead and stale
+    jobs (hov-stack#403), that lapsed."""
     names = spellings(wt)
     wt = names[0]
     slugs = list(dict.fromkeys(slug(s) for s in names))
@@ -415,10 +517,41 @@ def check(wt: str, home: str, active_min: int, procfs: str, cache_dir: str = "",
 
     resumable = []
     owners = []  # (session id, why) of every job not done and every live session
+    unreadable = []  # records and transcripts that could not be read: nothing is idle
+    now = time.time()
+    window = max(idle_hours * 3600, active_min * 60) if idle_hours > 0 else 0
 
-    for path in sorted(glob.glob(os.path.join(home, "jobs", "*", "state.json"))):
-        d = load(path)
-        if not isinstance(d, dict):
+    # Session records first: a job's liveness is read from them (hov-stack#403).
+    live, live_ids = [], set()
+    for e in _entries(os.path.join(home, "sessions"), unreadable):
+        if e.name.startswith(".") or not e.name.endswith(".json"):
+            continue
+        path, stem = e.path, e.name[:-5]
+        gone = stem.isdigit() and pid_running(stem, None, procfs) is False
+        d = _record(path, gone, unreadable)
+        if d is None:
+            continue
+        running = pid_running(d.get("pid"), d.get("procStart"), procfs)
+        if running is None:
+            print(f"wt_session_hold: could not read the status of pid {d.get('pid')} ({path}); counted as live",
+                  file=sys.stderr)
+        elif not running:
+            continue
+        live.append(d)
+        sid = d.get("sessionId")
+        if isinstance(sid, str) and sid:
+            live_ids.add(sid)
+    # A job's session is called stopped only when every session record was read.
+    sessions_read = not unreadable
+
+    lapsed_here = []  # (why, state.json mtime) of each lapsed job naming this worktree
+    lapsed_ids, held_ids = set(), set()
+    for e in _entries(os.path.join(home, "jobs"), unreadable):
+        if e.name.startswith(".") or not _is_dir(e, unreadable):
+            continue
+        path = os.path.join(e.path, "state.json")
+        d = _record(path, False, unreadable)
+        if d is None:
             continue
         if exclude and d.get("sessionId") == exclude:
             continue
@@ -427,8 +560,22 @@ def check(wt: str, home: str, active_min: int, procfs: str, cache_dir: str = "",
         state = d.get("state")
         link = d.get("linkScanPath")
         link = link if isinstance(link, str) else ""
+        lapsed, mtime = False, 0.0
         if state != "done":
             why = f'{label} is {state or "in an unknown state"}'
+            ids = {v for v in (d.get("sessionId"), d.get("resumeSessionId"), transcript_owner(link) if link else None)
+                   if isinstance(v, str) and v}
+            if window and sessions_read and not ids & live_ids:
+                try:
+                    mtime = os.stat(path).st_mtime
+                except OSError:
+                    mtime = now
+                lapsed = now - mtime >= window
+            if lapsed:
+                why += " and its session is not running"
+                lapsed_ids |= ids
+            else:
+                held_ids |= ids
             for sid in {d.get("sessionId"), transcript_owner(link) if link else None}:
                 if isinstance(sid, str) and sid and sid != exclude:
                     owners.append((sid, why))
@@ -439,16 +586,16 @@ def check(wt: str, home: str, active_min: int, procfs: str, cache_dir: str = "",
         if state == "done":
             resumable.append(f"resumable: {label} is done; resuming it would find this worktree gone")
             continue
-        return f'{label} is {state or "in an unknown state"}', resumable, False
-
-    for path in sorted(glob.glob(os.path.join(home, "sessions", "*.json"))):
-        d = load(path)
-        if not isinstance(d, dict):
+        if lapsed:
+            lapsed_here.append((why, mtime))
             continue
+        return why, resumable, False
+    # A session id that another job still holds by, or a live session carries, never lapses.
+    lapsed_ids -= held_ids | live_ids
+
+    for d in live:
         sid = d.get("sessionId")
         if exclude and sid == exclude:
-            continue
-        if not pid_running(d.get("pid"), d.get("procStart"), procfs):
             continue
         label = f'session pid {d.get("pid")} "{d.get("name") or ""}"'
         cwd = d.get("cwd")
@@ -457,17 +604,14 @@ def check(wt: str, home: str, active_min: int, procfs: str, cache_dir: str = "",
         if isinstance(sid, str) and sid:
             owners.append((sid, f"{label} is live"))
 
-    now = time.time()
     newest, newest_dir = 0.0, ""
     for wt_slug in slugs:
         project_dir = os.path.join(home, "projects", wt_slug)
-        for path in glob.glob(os.path.join(glob.escape(project_dir), "**", "*.jsonl"), recursive=True):
+        own = []
+        _jsonl_under(project_dir, "", own, unreadable, follow=True)  # as the ** glob it replaced did
+        for path, _, mtime in own:
             rel = os.path.relpath(path, project_dir).split(os.sep)
             if exclude and (rel[0][:-6] if len(rel) == 1 else rel[0]) == exclude:
-                continue
-            try:
-                mtime = os.stat(path).st_mtime
-            except OSError:
                 continue
             if mtime > newest:
                 newest, newest_dir = mtime, project_dir
@@ -481,9 +625,8 @@ def check(wt: str, home: str, active_min: int, procfs: str, cache_dir: str = "",
     # window, also every transcript written within it: a session that named the
     # worktree there keeps it in use even if it is neither. The window is never
     # shorter than active_min.
-    window = max(idle_hours * 3600, active_min * 60) if idle_hours > 0 else 0
     by_owner, recent, fresh = {}, [], {}
-    for path, owner, mtime in walk_transcripts(os.path.join(home, "projects")):
+    for path, owner, mtime in walk_transcripts(os.path.join(home, "projects"), unreadable):
         if exclude and owner == exclude:
             continue
         by_owner.setdefault(owner, []).append(path)
@@ -507,7 +650,8 @@ def check(wt: str, home: str, active_min: int, procfs: str, cache_dir: str = "",
         return p in names or p.startswith(prefixes)
 
     cache_file = _cache_path(cache_dir, home) if cache_dir else ""
-    driven = driven_paths({**fresh, **candidates}, cache_file)
+    driven, skipped = driven_paths({**fresh, **candidates}, cache_file)
+    unreadable += skipped
     holder = None
     for t in sorted(candidates):
         hit = sorted(p for p in driven.get(t, ({}, None))[0] if here(p))
@@ -515,15 +659,21 @@ def check(wt: str, home: str, active_min: int, procfs: str, cache_dir: str = "",
             holder = f"{why[t]}; its transcript {t} names {hit[0]}"
             break
     if holder is None:
-        return None, resumable, False
+        if not lapsed_here:
+            return None, resumable, False
+        holder = lapsed_here[0][0]  # a lapse needs a window, so this is never reported unheld
     if not window:
         return holder, resumable, False
-    last = max((w for found, _ in driven.values() for p, w in found.items() if here(p)), default=now)
+    named_at = [w for found, _ in driven.values() for p, w in found.items() if here(p)]
+    last = max(named_at + [m for _, m in lapsed_here], default=now)
     if now - last < window:
         return holder, resumable, False
+    if unreadable:
+        return (f"{holder}; not called idle: {len(unreadable)} record(s) or transcript(s) could not be read",
+                resumable, False)
     for t, sid in sorted(candidates.items()):
         cwd = driven.get(t, ({}, None))[1]
-        if cwd and within(cwd) and transcript_owner(t) == sid:
+        if cwd and within(cwd) and transcript_owner(t) == sid and sid not in lapsed_ids:
             return f"{holder}; its session last recorded its cwd at {cwd}", resumable, False
     return f"idle: {holder}; last named {int((now - last) // 3600)}h ago", resumable, True
 
