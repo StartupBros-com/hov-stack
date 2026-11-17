@@ -546,13 +546,13 @@ main() {
     # their normal flow red. Once every plugin stages draft-first (so the card
     # is always current at publish), this should become a hard failure.
     report_not_announced 'not-listed' \
-      "hov-marketplace does not yet list $PLUGIN_NAME $RELEASE_TAG at $SOURCE_SHA. Merge the repin PR, then edit the release to re-fire the announce."
+      "The marketplace manifest does not yet list $PLUGIN_NAME $RELEASE_TAG at $SOURCE_SHA. Merge the repin PR, then edit the release to re-fire the announce."
     return
   fi
 
   if ! marketplace_has_card; then
     report_not_announced 'no-card' \
-      "$PLUGIN_NAME has no card block in hov-marketplace. Add one (card: {rows, run}) in a marketplace PR, then edit the release to re-fire."
+      "$PLUGIN_NAME has no card block in the marketplace manifest. Add one (card: {rows, run}) in a marketplace PR, then edit the release to re-fire."
     return
   fi
 
