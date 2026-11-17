@@ -1075,8 +1075,15 @@ fi
 # fxBridgeError = fx bridge). Until this check those fields had ZERO readers,
 # so a bridge failing every night was indistinguishable from one that never
 # ran — the write-a-field-nobody-reads shape this repo treats as a defect.
+# Since #670 option 3 that hook is the maintainer's own, run from a private plugin,
+# and it runs each bridge only when the bridge's script exists. So the cache is read
+# only where one does: an outside install keeps the cache the old template hook
+# wrote, and with nothing rewriting it, its age would read as a stale bridge forever.
 _puc="$HOME/.claude/cache/plugin-update-check.json"
-if [ -f "$_puc" ] && command -v jq >/dev/null 2>&1; then
+_puc_bridge=0
+[ -f "$HOME/dotfiles/windows/sync-claude-skills-to-codex.sh" ] && _puc_bridge=1
+[ -f "$HOME/dotfiles/fx/sync.sh" ] && _puc_bridge=1
+if [ "$_puc_bridge" -eq 1 ] && [ -f "$_puc" ] && command -v jq >/dev/null 2>&1; then
   w0=$WARNS
   _puc_fx=$(jq -r '.fxBridgeError // empty' "$_puc" 2>/dev/null)
   _puc_cx=$(jq -r '.bridgeError // empty' "$_puc" 2>/dev/null)

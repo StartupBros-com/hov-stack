@@ -60,8 +60,8 @@ vacuous.
 
 ## Not covered yet (deliberately — no silent caps)
 
-- `plugin-auto-update.js` (network / SessionStart) — resists black-box testing
-  without a live session.
+- Nothing today. `plugin-auto-update.js` (network / SessionStart), the one hook
+  listed here, left the template in #670 option 3 and is a retired stub.
 
 ## Adding a test
 

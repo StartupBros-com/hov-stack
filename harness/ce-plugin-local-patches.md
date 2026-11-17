@@ -18,7 +18,7 @@ metadata:
 - `~/.claude/plugins/ce-post-update.sh` → tombstone (exits 0, explains retirement).
 - Retired scripts + the 2 custom agents archived (reversible) to `~/.claude/git-archive/retired-ce-patches-20260701/`: `ce-model-invocation-flips.sh`, `ce-agent-model-pins.sh`, `codex-reviewer-ce-integration.sh`, `codex-reviewer.md`, `codex-doc-reviewer.md`.
 - `~/.claude/agents/oracle-reviewer.md` KEPT (separate GPT-5.5 Pro terminal-gate reviewer, unrelated to the retired Codex personas).
-- `~/.claude/hooks/plugin-auto-update.js`: self-heal block removed. It still auto-pulls the marketplace + `claude plugin update` daily, but no longer runs any post-update patch. With no local patches, the marketplace working tree stays clean, so the old "dirty tree blocks the auto-pull" failure mode is also gone.
+- `~/.claude/hooks/plugin-auto-update.js`: self-heal block removed. It kept auto-pulling the marketplace + `claude plugin update` daily, with no post-update patch, until it left the template in #670 option 3 (2026-11-17); the file here is now a retired stub. With no local patches, the marketplace working tree stays clean, so the old "dirty tree blocks the auto-pull" failure mode is also gone.
 
 **Session model:** `"model": "fable"` set in `~/.claude/settings.json` (global). The `/mnt/c/Users/user/.claude/settings.json` project override may still pin `opus` (bg-isolation guard blocked editing it in this job) — flip or remove it if sessions launched from the Windows home should use Fable. `MAX_THINKING_TOKENS`/`CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING` are ignored by Fable 5 (adaptive-only); reconsider removing them so non-Fable Sonnet subagents can use adaptive thinking instead of a forced 32k budget on mechanical work.
 

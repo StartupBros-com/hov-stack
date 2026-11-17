@@ -25,8 +25,7 @@
  * A fake mise shim (a node wrapper in a `.../mise/shims` dir that logs each call) leads
  * PATH, so the suite also proves the lever engaged: OLD goes through the shim, NEW does not.
  *
- * Not covered, on purpose: SessionStart plugin-auto-update.js (network; README "Not covered
- * yet"). The codex-quota-guard deny and rewrite paths are driven in the pass-6 section below
+ * Not covered, on purpose: nothing today (README "Not covered yet"). The codex-quota-guard deny and rewrite paths are driven in the pass-6 section below
  * through a preload that answers the usage endpoints (fixtures/mock-codex-usage.js); the
  * in-process suite codex-quota-guard.test.js holds the decision logic.
  */
@@ -44,9 +43,7 @@ const SEED = process.env.HOOK_GOLDEN_SEED || path.join(REPO, 'settings.json');
 const LAUNCHER_PREFIX = '"$HOME/.claude/hooks/bin/node-hook" ';
 // Hooks the corpus does not drive, with the reason (a hook missing from both the
 // corpus and this table fails the coverage test).
-const UNCOVERED = {
-  'plugin-auto-update.js': 'SessionStart network fetch; resists black-box testing (hooks/tests/README.md)',
-};
+const UNCOVERED = {};
 
 // ---------------------------------------------------------------------------
 // The registered commands
