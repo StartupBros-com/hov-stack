@@ -46,7 +46,7 @@ The tree is clean and `HEAD` is not ahead of the merge base. Gather the facts be
 
 Report those facts, then offer the three routes in **With no change, ask rather than invent one**. State the last commit's SHA and subject inside the offer. The user recognises "a1b2c3d Merge pull request #482" as not what they wanted and cannot recognise "the last commit".
 
-A whole-repository audit is a different review, not this one with a wider net. Run `/ux-audit` or `/design-rails` on the repository directly, without a scope block, statuses, or a pre-existing section.
+A whole-repository audit is a different review, not this one with a wider net. Run `/hov-stack:better-interface` or `/design-rails` on the repository directly, without a scope block, statuses, or a pre-existing section.
 
 ## Renames
 

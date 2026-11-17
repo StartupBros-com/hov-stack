@@ -1,0 +1,7 @@
+interface:
+  display_name: "Better Interface"
+  short_description: "Cross-discipline interface review"
+policy:
+  # Mirrors `disable-model-invocation: true` in the Claude frontmatter, which Codex
+  # does not read. Invoke-only on this harness (harness-vet 2026-09-01, re-vet 2026-11-17).
+  allow_implicit_invocation: false
