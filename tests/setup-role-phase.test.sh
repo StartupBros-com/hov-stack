@@ -626,6 +626,30 @@ for role in workstation satellite; do
   ok "$role fresh home: one setup makes the first merge and only sync.sh's record; enable + root reach the end state"
 done
 
+# With Claude Code on PATH (#722): a fresh role home adds the marketplace in the same run as the
+# first merge, and the add replaces the entry without the autoUpdate the merge wrote
+# (tests/fixtures/fake-claude.sh does what Claude Code does). setup sets it again, so the file
+# and sync.sh's record agree; a rerun adds nothing and changes nothing.
+mkdir -p "$WORK/claude-bin" "$WORK/fake"
+cp "$ROOT/tests/fixtures/fake-claude.sh" "$WORK/claude-bin/claude"
+chmod +x "$WORK/claude-bin/claude"
+printf '2.1.318\n' | tee "$WORK/fake/version" >/dev/null
+grep -v -E '^(#|$)' "$REPO/lib/default-plugins.txt" | sed 's/$/ 1.0.0/' | tee "$WORK/fake/versions" >/dev/null
+: | tee "$WORK/fake/plugins" "$WORK/fake/calls" >/dev/null
+fresh_home "$WORK/workstation-claude" workstation
+FAKE=$WORK/fake PATH="$WORK/claude-bin:$PATH" run 0 setup --no-dcg
+first_merge_row 'workstation fresh setup with Claude Code'
+[ "$(grep -c -x -F 'plugin marketplace add StartupBros-com/hov-stack' "$WORK/fake/calls")" = 1 ] || fail 'fresh role setup did not add the marketplace once'
+jq -e '.extraKnownMarketplaces.hov.autoUpdate == true' "$CLAUDE_HOME/settings.json" >/dev/null \
+  || { printf '%s\n' "$output"; fail 'fresh role setup left hov auto-update off after the marketplace add'; }
+run 0 sync apply-settings --plan
+contains 'settings: plan 0 change(s)'
+cp "$CLAUDE_HOME/settings.json" "$WORK/claude-first.json"
+FAKE=$WORK/fake PATH="$WORK/claude-bin:$PATH" run 0 setup --no-dcg
+[ "$(grep -c -x -F 'plugin marketplace add StartupBros-com/hov-stack' "$WORK/fake/calls")" = 1 ] || fail 'rerun added the marketplace again'
+cmp "$WORK/claude-first.json" "$CLAUDE_HOME/settings.json" || fail 'rerun changed settings.json'
+ok 'fresh role home with Claude Code: auto-update stays on after the marketplace add; a rerun changes nothing'
+
 fresh_home "$WORK/satellite-fresh-no-proxy" satellite
 CCFLARE_URL_SATELLITE='' run 1 setup --no-dcg
 contains 'settings merge not run'

@@ -2337,6 +2337,16 @@ if [ -z "$dcg_path" ]; then
   echo "  and any other settings.json is left alone, with the hook in settings.hov-stack.json."
 fi
 
+# Whether this run's owner merge left auto-update on for the marketplace's entry (#722). A
+# 'marketplace add' below replaces that entry without the key, and sync.sh's next merge would
+# read the loss as yours, so the auto-update step makes sure it is still on.
+au_merged=0
+if [ "$merge_state" = synced ] && node -e '
+const s = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+process.exit(s?.extraKnownMarketplaces?.[process.argv[2]]?.autoUpdate === true ? 0 : 1);' \
+  "$CFG/settings.json" "$MARKETPLACE" > /dev/null 2>&1; then
+  au_merged=1
+fi
 claude_row
 if ! claude_usable; then
   row marketplace skipped "needs Claude Code $CLAUDE_FLOOR or later on PATH; then re-run ./setup"
@@ -2398,9 +2408,11 @@ else
     # settings.json setup has a record of creating (#650) it is set too, and the helper
     # keeps a copy of the old file, because a merged or edited one no longer reads as the
     # seed. A merge this run could not finish leaves the file as the settings row says, so
-    # setup only reports. Any other settings.json is yours: the README promises to leave it
-    # alone, so setup only reports, and /hov-setup asks before turning it on. No status row,
-    # so --check and the exit status do not change.
+    # setup only reports. On a host with a role, sync.sh's merge owns the file: when this run's
+    # merge turned it on, setup sets it again if the add dropped it, keeping a copy (#722); the
+    # helper writes nothing when it is still on. Any other settings.json is yours: the README
+    # promises to leave it alone, so setup only reports, and /hov-setup asks before turning it
+    # on. No status row, so --check and the exit status do not change.
     au_helper=$HOV_STACK/plugins/hov-stack/skills/hov-setup/scripts/autoupdate.mjs
     au_rc=0
     if untouched_seed "$CFG/settings.json" "$dcg_path" \
@@ -2408,6 +2420,9 @@ else
       au_out=$(node "$au_helper" --config-dir "$CFG" --no-backup "$MARKETPLACE" 2>&1) || au_rc=$?
       printf '%s\n' "$au_out" | sed 's/^/  /'
     elif settings_mergeable && [ "$merge_state" != failed ] && [ "$merge_state" != noseed ]; then
+      au_out=$(node "$au_helper" --config-dir "$CFG" "$MARKETPLACE" 2>&1) || au_rc=$?
+      printf '%s\n' "$au_out" | sed 's/^/  /'
+    elif [ "$au_merged" = 1 ]; then
       au_out=$(node "$au_helper" --config-dir "$CFG" "$MARKETPLACE" 2>&1) || au_rc=$?
       printf '%s\n' "$au_out" | sed 's/^/  /'
     else
