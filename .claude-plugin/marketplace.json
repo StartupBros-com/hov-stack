@@ -223,13 +223,13 @@
         "source": "git-subdir",
         "url": "https://github.com/StartupBros-com/hov-stack.git",
         "path": "plugins/product-video",
-        "sha": "77f995391b20c178c617726b46ef1ef58dab3bad"
+        "sha": "a89fa854acd0324820763ea4685b3b1cb11ad549"
       },
       "description": "Agent-native product walkthrough videos. Capture a real authenticated browser tour over CDP at a forced 16:9 geometry so a tall operator window cannot letterbox the recording, overlay a real cursor driven by telemetry that carries no URLs, DOM text, or account data, compose in Remotion, and render a digest-bound H.264 you can verify frame by frame.",
       "metadata": {
-        "version": "0.2.1",
-        "releaseId": 447722758,
-        "releaseTag": "product-video--v0.2.1"
+        "version": "0.2.2",
+        "releaseId": 448097229,
+        "releaseTag": "product-video--v0.2.2"
       },
       "card": {
         "rows": [
@@ -317,13 +317,13 @@
         "source": "git-subdir",
         "url": "https://github.com/StartupBros-com/hov-stack.git",
         "path": "plugins/hov-stack",
-        "sha": "ea5975fed324b447be9bc2aa426025e1841239bb"
+        "sha": "98822236237720ea37786310668bb0efff3a52a4"
       },
       "description": "The skill pack from the hov-stack Claude Code harness, installable on its own as one plugin.",
       "metadata": {
-        "version": "0.3.3",
-        "releaseId": 447836700,
-        "releaseTag": "hov-stack--v0.3.3"
+        "version": "0.3.4",
+        "releaseId": 448137793,
+        "releaseTag": "hov-stack--v0.3.4"
       },
       "card": {
         "rows": [
