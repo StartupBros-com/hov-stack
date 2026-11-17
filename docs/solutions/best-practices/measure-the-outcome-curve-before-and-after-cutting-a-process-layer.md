@@ -1,6 +1,7 @@
 ---
 title: "Measure the product repo's outcome curve before cutting a process layer, and re-run the same curve after"
 date: "2026-10-18"
+last_updated: "2026-11-17"
 category: best-practices
 module: harness-teardown-outcome-curve
 problem_type: best_practice
@@ -11,10 +12,12 @@ applies_when:
   - "The only evidence that a layer is worth its cost is what the layer itself reports catching"
   - "Merge throughput or open-to-merge latency in the product repo has moved and nobody has lined it up against the dates each layer landed"
   - "A teardown has shipped and someone has to say whether it worked"
+  - "The evidence that a cut did no harm is a count of post-cut fix commits per merged PR (escapes)"
 symptoms:
   - "the members app weekly merges fell from 199-240 (weeks of Sep 7-21) to 97 (week of Oct 12) while median open-to-merge latency rose from 0.9-1.5 h to 14.5 h, and no harness tool reported it"
   - "Every incident a layer cited as its catch was a code comment or an agent-written memory, never a counted outcome"
   - "A per-tier yield study on 2026-10-05 kept the review ladder intact while the weekly curve was already falling"
+  - "A month after the cut, harmful escapes per 100 merged PRs showed no change on cells of 1-6, while the cut tiers' own records showed would-harm catches on 1 in 5 of the PRs they had reviewed"
 tags:
   - outcome-metric
   - throughput
@@ -24,6 +27,9 @@ tags:
   - ceremony
   - review-ladder
   - measure-before-cut
+  - escape-count
+  - latent-defect
+  - positive-control
 ---
 
 # Measure the product repo's outcome curve before cutting a process layer, and re-run the same curve after
@@ -113,6 +119,8 @@ The teardown that followed, 2026-10-17/18:
    "it caught X" statements were C. Its appendix lists the adversarial-first skill's "4 of 4
    P1s" claim as unverified, because the run data could not be found. Keep only gates with a
    named catch: "Every gate that stays has a named catch. A gate with no catch is cost."
+   After a cut, look for the catch in the cut layer's own records (step 8). A post-cut
+   escape count cannot show it.
 
 4. **Cut in reversible moves, each waiting for the operator's word.** Every move is a PR or
    a documented command, "so each is a revert away".
@@ -145,6 +153,25 @@ The teardown that followed, 2026-10-17/18:
    merged 240, about 37 and 34 a day. Removing every gate at that rate still gives the
    mid-30s a day, so the rest of the gap is how much work gets started, not the harness.
 
+8. **After a cut, read what the cut layer caught. An escape count cannot see it.** Counting
+   post-cut fix commits per merged PR ("escapes") finds only the defects someone hit,
+   traced and fixed. Most review catches are conditional bugs: a rerun after a timeout, a
+   seek during a remount, an archive that follows a symlink. Once shipped, a bug like that
+   leaves no fix commit until it fires. So:
+   - Sample PRs the cut layer did review, from its own records or the sessions that ran it.
+     Count the catches that changed code before merge and would have reached a user.
+     Weight the rate to each repo's review volume, because a per-repo quota can undersample
+     the repos that hold the catches.
+   - Report the escape count beside it. Verify the same share of each era's candidate pool,
+     not the same number of candidates. Read "no detectable change" on small cells as "no
+     change of several times", because that is all they can show.
+   - Before a replay reviewer's misses count, run it on PRs whose catches are known (the
+     commit before the real review's fixes) and check that it finds them. If it cannot find
+     the known catches, its misses tell you nothing about anything else.
+   - Restore narrowly, keyed to the class the catches sit in, and size it before deciding.
+     Use two independent votes on the exact rule sentence, and report the count as a lower
+     bound behind any keyword prefilter.
+
 ## The gap: no outcome metric for quality
 
 The curve says faster or slower, not better or worse. No count of defects reaching
@@ -170,6 +197,12 @@ not a metric:
 
 Report it next to the curve and never decide on it alone. A real metric, such as production
 incidents or reverted deploys per week, would replace the kit.
+
+**Partly measured, 2026-11-16.** An audit built the escape count. It paired each fix
+commit with the PR that introduced the defect, using reverts, fix messages and blame, and
+agents verified the strongest candidates. The count turned out to be blind to the class
+where the review ladder's value sat. The numbers are under Examples, and the method is
+Guidance step 8.
 
 ## Why This Matters
 
@@ -198,6 +231,8 @@ Unsampled counts and tagged provenance are what let the verdict table hold up.
   start from the layer's own reports.
 - After a cut: re-run the same scripts, read the result against bands written down before
   the run, and record the verdict here.
+- When the case that a cut did no harm rests on post-cut escapes: first read what the cut
+  layer itself caught (Guidance step 8).
 - Whenever a layer's case rests on C-tagged claims.
 
 ## Examples
@@ -235,7 +270,63 @@ ladder and owner fleet, 97-144 merged with a median of 2.9-14.5 h.
 
 Decision: keep the teardown. Restoring a retired layer needs a named catch, and the curve
 names none. The measurement was not extended, since nobody named who would use an
-extension, and the kit was deleted under its own condition.
+extension, and the kit was deleted under its own condition. The audit below found named
+catches in one class, and that class got a review back.
+
+**The quality audit (2026-11-16).** A month after the teardown, the operator asked whether
+it had hurt. The audit used three measures. Agents made the harm labels; they were
+spot-checked against PR text and commit messages, not re-run.
+
+- **Escapes.** Verified harmful escapes per 100 merged PRs, ladder month against the month
+  after, compared at matched depth:
+
+  | Repo | Ladder month | Month after |
+  |---|---|---|
+  | The router | 2.1 | 2.4 |
+  | The members app | 0.19 | 0.12 |
+  | Other repos | 0.14 | 0.26 |
+
+  Each figure rests on 1 to 6 escapes, so no change is detectable in either direction. The
+  worst incidents of the month after the cut traced to code merged before it.
+- **What the cut tiers caught.** The sample was 23 ladder-era review sessions covering 25
+  PRs. Before merge, the two dropped tiers (adversarial-first and `ce-code-review`) caught 9
+  bugs that would have reached users, on 5 of those PRs. That is about 1 PR in 5
+  unweighted, and 1 in 3 weighted to review volume. They were mostly conditional P2s, in
+  money-moving, media-playback and data-overwriting code. Three examples:
+  - a paid-play preflight that let a paid join post without remote execution (P1);
+  - a second deposit after a poll timeout;
+  - an archive tool that followed a symlink and replaced a memory index.
+
+  About half of ladder-era PRs were reviewed. So if bugs like these had shipped and been
+  noticed, 1 in 5 reviewed PRs comes to something like 10 more harmful escapes per 100
+  merged PRs in the month after the cut. It shows none. The main reading is that these
+  bugs need a condition to fire and nobody has hit one yet. Two other readings fit, and
+  this data cannot separate them: some catches would have been stopped by tests, and
+  newer models may write fewer such bugs.
+- **A blind replay.** One reviewer agent was given the diff, a description and the touched
+  directories, and nothing else. It caught 1 of 6 post-cut escapes. For its positive
+  control, the same harness ran on three ladder-era PRs at the commit before their real
+  review fixes:
+  - of 14 known catches, it fully caught 2 and partly caught 5;
+  - of the 6 catches that carried the harm, it fully caught none.
+
+  So its misses on the escapes say nothing about what the real ladder would have done.
+
+Decision: keep the teardown, and give the one gated Pro review the class the catches sat
+in. hov-stack #686 widened the trigger in
+`plugins/hov-stack/skills/hov-setup/instructions/pro-gate.md` to code that moves real
+money or paid credits, or that deletes or overwrites user or operator data.
+
+The widening was sized before it went in, over the month after the cut:
+- 2,646 PRs merged;
+- 729 kept by a keyword prefilter;
+- 102 flagged by a first classifier pass;
+- 64 in scope by both of two votes on the exact sentence, and 10 split;
+- 33 of those (39 counting the splits) touched no gated path and had no Pro round.
+
+Against 560 PRs that did get a Pro round in that month, that is about 6 to 7 percent more
+rounds. The 33 is a lower bound: the prefilter drops PRs worded differently, and the votes
+read titles and paths, not diffs.
 
 ## Related
 
@@ -245,6 +336,9 @@ extension, and the kit was deleted under its own condition.
   the product repo.
 - `docs/solutions/best-practices/stop-adversarial-review-loops-on-measured-prevalence-not-a-clean-round.md`:
   the same keep-only-what-is-measured stance, applied to one review loop.
+- `docs/solutions/best-practices/agent-bakeoff-eval-discrimination-failure.md`: the same
+  check as the replay's positive control. Prove an instrument can fail before trusting its
+  null result.
 - `4f377209:claude/experiments/harness-teardown-2026-10/README.md` in dotfiles: the
   baseline table, the bands, the re-run commands and the kit's deletion condition, met on
   2026-11-03.
