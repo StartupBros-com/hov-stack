@@ -18,10 +18,12 @@
 # its sibling.
 # shellcheck source=lib/overlay.sh
 . "$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")/overlay.sh"
+# shellcheck source=lib/overlay-units.sh
+. "$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")/overlay-units.sh"
 
 # foreign_units_with_overlay LIST: print LIST with the overlay's unit names appended.
 foreign_units_with_overlay() {
-  local list=$1 dir line content
+  local list=$1 dir line content path
   if dir=$(overlay_dir) && [ -f "$dir/foreign-units" ]; then
     while IFS= read -r line || [ -n "$line" ]; do
       content=${line#"${line%%[![:space:]]*}"}
@@ -34,6 +36,11 @@ foreign_units_with_overlay() {
       esac
     done < "$dir/foreign-units"
   fi
+  overlay_units_load "${2:-}"
+  for path in "${OVERLAY_UNIT_PATHS[@]}"; do
+    case $path in */*) continue ;; esac
+    list="$list ${path%.*}"
+  done
   printf '%s\n' "$list"
 }
 
@@ -41,9 +48,10 @@ foreign_units_with_overlay() {
 # overlay's names appended. Prints nothing when that line is missing, so a reader that
 # needs the register still fails closed on a sync.sh it cannot parse.
 foreign_units_register() {
-  local static
+  local static units
   [ -f "$1" ] || return 0
   static=$(sed -n 's/^UNITS_FOREIGN="\(.*\)"$/\1/p' "$1") || return 0
   [ -n "$static" ] || return 0
-  foreign_units_with_overlay "$static"
+  units=$(sed -n 's/^UNITS="\(.*\)"$/\1/p' "$1") || return 0
+  foreign_units_with_overlay "$static" "$units"
 }

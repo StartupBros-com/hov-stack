@@ -295,7 +295,11 @@ UNITS_FOREIGN="check-fleet-drift voxtype"
 # all three share says how.
 # shellcheck source=lib/foreign-units.sh
 . "$HERE/lib/foreign-units.sh"
-UNITS_FOREIGN=$(foreign_units_with_overlay "$UNITS_FOREIGN")
+UNITS_FOREIGN=$(foreign_units_with_overlay "$UNITS_FOREIGN" "$UNITS")
+# shellcheck source=lib/overlay-units.sh
+. "$HERE/lib/overlay-units.sh"
+OVERLAY_UNIT_PATHS=() OVERLAY_UNIT_SOURCES=() OVERLAY_UNIT_FLAGS=() OVERLAY_UNIT_ERRORS=()
+if declare -F overlay_units_load >/dev/null; then overlay_units_load "$UNITS"; fi
 # A host's hygiene-timer posture (deletion on, schedule, which timers run) comes from
 # <overlay>/hygiene-posture; install applies it as drop-ins and check reports drift.
 # shellcheck source=lib/hygiene-posture.sh
@@ -2086,6 +2090,7 @@ install_memory_seed() {
 }
 
 install_user_units() {
+  local index error
   # Copy each declared user unit into the user unit directory. The standalone
   # and root installers share this path.
   for u in $UNITS; do
@@ -2096,11 +2101,17 @@ install_user_units() {
     }
     install_user_unit "$u" || return 1
   done
+  for error in "${OVERLAY_UNIT_ERRORS[@]}"; do echo "  $error" >&2; done
+  for index in "${!OVERLAY_UNIT_PATHS[@]}"; do
+    u=${OVERLAY_UNIT_PATHS[$index]}
+    mkdir -p "$(dirname "$SYS/$u")" || return 1
+    install_user_unit "$u" "${OVERLAY_UNIT_SOURCES[$index]}" || return 1
+  done
 }
 
 install_user_unit() {
-  local unit=$1
-  if ! cp "$HERE/systemd/$unit" "$SYS/$unit" || ! cmp -s "$HERE/systemd/$unit" "$SYS/$unit"; then
+  local unit=$1 source=${2:-$HERE/systemd/$1}
+  if ! cp "$source" "$SYS/$unit" || ! cmp -s "$source" "$SYS/$unit"; then
     echo "  failed to deploy user unit $unit; refusing to report harness install success" >&2
     return 1
   fi
@@ -2230,7 +2241,26 @@ install_tools_gate() {
 }
 
 install_role_timers() {
+  local index overlay_failed=0
+  local overlay_timers=()
   reconcile_role_timers "$_role" "$_enable" || return 1
+  for index in "${!OVERLAY_UNIT_PATHS[@]}"; do
+    [ "${OVERLAY_UNIT_FLAGS[$index]}" = on ] || continue
+    overlay_timers+=("${OVERLAY_UNIT_PATHS[$index]}")
+  done
+  if [ "${#overlay_timers[@]}" -gt 0 ]; then
+    if systemctl --user show-environment >/dev/null 2>&1; then
+      # A failure is reported and held until the posture timers below have run.
+      if systemctl --user enable --now "${overlay_timers[@]}"; then
+        echo "  overlay timers enabled: ${overlay_timers[*]}"
+      else
+        echo "  ERROR: could not enable overlay timers: ${overlay_timers[*]}" >&2
+        overlay_failed=1
+      fi
+    else
+      echo "  WARN systemd user manager unavailable; overlay timers not enabled: ${overlay_timers[*]}" >&2
+    fi
+  fi
   if [ "$posture_ok" = 1 ] && [ -n "$HYGIENE_POSTURE_DECLARED" ]; then
     if systemctl --user show-environment >/dev/null 2>&1; then
       _posture_timers=""
@@ -2246,59 +2276,93 @@ install_role_timers() {
       echo "  WARN systemd user manager unavailable; hygiene timers declared in the overlay posture not enabled: $HYGIENE_POSTURE_DECLARED" >&2
     fi
   fi
+  [ "$overlay_failed" = 0 ] || return 1
+}
+
+role_unit_file() {
+  local phase=$1 unit=$2 source=$3
+  if [ ! -f "$SYS/$unit" ]; then
+    new=$((new + 1))
+    echo "  new unit: $unit (not installed)"
+  elif ! cmp -s "$source" "$SYS/$unit"; then
+    if [ "$phase" = refresh ]; then
+      case "$(readlink -f "$SYS/$unit")" in
+        "$(readlink -f "$SYS")"/*) ;;
+        *) echo "  refusing unit outside user unit directory: $unit" >&2; refused=$((refused + 1)); return 0 ;;
+      esac
+      if [ -z "$refresh_backup" ]; then
+        if ! mkdir -p "$H/backups" || ! refresh_backup=$(mktemp -d "$H/backups/unit-refresh-$(date +%Y%m%d-%H%M%S)-XXXXXX"); then
+          echo "  failed to create unit refresh backup for $unit" >&2
+          failed=$((failed + 1))
+          return 0
+        fi
+        echo "  unit refresh backup: $refresh_backup"
+      fi
+      # -L: a unit that is a symlink inside the unit directory is overwritten
+      # through the link, so the backup keeps the bytes behind it, not the link.
+      if ! (cd "$refresh_backup" && mkdir -p "./$(dirname "$unit")" && cp -pL -- "$SYS/$unit" "./$unit"); then
+        echo "  failed to back up user unit $unit; leaving it alone" >&2
+        failed=$((failed + 1))
+        return 0
+      fi
+      [ ! -L "$SYS/$unit" ] || echo "  $unit was a symlink to $(readlink -f "$SYS/$unit"); the backup holds its contents"
+      # The marker goes down before the first write, so a refresh killed between
+      # a write and the reload still reloads on the next run.
+      if [ "$marked" -eq 0 ]; then
+        if ! mkdir -p "$(dirname "$pending")" || ! touch "$pending"; then
+          echo "  failed to record pending user-unit reload; leaving $unit alone" >&2
+          failed=$((failed + 1))
+          return 0
+        fi
+        marked=1
+      fi
+      if ! install_user_unit "$unit" "$source"; then
+        failed=$((failed + 1))
+        return 0
+      fi
+      echo "  updated unit: $unit"
+    else
+      echo "  unit differs: $unit"
+    fi
+    changed=$((changed + 1))
+  fi
+}
+
+overlay_unit_timers_check() {
+  local index unit reachable='' result=0
+  for index in "${!OVERLAY_UNIT_PATHS[@]}"; do
+    [ "${OVERLAY_UNIT_FLAGS[$index]}" = on ] || continue
+    if [ -z "$reachable" ]; then
+      if ! systemctl --user show-environment >/dev/null 2>&1; then
+        echo "SKIP: no reachable systemd --user manager; overlay timer enable-state check not applicable"
+        return 0
+      fi
+      reachable=1
+    fi
+    unit=${OVERLAY_UNIT_PATHS[$index]}
+    if ! systemctl --user is-enabled "$unit" >/dev/null 2>&1; then
+      echo "${1}overlay timer $unit is not enabled (./setup --enable-units)"
+      result=1
+    fi
+  done
+  return "$result"
 }
 
 role_unit_files() {
-  local phase=$1 unit changed=0 new=0 refused=0 failed=0 reload_failed=0 backup="" marked=0
+  local phase=$1 unit index error changed=0 new=0 refused=0 failed=0 reload_failed=0 refresh_backup="" marked=0
   local pending="$H/.hov-stack/units-reload-pending"
   for unit in $UNITS; do
     [ -f "$HERE/systemd/$unit" ] || continue
-    if [ ! -f "$SYS/$unit" ]; then
-      new=$((new + 1))
-      echo "  new unit: $unit (not installed)"
-    elif ! cmp -s "$HERE/systemd/$unit" "$SYS/$unit"; then
-      if [ "$phase" = refresh ]; then
-        case "$(readlink -f "$SYS/$unit")" in
-          "$(readlink -f "$SYS")"/*) ;;
-          *) echo "  refusing unit outside user unit directory: $unit" >&2; refused=$((refused + 1)); continue ;;
-        esac
-        if [ -z "$backup" ]; then
-          if ! mkdir -p "$H/backups" || ! backup=$(mktemp -d "$H/backups/unit-refresh-$(date +%Y%m%d-%H%M%S)-XXXXXX"); then
-            echo "  failed to create unit refresh backup for $unit" >&2
-            failed=$((failed + 1))
-            continue
-          fi
-          echo "  unit refresh backup: $backup"
-        fi
-        # -L: a unit that is a symlink inside the unit directory is overwritten
-        # through the link, so the backup keeps the bytes behind it, not the link.
-        if ! (cd "$backup" && mkdir -p "./$(dirname "$unit")" && cp -pL -- "$SYS/$unit" "./$unit"); then
-          echo "  failed to back up user unit $unit; leaving it alone" >&2
-          failed=$((failed + 1))
-          continue
-        fi
-        [ ! -L "$SYS/$unit" ] || echo "  $unit was a symlink to $(readlink -f "$SYS/$unit"); the backup holds its contents"
-        # The marker goes down before the first write, so a refresh killed between
-        # a write and the reload still reloads on the next run.
-        if [ "$marked" -eq 0 ]; then
-          if ! mkdir -p "$(dirname "$pending")" || ! touch "$pending"; then
-            echo "  failed to record pending user-unit reload; leaving $unit alone" >&2
-            failed=$((failed + 1))
-            continue
-          fi
-          marked=1
-        fi
-        if ! install_user_unit "$unit"; then
-          failed=$((failed + 1))
-          continue
-        fi
-        echo "  updated unit: $unit"
-      else
-        echo "  unit differs: $unit"
-      fi
-      changed=$((changed + 1))
-    fi
+    role_unit_file "$phase" "$unit" "$HERE/systemd/$unit"
   done
+  for error in "${OVERLAY_UNIT_ERRORS[@]}"; do
+    echo "  $error"
+    refused=$((refused + 1))
+  done
+  for index in "${!OVERLAY_UNIT_PATHS[@]}"; do
+    role_unit_file "$phase" "${OVERLAY_UNIT_PATHS[$index]}" "${OVERLAY_UNIT_SOURCES[$index]}"
+  done
+  if [ "$phase" = check ]; then overlay_unit_timers_check '  ' || failed=$((failed + 1)); fi
   if [ "$phase" = refresh ]; then
     HYGIENE_POSTURE_PENDING=$pending
     apply_hygiene_posture refresh || failed=$((failed + 1))
@@ -2310,6 +2374,7 @@ role_unit_files() {
       role_summary="$changed unit file(s) updated"
     else
       role_summary="$changed unit file(s) differ"
+      if [ "${#OVERLAY_UNIT_PATHS[@]}" -gt 0 ]; then role_summary="$role_summary: ./setup"; fi
     fi
   fi
   if [ "$phase" = refresh ]; then
@@ -2804,6 +2869,21 @@ check() {
       echo "DRIFT: systemd/$u differs (sync.sh push)"; drift=1
     fi
   done
+
+  local overlay_index overlay_path overlay_error
+  for overlay_error in "${OVERLAY_UNIT_ERRORS[@]}"; do
+    echo "DRIFT: $overlay_error"; drift=1
+  done
+  for overlay_index in "${!OVERLAY_UNIT_PATHS[@]}"; do
+    overlay_path=${OVERLAY_UNIT_PATHS[$overlay_index]}
+    examined=$((examined + 1))
+    if [ ! -f "$SYS/$overlay_path" ]; then
+      echo "DRIFT: overlay unit $overlay_path is not installed (./setup --enable-units)"; drift=1
+    elif ! cmp -s "$SYS/$overlay_path" "${OVERLAY_UNIT_SOURCES[$overlay_index]}"; then
+      echo "DRIFT: overlay unit $overlay_path differs (./setup)"; drift=1
+    fi
+  done
+  overlay_unit_timers_check 'DRIFT: ' || drift=1
 
   # Host-declared hygiene posture (lib/hygiene-posture.sh): the overlay's declaration
   # against the drop-ins and timers install should have left. No file and no generated

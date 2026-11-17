@@ -8,6 +8,23 @@ Plain `./setup` refreshes installed user units without changing timer activation
 
 Every timer file lists its own schedule. Read the timer before enabling it; the tables below are a summary.
 
+## Units from the overlay
+
+A host can install units of its own that this repository does not ship, such as a private repository's timers. List them in the overlay's `units` file, one per line, with a tab character where `<TAB>` is shown:
+
+```
+example-backup.service<TAB>systemd/example-backup.service
+example-report.timer<TAB>systemd/example-report.timer<TAB>on
+```
+
+- The first field is the name to install under `~/.config/systemd/user/`: a unit file, or a drop-in written as `<unit>.d/<file>.conf` (`example@.service.d/override.conf` is one). Names use letters, digits, `@`, `.`, `_` and `-`, and `..` is refused.
+- The second field is the source, a regular file. A relative path is read from the overlay directory with symlinks resolved; an absolute path is used as written.
+- The optional third field, `on`, is for timers: `./setup --enable-units` enables and starts each `on` timer. A timer without it keeps its current state. A template timer (`example@.timer`) cannot take `on`, since it has no instance to start.
+- Blank lines, `#` comment lines and CRLF line endings are accepted.
+- A bad row is reported with its line number and skipped, and the other rows still apply. These are bad: a missing field, a name that breaks the rules above, a missing source, a name listed twice, a name this repository already ships, and `on` on anything but a plain timer. A drop-in for one of this repository's units is allowed.
+
+Plain `./setup` refreshes the installed copies the way it refreshes this repository's units, with the same backup and pending-reload record; it installs no new ones. `./setup --check` and `sync.sh check` report a missing or differing copy, each refused row, and an `on` timer that is not enabled. `sync.sh push` never copies these units into this repository. Each listed unit file (drop-ins aside) also counts as foreign, so `sync.sh check`, `unit-health` and `harness-doctor` do not report it as unowned and it need not be repeated in `foreign-units`.
+
 ## Kept units
 
 These need no edits. Copy them as they are.
