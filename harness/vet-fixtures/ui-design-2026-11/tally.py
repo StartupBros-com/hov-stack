@@ -131,7 +131,7 @@ def join(scores, key, grades_dir):
         items = dict(s["items"])
         if s["task"] in BUILD_TASKS:
             need = list(BUILD_ITEMS)
-            if items.get(bds.D5) is None:
+            if s["task"] == "t1" and items.get(bds.D5) is None:
                 need.append("J5")
             got = build.get(s["rid"], {})
             for n in need:
