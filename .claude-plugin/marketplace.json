@@ -223,13 +223,13 @@
         "source": "git-subdir",
         "url": "https://github.com/StartupBros-com/hov-stack.git",
         "path": "plugins/product-video",
-        "sha": "a89fa854acd0324820763ea4685b3b1cb11ad549"
+        "sha": "271889304e0295b832ceff5b8e8bdf075da4aac4"
       },
       "description": "Agent-native product walkthrough videos. Capture a real authenticated browser tour over CDP at a forced 16:9 geometry so a tall operator window cannot letterbox the recording, overlay a real cursor driven by telemetry that carries no URLs, DOM text, or account data, compose in Remotion, and render a digest-bound H.264 you can verify frame by frame.",
       "metadata": {
-        "version": "0.2.2",
-        "releaseId": 448097229,
-        "releaseTag": "product-video--v0.2.2"
+        "version": "0.2.3",
+        "releaseId": 449272321,
+        "releaseTag": "product-video--v0.2.3"
       },
       "card": {
         "rows": [
