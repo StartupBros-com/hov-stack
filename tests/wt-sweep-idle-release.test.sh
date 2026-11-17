@@ -227,7 +227,7 @@ kept "exit 3 without an idle line: nothing removed" "$E/one"
 # build output (dotfiles#2259); .wrangler/ and .venv/ do not.
 slug(){ printf '%s' "$1" | sed 's/[^A-Za-z0-9]/-/g'; }
 D="$TMP/d"
-mkrepo "$D" deadown deaddist deadlive deadlive2 deadfresh deaddirty deadwrangler deadvenv deadunship deadcwd sharedcwd sharedid
+mkrepo "$D" deadown deaddist deadlive deadlive2 deadlive3 deadfresh deaddirty deadwrangler deadvenv deadunship deadcwd sharedcwd sharedid
 mkdir -p "$D/repo/.git/info"; printf 'dist/\nnext-env.d.ts\n.wrangler/\n.venv/\n' >>"$D/repo/.git/info/exclude"
 mkdir -p "$D/deaddist/dist" "$D/deaddist/apps/web/dist" "$D/deadwrangler/.wrangler/state" "$D/deadvenv/.venv/bin"
 echo a >"$D/deaddist/dist/a.js"; echo b >"$D/deaddist/apps/web/dist/b.js"; echo n >"$D/deaddist/apps/web/next-env.d.ts"
@@ -276,6 +276,10 @@ rec "$D/sharedcwd" "$(ago '30 hours')" >"$T13"; touch -d '-30 hours' "$T13"
 # has another id, so the sessionId alone proves it alive).
 job j16 livesid "\"sessionId\":\"s16\",\"worktreePath\":\"$D/deadlive2\",\"linkScanPath\":\"$L/t16.jsonl\""
 printf '{"pid":%s,"procStart":"%s","sessionId":"s16","cwd":"%s","name":"live16"}\n' "$$" "$(starttime $$)" "$TMP" >"$H2/sessions/live16.json"
+# j17: stale record whose sessionId differs from its transcript's name; the live
+# session carries only the transcript's id (t17), which alone proves it alive.
+job j17 ownerid "\"sessionId\":\"s17\",\"worktreePath\":\"$D/deadlive3\",\"linkScanPath\":\"$L/t17.jsonl\""
+printf '{"pid":%s,"procStart":"%s","sessionId":"t17","cwd":"%s","name":"live17"}\n' "$$" "$(starttime $$)" "$TMP" >"$H2/sessions/live17.json"
 # sharedid: j14 lapsed and entered it, but fresh j15 resumes j14's session, so that
 # session's last cwd still holds.
 T14="$L/s14.jsonl"
@@ -295,6 +299,7 @@ has "dead job: its own last cwd no longer holds" "$plan" \
   "~ idle: job j11 \"entered\" is blocked and its session is not running; its transcript $T11 names $D/deadcwd"
 has "dead job: a live session carrying its resumeSessionId holds" "$plan" "skip (Claude session: job j5 \"resumed\" is blocked): deadlive"
 has "dead job: a live session carrying its sessionId holds" "$plan" "skip (Claude session: job j16 \"livesid\" is blocked): deadlive2"
+has "dead job: a live session carrying its transcript's id holds" "$plan" "skip (Claude session: job j17 \"ownerid\" is blocked): deadlive3"
 has "dead job: a session a fresh job resumes keeps its last cwd's hold" "$plan" \
   "its session last recorded its cwd at $D/sharedid): sharedid"
 has "dead job: a record written inside the window holds" "$plan" "skip (Claude session: job j6 \"fresh\" is blocked): deadfresh"
@@ -307,7 +312,7 @@ has "dead job: counts" "$plan" "released-idle:3"
 out=$(sweep "$D" 0 "$H2")
 chk "dead job: the apply removes what the plan named" "$DEADREL" "$(removals "$out")"
 for n in deadown deaddist deadcwd; do gone "dead job: $n released" "$D/$n"; done
-for n in deadlive deadlive2 deadfresh deaddirty deadwrangler deadvenv deadunship sharedcwd sharedid; do kept "dead job: $n kept" "$D/$n"; done
+for n in deadlive deadlive2 deadlive3 deadfresh deaddirty deadwrangler deadvenv deadunship sharedcwd sharedid; do kept "dead job: $n kept" "$D/$n"; done
 chk "dead job: the dirty worktree's HEAD is untouched" "$dirty_head" "$(git -C "$D/deaddirty" rev-parse HEAD)"
 [ -f "$D/deaddirty/new.txt" ] && ok "dead job: its untracked file is untouched" || no "dead job: its untracked file is untouched"
 

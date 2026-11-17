@@ -84,7 +84,11 @@ unheld, so a sweep releases it only if it is clean, cache-only and shipped.
 
 Nothing is reported idle when a job or session record, or a candidate transcript,
 could not be read (hov-stack#660): its unread bytes may name the worktree inside
-the window. Each such file is reported on stderr and the hold stays. A transcript
+the window. Each such file is reported on stderr and the hold stays. It never
+makes a hold where none exists: a worktree nothing readable names stays unheld,
+as before, and takes the sweep's normal path, which commits, bundles or pushes
+its work before any removal; holding every worktree on one bad file would stop
+the sweep for as long as the file stays bad. A transcript
 whose new bytes cannot be read still holds through what its cache entry had
 recorded. Without --idle-hours the skip described below stands. A session record
 that cannot be read, from a pid (its file name) that is not running, holds nothing
