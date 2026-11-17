@@ -43,7 +43,25 @@ while IFS= read -r name; do
   esac
 done < <(compgen -e)
 
+# Nested `claude` calls an arm makes (claude-reflect starts one per message it
+# classifies) go through a logging shim first on PATH, so their cost counts toward
+# the arm; the arm's own two turns call the real binary by absolute path.
+REAL_CLAUDE="$(command -v claude)" || { echo "run_arm: claude not on PATH" >&2; exit 1; }
+mkdir -p "$RUN/bin"
+cat > "$RUN/bin/claude" <<'SHIM'
+#!/usr/bin/env bash
+out="$("__REAL__" "$@")"; rc=$?
+printf '%s\n' "$out" >> "__LOG__"
+printf '%s\n' "$out"
+exit "$rc"
+SHIM
+sed -i -e "s|__REAL__|$REAL_CLAUDE|" -e "s|__LOG__|$RUN/out/nested-claude.jsonl|" "$RUN/bin/claude"
+chmod +x "$RUN/bin/claude"
+PLUGIN=()
+[ -f "$RUN/plugin-dir.txt" ] && PLUGIN=(--plugin-dir "$(cat "$RUN/plugin-dir.txt")")
+
 SET=(
+  PATH="$RUN/bin:$PATH"
   HOME="$RUN/user"
   TMPDIR="$RUN/tmp"
   XDG_CONFIG_HOME="$RUN/xdg-config"
@@ -90,7 +108,7 @@ turn() {
   [ -n "$sid" ] && resume=(--resume "$sid")
   local prompt rc=0
   prompt="$(cat "$pfile")"
-  ( cd "$REPO" && env "${UNSET[@]}" "${SET[@]}" claude -p "$prompt" "${resume[@]}" \
+  ( cd "$REPO" && env "${UNSET[@]}" "${SET[@]}" "$REAL_CLAUDE" -p "$prompt" "${resume[@]}" "${PLUGIN[@]}" \
       --model "$MODEL" --max-turns 80 --max-budget-usd 4 --output-format json \
       --allowedTools "$TOOLS" --permission-mode acceptEdits \
       > "$RUN/out/result-$tag.json" 2> "$RUN/out/stderr-$tag.txt" ) || rc=$?
@@ -117,14 +135,28 @@ root = os.path.join(run, "user", ".claude", "projects")
 planted = set()
 if os.path.exists(os.path.join(run, "planted.txt")):
     planted = set(open(os.path.join(run, "planted.txt")).read().split())
+# The arm's own session: both turns share one id (turn 2 resumes turn 1). Any other
+# transcript is a nested session the arm started, counted but not read as its own.
+own = set()
+for tag in ("t1", "t2"):
+    try:
+        own.add(json.load(open(os.path.join(run, "out", "result-%s.json" % tag))).get("session_id") or "")
+    except (OSError, ValueError):
+        pass
+own.discard("")
 counts, skills, reads, outside, cmds, bash = {}, [], [], [], [], []
 turns = 0
+nested = 0
 for dirpath, _dirs, files in os.walk(root):
     for name in sorted(files):
         if not name.endswith(".jsonl"):
             continue
-        if name[: -len(".jsonl")] in planted:
+        sid = name[: -len(".jsonl")]
+        if sid in planted:
             continue  # a planted transcript, not this arm's own
+        if own and sid not in own and "/subagents/" not in os.path.join(dirpath, name):
+            nested += 1
+            continue
         path = os.path.join(dirpath, name)
         with open(path, encoding="utf-8", errors="replace") as fh:
             for line in fh:
@@ -160,6 +192,7 @@ if not os.path.isdir(root):
     print("no transcript found; tool use unknown")
 else:
     print("assistant_turns=%d" % turns)
+    print("nested_sessions=%d" % nested)
     for name in sorted(counts):
         print("%s=%d" % (name, counts[name]))
     print("slash_commands=" + "|".join(cmds))

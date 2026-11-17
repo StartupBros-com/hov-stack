@@ -33,6 +33,11 @@ ARMS = {
     "retro": {"prompt": "/retro " + ASK, "skill": "retro"},
     "bare-wide": {"prompt": ASK_WIDE, "skill": None},
     "learn-taste-wide": {"prompt": "/learn-taste " + ASK_WIDE, "skill": "learn-taste"},
+    # Added after the scored matrix (README, "Added arm: claude-reflect"). A plugin, not a
+    # skill: --src points at the plugin root, copied into the run dir and loaded with
+    # --plugin-dir. --scan-history is its documented cold-start form; with no hook-captured
+    # queue, plain /reflect only asks whether to scan.
+    "claude-reflect": {"prompt": "/reflect --scan-history " + ASK, "skill": None, "plugin": "claude-reflect"},
 }
 TURN2 = "write all"
 
@@ -58,6 +63,9 @@ def main():
         skill = ARMS[arm]["skill"]
         if skill and not os.path.isfile(os.path.join(srcs.get(skill, ""), "SKILL.md")):
             raise SystemExit("make_runs: arm %s needs --src %s=<dir holding SKILL.md>" % (arm, skill))
+        plugin = ARMS[arm].get("plugin")
+        if plugin and not os.path.isfile(os.path.join(srcs.get(plugin, ""), ".claude-plugin", "plugin.json")):
+            raise SystemExit("make_runs: arm %s needs --src %s=<plugin root>" % (arm, plugin))
 
     jobs = [arm for arm in arms for _ in range(a.reps)]
     random.Random(a.order_seed).shuffle(jobs)
@@ -76,6 +84,12 @@ def main():
         skill = ARMS[arm]["skill"]
         if skill:
             shutil.copytree(srcs[skill], os.path.join(home, ".claude", "skills", skill))
+        plugin = ARMS[arm].get("plugin")
+        if plugin:
+            dest = os.path.join(run, "plugins", plugin)
+            shutil.copytree(srcs[plugin], dest, ignore=shutil.ignore_patterns(".git"))
+            with open(os.path.join(run, "plugin-dir.txt"), "w", encoding="utf-8") as fh:
+                fh.write(dest + "\n")
         for name, text in (("prompt.txt", ARMS[arm]["prompt"]), ("turn2.txt", TURN2), ("model.txt", a.model),
                            ("planted.txt", "\n".join(sessions.PLANTED_IDS))):
             with open(os.path.join(run, name), "w", encoding="utf-8") as fh:

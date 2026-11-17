@@ -97,6 +97,41 @@ the ask. Recorded from turn 1:
 
 Turn 2 is recorded as for the scored arms, plus where any X3 content landed.
 
+## Added arm: claude-reflect (declared after the scored matrix, before its runs)
+
+claude-reflect was slated in discovery and left out as having no headless form, a call
+made from reading alone. Two probes then showed otherwise. Under `claude -p`,
+AskUserQuestion is not offered even when allowed, and the model asks in plain text
+instead. Its history scan needs no hook-captured queue. So the two-turn form fits it.
+
+- **Invocation.** Turn 1 is `/reflect --scan-history ` + the ask, with the plugin at
+  `b6c4232` copied into the run dir and loaded with `--plugin-dir`. `--scan-history` is its
+  documented cold-start form. With an empty queue, plain `/reflect` only asks whether to
+  scan. Its four hooks load too. They are local Python that writes only under HOME.
+- **Scope.** Its scan reads this project's sessions only (`project_paths.py`). X3, from
+  billing-portal, is outside that scope by default. It is graded as for the scored arms.
+- **Measurement.** It classifies messages with nested `claude -p` calls. `run_arm.sh`
+  routes them through a logging shim, and `check_runs.py` adds their cost to the arm's.
+  Nested transcripts are counted (`nested_sessions`) and left out of the arm's tool log.
+  They land in the same folder its scan reads. That is reported, not corrected.
+- **Rule.** I is now the best of ce-retro, retro and claude-reflect by median K-correct.
+  Rule 1(a) needs median(LT) ≥ median(I) + 1. With LT at 7, it holds only if claude-reflect's
+  median is 6 or less. The declared rule left one case open, claude-reflect at 7 or 8: (a)
+  fails, and rule 4 cannot fire. Declared now: in that case learn-taste is **SKIP** (not
+  better than the best contender), claude-reflect's row gets its own phase-5 pricing as a
+  proposal for the operator (it ships hooks, and enabling a plugin is the operator's call),
+  and nothing lands for either.
+- **Smoke first.** One run comes before the others. It passes if both turns exit 0 with a
+  non-error result and the turn-1 reply proposes rules drawn from the planted session. If it
+  passes and nothing in the setup changes after it, it counts as rep 1, and reps 2 and 3
+  follow. If it fails, the arm is PARTIAL. The deciding run is then an interactive session
+  with scripted answers on this fixture, and learn-taste is SKIP pending that run.
+- **Grading.** The same brief, two judges in opposite orders, plus the K7-only judge. The
+  batch also carries the first scored run of learn-taste (r07), bare (r03) and retro (r01),
+  rebuilt with the current `packets.py` under new numbers. That keeps a one-arm batch blind
+  and shows drift against the first grades. Those three re-grades are reported as drift
+  only, and the scored matrix keeps its recorded grades.
+
 ## Running it
 
 ```bash
