@@ -79,8 +79,13 @@ while read -r rev; do
   seeds+=("$rev")
 done < <(git -C "$ROOT" log --reverse --format=%H HEAD -- settings.json lib/settings-seed.js)
 [ "${#seeds[@]}" -ge 10 ] || fail "found ${#seeds[@]} seeds in the template's history; 10 existed on 2026-11-16, so the history is cut short"
+# Main's tip is a seed of its own only when the walk above did not already take it, as it does
+# when the tip itself changed the template: a second checkout of one revision cannot be made.
 if main_tip=$(git -C "$ROOT" rev-parse -q --verify origin/main 2>/dev/null) && [ "$(git -C "$ROOT" rev-parse HEAD)" != "$main_tip" ]; then
-  seeds+=("$main_tip")
+  case " ${seeds[*]} " in
+    *" $main_tip "*) ;;
+    *) seeds+=("$main_tip") ;;
+  esac
 fi
 echo "# ${#seeds[@]} seeds: $(for s in "${seeds[@]}"; do printf '%s ' "${s:0:7}"; done)"
 

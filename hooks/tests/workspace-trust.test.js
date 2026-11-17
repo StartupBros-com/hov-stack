@@ -3,7 +3,8 @@
  * lib/workspace-trust.js: that the home directory and the repositories under
  * ~/SITES become trusted in Claude Code's global config, that the write keeps
  * everything else and follows Claude Code's lock-and-rename protocol, and
- * that SessionStart runs it silently.
+ * that SessionStart runs it silently on a host with a declared role and not
+ * at all on one without.
  *
  * Every case builds its own home with a .claude.json and a SITES root. The
  * home starts with the entry Claude Code's trust dialog leaves there, fields
@@ -337,16 +338,44 @@ test('config path: legacy .config.json, then CLAUDE_CONFIG_DIR, custom-OAuth suf
   assert.strictEqual(wt.configPath({ home, env: {} }), path.join(home, '.claude', '.config.json'));
 });
 
-test('SessionStart: launchpad-advisory seeds silently', async () => {
-  plantRepo('fresh');
-  writeCfg(baseCfg());
+// The overlay's role table (lib/profile.sh reads <home>/.config/hov-stack/hosts.tsv
+// once the harness has cleared XDG_CONFIG_HOME and HOV_STACK_OVERLAY), keyed by
+// the name profile_role looks up.
+function declareRole(role) {
+  const host = execFileSync('bash', ['-c', 'hostname -s 2>/dev/null || hostname'],
+    { encoding: 'utf8' }).trim();
+  const dir = path.join(home, '.config', 'hov-stack');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'hosts.tsv'), `${host}\t${role}\n`);
+}
 
-  const res = await runHook('SessionStart/launchpad-advisory.js',
+function startSession() {
+  return runHook('SessionStart/launchpad-advisory.js',
     { cwd: home, hook_event_name: 'SessionStart', source: 'startup' },
     { env: { HOME: home, USERPROFILE: home } });
+}
+
+test('SessionStart: launchpad-advisory seeds a host with a declared role, silently', async () => {
+  plantRepo('fresh');
+  writeCfg(baseCfg());
+  declareRole('satellite');
+
+  const res = await startSession();
 
   assert.strictEqual(res.code, 0, res.stderr);
   assert.strictEqual(res.stdout, '');
   assert.strictEqual(readCfg().projects[home].hasTrustDialogAccepted, true);
   assert.strictEqual(readCfg().projects[sites('fresh')].hasTrustDialogAccepted, true);
+});
+
+test('SessionStart: launchpad-advisory leaves trust alone on a host with no declared role', async () => {
+  plantRepo('fresh');
+  writeCfg(baseCfg());
+  const before = fs.readFileSync(path.join(home, '.claude.json'), 'utf8');
+
+  const res = await startSession();
+
+  assert.strictEqual(res.code, 0, res.stderr);
+  assert.strictEqual(res.stdout, '');
+  assert.strictEqual(fs.readFileSync(path.join(home, '.claude.json'), 'utf8'), before);
 });
