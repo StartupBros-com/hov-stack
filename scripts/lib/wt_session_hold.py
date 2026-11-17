@@ -83,8 +83,12 @@ worktree gone, as a done job's would). Such a worktree is reported idle, never
 unheld, so a sweep releases it only if it is clean, cache-only and shipped.
 
 Nothing is reported idle when a job or session record, or a candidate transcript,
-could not be read (hov-stack#660): its unread bytes may name the worktree inside
-the window. Each such file is reported on stderr and the hold stays. It never
+could not be read (hov-stack#660), or when the sessions, jobs or projects
+directory, or one under it, exists but could not be listed: unread bytes may name
+the worktree inside the window, and a failed listing is not an empty one. No job
+lapses unless every session record was read, since its running session may be
+among the unread (hov-stack#695). Each such path is reported on stderr and the
+hold stays. It never
 makes a hold where none exists: a worktree nothing readable names stays unheld,
 as before, and takes the sweep's normal path, which commits, bundles or pushes
 its work before any removal; holding every worktree on one bad file would stop
@@ -110,7 +114,6 @@ working keeps writing its transcript.
 """
 
 import argparse
-import glob
 import json
 import os
 import re
@@ -207,6 +210,35 @@ def _record(path: str, quiet: bool, bad: list):
             print(f"wt_session_hold: skipped unreadable {path}: not a JSON object", file=sys.stderr)
         bad.append(path)
     return None
+
+
+def _unlisted(path: str, err: OSError, bad: list) -> None:
+    print(f"wt_session_hold: could not list {path}: {err}", file=sys.stderr)
+    bad.append(path)
+
+
+def _entries(path: str, bad: list) -> list:
+    """The entries of directory `path`, sorted by name: none if it is missing or
+    not a directory. One that exists but cannot be listed is not an empty one
+    (hov-stack#695): it is noted on stderr, appended to `bad`, and yields none."""
+    try:
+        with os.scandir(path) as it:
+            return sorted(it, key=lambda e: e.name)
+    except (FileNotFoundError, NotADirectoryError):
+        return []
+    except OSError as err:
+        _unlisted(path, err, bad)
+        return []
+
+
+def _is_dir(e, bad: list, follow: bool = True) -> bool:
+    try:
+        return e.is_dir(follow_symlinks=follow)
+    except FileNotFoundError:
+        return False
+    except OSError as err:
+        _unlisted(e.path, err, bad)
+        return False
 
 
 def pid_running(pid, proc_start, procfs: str) -> bool:
@@ -414,49 +446,40 @@ def driven_paths(transcripts: dict, cache_file: str):
     return out, skipped
 
 
-def _jsonl_under(top: str, owner: str, out: list) -> None:
+def _jsonl(e, owner: str, out: list, bad: list) -> None:
+    try:
+        out.append((e.path, owner, e.stat().st_mtime))
+    except FileNotFoundError:
+        pass
+    except OSError as err:
+        _unlisted(e.path, err, bad)
+
+
+def _jsonl_under(top: str, owner: str, out: list, bad: list) -> None:
+    """Every `.jsonl` under `top`, symlinks not followed, as (path, owner, mtime)."""
     stack = [top]
     while stack:
-        try:
-            it = os.scandir(stack.pop())
-        except OSError:
-            continue
-        with it:
-            for e in it:
-                try:
-                    if e.is_dir(follow_symlinks=False):
-                        stack.append(e.path)
-                    elif e.name.endswith(".jsonl"):
-                        out.append((e.path, owner, e.stat().st_mtime))
-                except OSError:
-                    continue
+        for e in _entries(stack.pop(), bad):
+            if _is_dir(e, bad, follow=False):
+                stack.append(e.path)
+            elif e.name.endswith(".jsonl"):
+                _jsonl(e, owner, out, bad)
 
 
-def walk_transcripts(projects: str) -> list:
+def walk_transcripts(projects: str, bad: list) -> list:
     """(path, session id, mtime) for every transcript under projects/: a session's
     own `<slug>/<sid>.jsonl`, and every file under `<slug>/<sid>/subagents/` (agents
-    and workflow agents, owned by that session). One walk, one stat each."""
+    and workflow agents, owned by that session). One walk, one stat each. A
+    directory on the way that cannot be listed is appended to `bad`."""
     out = []
-    try:
-        slugs = list(os.scandir(projects))
-    except OSError:
-        return out
-    for s in slugs:
-        try:
-            if not s.is_dir(follow_symlinks=False):
-                continue
-            it = os.scandir(s.path)
-        except OSError:
+    for s in _entries(projects, bad):
+        if not _is_dir(s, bad, follow=False):
             continue
-        with it:
-            for e in it:
-                try:
-                    if e.is_dir(follow_symlinks=False):
-                        _jsonl_under(os.path.join(e.path, "subagents"), e.name, out)
-                    elif e.name.endswith(".jsonl"):
-                        out.append((e.path, e.name[:-6], e.stat().st_mtime))
-                except OSError:
-                    continue
+        for e in _entries(s.path, bad):
+            if _is_dir(e, bad, follow=False):
+                _jsonl_under(os.path.join(e.path, "subagents"), e.name, out, bad)
+            elif e.name.endswith(".jsonl"):
+                _jsonl(e, e.name[:-6], out, bad)
     return out
 
 
@@ -480,8 +503,10 @@ def check(wt: str, home: str, active_min: int, procfs: str, cache_dir: str = "",
 
     # Session records first: a job's liveness is read from them (hov-stack#403).
     live, live_ids = [], set()
-    for path in sorted(glob.glob(os.path.join(home, "sessions", "*.json"))):
-        stem = os.path.splitext(os.path.basename(path))[0]
+    for e in _entries(os.path.join(home, "sessions"), unreadable):
+        if e.name.startswith(".") or not e.name.endswith(".json"):
+            continue
+        path, stem = e.path, e.name[:-5]
         gone = stem.isdigit() and not pid_running(stem, None, procfs)
         d = _record(path, gone, unreadable)
         if d is None or not pid_running(d.get("pid"), d.get("procStart"), procfs):
@@ -490,10 +515,15 @@ def check(wt: str, home: str, active_min: int, procfs: str, cache_dir: str = "",
         sid = d.get("sessionId")
         if isinstance(sid, str) and sid:
             live_ids.add(sid)
+    # A job's session is called stopped only when every session record was read.
+    sessions_read = not unreadable
 
     lapsed_here = []  # (why, state.json mtime) of each lapsed job naming this worktree
     lapsed_ids, held_ids = set(), set()
-    for path in sorted(glob.glob(os.path.join(home, "jobs", "*", "state.json"))):
+    for e in _entries(os.path.join(home, "jobs"), unreadable):
+        if e.name.startswith(".") or not _is_dir(e, unreadable):
+            continue
+        path = os.path.join(e.path, "state.json")
         d = _record(path, False, unreadable)
         if d is None:
             continue
@@ -509,7 +539,7 @@ def check(wt: str, home: str, active_min: int, procfs: str, cache_dir: str = "",
             why = f'{label} is {state or "in an unknown state"}'
             ids = {v for v in (d.get("sessionId"), d.get("resumeSessionId"), transcript_owner(link) if link else None)
                    if isinstance(v, str) and v}
-            if window and not ids & live_ids:
+            if window and sessions_read and not ids & live_ids:
                 try:
                     mtime = os.stat(path).st_mtime
                 except OSError:
@@ -551,13 +581,11 @@ def check(wt: str, home: str, active_min: int, procfs: str, cache_dir: str = "",
     newest, newest_dir = 0.0, ""
     for wt_slug in slugs:
         project_dir = os.path.join(home, "projects", wt_slug)
-        for path in glob.glob(os.path.join(glob.escape(project_dir), "**", "*.jsonl"), recursive=True):
+        own = []
+        _jsonl_under(project_dir, "", own, unreadable)
+        for path, _, mtime in own:
             rel = os.path.relpath(path, project_dir).split(os.sep)
             if exclude and (rel[0][:-6] if len(rel) == 1 else rel[0]) == exclude:
-                continue
-            try:
-                mtime = os.stat(path).st_mtime
-            except OSError:
                 continue
             if mtime > newest:
                 newest, newest_dir = mtime, project_dir
@@ -572,7 +600,7 @@ def check(wt: str, home: str, active_min: int, procfs: str, cache_dir: str = "",
     # worktree there keeps it in use even if it is neither. The window is never
     # shorter than active_min.
     by_owner, recent, fresh = {}, [], {}
-    for path, owner, mtime in walk_transcripts(os.path.join(home, "projects")):
+    for path, owner, mtime in walk_transcripts(os.path.join(home, "projects"), unreadable):
         if exclude and owner == exclude:
             continue
         by_owner.setdefault(owner, []).append(path)

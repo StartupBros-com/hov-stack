@@ -374,6 +374,67 @@ chmod 644 "$TQ"
 out=$(hold3 --idle-hours 24 -- "$Q/cw" 2>/dev/null); rc=$?
 chk "unreadable transcript: readable again, idle again (exit 3)" 3 "$rc"
 
+# --- 8. a directory that cannot be listed is not an empty one (hov-stack#695) --------
+# A missing directory reads as empty; one that exists but cannot be listed may hold
+# the record that names the worktree, so nothing is idle while it stays unlisted.
+mkdir -p "$H3/projects/-launch/sq/tool-results"   # a session dir with no subagents/
+printf '{}\n' >"$H3/jobs/pins.json"                # a plain file beside the job dirs
+out=$(hold3 --idle-hours 24 -- "$Q/cw" 2>"$TMP/err3"); rc=$?
+chk "unlisted: a missing subagents/ and a plain file in jobs/ leave it idle (exit 3)" 3 "$rc"
+hasnot "unlisted: neither is noted on stderr" "$(cat "$TMP/err3")" "could not list"
+mkdir -p "$H3/projects/-locked" "$H3/projects/$(slug "$Q/cw")/sz/tool-results"
+for d in "$H3/projects/-locked" "$H3/projects/-launch/sq/subagents" "$H3/projects/$(slug "$Q/cw")/sz/tool-results"; do
+  mkdir -p "$d"; chmod 000 "$d"
+  if [ -r "$d" ]; then
+    ok "unlisted $d: skipped (this user can list a mode-000 directory)"
+  else
+    out=$(hold3 --idle-hours 24 -- "$Q/cw" 2>"$TMP/err3"); rc=$?
+    chk "unlisted $d: held, not idle (exit 0)" 0 "$rc"
+    has "unlisted $d: says why" "$out" "not called idle"
+    has "unlisted $d: noted on stderr" "$(cat "$TMP/err3")" "could not list $d"
+  fi
+  chmod 755 "$d"
+done
+# jobs/ unlisted: the one record that holds it goes unread, and an unread record never
+# makes a hold, so it is unheld (the sweep's normal path, as before) and never idle.
+chmod 000 "$H3/jobs"
+if [ -r "$H3/jobs" ]; then
+  ok "unlisted jobs/: skipped (this user can list a mode-000 directory)"
+else
+  out=$(hold3 --idle-hours 24 -- "$Q/cw" 2>"$TMP/err3"); rc=$?
+  chk "unlisted jobs/: unheld, never idle (exit 1)" 1 "$rc"
+  has "unlisted jobs/: noted on stderr" "$(cat "$TMP/err3")" "could not list $H3/jobs"
+fi
+chmod 755 "$H3/jobs"
+out=$(hold3 --idle-hours 24 -- "$Q/cw" 2>/dev/null); rc=$?
+chk "unlisted: listable again, idle again (exit 3)" 3 "$rc"
+
+# A stale blocked job whose session is live is held by it. With sessions/ unlisted,
+# no session can be proven stopped, so the job must not lapse (it used to: a glob
+# read the failed listing as "no session runs" and the worktree went idle).
+H4="$TMP/h4"; C4="$TMP/hold-cache-4"; mkdir -p "$TMP/r4/dl" "$H4/jobs/jl" "$H4/sessions" "$H4/projects"
+printf '{"state":"blocked","name":"dl","sessionId":"sl","worktreePath":"%s"}\n' "$TMP/r4/dl" >"$H4/jobs/jl/state.json"
+touch -d '-30 hours' "$H4/jobs/jl/state.json"
+printf '{"pid":%s,"procStart":"%s","sessionId":"sl","cwd":"%s","name":"livel"}\n' "$$" "$(starttime $$)" "$TMP" >"$H4/sessions/livel.json"
+hold4(){ python3 "$HELPER" --claude-home "$H4" --cache-dir "$C4" --active-min 0 "$@"; }
+out=$(hold4 --idle-hours 24 -- "$TMP/r4/dl" 2>/dev/null); rc=$?
+chk "unlisted sessions/: the control is held by the live session (exit 0)" 0 "$rc"
+chk "unlisted sessions/: the control names the job" 'job jl "dl" is blocked' "$out"
+rm "$H4/sessions/livel.json"
+out=$(hold4 --idle-hours 24 -- "$TMP/r4/dl" 2>/dev/null); rc=$?
+chk "unlisted sessions/: with the session gone the job lapses (exit 3)" 3 "$rc"
+printf '{"pid":%s,"procStart":"%s","sessionId":"sl","cwd":"%s","name":"livel"}\n' "$$" "$(starttime $$)" "$TMP" >"$H4/sessions/livel.json"
+chmod 000 "$H4/sessions"
+if [ -r "$H4/sessions" ]; then
+  ok "unlisted sessions/: skipped (this user can list a mode-000 directory)"
+else
+  out=$(hold4 --idle-hours 24 -- "$TMP/r4/dl" 2>"$TMP/err4"); rc=$?
+  chk "unlisted sessions/: the stale job still holds (exit 0)" 0 "$rc"
+  chk "unlisted sessions/: and is not called stopped" 'job jl "dl" is blocked' "$out"
+  has "unlisted sessions/: noted on stderr" "$(cat "$TMP/err4")" "could not list $H4/sessions"
+fi
+chmod 755 "$H4/sessions"
+
 echo
 echo "wt-sweep-idle-release: $pass passed, $fail failed"
 [ "$fail" = 0 ]
