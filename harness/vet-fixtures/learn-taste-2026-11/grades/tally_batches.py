@@ -1,18 +1,21 @@
-"""Tally the claude-reflect batch (r31-r36): both full judges, the K7-only judge, the key.
+"""Tally a later grading batch: both full judges, the K7-only judge, the key.
 
-usage: python3 -I tally_reflect.py            (reads the files beside it)
+usage: python3 -I tally_batches.py reflect|added      (reads the files beside it)
 
-Packets r31-r36: claude-reflect r20-r22 and the drift re-grades of r07, r03 and r01,
-shuffled with seed 20261117 (key-reflect.json). Drift rows are reported, never re-scored.
+reflect: packets r31-r36, claude-reflect r20-r22 plus drift re-grades of r07, r03, r01
+         (seed 20261117). added: packets r51-r59, self-review and context-lens r40-r45
+         plus drift re-grades of r09, r04, r11 (seed 20261118). Drift rows are reported,
+         never re-scored.
 """
 import json, os, statistics, sys
 
 d = os.path.dirname(os.path.abspath(__file__))
 ld = lambda n: json.load(open(os.path.join(d, n), encoding="utf-8"))
-key = ld("key-reflect.json")
-A = {o["run"]: o for o in ld("reflect-judge-a.json")}
-B = {o["run"]: o for o in ld("reflect-judge-b.json")}
-K7 = {o["run"]: o for o in ld("reflect-k7-judge.json")}
+batch = sys.argv[1]
+key = ld("key-%s.json" % batch)
+A = {o["run"]: o for o in ld("%s-judge-a.json" % batch)}
+B = {o["run"]: o for o in ld("%s-judge-b.json" % batch)}
+K7 = {o["run"]: o for o in ld("%s-k7-judge.json" % batch)}
 assert set(A) == set(B) == set(K7) == set(key), (sorted(A), sorted(B), sorted(K7), sorted(key))
 
 rows = []
@@ -46,9 +49,11 @@ for x in rows:
         x["found_a"], x["found_b"], x["K3"], x["K6"], x["K7"], x["invented"], x["inv_ids"],
         x["fabricated"][0], x["fabricated"][1], x["x2"], x["dest"], ",".join(x["split"]) or "-"))
 med = statistics.median
-cr = [x for x in rows if x["arm"].startswith("claude-reflect")]
+arms = sorted({x["arm"].rsplit(" ", 1)[0] for x in rows if "(drift)" not in x["arm"]})
 print()
-for f in ("a", "b", "a_k7judge", "b_k7judge", "no_k7_a", "no_k7_b", "found_a", "found_b"):
-    print("claude-reflect median %-10s %g  (%s)" % (f, med([x[f] for x in cr]), ",".join(str(x[f]) for x in cr)))
-print("claude-reflect median invented A/B %g/%g" % (med([x["invented"][0] for x in cr]), med([x["invented"][1] for x in cr])))
-print("claude-reflect median fabricated A/B %g/%g" % (med([x["fabricated"][0] for x in cr]), med([x["fabricated"][1] for x in cr])))
+for arm in arms:
+    cr = [x for x in rows if x["arm"].rsplit(" ", 1)[0] == arm]
+    for f in ("a", "b", "a_k7judge", "b_k7judge", "no_k7_a", "no_k7_b", "found_a", "found_b"):
+        print("%s median %-10s %g  (%s)" % (arm, f, med([x[f] for x in cr]), ",".join(str(x[f]) for x in cr)))
+    print("%s median invented A/B %g/%g" % (arm, med([x["invented"][0] for x in cr]), med([x["invented"][1] for x in cr])))
+    print("%s median fabricated A/B %g/%g" % (arm, med([x["fabricated"][0] for x in cr]), med([x["fabricated"][1] for x in cr])))

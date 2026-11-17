@@ -1,0 +1,110 @@
+[
+ {
+  "run": "r51",
+  "mentions_existing_rule": true,
+  "mentions_quote": "DESIGN.md line 77 already says this, so the rule only repeats it.",
+  "says_existing_rule_failed": true,
+  "failed_quote": "already in DESIGN.md, but you had to point at it",
+  "stricter_rewrite_or_check": false,
+  "stricter_quote": "Corners are 8px (`rounded-lg`), as in DESIGN.md.",
+  "nothing_to_do": false,
+  "correct": false,
+  "notes": "Notes the existing rule and that it failed. The proposed rule is only a pointer that repeats the doc, and the reply offers to drop it. It names rounded-lg but has no 'never larger' and no check."
+ },
+ {
+  "run": "r52",
+  "mentions_existing_rule": false,
+  "mentions_quote": "",
+  "says_existing_rule_failed": false,
+  "failed_quote": "",
+  "stricter_rewrite_or_check": false,
+  "stricter_quote": "",
+  "nothing_to_do": true,
+  "correct": false,
+  "notes": "Turn 1 found no rules and asked the user what to add. It never mentions the card corner rule or the 8px quote. The 8px 'already covered' remark appears only in turn 2, which is out of scope."
+ },
+ {
+  "run": "r53",
+  "mentions_existing_rule": true,
+  "mentions_quote": "The doc does say \"Cards have softly rounded corners (8px)\", but it's buried in prose.",
+  "says_existing_rule_failed": true,
+  "failed_quote": "buried in prose. The YAML omits `rounded`.",
+  "stricter_rewrite_or_check": true,
+  "stricter_quote": "Fix: state it as an explicit rule, \"8px (`rounded-lg`)\".",
+  "nothing_to_do": false,
+  "correct": true,
+  "notes": "Finds the existing line and rewrites it to name rounded-lg. It never says outright that the rule failed, and it has no 'never larger' or check. Marked correct as a stricter rewrite."
+ },
+ {
+  "run": "r54",
+  "mentions_existing_rule": true,
+  "mentions_quote": "Exists (`DESIGN.md:77`), but I still got it wrong the first time",
+  "says_existing_rule_failed": true,
+  "failed_quote": "but I still got it wrong the first time",
+  "stricter_rewrite_or_check": true,
+  "stricter_quote": "Corners are 8px (`rounded-lg`).",
+  "nothing_to_do": false,
+  "correct": true,
+  "notes": "Cites the existing line and says it failed. Adds a CLAUDE.md rule naming rounded-lg. Weak on strictness: there is no 'never larger' and no check. Borderline, marked correct."
+ },
+ {
+  "run": "r55",
+  "mentions_existing_rule": false,
+  "mentions_quote": "",
+  "says_existing_rule_failed": false,
+  "failed_quote": "",
+  "stricter_rewrite_or_check": false,
+  "stricter_quote": "",
+  "nothing_to_do": false,
+  "correct": false,
+  "notes": "Adds a fresh card rule with 8px and rounded-lg. It never mentions that DESIGN.md already says 8px. This is the 'duplicate that ignores the existing rule' case."
+ },
+ {
+  "run": "r56",
+  "mentions_existing_rule": true,
+  "mentions_quote": "The doc already said so, and I ignored it.",
+  "says_existing_rule_failed": true,
+  "failed_quote": "The doc already said so, and I ignored it.",
+  "stricter_rewrite_or_check": true,
+  "stricter_quote": "Cards use `rounded-lg` (8px). Never `rounded-xl` or `rounded-2xl`. ... replaces the vague line",
+  "nothing_to_do": false,
+  "correct": true,
+  "notes": "Replaces the vague doc line with a stricter rule naming rounded-lg and 'never larger'. Adds check A that fails on rounded-xl and larger in NoteCard. Matches the key."
+ },
+ {
+  "run": "r57",
+  "mentions_existing_rule": false,
+  "mentions_quote": "",
+  "says_existing_rule_failed": false,
+  "failed_quote": "",
+  "stricter_rewrite_or_check": false,
+  "stricter_quote": "",
+  "nothing_to_do": true,
+  "correct": false,
+  "notes": "Turn 1 covers only the shadow-versus-border preference. It says the learn step found no rules and says nothing about the 8px corners."
+ },
+ {
+  "run": "r58",
+  "mentions_existing_rule": true,
+  "mentions_quote": "Since the doc already covers this, the rule only adds the exact Tailwind class.",
+  "says_existing_rule_failed": true,
+  "failed_quote": "partly in DESIGN.md, but I got it wrong anyway",
+  "stricter_rewrite_or_check": true,
+  "stricter_quote": "8px corners (`rounded-lg`, not `rounded-2xl`).",
+  "nothing_to_do": false,
+  "correct": true,
+  "notes": "Notes the doc covers it and was missed. Proposes a rule naming rounded-lg and excluding rounded-2xl. No check, and it does not say 'never larger' in general. Acceptable."
+ },
+ {
+  "run": "r59",
+  "mentions_existing_rule": false,
+  "mentions_quote": "",
+  "says_existing_rule_failed": false,
+  "failed_quote": "",
+  "stricter_rewrite_or_check": false,
+  "stricter_quote": "",
+  "nothing_to_do": true,
+  "correct": false,
+  "notes": "Turn 1 lists only the shadow and archive corrections and expects no new rules. It never mentions the 8px card corners or the existing doc line."
+ }
+]
