@@ -84,6 +84,14 @@ const NEUTRALIZE = [
   // fixture's repositories at the real ~/.claude.json.
   'CLAUDE_CONFIG_DIR',
   'CLAUDE_CODE_CUSTOM_OAUTH_URL',
+  // ...and runs only on a host with a declared role (lib/host-role.js runs
+  // lib/profile.sh, which reads these); a runner's own table or role must not
+  // decide whether a fixture home is seeded.
+  'DOTFILES',
+  'DOTFILES_ROLE',
+  'DOTFILES_ROLE_FILE',
+  'HOV_STACK_OVERLAY',
+  'XDG_CONFIG_HOME',
   // lib/permission-rule-overlap reads project settings from here; a runner
   // launched inside a Claude session would otherwise lend fixtures its rules.
   'CLAUDE_PROJECT_DIR',

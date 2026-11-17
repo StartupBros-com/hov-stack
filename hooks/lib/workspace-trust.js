@@ -58,8 +58,10 @@
  * behind a storage backend on a remote flag.
  *
  * Runs silently from launchpad-advisory.js at SessionStart (startup and
- * resume). A repository cloned while no session starts stays untrusted until
- * one does; `node workspace-trust.js --seed` closes that gap by hand.
+ * resume), on a host that declares a role in a hosts.tsv (lib/host-role.js);
+ * an install with no declared role is not seeded. A repository cloned while no
+ * session starts stays untrusted until one does; `node workspace-trust.js
+ * --seed` closes that gap by hand, and is how an install with no role opts in.
  *
  * Deletion condition: Claude Code gains a setting that trusts a directory
  * tree and persists home trust itself, or a dispatch into a directory marked
