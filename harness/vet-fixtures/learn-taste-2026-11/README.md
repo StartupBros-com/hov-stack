@@ -104,10 +104,16 @@ made from reading alone. Two probes then showed otherwise. Under `claude -p`,
 AskUserQuestion is not offered even when allowed, and the model asks in plain text
 instead. Its history scan needs no hook-captured queue. So the two-turn form fits it.
 
-- **Invocation.** Turn 1 is `/reflect --scan-history ` + the ask, with the plugin at
-  `b6c4232` copied into the run dir and loaded with `--plugin-dir`. `--scan-history` is its
-  documented cold-start form. With an empty queue, plain `/reflect` only asks whether to
-  scan. Its four hooks load too. They are local Python that writes only under HOME.
+- **Invocation.** Turn 1 is `/claude-reflect:reflect --scan-history ` + the ask, with the
+  plugin at `b6c4232` copied into the run dir and loaded with `--plugin-dir`.
+  `--scan-history` is its documented cold-start form. With an empty queue, plain `/reflect`
+  only asks whether to scan. Its four hooks load too. They are local Python that writes
+  only under HOME.
+- **Void smoke, r19.** The first smoke used `/reflect`. Under `--plugin-dir` the command
+  is namespaced. The transcript holds an `unknown_command_fallback` for `reflect`, so the
+  prompt went through as plain text. No plugin script ran and no nested call was made. r19
+  is void: it never ran the arm, and it is kept out of every count. The invocation above is
+  the only change. The smoke rule below applies to the next run, r20.
 - **Scope.** Its scan reads this project's sessions only (`project_paths.py`). X3, from
   billing-portal, is outside that scope by default. It is graded as for the scored arms.
 - **Measurement.** It classifies messages with nested `claude -p` calls. `run_arm.sh`
@@ -121,8 +127,9 @@ instead. Its history scan needs no hook-captured queue. So the two-turn form fit
   better than the best contender), claude-reflect's row gets its own phase-5 pricing as a
   proposal for the operator (it ships hooks, and enabling a plugin is the operator's call),
   and nothing lands for either.
-- **Smoke first.** One run comes before the others. It passes if both turns exit 0 with a
-  non-error result and the turn-1 reply proposes rules drawn from the planted session. If it
+- **Smoke first.** One run comes before the others. It passes if the command resolved
+  (`unresolved_commands` is empty in `tools.txt`, a check added after r19), both turns exit 0
+  with a non-error result, and the turn-1 reply proposes rules drawn from the planted session. If it
   passes and nothing in the setup changes after it, it counts as rep 1, and reps 2 and 3
   follow. If it fails, the arm is PARTIAL. The deciding run is then an interactive session
   with scripted answers on this fixture, and learn-taste is SKIP pending that run.

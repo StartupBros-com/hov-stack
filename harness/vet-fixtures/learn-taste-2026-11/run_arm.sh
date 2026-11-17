@@ -147,6 +147,7 @@ own.discard("")
 counts, skills, reads, outside, cmds, bash = {}, [], [], [], [], []
 turns = 0
 nested = 0
+unresolved = []
 for dirpath, _dirs, files in os.walk(root):
     for name in sorted(files):
         if not name.endswith(".jsonl"):
@@ -165,6 +166,10 @@ for dirpath, _dirs, files in os.walk(root):
                 except ValueError:
                     continue
                 content = (rec.get("message") or {}).get("content")
+                att = rec.get("attachment") if rec.get("type") == "attachment" else None
+                if isinstance(att, dict) and att.get("type") == "unknown_command_fallback":
+                    # The slash command did not resolve, so the prompt ran as plain text (r19).
+                    unresolved.append(str(att.get("commandName")))
                 if rec.get("type") == "user" and isinstance(content, str) and "<command-name>" in content:
                     cmds.append(content.split("<command-name>", 1)[1].split("</command-name>", 1)[0])
                 if rec.get("type") != "assistant" or not isinstance(content, list):
@@ -196,6 +201,7 @@ else:
     for name in sorted(counts):
         print("%s=%d" % (name, counts[name]))
     print("slash_commands=" + "|".join(cmds))
+    print("unresolved_commands=" + "|".join(unresolved))
     print("skills=" + "|".join(skills))
     print("reads=" + "|".join(reads))
     print("paths_outside_run=" + "|".join(outside))

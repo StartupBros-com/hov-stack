@@ -112,6 +112,9 @@ def check(run):
         # Opened every transcript by glob, so no id shows; the reply decides which it read.
         "reached_by_glob": glob_read(tools),
         "touched_projects_dir": ".claude/projects" in tools,
+        # A slash command that did not resolve ran as plain text: the arm never ran (r19).
+        "unresolved_command": any(line.startswith("unresolved_commands=") and line.strip() != "unresolved_commands="
+                                  for line in tools.splitlines()),
         "shared_tmp_writes": sorted(set(SHARED_TMP_WRITE.findall(tools))),
         "premature_repo": repo1,
         "premature_home": home1,

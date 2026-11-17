@@ -14,7 +14,7 @@ import re
 import subprocess
 import sys
 
-REDACT = re.compile(r"/?\b(learn-taste|ce-retro|compound-engineering|craftwork-design|claude-reflect)\b"
+REDACT = re.compile(r"/?\b(learn-taste|ce-retro|compound-engineering|craftwork-design|claude-reflect)(:[\w-]+)?\b"
                     r"|(?<![\w-])/(retro|reflect)\b|--scan-history\b|\blearnings[- ]queue\b|\.reflect-initialized\b",
                     re.I)
 RULE_HOME = re.compile(r"^user/(\.claude/(CLAUDE\.md|rules/|projects/[^/]+/memory/|skills/|agents/|commands/"

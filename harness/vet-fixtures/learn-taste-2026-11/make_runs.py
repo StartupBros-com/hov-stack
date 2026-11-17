@@ -36,8 +36,10 @@ ARMS = {
     # Added after the scored matrix (README, "Added arm: claude-reflect"). A plugin, not a
     # skill: --src points at the plugin root, copied into the run dir and loaded with
     # --plugin-dir. --scan-history is its documented cold-start form; with no hook-captured
-    # queue, plain /reflect only asks whether to scan.
-    "claude-reflect": {"prompt": "/reflect --scan-history " + ASK, "skill": None, "plugin": "claude-reflect"},
+    # queue, plain /reflect only asks whether to scan. A --plugin-dir command is namespaced:
+    # bare /reflect did not resolve (r19, README).
+    "claude-reflect": {"prompt": "/claude-reflect:reflect --scan-history " + ASK, "skill": None,
+                       "plugin": "claude-reflect"},
 }
 TURN2 = "write all"
 
