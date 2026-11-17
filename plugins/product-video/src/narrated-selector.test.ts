@@ -192,17 +192,22 @@ for (const type of ['click', 'move'] as const) {
     }
   });
 
-  test(`${type} preserves strict-object abort behavior`, () => {
-    for (const selector of ['reports', 'password']) {
-      expectIssues({ type, selector, unexpected: true }, [
-        {
-          code: 'unrecognized_keys',
-          keys: ['unexpected'],
-          path: ['steps', 0],
-          message: 'Unrecognized key: "unexpected"',
-        },
-      ]);
-    }
+  // Since zod 4.5.0 an unknown key no longer stops the step's own checks, so a
+  // prohibited selector is reported next to the unknown key instead of hidden by it.
+  test(`${type} reports unknown keys alongside selector issues`, () => {
+    const unknownKeyIssue = {
+      code: 'unrecognized_keys',
+      keys: ['unexpected'],
+      path: ['steps', 0],
+      message: 'Unrecognized key: "unexpected"',
+    };
+    expectIssues({ type, selector: 'reports', unexpected: true }, [
+      unknownKeyIssue,
+    ]);
+    expectIssues({ type, selector: 'password', unexpected: true }, [
+      unknownKeyIssue,
+      prohibitedIssue,
+    ]);
   });
 
   test(`${type} preserves ordered combined timing and selector issues`, () => {
