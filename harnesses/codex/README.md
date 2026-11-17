@@ -6,8 +6,8 @@ hooks. Codex launches matching hooks concurrently, so file order is
 organizational rather than an enforcement dependency.
 
 ```bash
-bash ~/dotfiles/harnesses/codex/sync.sh check
-bash ~/dotfiles/harnesses/codex/sync.sh "install"
+bash harnesses/codex/sync.sh check
+bash harnesses/codex/sync.sh install
 ```
 
 This separate Codex installer is not the root harness installer (`./setup`).

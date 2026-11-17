@@ -15,7 +15,7 @@
 #       pulled back into the repo by `push`.
 #
 # Usage:
-#   harnesses/fx/sync.sh "install"   Seed volatile parts where missing, refresh skill bridge.
+#   harnesses/fx/sync.sh install   Seed volatile parts where missing, refresh skill bridge.
 #                     Idempotent; never overwrites a live settings.json.
 #   sync.sh push      Refresh volatile copies into the repo (run before commit).
 #   sync.sh check     Exit 1 + DRIFT lines if live harness differs from repo
@@ -161,7 +161,7 @@ check() {
   # only the context_limits subtree (same approach as sync.sh's
   # settings.json check that excludes ad-daemon-owned keys).
   if [ ! -f "$LIVE_SETTINGS" ]; then
-    echo "DRIFT: ~/.fx/settings.json is missing (run harnesses/fx/sync.sh 'install')"
+    echo "DRIFT: ~/.fx/settings.json is missing (run harnesses/fx/sync.sh install)"
     drift=1
   elif [ -f "$REPO_SETTINGS" ] && command -v jq >/dev/null 2>&1; then
     if ! cmp -s \
@@ -182,5 +182,5 @@ case "$MODE" in
   install) install ;;
   push)    push ;;
   check)   check ;;
-  *) echo "usage: harnesses/fx/sync.sh 'install'|push|check" >&2; exit 2 ;;
+  *) echo "usage: harnesses/fx/sync.sh install|push|check" >&2; exit 2 ;;
 esac

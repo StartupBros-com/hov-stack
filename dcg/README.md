@@ -93,7 +93,7 @@ Install the verified binary and its atomic symlink:
 ```bash
 ./dcg/install.sh
 ./dcg/doctor.sh
-./dcg/sync.sh "install"
+./dcg/sync.sh install
 ```
 
 The resulting paths are (the version is the pin on first install, then whatever
