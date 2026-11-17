@@ -64,12 +64,9 @@ snapshot() {
     git -C "$REPO" status --porcelain --untracked-files=all
     echo "== repo diff"
     git -C "$REPO" diff
-    echo "== new or changed files under home (excluding transcripts and caches)"
-    find "$RUN/user" -type f -newer "$RUN/prompt.txt" \
-      -not -path "$RUN/user/.claude/projects/*" -not -path "$RUN/user/code/acme-notes/.git/*" \
-      -not -path "$RUN/user/.claude/statsig/*" -not -path "$RUN/user/.claude/shell-snapshots/*" \
-      -not -path "$RUN/user/.claude/todos/*" -not -path "$RUN/user/.claude/session-env/*" \
-      -not -name '.claude.json*' | sed "s|$RUN/||" | sort
+    echo "== new or changed files under home (transcripts and git internals left out; check_runs.py sorts rule writes from housekeeping)"
+    find "$RUN/user" -type f -newer "$RUN/prompt.txt" -not -name '*.jsonl' -not -path '*/.git/*' \
+      | sed "s|$RUN/||" | sort
   } > "$RUN/out/changes-$tag.txt" 2>&1
   for f in DESIGN.md design/DESIGN.md CLAUDE.md AGENTS.md; do
     if [ -f "$REPO/$f" ]; then
@@ -77,6 +74,10 @@ snapshot() {
       cp "$REPO/$f" "$RUN/out/files-$tag/$f"
     fi
   done
+  if [ -f "$RUN/user/.claude/CLAUDE.md" ]; then
+    mkdir -p "$RUN/out/files-$tag/global"
+    cp "$RUN/user/.claude/CLAUDE.md" "$RUN/out/files-$tag/global/CLAUDE.md"
+  fi
 }
 
 turn() {

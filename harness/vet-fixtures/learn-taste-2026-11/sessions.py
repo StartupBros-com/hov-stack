@@ -151,14 +151,64 @@ Position: any corner works, as long as it is the same across the app."""
 BUTTON_FULL_OLD = 'className={`w-full rounded-md bg-brand px-4 py-2 text-sm font-medium text-white sm:w-auto ${className}`}'
 BUTTON_FULL_NEW = 'className={`w-auto rounded-md bg-brand px-4 py-2 text-sm font-medium text-white ${className}`}'
 
+BUILD_OK = """
+> acme-notes@0.4.0 build
+> tsc -b && vite build
+
+vite v5.4.10 building for production...
+transforming...
+✓ %d modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                   0.46 kB │ gzip:  0.30 kB
+dist/assets/index-DiwrgTda.css    %s kB │ gzip:  2.62 kB
+dist/assets/index-C2Fz5b1q.js   146.12 kB │ gzip: 47.21 kB
+✓ built in 1.%02ds"""
+
+
+def dev_debug():
+    """A long, plausible `vite --debug` startup log: realistic tool-output bulk, no signal."""
+    deps = ["react", "react-dom", "react-dom/client", "react/jsx-runtime", "react/jsx-dev-runtime", "scheduler"]
+    lines = ["", "> acme-notes@0.4.0 dev", "> vite --debug", ""]
+    t = 0.0
+    for i in range(1, 41):
+        t += 3.17 + (i % 7) * 0.91
+        lines.append("  vite:config bundled config file loaded in %.2fms" % t if i == 1 else
+                     "  vite:resolve %.2fms /src/%s -> /src/%s" % (0.4 + i % 5 * 0.13, "main.tsx" if i % 3 else "App.tsx",
+                                                                    "main.tsx" if i % 3 else "App.tsx"))
+    lines.append("  vite:deps scanning for dependencies...")
+    for d in deps:
+        lines.append("  vite:deps crawling dependency %s" % d)
+    lines.append("  vite:deps Crawling dependencies using entries: \n  /index.html")
+    lines.append("  vite:deps Scan completed in 412.88ms: \n  " + "\n  ".join(deps))
+    lines.append("  vite:deps creating new cache in node_modules/.vite/deps")
+    for i, d in enumerate(deps):
+        lines.append("  vite:deps pre-bundling %s (%d/%d)" % (d, i + 1, len(deps)))
+    lines.append("  vite:deps Dependencies bundled in 8613.42ms")
+    for i in range(1, 61):
+        lines.append("  vite:transform %.2fms /src/%s" % (1.1 + i % 9 * 0.37, ["main.tsx", "App.tsx", "index.css", "pages/Archive.tsx",
+                                                                          "pages/Dashboard.tsx", "components/NoteCard.tsx"][i % 6]))
+    lines += ["", "  VITE v5.4.10  ready in 9214 ms", "", "  ➜  Local:   http://localhost:5173/", "  ➜  Network: use --host to expose"]
+    return "\n".join(lines)
+
+
 ACME = [
     ("user", "Build a card for each note in the list: title, a two-line excerpt, and when it was last edited. Tailwind, and match the existing stuff."),
+    ("say", "I'll start by reading the project instructions and the design system so the cards match."),
+    ("read", "CLAUDE.md"),
+    ("read", "design/DESIGN.md"),
+    ("glob", "src/**/*.{ts,tsx,css}"),
+    ("read", "tailwind.config.js"),
+    ("read", "src/index.css"),
+    ("read", "src/pages/Archive.tsx"),
     ("say", "Got it. I'll put the card list on the Archive page, next to the existing archive copy."),
     ("user", "No, I meant the dashboard list, not the archive page."),
     ("write", "src/components/NoteCard.tsx", NOTE_CARD_V1, "Understood, the dashboard. Here's the card component:"),
     ("write", "src/pages/Dashboard.tsx", DASHBOARD_V1, None),
+    ("read", "src/App.tsx"),
     ("edit", "src/App.tsx", 'import { Archive } from "./pages/Archive";', 'import { Archive } from "./pages/Archive";\nimport { Dashboard } from "./pages/Dashboard";'),
     ("edit", "src/App.tsx", '      {page === "archive" && <Archive />}', '      {page === "dashboard" && <Dashboard />}\n      {page === "archive" && <Archive />}'),
+    ("bash", "pnpm build", BUILD_OK % (34, "9.48", 42), "Build to check the new components compile"),
     ("say", "Done. The cards render on the dashboard in a two-column grid that drops to one column on phones."),
     ("user", "No, use a soft shadow on the card, not a border. Borders make it look like a form field."),
     ("edit", "src/components/NoteCard.tsx", "rounded-2xl border border-gray-200 bg-surface p-4", "rounded-2xl bg-surface p-4 shadow-raised"),
@@ -176,7 +226,11 @@ ACME = [
     ("user", "Now a sort dropdown for the list: newest, oldest, title."),
     ("write", "src/components/Dropdown.tsx", DROPDOWN_V1, None),
     ("say", "The dropdown is in `src/components/Dropdown.tsx`. It scales in from its top-right corner."),
+    ("user", "Unrelated: the dev server takes forever to start. Can you see why?"),
+    ("bash", "pnpm dev --debug 2>&1 | head -150", None, "Start the dev server with debug logging"),
+    ("say", "Almost all of the 9 seconds is Vite's first-run dependency pre-bundle (`Dependencies bundled in 8613ms`), which it caches in `node_modules/.vite`. A second start skips it and should be under a second. Nothing to change unless the cache keeps getting cleared."),
     ("user", "The save button in the note editor doesn't actually save anything. Fix that."),
+    ("read", "src/components/NoteEditor.tsx"),
     ("edit", "src/components/NoteEditor.tsx", '<Button type="button">Save</Button>', '<Button type="submit">Save</Button>'),
     ("say", "It was `type=\"button\"`, so the form never submitted. It's `type=\"submit\"` now."),
     ("user_edit", "src/components/Dropdown.tsx", "transition duration-300", "transition duration-150"),
@@ -192,7 +246,9 @@ ACME = [
     ("edit", "src/pages/Settings.tsx", "text-3xl font-bold", "text-2xl font-bold"),
     ("say", "Now `text-2xl`."),
     ("user", "ok, that's good."),
+    ("bash", "pnpm build", BUILD_OK % (37, "9.71", 51), "Build after the settings page"),
     ("user", "Make the primary button pop more."),
+    ("read", "src/components/Button.tsx"),
     ("edit", "src/components/Button.tsx", "bg-brand px-4", "bg-gradient-to-r from-brand to-violet-500 px-4"),
     ("say", "Added a brand-to-violet gradient to the primary button."),
     ("user", "Undo that."),
@@ -208,7 +264,8 @@ ACME = [
     ("write", "src/components/HolidayBanner.tsx", BANNER_V1, None),
     ("edit", "src/pages/Dashboard.tsx", 'import { NoteCard } from "../components/NoteCard";', 'import { NoteCard } from "../components/NoteCard";\nimport { HolidayBanner } from "../components/HolidayBanner";'),
     ("edit", "src/pages/Dashboard.tsx", '      <div className="mt-6 grid', '      <HolidayBanner />\n      <div className="mt-6 grid'),
-    ("say", "The banner sits between the headline and the list."),
+    ("bash", "pnpm build && git status --short", None, "Build and list what changed"),
+    ("say", "The banner sits between the headline and the list. The build passes."),
     ("user", "thanks, that's it for today."),
     ("say", "Anytime. Everything is saved; nothing is committed yet."),
 ]
@@ -346,6 +403,35 @@ def replay(script, repo, session):
             url, prompt, page = step[1], step[2], step[3]
             session.tool("WebFetch", {"url": url, "prompt": prompt}, page,
                          {"bytes": len(page), "code": 200, "codeText": "OK", "result": page, "url": url})
+        elif kind == "read":
+            path = os.path.join(repo, step[1])
+            with open(path, encoding="utf-8") as fh:
+                text = fh.read()
+            lines = text.split("\n")
+            if lines and lines[-1] == "":
+                lines.pop()
+            numbered = "\n".join("%6d\t%s" % (i + 1, line) for i, line in enumerate(lines))
+            session.tool("Read", {"file_path": path}, numbered,
+                         {"type": "text", "file": {"filePath": path, "content": text, "numLines": len(lines),
+                                                   "startLine": 1, "totalLines": len(lines)}})
+        elif kind == "glob":
+            names = []
+            for dirpath, _dirs, files in os.walk(os.path.join(repo, "src")):
+                names += [os.path.join(dirpath, f) for f in files if f.endswith((".ts", ".tsx", ".css"))]
+            names.sort()
+            session.tool("Glob", {"pattern": step[1]}, "\n".join(names),
+                         {"filenames": names, "durationMs": 9, "numFiles": len(names), "truncated": False})
+        elif kind == "bash":
+            cmd, output, desc = step[1], step[2], step[3]
+            if output is None and cmd.startswith("pnpm dev"):
+                output = dev_debug()
+            elif output is None and "git status" in cmd:
+                status = subprocess.run(["git", "-C", repo, "status", "--short"], capture_output=True, text=True,
+                                        check=True, env={"PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+                                                         "GIT_CONFIG_NOSYSTEM": "1", "HOME": repo}).stdout
+                output = BUILD_OK % (39, "9.93", 38) + "\n" + status.rstrip("\n")
+            session.tool("Bash", {"command": cmd, "description": desc}, output,
+                         {"stdout": output, "stderr": "", "interrupted": False, "isImage": False})
         else:
             raise SystemExit("sessions: unknown step %r" % kind)
 
