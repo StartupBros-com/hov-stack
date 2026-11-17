@@ -406,8 +406,34 @@ else
   has "unlisted jobs/: noted on stderr" "$(cat "$TMP/err3")" "could not list $H3/jobs"
 fi
 chmod 755 "$H3/jobs"
+# With a hold that is not a job (a live session whose transcript named it 30 hours
+# ago), jobs/ unlisted must still stop the idle answer: a job there may drive it now.
+printf '{"pid":%s,"procStart":"%s","sessionId":"sv","cwd":"%s","name":"liveq"}\n' "$$" "$(starttime $$)" "$TMP" >"$H3/sessions/liveq.json"
+readrec "$TMP" "$Q/cw/base.txt" "$(ago '30 hours')" >"$H3/projects/-launch/sv.jsonl"; touch -d '-30 hours' "$H3/projects/-launch/sv.jsonl"
+out=$(hold3 --idle-hours 24 -- "$Q/cw" 2>/dev/null); rc=$?
+chk "unlisted jobs/, session hold: the control is idle (exit 3)" 3 "$rc"
+chmod 000 "$H3/jobs"
+if [ -r "$H3/jobs" ]; then
+  ok "unlisted jobs/, session hold: skipped (this user can list a mode-000 directory)"
+else
+  out=$(hold3 --idle-hours 24 -- "$Q/cw" 2>"$TMP/err3"); rc=$?
+  chk "unlisted jobs/, session hold: held, not idle (exit 0)" 0 "$rc"
+  has "unlisted jobs/, session hold: says why" "$out" "not called idle"
+fi
+chmod 755 "$H3/jobs"
+rm "$H3/sessions/liveq.json" "$H3/projects/-launch/sv.jsonl"
 out=$(hold3 --idle-hours 24 -- "$Q/cw" 2>/dev/null); rc=$?
 chk "unlisted: listable again, idle again (exit 3)" 3 "$rc"
+
+# The worktree's own project dir is walked through directory symlinks, as the **
+# glob it replaced was, and a symlink loop there is walked once, not noted.
+H6="$TMP/h6"; mkdir -p "$H6/projects/$(slug "$Q/cw")" "$TMP/linked"; : >"$TMP/linked/s6.jsonl"
+ln -s "$TMP/linked" "$H6/projects/$(slug "$Q/cw")/link"
+ln -s . "$H6/projects/$(slug "$Q/cw")/loop"
+out=$(python3 "$HELPER" --claude-home "$H6" --cache-dir "" --active-min 120 -- "$Q/cw" 2>"$TMP/err6"); rc=$?
+chk "own project dir: a transcript behind a directory symlink holds (exit 0)" 0 "$rc"
+has "own project dir: says why" "$out" "was written 0m ago"
+hasnot "own project dir: the symlink loop is not noted" "$(cat "$TMP/err6")" "could not list"
 
 # A stale blocked job whose session is live is held by it. With sessions/ unlisted,
 # no session can be proven stopped, so the job must not lapse (it used to: a glob
@@ -434,6 +460,33 @@ else
   has "unlisted sessions/: noted on stderr" "$(cat "$TMP/err4")" "could not list $H4/sessions"
 fi
 chmod 755 "$H4/sessions"
+
+# A session whose process status cannot be read is live, not stopped: its job must
+# not lapse (it used to: any error reading <procfs>/<pid>/stat read as "gone").
+H5="$TMP/h5"; C5="$TMP/hold-cache-5"; P5="$TMP/proc5"
+mkdir -p "$TMP/r5/dl" "$H5/jobs/jl" "$H5/sessions" "$H5/projects" "$P5/4242"
+printf '{"state":"blocked","name":"dl","sessionId":"sl","worktreePath":"%s"}\n' "$TMP/r5/dl" >"$H5/jobs/jl/state.json"
+touch -d '-30 hours' "$H5/jobs/jl/state.json"
+printf '{"pid":4242,"procStart":"777","sessionId":"sl","cwd":"%s","name":"livep"}\n' "$TMP" >"$H5/sessions/livep.json"
+STAT5='4242 (claude code) S 1 1 1 0 -1 0 0 0 0 0 0 0 0 0 20 0 1 0 777 0 0'   # field 22 = 777
+printf '%s\n' "$STAT5" >"$P5/4242/stat"
+hold5(){ python3 "$HELPER" --claude-home "$H5" --cache-dir "$C5" --active-min 0 --procfs "$P5" "$@"; }
+out=$(hold5 --idle-hours 24 -- "$TMP/r5/dl" 2>/dev/null); rc=$?
+chk "unread pid status: the control is held by the live session (exit 0)" 0 "$rc"
+chk "unread pid status: the control names the job" 'job jl "dl" is blocked' "$out"
+rm "$P5/4242/stat"
+out=$(hold5 --idle-hours 24 -- "$TMP/r5/dl" 2>/dev/null); rc=$?
+chk "unread pid status: with the process gone the job lapses (exit 3)" 3 "$rc"
+printf '%s\n' "$STAT5" >"$P5/4242/stat"; chmod 000 "$P5/4242/stat"
+if [ -r "$P5/4242/stat" ]; then
+  ok "unread pid status: skipped (this user can read a mode-000 file)"
+else
+  out=$(hold5 --idle-hours 24 -- "$TMP/r5/dl" 2>"$TMP/err5"); rc=$?
+  chk "unread pid status: the job still holds (exit 0)" 0 "$rc"
+  chk "unread pid status: and is not called stopped" 'job jl "dl" is blocked' "$out"
+  has "unread pid status: noted on stderr" "$(cat "$TMP/err5")" "could not read the status of pid 4242"
+fi
+chmod 644 "$P5/4242/stat"
 
 echo
 echo "wt-sweep-idle-release: $pass passed, $fail failed"

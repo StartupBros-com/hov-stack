@@ -87,8 +87,8 @@ could not be read (hov-stack#660), or when the sessions, jobs or projects
 directory, or one under it, exists but could not be listed: unread bytes may name
 the worktree inside the window, and a failed listing is not an empty one. No job
 lapses unless every session record was read, since its running session may be
-among the unread (hov-stack#695). Each such path is reported on stderr and the
-hold stays. It never
+among the unread, and a session whose process status cannot be read counts as
+live (hov-stack#695). Each such path is reported on stderr and the hold stays. It never
 makes a hold where none exists: a worktree nothing readable names stays unheld,
 as before, and takes the sweep's normal path, which commits, bundles or pushes
 its work before any removal; holding every worktree on one bad file would stop
@@ -241,12 +241,21 @@ def _is_dir(e, bad: list, follow: bool = True) -> bool:
         return False
 
 
-def pid_running(pid, proc_start, procfs: str) -> bool:
+def pid_running(pid, proc_start, procfs: str):
+    """True if process `pid` runs (and, given `proc_start`, is the one started then);
+    False if it does not; None if its status could not be read. A process whose
+    status is unknown is not called stopped (hov-stack#695)."""
     try:
-        with open(os.path.join(procfs, str(int(pid)), "stat"), encoding="utf-8") as f:
-            stat = f.read()
-    except (OSError, ValueError, TypeError):
+        path = os.path.join(procfs, str(int(pid)), "stat")
+    except (ValueError, TypeError):
         return False
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            stat = f.read()
+    except (FileNotFoundError, ProcessLookupError):
+        return False
+    except OSError:
+        return None
     if proc_start in (None, ""):
         return True
     # Field 22 (starttime). comm may contain spaces, so split after its ')'.
@@ -455,12 +464,23 @@ def _jsonl(e, owner: str, out: list, bad: list) -> None:
         _unlisted(e.path, err, bad)
 
 
-def _jsonl_under(top: str, owner: str, out: list, bad: list) -> None:
-    """Every `.jsonl` under `top`, symlinks not followed, as (path, owner, mtime)."""
-    stack = [top]
+def _jsonl_under(top: str, owner: str, out: list, bad: list, follow: bool = False) -> None:
+    """Every `.jsonl` under `top` as (path, owner, mtime). Directory symlinks are
+    followed only with `follow`, and then each directory is walked once."""
+    stack, seen = [top], set()
     while stack:
-        for e in _entries(stack.pop(), bad):
-            if _is_dir(e, bad, follow=False):
+        d = stack.pop()
+        if follow:
+            try:
+                st = os.stat(d)
+            except OSError:
+                pass  # _entries notes it if it exists and cannot be listed
+            else:
+                if (st.st_dev, st.st_ino) in seen:
+                    continue
+                seen.add((st.st_dev, st.st_ino))
+        for e in _entries(d, bad):
+            if _is_dir(e, bad, follow=follow):
                 stack.append(e.path)
             elif e.name.endswith(".jsonl"):
                 _jsonl(e, owner, out, bad)
@@ -507,9 +527,15 @@ def check(wt: str, home: str, active_min: int, procfs: str, cache_dir: str = "",
         if e.name.startswith(".") or not e.name.endswith(".json"):
             continue
         path, stem = e.path, e.name[:-5]
-        gone = stem.isdigit() and not pid_running(stem, None, procfs)
+        gone = stem.isdigit() and pid_running(stem, None, procfs) is False
         d = _record(path, gone, unreadable)
-        if d is None or not pid_running(d.get("pid"), d.get("procStart"), procfs):
+        if d is None:
+            continue
+        running = pid_running(d.get("pid"), d.get("procStart"), procfs)
+        if running is None:
+            print(f"wt_session_hold: could not read the status of pid {d.get('pid')} ({path}); counted as live",
+                  file=sys.stderr)
+        elif not running:
             continue
         live.append(d)
         sid = d.get("sessionId")
@@ -582,7 +608,7 @@ def check(wt: str, home: str, active_min: int, procfs: str, cache_dir: str = "",
     for wt_slug in slugs:
         project_dir = os.path.join(home, "projects", wt_slug)
         own = []
-        _jsonl_under(project_dir, "", own, unreadable)
+        _jsonl_under(project_dir, "", own, unreadable, follow=True)  # as the ** glob it replaced did
         for path, _, mtime in own:
             rel = os.path.relpath(path, project_dir).split(os.sep)
             if exclude and (rel[0][:-6] if len(rel) == 1 else rel[0]) == exclude:
