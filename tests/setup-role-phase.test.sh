@@ -575,7 +575,9 @@ for override in workstation satellite; do
     const file = process.env.HOME + "/.claude.json";
     fs.writeFileSync(file, "{}");
     if (require(root + "/hooks/lib/host-role").hostRole() !== null) process.exit(1);
-    require(root + "/hooks/SessionStart/launchpad-advisory").run("{}");
+    // cwd is the scratch HOME, not a repository: with no cwd the hook reads the
+    // process cwd, the checkout under test, and heals a detached CI checkout onto main.
+    require(root + "/hooks/SessionStart/launchpad-advisory").run(JSON.stringify({ cwd: process.env.HOME }));
     if (fs.readFileSync(file, "utf8") !== "{}") process.exit(1);
   ' "$REPO" || fail 'undeclared host seeded workspace trust'
   ok "$override override grants no role or privileged setup"
@@ -709,7 +711,8 @@ for role in workstation none; do
   select_home "$WORK/advisory-$role" "$role"
   rm -- "$CLAUDE_HOME/.hov-stack/settings-base.json"
   printf '{}\n' | tee "$HOME/.claude.json" >/dev/null
-  output=$(node -e 'process.stdout.write(String(require(process.argv[1] + "/hooks/SessionStart/launchpad-advisory").run("{}")))' "$REPO")
+  # cwd is the scratch HOME, as above: the hook must never see the checkout under test.
+  output=$(node -e 'process.stdout.write(String(require(process.argv[1] + "/hooks/SessionStart/launchpad-advisory").run(JSON.stringify({ cwd: process.env.HOME }))))' "$REPO")
   if [ "$role" = none ]; then
     contains 'setup --adopt'
     [ -f "$CLAUDE_HOME/.hov-stack/adopt-notice" ] || fail 'no-role advisory wrote no stamp'

@@ -31,9 +31,11 @@
 # A reused -o DIR serves nothing stale: the runner removes its own earlier files
 # for the suites about to run, stamps every result with this run's token, and
 # counts a suite with no result from this run, or a launcher (xargs) that did
-# not exit 0, as a failure. Positional arguments select suites by the path
-# --list prints; a name that is not a discovered suite exits 2. Exit 0 all
-# green, 1 any failure, 2 a stale skip entry or a usage error.
+# not exit 0, as a failure. So is a run during which the checkout under test moved
+# to another commit or branch: the suites after the move tested another tree.
+# Positional arguments select suites by the path --list prints; a name that is not
+# a discovered suite exits 2. Exit 0 all green, 1 any failure, 2 a stale skip entry
+# or a usage error.
 #
 # On a machine whose PATH carries tools installed under the real HOME (mise
 # shims), a suite that re-derives PATH from HOME sees the scratch HOME without
@@ -298,6 +300,20 @@ while IFS=$'\t' read -r kind path; do
   esac
 done <<<"$manifest"
 
+# checkout_state: the commit and branch the checkout under test points at. A suite that
+# moves it (a SessionStart hook run against the real checkout healed a detached CI
+# checkout onto main, 2026-11-17) leaves every suite after it testing another tree, so
+# a change between the start and the end of the run fails the run. Outside a git
+# repository it prints the same "none" both times.
+checkout_state() {
+  local head branch
+  if ! git -C "$ROOT" rev-parse --git-dir >/dev/null 2>&1; then echo none; return; fi
+  head=$(git -C "$ROOT" rev-parse -q --verify HEAD) || head=unborn
+  branch=$(git -C "$ROOT" symbolic-ref -q --short HEAD) || branch=detached
+  printf '%s %s\n' "$head" "$branch"
+}
+checkout_before=$(checkout_state)
+
 t_start=$(date +%s)
 echo "run-claude-tests: $label, $skipped skipped, running the rest $jobs at a time; logs in $logdir"
 xargs -d '\n' -P "$jobs" -n 1 bash "$SELF" --one <"$runlist"
@@ -357,8 +373,14 @@ fi
 
 printf 'claude-tests: %s; %s ran: %s ok, %s failed, %s expected failures; %s skipped; %s stale skip entries; %ss wall\n' \
   "$label" "$ran" "$ok" "$failed" "$xfail" "$skipped" "$stale" "$(( $(date +%s) - t_start ))"
+checkout_after=$(checkout_state)
+moved=0
+if [ "$checkout_after" != "$checkout_before" ]; then
+  moved=1
+  echo "run-claude-tests: the checkout under test moved during the run ($checkout_before -> $checkout_after): a suite switched $ROOT, so the suites after it tested another tree; not green" >&2
+fi
 if [ "$stale" -gt 0 ]; then exit 2; fi
-if [ "$failed" -gt 0 ]; then exit 1; fi
+if [ "$failed" -gt 0 ] || [ "$moved" = 1 ]; then exit 1; fi
 if [ "$launch_rc" != 0 ]; then
   echo "run-claude-tests: every collected suite passed, but the launcher exited $launch_rc; not green" >&2
   exit 1
