@@ -15,8 +15,11 @@
 #   directory is dated a day back and ACTIVE_MIN is 120, and the plan is checked
 #   for the guard's own message, so the ACTIVE_MIN gate is never what holds it.
 #
-#   No-claim: green does not show that gitignored work is seen (`git status` does
-#   not list it, so neither does the guard), nor that the window is the right size.
+#   No-claim: green does not show that gitignored work, or an edit inside a nested
+#   checkout or submodule, is seen (`git status` does not list either, so neither
+#   does the guard), nor that the window is the right size. Case 12's plan/apply
+#   parity runs with wt-done stubbed out; a branch wt-done reconciles is counted
+#   shipped in a plan and re-counted on apply, which this suite does not cover.
 #
 #   Hermetic: bare origin + repo + worktrees under mktemp, an empty fake Claude home
 #   (no session names any worktree here), HOME under mktemp for the stale path's

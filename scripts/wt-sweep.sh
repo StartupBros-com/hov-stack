@@ -38,7 +38,12 @@
 #                                               so the session check above cannot see it. Newest
 #                                               work is the newest mtime among the paths git status
 #                                               lists, or HEAD's commit time when it is unshipped.
-#                                               Plan and apply agree.
+#                                               Gitignored files and edits inside a nested
+#                                               checkout or submodule are not seen; a file dated
+#                                               in the future holds until that date. The guard
+#                                               reads no DRY_RUN, but a branch wt-done reconciles
+#                                               counts as shipped in a plan and is re-counted on
+#                                               apply, so an apply can hold one the plan removed.
 #   before ANY removal ........................ copy ignored .claude/deliverables/ files to the
 #                                               main checkout; a detached HEAD on the preserve
 #                                               path is pinned at refs/heads/recovered/... first
@@ -438,7 +443,8 @@ except Exception:
     # that drives a worktree only through script files or another harness names it in
     # no tool call, and edits below the top directory leave its mtime alone, so every
     # check above can miss it. The stale path dates only HEAD, so a dirty worktree on
-    # an old branch needs this too. Nothing here reads DRY_RUN: plan and apply agree.
+    # an old branch needs this too. Nothing here reads DRY_RUN (but see the reconcile
+    # above: a plan counts a reconciled branch as shipped, an apply re-counts it).
     if [ "$FRESH_WORK_HOURS" -gt 0 ]; then
       if ! fresh=$(wt_newest_work "$wt" "$unp"); then
         echo "      => SKIP (cannot date local work: $fresh; nothing removed)"; n_skip=$((n_skip+1)); continue
