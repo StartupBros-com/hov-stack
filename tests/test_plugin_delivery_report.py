@@ -120,6 +120,19 @@ class TestDeliveryReport(unittest.TestCase):
         self.assertEqual(rc, 1, out)
         self.assertIn("\n  src/contracts.test.ts\n", out)
 
+    def test_a_non_ascii_file_name_is_still_compared(self):
+        # git quotes such a name in --name-only output unless told not to; a
+        # quoted name fails the plugin-prefix match and the card read as current.
+        self.repo.write("plugins/alpha/bin/café.sh", "a\n")
+        pin = self.repo.commit("feat(alpha): café")
+        self.repo.write("plugins/alpha/bin/café.sh", "b\n")
+        self.repo.commit("fix(alpha): café b")
+        self.repo.manifest([card("alpha", pin)])
+        self.repo.commit("chore: cards")
+        rc, out = run(self.repo)
+        self.assertEqual(rc, 1, out)
+        self.assertIn("\n  bin/café.sh\n", out)
+
     def test_a_change_in_another_plugin_does_not_move_this_card(self):
         self.repo.write("plugins/beta/lib/x.py", "x = 2\n")
         self.repo.write("plugins/alphabet/lib/y.py", "y = 1\n")
@@ -159,12 +172,15 @@ class TestDeliveryReport(unittest.TestCase):
         self.assertEqual(rc, 2, out)
         self.assertIn("not an ancestor of HEAD", warns(out)[0])
 
-    def test_a_card_that_pins_another_repository_is_unknown(self):
+    def test_when_every_card_pins_another_repository_one_line_names_both(self):
         self.repo.manifest([card("alpha", self.pin, url="https://github.com/acme/other.git")])
         self.repo.commit("chore: cards")
         rc, out = run(self.repo)
         self.assertEqual(rc, 2, out)
-        self.assertIn("pins another repository", warns(out)[0])
+        self.assertEqual(len(warns(out)), 1, out)
+        self.assertIn("UNKNOWN for every card", warns(out)[0])
+        self.assertIn("origin is github.com/acme/stack", warns(out)[0])
+        self.assertIn("they pin github.com/acme/other", warns(out)[0])
 
     def test_a_card_that_is_not_a_git_subdir_pin_is_unknown(self):
         self.repo.manifest([card("alpha", self.pin, source="github")])
@@ -220,13 +236,37 @@ class TestDeliveryReport(unittest.TestCase):
         self.assertEqual(rc, 2, out)
         self.assertIn("no-such-ref does not resolve", warns(out)[0])
 
-    def test_without_an_origin_remote_no_card_can_be_matched(self):
+    def test_without_an_origin_remote_every_card_is_one_unknown_line(self):
         self.repo.git("remote", "remove", "origin")
-        self.repo.manifest([card("alpha", self.pin)])
+        self.repo.manifest([card("alpha", self.pin), card("beta", self.pin)])
         self.repo.commit("chore: cards")
         rc, out = run(self.repo)
         self.assertEqual(rc, 2, out)
-        self.assertIn("pins another repository", warns(out)[0])
+        self.assertEqual(len(warns(out)), 1, out)
+        self.assertIn("UNKNOWN for every card", warns(out)[0])
+        self.assertIn("has no origin remote", warns(out)[0])
+
+    def test_a_fork_clone_is_one_unknown_line_not_one_per_card(self):
+        # A clone whose origin is a fork has the pinned history but compares it
+        # with the fork's main, so no card can be answered; one line says why.
+        self.repo.git("remote", "set-url", "origin", "https://github.com/someone/stack.git")
+        self.repo.manifest([card("alpha", self.pin), card("beta", self.pin)])
+        self.repo.commit("chore: cards")
+        rc, out = run(self.repo)
+        self.assertEqual(rc, 2, out)
+        self.assertEqual(len(warns(out)), 1, out)
+        self.assertIn("UNKNOWN for every card", warns(out)[0])
+        self.assertIn("github.com/someone/stack", warns(out)[0])
+
+    def test_one_card_from_another_repository_among_matching_cards_is_its_own_line(self):
+        self.repo.manifest([card("alpha", self.pin),
+                            card("beta", self.pin, url="https://github.com/acme/other.git")])
+        self.repo.commit("chore: cards")
+        rc, out = run(self.repo)
+        self.assertEqual(rc, 2, out)
+        self.assertEqual(len(warns(out)), 1, out)
+        self.assertIn("UNKNOWN for beta", warns(out)[0])
+        self.assertIn("1 current, 0 ahead of their pin, 1 could not be compared", out)
 
     def test_the_command_line_compares_the_named_repository(self):
         self.repo.write("plugins/alpha/bin/run.sh", "echo 2\n")

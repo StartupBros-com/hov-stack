@@ -15,6 +15,8 @@ any file except README.md, CHANGELOG.md and files under a tests, test, docs or
 fixtures directory. A card is UNKNOWN when it cannot be compared: it is not a
 git-subdir pin into this repository, its pin is not a full commit id, not in
 this checkout or not an ancestor of the ref, or its path is missing at the pin.
+When no card pins this checkout's origin (a fork's clone, or no origin at all),
+one line says so instead of one per card.
 
 Both AHEAD and UNKNOWN print a line starting with WARN, so harness-weekly's
 `grep -c '^WARN'` counts them. It reports and never fails a merge: some
@@ -94,11 +96,13 @@ def compare_card(repo: Path, ref: str, here: str | None, card) -> tuple[str, lis
         return "unknown", [f"the pin {sha[:8]} is not an ancestor of {ref}, so there is no forward diff to read"]
     if git(repo, "cat-file", "-e", f"{sha}:{path}").returncode != 0:
         return "unknown", [f"{path} does not exist at the pin {sha[:8]}"]
-    diff = git(repo, "diff", "--no-renames", "--name-only", sha, ref, "--", f"{path}/")
+    # -z: without it git quotes a non-ASCII name, the quoted name fails the
+    # prefix match below, and a changed file reads as no change.
+    diff = git(repo, "diff", "--no-renames", "--name-only", "-z", sha, ref, "--", f"{path}/")
     if diff.returncode != 0:
         return "unknown", [f"git diff {sha[:8]} {ref} failed: {diff.stderr.strip()}"]
     prefix = path.rstrip("/") + "/"
-    files = sorted(f[len(prefix):] for f in diff.stdout.splitlines() if f.startswith(prefix))
+    files = sorted(f[len(prefix):] for f in diff.stdout.split("\0") if f.startswith(prefix))
     ahead = [f for f in files if shipped(f)]
     if not ahead:
         return "current", []
@@ -129,6 +133,17 @@ def report(repo: Path, ref: str, out=sys.stdout) -> int:
         return 2
     origin = git(repo, "remote", "get-url", "origin")
     here = repo_key(origin.stdout) if origin.returncode == 0 and origin.stdout.strip() else None
+    pinned = {repo_key(c["source"]["url"]) for c in cards
+              if isinstance(c, dict) and isinstance(c.get("source"), dict)
+              and isinstance(c["source"].get("url"), str)}
+    if here is None:
+        print("WARN plugin delivery: UNKNOWN for every card: this checkout has no origin remote, "
+              "so it cannot tell which cards pin it", file=out)
+        return 2
+    if pinned and here not in pinned:
+        print(f"WARN plugin delivery: UNKNOWN for every card: this checkout's origin is {here} "
+              f"and no card pins it (they pin {', '.join(sorted(pinned))})", file=out)
+        return 2
     print(f"plugin delivery: {len(cards)} cards against {ref} ({rev.stdout.strip()[:8]})", file=out)
     counts = {"current": 0, "ahead": 0, "unknown": 0}
     for i, card in enumerate(cards):
