@@ -267,6 +267,22 @@ else
   bad "NOTIFY_POWERSHELL_BIN was not honoured under a runner :: err=$(cat "$TMP/override.err" 2>/dev/null) launch=$(head -1 "$TMP/override.log" 2>/dev/null)"
 fi
 
+# 13. A toast that did not go out is reported (dotfiles#1999): notify.sh returns
+#     PowerShell's status with its stderr kept, and 127 when the binary is missing,
+#     so a caller that needs delivery can tell. Case 1's stub exits 0, so the
+#     status is passed through, not invented.
+cat > "$TMP/ps-fail" <<'STUB'
+#!/usr/bin/env bash
+echo "stub powershell: toast failed" >&2
+exit 3
+STUB
+chmod +x "$TMP/ps-fail"
+err=$( cd "$PLAIN" && NOTIFY_POWERSHELL_BIN="$TMP/ps-fail" bash "$SCRIPT" "x" none 2>&1 >/dev/null ); rc=$?
+[ "$rc" -eq 3 ] && ok || bad "a failed toast returned $rc, expected PowerShell's 3"
+grep -qF 'stub powershell: toast failed' <<<"$err" && ok || bad "a failed toast's stderr was swallowed :: $err"
+( cd "$PLAIN" && NOTIFY_POWERSHELL_BIN="$TMP/no-such-powershell" bash "$SCRIPT" "x" none >/dev/null 2>&1 ); rc=$?
+[ "$rc" -eq 127 ] && ok || bad "a missing PowerShell returned $rc, expected 127"
+
 if [ "$fail" -eq 0 ]; then
   echo "ok — notify.sh PowerShell quoting: $pass/$((pass + fail)) assertions passed"
 else

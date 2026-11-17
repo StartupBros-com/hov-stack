@@ -75,12 +75,11 @@ done
 #    run. Those are exactly what OnFailure= is for, so the exclusion would now
 #    suppress the alerts this PR exists to enable. Case 6 pins the new position.
 #
-#    disk-watermark REMAINS here, deliberately. It has no break class to
-#    separate: the script only ever exits 0 or 1, so making a breach exit 0
-#    would leave it exiting 0 on every ordinary path and give OnFailure= nothing
-#    to fire on but an interpreter-level abort. Converting it means first
-#    introducing an error exit code, which is a change of its own and not a
-#    side effect of this one.
+#    disk-watermark REMAINS here, deliberately. It now has an error exit code
+#    (2: df failed, or the alert was not delivered; dotfiles#1999), but its
+#    exit 1 is still a finding, and OnFailure= cannot tell 1 from 2. Its alerts
+#    stay a desk toast by the operator's choice; a failed unit of either kind
+#    shows in the doctor's failed-unit sweep.
 wrong=""
 for b in disk-watermark; do
   grep -qE "^OnFailure=" "$SYSD/$b.service" 2>/dev/null && wrong="$wrong $b"

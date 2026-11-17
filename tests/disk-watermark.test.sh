@@ -35,21 +35,32 @@ cp "$REPO/scripts/disk-watermark.sh" "$TMP/scripts/disk-watermark.sh"
 chmod +x "$TMP/scripts/disk-watermark.sh"
 
 # Stub notify.sh -- same directory as the copied script, so $HERE/notify.sh
-# resolves here rather than to the real notifier. Logs one line per call.
+# resolves here rather than to the real notifier. Logs one line per call, and
+# exits DW_NOTIFY_RC (default 0) with a stderr line when that is not 0.
 NOTIFY_LOG="$TMP/notify-calls.log"
 cat > "$TMP/scripts/notify.sh" <<EOF
 #!/usr/bin/env bash
 echo "\$1|\${2:-default}" >> "$NOTIFY_LOG"
-exit 0
+rc=\${DW_NOTIFY_RC:-0}
+[ "\$rc" -eq 0 ] || echo "stub notify: toast failed" >&2
+exit "\$rc"
 EOF
 chmod +x "$TMP/scripts/notify.sh"
 
 # Stub df -- driven by DW_STUB_PCT_ROOT/DW_STUB_AVAIL_ROOT_KB and the _MNTC
 # equivalents, keyed off the fixture directory name in the queried path (the
 # real script always invokes `df -Pk "$fs"`, so the last arg is the path).
+# DW_STUB_DF_FAIL=root makes it fail for the root fixture; DW_STUB_DF_GARBAGE=root
+# makes it print a line with no numbers there; DW_STUB_DF_PARTIAL=root makes it
+# print a good line there and still exit 1.
 cat > "$TMP/bin/df" <<'EOF'
 #!/usr/bin/env bash
 path="${*: -1}"
+case "$path" in
+  */"${DW_STUB_DF_FAIL:-none}") echo "df: stub cannot stat $path" >&2; exit 1 ;;
+  */"${DW_STUB_DF_GARBAGE:-none}") echo "Filesystem 1024-blocks Used Available Capacity Mounted on"
+                                   echo "/dev/stub - - - -% $path"; exit 0 ;;
+esac
 case "$path" in
   */root) pct="$DW_STUB_PCT_ROOT"; avail="$DW_STUB_AVAIL_ROOT_KB" ;;
   */mntc) pct="$DW_STUB_PCT_MNTC"; avail="$DW_STUB_AVAIL_MNTC_KB" ;;
@@ -57,6 +68,7 @@ case "$path" in
 esac
 echo "Filesystem     1024-blocks      Used Available Capacity Mounted on"
 echo "/dev/stub          9999999    111111    ${avail}      ${pct}% ${path}"
+case "$path" in */"${DW_STUB_DF_PARTIAL:-none}") echo "df: stub partial read of $path" >&2; exit 1 ;; esac
 EOF
 chmod +x "$TMP/bin/df"
 
@@ -69,13 +81,13 @@ root() { export DW_STUB_PCT_ROOT="$1" DW_STUB_AVAIL_ROOT_KB; DW_STUB_AVAIL_ROOT_
 mntc() { export DW_STUB_PCT_MNTC="$1" DW_STUB_AVAIL_MNTC_KB; DW_STUB_AVAIL_MNTC_KB=$(gb "$2"); }
 fresh() { rm -rf "$TMP/state"; }
 
-# run_case <label> <exit> <flagged> <alerted> <notify calls>: runs the script in
-# this shell (no command substitution around the call), so ok/bad counts land;
-# leaves the output in $OUT for the caller's own checks.
+# run_case <label> <exit> <flagged> <alerted> <notify calls> [errors, default 0]:
+# runs the script in this shell (no command substitution around the call), so
+# ok/bad counts land; leaves the output in $OUT for the caller's own checks.
 OUT=""
 run_case() {
   local label="$1" expect_exit="$2" expect_flagged="$3" expect_alerted="$4" expect_calls="$5"
-  local status calls
+  local expect_errors="${6:-0}" status calls
   : > "$NOTIFY_LOG"
   OUT=$("$TMP/scripts/disk-watermark.sh" 2>&1); status=$?
   calls=$(wc -l < "$NOTIFY_LOG")
@@ -84,7 +96,15 @@ run_case() {
     || bad "$label: expected disk-watermark-flagged:$expect_flagged"$'\n'"$OUT"
   grep -qx "disk-watermark-alerted:$expect_alerted" <<<"$OUT" && ok \
     || bad "$label: expected disk-watermark-alerted:$expect_alerted"$'\n'"$OUT"
+  grep -qx "disk-watermark-errors:$expect_errors" <<<"$OUT" && ok \
+    || bad "$label: expected disk-watermark-errors:$expect_errors"$'\n'"$OUT"
   [ "$calls" -eq "$expect_calls" ] && ok || bad "$label: notifier fired $calls time(s), expected $expect_calls"
+}
+# record_avail: the free GB the root fixture's alert record holds, or "none".
+record_avail() {
+  local f="$TMP/state/fs${TMP//[^A-Za-z0-9._-]/_}_fs_root" a=none
+  [ -f "$f" ] && read -r _ _ a _ <"$f"
+  echo "$a"
 }
 has() { grep -qF -- "$2" <<<"$OUT" && ok || bad "$1: expected output to contain: $2"$'\n'"$OUT"; }
 
@@ -227,6 +247,52 @@ run_case mixed-both 1 2 1 1
 grep -qF "$TMP/fs/mntc: CRIT" "$NOTIFY_LOG" && ok || bad "mixed: notify should name the mntc fixture: $(cat "$NOTIFY_LOG")"
 grep -qF "$TMP/fs/root:" "$NOTIFY_LOG" && bad "mixed: notify should not name the suppressed root fixture: $(cat "$NOTIFY_LOG")" || ok
 has mixed "$TMP/fs/root — suppressed"
+
+# -- a failed df is not healthy: exit 2, df's own stderr kept (dotfiles#1999) ----
+echo "=== case: df-fail ===" >&2
+fresh; root 50 476; mntc 40 572
+DW_STUB_DF_FAIL=root run_case df-fail 2 0 0 0 1
+has df-fail "$TMP/fs/root — df failed (exit 1), cannot evaluate"
+has df-fail "df: stub cannot stat $TMP/fs/root"
+DW_STUB_DF_GARBAGE=root run_case df-garbage 2 0 0 0 1
+has df-garbage "$TMP/fs/root — unparseable df output, cannot evaluate"
+# A df that prints a line that parses but exits non-zero is still a failed check.
+DW_STUB_DF_PARTIAL=root run_case df-partial 2 0 0 0 1
+has df-partial "$TMP/fs/root — df failed (exit 1), cannot evaluate"
+# An error outranks an alert on the other filesystem, which still goes out.
+mntc 95 400
+DW_STUB_DF_FAIL=root run_case df-fail-and-alert 2 1 1 1 1
+DISK_WATERMARK_PATHS="$TMP/fs/absent" run_case none-checked 2 0 0 0 1
+has none-checked "no filesystem in '$TMP/fs/absent' could be checked"
+
+# -- an absent notifier: exit 2, nothing recorded, the next run alerts again -----
+echo "=== case: no-notifier ===" >&2
+fresh; root 87 400; mntc 40 572
+mv "$TMP/scripts/notify.sh" "$TMP/notify.sh.away"
+run_case no-notifier 2 1 1 0 1
+has no-notifier "no notifier at $TMP/scripts/notify.sh"
+has no-notifier "the alert was not delivered (notifier exit 127); no alert recorded"
+[ "$(record_avail)" = none ] && ok || bad "no-notifier: an undelivered alert left a record ($(record_avail))"
+mv "$TMP/notify.sh.away" "$TMP/scripts/notify.sh"
+run_case no-notifier-back 1 1 1 1
+has no-notifier-back "(new breach)"
+
+# -- a failed delivery: exit 2, its stderr kept, the baseline does not move ------
+echo "=== case: send-fail ===" >&2
+fresh; root 87 400; mntc 40 572
+DW_NOTIFY_RC=1 run_case send-fail 2 1 1 1 1
+has send-fail "stub notify: toast failed"
+has send-fail "the alert was not delivered (notifier exit 1)"
+[ "$(record_avail)" = none ] && ok || bad "send-fail: an undelivered alert left a record ($(record_avail))"
+run_case send-ok 1 1 1 1
+has send-ok "(new breach)"
+[ "$(record_avail)" = 400 ] && ok || bad "send-ok: a delivered alert should record 400GB, got $(record_avail)"
+run_case send-ok-repeat 0 1 0 0
+root 87 390
+DW_NOTIFY_RC=1 run_case send-fail-worse 2 1 1 1 1
+[ "$(record_avail)" = 400 ] && ok || bad "send-fail-worse: an undelivered alert moved the record to $(record_avail)"
+run_case send-ok-worse 1 1 1 1
+has send-ok-worse "free space fell from 400GB to 390GB since the last alert"
 
 if [ "$fail" -eq 0 ]; then
   echo "ok — disk-watermark: $pass/$((pass + fail)) assertions passed"

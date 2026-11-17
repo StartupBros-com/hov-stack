@@ -1,6 +1,6 @@
 # TEMPLATE: Disk-fill watermark check on / and /mnt/c that alerts on WARN, CRIT or a free-GB floor breach.
 # Replace before enabling:
-#   22: WARN_PCT tuned to the author's 1.7T /mnt/c drive; set it for your disks (script default 85).
+#   26: WARN_PCT tuned to the author's 1.7T /mnt/c drive; set it for your disks (script default 85).
 # See systemd/README.md.
 [Unit]
 Description=Disk-fill watermark check (/ and /mnt/c; alerts on WARN/CRIT/free-GB floor breach)
@@ -9,6 +9,10 @@ Description=Disk-fill watermark check (/ and /mnt/c; alerts on WARN/CRIT/free-GB
 # exit 1 means this run ALERTED on a new or worse breach, deliberately: the
 # failed unit is the visibility and the script already made one notify.sh call
 # (a breach no worse than at its last alert exits 0). A finding, not a fault.
+# exit 2 means the run could not do its job: df failed for a filesystem, or the
+# alert was not delivered (no record is kept, so the next run alerts again).
+# It shows as a failed unit too; ExecMainStatus tells the two apart. Alerts
+# stay a desk toast by the operator's choice, so neither exit pages.
 [Service]
 Type=oneshot
 TimeoutStartSec=15m

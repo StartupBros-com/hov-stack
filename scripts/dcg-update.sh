@@ -67,8 +67,8 @@ MIN_CONTRACT_CASES=${MIN_CONTRACT_CASES:-50}
 # Toast the operator. Added when dcg-auto-update.timer started running this file
 # unattended every night: a promote (or a REJECTED candidate) that only ever lands in
 # a log nobody opens is how you discover a version bump weeks later, mid-debugging.
-# Never fails the caller — notify.sh already always exits 0, and a missing toast must
-# not abort a promote that otherwise succeeded.
+# Never fails the caller — notify.sh returns non-zero when the toast did not go out,
+# and a missing toast must not abort a promote that otherwise succeeded.
 say() { [ -x "$HERE/notify.sh" ] && "$HERE/notify.sh" "$1" "${2:-default}" >/dev/null 2>&1; return 0; }
 
 have() { command -v "$1" >/dev/null 2>&1; }
