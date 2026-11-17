@@ -41,7 +41,6 @@ require a map.
 - `migration-apply.sh` and `migration-targets.sh` read the app map from
   `migration-targets.json`, overridden by `HOV_STACK_MIGRATION_TARGETS_FILE`.
   It may include `legacy_identities`; see `config/migration-targets.example.json`.
-- `with-gemini-sandbox` gets its BWS record id from `GEMINI_SANDBOX_BWS_ID`.
 - `stripe-api ACCOUNT` takes a name from the account map `stripe-accounts.json`,
   overridden by `STRIPE_API_ACCOUNTS_FILE`; see `config/stripe-accounts.example.json`.
   Account `acme` reads its key from `STRIPE_RK_ACME`. Without a map no account
