@@ -342,3 +342,76 @@ test('capture scale must divide the viewport into whole CSS pixels', () => {
     /at least 320 CSS pixels/i,
   );
 });
+
+test('narrated scenario reports unparseable URLs instead of throwing', () => {
+  for (const overrides of [
+    { baseUrl: 'not a url' },
+    { baseUrl: 'not a url', unexpected: true },
+  ]) {
+    const result = narratedScenarioSchema.safeParse({
+      ...validNarratedScenario,
+      ...overrides,
+    });
+    assert.equal(result.success, false);
+    if (!result.success)
+      assert.ok(
+        result.error.issues.some(
+          (issue) =>
+            issue.code === 'invalid_format' && issue.path[0] === 'baseUrl',
+        ),
+      );
+  }
+
+  for (const path of ['http://[bad', '//[bad']) {
+    const result = narratedScenarioSchema.safeParse({
+      ...validNarratedScenario,
+      routes: [
+        { id: 'home', path },
+        { id: 'reports', path: '/reports' },
+      ],
+    });
+    assert.equal(result.success, false);
+    if (!result.success)
+      assert.ok(
+        result.error.issues.some(
+          (issue) =>
+            issue.message === 'Route paths must resolve against the base URL' &&
+            issue.path.join('.') === 'routes.0.path',
+        ),
+      );
+  }
+});
+
+test('strict narrated scenarios reject an own __proto__ key', () => {
+  // JSON.parse makes "__proto__" an own key. Since zod 4.5.0 a strict object
+  // reports it instead of dropping it.
+  const input: unknown = JSON.parse(
+    `{"__proto__":{},${JSON.stringify(validNarratedScenario).slice(1)}`,
+  );
+  const result = narratedScenarioSchema.safeParse(input);
+  assert.equal(result.success, false);
+  if (!result.success)
+    assert.deepEqual(result.error.issues, [
+      {
+        code: 'unrecognized_keys',
+        keys: ['__proto__'],
+        path: [],
+        message: 'Unrecognized key: "__proto__"',
+      },
+    ]);
+});
+
+test('an oversized step list fails on its length before its steps are read', () => {
+  // Since zod 4.6.6 an array over its max reports one issue without parsing
+  // the elements, so a huge list cannot pile up one issue per element.
+  const result = narratedScenarioSchema.safeParse({
+    ...validNarratedScenario,
+    steps: Array.from({ length: 121 }, () => ({ type: 'not-a-step' })),
+  });
+  assert.equal(result.success, false);
+  if (!result.success)
+    assert.deepEqual(
+      result.error.issues.map((issue) => [issue.code, issue.path]),
+      [['too_big', ['steps']]],
+    );
+});

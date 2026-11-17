@@ -155,3 +155,46 @@ test('capture scenarios require at least one bounded step', () => {
     /at least one step/i,
   );
 });
+
+test('capture scenarios report unparseable URLs instead of throwing', () => {
+  for (const steps of [
+    [{ type: 'pause', durationMs: 500 }],
+    [{ type: 'goto', path: '/home' }],
+  ]) {
+    const result = captureScenarioSchema.safeParse({
+      baseUrl: 'not a url',
+      allowedHosts: ['prbot.ai'],
+      steps,
+    });
+    assert.equal(result.success, false);
+    if (!result.success)
+      assert.deepEqual(
+        result.error.issues.map((issue) => [issue.code, issue.path]),
+        [['invalid_format', ['baseUrl']]],
+      );
+  }
+
+  for (const path of ['http://[bad', '//[bad']) {
+    const result = captureScenarioSchema.safeParse({
+      baseUrl: 'https://prbot.ai/home',
+      allowedHosts: ['prbot.ai'],
+      steps: [{ type: 'goto', path }],
+    });
+    assert.equal(result.success, false);
+    if (!result.success)
+      assert.deepEqual(
+        result.error.issues.map(({ code, message, path }) => ({
+          code,
+          message,
+          path,
+        })),
+        [
+          {
+            code: 'custom',
+            message: 'Navigation paths must resolve against the base URL',
+            path: ['steps', 0, 'path'],
+          },
+        ],
+      );
+  }
+});
