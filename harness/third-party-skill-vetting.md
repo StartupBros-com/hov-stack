@@ -27,9 +27,11 @@ jsm skill, a plugin-marketplace skill, or one lifted from a public repo
 - Run it once in a sandboxed or throwaway environment before trusting it
   against real repos or credentials.
 - Clone a repository under vetting outside `~/SITES` (e.g.
-  `/tmp/vet-<name>`), and add no worktree of it under `~/SITES`. Every
-  repository directly under `~/SITES` is marked workspace-trusted at the next
-  session start (`hooks/lib/workspace-trust.js`), a linked worktree there
+  `/tmp/vet-<name>`), and add no worktree of it under `~/SITES`. On a host
+  that declares a role in a `hosts.tsv`, every repository directly under
+  `~/SITES` is marked workspace-trusted at the next session start
+  (`hooks/lib/workspace-trust.js`; its `--seed` does the same by hand on any
+  install), a linked worktree there
   trusting its main repository wherever that lives, so a Claude Code session
   started in it runs its project hooks, settings env and permission rules
   without a trust prompt. `~` itself is trusted the same way, and that trust

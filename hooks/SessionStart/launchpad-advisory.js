@@ -26,10 +26,12 @@
  * daemon spare dir, $HOME and their parents): Claude Code's root finder
  * accepts any `.git`, and one empty /tmp/.git fenced all of /tmp for resumed
  * background sessions for four weeks (dotfiles#1553). Its note comes first.
- * Then lib/workspace-trust.js silently marks the home directory and every
+ * Then, on a host that declares a role in a hosts.tsv (lib/host-role.js),
+ * lib/workspace-trust.js silently marks the home directory and every
  * repository under ~/SITES trusted in ~/.claude.json, so the Agents view can
  * dispatch into one that no interactive session has opened yet, and reopen a
- * retired session that was started in ~.
+ * retired session that was started in ~. An install with no declared role is
+ * not seeded.
  *
  * Fail-open: a broken advisory must never break session start. Helper execution
  * failures are reported without raw errors/stderr. Behind-counts use local
@@ -270,9 +272,14 @@ function run(rawInput) {
   // Required here, not at module top: a broken lib must cost only its own note.
   let strayNote = '';
   try { strayNote = require('../lib/stray-dot-git').sessionStartHeal(input); } catch { /* fail-open, same as below */ }
-  // Silent: marks ~ and new repositories under ~/SITES trusted so Agents-view
-  // dispatch and respawn into them is not refused (lib/workspace-trust.js).
-  try { require('../lib/workspace-trust').seed(); } catch { /* fail-open */ }
+  // Silent, and only on a host that declares a role in a hosts.tsv
+  // (lib/host-role.js): marks ~ and new repositories under ~/SITES trusted so
+  // Agents-view dispatch and respawn into them is not refused
+  // (lib/workspace-trust.js). An install with no declared role keeps Claude
+  // Code's own trust prompts; `workspace-trust.js --seed` opts in by hand.
+  try {
+    if (require('../lib/host-role').hostRole()) require('../lib/workspace-trust').seed();
+  } catch { /* fail-open */ }
   const note = launchAdvisory(input);
   return [strayNote, note, adoptNotice()].filter(Boolean).join('\n');
 }
