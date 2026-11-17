@@ -236,6 +236,29 @@ jq -e --arg main '${{ github.event.repository.default_branch }}' '
   "$TMP/release-pins-refresh.yml.json" >/dev/null || die 'pins refresh job split'
 pass 'pins refresh: downloaded programs run only in a read-only job with no secret; the land job applies rows to the default branch it checked out'
 
+# repin-land.sh reads a card's check runs with the job's own token, since the bot App has
+# no checks permission, and merges main into a failed card as the bot: a push made with
+# the job's token starts no workflow, so the card's checks would never run again.
+yq -o=json '.' .github/workflows/repin-reconcile.yml >"$TMP/repin-reconcile.yml.json"
+land_tokens() { # workflow-json job
+  jq -e --arg job "$2" --arg bot '${{ steps.bot.outputs.token }}' --arg own '${{ github.token }}' '
+    .jobs[$job].permissions.checks == "read"
+    and ([.jobs[$job].steps[] | select(.run == "./release/scripts/repin-land.sh")] | length == 1)
+    and all(.jobs[$job].steps[] | select(.run == "./release/scripts/repin-land.sh");
+      .env.GH_TOKEN == $bot and .env.CHECKS_TOKEN == $own)' "$1" >/dev/null
+}
+land_tokens "$TMP/repin-reconcile.yml.json" reconcile || die 'repin land step tokens'
+land_tokens "$TMP/release-pins-refresh.yml.json" land || die 'pins land step tokens'
+jq 'del(.jobs.reconcile.permissions.checks)' "$TMP/repin-reconcile.yml.json" >"$TMP/tokens-mutant.json"
+if land_tokens "$TMP/tokens-mutant.json" reconcile; then die 'accepted a repin land job without checks: read'; fi
+jq '(.jobs.land.steps[] | select(.run == "./release/scripts/repin-land.sh") | .env.CHECKS_TOKEN) = "${{ steps.bot.outputs.token }}"' \
+  "$TMP/release-pins-refresh.yml.json" >"$TMP/tokens-mutant.json"
+if land_tokens "$TMP/tokens-mutant.json" land; then die 'accepted a pins land step that reads check runs with the bot token'; fi
+jq '(.jobs.reconcile.steps[] | select(.run == "./release/scripts/repin-land.sh") | .env.GH_TOKEN) = "${{ github.token }}"' \
+  "$TMP/repin-reconcile.yml.json" >"$TMP/tokens-mutant.json"
+if land_tokens "$TMP/tokens-mutant.json" reconcile; then die 'accepted a repin land step that updates the card with the job token'; fi
+pass 'both land steps read check runs with the job token under checks: read and update a card as the bot'
+
 # The land job's branch key, run as the workflow writes it: the same rows on the same main
 # repeat the key (a rerun opens nothing), and rows that differ only in their bytes (a
 # publisher replaced a release's assets at the same version) change it, or the old branch
@@ -283,6 +306,24 @@ replaced="$(apply_key 'table v2 sha256 bbbb')"
 [ "${first%% *}" != "${replaced%% *}" ] || die "rows that differ only in bytes kept the key ${first%% *}"
 [ "${replaced#* }" = "$(sbgit hash-object "$INSTALLER")" ] || die 'the blob output is not the new table'
 pass 'pins branch key: the same rows on the same main repeat it; replaced bytes at the same version change it'
+
+# Main moves without touching the table, as any other merge does: the key must hold, so
+# the open PR the owner may be reviewing is kept. Keyed on main's sha, each day's run on
+# a moved main replaced it. A push that edits the table changes the key, so a PR cut from
+# the older table is superseded instead of conflicting.
+printf 'unrelated\n' >"$SB/NOTES.txt"
+sbgit add NOTES.txt
+sbgit -c user.name=t -c user.email=t@example.invalid commit -qm 'unrelated merge'
+moved="$(apply_key 'table v2 sha256 aaaa')"
+[ "$moved" = "$first" ] || die "a main push that left the table alone changed the key: $first / $moved"
+sbgit checkout -q -- "$INSTALLER"
+printf 'table v1 edited\n' >"$SB/$INSTALLER"
+sbgit add "$INSTALLER"
+sbgit -c user.name=t -c user.email=t@example.invalid commit -qm 'table edit'
+edited="$(apply_key 'table v2 sha256 aaaa')"
+[ "${edited%% *}" != "${first%% *}" ] || die "a main push that edited the table kept the key ${first%% *}"
+[ "${edited#* }" = "${first#* }" ] || die 'the same rows wrote a different table'
+pass 'pins branch key: a main push that leaves the table alone keeps it; one that edits the table changes it'
 
 # A script a workflow runs as ./release/scripts/X needs its exec bit in git, or the step
 # fails with "Permission denied" on the first scheduled run.

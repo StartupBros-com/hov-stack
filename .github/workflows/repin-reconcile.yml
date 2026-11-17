@@ -38,10 +38,13 @@ name: Repin reconcile
 # PR to open by hand.
 
 on:
-  # Every push to main. A merged repin publishes its draft at once, and a push that
-  # leaves an open card BEHIND gets a fresh card at once: main's sha is part of the
-  # card's key, so this run opens a new card and repin-land.sh closes the stale one.
-  # A run with no drift opens nothing and takes under a minute.
+  # Every push to main. A merged repin publishes its draft at once. A push that leaves
+  # an open card behind main keeps that card: its key is the plan plus main's manifest,
+  # so this run finds it already open, and the merge queue lands it on top of the new
+  # main. If that card's required checks failed, repin-land.sh merges main into it so
+  # they run again with whatever main fixed. A push that changes the plan or main's manifest gets a fresh card, and
+  # repin-land.sh closes the stale one. A run with no drift opens nothing and takes
+  # under a minute.
   push:
     branches: [main]
   # A finished Release run: release.yml has just staged a plugin's draft (hov-stack#438).
@@ -84,6 +87,9 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
+      # repin-land.sh reads the card's check runs with this job's token; the bot App
+      # has no checks permission.
+      checks: read
     steps:
       - name: Check out main
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -138,13 +144,21 @@ jobs:
           if [ -n "$MIGRATE_PLUGIN" ]; then ./release/scripts/repin-migrate.sh "$MIGRATE_PLUGIN"; else ./release/scripts/repin-reconcile.sh; fi
           if [ -s "$PLAN_FILE" ]; then
             echo "drift=true" >> "$GITHUB_OUTPUT"
-            # Content-addressed branch name: the SAME drift on the SAME main always
-            # produces the SAME branch, so a second run finds the PR already open
-            # and opens nothing. That is what makes a frequent schedule safe. Main's
-            # sha is in the key because the required checks demand an up-to-date
-            # branch: once main moves, the old PR can never merge, so the next run
-            # opens a fresh one and repin-land.sh closes the old.
-            key="$( { cat "$PLAN_FILE"; git rev-parse HEAD; } | sha256sum | cut -c1-12)"
+            # Content-addressed branch name: the SAME drift on the SAME main manifest
+            # always produces the SAME branch, so a later run finds the PR already open
+            # and opens nothing. That is what makes a frequent schedule safe. The key is
+            # main's manifest blob, not main's sha: main's merge queue lands a card that
+            # is behind main, so a push that leaves the manifest alone keeps the open card
+            # and its finished checks. Keyed on main's sha, every push replaced the card
+            # and restarted its checks; on 2026-11-17 five of seven cards were replaced
+            # with an unchanged plan. A kept card whose required checks failed is not
+            # stuck on its old main: repin-land.sh merges main into it once main moves.
+            # A push that edits the manifest still changes the
+            # key, so a card cut from an older manifest is superseded, not left to conflict.
+            # The rebuilt manifest's own blob is in it too, as in the pins key: a reconciler
+            # change that rebuilds different bytes from the same plan and main manifest
+            # supersedes the card instead of failing repin-land.sh's blob proof every run.
+            key="$( { cat "$PLAN_FILE"; git rev-parse HEAD:.claude-plugin/marketplace.json; git hash-object .claude-plugin/marketplace.json; } | sha256sum | cut -c1-12)"
             echo "key=$key" >> "$GITHUB_OUTPUT"
             echo "blob=$(git hash-object .claude-plugin/marketplace.json)" >> "$GITHUB_OUTPUT"
           else
@@ -211,7 +225,7 @@ jobs:
               printf '\nThis PR migrates %s%s%s from a %surl%s entry to a %sgit-subdir%s entry pinned to its newest prefixed release in the shared repository (dispatched by hand; the reconciler never changes an entry'"'"'s shape).\n' \
                 "$tick" "$MIGRATE_PLUGIN" "$tick" "$tick" "$tick" "$tick" "$tick"
             fi
-            printf '\nRe-running the reconciler on this same drift and main is a no-op: the branch name is derived from both.\n'
+            printf '\nRe-running the reconciler on this same drift and main manifest is a no-op: the branch name is derived from both, so a push to main that leaves the manifest alone keeps this PR open.\n'
             printf '\nThe reconciler requests auto-merge on this PR and merges it once the required checks pass. A plugin listed as **draft** is published by the next reconcile run after the merge.\n'
           } > "$RUNNER_TEMP/pr-body.md"
 
@@ -235,6 +249,7 @@ jobs:
         if: steps.bot_identity.outputs.have_bot == 'true'
         env:
           GH_TOKEN: ${{ steps.bot.outputs.token }}
+          CHECKS_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           BOT_SLUG: ${{ steps.bot.outputs.app-slug }}
           DESIRED_BRANCH: ${{ steps.reconcile.outputs.drift == 'true' && format('repin/auto-{0}', steps.reconcile.outputs.key) || '' }}

@@ -106,6 +106,9 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
+      # repin-land.sh reads the pins PR's check runs with this job's token; the bot App
+      # has no checks permission.
+      checks: read
     steps:
       # The default branch, never a commit the refresh job names: that job runs downloaded
       # programs, so all it can hand over is rows, and apply checks those against this table.
@@ -130,16 +133,20 @@ jobs:
           fi
           if [ -s "$PLAN_FILE" ]; then
             echo "drift=true" >> "$GITHUB_OUTPUT"
-            # Content-addressed branch name: the same rows on the same main always
+            # Content-addressed branch name: the same rows on the same main table always
             # produce the same branch, so a second run finds the PR already open and
-            # opens nothing. Main's sha is in the key because the required checks demand
-            # an up-to-date branch: once main moves, the old PR can never merge, so the
-            # next run opens a fresh one and repin-land.sh closes the old. The new table's
-            # blob is in it too: a publisher that replaces a release's assets at the same
-            # version changes the rows but not the plan, and the old branch would then fail
-            # repin-land.sh's blob proof on every run instead of being superseded.
+            # opens nothing. The key holds main's table blob, not main's sha: main's merge
+            # queue lands a PR that is behind main, so a day's pushes that leave the table
+            # alone keep the open PR the owner may be reviewing instead of replacing it. If
+            # its required checks failed, repin-land.sh merges main into it once main
+            # moves, so a fix on main reaches it. A
+            # push that edits the table changes the key, so a PR cut from an older table
+            # is superseded and repin-land.sh closes it. The new table's blob is in it
+            # too: a publisher that replaces a release's assets at the same version changes
+            # the rows but not the plan, and the old branch would then fail repin-land.sh's
+            # blob proof on every run instead of being superseded.
             blob="$(git hash-object "$INSTALL_RELEASE")"
-            key="$( { cat "$PLAN_FILE"; git rev-parse HEAD; printf '%s\n' "$blob"; } | sha256sum | cut -c1-12)"
+            key="$( { cat "$PLAN_FILE"; git rev-parse "HEAD:$INSTALL_RELEASE"; printf '%s\n' "$blob"; } | sha256sum | cut -c1-12)"
             echo "key=$key" >> "$GITHUB_OUTPUT"
             echo "blob=$blob" >> "$GITHUB_OUTPUT"
           else
@@ -200,7 +207,7 @@ jobs:
               printf '| %s | %s | %s | %s |\n' "$tool" "$from" "$to" "$platforms"
             done < "$PLAN_FILE"
             printf '\nThis PR does not bump plugins/hov-stack/VERSION; checkout users get the table through ./setup --update.\n'
-            printf '\nRe-running the refresh with the same rows on the same main is a no-op: the branch name is derived from both.\n'
+            printf '\nRe-running the refresh with the same rows on the same main table is a no-op: the branch name is derived from both, so a push to main that leaves the table alone keeps this PR open.\n'
             if [ "$AUTO_MERGE" = true ]; then
               printf '\nAuto-merge is requested once the required checks pass (HOV_PINS_AUTO_MERGE is true).\n'
             else
@@ -229,6 +236,7 @@ jobs:
         if: steps.bot_identity.outputs.have_bot == 'true'
         env:
           GH_TOKEN: ${{ steps.bot.outputs.token }}
+          CHECKS_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           BOT_SLUG: ${{ steps.bot.outputs.app-slug }}
           DESIRED_BRANCH: ${{ steps.apply.outputs.drift == 'true' && format('pins/auto-{0}', steps.apply.outputs.key) || '' }}
