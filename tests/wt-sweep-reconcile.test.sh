@@ -154,6 +154,9 @@ done
 git -C "$TMP/stale/repo" update-ref refs/heads/main "$parent"
 git -C "$TMP/stale/repo" push -q origin main
 printf 'tracked work must survive\n' >"$TMP/stale/repo-wt/one.txt"
+# Two days old: an edit younger than FRESH_WORK_HOURS (24) is held before the stale
+# path (hov-stack#721, wt-sweep-fresh-work.test.sh).
+touch -d '-2 days' "$TMP/stale/repo-wt/one.txt"
 objects_before=$(git -C "$TMP/stale/repo" count-objects -v)
 refs_before=$(git -C "$TMP/stale/repo" show-ref)
 index_path=$(git -C "$TMP/stale/repo-wt" rev-parse --git-path index)
