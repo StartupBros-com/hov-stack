@@ -63,5 +63,12 @@ printf 'two\n' >file; commit
 commit_on_branch "$first" HEAD || die 'ancestor refused'
 if commit_on_branch HEAD "$first"; then die 'descendant accepted'; fi
 pass 'commit_on_branch uses ancestry'
+release_semver_gt 0.10.0 0.9.0 || die '0.10.0 not newer than 0.9.0'
+release_semver_gt 1.0.0 0.99.99 || die '1.0.0 not newer than 0.99.99'
+release_semver_gt 0.3.5 0.3.4 || die '0.3.5 not newer than 0.3.4'
+release_semver_gt 0.08.0 0.7.0 || die 'a leading zero read as octal'
+if release_semver_gt 0.3.4 0.3.4; then die 'equal versions read as newer'; fi
+if release_semver_gt 0.9.9 0.10.0; then die '0.9.9 read as newer than 0.10.0'; fi
+pass 'release_semver_gt compares numerically, field by field'
 
 printf '%s plugin-tag checks passed\n' "$PASS"

@@ -6,12 +6,32 @@
 # two earlier releases announced branch-name shorthand to customers. This check makes that
 # failure loud at release time instead of silent in front of customers.
 #
-# Usage: check-release-notes.sh <notes-file>     (or pipe the body on stdin with "-")
-# Conventions in docs/release/plugin-release-recipe.md, section "Release notes".
+# Usage: check-release-notes.sh <notes-file|-> [--members-version <v>] [--carry <notes-file>]...
+#   "-" reads the body on stdin.
+#   --members-version  the version the marketplace lists, which is what members have; a
+#                      "Changes since vX" line naming a newer X fails.
+#   --carry            notes of an earlier version that has not reached members; each of
+#                      its Highlights bullets must appear in these Highlights (#702).
+# plugin-ci.sh passes both on a bump. Conventions in docs/release/plugin-release-recipe.md,
+# section "Release notes".
 set -euo pipefail
+# shellcheck source=release/scripts/plugin-tag.sh
+source "$(dirname "${BASH_SOURCE[0]}")/plugin-tag.sh"
 
+usage() { echo "usage: check-release-notes.sh <notes-file|-> [--members-version <v>] [--carry <notes-file>]..." >&2; exit 2; }
 src="${1:-}"
-[ -n "$src" ] || { echo "usage: check-release-notes.sh <notes-file|->" >&2; exit 2; }
+[ -n "$src" ] || usage
+shift
+members=''; carry=()
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --members-version)
+      if [ "$#" -lt 2 ] || ! is_release_semver "$2"; then usage; fi
+      members="$2"; shift 2 ;;
+    --carry) [ "$#" -ge 2 ] || usage; carry+=("$2"); shift 2 ;;
+    *) usage ;;
+  esac
+done
 if [ "$src" = "-" ]; then notes="$(cat)"; else
   [ -f "$src" ] || { echo "::error::no such release notes file: $src" >&2; exit 2; }
   notes="$(cat "$src")"
@@ -139,6 +159,40 @@ elif re.search(r"[`*_~>|#\[\]{}()]", t):
 $highlights
 EOF
   [ "$n" -gt 3 ] && printf '  ! %s\n' "note: $n bullets; only the first 3 reach the announcement feed" >&2
+fi
+
+# Each Highlights bullet of a body, with its marker and trailing space removed.
+bullets_of() {
+  printf '%s\n' "$1" | sed -n '/^##[[:space:]]*Highlights/,/^## /p' | grep -E '^[*•-][[:space:]]' \
+    | sed -E 's/^[*•-][[:space:]]+//; s/[[:space:]]+$//' || true
+}
+
+# A version that has not reached members when this one goes out may never be announced:
+# the publisher publishes only the newest draft a card names, and the Tool Drop card reads
+# only that release's Highlights. So v0.3.4's new skill went unannounced behind v0.3.5,
+# whose notes said nothing changed (#702). Carry its bullets word for word, or, when one
+# no longer holds, edit it in that version's notes file in the same change so they match.
+if [ "${#carry[@]}" -gt 0 ]; then
+  have="$(bullets_of "$notes")"
+  for older in "${carry[@]}"; do
+    if [ ! -f "$older" ]; then problem "no such notes file to carry: $older"; continue; fi
+    ver="$(basename "$older" .md)"
+    while IFS= read -r bullet; do
+      [ -n "$bullet" ] || continue
+      grep -Fxq -- "$bullet" <<<"$have" \
+        || problem "$ver has not reached members, and the card announces only this release; put its Highlights bullet in these Highlights word for word, or edit it in $older to match: ${bullet:0:80}"
+    done <<<"$(bullets_of "$(tr -d '\r' <"$older")")"
+  done
+fi
+
+# A "Changes since vX" line describes the change from what members have, so X may not be
+# newer than the version the marketplace lists.
+if [ -n "$members" ]; then
+  while IFS= read -r line; do
+    if [[ "$line" =~ ^[Cc]hanges\ since\ v([0-9]+\.[0-9]+\.[0-9]+) ]] && release_semver_gt "${BASH_REMATCH[1]}" "$members"; then
+      problem "'Changes since v${BASH_REMATCH[1]}' names a version members do not have; the marketplace lists v$members, so write 'Changes since v$members'"
+    fi
+  done <<<"$notes"
 fi
 
 if [ "$fails" -gt 0 ]; then

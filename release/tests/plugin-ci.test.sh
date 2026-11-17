@@ -108,4 +108,39 @@ mkdir -p plugins/b/skills/other; printf 'fixture skill\n' >plugins/b/skills/othe
 reject 'missing plugins/b/skills/b/SKILL.md' bash "$SCRIPT" plugins/b
 pass 'only the skill pack is exempt from the self-named skill'
 
+# A bump while the previous version has not reached members (#702): the marketplace at
+# the base still lists 1.0.0 while VERSION says 1.1.0, so the 1.2.0 notes must carry
+# 1.1.0's Highlights. Notes older than the listed version (hov kept six drafts behind
+# its published release) are never demanded.
+git init -q -b main "$TMP/inflight"; cd "$TMP/inflight"
+printf 'seed\n' >seed; commit
+mkdir -p .claude-plugin plugins/c/docs/release-notes
+printf '{"plugins":[{"name":"c","metadata":{"version":"1.0.0"}}]}\n' >.claude-plugin/marketplace.json
+plugin c 1.1.0
+printf '## Highlights\n- Customers can read the old changelog from the menu.\n' >plugins/c/docs/release-notes/v0.9.0.md
+printf '## Highlights\n- Customers can roll back an update with one command.\n' >plugins/c/docs/release-notes/v1.1.0.md
+commit; BASE_SHA="$(git rev-parse HEAD)"
+plugin c 1.2.0
+printf '## Highlights\n- Customers can pin an update to one version.\n\nChanges since v1.1.0:\n' >plugins/c/docs/release-notes/v1.2.0.md
+reject 'v1.1.0 has not reached members' bash "$SCRIPT" plugins/c
+grep -Fq "'Changes since v1.1.0' names a version members do not have" "$TMP/err" || { cat "$TMP/err"; die 'baseline line not checked through plugin-ci'; }
+grep -Fq 'the marketplace at' "$TMP/err" || { cat "$TMP/err"; die 'the pin and base read are not named'; }
+pass 'a bump over a version members do not have yet must carry its Highlights'
+printf '## Highlights\n- Customers can pin an update to one version.\n- Customers can roll back an update with one command.\n\nChanges since v1.0.0:\n' >plugins/c/docs/release-notes/v1.2.0.md
+bash "$SCRIPT" plugins/c >"$TMP/out" 2>"$TMP/err" || { cat "$TMP/err"; die 'carried notes rejected'; }
+pass 'carried Highlights pass, and notes older than the listed version are not demanded'
+plugin c 1.1.0
+printf '{"plugins":[]}\n' >.claude-plugin/marketplace.json
+commit; BASE_SHA="$(git rev-parse HEAD)"
+plugin c 1.2.0
+printf '## Highlights\n- Customers can pin an update to one version.\n' >plugins/c/docs/release-notes/v1.2.0.md
+bash "$SCRIPT" plugins/c >"$TMP/out" 2>"$TMP/err" || { cat "$TMP/err"; die 'an unlisted plugin was asked to carry'; }
+pass 'a plugin the marketplace does not list yet carries nothing'
+plugin c 1.1.0
+printf 'not json\n' >.claude-plugin/marketplace.json
+commit; BASE_SHA="$(git rev-parse HEAD)"
+plugin c 1.2.0
+reject 'cannot read the version members have' bash "$SCRIPT" plugins/c
+pass 'an unreadable marketplace fails the bump instead of skipping the check'
+
 printf '%s plugin-ci checks passed\n' "$PASS"

@@ -19,6 +19,13 @@ tag_plugin_version() {
 
 is_release_semver() { [[ "$1" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; }
 
+# True when release semver $1 is newer than release semver $2.
+release_semver_gt() {
+  local a1 a2 a3 b1 b2 b3
+  IFS=. read -r a1 a2 a3 <<<"$1"; IFS=. read -r b1 b2 b3 <<<"$2"
+  (( 10#$a1 > 10#$b1 || (10#$a1 == 10#$b1 && (10#$a2 > 10#$b2 || (10#$a2 == 10#$b2 && 10#$a3 > 10#$b3))) ))
+}
+
 # The skill pack ships several skills as skills/<skill>/SKILL.md and none named
 # after itself; every other plugin's entry skill is skills/<name>/SKILL.md.
 is_skill_pack() { [ "$1" = hov-stack ]; }
