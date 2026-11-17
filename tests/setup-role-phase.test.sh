@@ -595,4 +595,104 @@ for extra in none extra; do
   quiet_managers
   ok 'removed verb refuses all arguments on stderr and names replacement commands'
 done
+
+# A host with a role whose settings.json sync.sh keeps no record of (#722). One plain ./setup
+# runs the owner steps and sync.sh's first merge, as sync.sh install did before #720, and
+# setup keeps no record of its own there; --sync and --check change nothing and name ./setup.
+fresh_home() {  # fresh_home <dir> <role>: select_home with no settings.json and no record
+  select_home "$1" "$2"
+  rm -- "$CLAUDE_HOME/settings.json" "$CLAUDE_HOME/.hov-stack/settings-base.json"
+}
+first_merge_row() {
+  [ "$(grep -c '^  settings ' <<<"$output")" = 1 ] || { printf '%s\n' "$output"; fail "$1: not exactly one settings row"; }
+  grep -Eq '^  settings +(ok|warning) +merged [1-9][0-9]* change' <<<"$output" || { printf '%s\n' "$output"; fail "$1: no first merge"; }
+}
+for role in workstation satellite; do
+  fresh_home "$WORK/$role-fresh" "$role"
+  printf 'wt-sweep DRY_RUN=1\nwt-sweep OnCalendar=daily\n' >> "$HOV_STACK_OVERLAY/hygiene-posture"
+  CLAUDE_SYNC_SKIP_HOOK_RECONCILE=0 run 0 setup
+  contains "this host has the $role role: sync.sh's merge owns settings.json, so setup keeps no record of this seed"
+  first_merge_row "$role fresh setup"
+  [ -f "$CLAUDE_HOME/.hov-stack/settings-base.json" ] || fail "$role fresh setup made no sync.sh record"
+  [ ! -e "$CLAUDE_HOME/.hov-stack/setup-settings-base.json" ] || fail "$role fresh setup kept setup's record"
+  quiet_managers
+  run 0 setup --enable-units
+  run 0 setup --root
+  assert_end_state "$role"
+  run 0 sync apply-settings --plan
+  contains 'settings: plan 0 change(s)'
+  rc=0; output=$(bash "$REPO/setup" --check 2>&1) || rc=$?
+  grep -Eq '^  settings +ok ' <<<"$output" || { printf '%s\n' "$output"; fail "$role fresh check settings row is not ok"; }
+  ok "$role fresh home: one setup makes the first merge and only sync.sh's record; enable + root reach the end state"
+done
+
+fresh_home "$WORK/satellite-fresh-no-proxy" satellite
+CCFLARE_URL_SATELLITE='' run 1 setup --no-dcg
+contains 'settings merge not run'
+[ ! -e "$CLAUDE_HOME/.hov-stack/settings-base.json" ] && [ ! -e "$CLAUDE_HOME/.hov-stack/setup-settings-base.json" ] || fail 'refused owner phase left a record'
+jq -e '.env.ANTHROPIC_BASE_URL == null' "$CLAUDE_HOME/settings.json" >/dev/null || fail 'refused owner phase changed the seed'
+run 0 setup --no-dcg
+first_merge_row 'satellite rerun with a proxy URL'
+jq -e --arg proxy "$CCFLARE_URL_SATELLITE" '.env.ANTHROPIC_BASE_URL == $proxy' "$CLAUDE_HOME/settings.json" >/dev/null || fail 'rerun did not merge the satellite proxy'
+[ -f "$CLAUDE_HOME/.hov-stack/settings-base.json" ] || fail 'rerun made no sync.sh record'
+ok 'satellite with no proxy URL keeps the seed and no record; a rerun with one makes the first merge'
+
+fresh_home "$WORK/declared-later" none
+run 0 setup --no-dcg
+[ -f "$CLAUDE_HOME/.hov-stack/setup-settings-base.json" ] && [ ! -e "$CLAUDE_HOME/.hov-stack/settings-base.json" ] || fail 'no-role fresh setup did not keep only its own record'
+jq '.env.HAND_EDIT = "kept"' "$CLAUDE_HOME/settings.json" | tee "$WORK/hand-edit.json" >/dev/null
+cp "$WORK/hand-edit.json" "$CLAUDE_HOME/settings.json"
+run 0 setup --no-dcg
+cp "$CLAUDE_HOME/settings.json" "$WORK/member.json"
+cp "$CLAUDE_HOME/.hov-stack/setup-settings-base.json" "$WORK/member-record.json"
+run 0 setup --no-dcg
+cmp "$WORK/member.json" "$CLAUDE_HOME/settings.json" || fail 'no-role setup changed settings.json on a second run'
+jq -e '.env.HAND_EDIT == "kept"' "$CLAUDE_HOME/settings.json" >/dev/null || fail 'member merge lost the hand edit'
+ok 'a host with no role keeps setup record; settings.json is stable across runs'
+printf '%s\tworkstation\n' "$(hostname -s)" | tee "$HOV_STACK_OVERLAY/hosts.tsv" >/dev/null
+printf '{"env":{"ROLE_OVERLAY_TEST":"merged"}}\n' | tee "$HOV_STACK_OVERLAY/settings.json" >/dev/null
+run 1 setup --sync --no-pull --no-dcg
+contains 'sync: blocked: hov-stack not updated: this host has the workstation role and sync.sh keeps no record'
+contains 'run ./setup once'
+cmp "$WORK/member.json" "$CLAUDE_HOME/settings.json" || fail 'sync changed settings.json on a role host with no sync.sh record'
+rc=0; output=$(bash "$REPO/setup" --check --no-dcg 2>&1) || rc=$?
+[ "$rc" = 1 ] || { printf '%s\n' "$output"; fail "check exited $rc, expected 1"; }
+grep -Eq '^  settings +behind +this host has the workstation role .*run ./setup' <<<"$output" || { printf '%s\n' "$output"; fail 'check did not name ./setup'; }
+[[ "$output" != *'which ./setup has a record of creating'* ]] || { printf '%s\n' "$output"; fail "check said setup's merge owns a role host's settings.json"; }
+run 1 setup --adopt
+contains 'this host has the workstation role, so sync.sh'
+cmp "$WORK/member.json" "$CLAUDE_HOME/settings.json" || fail 'check or adopt changed settings.json'
+quiet_managers
+ok 'role declared later: --sync, --check and --adopt change nothing and name ./setup'
+run 0 setup --no-dcg
+first_merge_row 'role declared later'
+jq -e '.env.HAND_EDIT == "kept" and .env.ANTHROPIC_BASE_URL == "http://127.0.0.1:8788" and .env.ROLE_OVERLAY_TEST == "merged"' "$CLAUDE_HOME/settings.json" >/dev/null || fail 'first merge lost the hand edit, the owner keys or the overlay'
+[ -f "$CLAUDE_HOME/.hov-stack/settings-base.json" ] || fail 'first merge made no sync.sh record'
+cmp "$WORK/member-record.json" "$CLAUDE_HOME/.hov-stack/setup-settings-base.json" || fail "first merge changed setup's record"
+run 0 sync apply-settings --plan
+contains 'settings: plan 0 change(s)'
+ok "role declared later: plain setup keeps the hand edit, adds the owner keys and leaves setup's record alone"
+
+select_home "$WORK/both-records" workstation
+printf '{"env":{"SETUP_RECORD":"untouched"}}\n' | tee "$CLAUDE_HOME/.hov-stack/setup-settings-base.json" "$WORK/both-seed.json" >/dev/null
+run 0 setup --no-dcg
+cmp "$WORK/both-seed.json" "$CLAUDE_HOME/.hov-stack/setup-settings-base.json" || fail "both records: setup's record changed"
+jq -e '.env.ANTHROPIC_BASE_URL == "http://127.0.0.1:8788"' "$CLAUDE_HOME/.hov-stack/settings-base.json" >/dev/null || fail "both records: sync.sh's record was not used"
+[[ "$output" != *'so setup keeps no record of this seed'* ]] || fail 'both records: setup seeded again'
+ok "both records: sync.sh's record is used and setup's is untouched"
+
+for role in workstation none; do
+  select_home "$WORK/advisory-$role" "$role"
+  rm -- "$CLAUDE_HOME/.hov-stack/settings-base.json"
+  printf '{}\n' | tee "$HOME/.claude.json" >/dev/null
+  output=$(node -e 'process.stdout.write(String(require(process.argv[1] + "/hooks/SessionStart/launchpad-advisory").run("{}")))' "$REPO")
+  if [ "$role" = none ]; then
+    contains 'setup --adopt'
+    [ -f "$CLAUDE_HOME/.hov-stack/adopt-notice" ] || fail 'no-role advisory wrote no stamp'
+  else
+    [[ "$output" != *'setup --adopt'* ]] || fail 'role host was told to adopt'
+    [ ! -e "$CLAUDE_HOME/.hov-stack/adopt-notice" ] || fail 'role host advisory wrote an adopt stamp'
+  fi
+done
+ok 'session-start adopt notice is shown on a host with no role, never on a role host'
 printf 'passed: %s; failed: 0\n' "$pass"

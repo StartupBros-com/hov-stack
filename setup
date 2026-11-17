@@ -55,7 +55,8 @@
 #                          satellite host. A settings.json with neither is never merged and the
 #                          checkout is never moved: the result says ./setup --adopt shows the
 #                          merge and ./setup --adopt --yes makes it once, after which hov-stack
-#                          keeps itself current.
+#                          keeps itself current. On a workstation or satellite host with no
+#                          sync.sh record, the result says to run ./setup once instead.
 #                        - fast-forwards the checkout the way --update does (the same checks;
 #                          it never stashes, resets or rebases), after confirming that the
 #                          merge into settings.json would run, and only then. HOV_UPDATE=notice
@@ -138,7 +139,10 @@
 #      model, statusLine, spinnerVerbs or feedbackSurveyState. It lists every change and
 #      copies the old file to ~/.hov-stack-backups/settings-apply-<timestamp>-*/ first.
 #      Delete the record and setup leaves that settings.json alone; where sync.sh keeps a
-#      record of its own (.hov-stack/settings-base.json), sync.sh's merge owns the file.
+#      record of its own (.hov-stack/settings-base.json), sync.sh's merge owns the file. On a
+#      host with a role in hosts.tsv, sync.sh's merge owns it from the start: setup keeps no
+#      record, and runs the owner steps and sync.sh's first merge, which adds the template's
+#      settings the file lacks, keeps every value it sets, and writes sync.sh's record.
 #      Any other settings.json is left untouched and the seed is written next to it as
 #      settings.hov-stack.json; ./setup --adopt (above) shows how setup would merge into
 #      it, and --adopt --yes does that and keeps the record. One exception to leaving it
@@ -1099,11 +1103,21 @@ overlay_row() {  # overlay_row check|run
 }
 
 # Merging into a settings.json setup created (#650). settings_mergeable: 0 when
-# $CFG/settings.json is a regular file setup has a record of creating (SEED_BASE) and sync.sh
-# keeps no record of its own there. Every other settings.json is left alone, as it always was.
+# $CFG/settings.json is a regular file setup has a record of creating (SEED_BASE), sync.sh
+# keeps no record of its own there, and the host declares no role. Every other settings.json is
+# left alone, as it always was. On a host with a role, sync.sh's merge owns the file (owner_first).
 settings_mergeable() {
   [ -f "$SEED_BASE" ] && [ ! -L "$SEED_BASE" ] && [ ! -e "$SYNC_BASE" ] && [ ! -L "$SYNC_BASE" ] \
-    && [ -f "$CFG/settings.json" ] && [ ! -L "$CFG/settings.json" ]
+    && [ -f "$CFG/settings.json" ] && [ ! -L "$CFG/settings.json" ] && ! host_role > /dev/null
+}
+# owner_first: 0, printing the role, on a host that declares a role in hosts.tsv and has a regular
+# settings.json that sync.sh keeps no record of (#722). sync.sh's merge owns that file. Its first
+# merge, the one with no record, adds the template's settings the file lacks and keeps every value
+# the file sets; ./setup makes it, as sync.sh install did before #720. A record setup kept there
+# from before the host had a role is not read.
+owner_first() {
+  [ -f "$CFG/settings.json" ] && [ ! -L "$CFG/settings.json" ] && [ ! -e "$SYNC_BASE" ] && [ ! -L "$SYNC_BASE" ] \
+    && host_role
 }
 # record_seed_base <seed file>: keep the seed setup just wrote as its record; 0 when kept.
 record_seed_base() {
@@ -1441,6 +1455,10 @@ adopt_settings() {
     adopt_why="sync.sh keeps its own record of it ($(_lf_display "$SYNC_BASE")), and sync.sh's merge owns it"
     return 1
   fi
+  if a_kind=$(host_role); then
+    adopt_why="this host has the $a_kind role, so sync.sh's merge owns it: ./setup makes that merge's first run, which adds the template's settings it lacks and keeps every value it sets"
+    return 1
+  fi
   if settings_mergeable; then
     echo "  ./setup already has a record of creating it ($(_lf_display "$SEED_BASE")) and merges the template's changes into it on every run; nothing to adopt"
     return 0
@@ -1672,8 +1690,9 @@ sync_fetch_stop() {
 sync_cleanup() { sync_fetch_stop; sync_unlock; adopt_done; }
 
 # How this host merges settings.json: a member's install through setup's own record, a host
-# sync.sh keeps a record for through sync.sh (when its role applies settings), else not at all.
-# Sets sync_route (member, owner or none) and, for none, sync_why.
+# sync.sh keeps a record for through sync.sh (when its role applies settings), a host with a role
+# and no sync.sh record through sync.sh's first merge, else not at all.
+# Sets sync_route (member, owner, owner_first or none) and, for owner_first and none, sync_why.
 sync_route_find() {
   local role=
   sync_route=none
@@ -1694,6 +1713,11 @@ sync_route_find() {
     else
       sync_why="sync.sh keeps its own record of $CFG/settings.json ($(_lf_display "$SYNC_BASE")), but it is not a regular file next to an executable sync.sh, so the merge cannot run"
     fi
+  elif role=$(owner_first); then
+    # A plain run makes the first merge (with the owner steps); --sync and --check report it,
+    # because they run without anyone typing them.
+    sync_route=owner_first
+    sync_why="this host has the $role role and sync.sh keeps no record of $CFG/settings.json yet: run ./setup once, which makes sync.sh's first merge (it adds the template's settings the file lacks and keeps every value it sets)"
   elif settings_mergeable; then
     sync_route=member
   else
@@ -1865,7 +1889,7 @@ sync_merge() {
           ;;
       esac
       merge_done ;;
-    owner)
+    owner|owner_first)
       out=$(CLAUDE_HOME="$CFG" bash "$HOV_STACK/sync.sh" apply-settings --quiet < /dev/null) || rc=$?
       status=$(printf '%s\n' "$out" | sed -n 's/^settings: //p' | tail -n 1)
       case $status in
@@ -1910,7 +1934,7 @@ sync_main() {
   esac
   # 2. Route.
   sync_route_find
-  if [ "$sync_route" = none ]; then
+  if [ "$sync_route" = none ] || [ "$sync_route" = owner_first ]; then
     sync_finish blocked "hov-stack not updated: $sync_why"
     return 1
   fi
@@ -2052,6 +2076,8 @@ if [ "$check" = 1 ]; then
   hooked=0
   if [ -e "$CFG/settings.json" ] && [ -n "$dcg_path" ]; then dcg_hooked "$CFG/settings.json" || hooked=$?; fi
   if [ ! -e "$CFG/settings.json" ]; then row settings missing "no settings.json: run ./setup to seed it"
+  elif check_role=$(owner_first); then
+    row settings behind "this host has the $check_role role and sync.sh keeps no record of $CFG/settings.json: run ./setup, which makes sync.sh's first merge (it adds the template's settings the file lacks and keeps every value it sets)"
   elif settings_mergeable; then
     # The merge a run would make, as a plan: nothing is written.
     settings_merge plan
@@ -2144,11 +2170,9 @@ else
   esac
 fi
 
-dcg_path=$(find_dcg)
-seed_target=$CFG/settings.json
-moved_seed=
-sync_route_find
-if [ "$sync_route" = owner ]; then
+# The owner steps (sync.sh role owner) and sync.sh's merge, with the one settings row for both.
+# sync_route is owner (sync.sh keeps a record) or owner_first (its first merge makes the record).
+owner_settings_run() {
   owner_rc=0
   # sync.sh reconciles the dcg hook onto ~/.local/bin/dcg and refuses when that target is
   # missing. setup accepts a run without it (--no-dcg, or a dcg elsewhere on PATH), so only
@@ -2180,6 +2204,14 @@ if [ "$sync_route" = owner ]; then
     merge_state=failed
     row settings failed "$role_text; settings merge not run"
   fi
+}
+
+dcg_path=$(find_dcg)
+seed_target=$CFG/settings.json
+moved_seed=
+sync_route_find
+if [ "$sync_route" = owner ] || [ "$sync_route" = owner_first ]; then
+  owner_settings_run
 elif settings_mergeable; then
   # A settings.json setup has a record of creating (#650): merge the template's changes into it.
   settings_merge run
@@ -2261,8 +2293,13 @@ else
     # A settings.json this run created from nothing gets setup's record (#650), so later runs
     # merge the template's changes into it. An existing one, and one sync.sh keeps a record of,
     # get none. The record is the seed itself, taken before Claude Code adds its plugin keys.
+    # On a host with a role, sync.sh's merge owns the file (#722): setup keeps no record, and
+    # this run goes on to the owner steps and sync.sh's first merge, which records it.
+    seed_owner=
     if [ "$seed_target" = "$CFG/settings.json" ] && [ -z "$moved_seed" ] && [ ! -e "$SYNC_BASE" ] && [ ! -L "$SYNC_BASE" ]; then
-      if record_seed_base "$seed_target"; then
+      if seed_owner=$(host_role); then
+        echo "  this host has the $seed_owner role: sync.sh's merge owns settings.json, so setup keeps no record of this seed"
+      elif record_seed_base "$seed_target"; then
         echo "  kept a record of this seed at $(_lf_display "$SEED_BASE"): later runs of ./setup merge the template's changes into settings.json, and leave it alone once that record is deleted"
       else
         echo "  could not keep a record of this seed at $(_lf_display "$SEED_BASE"), so later runs of ./setup leave settings.json alone"
@@ -2270,6 +2307,9 @@ else
     fi
     if [ -n "$moved_seed" ] && ! carry_claude_writes "$moved_seed" "$seed_target"; then
       row settings failed "seeded $seed_target with dcg's hook, but could not copy the plugin keys Claude Code had written from $moved_seed; copy enabledPlugins and extraKnownMarketplaces from it"
+    elif [ -n "$seed_owner" ]; then
+      sync_route=owner_first
+      owner_settings_run
     else
       if [ -n "$dcg_path" ] && [ "$no_dcg" = 0 ]; then dcg_hooked "$CFG/settings.json" || hooked=$?; fi
       if [ "$hooked" != 0 ]; then row settings missing "$(dcg_hook_fix "$hooked")"
