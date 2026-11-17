@@ -120,6 +120,10 @@ if ('$WAV_FILE' -ne '') {
 # Brief pause then cleanup
 Start-Sleep -Milliseconds 500
 \$balloon.Dispose()
-" 2>/dev/null
-
-exit 0
+"
+# PowerShell's own status, or timeout's (124 when it hung, 127 when the binary
+# is missing), with its stderr kept: a caller that needs to know whether the
+# toast went out can tell (disk-watermark.sh, dotfiles#1999). Every caller in
+# this repo already discards stderr and ignores the status where a lost toast
+# must not fail it.
+exit $?

@@ -53,6 +53,17 @@
 # invocation shape as pkg-cache-prune.sh's failure path
 # (`$HERE/notify.sh "$msg" input`). A run with only suppressed breaches exits
 # 0, so an hourly timer does not mark the unit failed every hour.
+#
+# A RUN THAT COULD NOT DO ITS JOB EXITS 2 (dotfiles#1999), never 0 or 1, and
+# prints disk-watermark-errors:N:
+#   - df failed or printed something unparseable for a filesystem that exists,
+#     or no filesystem could be checked at all: an unknown fill level is not a
+#     healthy one;
+#   - an alert was due but not delivered: notify.sh is missing or returned
+#     non-zero. Its stderr is kept for the journal, and the alert records are
+#     written only after a delivery, so the next run alerts again.
+# Exit 2 outranks exit 1: a run that alerted on one filesystem and could not
+# read another still exits 2.
 set -uo pipefail
 
 WARN_PCT="${WARN_PCT:-85}"
@@ -63,7 +74,12 @@ FILESYSTEMS="${DISK_WATERMARK_PATHS:-/ /mnt/c}"
 STATE_DIR="${DISK_WATERMARK_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/hov-stack/disk-watermark}"
 
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-say() { [ -x "$HERE/notify.sh" ] && "$HERE/notify.sh" "$1" "${2:-default}" >/dev/null 2>&1; return 0; }
+# send <message> <sound>: notify.sh's own status, 127 when it is missing. Its
+# stderr goes to the journal with this script's.
+send() {
+  [ -x "$HERE/notify.sh" ] || { echo "disk-watermark: no notifier at $HERE/notify.sh"; return 127; }
+  "$HERE/notify.sh" "$1" "${2:-default}" >/dev/null
+}
 
 level_name() { case "$1" in 2) echo CRIT ;; 1) echo WARN ;; *) echo OK ;; esac; }
 
@@ -82,8 +98,11 @@ n_checked=0
 n_flagged=0
 n_alerted=0
 n_suppressed=0
+n_errors=0
 state_failed=0
 BREACHES=""
+# Alert records to write once the alert is delivered: file, level, floor, GB.
+P_SF=() P_LV=() P_FL=() P_AV=()
 
 for fs in $FILESYSTEMS; do
   if [ ! -d "$fs" ]; then
@@ -94,23 +113,27 @@ for fs in $FILESYSTEMS; do
   # df -P: POSIX output format, always exactly one line per filesystem (the
   # default format wraps a long device name onto a second line, which would
   # break the positional read below). -k: 1024-byte blocks, so the GB math
-  # here is exact and locale-independent — no -h suffix to parse.
-  line=$(df -Pk "$fs" 2>/dev/null | tail -n1)
-  if [ -z "$line" ]; then
-    echo "disk-watermark: $fs — df failed, cannot evaluate"
+  # here is exact and locale-independent — no -h suffix to parse. df's stderr
+  # is not captured, so it reaches the journal; pipefail makes df_rc df's own.
+  line=$(df -Pk "$fs" | tail -n1); df_rc=$?
+  if [ "$df_rc" -ne 0 ] || [ -z "$line" ]; then
+    echo "disk-watermark: $fs — df failed (exit $df_rc), cannot evaluate"
+    n_errors=$((n_errors + 1))
     continue
   fi
-  n_checked=$((n_checked + 1))
 
   # Filesystem 1024-blocks Used Available Capacity Mounted-on
   read -r _ _ _ avail_kb pct_str _ <<< "$line"
   pct=${pct_str%\%}
-  case "$pct" in
-    ''|*[!0-9]*) echo "disk-watermark: $fs — unparseable df output: $line"; continue ;;
-  esac
-  case "$avail_kb" in
-    ''|*[!0-9]*) echo "disk-watermark: $fs — unparseable df output: $line"; continue ;;
-  esac
+  parsed=1
+  case "$pct" in ''|*[!0-9]*) parsed=0 ;; esac
+  case "$avail_kb" in ''|*[!0-9]*) parsed=0 ;; esac
+  if [ "$parsed" -eq 0 ]; then
+    echo "disk-watermark: $fs — unparseable df output, cannot evaluate: $line"
+    n_errors=$((n_errors + 1))
+    continue
+  fi
+  n_checked=$((n_checked + 1))
   avail_gb=$(( avail_kb / 1024 / 1024 ))
 
   state=OK
@@ -174,14 +197,15 @@ for fs in $FILESYSTEMS; do
   fi
 
   n_alerted=$((n_alerted + 1))
-  write_state "$sf" "$level" "$floor_breach" "$avail_gb" || state_failed=1
+  P_SF+=("$sf") P_LV+=("$level") P_FL+=("$floor_breach") P_AV+=("$avail_gb")
   reason="${pct}% used (WARN_PCT=$WARN_PCT CRIT_PCT=$CRIT_PCT)"
   [ "$floor_breach" -eq 1 ] && reason="$reason, ${avail_gb}GB free < ${MIN_FREE_GB}GB floor"
   BREACHES="${BREACHES}${fs}: $state — $reason ($why)"$'\n'
 done
 
-if [ "$state_failed" -eq 1 ]; then
-  echo "disk-watermark: cannot keep alert state in $STATE_DIR; every breach alerts until it can"
+if [ "$n_checked" -eq 0 ] && [ "$n_errors" -eq 0 ]; then
+  echo "disk-watermark: no filesystem in '$FILESYSTEMS' could be checked"
+  n_errors=1
 fi
 
 if [ "$n_alerted" -gt 0 ]; then
@@ -190,11 +214,26 @@ if [ "$n_alerted" -gt 0 ]; then
   printf '%s' "$BREACHES"
   echo "reclaim levers: docker-hygiene.sh, wt-sweep.sh, pkg-cache-prune.sh, or find the fattest directories with:"
   echo "  du -x --max-depth=2 ~ | sort -h | tail"
-  say "disk-watermark: $n_alerted filesystem(s) breached a disk watermark or got worse — $(printf '%s' "$BREACHES" | tr '\n' ' ')" input
+  send "disk-watermark: $n_alerted filesystem(s) breached a disk watermark or got worse — $(printf '%s' "$BREACHES" | tr '\n' ' ')" input
+  send_rc=$?
+  if [ "$send_rc" -eq 0 ]; then
+    for i in "${!P_SF[@]}"; do
+      write_state "${P_SF[$i]}" "${P_LV[$i]}" "${P_FL[$i]}" "${P_AV[$i]}" || state_failed=1
+    done
+  else
+    echo "disk-watermark: the alert was not delivered (notifier exit $send_rc); no alert recorded, so the next run alerts again"
+    n_errors=$((n_errors + 1))
+  fi
 fi
 [ "$n_suppressed" -gt 0 ] && echo "disk-watermark: $n_suppressed breach(es) no worse than at their last alert; not alerted again"
 
+if [ "$state_failed" -eq 1 ]; then
+  echo "disk-watermark: cannot keep alert state in $STATE_DIR; every breach alerts until it can"
+fi
+
 echo "disk-watermark-flagged:$n_flagged"
 echo "disk-watermark-alerted:$n_alerted"
+echo "disk-watermark-errors:$n_errors"
+[ "$n_errors" -gt 0 ] && exit 2
 [ "$n_alerted" -eq 0 ] && exit 0
 exit 1
