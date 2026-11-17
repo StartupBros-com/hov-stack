@@ -33,7 +33,13 @@ Usage:
   papercut-vendor.py --check    report what would remain; write nothing
   papercut-vendor.py --verify-fresh   exit 1 if the package is behind this source
   papercut-vendor.py --verify-delivered  exit 1 if CUSTOMERS are behind (reads the
-                                         marketplace pin); exit 2 if unknowable
+                                         marketplace pin); exit 2 if unknowable.
+                                         Nothing calls it since #645: it reads the
+                                         pinned files from StartupBros-com/papercut,
+                                         while the card has pinned a hov-stack
+                                         commit since #309, so it answers UNKNOWN.
+                                         Use plugin-delivery-report.py, which
+                                         covers every card.
 """
 
 from __future__ import annotations

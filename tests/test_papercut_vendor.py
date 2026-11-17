@@ -162,8 +162,9 @@ class TestPrivateTokens(unittest.TestCase):
                 os.chdir(before)
 
     def test_a_missing_list_is_named_on_the_write_path_only(self):
-        # harness-weekly reads any stderr from --verify-delivered as a warning,
-        # so the verify paths stay silent about it.
+        # The verify paths stay silent about it: a caller that reads their stderr
+        # as a warning (harness-weekly did for --verify-delivered until #645)
+        # must not be warned about a list the verify path never needs.
         with tempfile.TemporaryDirectory() as tmp:
             env = {"HOV_STACK_PRIVATE_TOKENS": "", "HOV_STACK_OVERLAY": str(Path(tmp) / "none")}
             with patch.dict(os.environ, env), patch.object(VENDOR, "SKELETON", Path(tmp)):

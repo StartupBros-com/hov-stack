@@ -482,6 +482,28 @@ else:
   _hyg_check reclaim-sweep.timer
   echo "hyg-flagged:$_hyg_flag"
   echo
+  echo "## plugin delivery (report-only; marketplace cards whose shipped files changed since their pin — merged, not released)"
+  # A card pins a COMMIT and only a release moves it, so a fix merged under
+  # plugins/<name>/ without a VERSION bump reaches no install. It happened in
+  # September (a papercut redaction fix sat unreleased for twelve days and
+  # nothing said so) and again in November (#612 and #635 fixed files in four
+  # plugins with CI and the post-merge receipt green). The report diffs each
+  # card's plugin directory at its pin against origin/main in this checkout's
+  # git, as of the last fetch, and ignores tests, docs, fixtures, README.md and
+  # CHANGELOG.md (#645). A card ahead of its pin and a card it cannot compare
+  # both print WARN lines, so neither reads as current; some differences are
+  # deliberate, so this reports and never fails anything. A crash prints a
+  # traceback on stderr, which is surfaced below.
+  _pd_err=$(mktemp) || exit 1
+  python3 "$SCRIPTS/plugin-delivery-report.py" 2>"$_pd_err"
+  _pd_rc=$?
+  [ "$_pd_rc" -le 2 ] || echo "WARN plugin delivery report did not finish (exit $_pd_rc)"
+  if [ -s "$_pd_err" ]; then
+    echo "WARN plugin delivery diagnostics:"
+    sed 's/^/  /' "$_pd_err"
+  fi
+  rm -f "$_pd_err"
+  echo
   echo "## papercuts rollup (report-only; flagged families go through the clinic — \`/papercut\` triage + adopt)"
   # The consumption half of the friction log. Capture without consumption is this
   # harness's known failure mode (wf-pin-audit.py wired to nothing; a memory store
@@ -524,23 +546,6 @@ else:
     || echo "WARN papercut staleness check crashed"
   if [ -s "$_pc_err" ]; then
     echo "WARN papercut staleness diagnostics:"
-    sed 's/^/  /' "$_pc_err"
-  fi
-  # Capture can be alive and the rollup green while every CUSTOMER runs code
-  # from months ago: the marketplace pins a COMMIT, and merging does not move
-  # that pin. Measured 2026-09-08 -> 09-14: a redaction fix sat merged and
-  # unreleased for twelve days and nothing anywhere said so. This compares the
-  # SHIPPING files against the pinned artifact, not against every unrelated
-  # commit, so a test-only change is not reported as product drift.
-  #
-  # Exit 2 is "unknown", not "fine" -- an unreadable remote must not read as a
-  # clean bill of health, the same rule the staleness check follows.
-  python3 "$HOME/.claude/scripts/papercut-vendor.py" --verify-delivered 2>"$_pc_err"
-  case $? in
-    2) echo "  (delivery state unknown -- treat as unanswered, not as current)" ;;
-  esac
-  if [ -s "$_pc_err" ]; then
-    echo "WARN papercut delivery diagnostics:"
     sed 's/^/  /' "$_pc_err"
   fi
   rm -f "$_pc_err"

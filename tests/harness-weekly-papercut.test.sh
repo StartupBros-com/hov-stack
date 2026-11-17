@@ -57,10 +57,6 @@ grep -q 'papercut.py' "$TMP/section.sh" || {
   echo "FAIL: extracted section no longer invokes papercut.py" >&2
   exit 1
 }
-grep -q -- '--verify-delivered' "$TMP/section.sh" || {
-  echo "FAIL: extracted section no longer runs the delivery check" >&2
-  exit 1
-}
 grep -q 'papercut-backfill.js' "$TMP/section.sh" || {
   echo "FAIL: extracted section no longer runs the transcript backfill" >&2
   exit 1
@@ -80,18 +76,7 @@ make_home() {
     echo '    sys.stderr.write(err + "\n")'
     echo 'sys.exit(int(os.environ.get("PC_STUB_EXIT", "0")))'
   } > "$home/.claude/bin/papercut.py"
-  # The delivery check is a separate binary on a separate seam. Without a stub
-  # here every case below would be exercising "file not found" rather than the
-  # block's own handling of delivered / behind / unknown.
   mkdir -p "$home/.claude/scripts"
-  {
-    echo 'import os, sys'
-    echo 'sys.stdout.write(os.environ.get("PC_DELIVERY_STDOUT", "") )'
-    echo 'err = os.environ.get("PC_DELIVERY_STDERR", "")'
-    echo 'if err:'
-    echo '    sys.stderr.write(err + "\n")'
-    echo 'sys.exit(int(os.environ.get("PC_DELIVERY_EXIT", "0")))'
-  } > "$home/.claude/scripts/papercut-vendor.py"
   # The transcript backfill (dotfiles#1553) runs under node on its own seam.
   {
     echo 'process.stdout.write(process.env.PC_BACKFILL_STDOUT || "papercut backfill: 0 transcripts\n");'
@@ -104,9 +89,6 @@ make_home() {
 run_section() {
   ( HOME="$1" PC_STUB_STDERR_ROLLUP="${PC_STUB_STDERR_ROLLUP:-}" \
       PC_STUB_STDERR_STALENESS="${PC_STUB_STDERR_STALENESS:-}" \
-      PC_DELIVERY_STDOUT="${PC_DELIVERY_STDOUT:-}" \
-      PC_DELIVERY_STDERR="${PC_DELIVERY_STDERR:-}" \
-      PC_DELIVERY_EXIT="${PC_DELIVERY_EXIT:-0}" \
       PC_BACKFILL_STDERR="${PC_BACKFILL_STDERR:-}" \
       PC_BACKFILL_EXIT="${PC_BACKFILL_EXIT:-0}" \
       bash "$TMP/section.sh" 2>&1 )
@@ -138,35 +120,7 @@ h=$(make_home both)
 out=$(PC_STUB_STDERR_STALENESS="$DIAG" PC_STUB_EXIT=0 run_section "$h")
 contains "$out" "WARN papercut staleness diagnostics" "staleness stderr is surfaced under its own label"
 
-# 5. delivery: customers current -> no noise
-h=$(make_home delivered)
-out=$(PC_DELIVERY_STDOUT="papercut delivery: customers are current (marketplace pins abc12345)" \
-      PC_DELIVERY_EXIT=0 run_section "$h")
-contains "$out" "customers are current" "a delivered state is reported"
-omits "$out" "delivery state unknown" "a delivered state must not be called unknown"
-omits "$out" "WARN papercut delivery diagnostics" "a clean delivery check must not warn"
-
-# 6. delivery: customers BEHIND -> the warning reaches the report
-h=$(make_home behind)
-out=$(PC_DELIVERY_STDOUT="WARN papercut delivery: customers are BEHIND this source (marketplace pins 3b1ee286):
-  papercut/cli.py" PC_DELIVERY_EXIT=1 run_section "$h")
-contains "$out" "customers are BEHIND" "a merged-but-unreleased fix is surfaced"
-contains "$out" "papercut/cli.py" "the behind report names the shipping file"
-
-# 7. delivery: UNKNOWN must not read as fine. This is the whole point --
-#    an unreadable remote answering "current" is the failure being prevented.
-h=$(make_home unknown)
-out=$(PC_DELIVERY_STDOUT="papercut delivery: UNKNOWN — could not read the marketplace pin" \
-      PC_DELIVERY_EXIT=2 run_section "$h")
-contains "$out" "UNKNOWN" "an unreadable remote is reported"
-contains "$out" "treat as unanswered, not as current" "unknown is explicitly not a clean bill of health"
-
-# 8. delivery stderr is surfaced under its own label
-h=$(make_home deliverr)
-out=$(PC_DELIVERY_STDERR="$DIAG" PC_DELIVERY_EXIT=2 run_section "$h")
-contains "$out" "WARN papercut delivery diagnostics" "delivery stderr is surfaced under its own label"
-
-# 9. the transcript backfill runs BEFORE the rollup, so this week's rollup
+# 5. the transcript backfill runs BEFORE the rollup, so this week's rollup
 #    counts what it recorded (dotfiles#1553)
 h=$(make_home bforder)
 out=$(run_section "$h")
@@ -177,13 +131,13 @@ esac
 omits "$out" "WARN papercut transcript backfill crashed" "a clean backfill must not warn"
 omits "$out" "WARN papercut backfill diagnostics" "a silent backfill must stay silent"
 
-# 10. a backfill crash is a WARN, and the rollup still runs
+# 6. a backfill crash is a WARN, and the rollup still runs
 h=$(make_home bfcrash)
 out=$(PC_BACKFILL_EXIT=1 run_section "$h")
 contains "$out" "WARN papercut transcript backfill crashed" "a backfill crash keeps its own warning"
 contains "$out" "papercuts-flagged:0" "the rollup still runs after a backfill crash"
 
-# 11. backfill stderr is surfaced under its own label
+# 7. backfill stderr is surfaced under its own label
 h=$(make_home bferr)
 out=$(PC_BACKFILL_STDERR="papercut-backfill: skipped /x.jsonl: EACCES" run_section "$h")
 contains "$out" "WARN papercut backfill diagnostics" "backfill stderr is surfaced under its own label"

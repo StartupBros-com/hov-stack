@@ -1,7 +1,7 @@
 ---
 title: "A plugin fix merged without a version bump is merged, not released"
 date: "2026-11-15"
-last_updated: "2026-11-15"
+last_updated: "2026-11-17"
 category: best-practices
 module: plugin-release-delivery
 problem_type: best_practice
@@ -20,7 +20,7 @@ symptoms:
 tags: [plugin-release, marketplace-pin, version-bump, delivery-verification, merged-not-released]
 related_components:
   - hov-marketplace-repin-reconcile
-  - papercut-delivered-check
+  - plugin-delivery-report
 ---
 
 # A plugin fix merged without a version bump is merged, not released
@@ -50,40 +50,16 @@ One PR, two delivery routes, one receipt. The receipt was true and covered half 
 
 **It had happened before.**
 
-- `plugins/papercut/docs/EXTRACTION-DESIGN.md` records a papercut redaction fix that merged in September and "had not reached a single customer twelve days later". It concludes that "a freshness check would" have caught it. That check exists for papercut alone, as `scripts/papercut-vendor.py --verify-delivered`. Since #309 turned the papercut card into a subdirectory pin it cannot read the pinned files, and it answers UNKNOWN (#645).
+- `plugins/papercut/docs/EXTRACTION-DESIGN.md` records a papercut redaction fix that merged in September and "had not reached a single customer twelve days later". It concludes that "a freshness check would" have caught it. That check exists for papercut alone, as `scripts/papercut-vendor.py --verify-delivered`. Since #309 turned the papercut card into a subdirectory pin it cannot read the pinned files, and it answers UNKNOWN. #645 replaced it in the weekly report with `scripts/plugin-delivery-report.py`, which covers every card.
 - hov #568 changed `plugins/hov/hooks/hooks.json` with no bump, and its body said so: members would get it "with the next hov release". Nothing else changed in hov, so #580 bumped it to 0.1.8 with #568 as its only content. #590 moved the card and the release published about eight hours after #568 merged. That one was named at merge and released on purpose. It also shows what "the next release" means when none is coming: a release cut for one fix.
 
 ## Guidance
 
 **Say "merged, not released".** When a PR changes shipped plugin files without a bump, write those words in the PR body, in the report, and where the issue closes. Name the release that will carry the fix, or say that none is scheduled. "Done" and "fixed" are true of the repo tree only.
 
-**Check the card, not the checkout.** The test is whether the card's pinned commit contains the fix's merge commit. It answers only for a PR that changed files in that plugin, so the check refuses anything else instead of guessing.
+**Check the card, not the checkout.** After `git fetch origin main`, run `python3 scripts/plugin-delivery-report.py`. For every card it diffs the plugin's directory at the card's pin against `origin/main` and prints a `WARN` line for each card whose shipped files changed since its pin, then those files and the commits that changed them. Shipped means every file except `README.md`, `CHANGELOG.md` and files under a `tests`, `test`, `docs` or `fixtures` directory. A card it cannot compare (not a pin into this repo, a pin missing from the clone or not an ancestor of main, a path missing at the pin) also prints a `WARN` line, as `UNKNOWN`, so it never reads as current. It exits 0 when every card is current, 1 when one is ahead and 2 when one cannot be compared. The weekly report runs it in its *plugin delivery* section.
 
-```bash
-name=token-eater   # the plugin
-pr=612             # the PR that carried the fix
-git fetch origin main
-pin="$(git show origin/main:.claude-plugin/marketplace.json |
-  jq -r --arg n "$name" '.plugins[] | select(.name == $n) | .source.sha // empty')"
-fix="$(gh pr view "$pr" --json mergeCommit --jq '.mergeCommit.oid')"
-changed="$(git diff --name-only "$fix^" "$fix" -- "plugins/$name")"
-
-if [ -z "$pin" ] || [ -z "$changed" ]; then
-  echo "could not compare: no card for $name, or #$pr is unmerged or changed nothing under plugins/$name"
-else
-  git merge-base --is-ancestor "$fix" "$pin"
-  case $? in
-    0) echo released ;;
-    1) echo "merged, not released"
-       # every file that differs since the pin, tests included, then the merges that changed them
-       git diff --name-only "$pin" origin/main -- "plugins/$name"
-       git log --format=%s "$pin..origin/main" -- "plugins/$name" ;;
-    *) echo "could not compare: the pinned commit is not in this clone" ;;
-  esac
-fi
-```
-
-The file list is everything under the plugin that differs since the pin. It includes tests and docs, which do not ship, and changes from other merges.
+To ask about one fix rather than every card, test whether the card's pin contains the fix's merge commit: `git merge-base --is-ancestor <merge commit> <pin>` exits 0 when it is released and 1 when it is merged, not released.
 
 **Give the release an owner before the PR merges.** There are three honest choices.
 
@@ -107,14 +83,14 @@ git diff --name-only origin/main...HEAD -- plugins | cut -d/ -f2 | sort -u
 
 Find out which kind of host it is before reporting the runtime as waiting on a person. On the 0.65.9 release one host's runtime followed by itself 19 minutes after its plugin copy updated, while the release's author, who had listed user timers only, reported it as waiting on someone to run `install.sh`. Then confirm the result, because the updater can refuse or fail a version and writes the reason to its log: read the runtime's `VERSION` file and `logs/autoupdate.log`, and run `pro-gate-doctor.sh`, which also warns after three failed updates in a row. Until the runtime matches the plugin, `/pro-gate` stops at its version check.
 
-**Checking each card against main is a manual step until a report does it.** #645 asks for a delivered report that covers every card: shipped files on main ahead of each pin, printed as warnings in the weekly report. It should report and not fail a merge, because some differences are deliberate. `.github/workflows/release-pins-refresh.yml` edits a hov-stack plugin file on main and "never bumps plugins/hov-stack/VERSION". When that report exists and covers every card, the manual card check above can go and this doc should point at the report.
+**A warning is a question, not a failure.** The report never fails a merge, because some differences are deliberate. `.github/workflows/release-pins-refresh.yml` edits a hov-stack plugin file on main and "never bumps plugins/hov-stack/VERSION", so that file shows as ahead of the hov-stack card until the next hov-stack release. Answer each warning with one of the three choices above, or with "deliberate, rides the next release" when that release has an owner.
 
 ## Why This Matters
 
 - **It is silent by construction.** CI, the guards, the plugin CI and the activation receipt all pass, and each is right about what it checks. Nothing fails until someone compares the pin with main.
 - **The false "done" removes the prompt.** Closing the issue is what ends the work. Once #443 was closed, nothing was left to ask for a release. hov #568 went the other way: its PR body named the gap, #580 carried the bump, and the release published about eight hours after the fix merged.
 - **The author's machine hides it.** Tests and guards run against the checkout, where the fix is present. The people who lack it are the ones who install from the marketplace.
-- **It recurs.** `scripts/harness-weekly.sh` says the September fix sat "unreleased for twelve days and nothing anywhere said so". This one was reported done. The one automated check covers papercut only and currently answers UNKNOWN (#645).
+- **It recurs.** `scripts/harness-weekly.sh` says the September fix sat "unreleased for twelve days and nothing anywhere said so". This one was reported done. Until #645 the one automated check covered papercut only and answered UNKNOWN.
 
 ## When to Apply
 
@@ -125,22 +101,20 @@ Find out which kind of host it is before reporting the runtime as waiting on a p
 
 ## Examples
 
-The check above, run for token-eater and #612 on 2026-11-15. Four of the seven files ship; the three under `tests/` do not.
+The delivery report, run on 2026-11-17 against main at 18c5be64. #716 and #718 had changed product-video's dependencies without a bump; #723 carries the bump that releases them.
 
 ```text
-merged, not released
-plugins/token-eater/skills/token-eater/scripts/apply-tool.sh
-plugins/token-eater/skills/token-eater/scripts/delegate-claude.sh
-plugins/token-eater/skills/token-eater/scripts/delegate-codex.sh
-plugins/token-eater/skills/token-eater/scripts/delegate-grok.sh
-plugins/token-eater/tests/consent-preflight.sh
-plugins/token-eater/tests/delegate-scope.test.py
-plugins/token-eater/tests/validate-data.test.sh
-fix: a failed mktemp keeps each script's exit contract; guard follows sourced helpers (#635)
-fix: check every mktemp where it runs, and guard the tree against new unchecked ones (#612)
+plugin delivery: 14 cards against origin/main (18c5be64)
+WARN plugin delivery: product-video ships files that changed since its pin a89fa854 (merged, not released):
+  package.json
+  pnpm-lock.yaml
+  commits since the pin that touch them:
+    c12b74d fix(product-video): move minimatch to 11 through typescript-eslint 8.73.0 (#718)
+    4da535c fix(product-video): move source-map-js, fast-uri and brace-expansion past their advisories (#716)
+plugin delivery: 13 current, 1 ahead of their pin, 0 could not be compared
 ```
 
-The same check printed `released` for hov and #580, which carried a bump, and for hov and #568, which #580 released. For a plugin with no card, a PR number that does not exist, and hov with #612, which changed nothing in hov, it printed `could not compare`.
+On 2026-11-15, before the report existed, a manual check of the token-eater card against #612 found four shipped scripts ahead of the pin, along with three changed files under `tests/` that do not ship.
 
 The report, before:
 
@@ -148,7 +122,7 @@ The report, before:
 
 What it should have said, with the last sentence filled in from the real plan:
 
-> #612 merged. Repo scripts and hooks: live on hosts that run the checkout. Plugin files in pro-gate, token-eater, wsl-cdp and hov-stack: merged, not released. No `VERSION` changed, so each card still pins its previous release. No release is scheduled; #645 lists what is ahead of each pin.
+> #612 merged. Repo scripts and hooks: live on hosts that run the checkout. Plugin files in pro-gate, token-eater, wsl-cdp and hov-stack: merged, not released. No `VERSION` changed, so each card still pins its previous release. No release is scheduled; the weekly plugin delivery report lists what is ahead of each pin.
 
 ## Related
 
@@ -161,4 +135,5 @@ What it should have said, with the last sentence filled in from the real plan:
 - `docs/release/plugin-release-recipe.md` (how to cut the release)
 - `plugins/papercut/docs/EXTRACTION-DESIGN.md` (the September instance and the case for a freshness check)
 - `CONCEPTS.md`: *Marketplace card*, *Activation receipt*
+- `scripts/plugin-delivery-report.py` and the weekly report's *plugin delivery* section (the check for every card)
 - #443, #612, #635 (this instance); #568, #580, #590 (hov); #309, #645 (the delivered check)
