@@ -50,8 +50,12 @@ wt_session_hold() {
 # other entry and returns 1. A worktree released as idle (hov-stack#644) has no
 # session left to say an ignored .env, build output or venv can go, so only these
 # can: node_modules, __pycache__, .pytest_cache, .mypy_cache, .ruff_cache, .turbo,
-# .next, .velite, .svelte-kit, .nuxt and .parcel-cache directories, *.pyc,
-# .eslintcache and *.tsbuildinfo files, and .claude/deliverables/ and .context/.
+# .next, .velite, .svelte-kit, .nuxt, .parcel-cache and dist directories, *.pyc,
+# .eslintcache, *.tsbuildinfo and next-env.d.ts files, and .claude/deliverables/
+# and .context/. dist/ and next-env.d.ts (dotfiles#2259) are build output: on
+# 2026-11-16 they were all that kept 9 of the operator's 40 idle-kept worktrees.
+# Not listed, on purpose: .astro, .wrangler (local dev databases), .venv,
+# worker-configuration.d.ts, supabase/.temp and the like.
 # With --directory git also lists each untracked directory that holds only ignored
 # content (`.claude/` around `.claude/deliverables/`) and then lists that content
 # itself, so such a directory is skipped when an entry below it is listed.
@@ -76,6 +80,7 @@ wt_cache_only() {
       */.pytest_cache|*/.pytest_cache/*|*/.mypy_cache|*/.mypy_cache/*|*/.ruff_cache|*/.ruff_cache/*) ;;
       */.turbo|*/.turbo/*|*/.next|*/.next/*|*/.velite|*/.velite/*) ;;
       */.svelte-kit|*/.svelte-kit/*|*/.nuxt|*/.nuxt/*|*/.parcel-cache|*/.parcel-cache/*) ;;
+      */dist|*/dist/*|*/next-env.d.ts) ;;
       *.pyc|*/.eslintcache|*.tsbuildinfo) ;;
       *) printf '%s' "$entry"; return 1 ;;
     esac

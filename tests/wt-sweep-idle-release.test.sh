@@ -218,6 +218,157 @@ out=$(sweep "$E" 0 "$H" 24 "$TMP/lib3")
 has "exit 3 without an idle line: treated as held" "$out" "skip (Claude session: idle check gave no idle line; treating as held): one"
 kept "exit 3 without an idle line: nothing removed" "$E/one"
 
+# --- 6. a dead, stale job's own worktree lapses (hov-stack#403); dist/ is a cache ---
+# A job that is not done holds the worktree it names only while a running session
+# record carries one of its ids (sessionId, resumeSessionId, transcript id) or its
+# state.json was written inside the window. Past both, it is an idle hold like a
+# lapsed mention: released only clean, cache-only and shipped. The jobs in section 2
+# hold because their records were just written. dist/ and next-env.d.ts count as
+# build output (dotfiles#2259); .wrangler/ and .venv/ do not.
+slug(){ printf '%s' "$1" | sed 's/[^A-Za-z0-9]/-/g'; }
+D="$TMP/d"
+mkrepo "$D" deadown deaddist deadlive deadlive2 deadfresh deaddirty deadwrangler deadvenv deadunship deadcwd sharedcwd sharedid
+mkdir -p "$D/repo/.git/info"; printf 'dist/\nnext-env.d.ts\n.wrangler/\n.venv/\n' >>"$D/repo/.git/info/exclude"
+mkdir -p "$D/deaddist/dist" "$D/deaddist/apps/web/dist" "$D/deadwrangler/.wrangler/state" "$D/deadvenv/.venv/bin"
+echo a >"$D/deaddist/dist/a.js"; echo b >"$D/deaddist/apps/web/dist/b.js"; echo n >"$D/deaddist/apps/web/next-env.d.ts"
+echo db >"$D/deadwrangler/.wrangler/state/d1.sqlite"; echo py >"$D/deadvenv/.venv/bin/python"
+echo new >"$D/deaddirty/new.txt"
+{ echo two >"$D/deadunship/two.txt"; git -C "$D/deadunship" add -A; git -C "$D/deadunship" commit -qm two
+  git -C "$D/deadunship" push -q; } >/dev/null 2>&1
+dirty_head=$(git -C "$D/deaddirty" rev-parse HEAD)
+
+H2="$TMP/h2"; L="$H2/projects/-launch"; mkdir -p "$H2/sessions" "$L"
+job(){ # $1 id  $2 name  $3 extra JSON fields  [$4 age, default 30 hours; "" = just written]
+  mkdir -p "$H2/jobs/$1"
+  printf '{"state":"blocked","name":"%s","cwd":"%s",%s}\n' "$2" "$TMP" "$3" >"$H2/jobs/$1/state.json"
+  [ -n "${4-30 hours}" ] && touch -d "-${4-30 hours}" "$H2/jobs/$1/state.json"
+}
+T3="$H2/projects/$(slug "$D/deadown")/s3.jsonl"; mkdir -p "$(dirname "$T3")"
+# j3 launched in its worktree: its record's cwd and its transcript's project both name it.
+mkdir -p "$H2/jobs/j3"
+printf '{"state":"blocked","name":"own","sessionId":"s3","cwd":"%s","linkScanPath":"%s"}\n' "$D/deadown" "$T3" >"$H2/jobs/j3/state.json"
+touch -d '-30 hours' "$H2/jobs/j3/state.json"
+{ rec "$D/deadown" "$(ago '31 hours')"; readrec "$D/deadown" "$D/deadown/base.txt" "$(ago '30 hours')"; } >"$T3"
+touch -d '-30 hours' "$T3"
+# j4: names its worktree only in worktreePath, and has no transcript at all.
+job j4 distjob "\"sessionId\":\"s4\",\"worktreePath\":\"$D/deaddist\",\"linkScanPath\":\"$L/s4.jsonl\""
+# j5: stale record, but a live session carries its resumeSessionId: never lapses.
+job j5 resumed "\"sessionId\":\"s5\",\"resumeSessionId\":\"r5\",\"worktreePath\":\"$D/deadlive\",\"linkScanPath\":\"$L/s5.jsonl\""
+printf '{"pid":%s,"procStart":"%s","sessionId":"r5","cwd":"%s","name":"live5"}\n' "$$" "$(starttime $$)" "$TMP" >"$H2/sessions/$$.json"
+# j6: dead, but its record was just written: inside the window.
+job j6 fresh "\"sessionId\":\"s6\",\"worktreePath\":\"$D/deadfresh\",\"linkScanPath\":\"$L/s6.jsonl\"" ""
+job j7 dirtyjob "\"sessionId\":\"s7\",\"worktreePath\":\"$D/deaddirty\",\"linkScanPath\":\"$L/s7.jsonl\""
+job j8 wrangler "\"sessionId\":\"s8\",\"worktreePath\":\"$D/deadwrangler\",\"linkScanPath\":\"$L/s8.jsonl\""
+job j9 venv "\"sessionId\":\"s9\",\"worktreePath\":\"$D/deadvenv\",\"linkScanPath\":\"$L/s9.jsonl\""
+job j10 unshipped "\"sessionId\":\"s10\",\"worktreePath\":\"$D/deadunship\",\"linkScanPath\":\"$L/s10.jsonl\""
+# j11 launched elsewhere and entered deadcwd: its transcript's last cwd is there.
+T11="$L/s11.jsonl"
+job j11 entered "\"sessionId\":\"s11\",\"linkScanPath\":\"$T11\""
+{ rec "$TMP" "$(ago '32 hours')"; readrec "$TMP" "$D/deadcwd/base.txt" "$(ago '31 hours')"; rec "$D/deadcwd" "$(ago '30 hours')"; } >"$T11"
+touch -d '-30 hours' "$T11"
+# sharedcwd: a lapsed job named it, and the live session's own last cwd is there.
+# The lapse frees only the lapsed job's own cwd, so the live session still holds it.
+T12="$L/s12.jsonl"; T13="$L/r5.jsonl"
+job j12 shared "\"sessionId\":\"s12\",\"linkScanPath\":\"$T12\""
+readrec "$TMP" "$D/sharedcwd/base.txt" "$(ago '30 hours')" >"$T12"; touch -d '-30 hours' "$T12"
+rec "$D/sharedcwd" "$(ago '30 hours')" >"$T13"; touch -d '-30 hours' "$T13"
+# j16: stale record, but a live session carries its own sessionId (its transcript
+# has another id, so the sessionId alone proves it alive).
+job j16 livesid "\"sessionId\":\"s16\",\"worktreePath\":\"$D/deadlive2\",\"linkScanPath\":\"$L/t16.jsonl\""
+printf '{"pid":%s,"procStart":"%s","sessionId":"s16","cwd":"%s","name":"live16"}\n' "$$" "$(starttime $$)" "$TMP" >"$H2/sessions/live16.json"
+# sharedid: j14 lapsed and entered it, but fresh j15 resumes j14's session, so that
+# session's last cwd still holds.
+T14="$L/s14.jsonl"
+job j14 entered2 "\"sessionId\":\"s14\",\"linkScanPath\":\"$T14\""
+job j15 resumer "\"sessionId\":\"s15\",\"resumeSessionId\":\"s14\",\"linkScanPath\":\"$L/s15.jsonl\"" ""
+{ readrec "$TMP" "$D/sharedid/base.txt" "$(ago '31 hours')"; rec "$D/sharedid" "$(ago '30 hours')"; } >"$T14"
+touch -d '-30 hours' "$T14"
+
+DEADREL=$(printf '%s\n' "$D/deadcwd" "$D/deaddist" "$D/deadown" | sort)
+plan=$(sweep "$D" 1 "$H2")
+chk "dead job: the plan releases exactly the dead, stale, clean, shipped ones" "$DEADREL" "$(removals "$plan")"
+has "dead job: its own worktree is idle, saying its session is gone" "$plan" \
+  "~ idle: job j3 \"own\" is blocked and its session is not running; its transcript $T3 names $D/deadown"
+has "dead job: a record naming it with no transcript is idle too" "$plan" \
+  "~ idle: job j4 \"distjob\" is blocked and its session is not running; last named 30h ago"
+has "dead job: its own last cwd no longer holds" "$plan" \
+  "~ idle: job j11 \"entered\" is blocked and its session is not running; its transcript $T11 names $D/deadcwd"
+has "dead job: a live session carrying its resumeSessionId holds" "$plan" "skip (Claude session: job j5 \"resumed\" is blocked): deadlive"
+has "dead job: a live session carrying its sessionId holds" "$plan" "skip (Claude session: job j16 \"livesid\" is blocked): deadlive2"
+has "dead job: a session a fresh job resumes keeps its last cwd's hold" "$plan" \
+  "its session last recorded its cwd at $D/sharedid): sharedid"
+has "dead job: a record written inside the window holds" "$plan" "skip (Claude session: job j6 \"fresh\" is blocked): deadfresh"
+has "dead job: dirty keeps it, never WIP-committed" "$plan" "skip (Claude session, idle but not clean on a branch: job j7"
+has "dead job: an ignored .wrangler/ keeps it" "$plan" "idle but keeps ignored .wrangler"
+has "dead job: an ignored .venv/ keeps it" "$plan" "idle but keeps ignored .venv"
+has "dead job: pushed but unmerged keeps it" "$plan" "=> SKIP (idle, but not proven shipped"
+has "dead job: a live session's own last cwd still holds" "$plan" "its session last recorded its cwd at $D/sharedcwd): sharedcwd"
+has "dead job: counts" "$plan" "released-idle:3"
+out=$(sweep "$D" 0 "$H2")
+chk "dead job: the apply removes what the plan named" "$DEADREL" "$(removals "$out")"
+for n in deadown deaddist deadcwd; do gone "dead job: $n released" "$D/$n"; done
+for n in deadlive deadlive2 deadfresh deaddirty deadwrangler deadvenv deadunship sharedcwd sharedid; do kept "dead job: $n kept" "$D/$n"; done
+chk "dead job: the dirty worktree's HEAD is untouched" "$dirty_head" "$(git -C "$D/deaddirty" rev-parse HEAD)"
+[ -f "$D/deaddirty/new.txt" ] && ok "dead job: its untracked file is untouched" || no "dead job: its untracked file is untouched"
+
+# --- 7. a record or transcript that cannot be read stops an idle answer (#660) ------
+# Each would otherwise read as "nothing names it here". The helper directly, on a
+# worktree held only by a mention 30 hours old, whose job's record is fresh.
+Q="$TMP/q"; mkrepo "$Q" cw
+H3="$TMP/h3"; C3="$TMP/hold-cache-3"; TQ="$H3/projects/-launch/sq.jsonl"
+mkdir -p "$H3/jobs/jq" "$H3/sessions" "$(dirname "$TQ")"
+printf '{"state":"blocked","name":"q","sessionId":"sq","cwd":"%s","linkScanPath":"%s"}\n' "$TMP" "$TQ" >"$H3/jobs/jq/state.json"
+{ readrec "$TMP" "$Q/cw/base.txt" "$(ago '30 hours')"; rec "$TMP" "$(ago '30 hours')"; } >"$TQ"; touch -d '-30 hours' "$TQ"
+hold3(){ python3 "$HELPER" --claude-home "$H3" --cache-dir "$C3" --active-min 0 "$@"; }
+out=$(hold3 --idle-hours 24 -- "$Q/cw" 2>/dev/null); rc=$?
+chk "unreadable: the control is idle (exit 3)" 3 "$rc"
+
+mkdir -p "$H3/jobs/jbad"; printf '{"state": "work' >"$H3/jobs/jbad/state.json"   # half-written
+out=$(hold3 --idle-hours 24 -- "$Q/cw" 2>"$TMP/err3"); rc=$?
+chk "unreadable job record: held, not idle (exit 0)" 0 "$rc"
+has "unreadable job record: says why" "$out" "not called idle: 1 record(s) or transcript(s) could not be read"
+has "unreadable job record: noted on stderr" "$(cat "$TMP/err3")" "skipped unreadable $H3/jobs/jbad/state.json"
+rm -r "$H3/jobs/jbad"
+
+sh -c 'exit 0' & deadpid=$!; wait "$deadpid"
+: >"$H3/sessions/$deadpid.json"
+out=$(hold3 --idle-hours 24 -- "$Q/cw" 2>"$TMP/err3"); rc=$?
+chk "empty record of a pid that is gone: still idle (exit 3)" 3 "$rc"
+hasnot "empty record of a pid that is gone: no note" "$(cat "$TMP/err3")" "skipped unreadable"
+rm "$H3/sessions/$deadpid.json"
+: >"$H3/sessions/$$.json"
+out=$(hold3 --idle-hours 24 -- "$Q/cw" 2>"$TMP/err3"); rc=$?
+chk "empty record of a running pid: held, not idle (exit 0)" 0 "$rc"
+has "empty record of a running pid: noted on stderr" "$(cat "$TMP/err3")" "skipped unreadable $H3/sessions/$$.json"
+rm "$H3/sessions/$$.json"
+
+# Cached, then grown, then unreadable: the cached mention still holds, and the unread
+# tail may name it inside the window, so it is not idle either.
+rec "$TMP" "$(ago '1 minute')" >>"$TQ"; touch -d '-30 hours' "$TQ"; chmod 000 "$TQ"
+if [ -r "$TQ" ]; then
+  ok "unreadable transcript: skipped (this user can read a mode-000 file)"
+else
+  out=$(hold3 -- "$Q/cw" 2>/dev/null); rc=$?
+  chk "unreadable transcript: its cached mention still holds (exit 0)" 0 "$rc"
+  has "unreadable transcript: the holder is named" "$out" "job jq \"q\" is blocked; its transcript $TQ names $Q/cw"
+  out=$(hold3 --idle-hours 24 -- "$Q/cw" 2>"$TMP/err3"); rc=$?
+  chk "unreadable transcript: held, not idle (exit 0)" 0 "$rc"
+  has "unreadable transcript: says why" "$out" "not called idle: 1 record(s) or transcript(s) could not be read"
+  # A fresh transcript makes the next run rewrite the cache while TQ is still
+  # unreadable; a run without the window then holds only if TQ's entry was kept.
+  mkdir -p "$H3/projects/-other"; rec "$TMP" "$(ago '1 minute')" >"$H3/projects/-other/o.jsonl"
+  before=$(cat "$C3"/*.v2.json | md5sum)
+  hold3 --idle-hours 24 -- "$Q/cw" >/dev/null 2>&1
+  after=$(cat "$C3"/*.v2.json | md5sum)
+  [ "$before" != "$after" ] && ok "unreadable transcript: the cache was rewritten meanwhile" \
+    || no "unreadable transcript: the cache was rewritten meanwhile"
+  out=$(hold3 -- "$Q/cw" 2>/dev/null); rc=$?
+  chk "unreadable transcript: its cache entry survives that rewrite (exit 0)" 0 "$rc"
+fi
+chmod 644 "$TQ"
+out=$(hold3 --idle-hours 24 -- "$Q/cw" 2>/dev/null); rc=$?
+chk "unreadable transcript: readable again, idle again (exit 3)" 3 "$rc"
+
 echo
 echo "wt-sweep-idle-release: $pass passed, $fail failed"
 [ "$fail" = 0 ]
