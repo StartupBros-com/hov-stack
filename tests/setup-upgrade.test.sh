@@ -320,13 +320,17 @@ wait_for() {
   done
 }
 sync_log_has() { grep -q -F "$1" "$SH/.claude/.hov-stack/sync.log" 2>/dev/null; }
+# sync_done <text>: the detached sync printed its line and has exited. The line comes before the
+# result file is written and the lock is released, so it alone does not mean the run is over; the
+# session-start hook shows nothing while the lock is held.
+sync_done() { sync_log_has "$1" && [ ! -e "$SH/.claude/.hov-stack/sync.lock" ]; }
 head_is_successor() { [ "$(git -C "$SC" rev-parse HEAD)" = "$succ_sha" ]; }
 
 steady good
 successor successor-hook.js ship
 session_start "$SH" HOV_UPDATE=on HOV_SYNC_INTERVAL=0 > "$WORK/good-session.out" 2>&1
 wait_for 90 head_is_successor || { cat "$WORK/good-session.out"; cat "$SH/.claude/.hov-stack/sync.log" 2>/dev/null; fail "steady: HEAD never reached the successor"; }
-wait_for 30 sync_log_has 'sync: moved' || { cat "$SH/.claude/.hov-stack/sync.log"; fail "steady: the detached sync did not finish with a moved result"; }
+wait_for 30 sync_done 'sync: moved' || { cat "$SH/.claude/.hov-stack/sync.log"; fail "steady: the detached sync did not finish with a moved result"; }
 grep -q 'successor-hook.js' "$SH/.claude/settings.json" || fail "steady: the successor's registration was not merged"
 [ -f "$SH/.claude/hooks/SessionStart/successor-hook.js" ] || fail "steady: the successor's hook file is not reachable"
 # (Before check_hooks, which runs every hook and so claims the result.) The next session start shows the result once.
@@ -347,7 +351,7 @@ successor never-moved.js ship
 before=$(git -C "$SC" rev-parse HEAD)
 rm -f "$SH/.claude/.hov-stack/sync.log"
 SESSION_SETTINGS="$SH/registered-settings.json" session_start "$SH" HOV_UPDATE=on HOV_SYNC_INTERVAL=0 > "$WORK/blocked-session.out" 2>&1
-wait_for 60 sync_log_has 'sync: blocked' || { cat "$SH/.claude/.hov-stack/sync.log" 2>/dev/null; fail "steady, unmergeable: the detached sync never reported a refusal"; }
+wait_for 60 sync_done 'sync: blocked' || { cat "$SH/.claude/.hov-stack/sync.log" 2>/dev/null; fail "steady, unmergeable: the detached sync never reported a refusal"; }
 [ "$(git -C "$SC" rev-parse HEAD)" = "$before" ] || fail "steady, unmergeable: the checkout moved under a settings.json that cannot be merged"
 ok "planted: an unmergeable settings.json leaves the checkout where it was, and the sync says so"
 
@@ -356,7 +360,7 @@ steady ghost
 successor ghost-hook.js noship
 session_start "$SH" HOV_UPDATE=on HOV_SYNC_INTERVAL=0 > "$WORK/ghost-session.out" 2>&1
 wait_for 90 head_is_successor || fail "steady, ghost: HEAD never reached the successor"
-wait_for 30 sync_log_has 'sync: warning' || { cat "$SH/.claude/.hov-stack/sync.log"; fail "steady, ghost: the detached sync did not finish with a warning"; }
+wait_for 30 sync_done 'sync: warning' || { cat "$SH/.claude/.hov-stack/sync.log"; fail "steady, ghost: the detached sync did not finish with a warning"; }
 sync_log_has 'hook(s) skipped' || fail "steady, ghost: the result does not name the skipped hook"
 grep -q -P '^[0-9]+\twarning\t' "$SH/.claude/.hov-stack/sync-result" || fail "steady, ghost: the result file is not a warning"
 # The merge refuses to register a hook whose file is missing, so the install stays whole...
