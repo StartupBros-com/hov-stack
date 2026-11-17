@@ -1,0 +1,58 @@
+{
+  "$description": "Primitive and semantic colour tokens derived from project on 2026-11-17. Values are colours the codebase already ships — nothing was invented.",
+  "primitive": {
+    "canvas": {
+      "$type": "color",
+      "$value": "#f8fafc",
+      "$description": "declared as --color-bg in src/index.css"
+    },
+    "ink": {
+      "$type": "color",
+      "$value": "#0f172a",
+      "$description": "declared as --color-fg in src/index.css"
+    },
+    "ink-mute": {
+      "$type": "color",
+      "$value": "#64748b",
+      "$description": "declared as --color-fg-muted in src/index.css"
+    },
+    "brand": {
+      "$type": "color",
+      "$value": "#4f46e5",
+      "$description": "declared as --color-brand in src/index.css"
+    }
+  },
+  "semantic": {
+    "surface": {
+      "canvas": {
+        "$type": "color",
+        "$value": "{color.primitive.canvas}",
+        "$description": "Page background"
+      }
+    },
+    "text": {
+      "primary": {
+        "$type": "color",
+        "$value": "{color.primitive.ink}",
+        "$description": "Primary body/heading text"
+      },
+      "secondary": {
+        "$type": "color",
+        "$value": "{color.primitive.ink-mute}",
+        "$description": "Secondary / muted text"
+      },
+      "on-action": {
+        "$type": "color",
+        "$value": "{color.primitive.canvas}",
+        "$description": "Text on a filled action (assumption — mirrors button-primary; review)"
+      }
+    },
+    "action": {
+      "primary": {
+        "$type": "color",
+        "$value": "{color.primitive.brand}",
+        "$description": "Primary action / brand accent"
+      }
+    }
+  }
+}
