@@ -1339,7 +1339,7 @@ role_run() {
   local output rc=0
   role_text=
   host_role >/dev/null || return 0
-  output=$(CLAUDE_HOME="$CFG" bash "$HOV_STACK/sync.sh" role "$1") || rc=$?
+  output=$(CLAUDE_HOME="$CFG" CLAUDE_SYNC_SKIP_DCG_RECONCILE="${role_skip_dcg:-0}" bash "$HOV_STACK/sync.sh" role "$1") || rc=$?
   [ -z "$output" ] || printf '%s\n' "$output" | sed '/^role: /d'
   role_text=$(printf '%s\n' "$output" | sed -n 's/^role: //p' | tail -n 1)
   if [ -z "$role_text" ]; then role_text="$1 gave no role summary (exit $rc)"; rc=1; fi
@@ -2150,7 +2150,13 @@ moved_seed=
 sync_route_find
 if [ "$sync_route" = owner ]; then
   owner_rc=0
+  # sync.sh reconciles the dcg hook onto ~/.local/bin/dcg and refuses when that target is
+  # missing. setup accepts a run without it (--no-dcg, or a dcg elsewhere on PATH), so only
+  # that reconcile is skipped; the other owner steps and the merge still run.
+  role_skip_dcg=0
+  [ -e "$HOME/.local/bin/dcg" ] || role_skip_dcg=1
   role_run owner || owner_rc=$?
+  role_skip_dcg=0
   if [ "$owner_rc" = 0 ] || [ "$owner_rc" = 3 ]; then
     sync_merge
     if [ "$sync_merge_failed" = 0 ]; then

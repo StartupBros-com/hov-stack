@@ -2004,7 +2004,14 @@ install_hooks() {
   if [ "${CLAUDE_SYNC_SKIP_HOOK_RECONCILE:-0}" = 1 ]; then
     echo "  skipped hook reconcile (CLAUDE_SYNC_SKIP_HOOK_RECONCILE=1)"
   else
-    reconcile_dcg_hook || return 1
+    # ./setup sets CLAUDE_SYNC_SKIP_DCG_RECONCILE=1 when there is no dcg at
+    # ~/.local/bin/dcg (--no-dcg, or a dcg elsewhere on PATH): reconcile_dcg_hook
+    # refuses to register a missing target, and setup accepts a run without one.
+    if [ "${CLAUDE_SYNC_SKIP_DCG_RECONCILE:-0}" = 1 ]; then
+      echo "  skipped dcg hook reconcile (no dcg at ~/.local/bin/dcg)"
+    else
+      reconcile_dcg_hook || return 1
+    fi
     # Not `|| return 1`: a failed plugin install (offline, marketplace not added)
     # still allows links, units and timers to install. Report failure at the end.
     ensure_papercut_plugin || papercut_failed=1
@@ -2320,7 +2327,7 @@ install() {
 }
 
 role_unit_files() {
-  local phase=$1 unit changed=0 new=0 refused=0 failed=0 reload_failed=0 backup=""
+  local phase=$1 unit changed=0 new=0 refused=0 failed=0 reload_failed=0 backup="" marked=0
   local pending="$H/.hov-stack/units-reload-pending"
   for unit in $UNITS; do
     [ -f "$HERE/systemd/$unit" ] || continue
@@ -2341,10 +2348,23 @@ role_unit_files() {
           fi
           echo "  unit refresh backup: $backup"
         fi
-        if ! (cd "$backup" && mkdir -p "./$(dirname "$unit")" && cp -a -- "$SYS/$unit" "./$unit"); then
+        # -L: a unit that is a symlink inside the unit directory is overwritten
+        # through the link, so the backup keeps the bytes behind it, not the link.
+        if ! (cd "$backup" && mkdir -p "./$(dirname "$unit")" && cp -pL -- "$SYS/$unit" "./$unit"); then
           echo "  failed to back up user unit $unit; leaving it alone" >&2
           failed=$((failed + 1))
           continue
+        fi
+        [ ! -L "$SYS/$unit" ] || echo "  $unit was a symlink to $(readlink -f "$SYS/$unit"); the backup holds its contents"
+        # The marker goes down before the first write, so a refresh killed between
+        # a write and the reload still reloads on the next run.
+        if [ "$marked" -eq 0 ]; then
+          if ! mkdir -p "$(dirname "$pending")" || ! touch "$pending"; then
+            echo "  failed to record pending user-unit reload; leaving $unit alone" >&2
+            failed=$((failed + 1))
+            continue
+          fi
+          marked=1
         fi
         if ! install_user_unit "$unit"; then
           failed=$((failed + 1))
@@ -2368,11 +2388,7 @@ role_unit_files() {
     if [ "$refused" -gt 0 ] || [ "$failed" -gt 0 ]; then
       role_summary="$changed unit file(s) updated; $refused refused; $failed failed"
     fi
-    if [ "$changed" -gt 0 ] || [ -f "$pending" ]; then
-      if ! mkdir -p "$(dirname "$pending")" || ! touch "$pending"; then
-        echo "  failed to record pending user-unit reload" >&2
-        reload_failed=1
-      fi
+    if [ -f "$pending" ]; then
       if systemctl --user show-environment >/dev/null 2>&1; then
         if systemctl --user daemon-reload; then
           rm -f -- "$pending" || reload_failed=1

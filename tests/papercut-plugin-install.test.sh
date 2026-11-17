@@ -203,7 +203,7 @@ case $out in *"still not installed"*) ok ;; *) fail "the no-op install was not n
 body=$(sed -n '/^install() {/,/^}/p' "$SYNC")
 hooks_body=$(sed -n '/^install_hooks() {/,/^}/p' "$SYNC")
 summary_body=$(sed -n '/^install_summary() {/,/^}/p' "$SYNC")
-order=$(grep -E '^    (reconcile_dcg_hook|ensure_papercut_plugin) ' <<<"$hooks_body" | awk '{print $1}' | tr '\n' ' ') || true
+order=$(grep -E '^ +(reconcile_dcg_hook|ensure_papercut_plugin) ' <<<"$hooks_body" | awk '{print $1}' | tr '\n' ' ') || true
 [ "$order" = "reconcile_dcg_hook ensure_papercut_plugin " ] ||
   fail "install_hooks() does not run dcg before plugin installation: '$order'"
 grep -q -F 'ensure_papercut_plugin || papercut_failed=1' <<<"$hooks_body" ||

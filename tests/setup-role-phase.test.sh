@@ -370,7 +370,7 @@ ok 'routine refresh preserves hand edits and drop-in paths in one backup; no dif
 cat <<'EOF' | tee "$WORK/bin/cp" >/dev/null
 #!/usr/bin/env bash
 case "${COPY_FAILURE:-}:$*" in
-  backup:'-a -- '*dcg-auto-update.service*) exit 17 ;;
+  backup:'-pL -- '*dcg-auto-update.service*) exit 17 ;;
   install:*repo/systemd/dcg-auto-update.service*) exit 18 ;;
 esac
 exec /usr/bin/cp "$@"
@@ -391,6 +391,76 @@ for failure in backup install; do
   ok "$failure copy failure preserves the unit, continues and reloads"
 done
 rm -- "$WORK/bin/cp"
+
+# A unit that is a symlink inside the unit directory is overwritten through the
+# link, so the backup must hold the bytes behind it, not a second link to them.
+select_home "$WORK/symlink-backup" satellite
+mkdir -p "$HOME/.config/systemd/user"
+printf 'linked hand edit\n' | tee "$HOME/.config/systemd/user/custom.service" >/dev/null
+ln -s "$HOME/.config/systemd/user/custom.service" "$HOME/.config/systemd/user/dcg-auto-update.service"
+run 0 sync role refresh
+backups=("$CLAUDE_HOME"/backups/unit-refresh-*)
+[ "${#backups[@]}" = 1 ] && [ -d "${backups[0]}" ] || fail 'symlinked unit refresh made no single backup directory'
+[ ! -L "${backups[0]}/dcg-auto-update.service" ] || fail 'backup kept the symlink instead of the unit contents'
+[ "$(cat "${backups[0]}/dcg-auto-update.service")" = 'linked hand edit' ] || fail 'backup lost the bytes behind a symlinked unit'
+cmp "$HOME/.config/systemd/user/dcg-auto-update.service" "$REPO/systemd/dcg-auto-update.service" || fail 'symlinked unit was not refreshed'
+contains 'dcg-auto-update.service was a symlink to'
+ok 'refresh backs up the contents behind a symlinked unit'
+
+# The pending marker is on disk before the first unit is rewritten, so a refresh
+# killed between that write and the reload still reloads on the next run. A cp
+# shim records whether the marker existed at the moment the unit was copied in.
+cat <<'EOF' | tee "$WORK/bin/cp" >/dev/null
+#!/usr/bin/env bash
+case "$*" in
+  *repo/systemd/dcg-auto-update.service*)
+    if [ -f "$CLAUDE_HOME/.hov-stack/units-reload-pending" ]; then state=present; else state=absent; fi
+    printf '%s\n' "$state" >> "$HOME/marker-at-copy.log" ;;
+esac
+exec /usr/bin/cp "$@"
+EOF
+chmod +x "$WORK/bin/cp"
+select_home "$WORK/marker-order" satellite
+mkdir -p "$HOME/.config/systemd/user"
+printf 'hand edit\n' | tee "$HOME/.config/systemd/user/dcg-auto-update.service" >/dev/null
+run 0 sync role refresh
+[ "$(cat "$HOME/marker-at-copy.log")" = present ] || fail 'a unit was rewritten before the pending reload was recorded'
+[ "$(grep -c '^--user daemon-reload$' "$HOME/systemctl.log")" = 1 ] || fail 'marker-first refresh did not reload exactly once'
+[ ! -e "$CLAUDE_HOME/.hov-stack/units-reload-pending" ] || fail 'marker not removed after a successful reload'
+ok 'refresh records the pending reload before its first unit write'
+rm -- "$WORK/bin/cp"
+
+# Without a marker there is no recovery, so a unit is left alone when the marker cannot be written.
+select_home "$WORK/marker-unwritable" satellite
+mkdir -p "$HOME/.config/systemd/user"
+printf 'keep this edit\n' | tee "$HOME/.config/systemd/user/dcg-auto-update.service" >/dev/null
+chmod 500 "$CLAUDE_HOME/.hov-stack"
+clear_logs
+run 1 sync role refresh
+chmod 700 "$CLAUDE_HOME/.hov-stack"
+contains 'failed to record pending user-unit reload; leaving dcg-auto-update.service alone'
+[ "$(cat "$HOME/.config/systemd/user/dcg-auto-update.service")" = 'keep this edit' ] || fail 'unit rewritten although the pending marker could not be written'
+ok 'refresh leaves a unit alone when it cannot record the pending reload'
+
+# setup accepts a run with no dcg at ~/.local/bin/dcg (--no-dcg, or a dcg elsewhere on
+# PATH). The owner phase then skips only the dcg reconcile, which would refuse the
+# missing target; the other owner steps and the settings merge still run. sync.sh on
+# its own still refuses, which shows the skip is what lets setup through.
+for where in absent elsewhere; do
+  select_home "$WORK/no-local-dcg-$where" workstation
+  rm -- "$HOME/.local/bin/dcg"
+  if [ "$where" = elsewhere ]; then ln -s /usr/bin/true "$WORK/bin/dcg"; fi
+  printf '{"env":{"ROLE_OVERLAY_TEST":"merged"}}\n' | tee "$HOV_STACK_OVERLAY/settings.json" >/dev/null
+  CLAUDE_SYNC_SKIP_HOOK_RECONCILE=0 run 0 setup --no-dcg
+  contains 'skipped dcg hook reconcile (no dcg at ~/.local/bin/dcg)'
+  jq -e '.env.ROLE_OVERLAY_TEST == "merged"' "$CLAUDE_HOME/settings.json" >/dev/null || fail "dcg $where blocked the owner settings merge"
+  grep -q '^  settings *ok ' <<<"$output" || { printf '%s\n' "$output"; fail "dcg $where did not leave the settings row ok"; }
+  CLAUDE_SYNC_SKIP_HOOK_RECONCILE=0 run 1 sync role owner
+  contains 'DCG reconcile: hook target'
+  rm -f -- "$WORK/bin/dcg"
+  quiet_managers
+  ok "owner setup with dcg $where skips only the dcg reconcile; sync.sh alone still refuses"
+done
 
 select_home "$WORK/profile-stderr" none
 DOTFILES_ROLE=workstation run 0 setup --no-dcg
