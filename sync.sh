@@ -30,14 +30,9 @@
 #       operator step, unlike the --user timers below.
 #
 # Usage:
-#   sync.sh install   New PC bootstrap or post-merge adoption on this PC:
-#                     symlink stable parts (originals backed up to
-#                     ~/.claude/backups/dotfiles-adopt-<ts>/), seed volatile
-#                     parts only where missing, reconcile the canonical DCG
-#                     hook without replacing other live settings, deploy the
-#                     managed lock (sudo), deploy user units, and reconcile
-#                     role-eligible timers (five are cron-ownership-gated).
-#                     Applies settings after the reconcilers. Idempotent.
+#   ./setup           Link harness files and seed or merge settings.
+#   ./setup --root    Reconcile Docker policy, managed lock and system units.
+#   ./setup --enable-units  Deploy user units and reconcile role timers.
 #   sync.sh apply-settings [--plan] [--quiet] [--seed-base <rev>]
 #                     Apply tracked settings against the last-applied base.
 #                     Plan and check report conflicts and held deny removals.
@@ -93,7 +88,7 @@ HERE=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd -P)
 # shellcheck source=scripts/lib/floor-assert.sh
 . "$HERE/scripts/lib/floor-assert.sh"
 # Role model. Sourced when present; a checkout broken enough to be missing it
-# retains the historical DOTFILES_ROLE fallback for unrelated bootstrap work.
+# has no role; an environment variable cannot replace the roster.
 # Docker-init ownership is stricter: only the versioned profile library can
 # authorize it, so the fallback can never select it.
 PROFILE_LIBRARY_AUTHORITATIVE=0
@@ -102,7 +97,7 @@ if [ -r "$HERE/lib/profile.sh" ]; then
   . "$HERE/lib/profile.sh"
   PROFILE_LIBRARY_AUTHORITATIVE=1
 else
-  profile_role() { [ -n "${DOTFILES_ROLE:-}" ] && printf '%s\n' "$DOTFILES_ROLE" || return 1; }
+  profile_role() { return 1; }
   profile_is() { [ "$(profile_role 2>/dev/null)" = "$1" ]; }
 fi
 
@@ -987,10 +982,9 @@ papercut_plugin_active() {
     "$H/settings.json" >/dev/null 2>&1
 }
 
-# install installs papercut@hov itself. ./setup installs it too
-# (lib/default-plugins.txt), but a host that only ever runs `sync.sh install` never
-# runs ./setup, and the seed carries none of the three hooks: without the plugin, a
-# fresh host captures no failures at all. Left alone: an explicit
+# The owner phase ensures papercut@hov is installed, including when called
+# without the default plugin installer. The seed carries none of its hooks:
+# without the plugin, a fresh host captures no failures. Left alone: an explicit
 # enabledPlugins["papercut@hov"] = false (a choice; harness-doctor section 19 still
 # reports the dead capture), a host with no claude CLI, and adding the hov marketplace
 # (./setup's job; adding a marketplace trusts a new source).
@@ -1018,7 +1012,7 @@ ensure_papercut_plugin() {
     return 0
   fi
   if ! command -v jq >/dev/null 2>&1 || [ ! -f "$H/settings.json" ]; then
-    echo "  papercut: $PAPERCUT_PLUGIN_ID not installed: needs jq and $H/settings.json (sync.sh install seeds it)"
+    echo "  papercut: $PAPERCUT_PLUGIN_ID not installed: needs jq and $H/settings.json (./setup seeds it)"
     return 0
   fi
   if jq -e --arg id "$PAPERCUT_PLUGIN_ID" '.enabledPlugins[$id] == false' "$H/settings.json" >/dev/null 2>&1; then
@@ -1027,7 +1021,7 @@ ensure_papercut_plugin() {
   fi
   claude=${CLAUDE_SYNC_CLAUDE_BIN:-$(command -v claude 2>/dev/null || true)}
   if [ -z "$claude" ] || [ ! -x "$claude" ]; then
-    echo "  papercut: no claude CLI${claude:+ at $claude}, so $PAPERCUT_PLUGIN_ID was not installed (install Claude Code, then re-run sync.sh install)"
+    echo "  papercut: no claude CLI${claude:+ at $claude}, so $PAPERCUT_PLUGIN_ID was not installed (install Claude Code, then re-run ./setup)"
     return 0
   fi
   registry=${CLAUDE_INSTALLED_PLUGINS:-$H/plugins/installed_plugins.json}
@@ -1085,7 +1079,7 @@ VALID_COMPACT_WINDOW_JQ='def valid_compact_window:
 # `$HOME/` is rendered with lib/settings-seed.js's mapping ($HOME/.claude to the
 # config dir, then $HOME/ to the home). A permission rule's `$HOME/` is rendered
 # the same way for another reason: setup's seed writes the rendered rule and
-# `sync.sh install` copies the template's spelling, and settings-seed.js already
+# older installations kept the template's spelling; settings-seed.js already
 # counts the two spellings as one entry. Env values are read literally and are
 # not rendered here. An event with no hooks is no event, and
 # hook groups and the hooks in a group are sorted: "When an event fires, its
@@ -1466,14 +1460,16 @@ guard_auto_mode_policy_for_push() {
         ;;
     esac
     if [ ! -f "$path" ] || ! jq -e "$policy_filter" "$path" >/dev/null 2>&1; then
-      echo "push refused: $label settings at $path violate the required Auto/default/bypass policy; run sync.sh install first" >&2
+      local remedy=./setup
+      [ "$label" != managed ] || remedy='./setup --root'
+      echo "push refused: $label settings at $path violate the required Auto/default/bypass policy; run $remedy first" >&2
       return 1
     fi
   done
   # While the canonical EnterPlanMode deny propagates, an entry-less live file
   # would revert it; the check goes inert once the repo copy drops the entry.
   if denies_enter_plan_mode "$HERE/settings.json" && ! denies_enter_plan_mode "$H/settings.json"; then
-    echo "push refused: user settings at $H/settings.json lack the EnterPlanMode deny that the repo copy carries; run sync.sh install first" >&2
+    echo "push refused: user settings at $H/settings.json lack the EnterPlanMode deny that the repo copy carries; run ./setup first" >&2
     return 1
   fi
   if [ -d "$WIN" ]; then
@@ -1482,11 +1478,11 @@ guard_auto_mode_policy_for_push() {
         .permissions.disableAutoMode == "disable"
         and .permissions.disableBypassPermissionsMode != "disable"
       ' "$path" >/dev/null 2>&1; then
-      echo "push refused: Windows settings at $path violate the required Auto/bypass policy; run sync.sh install first" >&2
+      echo "push refused: Windows settings at $path violate the required Auto/bypass policy; run ./setup first" >&2
       return 1
     fi
     if denies_enter_plan_mode "$HERE/windows-stub/settings.json" && ! denies_enter_plan_mode "$path"; then
-      echo "push refused: Windows settings at $path lack the EnterPlanMode deny that the repo copy carries; run sync.sh install first" >&2
+      echo "push refused: Windows settings at $path lack the EnterPlanMode deny that the repo copy carries; run ./setup first" >&2
       return 1
     fi
   fi
@@ -1539,16 +1535,8 @@ push() {
     echo "sync.sh push: refused — this host is '$(profile_role 2>/dev/null || echo undeclared)', not the workstation." >&2
     echo "  Canonical live state is the workstation's (see hosts.tsv). A satellite" >&2
     echo "  consumes the harness and never publishes it." >&2
-    # NOT "DOTFILES_ROLE=workstation sync.sh push", which is what this said and
-    # is an escape hatch that no longer exists for anyone who can reach this
-    # line. Both paths through profile_role close it: on a DECLARED host the
-    # table wins and a contradicting DOTFILES_ROLE is reported-then-ignored, and
-    # on an UNDECLARED host the workstation role is refused outright. A declared
-    # satellite is the only thing that gets here, so the old message advertised
-    # a route to precisely the population that cannot use it.
-    echo "  A declared satellite cannot override this: the table wins, and" >&2
-    echo "  DOTFILES_ROLE=workstation is refused for undeclared hosts. To move" >&2
-    echo "  canonical authority, change hosts.tsv." >&2
+    echo "  Add this host's row to hosts.tsv. To move canonical authority," >&2
+    echo "  change the workstation declaration in hosts.tsv." >&2
     return 2
   fi
   guard_no_credentials || exit 1
@@ -1888,6 +1876,7 @@ reconcile_role_timers() {
 apply_hygiene_posture() {
   local file rows stem kind dir dest want
   HYGIENE_POSTURE_DECLARED=""
+  HYGIENE_POSTURE_CHANGED=0
   if ! declare -F hygiene_posture_load >/dev/null; then
     echo "  ERROR: lib/hygiene-posture.sh is not loaded; no hygiene posture applied" >&2
     return 1
@@ -1899,7 +1888,7 @@ apply_hygiene_posture() {
     return 0
   fi
   if ! rows=$(hygiene_posture_load); then
-    echo "  ERROR: $file is invalid; no hygiene posture applied (fix the file and re-run install)" >&2
+    echo "  ERROR: $file is invalid; no hygiene posture applied (fix the file and re-run ./setup --enable-units)" >&2
     return 1
   fi
   HYGIENE_POSTURE_ROWS=$rows
@@ -1909,6 +1898,13 @@ apply_hygiene_posture() {
     for kind in service timer; do
       dir=$SYS/$stem.$kind.d
       dest=$dir/$HYGIENE_POSTURE_DROPIN
+      if [ "${1:-}" = refresh ]; then
+        [ -f "$dest" ] || [ -L "$dest" ] || continue
+        case "$(readlink -f "$dest")" in
+          "$(readlink -f "$SYS")"/*) ;;
+          *) echo "  refusing posture drop-in outside user unit directory: $dest" >&2; return 1 ;;
+        esac
+      fi
       want=$(hygiene_posture_render "$stem" "$kind")
       if [ -n "$want" ]; then
         if [ -f "$dest" ] && [ "$(cat -- "$dest")" = "$want" ]; then
@@ -1926,6 +1922,7 @@ apply_hygiene_posture() {
           echo "  ERROR: could not write hygiene posture drop-in $dest" >&2
           return 1
         fi
+        HYGIENE_POSTURE_CHANGED=$((HYGIENE_POSTURE_CHANGED + 1))
         echo "  hygiene posture: wrote $dest"
       elif [ -e "$dest" ] || [ -L "$dest" ]; then
         if ! rm -f -- "$dest"; then
@@ -1933,6 +1930,7 @@ apply_hygiene_posture() {
           return 1
         fi
         rmdir "$dir" 2>/dev/null || true
+        HYGIENE_POSTURE_CHANGED=$((HYGIENE_POSTURE_CHANGED + 1))
         echo "  hygiene posture: removed $dest (no longer declared)"
       fi
     done
@@ -2198,7 +2196,7 @@ install_daemon_reload() {
 install_role_selection() {
   # DELIBERATE EXCEPTION — the four hygiene timers (wt-sweep, pkg-cache-prune,
   # docker-hygiene, reclaim-sweep) are NOT in this list, on purpose, even though
-  # they ship in an observe-only/plan-only stage. Every routine `sync.sh install`
+  # they ship in an observe-only/plan-only stage. Every `./setup --enable-units`
   # run (e.g. to pick up an unrelated settings.json change) must not be the thing
   # that silently starts a new deletion-capable timer on an operator's box before
   # they've read the PR that introduced it. Enable them by hand per the OPERATOR
@@ -2259,7 +2257,7 @@ install_tools_gate() {
   if bash "$HERE/scripts/tool-update.sh" --any-installed >/dev/null 2>&1; then
     _enable="$_enable tools-auto-update.timer"
   else
-    echo "  tools-auto-update.timer: none of tool-update.sh's tools is installed here, so it stays off; install one, then re-run install"
+    echo "  tools-auto-update.timer: none of tool-update.sh's tools is installed here, so it stays off; install one, then re-run ./setup --enable-units"
   fi
 
 }
@@ -2290,40 +2288,13 @@ install_summary() {
   fi
   if [ "$papercut_failed" = 1 ]; then
     echo "install finished everything else, but FAILED to install $PAPERCUT_PLUGIN_ID: $PAPERCUT_INSTALL_ERROR" >&2
-    echo "  The settings.json copies of its three hooks were left in place. Fix the cause above, then re-run sync.sh install." >&2
+    echo "  The settings.json copies of its three hooks were left in place. Fix the cause above, then re-run ./setup." >&2
   fi
   if [ "$posture_failed" = 1 ]; then
-    echo "install finished everything else, but the hygiene posture from the overlay was not applied in full (see above); fix it and re-run sync.sh install." >&2
+    echo "install finished everything else, but the hygiene posture from the overlay was not applied in full (see above); fix it and re-run ./setup --enable-units." >&2
   fi
   if [ "$settings_apply_failed$papercut_failed$posture_failed" != 000 ]; then return 1; fi
   echo "install done. Restore separately: credentials (claude login), skills (jsm sync), plugins (claude plugin — enabledPlugins already in settings.json)."
-}
-
-install() {
-  local ts backup="" papercut_failed=0 posture_failed=0 posture_ok=0 settings_apply_failed=0
-  validate_canonical_compact_window || return 1
-  docker_init_policy reconcile || return 1
-  install_harness_links
-  install_volatile_seed
-  install_statusline || return 1
-  install_hooks || return 1
-  install_repo_routes
-  install_retire_loop_quality || return 1
-  install_runtime_policy || return 1
-  install_settings
-  install_papercut_link
-  install_deliverable_link
-  install_watchdog_link
-  install_managed_lock
-  install_memory_seed
-  install_user_units || return 1
-  install_hygiene_posture
-  install_system_units
-  install_daemon_reload || return 1
-  install_role_selection || return 1
-  install_tools_gate
-  install_role_timers || return 1
-  install_summary
 }
 
 role_unit_files() {
@@ -2377,6 +2348,10 @@ role_unit_files() {
       changed=$((changed + 1))
     fi
   done
+  if [ "$phase" = refresh ]; then
+    apply_hygiene_posture refresh || failed=$((failed + 1))
+    changed=$((changed + HYGIENE_POSTURE_CHANGED))
+  fi
   if [ "$changed" -gt 0 ]; then
     if [ "$phase" = refresh ]; then
       role_summary="$changed unit file(s) updated"
@@ -2473,6 +2448,10 @@ role_phase() {
   if [ "$rc" = 2 ]; then
     echo "usage: sync.sh role <refresh|owner|enable|root|check>" >&2
     return 2
+  fi
+  if ! profile_is workstation && ! profile_is satellite; then
+    echo "role: no role for this host; add its row to hosts.tsv" >&2
+    return 1
   fi
   role_steps "$1" || rc=$?
   if [ "$rc" = 1 ]; then role_summary="${role_summary:+$role_summary; }$1 failed (see above)"; fi
@@ -2700,7 +2679,7 @@ check() {
       if [ -n "$mapped_plugin_dirs" ] && [ -z "$invalid_plugin_dirs" ]; then
         missing_plugin_dir=$(plugin_dir_missing_manifest "$mapped_plugin_dirs")
         [ -z "$missing_plugin_dir" ] ||
-          { echo "DRIFT: $f env.CLAUDE_CODE_PLUGIN_DIRS names $missing_plugin_dir, which has no .claude-plugin/plugin.json (sync.sh install relinks ~/.claude/mods; a mod on an unmerged branch is not loadable)"; drift=1; }
+          { echo "DRIFT: $f env.CLAUDE_CODE_PLUGIN_DIRS names $missing_plugin_dir, which has no .claude-plugin/plugin.json (./setup relinks ~/.claude/mods; a mod on an unmerged branch is not loadable)"; drift=1; }
         # The overlay's plugin-dirs lines are compared below as part of the
         # desired settings, which drop a line that cannot be loaded; name it
         # here, since the builder's stderr is shown only when it fails.
@@ -2867,7 +2846,7 @@ check() {
     [ -f "$HERE/systemd/$u" ] || continue
     examined=$((examined + 1))
     if [ ! -f "$SYS/$u" ]; then
-      echo "DRIFT: systemd/$u is not installed (sync.sh install)"; drift=1
+      echo "DRIFT: systemd/$u is not installed (./setup --enable-units)"; drift=1
     elif ! cmp -s "$SYS/$u" "$HERE/systemd/$u"; then
       echo "DRIFT: systemd/$u differs (sync.sh push)"; drift=1
     fi
@@ -2894,19 +2873,19 @@ check() {
         _want=$(hygiene_posture_render "$_stem" "$_kind")
         if [ -n "$_want" ]; then
           if [ ! -f "$_dest" ]; then
-            echo "DRIFT: hygiene posture: $_dest is not installed (sync.sh install)"; drift=1
+            echo "DRIFT: hygiene posture: $_dest is not installed (./setup --enable-units)"; drift=1
           elif [ "$(cat -- "$_dest")" != "$_want" ]; then
-            echo "DRIFT: hygiene posture: $_dest differs from the overlay declaration (sync.sh install)"; drift=1
+            echo "DRIFT: hygiene posture: $_dest differs from the overlay declaration (./setup --enable-units)"; drift=1
           fi
         elif [ -e "$_dest" ] || [ -L "$_dest" ]; then
-          echo "DRIFT: hygiene posture: $_dest is no longer declared (sync.sh install removes it)"; drift=1
+          echo "DRIFT: hygiene posture: $_dest is no longer declared (./setup --enable-units removes it)"; drift=1
         fi
       done
     done
     if systemctl --user show -p Version >/dev/null 2>&1; then
       for _stem in $(hygiene_posture_declared); do
         systemctl --user is-enabled "$_stem.timer" >/dev/null 2>&1 || {
-          echo "DRIFT: hygiene posture: $_stem.timer is declared but not enabled (sync.sh install)"; drift=1
+          echo "DRIFT: hygiene posture: $_stem.timer is declared but not enabled (./setup --enable-units)"; drift=1
         }
       done
     fi
@@ -3039,7 +3018,7 @@ EOF_LIVE_UNITS
 case "$MODE" in
   apply-settings) apply_settings "${@:2}" ;;
   push) push ;;
-  install) install ;;
+  install) echo "sync.sh install was removed. Use ./setup (links and settings), ./setup --enable-units (units and timers), and ./setup --root (lock and system units)." >&2; exit 2 ;;
   role) role_phase "${@:2}" ;;
   reconcile-dcg) reconcile_dcg_hook --write-canonical ;;
   ensure-papercut-plugin) ensure_papercut_plugin ;;
@@ -3074,5 +3053,5 @@ case "$MODE" in
   check) check ;;
   memory-preview|memory-check) memory_preview ;;
   memory-push) memory_push ;;
-  *) echo "usage: sync.sh apply-settings [--plan] [--quiet] [--seed-base <rev>]|push|install|role <refresh|owner|enable|root|check>|reconcile-docker-init|adopt-docker-init [--allow-existing-false]|rollback-docker-init|reconcile-dcg|reconcile-runtime-env|reconcile-windows-auto-mode|ensure-papercut-plugin|check|memory-preview|memory-check|memory-push" >&2; exit 2 ;;
+  *) echo "usage: sync.sh apply-settings [--plan] [--quiet] [--seed-base <rev>]|push|role <refresh|owner|enable|root|check>|reconcile-docker-init|adopt-docker-init [--allow-existing-false]|rollback-docker-init|reconcile-dcg|reconcile-runtime-env|reconcile-windows-auto-mode|ensure-papercut-plugin|check|memory-preview|memory-check|memory-push" >&2; exit 2 ;;
 esac

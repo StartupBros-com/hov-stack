@@ -52,7 +52,7 @@ The `cgroup-parent` key is set on this host but not yet owned by
 rollback path included). `reconcile` preserves foreign keys, so the value
 survives; a fresh host would not get it. Tracked as a follow-up.
 
-Activation after `sync.sh install` places a new drop-in or slice:
+Activation after `./setup --enable-units` places a new drop-in or slice:
 `sudo systemctl daemon-reload` — resource-control properties apply to the
 running unit on reload, verified by reading `memory.high` under
 `/sys/fs/cgroup/system.slice/<unit>/`.

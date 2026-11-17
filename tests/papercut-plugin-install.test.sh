@@ -70,7 +70,7 @@ unchanged() {
   ok
 }
 
-# ---- ensure-papercut-plugin: `sync.sh install` installs the plugin itself --------
+# ---- ensure-papercut-plugin: `./setup` installs the plugin itself --------
 # A stand-in for the claude CLI: it logs its arguments and the CLAUDE_CONFIG_DIR it
 # saw, then acts like `claude plugin install|enable <id> --scope user` against that
 # config directory (or $HOME/.claude), the way the real CLI was observed to in a
@@ -196,25 +196,23 @@ ensure "$h" STUB_MODE=noop
 [ "$rc" -ne 0 ] || fail "a CLI that installed nothing was taken as success:"$'\n'"$out"
 case $out in *"still not installed"*) ok ;; *) fail "the no-op install was not named:"$'\n'"$out" ;; esac
 
-# install runs dcg before plugin installation and defers plugin failure. Since
-# #713 install() is a list of step functions: install_hooks holds the two calls,
-# install_summary turns papercut_failed into the exit status, and install()
-# declares the flag and runs the hooks step before the settings apply.
-body=$(sed -n '/^install() {/,/^}/p' "$SYNC")
+# The owner phase runs DCG before plugin installation and defers plugin failure.
+body=$(sed -n '/^role_phase() {/,/^}/p' "$SYNC")
 hooks_body=$(sed -n '/^install_hooks() {/,/^}/p' "$SYNC")
-summary_body=$(sed -n '/^install_summary() {/,/^}/p' "$SYNC")
+summary_body=$(sed -n '/^role_steps() {/,/^}/p' "$SYNC")
 order=$(grep -E '^ +(reconcile_dcg_hook|ensure_papercut_plugin) ' <<<"$hooks_body" | awk '{print $1}' | tr '\n' ' ') || true
 [ "$order" = "reconcile_dcg_hook ensure_papercut_plugin " ] ||
   fail "install_hooks() does not run dcg before plugin installation: '$order'"
 grep -q -F 'ensure_papercut_plugin || papercut_failed=1' <<<"$hooks_body" ||
-  fail "install_hooks() no longer defers a failed papercut install to the end of install"
+  fail "install_hooks() no longer defers a failed papercut install to the end of the owner phase"
 grep -q -F 'papercut_failed=0' <<<"$body" ||
-  fail "install() no longer declares papercut_failed for its steps"
-steps=$(grep -E '^  (install_hooks|install_settings|install_summary)( |$)' <<<"$body" | awk '{print $1}' | tr '\n' ' ') || true
-[ "$steps" = "install_hooks install_settings install_summary " ] ||
-  fail "install() does not run install_hooks, then install_settings, then install_summary: '$steps'"
-grep -q -F 'if [ "$papercut_failed" = 1 ]; then' <<<"$summary_body" ||
-  fail "install_summary() never exits non-zero for a failed papercut install"
+  fail "role_phase() no longer declares papercut_failed for its steps"
+steps=$(grep -E '^      (install_hooks|install_runtime_policy)( |$)' <<<"$summary_body" | awk '{print $1}' | tr '\n' ' ') || true
+[ "$steps" = "install_hooks install_runtime_policy " ] ||
+  fail "owner does not run install_hooks before install_runtime_policy: '$steps'"
+grep -q -F 'if [ "$papercut_failed" = 1 ]; then' <<<"$summary_body" &&
+  grep -q -F 'return 3' <<<"$summary_body" ||
+  fail "owner never returns the deferred papercut failure status"
 ok
 
 echo "papercut plugin install: $pass passed"

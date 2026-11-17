@@ -163,7 +163,7 @@ from the overlay too, each adding to this repository's. An overlay
   - `private-tokens`, the public-safety scan's fixed-string layer;
   - `foreign-units`, one externally owned unit stem per line, excluded from sync's undeclared-unit findings (blank lines and `#` comments ignored);
   - `hosts.tsv`, this host's copy of the fleet's host-to-role table (`<hostname><TAB><workstation|satellite>` lines), which `lib/profile.sh` reads when the tree carries none. The `workstation` row is the one host allowed to push canonical state, so the operator writes it, and `sync.sh check` reports a host whose live tree has no roster;
-  - `hygiene-posture`, the hygiene timers this host runs and their settings (deletion on, schedule), one `<unit-stem> [KEY=value]` per line; `sync.sh install` applies it and `sync.sh check` reports drift (`systemd/README.md`);
+  - `hygiene-posture`, the hygiene timers this host runs and their settings (deletion on, schedule), one `<unit-stem> [KEY=value]` per line; `./setup --enable-units` applies it and `sync.sh check` reports drift (`systemd/README.md`);
   - `memory-filename-allowlist.txt`, the memory audit's reviewed-name list (the tracked copy has no entries);
   - `ga4-properties.json`, `posthog-projects.json`, `resend-bws-bindings.json`, `stripe-accounts.json`, `supabase-projects.json` and `migration-targets.json`, whose shapes `config/*.example.json` show;
   - `repo-routes.json`, which replaces the tracked placeholder;

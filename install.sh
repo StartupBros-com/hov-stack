@@ -117,7 +117,7 @@ fi
 if /usr/bin/bash "$DOTFILES/harnesses/fx/sync.sh" install; then
     echo "  Installed harnesses/fx harness (skill bridge + settings seed)"
 else
-    echo "  WARN: fx harness install incomplete; fix the skills reported above, then rerun ~/dotfiles/harnesses/fx/sync.sh install" >&2
+    echo "  WARN: fx harness install incomplete; fix the skills reported above, then rerun ~/dotfiles/harnesses/fx/sync.sh 'install'" >&2
 fi
 
 # Set up gitconfig (not symlinked - contains user-specific data)

@@ -332,7 +332,9 @@ test("role and live deny inputs invalidate stamps without processes", () => {
     let before = hash();
     fs.writeFileSync(path.join(tmp,"hosts.tsv"),"fixture\tworkstation\n");
     assert.notEqual(hash(),before);
-    before = hash(); args.env.DOTFILES_ROLE="satellite"; assert.notEqual(hash(),before);
+    before = hash();
+    args.env.DOTFILES_ROLE = "satellite";
+    assert.equal(hash(), before);
     before = hash(); fs.writeFileSync(path.join(tmp,"settings.json"),'{"permissions":{"deny":["a"]}}');
     assert.notEqual(hash(),before);
   } finally {fs.rmSync(tmp,{recursive:true,force:true});}

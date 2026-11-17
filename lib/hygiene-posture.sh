@@ -4,7 +4,7 @@
 # hygiene-posture.sh — the host-declared posture of the four hygiene timers.
 #
 # The shipped units (systemd/wt-sweep.*, reclaim-sweep.*, docker-hygiene.*,
-# pkg-cache-prune.*) are plan-only, and `sync.sh install` copies them over the live
+# pkg-cache-prune.*) are plan-only, and `./setup --enable-units` copies them over the live
 # ones, so a host that runs one with deletion on lost that setting at the next install
 # and kept a disabled timer. A host declares its posture in <overlay>/hygiene-posture
 # instead, one setting per line; a # after optional leading whitespace starts a comment
@@ -181,7 +181,7 @@ hygiene_posture_render() {
     *) return 2 ;;
   esac
   printf '%s\n%s\n%s%s' \
-    "# Written by sync.sh install from the overlay's hygiene-posture file." \
+    "# Written by ./setup --enable-units from the overlay's hygiene-posture file." \
     "# Edit that file, not this one; install rewrites or removes this drop-in." \
     "$header" "$body"
 }

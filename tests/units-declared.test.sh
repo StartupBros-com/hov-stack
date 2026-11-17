@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Every shipped unit file is declared, and every declared unit ships.
 #
-# Consumer: `sync.sh install`, which copies only the names in UNITS (user
+# Consumer: `./setup --enable-units`, which copies only the names in UNITS (user
 # units, from systemd/) and SYSTEM_UNITS (root units, from
 # systemd-system/). Defect class: a unit file in the tree that install
 # never copies (it ships in the repo and never reaches a host), and the inverse,

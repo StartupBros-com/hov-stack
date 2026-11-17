@@ -19,13 +19,16 @@ pass=0 fail=0
 ok()  { pass=$((pass + 1)); }
 bad() { fail=$((fail + 1)); echo "FAIL: $*" >&2; }
 
-DOTFILES_ROLE_FILE=$REPO/hosts.tsv
+ROLE_TMP=$(mktemp -d) || exit 1
+trap 'rm -f -- "$ROLE_TMP/hosts.tsv"; rmdir "$ROLE_TMP"' EXIT
+printf 'workstation-host\tworkstation\nsatellite-host\tsatellite\n' >"$ROLE_TMP/hosts.tsv"
+DOTFILES_ROLE_FILE=$ROLE_TMP/hosts.tsv
 export DOTFILES_ROLE_FILE
 # shellcheck source=../lib/profile.sh
 . "$REPO/lib/profile.sh"
 
 # 1. Zero-run-green guard: the table must actually contain hosts.
-n=$(grep -cvE '^\s*(#|$)' "$REPO/hosts.tsv")
+n=$(grep -cvE '^\s*(#|$)' "$DOTFILES_ROLE_FILE")
 [ "$n" -ge 2 ] && ok || bad "hosts.tsv declares $n hosts, expected >=2"
 
 # 2. An UNMAPPED host resolves to nothing and returns non-zero. Defaulting would
@@ -35,18 +38,18 @@ n=$(grep -cvE '^\s*(#|$)' "$REPO/hosts.tsv")
   && bad "unmapped host resolved to a role" || ok
 
 # 3. Both real machines resolve, and to different roles.
-w=$( unset DOTFILES_ROLE; profile_role workstation-host 2>/dev/null )
-x=$( unset DOTFILES_ROLE; profile_role satellite-host 2>/dev/null )
+w=$( unset DOTFILES_ROLE; profile_role workstation-host 2>&1 )
+x=$( unset DOTFILES_ROLE; profile_role satellite-host 2>&1 )
 [ "$w" = workstation ] && [ "$x" = satellite ] \
   && ok || bad "expected workstation-host=workstation satellite-host=satellite, got workstation-host=$w satellite-host=$x"
 
 # 4. EXACTLY ONE workstation. Two would mean two machines pushing canonical
 #    state, which is the corruption the whole model exists to prevent.
-c=$(awk -F'\t' '!/^#/ && NF>=2 && $2=="workstation"' "$REPO/hosts.tsv" | wc -l)
+c=$(awk -F'\t' '!/^#/ && NF>=2 && $2=="workstation"' "$DOTFILES_ROLE_FILE" | wc -l)
 [ "$c" -eq 1 ] && ok || bad "hosts.tsv declares $c workstations, must be exactly 1"
 
 # 5. Every declared role is one of the two known ones.
-u=$(awk -F'\t' '!/^#/ && NF>=2 && $2!="workstation" && $2!="satellite" {print $2}' "$REPO/hosts.tsv")
+u=$(awk -F'\t' '!/^#/ && NF>=2 && $2!="workstation" && $2!="satellite" {print $2}' "$DOTFILES_ROLE_FILE")
 [ -z "$u" ] && ok || bad "unknown role(s) in hosts.tsv: $u"
 
 # 6. No role's timer set enables backup-harness.timer: it is opt-in, because
@@ -54,7 +57,7 @@ u=$(awk -F'\t' '!/^#/ && NF>=2 && $2!="workstation" && $2!="satellite" {print $2
 #    disables it, since a second host writing the canonical backup duplicates or
 #    clobbers the workstation's copy. Reads both _enable sets directly rather than
 #    the first "satellite)" in sync.sh, which is an unrelated case statement.
-sets=$(grep -o '_enable="[^"]*"' "$REPO/sync.sh")
+sets=$(grep -o '_enable="[^"]*"' "$REPO/sync.sh" | grep -v "\$_enable")
 n=$(printf '%s\n' "$sets" | grep -c .)
 leak=$(printf '%s\n' "$sets" | grep -F backup-harness || true)
 if [ "$n" -eq 2 ] && [ -z "$leak" ]; then ok
@@ -130,13 +133,13 @@ esac
 #     for. Verified against the real destructive case: DOTFILES_ROLE=workstation
 #     sync.sh push from this satellite once replaced the workstation's 693-line
 #     settings.json with the laptop's.
-r=$( unset DOTFILES_ROLE; DOTFILES_ROLE=workstation profile_role satellite-host 2>/dev/null )
+r=$( unset DOTFILES_ROLE; DOTFILES_ROLE=workstation profile_role satellite-host 2>&1 )
 [ "$r" = satellite ] && ok || bad "DOTFILES_ROLE overrode a declared host (got '$r')"
 
-# 12. But an UNDECLARED host may still self-declare, or a rebuild under a
-#     temporary hostname could not install at all.
-r=$( DOTFILES_ROLE=satellite profile_role no-such-host-xyz 2>/dev/null )
-[ "$r" = satellite ] && ok || bad "undeclared host could not use the override (got '$r')"
+# 12. An undeclared host cannot gain even satellite authority from the environment.
+r=$( DOTFILES_ROLE=satellite profile_role no-such-host-xyz 2>&1 )
+rc=$?
+[ "$rc" -eq 1 ] && [ -z "$r" ] && ok || bad "undeclared host accepted satellite override (rc=$rc, output='$r')"
 
 # 13. install() must RECONCILE, not only enable. Without a disable path a
 #     satellite keeps every singleton timer it already had, and the migration
@@ -156,16 +159,15 @@ grep -q 'profile_assert_known' "$REPO/sync.sh" \
 #     unregistered host claiming it by environment variable is exactly the hole
 #     the table exists to close -- push authority hangs off this role, and a
 #     fresh machine, a CI runner or any third box could otherwise assert it.
-r=$( DOTFILES_ROLE=workstation profile_role some-unregistered-box 2>/dev/null )
+r=$( DOTFILES_ROLE=workstation profile_role some-unregistered-box 2>&1 )
 rc=$?
-{ [ "$rc" -ne 0 ] && [ -z "$r" ]; } \
+{ [ "$rc" -eq 1 ] && [ -z "$r" ]; } \
   && ok || bad "unregistered host was granted workstation by env var (rc=$rc, role='$r')"
 
-# 17. But `satellite` is still allowed for an unregistered host: it fails DOWN,
-#     enabling the minimal timer set and holding no push authority. Without this
-#     a rebuild under a temporary hostname could not install at all.
-r=$( DOTFILES_ROLE=satellite profile_role some-unregistered-box 2>/dev/null )
-[ "$r" = satellite ] && ok || bad "unregistered host could not self-declare as satellite (got '$r')"
+# 17. Satellite also requires a roster row, with no override diagnostic.
+r=$( DOTFILES_ROLE=satellite profile_role some-unregistered-box 2>&1 )
+rc=$?
+[ "$rc" -eq 1 ] && [ -z "$r" ] && ok || bad "unregistered host accepted satellite override (rc=$rc, output='$r')"
 
 # 18. The cron-migrated role set is exactly two, and remains outside both
 # base role sets (case 6's $sets). Workstation admission is dynamic per ownership scan, so

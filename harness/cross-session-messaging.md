@@ -37,7 +37,7 @@ from 2.1.283, unless the organization requires Trusted Devices.
 - `crossSessionInbound: accept`, user-wide, since 2026-09-28 (operator
   decision after the Ground Truth vet follow-up). Applied by hand to the
   live `~/.claude/settings.json` and mirrored in the tracked copy, because
-  `settings.json` is volatile and `sync.sh install` never copies it. With no
+  `settings.json` is volatile; `./setup` seeds or merges it rather than replacing it. With no
   value set, Claude Code decides per message from the two sessions'
   permission-mode classes (bypass versus prompting, per the messaging docs):
   a prompting receiver delivers unless the sender bypasses, and a bypass

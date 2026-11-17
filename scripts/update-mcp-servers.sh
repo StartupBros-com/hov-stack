@@ -14,7 +14,7 @@ REALPATH_BIN="${REALPATH_BIN:-realpath}"
 # No built-in origin: the checkout this updater may fast-forward is deployment-specific.
 # An exported EXPECTED_ORIGIN wins, for one run; otherwise the HOV_MCP_EXPECTED_ORIGIN
 # line of the overlay's env file answers. That is where a host sets it: the scheduled
-# unit runs without the file in its environment, and `sync.sh install` overwrites a line
+# unit runs without the file in its environment, and `./setup --enable-units` overwrites a line
 # edited into the unit. The overlay name is namespaced because claude-env.sh exports the
 # file to every session command. Unset in both, the updater refuses before git.
 # shellcheck source=lib/overlay.sh

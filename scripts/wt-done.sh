@@ -597,7 +597,7 @@ close_one() {
 #   defect      — OBSERVED (dotfiles#909, 2026-09-02): PR #893 merged 19:53:47; the
 #                 canonical checkout that ~/.claude/* symlinks into sat one commit behind
 #                 until 20:01:51, and the session that merged it closed by telling the
-#                 operator to run sync.sh install (same shape as #355 and #508/#510).
+#                 operator to run ./setup (same shape as #355 and #508/#510).
 #   delete-when — a merge event on the host itself refreshes the canonical checkout
 #                 (webhook or a path unit on the fetch), so no caller has to ask for it.
 #

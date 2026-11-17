@@ -5,7 +5,7 @@
 #
 # The overlay holds what this tree cannot carry (README.md, "The private overlay"). A
 # session gets <overlay>/env through claude-env.sh, but a systemd unit runs without it,
-# and `sync.sh install` copies this repository's unit files over the live ones, so a
+# and `./setup --enable-units` copies this repository's unit files over the live ones, so a
 # value edited into a unit file does not survive the next install. A scheduled script
 # that needs a host value reads it here instead.
 

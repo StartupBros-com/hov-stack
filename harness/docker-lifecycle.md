@@ -69,8 +69,9 @@ doctor never runs the full hygiene script to manufacture fresh evidence.
 
 ## 1. Repository installation
 
-`bash sync.sh install` installs the helper, policy, and existing unit
-files. On an unadopted workstation it validates/reports the candidate as pending
+`./setup` links the helper, `./setup --enable-units` installs user units, and
+`./setup --root` reconciles Docker policy and system units. On an unadopted
+workstation the root phase validates/reports the candidate as pending
 and does not publish `init`. Installation does not restart Docker, start stopped
 containers, or enable `docker-hygiene.timer`.
 

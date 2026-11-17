@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # lib/overlay.sh, and the scheduled script that reads a host value through it.
 #
-# A systemd unit runs without <overlay>/env in its environment, and `sync.sh install`
+# A systemd unit runs without <overlay>/env in its environment, and `./setup --enable-units`
 # copies the shipped unit files over the live ones, so a value edited into a unit does not
 # last. update-mcp-servers.sh is the first scheduled script that needs a host value: the
 # GitHub origin its checkout must match. Before lib/overlay.sh it read only an exported

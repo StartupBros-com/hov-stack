@@ -106,7 +106,7 @@ The repository manages these two replacement timers and their services:
 - `mcp-servers-update.timer`
 - `skills-update.timer`
 
-`sync.sh install` always deploys the unit files byte-for-byte. On the workstation,
+`./setup --enable-units` always deploys the unit files byte-for-byte. On the workstation,
 it reads and classifies the active crontab under the shared cutover lock and admits
 each timer only when that job's direct legacy command is absent. A legacy owner
 that remains or reappears disables only its replacement. A read/parser failure or
@@ -120,7 +120,7 @@ separate post-merge cutover, independently per job, after canonical deployment a
 live proof; see `harness/wsl-crontab-and-cookie-sync.md`.
 
 `settings.json` contains a standalone DCG `PreToolUse` Bash hook. On an
-already-configured machine, `sync.sh install` (or the narrower
+already-configured machine, `./setup` (or the narrower
 `sync.sh reconcile-dcg`) backs up the live file and merges only that hook. It
 does not replace other hooks, permissions, environment values, or runtime-owned
 settings. DCG must be installed at `~/.local/bin/dcg` before opening a
@@ -165,9 +165,9 @@ mirror, satisfy the floor, and report "memory in sync". Resolve a `LOST` line by
 restoring the live store, or by `git rm -r memory/<project>` if the project is
 genuinely retired (the archive is versioned, so that stays recoverable).
 
-`sync.sh install` restores mirrored projects only when their live memory directory is
+`./setup` restores mirrored projects only when their live memory directory is
 missing. It never overwrites an existing live memory directory. To restore a missing
-project, run install. To restore selected older or mirror-only files into an existing
+project, run `./setup`. To restore selected older or mirror-only files into an existing
 project, inspect and copy those files manually.
 
 The auditor validates `MEMORY.md` coverage and links, the existing note frontmatter

@@ -43,7 +43,7 @@ copy_tracked() { cp -a "$1" "$2" && chmod -R u=rwX,go=rX "$2"; }
 # Copy the source outside its git worktree: check() correctly reports pending
 # source changes as drift, but that host state is unrelated to this fixture.
 mkdir -p "$TMP/dotfiles"
-# The harness tree is what sync.sh installs: copy each DOTFILES_HARNESS entry rather
+# The harness tree is what ./setup installs: copy each DOTFILES_HARNESS entry rather
 # than the whole checkout, so docs/, harnesses/ and the repo-only root files stay out
 # of the fixture the way the old mirror directory kept them out.
 # shellcheck source=../lib/manifest.sh
@@ -53,6 +53,7 @@ for e in "${DOTFILES_HARNESS[@]}"; do copy_tracked "$REPO/$e" "$TMP/dotfiles/$e"
 # Both belong in the fake tree because they are the same repo -- omitting them
 # made sync.sh emit "No such file" on every invocation in this suite.
 copy_tracked "$REPO/lib" "$TMP/dotfiles/lib"
+copy_tracked "$REPO/setup" "$TMP/dotfiles/setup"
 # config/ holds the harness's policy files (dispatcher.env, repo-routes.json,
 # system/docker-daemon.patch.json) beside the tool configs
 # install.sh links; sync.sh reads and links from it, so the directory comes along whole.
@@ -89,6 +90,8 @@ mkdir -p "$CLAUDE_HOME/config"
 printf '%s\n' '{"retired":true}' >"$retired_profile"
 export HOME CLAUDE_HOME
 mkdir -p "$HOME"
+mkdir -p "$HOME/.local/bin"
+cp /usr/bin/false "$HOME/.local/bin/dcg"
 # The overlay is the fixture's own, so no install here reads a real host's overlay
 # files (foreign-units, hygiene-posture) through an inherited variable.
 unset XDG_CONFIG_HOME
@@ -118,6 +121,17 @@ printf '#!/usr/bin/env bash\necho "hov-smoke-tool 1.0.0"\n' >"$TOOL_UPDATE_BIN_D
 chmod +x "$TOOL_UPDATE_BIN_DIR/hov-smoke-tool"
 
 SYNC="$REPO/sync.sh"
+
+setup_phases() (
+  local phase_status=0 owner_status=0
+  CLAUDE_CONFIG_DIR="$CLAUDE_HOME" bash "$REPO/setup" --no-dcg || phase_status=1
+  "$SYNC" role owner || owner_status=$?
+  [ "$owner_status" = 0 ] || [ "$owner_status" = 3 ] || return "$owner_status"
+  "$SYNC" apply-settings || phase_status=1
+  "$SYNC" role root || return 1
+  "$SYNC" role enable || return 1
+  [ "$owner_status" = 0 ] && [ "$phase_status" = 0 ]
+)
 
 # Docker init policy uses its real subprocess CLI against asserted scratch
 # paths. The mock implements only dockerd's offline validation interface and
@@ -264,6 +278,7 @@ case "${CRONTAB_MODE:-absent}" in
 esac
 SH
 chmod +x "$TEST_BIN/docker" "$TEST_BIN/systemctl" "$TEST_BIN/crontab"
+cp /usr/bin/false "$TEST_BIN/claude"
 export DOCKER_COMMAND_LOG="$TMP/docker-command.log"
 export SYSTEMCTL_LOG="$TMP/systemctl.log"
 export SYSTEMCTL_ENABLED_TIMERS="$TMP/systemctl-enabled-timers.state"
@@ -280,7 +295,7 @@ export CLAUDE_SYNC_CUTOVER_LOCK="$TMP/critical-silence-cutover.lock"
 : >"$SYSTEMCTL_ACTIVE_SERVICES"
 : >"$SYSTEMCTL_FAILED_SERVICES"
 : >"$CRONTAB_FIXTURE"
-export PATH="$TEST_BIN:$PATH"
+export PATH="$TEST_BIN:$HOME/.local/bin:$PATH"
 
 # The three public Docker policy verbs validate their complete argv before the
 # helper or sudo can run. Replace only the copied helper with an invocation
@@ -461,7 +476,7 @@ for plan_fixture in missing:'.permissions.deny -= ["EnterPlanMode"]' exit-only:'
     CLAUDE_SYNC_MANAGED_LOCK="$stale_push_lock" "$SYNC" push 2>&1); stale_plan_status=$?
   if [ "$stale_plan_status" -ne 0 ]; then ok; else bad "push accepted user settings without the EnterPlanMode deny (${plan_fixture%%:*})"; fi
   case "$stale_plan_out" in
-    *"user settings"*"EnterPlanMode"*"sync.sh install"*) ok ;;
+    *"user settings"*"EnterPlanMode"*"./setup"*) ok ;;
     *) bad "EnterPlanMode push refusal (${plan_fixture%%:*}) did not name the source, the entry, and the install remedy:"$'\n'"$stale_plan_out" ;;
   esac
 done
@@ -545,7 +560,7 @@ stale_windows_plan_out=$(CLAUDE_HOME="$stale_push_home" CLAUDE_WINDOWS_HOME="$st
   CLAUDE_SYNC_MANAGED_LOCK="$stale_push_lock" "$SYNC" push 2>&1); stale_windows_plan_status=$?
 if [ "$stale_windows_plan_status" -ne 0 ]; then ok; else bad "push accepted Windows settings without the EnterPlanMode deny"; fi
 case "$stale_windows_plan_out" in
-  *"Windows settings"*"EnterPlanMode"*"sync.sh install"*) ok ;;
+  *"Windows settings"*"EnterPlanMode"*"./setup"*) ok ;;
   *) bad "Windows EnterPlanMode push refusal did not name the source, the entry, and the install remedy:"$'\n'"$stale_windows_plan_out" ;;
 esac
 cp "$REPO/windows-stub/settings.json" "$stale_push_windows/.claude/settings.json"
@@ -823,7 +838,7 @@ sn_edit --arg rule "Bash($HOME/planted/bin/tool:*)" '.permissions.allow += [$rul
 sn_expect_clean "the overlay rule in live, rendered as setup writes it" "$sn_ov"
 sn_reset
 sn_edit '.permissions.allow += ["Bash($HOME/planted/bin/tool:*)"]'
-sn_expect_clean "the overlay rule in live, in the template spelling sync.sh install copies" "$sn_ov"
+sn_expect_clean "the overlay rule in live, in the template spelling ./setup copies" "$sn_ov"
 sn_reset
 # Hook order and spelling: groups run in parallel, and `$HOME/.claude` in a
 # command is the config dir.
@@ -1265,9 +1280,9 @@ jq 'del(.permissions.disableAutoMode) | .permissions.deny -= ["EnterPlanMode"] |
   "$REPO/windows-stub/settings.json" >"$CLAUDE_WINDOWS_HOME/.claude/settings.json"
 cp "$CLAUDE_WINDOWS_HOME/.claude/settings.json" "$TMP/windows-settings-before-install.json"
 
-echo "=== sync.sh install (fresh retry) ===" >&2
-out=$("$SYNC" install 2>&1); status=$?
-if [ "$status" -eq 0 ]; then ok; else bad "sync.sh install exited $status:"$'\n'"$out"; fi
+echo "=== ./setup (fresh retry) ===" >&2
+out=$(setup_phases 2>&1); status=$?
+if [ "$status" -eq 0 ]; then ok; else bad "./setup exited $status:"$'\n'"$out"; fi
 
 # Routine install may validate the reviewed candidate but cannot perform first
 # adoption. Unknown target keys and exact bytes remain operator-owned until the
@@ -1299,7 +1314,7 @@ fi
 # Once adopted, policy validation failures are installer failures rather than a
 # silently green install. Snapshot all Docker-owned artifacts around the call.
 docker_failure_before=$(sha256sum "$DOCKER_DAEMON_TARGET" "$DOCKER_ADOPTION_STATE" "$DOCKER_ADOPTION_BACKUP")
-docker_failure_out=$(DOCKER_VALIDATE_EXIT=42 "$SYNC" install 2>&1); docker_failure_status=$?
+docker_failure_out=$(DOCKER_VALIDATE_EXIT=42 setup_phases 2>&1); docker_failure_status=$?
 docker_failure_after=$(sha256sum "$DOCKER_DAEMON_TARGET" "$DOCKER_ADOPTION_STATE" "$DOCKER_ADOPTION_BACKUP")
 if [ "$docker_failure_status" -ne 0 ] \
    && [ "$docker_failure_before" = "$docker_failure_after" ] \
@@ -1356,7 +1371,7 @@ fi
 # leaves it out of the role set and the reconcile disables it (hov-stack#632), saying
 # why. dcg's timer is unaffected. The next install after a tool appears enables it.
 mv "$TOOL_UPDATE_BIN_DIR/hov-smoke-tool" "$TMP/hov-smoke-tool.aside"
-no_tools_out=$("$SYNC" install 2>&1); no_tools_status=$?
+no_tools_out=$(setup_phases 2>&1); no_tools_status=$?
 mv "$TMP/hov-smoke-tool.aside" "$TOOL_UPDATE_BIN_DIR/hov-smoke-tool"
 if [ "$no_tools_status" -eq 0 ] && ! timer_enabled tools-auto-update.timer \
    && timer_enabled dcg-auto-update.timer \
@@ -1365,7 +1380,7 @@ if [ "$no_tools_status" -eq 0 ] && ! timer_enabled tools-auto-update.timer \
 else
   bad "install with none of tool-update.sh's tools kept tools-auto-update.timer or did not say why:"$'\n'"$no_tools_out"
 fi
-tools_back_out=$("$SYNC" install 2>&1); tools_back_status=$?
+tools_back_out=$(setup_phases 2>&1); tools_back_status=$?
 if [ "$tools_back_status" -eq 0 ] && timer_enabled tools-auto-update.timer; then
   ok
 else
@@ -1386,7 +1401,7 @@ sort -u -o "$SYSTEMCTL_ACTIVE_SERVICES" "$SYSTEMCTL_ACTIVE_SERVICES"
 printf '%s\n' '0 4 * * 0 $HOME/.local/bin/update-mcp-servers.sh >> /redacted/log 2>&1' \
   >"$CRONTAB_FIXTURE"
 export CRONTAB_MODE=file
-owner_out=$("$SYNC" install 2>&1); owner_status=$?
+owner_out=$(setup_phases 2>&1); owner_status=$?
 if [ "$owner_status" -eq 0 ] \
    && ! timer_enabled mcp-servers-update.timer \
    && [ "$(enabled_migrated_count)" -eq 1 ] \
@@ -1403,7 +1418,7 @@ fi
 printf '%s\n' mcp-servers-update.service >>"$SYSTEMCTL_ACTIVE_SERVICES"
 sort -u -o "$SYSTEMCTL_ACTIVE_SERVICES" "$SYSTEMCTL_ACTIVE_SERVICES"
 export SYSTEMCTL_STICKY_SERVICE=mcp-servers-update.service
-sticky_out=$("$SYNC" install 2>&1); sticky_status=$?
+sticky_out=$(setup_phases 2>&1); sticky_status=$?
 unset SYSTEMCTL_STICKY_SERVICE
 if [ "$sticky_status" -ne 0 ] \
    && service_active mcp-servers-update.service \
@@ -1412,7 +1427,7 @@ if [ "$sticky_status" -ne 0 ] \
 else
   bad "scheduler claimed safety without proving the replacement service inactive:"$'\n'"$sticky_out"
 fi
-"$SYNC" install >/dev/null 2>&1 \
+setup_phases >/dev/null 2>&1 \
   || bad "scheduler fixture did not recover after the sticky-service negative"
 
 # `systemctl stop` can leave a oneshot in failed state. Failed is not proof of
@@ -1420,7 +1435,7 @@ fi
 # preserving unrelated manager state.
 printf '%s\n' mcp-servers-update.service >"$SYSTEMCTL_FAILED_SERVICES"
 : >"$SYSTEMCTL_LOG"
-failed_service_out=$("$SYNC" install 2>&1); failed_service_status=$?
+failed_service_out=$(setup_phases 2>&1); failed_service_status=$?
 if [ "$failed_service_status" -ne 0 ] \
    && service_failed mcp-servers-update.service \
    && timer_enabled unrelated-existing.timer \
@@ -1432,7 +1447,7 @@ else
   bad "scheduler accepted a failed replacement service or touched unrelated state:"$'\n'"$failed_service_out"
 fi
 : >"$SYSTEMCTL_FAILED_SERVICES"
-"$SYNC" install >/dev/null 2>&1 \
+setup_phases >/dev/null 2>&1 \
   || bad "scheduler fixture did not recover after the failed-service negative"
 
 # Commented targets and standalone assignments are inactive. Empty and absent
@@ -1440,11 +1455,11 @@ fi
 printf '%s\n' \
   'PATH="$HOME/bin:/usr/bin" # standalone environment' \
   '# 0 4 * * 0 $HOME/.local/bin/update-mcp-servers.sh' >"$CRONTAB_FIXTURE"
-ignored_out=$("$SYNC" install 2>&1); ignored_status=$?
+ignored_out=$(setup_phases 2>&1); ignored_status=$?
 [ "$ignored_status" -eq 0 ] && [ "$(enabled_migrated_count)" -eq 2 ] \
   && ok || bad "comment/environment records prevented migrated timer admission:"$'\n'"$ignored_out"
 : >"$CRONTAB_FIXTURE"
-empty_out=$("$SYNC" install 2>&1); empty_status=$?
+empty_out=$(setup_phases 2>&1); empty_status=$?
 [ "$empty_status" -eq 0 ] && [ "$(enabled_migrated_count)" -eq 2 ] \
   && ok || bad "empty crontab did not admit both migrated timers:"$'\n'"$empty_out"
 
@@ -1452,7 +1467,7 @@ empty_out=$("$SYNC" install 2>&1); empty_status=$?
 # fail closed for the mentioned job while the other job remains independent.
 printf '%s\n' 'FOO=1 0 4 * * 0 $HOME/.local/bin/update-mcp-servers.sh' \
   >"$CRONTAB_FIXTURE"
-ambiguous_out=$("$SYNC" install 2>&1); ambiguous_status=$?
+ambiguous_out=$(setup_phases 2>&1); ambiguous_status=$?
 if [ "$ambiguous_status" -eq 0 ] \
    && ! timer_enabled mcp-servers-update.timer \
    && [ "$(enabled_migrated_count)" -eq 1 ]; then
@@ -1472,7 +1487,7 @@ printf '# satellite fixture table\n%s\t%s\n' "$fixture_hostname" satellite \
 # source of CCFLARE_URL_SATELLITE.
 unset CCFLARE_URL_SATELLITE
 sat_unset_url_before=$(jq -r '.env.ANTHROPIC_BASE_URL // ""' "$CLAUDE_HOME/settings.json" 2>/dev/null)
-sat_unset_out=$("$SYNC" install 2>&1); sat_unset_status=$?
+sat_unset_out=$(setup_phases 2>&1); sat_unset_status=$?
 if [ "$sat_unset_status" -ne 0 ] && grep -Fq 'CCFLARE_URL_SATELLITE is unset' <<<"$sat_unset_out"; then
   ok
 else
@@ -1491,7 +1506,7 @@ docker_satellite_validations_before=$(wc -l <"$DOCKER_VALIDATE_LOG")
 # An empty system dir for this install alone: the workstation install above already
 # filled the shared one, where an unchanged unit is skipped whatever the role.
 satellite_system=$TMP/satellite-system
-satellite_out=$(CLAUDE_SYNC_SYSTEM_SYS_DIR="$satellite_system" "$SYNC" install 2>&1); satellite_status=$?
+satellite_out=$(CLAUDE_SYNC_SYSTEM_SYS_DIR="$satellite_system" setup_phases 2>&1); satellite_status=$?
 satellite_check_out=$("$SYNC" check 2>&1); satellite_check_status=$?
 satellite_push_out=$("$SYNC" push 2>&1); satellite_push_status=$?
 if [ "$satellite_status" -eq 0 ] \
@@ -1542,7 +1557,7 @@ printf '%s\n' '0 4 * * 0 $HOME/.local/bin/update-mcp-servers.sh' >"$CRONTAB_FIXT
 for satellite_cron_mode in unavailable error absent file drift; do
   seed_satellite_scheduler
   export CRONTAB_MODE=$satellite_cron_mode
-  satellite_cron_out=$("$SYNC" install 2>&1); satellite_cron_status=$?
+  satellite_cron_out=$(setup_phases 2>&1); satellite_cron_status=$?
   if [ "$satellite_cron_status" -eq 0 ] \
      && [ ! -s "$CRONTAB_CALL_LOG" ] \
      && [ "$(enabled_migrated_count)" -eq 0 ] \
@@ -1574,7 +1589,7 @@ for satellite_failure in disable stop sticky failed enable lock; do
     lock) exec 9>"$CLAUDE_SYNC_CUTOVER_LOCK"; flock -n 9 ;;
   esac
   satellite_failure_before=$(sha256sum "$SYSTEMCTL_ENABLED_TIMERS" "$SYSTEMCTL_ACTIVE_SERVICES" "$SYSTEMCTL_FAILED_SERVICES")
-  satellite_failure_out=$("$SYNC" install 2>&1); satellite_failure_status=$?
+  satellite_failure_out=$(setup_phases 2>&1); satellite_failure_status=$?
   if [ "$satellite_failure" = lock ]; then flock -u 9; exec 9>&-; fi
   unset SYSTEMCTL_FAIL_DISABLE SYSTEMCTL_FAIL_STOP SYSTEMCTL_STICKY_SERVICE SYSTEMCTL_FAIL_ENABLE_TIMER
   if [ "$satellite_failure_status" -ne 0 ] && [ ! -s "$CRONTAB_CALL_LOG" ] \
@@ -1607,7 +1622,7 @@ for satellite_failure in disable stop sticky failed enable lock; do
 done
 seed_satellite_scheduler
 export CRONTAB_MODE=file
-"$SYNC" install >/dev/null 2>&1 || bad "satellite scheduler did not recover after failure fixtures"
+setup_phases >/dev/null 2>&1 || bad "satellite scheduler did not recover after failure fixtures"
 
 
 # An undeclared host cannot use DOTFILES_ROLE=workstation as a backdoor. It may
@@ -1615,7 +1630,7 @@ export CRONTAB_MODE=file
 printf '# unknown-host fixture table\n' >"$REPO/hosts.tsv"
 docker_unknown_before=$(sha256sum "$DOCKER_DAEMON_TARGET" "$DOCKER_ADOPTION_STATE" "$DOCKER_ADOPTION_BACKUP")
 docker_unknown_validations_before=$(wc -l <"$DOCKER_VALIDATE_LOG")
-unknown_out=$(DOTFILES_ROLE=workstation "$SYNC" install 2>&1); unknown_status=$?
+unknown_out=$(DOTFILES_ROLE=workstation setup_phases 2>&1); unknown_status=$?
 unknown_check_out=$(DOTFILES_ROLE=workstation "$SYNC" check 2>&1); unknown_check_status=$?
 unknown_push_out=$(DOTFILES_ROLE=workstation "$SYNC" push 2>&1); unknown_push_status=$?
 if [ "$unknown_status" -ne 0 ] \
@@ -1635,23 +1650,22 @@ else
   bad "undeclared host claimed or validated Docker init policy"
 fi
 
-# A damaged checkout may retain the historical DOTFILES_ROLE fallback for
-# unrelated units: with no authoritative profile library, install must still
-# succeed and enable the workstation timer set.
+# A damaged checkout has no role, regardless of DOTFILES_ROLE.
+# Refusal must preserve the existing timer set and Docker policy.
 docker_missing_profile_before=$(sha256sum "$DOCKER_DAEMON_TARGET" "$DOCKER_ADOPTION_STATE" "$DOCKER_ADOPTION_BACKUP")
 docker_missing_profile_validations_before=$(wc -l <"$DOCKER_VALIDATE_LOG")
 mv "$REPO/lib/profile.sh" "$TMP/profile.sh.authoritative"
 # The workstation set leaves an opted-in backup-harness.timer enabled where the satellite
 # set disables it, so seeding it enabled tells the two roles apart.
 printf '%s\n' backup-harness.timer >>"$SYSTEMCTL_ENABLED_TIMERS"
-missing_profile_out=$(DOTFILES_ROLE=workstation "$SYNC" install 2>&1); missing_profile_status=$?
+missing_profile_out=$(DOTFILES_ROLE=workstation setup_phases 2>&1); missing_profile_status=$?
 missing_profile_check_out=$(DOTFILES_ROLE=workstation "$SYNC" check 2>&1); missing_profile_check_status=$?
 mv "$TMP/profile.sh.authoritative" "$REPO/lib/profile.sh"
-if [ "$missing_profile_status" -eq 0 ] && timer_enabled backup-harness.timer \
+if [ "$missing_profile_status" -eq 1 ] && timer_enabled backup-harness.timer \
    && timer_enabled dcg-auto-update.timer && timer_enabled tools-auto-update.timer; then
   ok
 else
-  bad "missing profile library broke the unrelated role fallback (check=$missing_profile_check_status):"$'\n'"$missing_profile_out"$'\n'"$missing_profile_check_out"
+  bad "missing profile library did not fail closed without changing timers (check=$missing_profile_check_status):"$'\n'"$missing_profile_out"$'\n'"$missing_profile_check_out"
 fi
 docker_missing_profile_after=$(sha256sum "$DOCKER_DAEMON_TARGET" "$DOCKER_ADOPTION_STATE" "$DOCKER_ADOPTION_BACKUP")
 docker_missing_profile_validations_after=$(wc -l <"$DOCKER_VALIDATE_LOG")
@@ -1680,7 +1694,7 @@ EOF_REACTIVATE_READ_FAILURE
 sort -u -o "$SYSTEMCTL_ENABLED_TIMERS" "$SYSTEMCTL_ENABLED_TIMERS"
 sort -u -o "$SYSTEMCTL_ACTIVE_SERVICES" "$SYSTEMCTL_ACTIVE_SERVICES"
 export CRONTAB_MODE=error
-read_fail_out=$("$SYNC" install 2>&1); read_fail_status=$?
+read_fail_out=$(setup_phases 2>&1); read_fail_status=$?
 if [ "$read_fail_status" -ne 0 ] \
    && [ "$(enabled_migrated_count)" -eq 0 ] \
    && [ "$(active_migrated_count)" -eq 0 ] \
@@ -1698,7 +1712,7 @@ printf '%s\n' "$migrated_timers" >>"$SYSTEMCTL_ENABLED_TIMERS"
 printf '%s\n' "$migrated_services" >>"$SYSTEMCTL_ACTIVE_SERVICES"
 export CRONTAB_MODE=unavailable
 : >"$CRONTAB_CALL_LOG"
-unavailable_cron_out=$("$SYNC" install 2>&1); unavailable_cron_status=$?
+unavailable_cron_out=$(setup_phases 2>&1); unavailable_cron_status=$?
 if [ "$unavailable_cron_status" -ne 0 ] && [ -s "$CRONTAB_CALL_LOG" ] \
    && [ "$(enabled_migrated_count)" -eq 0 ] && [ "$(active_migrated_count)" -eq 0 ] \
    && timer_enabled unrelated-existing.timer && service_active unrelated-existing.service \
@@ -1717,7 +1731,7 @@ state_before_lock=$(sha256sum \
   "$SYSTEMCTL_FAILED_SERVICES")
 exec 9>"$CLAUDE_SYNC_CUTOVER_LOCK"
 flock -n 9
-lock_out=$("$SYNC" install 2>&1); lock_status=$?
+lock_out=$(setup_phases 2>&1); lock_status=$?
 flock -u 9
 exec 9>&-
 state_after_lock=$(sha256sum \
@@ -1740,7 +1754,7 @@ fi
 printf '%s\n' mcp-servers-update.service >>"$SYSTEMCTL_ACTIVE_SERVICES"
 sort -u -o "$SYSTEMCTL_ACTIVE_SERVICES" "$SYSTEMCTL_ACTIVE_SERVICES"
 export CRONTAB_MODE=drift
-drift_out=$("$SYNC" install 2>&1); drift_status=$?
+drift_out=$(setup_phases 2>&1); drift_status=$?
 if [ "$drift_status" -ne 0 ] \
    && [ "$(enabled_migrated_count)" -eq 0 ] \
    && ! service_active mcp-servers-update.service \
@@ -1758,7 +1772,7 @@ export CRONTAB_MODE=absent
 printf '%s\n' skills-update.service >>"$SYSTEMCTL_ACTIVE_SERVICES"
 sort -u -o "$SYSTEMCTL_ACTIVE_SERVICES" "$SYSTEMCTL_ACTIVE_SERVICES"
 export SYSTEMCTL_FAIL_ENABLE_TIMER=skills-update.timer
-enable_fail_out=$("$SYNC" install 2>&1); enable_fail_status=$?
+enable_fail_out=$(setup_phases 2>&1); enable_fail_status=$?
 unset SYSTEMCTL_FAIL_ENABLE_TIMER
 if [ "$enable_fail_status" -ne 0 ] \
    && [ "$(enabled_migrated_count)" -eq 0 ] \
@@ -1774,7 +1788,7 @@ fi
 # Restore the suite's normal no-crontab workstation state for all later install
 # and check assertions.
 unset CRONTAB_MODE
-"$SYNC" install >/dev/null 2>&1 || bad "scheduler fixture did not recover after failure scenarios"
+setup_phases >/dev/null 2>&1 || bad "scheduler fixture did not recover after failure scenarios"
 
 # -- STABLE_DIRS symlinked into place --------------------------------------
 for d in hooks scripts bin commands agents workflows mods; do
@@ -1847,14 +1861,10 @@ for f in settings.json keybindings.json; do
   if [ "$f" = settings.json ]; then
     if cmp -s \
         <(jq -S --arg home "$CLAUDE_HOME" --arg realhome "$HOME" '
-            # The tracked file is a template. sync.sh'"'"'s fresh seed renders the env
-            # values spelled $HOME/ to the installing home (Claude Code exports env
-            # as written) and keeps hook commands and permission rules as the
-            # template (a shell expands the former; the latter match literally),
-            # then sets the two env paths below.
-            .env |= with_entries(.value |= (if type == "string" and startswith("$HOME/") then $realhome + .[5:] else . end))
-            | .env.CLAUDE_ENV_FILE = ($home + "/claude-env.sh")
-            | .env.CLAUDE_CODE_PLUGIN_DIRS = ($home + "/mods/loop-breaker:" + $home + "/mods/agent-radar:" + $home + "/mods/read-ceiling-pager:" + $home + "/mods/x-mcp-budget:" + $home + "/mods/idle-compact")
+            walk(if type == "string" then
+              split("$HOME/.claude") | join($home) | split("$HOME/") | join($realhome + "/")
+              else . end)
+            | del(.model, .statusLine, .feedbackSurveyState)
           ' "$REPO/$f") \
         <(jq -S . "$CLAUDE_HOME/$f"); then
       ok
@@ -1912,26 +1922,26 @@ dcg_cmd=$(jq -r '
   | if length == 1 then .[0] else empty end
 ' "$REPO/settings.json")
 if [ -n "$dcg_cmd" ]; then ok; else bad "canonical settings must contain exactly one dcg hook command, naming the literal \$HOME/.local/bin/dcg and no version (dotfiles#1201)"; fi
-if jq -e --arg realhome "$HOME" '
+if jq -e --arg realhome "$HOME" --arg home "$CLAUDE_HOME" '
     .hooks.PreToolUse as $groups
     | ([ $groups[] | .hooks[]? | .command
         | (. == "$HOME/.local/bin/dcg" or (startswith($realhome + "/.local/") and test("/\\.local/(lib/dcg/v[0-9]+\\.[0-9]+\\.[0-9]+|bin)/dcg$"))) ] | index(true)) as $dcg
-    | ([ $groups[] | .hooks[]? | .command ] | index("\"$HOME/.claude/hooks/bin/node-hook\" \"$HOME/.claude/hooks/PreToolUse/grep-cost-guard.js\"")) as $guard
-    | ([ $groups[] | .hooks[]? | .command ] | index("\"$HOME/.claude/hooks/bin/node-hook\" \"$HOME/.claude/hooks/PreToolUse/heavy-job-admission.js\"")) as $heavy
-    | ([ $groups[] | .hooks[]? | .command ] | index("\"$HOME/.claude/hooks/bin/node-hook\" \"$HOME/.claude/hooks/PreToolUse/whatsapp-guard.js\"")) as $whatsapp
+    | ([ $groups[] | .hooks[]? | .command ] | index("\"" + $home + "/hooks/bin/node-hook\" \"" + $home + "/hooks/PreToolUse/grep-cost-guard.js\"")) as $guard
+    | ([ $groups[] | .hooks[]? | .command ] | index("\"" + $home + "/hooks/bin/node-hook\" \"" + $home + "/hooks/PreToolUse/heavy-job-admission.js\"")) as $heavy
+    | ([ $groups[] | .hooks[]? | .command ] | index("\"" + $home + "/hooks/bin/node-hook\" \"" + $home + "/hooks/PreToolUse/whatsapp-guard.js\"")) as $whatsapp
     | $dcg != null and $guard == ($dcg + 1) and $heavy == ($guard + 1) and $whatsapp == ($heavy + 1)
   ' "$CLAUDE_HOME/settings.json" >/dev/null; then
   ok
 else
   bad "settings.json: grep-cost/heavy-job/WhatsApp guards are not registered immediately after DCG in order"
 fi
-if jq -e '
+if jq -e --arg home "$CLAUDE_HOME" '
     ([.hooks.PreToolUse[]?.hooks[]? | select(
-      .command == "\"$HOME/.claude/hooks/bin/node-hook\" \"$HOME/.claude/hooks/PreToolUse/grep-cost-guard.js\""
-      or .command == "\"$HOME/.claude/hooks/bin/node-hook\" \"$HOME/.claude/hooks/PreToolUse/heavy-job-admission.js\""
+      .command == ("\"" + $home + "/hooks/bin/node-hook\" \"" + $home + "/hooks/PreToolUse/grep-cost-guard.js\"")
+      or .command == ("\"" + $home + "/hooks/bin/node-hook\" \"" + $home + "/hooks/PreToolUse/heavy-job-admission.js\"")
     )] | length == 2 and all(.[]; has("timeout") | not))
     and ([.hooks.PreToolUse[]?.hooks[]? | select(
-      .command == "\"$HOME/.claude/hooks/bin/node-hook\" \"$HOME/.claude/hooks/PreToolUse/whatsapp-guard.js\""
+      .command == ("\"" + $home + "/hooks/bin/node-hook\" \"" + $home + "/hooks/PreToolUse/whatsapp-guard.js\"")
     )] | length == 1 and all(.[]; .timeout == 5))
   ' "$CLAUDE_HOME/settings.json" >/dev/null; then
   ok
@@ -2113,10 +2123,10 @@ done
 copy_fail_unit="$HOME/.config/systemd/user/backup-harness.service"
 mv "$copy_fail_unit" "$TMP/backup-harness.service.parked"
 ln -s /dev/full "$copy_fail_unit"
-copy_fail_out=$("$SYNC" install 2>&1); copy_fail_status=$?
+copy_fail_out=$(setup_phases 2>&1); copy_fail_status=$?
 rm "$copy_fail_unit"
 mv "$TMP/backup-harness.service.parked" "$copy_fail_unit"
-if [ "$copy_fail_status" -ne 0 ]; then ok; else bad "sync.sh install exited 0 after backup-harness.service deployment failed"; fi
+if [ "$copy_fail_status" -ne 0 ]; then ok; else bad "./setup exited 0 after backup-harness.service deployment failed"; fi
 if grep -Fq 'failed to deploy user unit backup-harness.service' <<<"$copy_fail_out"; then
   ok
 else
@@ -2216,9 +2226,9 @@ fi
 
 # -- idempotence: a second install is a no-op, no new backup dir ------------
 before=$(find "$CLAUDE_HOME/backups" -maxdepth 1 -mindepth 1 2>/dev/null | sort)
-echo "=== sync.sh install (2nd run, idempotence) ===" >&2
-out2=$("$SYNC" install 2>&1); status2=$?
-if [ "$status2" -eq 0 ]; then ok; else bad "sync.sh install (2nd run) exited $status2:"$'\n'"$out2"; fi
+echo "=== ./setup (2nd run, idempotence) ===" >&2
+out2=$(setup_phases 2>&1); status2=$?
+if [ "$status2" -eq 0 ]; then ok; else bad "./setup (2nd run) exited $status2:"$'\n'"$out2"; fi
 after=$(find "$CLAUDE_HOME/backups" -maxdepth 1 -mindepth 1 2>/dev/null | sort)
 if [ "$before" = "$after" ]; then
   ok
@@ -2237,7 +2247,7 @@ fi
 
 # -- host-declared hygiene posture (#408) --------------------------------------
 # <overlay>/hygiene-posture is how a host keeps deletion on and its hygiene timers
-# enabled across `sync.sh install`. This section runs on the clean, fully installed
+# enabled across `./setup`. This section runs on the clean, fully installed
 # fixture above and puts the fixture back at its end. The overlay is the fixture's own
 # ($HOV_STACK_OVERLAY, set at the top); the shim systemctl is the only manager.
 echo "=== hygiene posture ===" >&2
@@ -2254,7 +2264,7 @@ hp_tree() { hp_dropins | while IFS= read -r f; do printf '%s %s\n' "$f" "$(sha25
 # a. No posture file: install writes no drop-in and enables no hygiene timer.
 [ ! -e "$hp_file" ] || bad "hygiene posture precondition: $hp_file exists"
 hp_mark=$(hp_log_mark)
-hp_none_out=$("$SYNC" install 2>&1); hp_none_status=$?
+hp_none_out=$(setup_phases 2>&1); hp_none_status=$?
 if [ "$hp_none_status" -eq 0 ]; then ok; else bad "install with no hygiene-posture file exited $hp_none_status:"$'\n'"$hp_none_out"; fi
 if [ -z "$(hp_dropins)" ]; then ok; else bad "install with no hygiene-posture file wrote a posture drop-in: $(hp_dropins)"; fi
 if hp_log_since "$hp_mark" | grep -Eq "$hp_stems_re"; then
@@ -2275,9 +2285,9 @@ printf '%s\n' \
   'wt-sweep OnCalendar=daily' \
   'reclaim-sweep RECLAIM_SWEEP_APPLY=1' >"$hp_file"
 hp_mark=$(hp_log_mark)
-hp_decl_out=$("$SYNC" install 2>&1); hp_decl_status=$?
+hp_decl_out=$(setup_phases 2>&1); hp_decl_status=$?
 if [ "$hp_decl_status" -eq 0 ]; then ok; else bad "install with a valid hygiene posture exited $hp_decl_status:"$'\n'"$hp_decl_out"; fi
-hp_header="# Written by sync.sh install from the overlay's hygiene-posture file.
+hp_header="# Written by ./setup --enable-units from the overlay's hygiene-posture file.
 # Edit that file, not this one; install rewrites or removes this drop-in."
 hp_expect_dropin() {
   local path=$1 expected=$2
@@ -2310,34 +2320,34 @@ if cmp -s "$hp_sys/wt-sweep.service.d/override.conf" "$TMP/hp-override.expected"
 hp_decl_check=$(SYSTEMCTL_SHOW_REACHABLE=1 "$SYNC" check 2>&1)
 if grep -q 'hygiene posture' <<<"$hp_decl_check"; then bad "check reported hygiene posture drift right after install:"$'\n'"$hp_decl_check"; else ok; fi
 hp_again=$(hp_tree)
-"$SYNC" install >/dev/null 2>&1
+setup_phases >/dev/null 2>&1
 if [ "$hp_again" = "$(hp_tree)" ]; then ok; else bad "a second install changed the posture drop-ins"; fi
 
 # c. Drift: a deleted drop-in, a not-enabled declared timer.
 rm -f "$hp_sys/wt-sweep.service.d/50-hygiene-posture.conf"
 hp_gone_check=$(SYSTEMCTL_SHOW_REACHABLE=1 "$SYNC" check 2>&1)
-if grep -Fq "DRIFT: hygiene posture: $hp_sys/wt-sweep.service.d/50-hygiene-posture.conf is not installed (sync.sh install)" <<<"$hp_gone_check"; then ok; else bad "check did not report the deleted posture drop-in:"$'\n'"$hp_gone_check"; fi
+if grep -Fq "DRIFT: hygiene posture: $hp_sys/wt-sweep.service.d/50-hygiene-posture.conf is not installed (./setup --enable-units)" <<<"$hp_gone_check"; then ok; else bad "check did not report the deleted posture drop-in:"$'\n'"$hp_gone_check"; fi
 printf '[Service]\nEnvironment=DRY_RUN=1\n' >"$hp_sys/wt-sweep.service.d/50-hygiene-posture.conf"
 hp_diff_check=$(SYSTEMCTL_SHOW_REACHABLE=1 "$SYNC" check 2>&1)
-if grep -Fq "DRIFT: hygiene posture: $hp_sys/wt-sweep.service.d/50-hygiene-posture.conf differs from the overlay declaration (sync.sh install)" <<<"$hp_diff_check"; then ok; else bad "check did not report the edited posture drop-in:"$'\n'"$hp_diff_check"; fi
-"$SYNC" install >/dev/null 2>&1
+if grep -Fq "DRIFT: hygiene posture: $hp_sys/wt-sweep.service.d/50-hygiene-posture.conf differs from the overlay declaration (./setup --enable-units)" <<<"$hp_diff_check"; then ok; else bad "check did not report the edited posture drop-in:"$'\n'"$hp_diff_check"; fi
+setup_phases >/dev/null 2>&1
 hp_expect_dropin "$hp_sys/wt-sweep.service.d/50-hygiene-posture.conf" "$hp_header
 [Service]
 Environment=DRY_RUN=0"
 grep -Fxv wt-sweep.timer "$SYSTEMCTL_ENABLED_TIMERS" >"$TMP/hp-enabled.next"; cp "$TMP/hp-enabled.next" "$SYSTEMCTL_ENABLED_TIMERS"
 hp_off_check=$(SYSTEMCTL_SHOW_REACHABLE=1 "$SYNC" check 2>&1)
-if grep -Fq 'DRIFT: hygiene posture: wt-sweep.timer is declared but not enabled (sync.sh install)' <<<"$hp_off_check"; then ok; else bad "check did not report a declared timer that is not enabled:"$'\n'"$hp_off_check"; fi
+if grep -Fq 'DRIFT: hygiene posture: wt-sweep.timer is declared but not enabled (./setup --enable-units)' <<<"$hp_off_check"; then ok; else bad "check did not report a declared timer that is not enabled:"$'\n'"$hp_off_check"; fi
 if grep -Fq 'reclaim-sweep.timer is declared but not enabled' <<<"$hp_off_check"; then bad "check reported an enabled declared timer as not enabled"; else ok; fi
 hp_unreach_check=$("$SYNC" check 2>&1)
 if grep -Fq 'is declared but not enabled' <<<"$hp_unreach_check"; then bad "check judged timer state with no reachable user manager:"$'\n'"$hp_unreach_check"; else ok; fi
-"$SYNC" install >/dev/null 2>&1
+setup_phases >/dev/null 2>&1
 
 # d. Dropping a stem removes its generated drop-in and never disables its timer.
 printf '%s\n' 'wt-sweep DRY_RUN=0' 'wt-sweep OnCalendar=daily' >"$hp_file"
 hp_stale_check=$(SYSTEMCTL_SHOW_REACHABLE=1 "$SYNC" check 2>&1)
-if grep -Fq "DRIFT: hygiene posture: $hp_sys/reclaim-sweep.service.d/50-hygiene-posture.conf is no longer declared (sync.sh install removes it)" <<<"$hp_stale_check"; then ok; else bad "check did not report the no-longer-declared drop-in:"$'\n'"$hp_stale_check"; fi
+if grep -Fq "DRIFT: hygiene posture: $hp_sys/reclaim-sweep.service.d/50-hygiene-posture.conf is no longer declared (./setup --enable-units removes it)" <<<"$hp_stale_check"; then ok; else bad "check did not report the no-longer-declared drop-in:"$'\n'"$hp_stale_check"; fi
 hp_mark=$(hp_log_mark)
-hp_drop_out=$("$SYNC" install 2>&1); hp_drop_status=$?
+hp_drop_out=$(setup_phases 2>&1); hp_drop_status=$?
 if [ "$hp_drop_status" -eq 0 ]; then ok; else bad "install after dropping a stem exited $hp_drop_status:"$'\n'"$hp_drop_out"; fi
 if [ ! -e "$hp_sys/reclaim-sweep.service.d/50-hygiene-posture.conf" ]; then ok; else bad "install left the dropped stem's generated drop-in"; fi
 if [ -f "$hp_sys/wt-sweep.service.d/50-hygiene-posture.conf" ] && [ -f "$hp_sys/wt-sweep.timer.d/50-hygiene-posture.conf" ]; then ok; else bad "install removed a still-declared drop-in"; fi
@@ -2353,13 +2363,13 @@ printf '%s\n' 'wt-sweep DRYRUN=0' >"$hp_file"
 grep -Fxv wt-sweep.timer "$SYSTEMCTL_ENABLED_TIMERS" >"$TMP/hp-enabled.next"; cp "$TMP/hp-enabled.next" "$SYSTEMCTL_ENABLED_TIMERS"
 hp_tree_before=$(hp_tree)
 hp_mark=$(hp_log_mark)
-hp_bad_out=$("$SYNC" install 2>&1); hp_bad_status=$?
+hp_bad_out=$(setup_phases 2>&1); hp_bad_status=$?
 if [ "$hp_bad_status" -ne 0 ]; then ok; else bad "install with an invalid hygiene-posture file exited 0:"$'\n'"$hp_bad_out"; fi
-if grep -Fq "ERROR: $hp_file is invalid; no hygiene posture applied (fix the file and re-run install)" <<<"$hp_bad_out"; then ok; else bad "install did not print the invalid-posture error:"$'\n'"$hp_bad_out"; fi
+if grep -Fq "ERROR: $hp_file is invalid; no hygiene posture applied (fix the file and re-run ./setup --enable-units)" <<<"$hp_bad_out"; then ok; else bad "install did not print the invalid-posture error:"$'\n'"$hp_bad_out"; fi
 if grep -Fq 'hygiene-posture: unknown key for wt-sweep: wt-sweep DRYRUN=0' <<<"$hp_bad_out"; then ok; else bad "install did not print the line-level error:"$'\n'"$hp_bad_out"; fi
 if [ "$hp_tree_before" = "$(hp_tree)" ]; then ok; else bad "install with an invalid hygiene-posture file wrote or removed a posture drop-in"; fi
 if hp_log_since "$hp_mark" | grep -Eq "$hp_stems_re"; then bad "install with an invalid hygiene-posture file touched a hygiene timer"; else ok; fi
-if grep -Fq 'install done.' <<<"$hp_bad_out"; then bad "install with an invalid hygiene-posture file still reported success"; else ok; fi
+if grep -Fq 'role: role timers reconciled' <<<"$hp_bad_out"; then bad "install with an invalid hygiene-posture file still reported success"; else ok; fi
 hp_bad_check=$(SYSTEMCTL_SHOW_REACHABLE=1 "$SYNC" check 2>&1)
 if grep -Fq "DRIFT: hygiene posture: $hp_file is invalid (see errors above)" <<<"$hp_bad_check"; then ok; else bad "check did not report the invalid posture file:"$'\n'"$hp_bad_check"; fi
 
@@ -2372,7 +2382,7 @@ printf '%s\n' 'pkg-cache-prune' >"$TMP/hp-relcwd/ovrel/hygiene-posture"
 hp_tree_before=$(hp_tree)
 if [ -n "$hp_tree_before" ]; then ok; else bad "hygiene posture precondition: no drop-ins installed before the relative-overlay case"; fi
 hp_mark=$(hp_log_mark)
-hp_rel_out=$(cd "$TMP/hp-relcwd" && HOV_STACK_OVERLAY=ovrel "$SYNC" install 2>&1); hp_rel_status=$?
+hp_rel_out=$(cd "$TMP/hp-relcwd" && HOV_STACK_OVERLAY=ovrel setup_phases 2>&1); hp_rel_status=$?
 if [ "$hp_rel_status" -eq 0 ]; then ok; else bad "install with a relative overlay path exited $hp_rel_status:"$'\n'"$hp_rel_out"; fi
 if grep -Fq 'WARN the overlay path is not absolute (HOV_STACK_OVERLAY or HOME); hygiene posture not read, its drop-ins left as they are' <<<"$hp_rel_out"; then ok; else bad "install did not warn about the relative overlay path:"$'\n'"$hp_rel_out"; fi
 if [ "$hp_tree_before" = "$(hp_tree)" ]; then ok; else bad "install with a relative overlay path wrote or removed a posture drop-in"; fi
@@ -2387,18 +2397,18 @@ printf '%s\n' 'wt-sweep DRY_RUN=0' 'wt-sweep OnCalendar=daily' 'reclaim-sweep RE
 hp_dir=$hp_sys/reclaim-sweep.service.d/50-hygiene-posture.conf
 mkdir -p "$hp_dir"
 hp_mark=$(hp_log_mark)
-hp_dir_out=$("$SYNC" install 2>&1); hp_dir_status=$?
+hp_dir_out=$(setup_phases 2>&1); hp_dir_status=$?
 if [ "$hp_dir_status" -ne 0 ]; then ok; else bad "install with a directory at a drop-in path exited 0:"$'\n'"$hp_dir_out"; fi
 if grep -Fq "ERROR: $hp_dir is a directory; hygiene posture drop-in not written" <<<"$hp_dir_out"; then ok; else bad "install did not report the directory at the drop-in path:"$'\n'"$hp_dir_out"; fi
 if [ -z "$(find "$hp_dir" -mindepth 1 2>/dev/null)" ]; then ok; else bad "install left files inside the directory at the drop-in path: $(find "$hp_dir" -mindepth 1)"; fi
 if grep -Fq 'hygiene posture: wrote '"$hp_dir" <<<"$hp_dir_out"; then bad "install reported writing the drop-in it could not write"; else ok; fi
 if hp_log_since "$hp_mark" | grep -Eq "$hp_stems_re"; then bad "install with a directory at a drop-in path enabled a hygiene timer"; else ok; fi
-if grep -Fq 'install done.' <<<"$hp_dir_out"; then bad "install with a directory at a drop-in path still reported success"; else ok; fi
+if grep -Fq 'role: role timers reconciled' <<<"$hp_dir_out"; then bad "install with a directory at a drop-in path still reported success"; else ok; fi
 rmdir "$hp_dir" "$hp_sys/reclaim-sweep.service.d"
 
 # Put the fixture back: no file means install removes what it generated, and only that.
 rm -f "$hp_file"
-"$SYNC" install >/dev/null 2>&1 || bad "install did not recover once the hygiene-posture file was removed"
+setup_phases >/dev/null 2>&1 || bad "install did not recover once the hygiene-posture file was removed"
 if [ -z "$(hp_dropins)" ]; then ok; else bad "install left generated posture drop-ins after the file was removed: $(hp_dropins)"; fi
 if cmp -s "$hp_sys/wt-sweep.service.d/override.conf" "$TMP/hp-override.expected"; then ok; else bad "removing the posture touched a hand-written override.conf"; fi
 rm -rf "$hp_sys/wt-sweep.service.d"
@@ -2418,7 +2428,7 @@ for unset_global in 'del(.autoCompactWindow)' '.autoCompactWindow = null'; do
   global_check=$("$SYNC" check 2>&1); global_check_status=$?
   if [ "$global_check_status" -ne 0 ] && grep -Fq 'DRIFT: settings.json' <<<"$global_check"; then ok; else bad "check missed unset global fallback: $unset_global"; fi
   # Cover the configured-install path too, not just direct reconciliation.
-  global_adopt=$("$SYNC" install 2>&1); global_adopt_status=$?
+  global_adopt=$(setup_phases 2>&1); global_adopt_status=$?
   if [ "$global_adopt_status" -eq 0 ] && jq -e '.autoCompactWindow == 300000' "$CLAUDE_HOME/settings.json" >/dev/null; then ok; else bad "install did not adopt unset global fallback: $unset_global"$'\n'"$global_adopt"; fi
 done
 jq '.autoCompactWindow = 500000
@@ -2469,7 +2479,7 @@ for bad_global in '50000' '2000000' '"300k"' '300000.5'; do
   if [ "$global_refusal_status" -ne 0 ] \
      && cmp -s "$TMP/global-live-baseline.json" "$CLAUDE_HOME/settings.json"; then ok; else bad "invalid canonical global reconciled/wrote live: $bad_global"$'\n'"$global_refusal"; fi
   global_invalid_home=$(mktemp -d "$TMP/global-invalid-install.XXXXXX") || exit 1
-  global_install_refusal=$(CLAUDE_HOME="$global_invalid_home" "$SYNC" install 2>&1); global_install_refusal_status=$?
+  global_install_refusal=$(CLAUDE_HOME="$global_invalid_home" "$SYNC" role owner 2>&1); global_install_refusal_status=$?
   if [ "$global_install_refusal_status" -ne 0 ] && [ -z "$(find "$global_invalid_home" -mindepth 1 -print -quit)" ]; then ok; else bad "invalid canonical global installed live artifacts: $bad_global"$'\n'"$global_install_refusal"; fi
   # Equal invalid values cannot pass the drift projection by equality alone.
   jq --argjson value "$bad_global" '.autoCompactWindow = $value' \
@@ -2684,7 +2694,7 @@ pure_after=$(cd "$PURE" && find . -type f -exec sha256sum {} + | sort)
 if [ "$pure_before" = "$pure_after" ]; then
   ok
 else
-  bad "sync.sh install modified its own source tree:"$'\n'"$(diff <(echo "$pure_before") <(echo "$pure_after") | head -20)"$'\n'"install said:"$'\n'"$pure_out"
+  bad "./setup modified its own source tree:"$'\n'"$(diff <(echo "$pure_before") <(echo "$pure_after") | head -20)"$'\n'"install said:"$'\n'"$pure_out"
 fi
 
 # The converse: the EXPLICIT verb migrates a versioned canonical to the symlink
@@ -2851,8 +2861,8 @@ else
 fi
 
 if [ "$fail" -eq 0 ]; then
-  echo "ok — sync.sh install/check smoke: $pass/$((pass + fail)) assertions passed"
+  echo "ok — ./setup/check smoke: $pass/$((pass + fail)) assertions passed"
 else
-  echo "FAIL — sync.sh install/check smoke: $fail of $((pass + fail)) assertions failed" >&2
+  echo "FAIL — ./setup/check smoke: $fail of $((pass + fail)) assertions failed" >&2
   exit 1
 fi

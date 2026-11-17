@@ -27,7 +27,7 @@ helper=$(sed -n '/^check_enter_plan_mode_denied() {/,/^}/p' "$DOCTOR")
 [ -n "$helper" ] || { echo "FAIL: check_enter_plan_mode_denied not found in $DOCTOR" >&2; exit 1; }
 eval "$helper"
 
-REMEDY="run sync.sh install (never push)"
+REMEDY="run ./setup (never push)"
 
 # Run in the current shell (not a $( ) subshell) so the WARNS counter the
 # doctor's summary relies on is observed to move, not just the text.

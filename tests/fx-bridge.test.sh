@@ -190,7 +190,7 @@ export FX_HOME=$TMP/fx-home
 mkdir -p "$FX_HOME"
 printf 'leaked\n' >"$FX_HOME/.settings.json.fx.STALE"      # from a "killed" prior merge
 out=$(bash "$FXREPO/sync.sh" install 2>&1); rc=$?
-check '[ "$rc" -eq 0 ]'                                    "sync.sh install exited $rc, not 0"
+check '[ "$rc" -eq 0 ]'                                    "fx installer exited $rc, not 0"
 check 'cmp -s "$FX_HOME/settings.json" "$FXREPO/settings.json"' "settings.json was not seeded from the repo copy"
 check '[ ! -e "$FX_HOME/.settings.json.fx.STALE" ]'        "stale merge temp file was not swept"
 # Live file grows machine-local keys + drifted context_limits; install must

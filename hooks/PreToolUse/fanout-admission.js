@@ -2,7 +2,7 @@
 /**
  * PreToolUse Hook: fanout-admission (producer/verifier fan-out governance)
  *
- * NOT REGISTERED (dotfiles#1865): sync.sh install removes this hook from live
+ * NOT REGISTERED (dotfiles#1865): ./setup removes this hook from live
  * settings. Its warnings reached only the papercut store (1,030 in the 30
  * days to 2026-10-17) and nothing acted on them. The file stays because
  * scripts/lib/wf-pin-lex.js loads its lexer and uncappedFanouts() for
