@@ -406,7 +406,7 @@ else:
     fi
   else
     echo "WARN dcg-auto-update.timer NOT enabled — the guard is not being auto-updated."
-    echo "     Enable with: bash $HW_ROOT/sync.sh install"
+    echo "     Enable with: bash $HW_ROOT/setup --enable-units"
   fi
   echo
   echo "## vendored skill drift (skills-patches and skill-pack UPSTREAM.md pins vs upstream head; report-only)"
@@ -446,7 +446,7 @@ else:
   echo "## hygiene timer health (wt-sweep/pkg-cache-prune/docker-hygiene/reclaim-sweep, added 2026-08-11)"
   # Same shape as the dcg-auto-update check above: a disabled or
   # silently-failing timer looks identical to a healthy one from the outside. Unlike
-  # that one, these four ship deliberately NOT enabled (sync.sh install's
+  # that one, these four ship deliberately NOT enabled (sync.sh's role-selection
   # DELIBERATE EXCEPTION comment — they are deletion-capable and stay opt-in), so
   # "not enabled" alone is the expected pre-activation state here and is reported
   # plainly, not as a WARN. Once an operator enables one, this is what would have

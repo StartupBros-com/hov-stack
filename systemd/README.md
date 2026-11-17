@@ -4,7 +4,7 @@ These are the systemd user and system units from the author's machines, trimmed 
 
 ## What ships
 
-`./setup` installs no units. `install.sh` and `sync.sh install` are the author's installers. They read a host roster (`hosts.tsv`) that this repo does not carry, so they will not get through the role step here. Copy and enable the units below by hand.
+Plain `./setup` refreshes installed user units without changing timer activation. `./setup --enable-units` installs user units and reconciles timers; `./setup --root` reconciles the managed lock, Docker policy and workstation system units. Both flags require a host row in `hosts.tsv`, normally in the overlay. This public tree carries no roster. Without a declared role, review and copy the units below by hand.
 
 Every timer file lists its own schedule. Read the timer before enabling it; the tables below are a summary.
 
@@ -22,7 +22,7 @@ These need no edits. Copy them as they are.
 | `wt-sweep` | `OnCalendar=Thu *-*-* 01:15:00` | `wt-sweep.sh`: sweeps git worktrees that have merged or gone stale | shipped plan-only, see below |
 | `fstrim.service.d/10-wsl.conf`, `fstrim.timer.d/10-wsl.conf` | the distribution's own `fstrim.timer` | clears the inherited `ConditionVirtualization=` so TRIM runs under WSL2 | a WSL2 host; system scope |
 
-`skills-update` is one of two timers that `sync.sh install` admits only through its cron-ownership gate (the other is `mcp-servers-update`, below). Without that installer, enable it by hand like any other.
+`skills-update` is one of two timers that `./setup --enable-units` admits only through its cron-ownership gate (the other is `mcp-servers-update`, below). Without that installer, enable it by hand like any other.
 
 Copy and enable a user unit:
 
@@ -52,16 +52,16 @@ These carry a `# TEMPLATE:` header at the top that lists the lines to change. "N
 
 | Unit | Timer schedule | Lines the header lists | Notes |
 | --- | --- | --- | --- |
-| `backup-harness` | `OnCalendar=*-*-* 03:30:00` | 17: `Environment=DOTFILES=<clone path>` | Uncomment and set it; the script defaults to `~/dotfiles`, and the clone needs an origin to push to. Opt-in: the script refuses a public origin, and `sync.sh install` never enables the timer (it disables it on a satellite). Skip it if something else already backs up `~/.claude/projects` |
+| `backup-harness` | `OnCalendar=*-*-* 03:30:00` | 17: `Environment=DOTFILES=<clone path>` | Uncomment and set it; the script defaults to `~/dotfiles`, and the clone needs an origin to push to. Opt-in: the script refuses a public origin, and `./setup --enable-units` never enables the timer (it disables it on a satellite). Skip it if something else already backs up `~/.claude/projects` |
 | `disk-watermark` | `OnCalendar=*-*-* *:23:00` | 26: `WARN_PCT=90` | Tuned to the author's `/mnt/c` drive; the script's own default is 85. Hourly, but it alerts only on a breach that is new or worse than at its last alert (state in `~/.local/state/hov-stack/disk-watermark/`) |
 | `docker-hygiene` | `OnCalendar=*-*-* 01:50:00` | nothing | Ships plan-only |
 | `reclaim-sweep` | `OnCalendar=Fri *-*-* 02:05:00` | nothing | Ships plan-only |
-| `tools-auto-update` | `OnCalendar=*-*-* 03:45:00` | nothing | The tool set (xf, csctf, ru) lives in `tool-update.sh`, not the unit. `sync.sh install` enables the timer only where at least one of them is installed, and disables it elsewhere |
+| `tools-auto-update` | `OnCalendar=*-*-* 03:45:00` | nothing | The tool set (xf, csctf, ru) lives in `tool-update.sh`, not the unit. `./setup --enable-units` enables the timer only where at least one of them is installed, and disables it elsewhere |
 | `jsm-auto-update` drop-ins and timer | `OnCalendar=*-*-* 03:00:00` | nothing | Drop-ins for jsm's own `jsm-auto-update.service`; install that first |
-| `mcp-servers-update` | `OnCalendar=Sun *-*-* 04:00:00` | nothing | Set `HOV_MCP_EXPECTED_ORIGIN=<owner>/<repo>` in the overlay's `env` file instead: `sync.sh install` overwrites the unit, so a value set there would not last. `update-mcp-servers.sh` reads it through `lib/overlay.sh` (an exported `EXPECTED_ORIGIN` wins for one run), refuses any other origin and, unset, exits 2 before touching git |
+| `mcp-servers-update` | `OnCalendar=Sun *-*-* 04:00:00` | nothing | Set `HOV_MCP_EXPECTED_ORIGIN=<owner>/<repo>` in the overlay's `env` file instead: `./setup --enable-units` overwrites the unit, so a value set there would not last. `update-mcp-servers.sh` reads it through `lib/overlay.sh` (an exported `EXPECTED_ORIGIN` wins for one run), refuses any other origin and, unset, exits 2 before touching git |
 | `harness-unit-failure-alert@` | none (started by `OnFailure=`) | 14: `DISCORD_WEBHOOK_URL` requirement | See the pager section |
 | `docker-containers.slice` (system) | none | 27, 28: `MemoryHigh=12G`, `MemorySwapMax=6G` | Sized for the author's machine. Needs `"cgroup-parent"` in `/etc/docker/daemon.json` |
-| `zram-swap.service` (system) | none | 30, 42, 49: `$HOME/.claude/scripts/zram-swap.sh`; `ZRAM_SIZE=4G` | `%h` would resolve to `/root` in a system unit, so the installed copy needs absolute paths: `sync.sh install` renders `$HOME/.claude/` to your harness home; by hand, substitute it |
+| `zram-swap.service` (system) | none | 30, 42, 49: `$HOME/.claude/scripts/zram-swap.sh`; `ZRAM_SIZE=4G` | `%h` would resolve to `/root` in a system unit, so the installed copy needs absolute paths: `./setup --root` renders `$HOME/.claude/` to your harness home; by hand, substitute it |
 | `pi-local-champion-tunnel.service` (user, under `harnesses/pi/systemd/user/`) | none | 33-36: `TUNNEL_USER`, `TUNNEL_HOST`, `TUNNEL_LOCAL_PORT`, `TUNNEL_REMOTE_PORT` | `TUNNEL_HOST=gateway.invalid` cannot resolve until you set it. Pairs with `harnesses/pi/agent/bin/pi-local` |
 
 Install a system template the same way as the fstrim drop-ins, with `sudo install -D -m 0644 <file> /etc/systemd/system/<name>`, then `sudo systemctl daemon-reload`.
@@ -95,7 +95,7 @@ Environment=RECLAIM_SWEEP_APPLY=1
 Environment=DRY_RUN=0
 ```
 
-A drop-in made with `systemctl --user edit` is yours to maintain, and `sync.sh install` never touches it. To have install apply a posture for you, and keep it across reinstalls, declare it in the overlay's `hygiene-posture` file (`~/.config/hov-stack/hygiene-posture`, or under `$XDG_CONFIG_HOME` or `$HOV_STACK_OVERLAY`). One setting per line, `<unit-stem> [KEY=value]`; blank lines and `#` comment lines are skipped:
+A drop-in made with `systemctl --user edit` is yours to maintain, and `./setup --enable-units` never touches it. To have `./setup --enable-units` apply a posture for you, and keep it across reinstalls, declare it in the overlay's `hygiene-posture` file (`~/.config/hov-stack/hygiene-posture`, or under `$XDG_CONFIG_HOME` or `$HOV_STACK_OVERLAY`). One setting per line, `<unit-stem> [KEY=value]`; blank lines and `#` comment lines are skipped:
 
 ```
 wt-sweep DRY_RUN=0

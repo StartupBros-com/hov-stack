@@ -6,16 +6,17 @@ hooks. Codex launches matching hooks concurrently, so file order is
 organizational rather than an enforcement dependency.
 
 ```bash
-bash ~/dotfiles/codex/sync.sh check
-bash ~/dotfiles/codex/sync.sh install
+bash harnesses/codex/sync.sh check
+bash harnesses/codex/sync.sh install
 ```
 
+This separate Codex installer is not the root harness installer (`./setup`).
 Installation validates both JSON files, backs up a differing live hooks file,
 and replaces it atomically. It never reads or writes `config.toml`, credentials,
 sessions, runtime state, or Codex's hook-trust records.
 
 The tracked `hooks.json` is a template that spells every home path with a
-literal `$HOME/`; `sync.sh install` renders it for the installing user's home
+literal `$HOME/`; the Codex installer renders it for the installing user's home
 and `check` compares the live file against that rendered form.
 
 After installing, open a **new** Codex session, run `/hooks`, inspect the exact

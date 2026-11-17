@@ -18,7 +18,7 @@ machinery: the `claimed` label and "Claimed by session" comment, the TTL
 gate, `Released:` markers, `claim-reap.sh` and its systemd units,
 `gh-dedup-check.sh`, and the `worktree-claim-advisory.js` hook. Nothing claims
 issues any more and nothing detects two sessions on the same issue: check
-`gh pr list --search "#N"` before starting one. `sync.sh install` disables and
+`gh pr list --search "#N"` before starting one. `./setup` disables and
 removes the claim-reap units on any host that still has them. The filename
 keeps its old name so links stay valid.
 

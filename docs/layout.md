@@ -16,12 +16,11 @@ cd ~/hov-stack && ./setup                     # symlinks the harness into ~/.cla
 | Skills: the pack and the ones that run this checkout's scripts      | `plugins/hov-stack/skills/`, `skills-stack/` | one **symlink** per skill into `~/.claude/skills` by `./setup`, except a skill a default plugin provides     |
 | Per-project memory                                                  | `memory/<project>/` | opt-in: copied by `sync.sh memory-push`; git-ignored                                                                                      |
 | Systemd units and timers                                            | `systemd/`          | copied and enabled by hand; see `systemd/README.md` for what each one does, which lines to edit, and the plan-only defaults                |
-| Two cron-ownership-gated timers (mcp-servers-update, skills-update) | `systemd/`          | copied on install; admitted on the workstation one job at a time only when the matching cron owner is absent; never admitted on satellites |
+| Two cron-ownership-gated timers (mcp-servers-update, skills-update) | `systemd/`          | copied by ./setup; admitted on the workstation one job at a time only when the matching cron owner is absent; never admitted on satellites |
 | Windows break-glass stubs                                           | `windows-stub/`     | reference copies of `/mnt/c/Users/<user>/.claude` stubs                                                                                    |
 
 The full list of harness entries is `DOTFILES_HARNESS` in `lib/manifest.sh`;
-`sync.sh` installs them, except the skill directories `./setup` links, and
-harness-doctor §10 checks the links.
+`./setup` links them, and harness-doctor §10 checks the links.
 
 **Deliberately NOT here:** credentials (`claude login` manually), `~/.claude.json`
 (runtime + oauth state), third-party skills (`jsm sync` restores them), plugin installs
@@ -106,7 +105,7 @@ The repository manages these two replacement timers and their services:
 - `mcp-servers-update.timer`
 - `skills-update.timer`
 
-`sync.sh install` always deploys the unit files byte-for-byte. On the workstation,
+`./setup --enable-units` always deploys the unit files byte-for-byte. On the workstation,
 it reads and classifies the active crontab under the shared cutover lock and admits
 each timer only when that job's direct legacy command is absent. A legacy owner
 that remains or reappears disables only its replacement. A read/parser failure or
@@ -120,7 +119,7 @@ separate post-merge cutover, independently per job, after canonical deployment a
 live proof; see `harness/wsl-crontab-and-cookie-sync.md`.
 
 `settings.json` contains a standalone DCG `PreToolUse` Bash hook. On an
-already-configured machine, `sync.sh install` (or the narrower
+already-configured machine, `./setup` (or the narrower
 `sync.sh reconcile-dcg`) backs up the live file and merges only that hook. It
 does not replace other hooks, permissions, environment values, or runtime-owned
 settings. DCG must be installed at `~/.local/bin/dcg` before opening a
@@ -165,9 +164,9 @@ mirror, satisfy the floor, and report "memory in sync". Resolve a `LOST` line by
 restoring the live store, or by `git rm -r memory/<project>` if the project is
 genuinely retired (the archive is versioned, so that stays recoverable).
 
-`sync.sh install` restores mirrored projects only when their live memory directory is
+`./setup` restores mirrored projects only when their live memory directory is
 missing. It never overwrites an existing live memory directory. To restore a missing
-project, run install. To restore selected older or mirror-only files into an existing
+project, run `./setup`. To restore selected older or mirror-only files into an existing
 project, inspect and copy those files manually.
 
 The auditor validates `MEMORY.md` coverage and links, the existing note frontmatter

@@ -15,7 +15,7 @@ are recorded under Current status.
   hosts do not run the workstation policy check.
 - Dotfiles owns only the Docker daemon `init` key. Adoption and rollback retain
   every unrelated daemon key and preserve the target's restrictive metadata.
-- First adoption is explicit. Routine `install`, `check`, and
+- First adoption is explicit. Routine `./setup --root`, `check`, and
   `reconcile-docker-init` do not first-publish the key.
 - Adoption state and recovery metadata live outside the repository at
   `/var/lib/dotfiles/docker-init-adoption.json` and
@@ -69,8 +69,9 @@ doctor never runs the full hygiene script to manufacture fresh evidence.
 
 ## 1. Repository installation
 
-`bash sync.sh install` installs the helper, policy, and existing unit
-files. On an unadopted workstation it validates/reports the candidate as pending
+`./setup` links the helper, `./setup --enable-units` installs user units, and
+`./setup --root` reconciles Docker policy and system units. On an unadopted
+workstation the root phase validates/reports the candidate as pending
 and does not publish `init`. Installation does not restart Docker, start stopped
 containers, or enable `docker-hygiene.timer`.
 

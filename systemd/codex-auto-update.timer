@@ -1,7 +1,7 @@
 [Unit]
 Description=Verified Codex CLI update check every 15 minutes
 
-# Opt-in: sync.sh install deploys this timer but never enables it. Enable by hand:
+# Opt-in: ./setup --enable-units deploys this timer but never enables it. Enable by hand:
 #   systemctl --user enable --now codex-auto-update.timer
 [Timer]
 OnBootSec=10min

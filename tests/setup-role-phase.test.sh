@@ -107,12 +107,56 @@ run() {
   if [ "$rc" -ne "$expected" ]; then printf '%s\n' "$output"; fail "$mode exited $rc, expected $expected"; fi
 }
 
+assert_end_state() {
+  local role=$1 unit kind body expected_calls
+  while IFS= read -r unit; do
+    [ "$unit" = README.md ] && continue
+    cmp "$REPO/systemd/$unit" "$HOME/.config/systemd/user/$unit" || fail "$role unit differs: $unit"
+  done < <(cd "$REPO/systemd" && find . -type f -printf '%P\n' | sort)
+  cmp "$REPO/managed-settings.json" "$HOME/managed/settings.json" || fail "$role managed lock differs"
+  if [ "$role" = workstation ]; then
+    while IFS= read -r unit; do
+      sed "s|\$HOME/|$HOME/|g" "$REPO/systemd-system/$unit" | cmp - "$HOME/system-units/$unit" || fail "$role system unit differs: $unit"
+    done < <(cd "$REPO/systemd-system" && find . -type f -printf '%P\n' | sort)
+    diff <(cd "$REPO/systemd-system" && find . -type f -printf '%P\n' | sort) <(cd "$HOME/system-units" && find . -type f -printf '%P\n' | sort) || fail 'system inventory differs'
+  else
+    [ -z "$(find "$HOME/system-units" -type f)" ] || fail 'satellite installed system units'
+  fi
+  diff <({ (cd "$REPO/systemd" && find . -type f ! -name README.md -printf '%P\n'); printf '%s\n' wt-sweep.service.d/50-hygiene-posture.conf wt-sweep.timer.d/50-hygiene-posture.conf; } | sort) \
+    <(cd "$HOME/.config/systemd/user" && find . -type f -printf '%P\n' | sort) || fail "$role user unit inventory differs"
+  jq -e --arg proxy "$CCFLARE_URL_SATELLITE" --arg role "$role" '
+    .permissions.disableAutoMode == "disable" and
+    (.permissions.deny | index("EnterPlanMode") != null) and
+    .autoCompactWindow == 300000 and (.hooks.PreToolUse | length > 0) and
+    .env.ANTHROPIC_BASE_URL == (if $role == "satellite" then $proxy else "http://127.0.0.1:8788" end)
+  ' "$CLAUDE_HOME/settings.json" >/dev/null || fail "$role settings keys differ"
+  [ "$(cat "$CLAUDE_SYNC_DOCKER_DAEMON_TARGET")" = '{}' ] || fail "$role Docker target changed"
+  [ ! -e "$CLAUDE_SYNC_DOCKER_ADOPTION_STATE" ] && [ ! -e "$CLAUDE_SYNC_DOCKER_ADOPTION_BACKUP" ] || fail "$role Docker policy was adopted"
+  for kind in service timer; do
+    if [ "$kind" = service ]; then body=$'[Service]\nEnvironment=DRY_RUN=1'
+    else body=$'[Timer]\nOnCalendar=\nOnCalendar=daily'; fi
+    printf '%s\n' "# Written by ./setup --enable-units from the overlay's hygiene-posture file." \
+      '# Edit that file, not this one; ./setup rewrites or removes this drop-in.' "$body" \
+      | cmp - "$HOME/.config/systemd/user/wt-sweep.$kind.d/50-hygiene-posture.conf" || fail "$role posture $kind differs"
+  done
+  for entry in hooks scripts bin commands agents workflows mods CLAUDE.md claude-env.sh memory-dream.json; do
+    [ "$(readlink "$CLAUDE_HOME/$entry")" = "$REPO/$entry" ] || fail "$role harness link differs: $entry"
+  done
+  expected_calls=$'--user show-environment\n--user daemon-reload'
+  if [ "$role" = satellite ]; then
+    expected_calls+=$'\n--user show-environment\n--user disable --now mcp-servers-update.timer skills-update.timer\n--user stop mcp-servers-update.service skills-update.service\n--user is-active mcp-servers-update.service\n--user is-active skills-update.service\n--user is-enabled backup-harness.timer'
+  fi
+  expected_calls+=$'\n--user enable --now dcg-auto-update.timer tools-auto-update.timer'
+  if [ "$role" = workstation ]; then expected_calls+=' mcp-servers-update.timer skills-update.timer'; fi
+  expected_calls+=$'\n--user show-environment\n--user enable --now wt-sweep.timer'
+  diff -u <(printf '%s\n' "$expected_calls") <(calls "$HOME") || fail "$role systemctl call order differs"
+  for unit in dcg-auto-update.timer tools-auto-update.timer wt-sweep.timer; do
+    [ -f "$HOME/enabled/$unit" ] || fail "$role timer not enabled: $unit"
+  done
+}
+
 for role in workstation satellite; do
-  first=$WORK/$role-install
   second=$WORK/$role-setup
-  select_home "$first" "$role"
-  printf 'wt-sweep DRY_RUN=1\nwt-sweep OnCalendar=daily\n' >> "$HOV_STACK_OVERLAY/hygiene-posture"
-  CLAUDE_SYNC_SKIP_HOOK_RECONCILE=0 run 0 sync install
   select_home "$second" "$role"
   printf 'wt-sweep DRY_RUN=1\nwt-sweep OnCalendar=daily\n' >> "$HOV_STACK_OVERLAY/hygiene-posture"
   CLAUDE_SYNC_SKIP_HOOK_RECONCILE=0 run 0 setup
@@ -121,23 +165,18 @@ for role in workstation satellite; do
   run 0 setup --enable-units
   grep -q '^--user enable ' "$HOME/systemctl.log" || fail 'enable positive control did not enable timers'
   run 0 setup --root
-  diff -r "$first/.config/systemd/user" "$second/.config/systemd/user" || fail "$role user units differ"
-  diff -r "$first/system-units" "$second/system-units" || fail "$role system units differ"
-  cmp "$first/managed/settings.json" "$second/managed/settings.json" || fail "$role managed lock differs"
-  diff <(calls "$first") <(calls "$second") || fail "$role timer calls differ"
-  cmp "$first/.claude/settings.json" "$second/.claude/settings.json" || { diff -u "$first/.claude/settings.json" "$second/.claude/settings.json"; fail "$role settings differ"; }
-  diff -r "$first/docker-policy" "$second/docker-policy" || fail "$role Docker policy differs"
+  assert_end_state "$role"
   [ -f "$second/.config/systemd/user/wt-sweep.service.d/50-hygiene-posture.conf" ] || fail "$role posture service drop-in missing"
   [ -f "$second/.config/systemd/user/wt-sweep.timer.d/50-hygiene-posture.conf" ] || fail "$role posture timer drop-in missing"
   grep -q '^--user enable --now wt-sweep.timer$' "$second/systemctl.log" || fail "$role posture timer not enabled"
-  for entry in .local/bin/papercut .local/bin/open-deliverable .local/bin/wsl-watchdog.sh \
-    .config/statusline-stack/local-statusline.mjs .claude/config/repo-routes.json; do
-    [ -L "$first/$entry" ] && [ -L "$second/$entry" ] || fail "$role missing link: $entry"
-    [ "$(readlink "$first/$entry")" = "$(readlink "$second/$entry")" ] || fail "$role link differs: $entry"
+  for entry in '.local/bin/papercut|bin/papercut.py' '.local/bin/open-deliverable|bin/open-deliverable' \
+    '.local/bin/wsl-watchdog.sh|bin/wsl-watchdog.sh' '.config/statusline-stack/local-statusline.mjs|statusline-stack/local-statusline.mjs' \
+    '.claude/config/repo-routes.json|config/repo-routes.json'; do
+    [ "$(readlink "$HOME/${entry%%|*}")" = "$REPO/${entry#*|}" ] || fail "$role link differs: $entry"
   done
-  cmp "$first/.claude/keybindings.json" "$second/.claude/keybindings.json" || fail "$role keybindings differ"
-  diff -r "$first/.claude/projects" "$second/.claude/projects" || fail "$role memory differs"
-  ok "$role install equals setup + enable + root (files, links, memory, timer calls)"
+  cmp "$REPO/keybindings.json" "$CLAUDE_HOME/keybindings.json" || fail "$role keybindings differ"
+  cmp "$WORK/mirror/project/MEMORY.md" "$CLAUDE_HOME/projects/project/memory/MEMORY.md" || fail "$role memory differs"
+  ok "$role setup + enable + root reaches the declared end state"
   clear_logs
   TMPDIR="$HOME/no-temp" run 0 sync role check
   contains 'role: nothing to change'
@@ -171,6 +210,26 @@ for role in workstation satellite; do
   diff <(printf '%s\n' "$before") <(printf '%s\n' "$after") || fail 'drift report wrote files'
   [ ! -e "$HOME/systemctl.log" ] && [ ! -e "$HOME/sudo.log" ] || fail 'drift report called manager or sudo'
   ok "$role drift rendering writes nothing, including temporary files"
+  for kind in service timer; do
+    dropin="$HOME/.config/systemd/user/wt-sweep.$kind.d/50-hygiene-posture.conf"
+    sed '1s/.*/previous generated header/' "$dropin" | tee "$WORK/old-posture" >/dev/null
+    cp "$WORK/old-posture" "$dropin"
+  done
+  clear_logs
+  run 0 sync role refresh
+  contains '2 unit file(s) updated'
+  for kind in service timer; do
+    head -1 "$HOME/.config/systemd/user/wt-sweep.$kind.d/50-hygiene-posture.conf" | grep -Fq './setup --enable-units' || fail 'posture header not refreshed'
+  done
+  [ "$(grep -c '^--user daemon-reload$' "$HOME/systemctl.log")" = 1 ] || fail 'posture refresh must reload once'
+  quiet_managers
+  clear_logs
+  before=$(find "$HOME/.config/systemd/user" -type f -printf '%P %s %T@\n' | sort)
+  run 0 sync role refresh
+  after=$(find "$HOME/.config/systemd/user" -type f -printf '%P %s %T@\n' | sort)
+  diff <(printf '%s\n' "$before") <(printf '%s\n' "$after") || fail 'posture refresh rewrote unchanged files'
+  [ ! -e "$HOME/systemctl.log" ] || fail 'unchanged posture refreshed manager'
+  ok "$role posture header refresh writes once without activating timers"
 done
 
 rm -- "$HOME/.config/systemd/user/dcg-auto-update.timer"
@@ -274,6 +333,8 @@ for role in workstation satellite; do
   contains "settings.json merged through sync.sh into $CLAUDE_HOME/settings.json"
   grep -q '^  overlay *ok ' <<<"$output" || fail "$role owner overlay row is not ok"
   jq -e '.env.ROLE_OVERLAY_TEST == "merged"' "$CLAUDE_HOME/settings.json" >/dev/null || fail "$role owner overlay key was not merged"
+  # select_home seeds the base as {}; the apply records what it merged.
+  jq -e '.env.ROLE_OVERLAY_TEST == "merged"' "$CLAUDE_HOME/.hov-stack/settings-base.json" >/dev/null || fail "$role owner merge did not record its base"
   quiet_managers
   ok "$role owner overlay merge is reported correctly"
 done
@@ -310,6 +371,18 @@ contains 'the merge into'
 [[ "$output" != *'wrote no seed'* ]] || fail 'failed owner merge reported missing seed'
 contains 'permissions.deny'
 ok 'owner merge failure is reported and apply-settings stderr remains visible'
+
+# A soft papercut failure lets the merge run; when the merge fails as well, the
+# settings row names both, as the removed install verb once reported them together.
+select_home "$WORK/papercut-and-merge-failure" workstation
+printf '{"permissions":{"deny":"invalid"}}\n' | tee "$HOV_STACK_OVERLAY/settings.json" >/dev/null
+CLAUDE_SYNC_SKIP_HOOK_RECONCILE=0 CLAUDE_SYNC_CLAUDE_BIN="$WORK/claude-fails" run 1 setup --no-dcg
+grep -q '^  settings *failed .*apply-settings.*papercut install failed' <<<"$output" || {
+  printf '%s\n' "$output"
+  fail 'settings row did not name both the merge and the papercut failure'
+}
+quiet_managers
+ok 'papercut and merge failures are reported together'
 
 select_home "$WORK/partial-refresh" satellite
 mkdir -p "$HOME/.config/systemd/user"
@@ -442,6 +515,19 @@ contains 'failed to record pending user-unit reload; leaving dcg-auto-update.ser
 [ "$(cat "$HOME/.config/systemd/user/dcg-auto-update.service")" = 'keep this edit' ] || fail 'unit rewritten although the pending marker could not be written'
 ok 'refresh leaves a unit alone when it cannot record the pending reload'
 
+# The same holds for a posture drop-in, which refresh rewrites after the unit loop.
+select_home "$WORK/posture-marker-unwritable" satellite
+printf 'wt-sweep DRY_RUN=1\n' >> "$HOV_STACK_OVERLAY/hygiene-posture"
+mkdir -p "$HOME/.config/systemd/user/wt-sweep.service.d"
+printf 'previous generated header\n' | tee "$HOME/.config/systemd/user/wt-sweep.service.d/50-hygiene-posture.conf" >/dev/null
+chmod 500 "$CLAUDE_HOME/.hov-stack"
+clear_logs
+run 1 sync role refresh
+chmod 700 "$CLAUDE_HOME/.hov-stack"
+contains 'failed to record pending user-unit reload; leaving'
+[ "$(cat "$HOME/.config/systemd/user/wt-sweep.service.d/50-hygiene-posture.conf")" = 'previous generated header' ] || fail 'posture drop-in rewritten although the pending marker could not be written'
+ok 'refresh leaves a posture drop-in alone when it cannot record the pending reload'
+
 # setup accepts a run with no dcg at ~/.local/bin/dcg (--no-dcg, or a dcg elsewhere on
 # PATH). The owner phase then skips only the dcg reconcile, which would refuse the
 # missing target; the other owner steps and the settings merge still run. sync.sh on
@@ -469,4 +555,44 @@ DOTFILES_ROLE=workstation run 1 setup --enable-units
 contains 'needs a host role'
 [[ "$output" != *'profile:'* ]] || fail 'standalone host_role leaked profile stderr'
 ok 'host_role silences profile stderr but retains setup guidance'
+for override in workstation satellite; do
+  select_home "$WORK/undeclared-$override" none
+  printf 'other-host\tsatellite\n' | tee "$HOV_STACK_OVERLAY/hosts.tsv" >/dev/null
+  for flag in --enable-units --root; do
+    DOTFILES_ROLE="$override" run 1 setup "$flag"
+    contains 'hosts.tsv'
+    contains 'needs a host role'
+  done
+  DOTFILES_ROLE="$override" run 1 sync role owner
+  contains 'no role'
+  quiet_managers
+  DOTFILES_ROLE="$override" run 1 sync check
+  contains 'has no role in hosts.tsv'
+  clear_logs
+  DOTFILES_ROLE="$override" node -e '
+    const fs = require("fs");
+    const root = process.argv[1];
+    const file = process.env.HOME + "/.claude.json";
+    fs.writeFileSync(file, "{}");
+    if (require(root + "/hooks/lib/host-role").hostRole() !== null) process.exit(1);
+    require(root + "/hooks/SessionStart/launchpad-advisory").run("{}");
+    if (fs.readFileSync(file, "utf8") !== "{}") process.exit(1);
+  ' "$REPO" || fail 'undeclared host seeded workspace trust'
+  ok "$override override grants no role or privileged setup"
+done
+for extra in none extra; do
+  args=(install)
+  [ "$extra" = none ] || args+=(--arbitrary value)
+  rc=0
+  bash "$REPO/sync.sh" "${args[@]}" >"$WORK/removed.stdout" 2>"$WORK/removed.stderr" || rc=$?
+  [ "$rc" = 2 ] || fail "removed verb exited $rc, expected 2"
+  [ ! -s "$WORK/removed.stdout" ] || fail 'removed verb wrote stdout'
+  output=$(cat "$WORK/removed.stderr")
+  contains 'was removed'
+  contains './setup (links and settings)'
+  contains './setup --enable-units'
+  contains './setup --root'
+  quiet_managers
+  ok 'removed verb refuses all arguments on stderr and names replacement commands'
+done
 printf 'passed: %s; failed: 0\n' "$pass"

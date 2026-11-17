@@ -18,7 +18,7 @@ The repository deploys these service/timer pairs:
 
 The units that shipped alongside them for the analytics collector, the weekly ads run and the memory micro-batch were removed from this repository, along with their `RETIRED_PROCESS_TIMERS` entry in `sync.sh`.
 
-Deployment is not scheduler transfer. `sync.sh install` applies a per-job
+Deployment is not scheduler transfer. `./setup --enable-units` applies a per-job
 cron-ownership gate under the shared cutover lock: a direct or ambiguous active legacy
 record keeps that replacement disabled, while an absent owner admits it only on the
 workstation. Satellites admit none and never read the crontab. Empty/no crontab admits

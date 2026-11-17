@@ -64,7 +64,7 @@ claude --plugin-dir ~/.claude/mods/loop-breaker --plugin-dir ~/.claude/mods/inst
 
 For every session, `CLAUDE_CODE_PLUGIN_DIRS` in `settings.json` `env` names the
 folders joined by `:` (absolute paths; the engine expands a leading `~`). The
-harness wires five of them this way, all but install-preflight: `sync.sh install`
+harness wires five of them this way, all but install-preflight: `./setup`
 links this folder at `~/.claude/mods` (a `STABLE_DIRS` entry, like `hooks`),
 the canonical `settings.json` names them as
 `~/.claude/mods/<mod>`, and `reconcile-runtime-env` writes that list

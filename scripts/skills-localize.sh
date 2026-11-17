@@ -1377,7 +1377,7 @@ enforce_retired "$RETIRED" retired-skills.txt
 enforce_retired "$RETIRED_HOST_LIST" "$RETIRED_HOST_LIST"
 # Reap BEFORE deploying, so a run converges in one pass. sync_fork skips any entry that
 # is a symlink — including a DANGLING one — so a fork whose symlink target vanished
-# (the documented `sync.sh install` from a temp worktree trap) would otherwise stay
+# (the documented `./setup` from a temp worktree trap) would otherwise stay
 # broken until a second run: reap frees the name, and only then can deploy refill it.
 reap_broken_links "$SKILLS" "claude-skills"
 reap_broken_links "$CODEX_SKILLS" "codex-skills"

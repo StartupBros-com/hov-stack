@@ -1,6 +1,6 @@
 # TEMPLATE: System unit that sets up a zram compressed-RAM swap tier at boot.
 # Replace before enabling:
-#   lines 30, 42: ExecStart=/ExecStop= name $HOME/.claude/scripts/zram-swap.sh; sync.sh install renders
+#   lines 30, 42: ExecStart=/ExecStop= name $HOME/.claude/scripts/zram-swap.sh; ./setup --root renders
 #   that prefix to your harness home (%h is /root in a system unit); by hand, substitute the absolute path.
 #   line 49: Environment=ZRAM_SIZE=4G, sized for a 39 GiB budget; set it to about 10% of your RAM.
 # See systemd/README.md.

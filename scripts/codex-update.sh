@@ -21,7 +21,7 @@
 # Why pnpm stays the owner: the live launcher (~/.local/bin/codex) is pnpm's shim, and the
 # native binary arrives as an npm:-aliased optionalDependency that pnpm resolves. This
 # script never writes the launcher or package dirs itself; every install is `pnpm add -g`.
-# tool-update.sh is not extended because sync.sh install enables its daily timer on every
+# tool-update.sh is not extended because ./setup --enable-units enables its daily timer on every
 # role wherever one of its tools is installed, codex included once it joined the table, and
 # this path must stay inert until codex-auto-update.timer is enabled.
 #
@@ -59,7 +59,7 @@
 # A current install re-stamps it daily; the reader treats >30 days as stale, so a stopped
 # updater shows up there too.
 #
-# Activation is manual and separate; sync.sh install deploys the units but never enables
+# Activation is manual and separate; ./setup --enable-units deploys the units but never enables
 # them:
 #   systemctl --user enable --now codex-auto-update.timer
 # and, for better-ccflare, CCFLARE_CODEX_VERIFIED_VERSION_FILE=<record path> on its unit.

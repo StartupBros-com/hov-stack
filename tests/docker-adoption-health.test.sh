@@ -82,7 +82,7 @@ SH
 chmod +x "$TMP/bin/sudo"
 
 : > "$TMP/forbidden-actions.log"
-for tool in docker systemctl docker-hygiene.sh sync.sh install.sh cleanup; do
+for tool in docker systemctl docker-hygiene.sh install.sh sync.sh cleanup; do
   cat > "$TMP/bin/$tool" <<'SH'
 #!/usr/bin/env bash
 printf '%s %s\n' "$(basename "$0")" "$*" >> "$FORBIDDEN_ACTION_LOG"

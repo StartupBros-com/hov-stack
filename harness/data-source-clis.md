@@ -608,7 +608,7 @@ there is no Resend MCP server.
   waits up to `RESEND_CLI_INSTALL_LOCK_WAIT` seconds, default 600, then
   rechecks convergence under the lock, or fails typed on timeout) and
   `check` reports it without taking the lock. It runs on
-  demand rather than from `sync.sh install`: the install-smoke image
+  demand rather than from `./setup`: the install-smoke image
   has no pnpm and the hermetic sync smoke must not reach npm. Bumping the
   pin: update `PIN_VERSION` and `VENDOR_PIN`, regenerate
   `tests/fixtures/resend-cli/commands-<pin>.json` from `resend

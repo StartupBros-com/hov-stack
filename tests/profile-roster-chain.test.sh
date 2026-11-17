@@ -84,12 +84,12 @@ is_eq "$(role)" "overlay-role rc=0" "the default overlay's roster was not read"
 rm "$TMP/home/.config/hov-stack/hosts.tsv"
 
 # 7. The overlay copy is a table, so the table still wins for a host it declares: it can
-#    grant workstation, and an environment that contradicts it is reported, not obeyed.
+#    grant workstation, and an environment that contradicts it has no effect or diagnostic.
 out=$(in_shell HOV_STACK_OVERLAY="$OV" DOTFILES_ROLE=satellite -- 'profile_role fixture-ws 2>&1')
 is_eq "${out##*$'\n'}" workstation "the overlay roster's workstation row did not resolve"
 case "$out" in
-  *"ignoring DOTFILES_ROLE=satellite"*) ok ;;
-  *) bad "a DOTFILES_ROLE contradicting the overlay roster was not reported: $out" ;;
+  workstation) ok ;;
+  *) bad "a DOTFILES_ROLE contradicting the overlay roster changed output: $out" ;;
 esac
 
 # 8. And an undeclared host still cannot claim workstation from the environment.

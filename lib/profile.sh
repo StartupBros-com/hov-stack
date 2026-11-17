@@ -46,17 +46,8 @@ fi
 
 # profile_role [hostname] -> prints the role, or nothing and returns 1.
 #
-# THE TABLE WINS FOR A DECLARED HOST. DOTFILES_ROLE used to be consulted first,
-# which meant any process on any machine could claim `workstation` with one
-# environment variable and push canonical state -- defeating the single feature
-# this file exists to provide. The override now applies ONLY to a host that
-# hosts.tsv does not declare: a rebuild under a temporary hostname, a container,
-# the test suite. A machine that IS declared cannot be talked out of its role.
-#
-# The narrower hatch is still a hatch, and deliberately so: an undeclared host
-# with no way to state its role could not install at all. But it can no longer
-# override a decision the repo has already recorded, which is the case that
-# mattered.
+# A role comes only from this host's hosts.tsv row. An undeclared host has
+# no role, regardless of its environment; callers must fail closed.
 profile_role() {
   local host=${1:-$(hostname -s 2>/dev/null || hostname)} declared=""
   if [ -r "$DOTFILES_ROLE_FILE" ]; then
@@ -64,40 +55,10 @@ profile_role() {
                  "$DOTFILES_ROLE_FILE" 2>/dev/null)
   fi
   if [ -n "$declared" ]; then
-    # An override that CONTRADICTS the table is reported, never silently obeyed.
-    if [ -n "${DOTFILES_ROLE:-}" ] && [ "${DOTFILES_ROLE}" != "$declared" ]; then
-      printf 'profile: ignoring DOTFILES_ROLE=%s — %s is declared %s in %s\n' \
-        "$DOTFILES_ROLE" "$host" "$declared" "$DOTFILES_ROLE_FILE" >&2
-    fi
     printf '%s\n' "$declared"
     return 0
   fi
-  # WORKSTATION REQUIRES A ROW, unconditionally. An unregistered host may
-  # self-declare only as `satellite`, which is harmless: it fails DOWN, enabling
-  # the minimal timer set and holding no push authority. `workstation` is the
-  # canonical-push authority, so allowing an unregistered host to claim it by
-  # environment variable would leave exactly the hole the table exists to close
-  # -- a fresh machine, a CI runner, or any third box could assert it.
-  #
-  # The earlier fix made the table win for DECLARED hosts. This closes the other
-  # half: undeclared hosts cannot reach the privileged role at all.
-  if [ -n "${DOTFILES_ROLE:-}" ]; then
-    if [ "$DOTFILES_ROLE" = workstation ]; then
-      printf 'profile: refusing DOTFILES_ROLE=workstation for undeclared host %s\n' "$host" >&2
-      printf '         the workstation role requires a row in %s\n' "$DOTFILES_ROLE_FILE" >&2
-      return 1
-    fi
-    printf '%s\n' "$DOTFILES_ROLE"; return 0
-  fi
-  [ -r "$DOTFILES_ROLE_FILE" ] || return 1
-  local h r
-  while IFS=$'\t' read -r h r; do
-    case "$h" in ''|\#*) continue ;; esac
-    [ "$h" = "$host" ] || continue
-    [ -n "$r" ] || return 1
-    printf '%s\n' "$r"
-    return 0
-  done < "$DOTFILES_ROLE_FILE"
+
   return 1
 }
 

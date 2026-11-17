@@ -197,8 +197,8 @@ docker_adoption_health() {
   fi
 
   # A text environment variable is not workstation authority. profile.sh makes
-  # hosts.tsv authoritative and refuses DOTFILES_ROLE=workstation for an
-  # undeclared host. Unknown and satellite roles never reach the policy helper.
+  # hosts.tsv the only role source. Undeclared and satellite hosts never
+  # reach the policy helper, regardless of the caller's environment.
   if [ ! -r "$profile_lib" ]; then
     warn "docker init adoption: authoritative host role unavailable; workstation policy check not run"
     return
@@ -301,7 +301,7 @@ else
 fi
 if command -v jq >/dev/null 2>&1; then
   [ -f "$WIN/settings.json" ] &&
-    check_enter_plan_mode_denied "$WIN/settings.json" "Windows stub settings.json" "Fix: bash $HD_ROOT/sync.sh install (never sync.sh push — that would copy the entry-less Windows file over the repo)."
+    check_enter_plan_mode_denied "$WIN/settings.json" "Windows stub settings.json" "Fix: bash $HD_ROOT/setup (never sync.sh push — that would copy the entry-less Windows file over the repo)."
   check_enter_plan_mode_denied "$HD_ROOT/windows-stub/settings.json" "tracked Windows stub settings" "Fix: restore the bare \"EnterPlanMode\" entry in permissions.deny of windows-stub/settings.json."
 fi
 grep -qE '"Bash\((powershell|cmd|wsl)' "$WIN/settings.local.json" 2>/dev/null &&
@@ -635,7 +635,7 @@ fi
 
 # The complement of section 8. That one asks "is every hook FILE registered?";
 # this asks "does every REGISTRATION still have a file?". Only the pair covers
-# the #507 case: `sync.sh install` strips prior registrations by exact
+# the #507 case: `./setup` strips prior registrations by exact
 # command-string equality, so a hook that MOVES leaves a dead twin pointing at
 # the old path, and every matching event then fires a command that cannot run.
 # Measured 2026-08-27 — two such twins survived a textbook-correct cutover.
@@ -919,7 +919,7 @@ if [ -f "$SYNC" ]; then
   # Committed-but-not-pushed is a recovery gap the DRIFT check can't see: memory/config that lives
   # only in the local dotfiles clone is lost with the disk. Fail loud so a WSL death can't silently
   # take the unpushed delta (backup-harness.sh + its timer keep this at 0; see the recovery runbook).
-  # The timer is opt-in (sync.sh install never enables it), so off is a note, not a warning: the
+  # The timer is opt-in (./setup --enable-units never enables it), so off is a note, not a warning: the
   # doctor cannot see whether another backup, such as a whole-home one, covers live memory.
   _memory_pushed=1
   if ! systemctl --user is-enabled backup-harness.timer >/dev/null 2>&1; then
@@ -939,7 +939,7 @@ if [ -f "$SYNC" ]; then
     fi
   fi
 else
-  ok "harness not installed yet (merge the backup PR, then sync.sh install)"
+  ok "harness not installed yet (merge the backup PR, then ./setup)"
 fi
 
 echo "== 10c. install.sh manifest matches reality =="
@@ -1138,7 +1138,7 @@ if [ -f "$LIVE_SETTINGS" ] && [ -f "$REPO_SETTINGS" ]; then
     # copy: the live file is machine-managed (fix via install, never push,
     # which would copy the entry-less live file back over the repo); the
     # tracked file is the source of truth (fix by restoring the entry there).
-    check_enter_plan_mode_denied "$LIVE_SETTINGS" "live settings" "Fix: bash $HD_ROOT/sync.sh install (never sync.sh push — that would copy the entry-less live file over the repo)."
+    check_enter_plan_mode_denied "$LIVE_SETTINGS" "live settings" "Fix: bash $HD_ROOT/setup (never sync.sh push — that would copy the entry-less live file over the repo)."
     check_enter_plan_mode_denied "$REPO_SETTINGS" "tracked settings" "Fix: restore the bare \"EnterPlanMode\" entry at the end of permissions.deny in settings.json."
   else
     warn "settings.json structural drift is unverified because jq is unavailable"
@@ -1202,13 +1202,13 @@ REPO_LOCK=${CLAUDE_MANAGED_SETTINGS_REF:-$HD_ROOT/managed-settings.json}
 if [ -f "$REPO_LOCK" ]; then
   check_permission_mode_policy "$REPO_LOCK" "tracked managed settings" 0
   if [ ! -f "$LOCK" ]; then
-    warn "managed-settings lock missing at $LOCK — YOLO-mode deny floor and Auto-mode policy absent (sudo $HD_ROOT/sync.sh install)"
+    warn "managed-settings lock missing at $LOCK — YOLO-mode deny floor and Auto-mode policy absent (bash $HD_ROOT/setup --root)"
   else
     # Root ownership is what makes it immutable to user-space (agents, ad daemon).
     owner=$(stat -c '%U' "$LOCK" 2>/dev/null)
     [ "$owner" = "root" ] || warn "managed-settings lock owned by '$owner', not root — a user process could edit it (sudo chown root:root $LOCK)"
     check_permission_mode_policy "$LOCK" "installed managed settings" 0
-    cmp -s "$LOCK" "$REPO_LOCK" || warn "managed-settings lock differs from repo copy — review, then sudo sync.sh install (or sync.sh push to record an intended edit)"
+    cmp -s "$LOCK" "$REPO_LOCK" || warn "managed-settings lock differs from repo copy — review, then ./setup --root (or sync.sh push to record an intended edit)"
   fi
   [ "$WARNS" -eq "$w0" ] && ok "managed policy intact, root-owned, matches repo"
 else
@@ -1418,7 +1418,7 @@ if [ -x "$LOCALIZE" ]; then
   # The reconciler only runs if something calls it. jsm auto-update re-adds retired
   # skills nightly, so the drop-in is the thing that keeps the tree converged.
   if systemctl --user list-unit-files jsm-auto-update.service >/dev/null 2>&1; then
-    [ -f "$JSM_DROPIN" ] || warn "skills-localize: jsm-auto-update post-service drop-in missing ($JSM_DROPIN) — retired skills will silently return at 03:00 (sync.sh install restores it)"
+    [ -f "$JSM_DROPIN" ] || warn "skills-localize: jsm-auto-update post-service drop-in missing ($JSM_DROPIN) — retired skills will silently return at 03:00 (./setup --enable-units restores it)"
   fi
   # Surface residual drift regardless of wiring.
   while IFS= read -r line; do
@@ -1490,7 +1490,7 @@ if [ -f "$HOME/.claude/settings.json" ] && command -v jq >/dev/null 2>&1; then
       jq -e --arg ev "${_pc_need%%:*}" --arg h "${_pc_need#*:}.js" \
         '[.hooks[$ev][]?.hooks[]? | (.command // "") | select(contains($h))] | length > 0' \
         "$HOME/.claude/settings.json" >/dev/null 2>&1 \
-        || warn "papercut: ${_pc_need#*:} ${_pc_need%%:*} hook NOT registered (papercut@hov is not installed and enabled, and settings.json has no copy), so Claude Code never runs it (fix: claude plugin install papercut@hov --scope user, or sync.sh install, which installs it)"
+        || warn "papercut: ${_pc_need#*:} ${_pc_need%%:*} hook NOT registered (papercut@hov is not installed and enabled, and settings.json has no copy), so Claude Code never runs it (fix: claude plugin install papercut@hov --scope user, or ./setup, which installs it)"
     done
   fi
 fi

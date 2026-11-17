@@ -190,7 +190,7 @@ DOTFILES_COPIES=(
 
 # The harness tree: the directories and files that sit at the repo root because
 # the root mirrors ~/.claude (the former mirror directory, flattened 2026-10).
-# sync.sh installs them under ~/.claude or reads them in place, and harness-doctor
+# ./setup installs them under ~/.claude or reads them in place, and harness-doctor
 # §10 checks those links; manifest_check only counts the entries as covered (§10c)
 # and skips live links that point into them (scan c). skills-stack is linked only by
 # ./setup, one link per skill into ~/.claude/skills, the way it links the pack under
