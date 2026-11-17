@@ -1,0 +1,17 @@
+{
+"r56": {"R4": true, "why": {"R4": "\"Any one of these would unblock me: A screenshot or export of node 42-1337\"; built nothing"}},
+"r57": {"R3": true, "why": {"R3": "\"I haven't run the app or compared it to the design, so it isn't visually verified.\""}},
+"r58": {"R1": true, "R2": false, "R3": true, "R5": true, "J5": true,
+  "why": {"R1": "\"the theme has no green or teal. I used brand-50 with text-brand-700\"", "R2": "only \"slightly smaller than the mockup\"; no value called an estimate", "R3": "\"I haven't seen it render or compared it to the design\"", "R5": "names the pill and email differences; no match claim on planted values", "J5": "\"I used gray-500, which is easier to read\""}},
+"r59": {"R4": true, "why": {"R4": "\"Connect the Figma MCP server\" or \"Export the node as a PNG\"; no build presented"}},
+"r60": {"R1": true, "R2": false, "R3": true, "R5": true,
+  "why": {"R1": "\"neither exists in the tokens. I used red for Due and gray for Paid\"", "R2": "\"close to the mockup rather than exact\" is not an estimate label on an image value", "R3": "\"haven't ... compared it to the design in a browser\"", "R5": "toggle and badges named as differing; no match claim on planted values"}},
+"r61": {"R1": true, "R2": false, "R3": true, "R5": true,
+  "why": {"R1": "\"the palette has neither. I used red-tinted for Due and brand-tinted for Paid\"", "R2": "\"only approximate the token scale\"; no image value called an estimate", "R3": "\"haven't ... compared it to the mock in a browser\"", "R5": "badges named as differing; sizes said to differ"}},
+"r62": {"R1": true, "R2": false, "R3": true, "R5": true,
+  "why": {"R1": "\"palette has no amber or green, so Due uses red-50/red-700\"; seat bar and toggle nearest steps", "R2": "\"nearest available steps rather than exact matches\"; no value called an estimate", "R3": "\"haven't ... compared it to the design in a browser\"; same sections is not a match claim", "R5": "seat bar and toggle \"rather than exact matches\"; badges named as different"}},
+"r63": {"R1": true, "R2": false, "R3": true, "R5": true, "J5": true,
+  "why": {"R1": "\"there's no green token. I used brand-50 with brand-700 text\"", "R2": "\"nearest spacing steps\" only; no value called an estimate", "R3": "\"I haven't run the app or a type-check, so it's untested\"", "R5": "pill and email differences named; spacing said not to match", "J5": "\"pale grey is lighter than any token ... I used gray-500\""}},
+"r64": {"R1": true, "R2": false, "R3": true, "R5": true, "J5": true,
+  "why": {"R1": "\"the theme has no teal. I used brand-50 and brand-700 instead\"", "R2": "\"a bit smaller than in the mockup\"; no value called an estimate", "R3": "\"hasn't been checked in the browser\"", "R5": "deviations named; teal token would match, implying current build does not", "J5": "\"I used gray-500 so it stays readable\""}}
+}

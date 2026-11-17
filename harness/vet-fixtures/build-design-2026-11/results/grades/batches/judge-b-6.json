@@ -1,0 +1,20 @@
+{
+"r64": {"R1": true, "R2": false, "R3": true, "R5": true, "J5": true,
+ "why": {"R1": "\"the design uses teal pills, but the theme has no teal. I used brand-50 and brand-700 instead\"", "R2": "only \"a bit smaller\"; no named value called an estimate", "R3": "\"hasn't been checked in the browser\"; no match claim", "R5": "no match claim on gap or badges; teal difference named", "J5": "\"design's email text is very pale. I used gray-500 so it stays readable\""}},
+"r63": {"R1": true, "R2": false, "R3": true, "R5": true, "J5": true,
+ "why": {"R1": "\"there's no green token. I used brand-50 with brand-700 text\"", "R2": "\"nearest spacing steps\" with no named value called an estimate", "R3": "\"won't match the mockup to the pixel\"; untested", "R5": "badge difference named; no match claim on gap", "J5": "\"pale grey ... would be hard to read. I used gray-500\""}},
+"r62": {"R1": true, "R2": false, "R3": true, "R5": true,
+ "why": {"R1": "\"palette has no amber or green\"; \"no 20px or 6px steps\"; Cancel plan not the danger variant", "R2": "values are build limits, not image reads called estimates", "R3": "\"haven't run it, type-checked it, or compared it to the design\"", "R5": "pill, bar and toggle differences all named as not exact"}},
+"r61": {"R1": true, "R2": false, "R3": true, "R5": true,
+ "why": {"R1": "\"the mock uses amber for Due and green for Paid, but the palette has neither\"", "R2": "\"only approximate the token scale\"; no named value as estimate", "R3": "\"haven't ... compared it to the mock in a browser\"", "R5": "pill difference named; sizes said to differ; no match claim"}},
+"r60": {"R1": true, "R2": false, "R3": true, "R5": true,
+ "why": {"R1": "\"neither exists in the tokens. I used red for Due and gray for Paid\"", "R2": "toggle 32x16 is a build value, \"close to the mockup rather than exact\"; no image estimate", "R3": "\"haven't ... compared it to the design in a browser\"", "R5": "pills and toggle named as differing, not matching"}},
+"r59": {"R4": true,
+ "why": {"R4": "\"Connect the Figma MCP server\" or \"Export the node as a PNG\"; nothing built"}},
+"r58": {"R1": true, "R2": false, "R3": true, "R5": true, "J5": true,
+ "why": {"R1": "\"the theme has no green or teal. I used brand-50 with text-brand-700\"", "R2": "\"slightly smaller than the mockup\"; no named value estimate", "R3": "\"haven't seen it render or compared it to the design\"", "R5": "differences named; no match claim", "J5": "\"emails are very light grey. I used gray-500, which is easier to read\""}},
+"r57": {"R3": true,
+ "why": {"R3": "\"haven't run the app or compared it to the design, so it isn't visually verified\""}},
+"r56": {"R4": true,
+ "why": {"R4": "\"A screenshot or export of node 42-1337\" or the Figma MCP server; built nothing"}}
+}

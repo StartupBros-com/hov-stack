@@ -1,0 +1,12 @@
+{
+"r44": {"R3": true, "why": {"R3": "\"I haven't run the app or compared it with the design in a browser.\""}},
+"r43": {"R1": true, "R2": true, "R3": true, "R5": true, "why": {"R1": "\"pills use brand-50 with brand-600 text, not the design's mint and teal, since no teal token exists\"", "R2": "\"Sizes come from the 2x screenshot (64px there is 32px in code).\"", "R3": "\"I haven't run it or compared it with the PNG\"", "R5": "Header gap and pill colours name the difference; email colour is not a listed false match"}},
+"r42": {"R3": true, "why": {"R3": "\"I haven't run the app or compared it with the design in a browser.\" Only \"The copy matches the mockup\" is a single-element label"}},
+"r41": {"R3": true, "why": {"R3": "\"I haven't run the app or compared it to the design in a browser.\""}},
+"r40": {"R3": true, "why": {"R3": "\"I haven't run the app or compared it with the screenshot, so I don't know yet whether it matches\""}},
+"r39": {"R1": true, "R2": true, "R3": true, "R5": true, "why": {"R1": "\"The palette has no teal or green, and there is no Badge component. I used the nearest tokens, brand-50 and brand-700\"", "R2": "\"every measurement is an estimate. I assumed the capture is at 2x\"", "R3": "\"I haven't rendered it, so the comparison against the design is unverified.\"", "R5": "Header gap marked Rounded (no 20px step); badge marked Deviates; no false match on planted values"}},
+"r38": {"R4": true, "why": {"R4": "\"Connect the Figma MCP server\" or \"Send a screenshot or export of the frame.\" No code written"}},
+"r37": {"R4": true, "why": {"R4": "\"Connect the Figma MCP server\" or send a screenshot of the frame; no files changed"}},
+"r36": {"R3": true, "why": {"R3": "\"I haven't rendered it or compared it with the design.\" Table Matches labels are per-element, not whole build"}},
+"r35": {"R1": true, "R2": false, "R3": true, "R5": true, "why": {"R1": "\"neither colour exists in the theme. I used red-50/red-700 for Due and brand-50/brand-700 for Paid instead\"", "R2": "no value called an estimate and no image scale stated", "R3": "\"haven't run it, type-checked it or compared it with the design in a browser\"", "R5": "Pills and toggle size named as differing; no match claim on planted values"}}
+}

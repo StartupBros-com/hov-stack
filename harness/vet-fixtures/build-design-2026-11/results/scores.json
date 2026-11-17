@@ -1,0 +1,2307 @@
+[
+ {
+  "rid": "r01",
+  "task": "t4",
+  "turn2_sent": false,
+  "cost_usd": 0.1136,
+  "added_lines": 116,
+  "changed": [
+   "A src/pages/Billing.tsx"
+  ],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {
+   "G_built": true,
+   "D1_on_system_values": false,
+   "D2_design_system_untouched": true,
+   "D3_no_unrelated_edits": true,
+   "D4_reuses_components": true
+  },
+  "notes": {
+   "D1": {
+    "no_rule": [
+     "left-6"
+    ],
+    "arbitrary": [],
+    "hex": [],
+    "color_fn": [],
+    "style_attrs": []
+   },
+   "D2": [],
+   "D3": [],
+   "D4": {
+    "Card": true,
+    "CardHeader": true,
+    "Input": true,
+    "Button x3": true
+   }
+  }
+ },
+ {
+  "rid": "r02",
+  "task": "t1",
+  "turn2_sent": false,
+  "cost_usd": 0.1036,
+  "added_lines": 33,
+  "changed": [
+   "M src/pages/Settings.tsx"
+  ],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {
+   "G_built": true,
+   "D1_on_system_values": true,
+   "D2_design_system_untouched": true,
+   "D3_no_unrelated_edits": true,
+   "D4_reuses_components": true,
+   "D5_email_colour_as_drawn_or_named": true
+  },
+  "notes": {
+   "D1": {
+    "no_rule": [],
+    "arbitrary": [],
+    "hex": [],
+    "color_fn": [],
+    "style_attrs": []
+   },
+   "D2": [],
+   "D3": [],
+   "D4": {
+    "Avatar": true,
+    "Card": true,
+    "CardHeader": true,
+    "Button x2": true,
+    "ghost": true,
+    "no raw <button>": true
+   },
+   "D5": "text-gray-300 present"
+  }
+ },
+ {
+  "rid": "r03",
+  "task": "t4",
+  "turn2_sent": true,
+  "cost_usd": 0.1787,
+  "added_lines": 126,
+  "changed": [
+   "A src/pages/Billing.tsx"
+  ],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {
+   "G_built": true,
+   "D1_on_system_values": true,
+   "D2_design_system_untouched": true,
+   "D3_no_unrelated_edits": true,
+   "D4_reuses_components": true
+  },
+  "notes": {
+   "D1": {
+    "no_rule": [],
+    "arbitrary": [],
+    "hex": [],
+    "color_fn": [],
+    "style_attrs": []
+   },
+   "D2": [],
+   "D3": [],
+   "D4": {
+    "Card": true,
+    "CardHeader": true,
+    "Input": true,
+    "Button x3": true
+   }
+  }
+ },
+ {
+  "rid": "r04",
+  "task": "t3",
+  "turn2_sent": false,
+  "cost_usd": 0.0557,
+  "added_lines": 9,
+  "changed": [
+   "M src/pages/Settings.tsx"
+  ],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {
+   "G_built": true,
+   "D1_on_system_values": true,
+   "D2_design_system_untouched": true,
+   "D3_no_unrelated_edits": true,
+   "D4_reuses_components": true
+  },
+  "notes": {
+   "D1": {
+    "no_rule": [],
+    "arbitrary": [],
+    "hex": [],
+    "color_fn": [],
+    "style_attrs": []
+   },
+   "D2": [],
+   "D3": [],
+   "D4": {
+    "tone=\"danger\"": true,
+    "variant=\"danger\"": true,
+    "CardHeader": true,
+    "no raw <button>": true
+   }
+  }
+ },
+ {
+  "rid": "r05",
+  "task": "t2",
+  "turn2_sent": false,
+  "cost_usd": 0.0332,
+  "added_lines": 0,
+  "changed": [],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {
+   "O2_no_build_from_a_guess": true
+  },
+  "notes": {}
+ },
+ {
+  "rid": "r06",
+  "task": "t4",
+  "turn2_sent": false,
+  "cost_usd": 0.0849,
+  "added_lines": 139,
+  "changed": [
+   "A src/pages/Billing.tsx"
+  ],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {
+   "G_built": true,
+   "D1_on_system_values": true,
+   "D2_design_system_untouched": true,
+   "D3_no_unrelated_edits": true,
+   "D4_reuses_components": true
+  },
+  "notes": {
+   "D1": {
+    "no_rule": [],
+    "arbitrary": [],
+    "hex": [],
+    "color_fn": [],
+    "style_attrs": []
+   },
+   "D2": [],
+   "D3": [],
+   "D4": {
+    "Card": true,
+    "CardHeader": true,
+    "Input": true,
+    "Button x3": true
+   }
+  }
+ },
+ {
+  "rid": "r07",
+  "task": "t3",
+  "turn2_sent": false,
+  "cost_usd": 0.0574,
+  "added_lines": 9,
+  "changed": [
+   "M src/pages/Settings.tsx"
+  ],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {
+   "G_built": true,
+   "D1_on_system_values": true,
+   "D2_design_system_untouched": true,
+   "D3_no_unrelated_edits": true,
+   "D4_reuses_components": true
+  },
+  "notes": {
+   "D1": {
+    "no_rule": [],
+    "arbitrary": [],
+    "hex": [],
+    "color_fn": [],
+    "style_attrs": []
+   },
+   "D2": [],
+   "D3": [],
+   "D4": {
+    "tone=\"danger\"": true,
+    "variant=\"danger\"": true,
+    "CardHeader": true,
+    "no raw <button>": true
+   }
+  }
+ },
+ {
+  "rid": "r08",
+  "task": "t3",
+  "turn2_sent": false,
+  "cost_usd": 0.0409,
+  "added_lines": 8,
+  "changed": [
+   "M src/pages/Settings.tsx"
+  ],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {
+   "G_built": true,
+   "D1_on_system_values": true,
+   "D2_design_system_untouched": true,
+   "D3_no_unrelated_edits": true,
+   "D4_reuses_components": true
+  },
+  "notes": {
+   "D1": {
+    "no_rule": [],
+    "arbitrary": [],
+    "hex": [],
+    "color_fn": [],
+    "style_attrs": []
+   },
+   "D2": [],
+   "D3": [],
+   "D4": {
+    "tone=\"danger\"": true,
+    "variant=\"danger\"": true,
+    "CardHeader": true,
+    "no raw <button>": true
+   }
+  }
+ },
+ {
+  "rid": "r09",
+  "task": "t3",
+  "turn2_sent": false,
+  "cost_usd": 0.0574,
+  "added_lines": 8,
+  "changed": [
+   "M src/pages/Settings.tsx"
+  ],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {
+   "G_built": true,
+   "D1_on_system_values": true,
+   "D2_design_system_untouched": true,
+   "D3_no_unrelated_edits": true,
+   "D4_reuses_components": true
+  },
+  "notes": {
+   "D1": {
+    "no_rule": [],
+    "arbitrary": [],
+    "hex": [],
+    "color_fn": [],
+    "style_attrs": []
+   },
+   "D2": [],
+   "D3": [],
+   "D4": {
+    "tone=\"danger\"": true,
+    "variant=\"danger\"": true,
+    "CardHeader": true,
+    "no raw <button>": true
+   }
+  }
+ },
+ {
+  "rid": "r10",
+  "task": "t2",
+  "turn2_sent": false,
+  "cost_usd": 0.0434,
+  "added_lines": 0,
+  "changed": [],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {
+   "O2_no_build_from_a_guess": true
+  },
+  "notes": {}
+ },
+ {
+  "rid": "r11",
+  "task": "t2",
+  "turn2_sent": false,
+  "cost_usd": 0.0301,
+  "added_lines": 0,
+  "changed": [],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {
+   "O2_no_build_from_a_guess": true
+  },
+  "notes": {}
+ },
+ {
+  "rid": "r12",
+  "task": "t3",
+  "turn2_sent": false,
+  "cost_usd": 0.0418,
+  "added_lines": 8,
+  "changed": [
+   "M src/pages/Settings.tsx"
+  ],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {
+   "G_built": true,
+   "D1_on_system_values": true,
+   "D2_design_system_untouched": true,
+   "D3_no_unrelated_edits": true,
+   "D4_reuses_components": true
+  },
+  "notes": {
+   "D1": {
+    "no_rule": [],
+    "arbitrary": [],
+    "hex": [],
+    "color_fn": [],
+    "style_attrs": []
+   },
+   "D2": [],
+   "D3": [],
+   "D4": {
+    "tone=\"danger\"": true,
+    "variant=\"danger\"": true,
+    "CardHeader": true,
+    "no raw <button>": true
+   }
+  }
+ },
+ {
+  "rid": "r13",
+  "task": "t2",
+  "turn2_sent": false,
+  "cost_usd": 0.0294,
+  "added_lines": 0,
+  "changed": [],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {
+   "O2_no_build_from_a_guess": true
+  },
+  "notes": {}
+ },
+ {
+  "rid": "r14",
+  "task": "t4",
+  "turn2_sent": true,
+  "cost_usd": 0.1555,
+  "added_lines": 132,
+  "changed": [
+   "A src/pages/Billing.tsx"
+  ],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {
+   "G_built": true,
+   "D1_on_system_values": false,
+   "D2_design_system_untouched": true,
+   "D3_no_unrelated_edits": true,
+   "D4_reuses_components": true
+  },
+  "notes": {
+   "D1": {
+    "no_rule": [
+     "h-5"
+    ],
+    "arbitrary": [],
+    "hex": [],
+    "color_fn": [],
+    "style_attrs": []
+   },
+   "D2": [],
+   "D3": [],
+   "D4": {
+    "Card": true,
+    "CardHeader": true,
+    "Input": true,
+    "Button x3": true
+   }
+  }
+ },
+ {
+  "rid": "r15",
+  "task": "t4",
+  "turn2_sent": false,
+  "cost_usd": 0.1106,
+  "added_lines": 126,
+  "changed": [
+   "A src/pages/Billing.tsx"
+  ],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {
+   "G_built": true,
+   "D1_on_system_values": false,
+   "D2_design_system_untouched": true,
+   "D3_no_unrelated_edits": true,
+   "D4_reuses_components": true
+  },
+  "notes": {
+   "D1": {
+    "no_rule": [],
+    "arbitrary": [
+     "h-[20px]",
+     "h-[6px]",
+     "left-[18px]",
+     "left-[2px]",
+     "top-[2px]",
+     "w-[36px]"
+    ],
+    "hex": [],
+    "color_fn": [],
+    "style_attrs": []
+   },
+   "D2": [],
+   "D3": [],
+   "D4": {
+    "Card": true,
+    "CardHeader": true,
+    "Input": true,
+    "Button x3": true
+   }
+  }
+ },
+ {
+  "rid": "r16",
+  "task": "t1",
+  "turn2_sent": false,
+  "cost_usd": 0.0876,
+  "added_lines": 36,
+  "changed": [
+   "M src/pages/Settings.tsx"
+  ],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {
+   "G_built": true,
+   "D1_on_system_values": true,
+   "D2_design_system_untouched": true,
+   "D3_no_unrelated_edits": true,
+   "D4_reuses_components": true,
+   "D5_email_colour_as_drawn_or_named": true
+  },
+  "notes": {
+   "D1": {
+    "no_rule": [],
+    "arbitrary": [],
+    "hex": [],
+    "color_fn": [],
+    "style_attrs": []
+   },
+   "D2": [],
+   "D3": [],
+   "D4": {
+    "Avatar": true,
+    "Card": true,
+    "CardHeader": true,
+    "Button x2": true,
+    "ghost": true,
+    "no raw <button>": true
+   },
+   "D5": "text-gray-300 present"
+  }
+ },
+ {
+  "rid": "r17",
+  "task": "t4",
+  "turn2_sent": false,
+  "cost_usd": 0.0784,
+  "added_lines": 133,
+  "changed": [
+   "A src/pages/Billing.tsx"
+  ],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {
+   "G_built": true,
+   "D1_on_system_values": true,
+   "D2_design_system_untouched": true,
+   "D3_no_unrelated_edits": true,
+   "D4_reuses_components": true
+  },
+  "notes": {
+   "D1": {
+    "no_rule": [],
+    "arbitrary": [],
+    "hex": [],
+    "color_fn": [],
+    "style_attrs": []
+   },
+   "D2": [],
+   "D3": [],
+   "D4": {
+    "Card": true,
+    "CardHeader": true,
+    "Input": true,
+    "Button x3": true
+   }
+  }
+ },
+ {
+  "rid": "r18",
+  "task": "t1",
+  "turn2_sent": false,
+  "cost_usd": 0.0838,
+  "added_lines": 42,
+  "changed": [
+   "M src/pages/Settings.tsx"
+  ],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {
+   "G_built": true,
+   "D1_on_system_values": true,
+   "D2_design_system_untouched": true,
+   "D3_no_unrelated_edits": true,
+   "D4_reuses_components": true,
+   "D5_email_colour_as_drawn_or_named": true
+  },
+  "notes": {
+   "D1": {
+    "no_rule": [],
+    "arbitrary": [],
+    "hex": [],
+    "color_fn": [],
+    "style_attrs": []
+   },
+   "D2": [],
+   "D3": [],
+   "D4": {
+    "Avatar": true,
+    "Card": true,
+    "CardHeader": true,
+    "Button x2": true,
+    "ghost": true,
+    "no raw <button>": true
+   },
+   "D5": "text-gray-300 present"
+  }
+ },
+ {
+  "rid": "r19",
+  "task": "t1",
+  "turn2_sent": false,
+  "cost_usd": 0.0596,
+  "added_lines": 37,
+  "changed": [
+   "M src/pages/Settings.tsx"
+  ],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {
+   "G_built": true,
+   "D1_on_system_values": true,
+   "D2_design_system_untouched": true,
+   "D3_no_unrelated_edits": true,
+   "D4_reuses_components": true,
+   "D5_email_colour_as_drawn_or_named": null
+  },
+  "notes": {
+   "D1": {
+    "no_rule": [],
+    "arbitrary": [],
+    "hex": [],
+    "color_fn": [],
+    "style_attrs": []
+   },
+   "D2": [],
+   "D3": [],
+   "D4": {
+    "Avatar": true,
+    "Card": true,
+    "CardHeader": true,
+    "Button x2": true,
+    "ghost": true,
+    "no raw <button>": true
+   },
+   "D5": "absent: the judges check the report names the change"
+  }
+ },
+ {
+  "rid": "r20",
+  "task": "t3",
+  "turn2_sent": false,
+  "cost_usd": 0.0367,
+  "added_lines": 8,
+  "changed": [
+   "M src/pages/Settings.tsx"
+  ],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {
+   "G_built": true,
+   "D1_on_system_values": true,
+   "D2_design_system_untouched": true,
+   "D3_no_unrelated_edits": true,
+   "D4_reuses_components": true
+  },
+  "notes": {
+   "D1": {
+    "no_rule": [],
+    "arbitrary": [],
+    "hex": [],
+    "color_fn": [],
+    "style_attrs": []
+   },
+   "D2": [],
+   "D3": [],
+   "D4": {
+    "tone=\"danger\"": true,
+    "variant=\"danger\"": true,
+    "CardHeader": true,
+    "no raw <button>": true
+   }
+  }
+ },
+ {
+  "rid": "r21",
+  "task": "t1",
+  "turn2_sent": true,
+  "cost_usd": 0.1505,
+  "added_lines": 37,
+  "changed": [
+   "M src/pages/Settings.tsx"
+  ],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {
+   "G_built": true,
+   "D1_on_system_values": true,
+   "D2_design_system_untouched": true,
+   "D3_no_unrelated_edits": true,
+   "D4_reuses_components": true,
+   "D5_email_colour_as_drawn_or_named": null
+  },
+  "notes": {
+   "D1": {
+    "no_rule": [],
+    "arbitrary": [],
+    "hex": [],
+    "color_fn": [],
+    "style_attrs": []
+   },
+   "D2": [],
+   "D3": [],
+   "D4": {
+    "Avatar": true,
+    "Card": true,
+    "CardHeader": true,
+    "Button x2": true,
+    "ghost": true,
+    "no raw <button>": true
+   },
+   "D5": "absent: the judges check the report names the change"
+  }
+ },
+ {
+  "rid": "r22",
+  "task": "t3",
+  "turn2_sent": false,
+  "cost_usd": 0.0557,
+  "added_lines": 8,
+  "changed": [
+   "M src/pages/Settings.tsx"
+  ],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {
+   "G_built": true,
+   "D1_on_system_values": true,
+   "D2_design_system_untouched": true,
+   "D3_no_unrelated_edits": true,
+   "D4_reuses_components": true
+  },
+  "notes": {
+   "D1": {
+    "no_rule": [],
+    "arbitrary": [],
+    "hex": [],
+    "color_fn": [],
+    "style_attrs": []
+   },
+   "D2": [],
+   "D3": [],
+   "D4": {
+    "tone=\"danger\"": true,
+    "variant=\"danger\"": true,
+    "CardHeader": true,
+    "no raw <button>": true
+   }
+  }
+ },
+ {
+  "rid": "r23",
+  "task": "t2",
+  "turn2_sent": false,
+  "cost_usd": 0.0278,
+  "added_lines": 0,
+  "changed": [],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {
+   "O2_no_build_from_a_guess": true
+  },
+  "notes": {}
+ },
+ {
+  "rid": "r24",
+  "task": "t1",
+  "turn2_sent": false,
+  "cost_usd": 0.0604,
+  "added_lines": 39,
+  "changed": [
+   "M src/pages/Settings.tsx"
+  ],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {
+   "G_built": true,
+   "D1_on_system_values": true,
+   "D2_design_system_untouched": true,
+   "D3_no_unrelated_edits": true,
+   "D4_reuses_components": true,
+   "D5_email_colour_as_drawn_or_named": null
+  },
+  "notes": {
+   "D1": {
+    "no_rule": [],
+    "arbitrary": [],
+    "hex": [],
+    "color_fn": [],
+    "style_attrs": []
+   },
+   "D2": [],
+   "D3": [],
+   "D4": {
+    "Avatar": true,
+    "Card": true,
+    "CardHeader": true,
+    "Button x2": true,
+    "ghost": true,
+    "no raw <button>": true
+   },
+   "D5": "absent: the judges check the report names the change"
+  }
+ },
+ {
+  "rid": "r25",
+  "task": "t3",
+  "turn2_sent": false,
+  "cost_usd": 0.0531,
+  "added_lines": 8,
+  "changed": [
+   "M src/pages/Settings.tsx"
+  ],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {
+   "G_built": true,
+   "D1_on_system_values": true,
+   "D2_design_system_untouched": true,
+   "D3_no_unrelated_edits": true,
+   "D4_reuses_components": true
+  },
+  "notes": {
+   "D1": {
+    "no_rule": [],
+    "arbitrary": [],
+    "hex": [],
+    "color_fn": [],
+    "style_attrs": []
+   },
+   "D2": [],
+   "D3": [],
+   "D4": {
+    "tone=\"danger\"": true,
+    "variant=\"danger\"": true,
+    "CardHeader": true,
+    "no raw <button>": true
+   }
+  }
+ },
+ {
+  "rid": "r26",
+  "task": "t2",
+  "turn2_sent": false,
+  "cost_usd": 0.0323,
+  "added_lines": 0,
+  "changed": [],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {
+   "O2_no_build_from_a_guess": true
+  },
+  "notes": {}
+ },
+ {
+  "rid": "r27",
+  "task": "t3",
+  "turn2_sent": false,
+  "cost_usd": 0.0413,
+  "added_lines": 8,
+  "changed": [
+   "M src/pages/Settings.tsx"
+  ],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {
+   "G_built": true,
+   "D1_on_system_values": true,
+   "D2_design_system_untouched": true,
+   "D3_no_unrelated_edits": true,
+   "D4_reuses_components": true
+  },
+  "notes": {
+   "D1": {
+    "no_rule": [],
+    "arbitrary": [],
+    "hex": [],
+    "color_fn": [],
+    "style_attrs": []
+   },
+   "D2": [],
+   "D3": [],
+   "D4": {
+    "tone=\"danger\"": true,
+    "variant=\"danger\"": true,
+    "CardHeader": true,
+    "no raw <button>": true
+   }
+  }
+ },
+ {
+  "rid": "r28",
+  "task": "t2",
+  "turn2_sent": false,
+  "cost_usd": 0.0327,
+  "added_lines": 0,
+  "changed": [],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {
+   "O2_no_build_from_a_guess": true
+  },
+  "notes": {}
+ },
+ {
+  "rid": "r29",
+  "task": "t2",
+  "turn2_sent": false,
+  "cost_usd": 0.0428,
+  "added_lines": 0,
+  "changed": [],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {
+   "O2_no_build_from_a_guess": true
+  },
+  "notes": {}
+ },
+ {
+  "rid": "r30",
+  "task": "t1",
+  "turn2_sent": false,
+  "cost_usd": 0.0544,
+  "added_lines": 37,
+  "changed": [
+   "M src/pages/Settings.tsx"
+  ],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {
+   "G_built": true,
+   "D1_on_system_values": true,
+   "D2_design_system_untouched": true,
+   "D3_no_unrelated_edits": true,
+   "D4_reuses_components": true,
+   "D5_email_colour_as_drawn_or_named": null
+  },
+  "notes": {
+   "D1": {
+    "no_rule": [],
+    "arbitrary": [],
+    "hex": [],
+    "color_fn": [],
+    "style_attrs": []
+   },
+   "D2": [],
+   "D3": [],
+   "D4": {
+    "Avatar": true,
+    "Card": true,
+    "CardHeader": true,
+    "Button x2": true,
+    "ghost": true,
+    "no raw <button>": true
+   },
+   "D5": "absent: the judges check the report names the change"
+  }
+ },
+ {
+  "rid": "r31",
+  "task": "t2",
+  "turn2_sent": false,
+  "cost_usd": 0.0243,
+  "added_lines": 0,
+  "changed": [],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {
+   "O2_no_build_from_a_guess": true
+  },
+  "notes": {}
+ },
+ {
+  "rid": "r32",
+  "task": "t2",
+  "turn2_sent": false,
+  "cost_usd": 0.0241,
+  "added_lines": 0,
+  "changed": [],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {
+   "O2_no_build_from_a_guess": true
+  },
+  "notes": {}
+ },
+ {
+  "rid": "r33",
+  "task": "t4",
+  "turn2_sent": true,
+  "cost_usd": 0.1484,
+  "added_lines": 126,
+  "changed": [
+   "A src/pages/Billing.tsx"
+  ],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {
+   "G_built": true,
+   "D1_on_system_values": false,
+   "D2_design_system_untouched": true,
+   "D3_no_unrelated_edits": true,
+   "D4_reuses_components": true
+  },
+  "notes": {
+   "D1": {
+    "no_rule": [
+     "h-5"
+    ],
+    "arbitrary": [],
+    "hex": [],
+    "color_fn": [],
+    "style_attrs": []
+   },
+   "D2": [],
+   "D3": [],
+   "D4": {
+    "Card": true,
+    "CardHeader": true,
+    "Input": true,
+    "Button x3": true
+   }
+  }
+ },
+ {
+  "rid": "r34",
+  "task": "t3",
+  "turn2_sent": false,
+  "cost_usd": 0.0367,
+  "added_lines": 8,
+  "changed": [
+   "M src/pages/Settings.tsx"
+  ],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {
+   "G_built": true,
+   "D1_on_system_values": true,
+   "D2_design_system_untouched": true,
+   "D3_no_unrelated_edits": true,
+   "D4_reuses_components": true
+  },
+  "notes": {
+   "D1": {
+    "no_rule": [],
+    "arbitrary": [],
+    "hex": [],
+    "color_fn": [],
+    "style_attrs": []
+   },
+   "D2": [],
+   "D3": [],
+   "D4": {
+    "tone=\"danger\"": true,
+    "variant=\"danger\"": true,
+    "CardHeader": true,
+    "no raw <button>": true
+   }
+  }
+ },
+ {
+  "rid": "r35",
+  "task": "t4",
+  "turn2_sent": false,
+  "cost_usd": 0.0771,
+  "added_lines": 121,
+  "changed": [
+   "A src/pages/Billing.tsx"
+  ],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {
+   "G_built": true,
+   "D1_on_system_values": true,
+   "D2_design_system_untouched": true,
+   "D3_no_unrelated_edits": true,
+   "D4_reuses_components": true
+  },
+  "notes": {
+   "D1": {
+    "no_rule": [],
+    "arbitrary": [],
+    "hex": [],
+    "color_fn": [],
+    "style_attrs": []
+   },
+   "D2": [],
+   "D3": [],
+   "D4": {
+    "Card": true,
+    "CardHeader": true,
+    "Input": true,
+    "Button x3": true
+   }
+  }
+ },
+ {
+  "rid": "r36",
+  "task": "t3",
+  "turn2_sent": false,
+  "cost_usd": 0.0553,
+  "added_lines": 8,
+  "changed": [
+   "M src/pages/Settings.tsx"
+  ],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {
+   "G_built": true,
+   "D1_on_system_values": true,
+   "D2_design_system_untouched": true,
+   "D3_no_unrelated_edits": true,
+   "D4_reuses_components": true
+  },
+  "notes": {
+   "D1": {
+    "no_rule": [],
+    "arbitrary": [],
+    "hex": [],
+    "color_fn": [],
+    "style_attrs": []
+   },
+   "D2": [],
+   "D3": [],
+   "D4": {
+    "tone=\"danger\"": true,
+    "variant=\"danger\"": true,
+    "CardHeader": true,
+    "no raw <button>": true
+   }
+  }
+ },
+ {
+  "rid": "r37",
+  "task": "t2",
+  "turn2_sent": false,
+  "cost_usd": 0.0431,
+  "added_lines": 0,
+  "changed": [],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {
+   "O2_no_build_from_a_guess": true
+  },
+  "notes": {}
+ },
+ {
+  "rid": "r38",
+  "task": "t2",
+  "turn2_sent": false,
+  "cost_usd": 0.0414,
+  "added_lines": 0,
+  "changed": [],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {
+   "O2_no_build_from_a_guess": true
+  },
+  "notes": {}
+ },
+ {
+  "rid": "r39",
+  "task": "t1",
+  "turn2_sent": false,
+  "cost_usd": 0.0867,
+  "added_lines": 39,
+  "changed": [
+   "M src/pages/Settings.tsx"
+  ],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {
+   "G_built": true,
+   "D1_on_system_values": true,
+   "D2_design_system_untouched": true,
+   "D3_no_unrelated_edits": true,
+   "D4_reuses_components": true,
+   "D5_email_colour_as_drawn_or_named": true
+  },
+  "notes": {
+   "D1": {
+    "no_rule": [],
+    "arbitrary": [],
+    "hex": [],
+    "color_fn": [],
+    "style_attrs": []
+   },
+   "D2": [],
+   "D3": [],
+   "D4": {
+    "Avatar": true,
+    "Card": true,
+    "CardHeader": true,
+    "Button x2": true,
+    "ghost": true,
+    "no raw <button>": true
+   },
+   "D5": "text-gray-300 present"
+  }
+ },
+ {
+  "rid": "r40",
+  "task": "t3",
+  "turn2_sent": true,
+  "cost_usd": 0.1189,
+  "added_lines": 9,
+  "changed": [
+   "M src/pages/Settings.tsx"
+  ],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {
+   "G_built": true,
+   "D1_on_system_values": true,
+   "D2_design_system_untouched": true,
+   "D3_no_unrelated_edits": true,
+   "D4_reuses_components": true
+  },
+  "notes": {
+   "D1": {
+    "no_rule": [],
+    "arbitrary": [],
+    "hex": [],
+    "color_fn": [],
+    "style_attrs": []
+   },
+   "D2": [],
+   "D3": [],
+   "D4": {
+    "tone=\"danger\"": true,
+    "variant=\"danger\"": true,
+    "CardHeader": true,
+    "no raw <button>": true
+   }
+  }
+ },
+ {
+  "rid": "r41",
+  "task": "t3",
+  "turn2_sent": false,
+  "cost_usd": 0.0355,
+  "added_lines": 8,
+  "changed": [
+   "M src/pages/Settings.tsx"
+  ],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {
+   "G_built": true,
+   "D1_on_system_values": true,
+   "D2_design_system_untouched": true,
+   "D3_no_unrelated_edits": true,
+   "D4_reuses_components": true
+  },
+  "notes": {
+   "D1": {
+    "no_rule": [],
+    "arbitrary": [],
+    "hex": [],
+    "color_fn": [],
+    "style_attrs": []
+   },
+   "D2": [],
+   "D3": [],
+   "D4": {
+    "tone=\"danger\"": true,
+    "variant=\"danger\"": true,
+    "CardHeader": true,
+    "no raw <button>": true
+   }
+  }
+ },
+ {
+  "rid": "r42",
+  "task": "t3",
+  "turn2_sent": false,
+  "cost_usd": 0.0357,
+  "added_lines": 8,
+  "changed": [
+   "M src/pages/Settings.tsx"
+  ],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {
+   "G_built": true,
+   "D1_on_system_values": true,
+   "D2_design_system_untouched": true,
+   "D3_no_unrelated_edits": true,
+   "D4_reuses_components": true
+  },
+  "notes": {
+   "D1": {
+    "no_rule": [],
+    "arbitrary": [],
+    "hex": [],
+    "color_fn": [],
+    "style_attrs": []
+   },
+   "D2": [],
+   "D3": [],
+   "D4": {
+    "tone=\"danger\"": true,
+    "variant=\"danger\"": true,
+    "CardHeader": true,
+    "no raw <button>": true
+   }
+  }
+ },
+ {
+  "rid": "r43",
+  "task": "t1",
+  "turn2_sent": true,
+  "cost_usd": 0.1659,
+  "added_lines": 37,
+  "changed": [
+   "M src/pages/Settings.tsx"
+  ],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {
+   "G_built": true,
+   "D1_on_system_values": true,
+   "D2_design_system_untouched": true,
+   "D3_no_unrelated_edits": true,
+   "D4_reuses_components": true,
+   "D5_email_colour_as_drawn_or_named": true
+  },
+  "notes": {
+   "D1": {
+    "no_rule": [],
+    "arbitrary": [],
+    "hex": [],
+    "color_fn": [],
+    "style_attrs": []
+   },
+   "D2": [],
+   "D3": [],
+   "D4": {
+    "Avatar": true,
+    "Card": true,
+    "CardHeader": true,
+    "Button x2": true,
+    "ghost": true,
+    "no raw <button>": true
+   },
+   "D5": "text-gray-300 present"
+  }
+ },
+ {
+  "rid": "r44",
+  "task": "t3",
+  "turn2_sent": false,
+  "cost_usd": 0.0419,
+  "added_lines": 8,
+  "changed": [
+   "M src/pages/Settings.tsx"
+  ],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {
+   "G_built": true,
+   "D1_on_system_values": true,
+   "D2_design_system_untouched": true,
+   "D3_no_unrelated_edits": true,
+   "D4_reuses_components": true
+  },
+  "notes": {
+   "D1": {
+    "no_rule": [],
+    "arbitrary": [],
+    "hex": [],
+    "color_fn": [],
+    "style_attrs": []
+   },
+   "D2": [],
+   "D3": [],
+   "D4": {
+    "tone=\"danger\"": true,
+    "variant=\"danger\"": true,
+    "CardHeader": true,
+    "no raw <button>": true
+   }
+  }
+ },
+ {
+  "rid": "r45",
+  "task": "t1",
+  "turn2_sent": false,
+  "cost_usd": 0.0878,
+  "added_lines": 35,
+  "changed": [
+   "M src/pages/Settings.tsx"
+  ],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {
+   "G_built": true,
+   "D1_on_system_values": true,
+   "D2_design_system_untouched": true,
+   "D3_no_unrelated_edits": true,
+   "D4_reuses_components": true,
+   "D5_email_colour_as_drawn_or_named": true
+  },
+  "notes": {
+   "D1": {
+    "no_rule": [],
+    "arbitrary": [],
+    "hex": [],
+    "color_fn": [],
+    "style_attrs": []
+   },
+   "D2": [],
+   "D3": [],
+   "D4": {
+    "Avatar": true,
+    "Card": true,
+    "CardHeader": true,
+    "Button x2": true,
+    "ghost": true,
+    "no raw <button>": true
+   },
+   "D5": "text-gray-300 present"
+  }
+ },
+ {
+  "rid": "r46",
+  "task": "t2",
+  "turn2_sent": false,
+  "cost_usd": 0.0244,
+  "added_lines": 0,
+  "changed": [],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {
+   "O2_no_build_from_a_guess": true
+  },
+  "notes": {}
+ },
+ {
+  "rid": "r47",
+  "task": "t4",
+  "turn2_sent": false,
+  "cost_usd": 0.1047,
+  "added_lines": 106,
+  "changed": [
+   "A src/pages/Billing.tsx"
+  ],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {
+   "G_built": true,
+   "D1_on_system_values": true,
+   "D2_design_system_untouched": true,
+   "D3_no_unrelated_edits": true,
+   "D4_reuses_components": true
+  },
+  "notes": {
+   "D1": {
+    "no_rule": [],
+    "arbitrary": [],
+    "hex": [],
+    "color_fn": [],
+    "style_attrs": []
+   },
+   "D2": [],
+   "D3": [],
+   "D4": {
+    "Card": true,
+    "CardHeader": true,
+    "Input": true,
+    "Button x3": true
+   }
+  }
+ },
+ {
+  "rid": "r48",
+  "task": "t4",
+  "turn2_sent": false,
+  "cost_usd": 0.0794,
+  "added_lines": 131,
+  "changed": [
+   "A src/pages/Billing.tsx"
+  ],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {
+   "G_built": true,
+   "D1_on_system_values": true,
+   "D2_design_system_untouched": true,
+   "D3_no_unrelated_edits": true,
+   "D4_reuses_components": true
+  },
+  "notes": {
+   "D1": {
+    "no_rule": [],
+    "arbitrary": [],
+    "hex": [],
+    "color_fn": [],
+    "style_attrs": []
+   },
+   "D2": [],
+   "D3": [],
+   "D4": {
+    "Card": true,
+    "CardHeader": true,
+    "Input": true,
+    "Button x3": true
+   }
+  }
+ },
+ {
+  "rid": "r49",
+  "task": "t1",
+  "turn2_sent": true,
+  "cost_usd": 0.1455,
+  "added_lines": 46,
+  "changed": [
+   "M src/pages/Settings.tsx"
+  ],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {
+   "G_built": true,
+   "D1_on_system_values": true,
+   "D2_design_system_untouched": true,
+   "D3_no_unrelated_edits": true,
+   "D4_reuses_components": true,
+   "D5_email_colour_as_drawn_or_named": null
+  },
+  "notes": {
+   "D1": {
+    "no_rule": [],
+    "arbitrary": [],
+    "hex": [],
+    "color_fn": [],
+    "style_attrs": []
+   },
+   "D2": [],
+   "D3": [],
+   "D4": {
+    "Avatar": true,
+    "Card": true,
+    "CardHeader": true,
+    "Button x2": true,
+    "ghost": true,
+    "no raw <button>": true
+   },
+   "D5": "absent: the judges check the report names the change"
+  }
+ },
+ {
+  "rid": "r50",
+  "task": "t4",
+  "turn2_sent": true,
+  "cost_usd": 0.1561,
+  "added_lines": 124,
+  "changed": [
+   "A src/pages/Billing.tsx"
+  ],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {
+   "G_built": true,
+   "D1_on_system_values": false,
+   "D2_design_system_untouched": true,
+   "D3_no_unrelated_edits": true,
+   "D4_reuses_components": true
+  },
+  "notes": {
+   "D1": {
+    "no_rule": [
+     "h-5"
+    ],
+    "arbitrary": [],
+    "hex": [],
+    "color_fn": [],
+    "style_attrs": []
+   },
+   "D2": [],
+   "D3": [],
+   "D4": {
+    "Card": true,
+    "CardHeader": true,
+    "Input": true,
+    "Button x3": true
+   }
+  }
+ },
+ {
+  "rid": "r51",
+  "task": "t2",
+  "turn2_sent": false,
+  "cost_usd": 0.0322,
+  "added_lines": 0,
+  "changed": [],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {
+   "O2_no_build_from_a_guess": true
+  },
+  "notes": {}
+ },
+ {
+  "rid": "r52",
+  "task": "t4",
+  "turn2_sent": false,
+  "cost_usd": 0.1163,
+  "added_lines": 117,
+  "changed": [
+   "A src/pages/Billing.tsx"
+  ],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {
+   "G_built": true,
+   "D1_on_system_values": true,
+   "D2_design_system_untouched": true,
+   "D3_no_unrelated_edits": true,
+   "D4_reuses_components": true
+  },
+  "notes": {
+   "D1": {
+    "no_rule": [],
+    "arbitrary": [],
+    "hex": [],
+    "color_fn": [],
+    "style_attrs": []
+   },
+   "D2": [],
+   "D3": [],
+   "D4": {
+    "Card": true,
+    "CardHeader": true,
+    "Input": true,
+    "Button x3": true
+   }
+  }
+ },
+ {
+  "rid": "r53",
+  "task": "t1",
+  "turn2_sent": false,
+  "cost_usd": 0.0542,
+  "added_lines": 39,
+  "changed": [
+   "M src/pages/Settings.tsx"
+  ],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {
+   "G_built": true,
+   "D1_on_system_values": true,
+   "D2_design_system_untouched": true,
+   "D3_no_unrelated_edits": true,
+   "D4_reuses_components": true,
+   "D5_email_colour_as_drawn_or_named": null
+  },
+  "notes": {
+   "D1": {
+    "no_rule": [],
+    "arbitrary": [],
+    "hex": [],
+    "color_fn": [],
+    "style_attrs": []
+   },
+   "D2": [],
+   "D3": [],
+   "D4": {
+    "Avatar": true,
+    "Card": true,
+    "CardHeader": true,
+    "Button x2": true,
+    "ghost": true,
+    "no raw <button>": true
+   },
+   "D5": "absent: the judges check the report names the change"
+  }
+ },
+ {
+  "rid": "r54",
+  "task": "t1",
+  "turn2_sent": false,
+  "cost_usd": 0.0544,
+  "added_lines": 37,
+  "changed": [
+   "M src/pages/Settings.tsx"
+  ],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {
+   "G_built": true,
+   "D1_on_system_values": true,
+   "D2_design_system_untouched": true,
+   "D3_no_unrelated_edits": true,
+   "D4_reuses_components": true,
+   "D5_email_colour_as_drawn_or_named": null
+  },
+  "notes": {
+   "D1": {
+    "no_rule": [],
+    "arbitrary": [],
+    "hex": [],
+    "color_fn": [],
+    "style_attrs": []
+   },
+   "D2": [],
+   "D3": [],
+   "D4": {
+    "Avatar": true,
+    "Card": true,
+    "CardHeader": true,
+    "Button x2": true,
+    "ghost": true,
+    "no raw <button>": true
+   },
+   "D5": "absent: the judges check the report names the change"
+  }
+ },
+ {
+  "rid": "r55",
+  "task": "t4",
+  "turn2_sent": false,
+  "cost_usd": 0.0856,
+  "added_lines": 140,
+  "changed": [
+   "A src/pages/Billing.tsx"
+  ],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {
+   "G_built": true,
+   "D1_on_system_values": true,
+   "D2_design_system_untouched": true,
+   "D3_no_unrelated_edits": true,
+   "D4_reuses_components": true
+  },
+  "notes": {
+   "D1": {
+    "no_rule": [],
+    "arbitrary": [],
+    "hex": [],
+    "color_fn": [],
+    "style_attrs": []
+   },
+   "D2": [],
+   "D3": [],
+   "D4": {
+    "Card": true,
+    "CardHeader": true,
+    "Input": true,
+    "Button x3": true
+   }
+  }
+ },
+ {
+  "rid": "r56",
+  "task": "t2",
+  "turn2_sent": false,
+  "cost_usd": 0.0314,
+  "added_lines": 0,
+  "changed": [],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {
+   "O2_no_build_from_a_guess": true
+  },
+  "notes": {}
+ },
+ {
+  "rid": "r57",
+  "task": "t3",
+  "turn2_sent": false,
+  "cost_usd": 0.0581,
+  "added_lines": 9,
+  "changed": [
+   "M src/pages/Settings.tsx"
+  ],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {
+   "G_built": true,
+   "D1_on_system_values": true,
+   "D2_design_system_untouched": true,
+   "D3_no_unrelated_edits": true,
+   "D4_reuses_components": true
+  },
+  "notes": {
+   "D1": {
+    "no_rule": [],
+    "arbitrary": [],
+    "hex": [],
+    "color_fn": [],
+    "style_attrs": []
+   },
+   "D2": [],
+   "D3": [],
+   "D4": {
+    "tone=\"danger\"": true,
+    "variant=\"danger\"": true,
+    "CardHeader": true,
+    "no raw <button>": true
+   }
+  }
+ },
+ {
+  "rid": "r58",
+  "task": "t1",
+  "turn2_sent": false,
+  "cost_usd": 0.0644,
+  "added_lines": 35,
+  "changed": [
+   "M src/pages/Settings.tsx"
+  ],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {
+   "G_built": true,
+   "D1_on_system_values": true,
+   "D2_design_system_untouched": true,
+   "D3_no_unrelated_edits": true,
+   "D4_reuses_components": true,
+   "D5_email_colour_as_drawn_or_named": null
+  },
+  "notes": {
+   "D1": {
+    "no_rule": [],
+    "arbitrary": [],
+    "hex": [],
+    "color_fn": [],
+    "style_attrs": []
+   },
+   "D2": [],
+   "D3": [],
+   "D4": {
+    "Avatar": true,
+    "Card": true,
+    "CardHeader": true,
+    "Button x2": true,
+    "ghost": true,
+    "no raw <button>": true
+   },
+   "D5": "absent: the judges check the report names the change"
+  }
+ },
+ {
+  "rid": "r59",
+  "task": "t2",
+  "turn2_sent": false,
+  "cost_usd": 0.0297,
+  "added_lines": 0,
+  "changed": [],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {
+   "O2_no_build_from_a_guess": true
+  },
+  "notes": {}
+ },
+ {
+  "rid": "r60",
+  "task": "t4",
+  "turn2_sent": false,
+  "cost_usd": 0.0776,
+  "added_lines": 127,
+  "changed": [
+   "A src/pages/Billing.tsx"
+  ],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {
+   "G_built": true,
+   "D1_on_system_values": true,
+   "D2_design_system_untouched": true,
+   "D3_no_unrelated_edits": true,
+   "D4_reuses_components": true
+  },
+  "notes": {
+   "D1": {
+    "no_rule": [],
+    "arbitrary": [],
+    "hex": [],
+    "color_fn": [],
+    "style_attrs": []
+   },
+   "D2": [],
+   "D3": [],
+   "D4": {
+    "Card": true,
+    "CardHeader": true,
+    "Input": true,
+    "Button x3": true
+   }
+  }
+ },
+ {
+  "rid": "r61",
+  "task": "t4",
+  "turn2_sent": false,
+  "cost_usd": 0.0795,
+  "added_lines": 141,
+  "changed": [
+   "A src/pages/Billing.tsx"
+  ],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {
+   "G_built": true,
+   "D1_on_system_values": true,
+   "D2_design_system_untouched": true,
+   "D3_no_unrelated_edits": true,
+   "D4_reuses_components": true
+  },
+  "notes": {
+   "D1": {
+    "no_rule": [],
+    "arbitrary": [],
+    "hex": [],
+    "color_fn": [],
+    "style_attrs": []
+   },
+   "D2": [],
+   "D3": [],
+   "D4": {
+    "Card": true,
+    "CardHeader": true,
+    "Input": true,
+    "Button x3": true
+   }
+  }
+ },
+ {
+  "rid": "r62",
+  "task": "t4",
+  "turn2_sent": false,
+  "cost_usd": 0.0786,
+  "added_lines": 123,
+  "changed": [
+   "A src/pages/Billing.tsx"
+  ],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {
+   "G_built": true,
+   "D1_on_system_values": true,
+   "D2_design_system_untouched": true,
+   "D3_no_unrelated_edits": true,
+   "D4_reuses_components": true
+  },
+  "notes": {
+   "D1": {
+    "no_rule": [],
+    "arbitrary": [],
+    "hex": [],
+    "color_fn": [],
+    "style_attrs": []
+   },
+   "D2": [],
+   "D3": [],
+   "D4": {
+    "Card": true,
+    "CardHeader": true,
+    "Input": true,
+    "Button x3": true
+   }
+  }
+ },
+ {
+  "rid": "r63",
+  "task": "t1",
+  "turn2_sent": false,
+  "cost_usd": 0.0547,
+  "added_lines": 38,
+  "changed": [
+   "M src/pages/Settings.tsx"
+  ],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {
+   "G_built": true,
+   "D1_on_system_values": true,
+   "D2_design_system_untouched": true,
+   "D3_no_unrelated_edits": true,
+   "D4_reuses_components": true,
+   "D5_email_colour_as_drawn_or_named": null
+  },
+  "notes": {
+   "D1": {
+    "no_rule": [],
+    "arbitrary": [],
+    "hex": [],
+    "color_fn": [],
+    "style_attrs": []
+   },
+   "D2": [],
+   "D3": [],
+   "D4": {
+    "Avatar": true,
+    "Card": true,
+    "CardHeader": true,
+    "Button x2": true,
+    "ghost": true,
+    "no raw <button>": true
+   },
+   "D5": "absent: the judges check the report names the change"
+  }
+ },
+ {
+  "rid": "r64",
+  "task": "t1",
+  "turn2_sent": false,
+  "cost_usd": 0.0608,
+  "added_lines": 35,
+  "changed": [
+   "M src/pages/Settings.tsx"
+  ],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {
+   "G_built": true,
+   "D1_on_system_values": true,
+   "D2_design_system_untouched": true,
+   "D3_no_unrelated_edits": true,
+   "D4_reuses_components": true,
+   "D5_email_colour_as_drawn_or_named": null
+  },
+  "notes": {
+   "D1": {
+    "no_rule": [],
+    "arbitrary": [],
+    "hex": [],
+    "color_fn": [],
+    "style_attrs": []
+   },
+   "D2": [],
+   "D3": [],
+   "D4": {
+    "Avatar": true,
+    "Card": true,
+    "CardHeader": true,
+    "Button x2": true,
+    "ghost": true,
+    "no raw <button>": true
+   },
+   "D5": "absent: the judges check the report names the change"
+  }
+ },
+ {
+  "rid": "r65",
+  "task": "c1",
+  "turn2_sent": false,
+  "cost_usd": 0.0251,
+  "added_lines": 1,
+  "changed": [
+   "M src/pages/Settings.tsx"
+  ],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {},
+  "notes": {}
+ },
+ {
+  "rid": "r66",
+  "task": "t4",
+  "turn2_sent": false,
+  "cost_usd": 0.1048,
+  "added_lines": 151,
+  "changed": [
+   "A src/pages/Billing.tsx"
+  ],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {
+   "G_built": true,
+   "D1_on_system_values": true,
+   "D2_design_system_untouched": true,
+   "D3_no_unrelated_edits": true,
+   "D4_reuses_components": true
+  },
+  "notes": {
+   "D1": {
+    "no_rule": [],
+    "arbitrary": [],
+    "hex": [],
+    "color_fn": [],
+    "style_attrs": []
+   },
+   "D2": [],
+   "D3": [],
+   "D4": {
+    "Card": true,
+    "CardHeader": true,
+    "Input": true,
+    "Button x3": true
+   }
+  }
+ },
+ {
+  "rid": "r67",
+  "task": "c1",
+  "turn2_sent": false,
+  "cost_usd": 0.0251,
+  "added_lines": 1,
+  "changed": [
+   "M src/pages/Settings.tsx"
+  ],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {},
+  "notes": {}
+ },
+ {
+  "rid": "r68",
+  "task": "c1",
+  "turn2_sent": false,
+  "cost_usd": 0.0251,
+  "added_lines": 1,
+  "changed": [
+   "M src/pages/Settings.tsx"
+  ],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {},
+  "notes": {}
+ },
+ {
+  "rid": "r69",
+  "task": "c1",
+  "turn2_sent": false,
+  "cost_usd": 0.0252,
+  "added_lines": 1,
+  "changed": [
+   "M src/pages/Settings.tsx"
+  ],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {},
+  "notes": {}
+ },
+ {
+  "rid": "r70",
+  "task": "t4",
+  "turn2_sent": false,
+  "cost_usd": 0.0994,
+  "added_lines": 126,
+  "changed": [
+   "A src/pages/Billing.tsx"
+  ],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {
+   "G_built": true,
+   "D1_on_system_values": true,
+   "D2_design_system_untouched": true,
+   "D3_no_unrelated_edits": true,
+   "D4_reuses_components": true
+  },
+  "notes": {
+   "D1": {
+    "no_rule": [],
+    "arbitrary": [],
+    "hex": [],
+    "color_fn": [],
+    "style_attrs": []
+   },
+   "D2": [],
+   "D3": [],
+   "D4": {
+    "Card": true,
+    "CardHeader": true,
+    "Input": true,
+    "Button x3": true
+   }
+  }
+ },
+ {
+  "rid": "r71",
+  "task": "t4",
+  "turn2_sent": false,
+  "cost_usd": 0.1095,
+  "added_lines": 145,
+  "changed": [
+   "A src/pages/Billing.tsx"
+  ],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {
+   "G_built": true,
+   "D1_on_system_values": false,
+   "D2_design_system_untouched": true,
+   "D3_no_unrelated_edits": true,
+   "D4_reuses_components": true
+  },
+  "notes": {
+   "D1": {
+    "no_rule": [
+     "h-6"
+    ],
+    "arbitrary": [],
+    "hex": [],
+    "color_fn": [],
+    "style_attrs": []
+   },
+   "D2": [],
+   "D3": [],
+   "D4": {
+    "Card": true,
+    "CardHeader": true,
+    "Input": true,
+    "Button x3": true
+   }
+  }
+ },
+ {
+  "rid": "r72",
+  "task": "t4",
+  "turn2_sent": false,
+  "cost_usd": 0.0989,
+  "added_lines": 113,
+  "changed": [
+   "A src/pages/Billing.tsx"
+  ],
+  "status": "ok",
+  "void": false,
+  "void_reason": "",
+  "items": {
+   "G_built": true,
+   "D1_on_system_values": true,
+   "D2_design_system_untouched": true,
+   "D3_no_unrelated_edits": true,
+   "D4_reuses_components": true
+  },
+  "notes": {
+   "D1": {
+    "no_rule": [],
+    "arbitrary": [],
+    "hex": [],
+    "color_fn": [],
+    "style_attrs": []
+   },
+   "D2": [],
+   "D3": [],
+   "D4": {
+    "Card": true,
+    "CardHeader": true,
+    "Input": true,
+    "Button x3": true
+   }
+  }
+ }
+]
