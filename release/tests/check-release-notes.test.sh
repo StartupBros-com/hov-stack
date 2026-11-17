@@ -128,4 +128,42 @@ NOTES
 reject 'members would read: Read before running setup again.' bash "$SCRIPT" "$TMP/notes"
 pass 'an angle-bracket URL leaves nothing behind in the card text'
 
+# A release that goes out while an earlier version of the plugin has not reached
+# members (#702): the card announces only this release, so its Highlights must carry
+# that version's, and a "Changes since" line must name a version members have.
+cat >"$TMP/v1.1.0.md" <<'NOTES'
+## Highlights
+- Customers can install updates with one command.
+- Customers can roll back an update with one command.
+NOTES
+cat >"$TMP/notes" <<'NOTES'
+## Highlights
+- Customers can pin an update to one version.
+
+## Details
+
+Changes since v1.1.0:
+NOTES
+reject 'v1.1.0 has not reached members' bash "$SCRIPT" "$TMP/notes" --members-version 1.0.0 --carry "$TMP/v1.1.0.md"
+grep -Fq 'Customers can roll back an update with one command.' "$TMP/err" || { cat "$TMP/err"; die 'the missing bullet is not named'; }
+grep -Fq "'Changes since v1.1.0' names a version members do not have" "$TMP/err" || { cat "$TMP/err"; die 'the baseline line was not checked'; }
+pass 'a release over a version members lack must carry its Highlights and name their baseline'
+cat >"$TMP/notes" <<'NOTES'
+## Highlights
+- Customers can pin an update to one version.
+* Customers can install updates with one command.
+-   Customers can roll back an update with one command.
+
+## Details
+
+Changes since v1.0.0:
+Changes since v0.9.0, for anyone still on it:
+NOTES
+bash "$SCRIPT" "$TMP/notes" --members-version 1.0.0 --carry "$TMP/v1.1.0.md" >"$TMP/out" 2>"$TMP/err" || { cat "$TMP/err"; die 'carried notes rejected'; }
+pass 'carried bullets match whatever marker and spacing they use, and an older baseline is fine'
+reject 'no such notes file to carry' bash "$SCRIPT" "$TMP/notes" --carry "$TMP/v9.9.9.md"
+pass 'a missing notes file to carry is an error, not a pass'
+reject 'usage: check-release-notes.sh' bash "$SCRIPT" "$TMP/notes" --members-versions 1.0.0
+pass 'an unknown option is refused'
+
 printf '%s check-release-notes checks passed\n' "$PASS"

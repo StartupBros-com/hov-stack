@@ -33,8 +33,30 @@ if [ -n "$base" ] && git cat-file -e "$base^{commit}" 2>/dev/null \
   previous="$(jq -Rrs 'gsub("^\\s+|\\s+$"; "")' <<<"$previous")"
   if [ "$previous" != "$version" ] && ! git rev-parse -q --verify "refs/tags/$name--v$version" >/dev/null; then
     notes="$dir/docs/release-notes/v$version.md"
+    # What members have is the version the marketplace lists at the base; only the
+    # release bot's card PRs move it, and validate-marketplace.sh refuses a changed
+    # version under an existing release id. Every version between it and this one has
+    # not reached members, so these notes must carry their Highlights (#702). A plugin
+    # the marketplace does not list yet has nothing to carry.
+    members=''; checks=()
+    if manifest="$(git show "$base:.claude-plugin/marketplace.json" 2>/dev/null)"; then
+      if ! members="$(jq -r --arg n "$name" 'first(.plugins[] | select(.name == $n) | .metadata.version // empty) // empty' <<<"$manifest")" \
+         || { [ -n "$members" ] && ! is_release_semver "$members"; }; then
+        problem "$name cannot read the version members have from .claude-plugin/marketplace.json at $base"; members=''
+      fi
+    fi
+    if [ -n "$members" ]; then
+      checks+=(--members-version "$members")
+      for older in "$dir"/docs/release-notes/v*.md; do
+        v="${older##*/v}"; v="${v%.md}"
+        if is_release_semver "$v" && release_semver_gt "$v" "$members" && release_semver_gt "$version" "$v"; then
+          checks+=(--carry "$older")
+          printf '  ! %s\n' "$name v$v has not reached members (the marketplace at ${base:0:12} lists v$members); v$version must carry its Highlights" >&2
+        fi
+      done
+    fi
     if [ ! -f "$notes" ]; then problem "$name VERSION bump requires release notes $notes";
-    elif "$SCRIPT_DIR/check-release-notes.sh" "$notes"; then ok "$name bump release notes pass";
+    elif "$SCRIPT_DIR/check-release-notes.sh" "$notes" ${checks[@]+"${checks[@]}"}; then ok "$name bump release notes pass";
     else problem "$name release notes failed: $notes"; fi
   fi
 fi

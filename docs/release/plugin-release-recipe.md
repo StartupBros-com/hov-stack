@@ -396,6 +396,19 @@ and if a release genuinely has no user-visible change, say so in one bullet
 rather than leaving the section out. `release/scripts/check-release-notes.sh`
 runs on the bump PR and again before the draft is created.
 
+A bump while an earlier version has not reached members yet (its draft is
+staged, the marketplace still lists the version before it) must carry that
+version's Highlights. The card names only the newest version, so the earlier
+draft may never publish and its news would otherwise never be announced:
+hov-stack 0.3.4's new skill went unannounced behind 0.3.5, whose notes said
+nothing changed. On the bump PR, `plugin-ci.sh` reads the version members have
+from the marketplace at the base commit, and fails the notes when a Highlights
+bullet of any version between it and the new one is missing, or when a
+`Changes since vX` line names a version newer than what members have. Copy the
+bullets word for word; to reword one, edit it in the earlier version's notes
+file in the same PR so the two match. The check runs at PR and merge-queue
+time only, not again at staging.
+
 ## Announce service error semantics (issue #56)
 
 - **429 "GitHub release verification is rate limited"**: the service holds a
