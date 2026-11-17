@@ -57,15 +57,17 @@ EMPTY="$TMP/claude-empty"; mkdir -p "$EMPTY" "$TMP/home"
 
 # ROOT=$TMP/$1 holding one repo (origin outside the root) and one worktree per
 # further argument, $TMP/$1/<name> on branch <name>, pushed: clean and shipped.
-# Each holds sub/f.txt and sub/g.txt. Dates come from the caller's environment.
+# Each holds sub/f.txt, sub/g.txt and source/s.txt (a directory name longer than the
+# three status characters, for case 13). Dates come from the caller's environment.
 mkfix(){
   local d="$TMP/$1" w; shift
   {
-    mkdir -p "$d/repo/sub"
+    mkdir -p "$d/repo/sub" "$d/repo/source"
     git init --bare -q -b main "$d-origin.git"
     git init -q -b main "$d/repo"
     git -C "$d/repo" remote add origin "$d-origin.git"
     echo f >"$d/repo/sub/f.txt"; echo g >"$d/repo/sub/g.txt"; echo base >"$d/repo/base.txt"
+    echo s >"$d/repo/source/s.txt"
     git -C "$d/repo" add -A; git -C "$d/repo" commit -qm base
     git -C "$d/repo" push -q -u origin main
     for w in "$@"; do
@@ -222,9 +224,13 @@ echo edited >>"$WT/sub/f.txt"; touch -d '-25 hours' "$WT/sub/f.txt"; settle "$WT
 before=$(state "$WT")
 out=$(FRESH_WORK_HOURS=24h sweep "$TMP/bad" 0); rc=$?
 chk "bad knob: exits 2" 2 "$rc"
-has "bad knob: says why" "$out" "FRESH_WORK_HOURS must be a whole number of hours (got '24h'); nothing swept"
+has "bad knob: says why" "$out" "FRESH_WORK_HOURS must be a whole number of hours, at most 9 digits (got '24h'); nothing swept"
 kept "bad knob: worktree kept" "$WT"
 chk "bad knob: nothing written" "$before" "$(state "$WT")"
+out=$(FRESH_WORK_HOURS=0000000024 sweep "$TMP/bad" 0); rc=$?
+chk "ten-digit knob: exits 2" 2 "$rc"
+kept "ten-digit knob: worktree kept" "$WT"
+chk "ten-digit knob: nothing written" "$before" "$(state "$WT")"
 
 # --- 11. PLANTED NEGATIVE: work that cannot be dated keeps the worktree ------------
 mkfix nodate nodate; WT="$TMP/nodate/nodate"
@@ -250,6 +256,60 @@ chk "mixed root: plan and apply print the same decisions" "$plan" "$apply"
 has "mixed root: two held, two preserved" "$apply" "removed:2  preserved-local:2  dropped:0  bundled:0  kept-in-place:0  skipped-active:2"
 kept "mixed root: fresh dirty kept" "$TMP/mix/a-fresh"; kept "mixed root: fresh unshipped kept" "$TMP/mix/c-fresh"
 gone "mixed root: old dirty removed" "$TMP/mix/b-old"; gone "mixed root: old unshipped removed" "$TMP/mix/d-old"
+
+# --- 13. a rename only the work tree shows (` R`): its source is dated too ---------
+# `mv` keeps the file's old mtime; only the source directory the move emptied is
+# fresh. Before, the source field was read as a record of its own, cut to
+# "rce/s.txt" and dated by the old top directory, so the worktree was preserved.
+mkfix wren wren; WT="$TMP/wren/wren"
+mkdir "$WT/dest"; mv "$WT/source/s.txt" "$WT/dest/s.txt"; git -C "$WT" add -N dest/s.txt
+touch -d '-25 hours' "$WT/dest/s.txt" "$WT/dest"; touch -d '-1 hour' "$WT/source"; settle "$WT"
+[ "$(git -C "$WT" status --porcelain=v1 -z | tr '\0' '|')" = ' R dest/s.txt|source/s.txt|' ] \
+  && ok "fixture: git shows the rename in the work-tree column only" \
+  || no "fixture: git shows the rename in the work-tree column only (got '$(git -C "$WT" status --porcelain=v1 -z | tr '\0' '|')')"
+before=$(state "$WT")
+out=$(sweep "$TMP/wren" 1)
+has "work-tree rename: held, the emptied source directory named" "$out" \
+  "=> SKIP (local work 1h old, under FRESH_WORK_HOURS=24: source; nothing removed)"
+notothers "work-tree rename" "$out"
+out=$(sweep "$TMP/wren" 0)
+kept "work-tree rename, apply: worktree kept" "$WT"
+chk "work-tree rename, apply: no WIP commit" 0 "$(wips "$TMP/wren/repo")"
+chk "work-tree rename, apply: HEAD and status unchanged" "$before" "$(state "$WT")"
+touch -d '-25 hours' "$WT/source"
+out=$(sweep "$TMP/wren" 1)
+has "twin, 25 h old: preserve" "$out" "=> preserve (branch kept local)"
+
+# --- 14. leading zeros are decimal: 08 is 8 hours, 010 is 10 ----------------------
+# Bash arithmetic reads 08 as bad octal (the test errored to false and the edit was
+# preserved) and 010 as 8 (a 9 h old edit was preserved).
+mkfix oct oct; WT="$TMP/oct/oct"
+echo edited >>"$WT/sub/f.txt"; touch -d '-1 hour' "$WT/sub/f.txt"; settle "$WT/sub" "$WT"
+out=$(FRESH_WORK_HOURS=08 sweep "$TMP/oct" 0); rc=$?
+chk "knob 08: sweep exits 0" 0 "$rc"
+has "knob 08: held as 8 hours" "$out" "=> SKIP (local work 1h old, under FRESH_WORK_HOURS=8: sub/f.txt; nothing removed)"
+kept "knob 08: worktree kept" "$WT"
+touch -d '-9 hours' "$WT/sub/f.txt"
+out=$(FRESH_WORK_HOURS=010 sweep "$TMP/oct" 0)
+has "knob 010: a 9 h old edit held as under 10 hours" "$out" "=> SKIP (local work 9h old, under FRESH_WORK_HOURS=10: sub/f.txt; nothing removed)"
+kept "knob 010: worktree kept" "$WT"
+chk "knobs 08 and 010: no WIP commit" 0 "$(wips "$TMP/oct/repo")"
+
+# --- 15. a worktree removed while it is being dated: the helper returns, refusing ---
+# Another sweep or a closeout can remove it between `git status` and the dating.
+# Before, the climb to the nearest existing directory reached "." and looped forever.
+mkfix van van; WT="$TMP/van/van"
+echo edited >>"$WT/sub/f.txt"
+cat >"$TMP/vanish.sh" <<'SH'
+set -u
+. "$1/wt-preserve.sh"
+# git status answers, then the worktree is moved away before anything is dated.
+git(){ command git "$@"; local rc=$?; case " $* " in *" status "*) mv "$WT_VANISH" "$WT_VANISH.moved" ;; esac; return $rc; }
+wt_newest_work "$WT_VANISH" 0
+SH
+out=$(WT_VANISH="$WT" timeout 30 bash "$TMP/vanish.sh" "$HERE/../scripts/lib" 2>&1); rc=$?
+chk "vanished mid-scan: helper refuses rather than hangs" 1 "$rc"
+has "vanished mid-scan: says why" "$out" "the worktree vanished during the scan"
 
 echo
 echo "wt-sweep-fresh-work: $pass passed, $fail failed"

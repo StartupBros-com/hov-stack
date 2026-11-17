@@ -167,13 +167,20 @@ wt_newest_work() {
     e=${ents[i]}; i=$((i+1))
     p=${e:3}
     # With -z a rename or copy puts its source in the next field, without a status.
-    case ${e:0:2} in R*|C*) (( i < n )) && { cands+=("${ents[i]}"); i=$((i+1)); } ;; esac
+    # Either column can carry the R or C: ` R` is a rename only the work tree shows,
+    # as after `git add -N` on the new path. Missing it read the source as a record
+    # of its own, cut its first three characters and dated the wrong path.
+    case ${e:0:2} in R?|C?|?R|?C) (( i < n )) && { cands+=("${ents[i]}"); i=$((i+1)); } ;; esac
     cands+=("$p")
   done
   for i in "${!cands[@]}"; do
     q=${cands[i]%/}; [ -n "$q" ] || q=.
+    # Climb no higher than the worktree itself: if that is gone too, it was removed
+    # or moved after the listing, and the caller keeps it.
     while [ ! -e "$wt/$q" ] && [ ! -L "$wt/$q" ]; do
+      if [ "$q" = . ]; then printf 'the worktree vanished during the scan'; return 1; fi
       case $q in */*) q=${q%/*} ;; *) q=. ;; esac
+      [ -n "$q" ] || q=.
     done
     cands[i]=$q
   done
