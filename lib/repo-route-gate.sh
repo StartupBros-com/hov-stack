@@ -9,12 +9,21 @@
 # the reason in route_gate_why. A resolver that fails or prints anything but a JSON object
 # refuses, as do an unverified, ambiguous or misconfigured route, an absent canonical launch
 # pad, and, once a route is in warn or enforce mode, a checkout that is not its registered
-# canonical one or a route with no authority registered on this host.
+# canonical one or a route with no authority registered on this host. The resolver needs python3
+# 3.9 or later (3.8 fails on its first `dict | dict`), so a host without one refuses, saying so.
 # shellcheck disable=SC2034  # route_gate_why is the callers' to read
 route_gate_why=
 repo_route_gate() {
   local repo=$1 resolver=$2 result fields state mode route canonical missing
   route_gate_why=
+  if ! command -v python3 > /dev/null 2>&1; then
+    route_gate_why="python3 is not on PATH, and the repo-route resolver needs 3.9 or later; skipped before mutation"
+    return 1
+  fi
+  if ! python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 9) else 1)' > /dev/null 2>&1 < /dev/null; then
+    route_gate_why="python3 here is older than 3.9 or does not run, and the repo-route resolver needs 3.9 or later; skipped before mutation"
+    return 1
+  fi
   result=$(python3 "$resolver" resolve --repo "$repo" --format json 2>/dev/null) || {
     route_gate_why="repo-route resolver failed; skipped before mutation"
     return 1

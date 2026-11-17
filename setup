@@ -1517,7 +1517,10 @@ sync_lock_stale() {  # sync_lock_stale <pid read from the lock, or empty>
 # different pid (and a young directory), so the claim's holder leaves it alone. The claim is held
 # for a few milliseconds; one older than a minute was left by a run that died holding it and is
 # cleared. Clearing it can race only when two runs find that same orphaned claim within the same
-# instant, which needs a reaper killed inside those milliseconds first.
+# instant, which needs a reaper killed inside those milliseconds first. One more window is left:
+# a lock reaped for its age (a live owner past 15 minutes, a hung run) whose owner releases it,
+# and a third run takes it, between the re-check under the claim and the move. The move then
+# takes the third run's lock. It needs a hung run to wake inside that same instant.
 sync_reap_dir=$CFG/.hov-stack/sync.lock.reap
 sync_reaping=0
 sync_lock_reap() {  # sync_lock_reap <pid judged stale>: 0 looked again under the claim, 1 another run holds it
@@ -1576,7 +1579,17 @@ sync_unlock() {
   if [ "$(cat "$sync_lock_dir/pid" 2>/dev/null)" = "$$" ]; then rm -rf "$sync_lock_dir"; fi
   sync_locked=0
 }
-sync_cleanup() { sync_unlock; adopt_done; }
+# A run that is itself stopped (TERM: wt-done's cap, a hand kill) while its fetch runs ends the
+# fetch too. The fetch has a process group of its own (sync_fetch), so a signal to this run's
+# group never reaches it, and a hung transport would outlive the run that started it.
+sync_fetch_pid=
+sync_fetch_stop() {
+  [ -n "$sync_fetch_pid" ] || return 0
+  kill -TERM -- "-$sync_fetch_pid" 2>/dev/null || kill "$sync_fetch_pid" 2>/dev/null || :
+  kill -CONT -- "-$sync_fetch_pid" 2>/dev/null || kill -CONT "$sync_fetch_pid" 2>/dev/null || :
+  sync_fetch_pid=
+}
+sync_cleanup() { sync_fetch_stop; sync_unlock; adopt_done; }
 
 # How this host merges settings.json: a member's install through setup's own record, a host
 # sync.sh keeps a record for through sync.sh (when its role applies settings), else not at all.
@@ -1611,17 +1624,14 @@ sync_route_find() {
 # The repository-route gate launchpad-freshen.sh applies to every launch pad (one copy, in
 # lib/repo-route-gate.sh): --sync may not fetch into or move a checkout the routes registered on
 # this host protect. It runs before the fetch, and only on --sync's pull; ./setup --update is a
-# move made by hand. A lib that does not load, or no python3 for the resolver, refuses.
+# move made by hand. A lib that does not load refuses, and so does the lib itself on a host
+# without python3 3.9 or later for the resolver.
 sync_gate_why=
 sync_route_gate() {
   local resolver=${REPO_ROUTE_RESOLVER:-$HOV_STACK/scripts/repo-route.py}
   # shellcheck source=lib/repo-route-gate.sh
   if ! . "$HOV_STACK/lib/repo-route-gate.sh" 2>/dev/null || ! declare -F repo_route_gate > /dev/null; then
     sync_gate_why="lib/repo-route-gate.sh did not load"
-    return 1
-  fi
-  if ! command -v python3 > /dev/null 2>&1; then
-    sync_gate_why="python3 is not on PATH, and the route resolver that decides this needs it"
     return 1
   fi
   repo_route_gate "$HOV_STACK" "$resolver" && return 0
@@ -1648,6 +1658,7 @@ sync_fetch() {  # sync_fetch <remote>
     set -m
     GIT_TERMINAL_PROMPT=0 git -C "$HOV_STACK" fetch --quiet "$1" > /dev/null 2>&1 < /dev/null &
     fpid=$!
+    sync_fetch_pid=$fpid
     set +m
     while kill -0 "$fpid" 2>/dev/null; do
       if [ "$steps" -eq "$limit" ]; then
@@ -1664,6 +1675,7 @@ sync_fetch() {  # sync_fetch <remote>
       steps=$((steps + 1))
     done
     wait "$fpid" 2>/dev/null || frc=$?
+    sync_fetch_pid=
     return "$frc"
   fi
 }

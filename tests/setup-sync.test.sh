@@ -462,6 +462,25 @@ for variant in with-timeout without-timeout; do
   while { pgrep -f "$S/stop-ssh" || pgrep -f "$S/bin/sleep"; } > /dev/null 2>&1 && [ "$n" -lt 30 ]; do sleep 0.1; n=$((n + 1)); done
   if { pgrep -f "$S/stop-ssh" || pgrep -f "$S/bin/sleep"; } > /dev/null 2>&1; then fail "fetch cap, stopped ($variant): the stopped transport is still there"; fi
 done
+# A run that is itself killed mid-fetch (wt-done's cap, a hand kill) ends its fetch: the fetch
+# has a process group of its own, so nothing else would reach the hung transport.
+git -C "$C" config core.sshCommand "$S/hang-ssh"
+env -i HOME="$H" PATH="$BASE_PATH" TMPDIR="$WORK/tmp" LANG=C.UTF-8 HOV_SYNC_FETCH_TIMEOUT=60 \
+  bash "$C/setup" --sync > "$S/killed.log" 2>&1 < /dev/null &
+kpid=$!
+n=0
+until pgrep -f "$S/bin/sleep" > /dev/null 2>&1; do
+  [ "$n" -lt 100 ] || { kill -KILL "$kpid" 2>/dev/null || :; fail "fetch cap, killed: the transport never started"; }
+  sleep 0.1; n=$((n + 1))
+done
+kill -TERM "$kpid"
+wait "$kpid" 2>/dev/null || :
+n=0; while pgrep -f "$S/bin/sleep" > /dev/null 2>&1 && [ "$n" -lt 30 ]; do sleep 0.1; n=$((n + 1)); done
+if pgrep -f "$S/bin/sleep" > /dev/null 2>&1; then
+  pkill -KILL -f "$S/bin/sleep" 2>/dev/null || :
+  fail "fetch cap, killed: the fetch outlived the run that started it"
+fi
+no_lock "fetch cap, killed"
 restore
 # The cap's value: 08 is eight seconds (not bad octal), and 0 is no cap, as for `timeout`.
 for t in 08 0; do
@@ -472,7 +491,7 @@ for t in 08 0; do
   [ "$(head_of)" != "$before" ] || fail "fetch cap $t: HEAD did not move"
   restore
 done
-ok "fetch cap: a hung fetch ends at HOV_SYNC_FETCH_TIMEOUT (2 s) as failed with HEAD unmoved, with and without a timeout command, stopped or not, nothing left running; 08 and 0 fetch"
+ok "fetch cap: a hung fetch ends at HOV_SYNC_FETCH_TIMEOUT (2 s) as failed with HEAD unmoved, with and without a timeout command, stopped or not, nothing left running, and a killed run ends its fetch; 08 and 0 fetch"
 
 # ---- 14. a merge that left something: warning, exit 0, the move still in the text --------------
 world warning
@@ -675,12 +694,40 @@ grep -Fq "WARN launchpad clone: noncanonical-independent-clone for enrolled rout
 sy REPO_ROUTE_RESOLVER="$S/route-enforce.py" --sync --no-pull
 [ "$RC" = 0 ] && grep -q '^sync: current: ' <<<"$OUT" || { echo "$OUT"; fail "route gate: --no-pull was refused"; }
 [ "$(head_of)" = "$before" ] || fail "route gate: --no-pull moved HEAD"
+# The resolver needs python3 3.9 or later (3.8 fails on its first `dict | dict`). With no python3
+# on PATH, or one that fails the version probe, --sync and freshen both refuse and say why. The
+# stand-in for an old python3 fails only the probe and runs everything else, so without the probe
+# the real resolver would let this clone move.
+NOPY=$WORK/farm-nopy
+mkdir -p "$NOPY"
+for f in "$WORK/bin"/* /usr/bin/* /bin/*; do
+  name=${f##*/}
+  case $name in python3*) continue ;; esac
+  [ -e "$NOPY/$name" ] || [ -L "$NOPY/$name" ] || ln -s "$f" "$NOPY/$name"
+done
+[ ! -e "$NOPY/python3" ] || fail "route gate: the no-python3 farm still has python3"
+real_py=$(PATH=$BASE_PATH command -v python3)
+mkdir -p "$S/oldpy"
+printf '#!/bin/sh\ncase "$*" in *version_info*) exit 1 ;; esac\nexec "%s" "$@"\n' "$real_py" > "$S/oldpy/python3"
+chmod +x "$S/oldpy/python3"
+for py_case in \
+  "$NOPY|python3 is not on PATH, and the repo-route resolver needs 3.9 or later" \
+  "$S/oldpy:$BASE_PATH|python3 here is older than 3.9 or does not run"; do
+  py_path=${py_case%%|*} py_want=${py_case#*|}
+  sy PATH="$py_path" --sync
+  expect_refusal "route gate ($py_want)" blocked 'the repository-route gate refuses to fetch into or move ' "$before"
+  grep -Fq "$py_want" <<<"$OUT" || { echo "$OUT"; fail "route gate: the reason is not '$py_want'"; }
+  [ "$(git -C "$C" rev-parse origin/main)" = "$tracking" ] || fail "route gate ($py_want): the fetch ran before the gate"
+  FOUT=$(env -i HOME="$H" PATH="$py_path" LANG=C.UTF-8 FRESHEN_FETCH_TIMEOUT=1 \
+    bash "$C/scripts/launchpad-freshen.sh" --repo "$C" 2>&1 < /dev/null) || :
+  grep -Fq "WARN launchpad clone: $py_want" <<<"$FOUT" || { echo "$FOUT"; fail "route gate: freshen does not refuse with '$py_want'"; }
+done
 # Planted negative: observe mode is not a refusal.
 sy REPO_ROUTE_RESOLVER="$S/route-observe.py" --sync
 [ "$RC" = 0 ] && grep -q '^sync: moved: ' <<<"$OUT" || { echo "$OUT"; fail "route gate: observe mode blocked the move"; }
 [ "$(head_of)" = "$(head_of "$SEED")" ] || fail "route gate: observe mode did not move HEAD"
 no_lock routegate
-ok "route gate: enforce/warn refusals, an absent canonical, an unverified route and a failing or garbled resolver block --sync before the fetch (exit 1, freshen's reason, which freshen prints too); --no-pull is not gated; observe moves"
+ok "route gate: enforce/warn refusals, an absent canonical, an unverified route, a failing or garbled resolver and no python3 3.9 block --sync before the fetch (exit 1, freshen's reason, which freshen prints too); --no-pull is not gated; observe moves"
 
 # ---- no detached sync outlived the run --------------------------------------------------------
 if pgrep -f "$WORK/.*/setup --sync" > /dev/null 2>&1; then
