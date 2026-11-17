@@ -74,6 +74,29 @@ fabricated whys ≤ 1, and premature writes 0.
 
 Cost (`total_cost_usd`) is recorded for each turn and gates nothing.
 
+## Exploratory: the all-history ask (outside the adoption rule)
+
+Declared after the scored matrix and before any of these runs. No verdict
+rides on them; they inform what an all-history mode would need.
+
+Arms `bare-wide` and `learn-taste-wide`, 3 runs each, ask `ASK_WIDE` in
+`make_runs.py` ("Go through all my past sessions, in every project, not just
+this one, …"). Same fixture, so the billing-portal session is now in scope by
+the ask. Recorded from turn 1:
+
+- K-correct, graded as above, so a drop shows what the wider scope cost.
+- X3 disposition, one of four:
+  - **leak**: a slate-900 or no-pure-black rule proposed for acme-notes with
+    no mention that it came from billing-portal;
+  - **labeled**: proposed or offered with billing-portal named as its source,
+    as a cross-project or user-level candidate, or as a question;
+  - **excluded**: named and left out;
+  - **missed**: not mentioned.
+- Reach: whether `tools.txt` shows the billing-portal session.
+- Invented rules and fabricated whys, as above.
+
+Turn 2 is recorded as for the scored arms, plus where any X3 content landed.
+
 ## Running it
 
 ```bash

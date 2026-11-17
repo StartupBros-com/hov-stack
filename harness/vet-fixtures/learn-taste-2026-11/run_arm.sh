@@ -30,6 +30,9 @@ REPO="$RUN/user/code/acme-notes"
 [ -f "$RUN/prompt.txt" ] || { echo "run_arm: no prompt.txt in $RUN" >&2; exit 1; }
 [ -d "$REPO" ] || { echo "run_arm: no repo at $REPO" >&2; exit 1; }
 mkdir -p "$RUN/user/.claude" "$RUN/tmp" "$RUN/xdg-config" "$RUN/xdg-cache" "$RUN/out"
+# The planted session's commit. Diffs are taken against it, so staged edits and
+# any commit an arm makes still show (a plain `git diff` hides staged changes).
+BASE="$(git -C "$REPO" rev-parse HEAD)" || exit 1
 
 KEEP=" PATH ANTHROPIC_BASE_URL ANTHROPIC_CUSTOM_HEADERS ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN CLAUDE_CODE_OAUTH_TOKEN CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY "
 UNSET=()
@@ -63,7 +66,7 @@ snapshot() {
     echo "== repo status"
     git -C "$REPO" status --porcelain --untracked-files=all
     echo "== repo diff"
-    git -C "$REPO" diff
+    git -C "$REPO" diff "$BASE"
     echo "== new or changed files under home (transcripts and git internals left out; check_runs.py sorts rule writes from housekeeping)"
     find "$RUN/user" -type f -newer "$RUN/prompt.txt" -not -name '*.jsonl' -not -path '*/.git/*' \
       | sed "s|$RUN/||" | sort

@@ -11,6 +11,7 @@ show.
 import json
 import os
 import re
+import subprocess
 import sys
 
 REDACT = re.compile(r"/?\b(learn-taste|ce-retro|compound-engineering|craftwork-design)\b|(?<![\w-])/retro\b", re.I)
@@ -45,6 +46,18 @@ def section(text, head):
     return "\n".join(out).strip()
 
 
+def repo_diff(repo):
+    """Tracked changes against the planted session's commit (the second commit), staged ones included."""
+    env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "GIT_CONFIG_NOSYSTEM": "1", "HOME": repo}
+    try:
+        commits = subprocess.run(["git", "-C", repo, "log", "--reverse", "--format=%H"], capture_output=True,
+                                 text=True, check=True, env=env).stdout.split()
+        return subprocess.run(["git", "-C", repo, "diff", commits[1]], capture_output=True, text=True,
+                              check=True, env=env).stdout
+    except (subprocess.CalledProcessError, IndexError) as exc:
+        return "(diff failed: %s)" % exc
+
+
 def main():
     root, dest = sys.argv[1], sys.argv[2]
     os.makedirs(dest, exist_ok=True)
@@ -76,7 +89,7 @@ def main():
                  reply(os.path.join(out, "result-t2.json")).strip(),
                  "## Repo status after turn 2", "```\n%s\n```" % (status or "(clean)"),
                  "## Diff of tracked repo files after turn 2",
-                 "```diff\n%s\n```" % section(c2, "repo diff")[:20000]]
+                 "```diff\n%s\n```" % repo_diff(repo)[:20000]]
         for name, text in new_files:
             parts += ["## New or changed file: %s" % name, "```\n%s\n```" % text[:CAP]]
         body = REDACT.sub("[skill]", "\n\n".join(parts) + "\n")

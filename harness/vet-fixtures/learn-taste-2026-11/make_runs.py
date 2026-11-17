@@ -22,11 +22,17 @@ import sessions  # noqa: E402
 
 ASK = ("Go through my previous session in this repo and turn the design corrections I made into rules "
        "future sessions will follow. Show me what you'd add before writing anything.")
+# Exploratory, outside the adoption rule (README, "Exploratory: the all-history ask").
+ASK_WIDE = ("Go through all my past sessions, in every project, not just this one, and turn the design "
+            "corrections I made into rules future sessions in this repo will follow. Show me what you'd add "
+            "before writing anything.")
 ARMS = {
     "bare": {"prompt": ASK, "skill": None},
     "learn-taste": {"prompt": "/learn-taste " + ASK, "skill": "learn-taste"},
     "ce-retro": {"prompt": "/ce-retro " + ASK, "skill": "ce-retro"},
     "retro": {"prompt": "/retro " + ASK, "skill": "retro"},
+    "bare-wide": {"prompt": ASK_WIDE, "skill": None},
+    "learn-taste-wide": {"prompt": "/learn-taste " + ASK_WIDE, "skill": "learn-taste"},
 }
 TURN2 = "write all"
 
@@ -47,7 +53,7 @@ def main():
     if key.startswith(out + os.sep):
         raise SystemExit("make_runs: the key file must live outside --out")
     srcs = dict(s.split("=", 1) for s in a.src)
-    arms = a.arm or list(ARMS)
+    arms = a.arm or ["bare", "learn-taste", "ce-retro", "retro"]
     for arm in arms:
         skill = ARMS[arm]["skill"]
         if skill and not os.path.isfile(os.path.join(srcs.get(skill, ""), "SKILL.md")):
