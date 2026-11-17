@@ -21,6 +21,14 @@
 # removed the check must fail and name it, and with PostToolUse/auto-format.js (registered through
 # run-with-flags.js) removed instead it must fail and name that.
 #
+# ./setup --sync (#670, step 3), two more hops after the per-seed ones: a checkout moved by hand
+# is merged by the next session start (bootstrap; an install with no record is left alone and
+# told how to adopt), and a checkout that follows its origin moves and merges by itself
+# (steady state: a bare origin, a successor commit adding a hook and its registration, a session
+# start with the interval at 0). Planted negatives: a settings.json that cannot be merged leaves
+# HEAD unmoved, and a successor registering a file it does not ship fails the hook check by name.
+# HOV_UPDATE=off in every run_clean keeps a session start from pulling unless a case asks for it.
+#
 # Commands that name no ~/.claude/ path (dcg, an external binary --no-dcg leaves out) are
 # counted, not run: tests/repo/setup.test.sh owns dcg's hook.
 #
@@ -53,7 +61,7 @@ BASE_PATH=$WORK/bin:/usr/bin:/bin
 # run_clean <home> <cmd...>: a fresh machine's environment, nothing inherited.
 run_clean() {
   local h=$1; shift
-  env -i HOME="$h" PATH="$BASE_PATH" TMPDIR="$WORK/tmp" STUB_LOG="$WORK/stub" LANG=C.UTF-8 "$@"
+  env -i HOME="$h" PATH="$BASE_PATH" TMPDIR="$WORK/tmp" STUB_LOG="$WORK/stub" LANG=C.UTF-8 HOV_UPDATE=off "$@"
 }
 mkdir -p "$WORK/tmp"
 
@@ -165,5 +173,209 @@ read -r _ n skipped problems <<<"$last"
 [ "$problems" -ge 1 ] && grep -q -F 'auto-format.js' <<<"$report" && ! grep -q -F 'pr-record.js' <<<"$report" \
   || { printf '%s\n' "$report"; fail "removing auto-format.js did not break the install seeded at $planted_seed by name; run-with-flags hooks are unchecked"; }
 ok "planted: with hooks/PostToolUse/auto-format.js removed, run-with-flags.js's 'Script not found' fails the install seeded at $planted_seed"
+
+
+# ==== ./setup --sync (#670, step 3) ============================================================
+# The two hops an install takes to get from "a checkout somebody moved by hand" and "a checkout
+# that follows its origin" to "kept current by hov-stack itself".
+
+# session_start <home> [VAR=val...]: what a new session runs, every registered SessionStart
+# command, in order, each under its registered timeout, stdin a SessionStart payload from the
+# home directory (not a repository). Prints their output.
+session_start() {
+  local h=$1 t cmd; shift
+  while IFS=$'\t' read -r t cmd; do
+    case $cmd in *'/.claude/'*) ;; *) continue ;; esac
+    ( cd "$h" && printf '{"hook_event_name":"SessionStart","cwd":"%s"}' "$h" \
+        | run_clean "$h" CLAUDE_LOOP_GUARD=1 "$@" timeout "$t" bash -c "$cmd" 2>&1 ) || :
+  done < <(node -e '
+    const s = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+    for (const g of (s.hooks || {}).SessionStart || []) for (const x of (g && g.hooks) || [])
+      if (x && typeof x.command === "string") console.log(`${x.timeout || 60}\t${x.command.replace(/\n/g, " ")}`);
+  ' "${SESSION_SETTINGS:-$h/.claude/settings.json}")
+}
+gate_hash() {  # gate_hash <home> <checkout>: the hash the session-start gate compares its stamp with
+  run_clean "$1" CLAUDE_HOME="$1/.claude" node -e '
+    const { gateHash } = require(process.argv[1]);
+    process.stdout.write(gateHash({ cfg: process.argv[2], home: process.env.HOME, env: process.env }));
+  ' "$2/lib/settings-apply.js" "$1/.claude"
+}
+
+# ---- bootstrap hop: the checkout is moved by hand, the next session start does the rest -------
+# An install that ./setup created (it has a record) is moved to HEAD by a plain `git pull`. Its
+# settings.json still registers what its old template did. The next session start must run
+# `./setup --sync --no-pull` through the gate, which merges the new template and stamps the
+# result. An install with no record (a settings.json setup did not create) must be left alone,
+# and told how to adopt.
+# No seed above keeps a record: setup began keeping one with the commit that introduced
+# setup-settings-base.json (2026-11-16), after the newest seed's setup. The record installs are
+# that commit and its first parent on HEAD's line when it keeps one too; the record-less one is
+# the newest seed whose setup keeps none.
+# (grep -c reads all of git's output; grep -q would end the pipe early and fail under pipefail.)
+has_record() { [ "$(git -C "$ROOT" show "$1:setup" | grep -c -F 'setup-settings-base.json')" != 0 ]; }
+first_record=$(git -C "$ROOT" log --reverse --format=%H -S'setup-settings-base.json' -- setup | head -n 1)
+[ -n "$first_record" ] || fail "no commit in the history introduced setup's record of settings.json"
+boot_revs=("$first_record")
+parent=$(git -C "$ROOT" rev-parse -q --verify "$head_sha~1" 2>/dev/null) || parent=
+if [ -n "$parent" ] && [ "$parent" != "$first_record" ] \
+  && has_record "$parent"; then
+  boot_revs+=("$parent")
+fi
+for ((i = ${#seeds[@]} - 1; i >= 0; i--)); do
+  if ! has_record "${seeds[i]}"; then
+    boot_revs+=("${seeds[i]}")
+    break
+  fi
+done
+boot_done=0 boot_norecord=
+for rev in "${boot_revs[@]}"; do
+  short=${rev:0:7}
+  h=$WORK/bh-$short c=$WORK/bc-$short
+  mkdir -p "$h"
+  git clone -q --shared "$ROOT" "$c"
+  git -C "$c" checkout -q --detach "$rev"
+  run_clean "$h" bash "$c/setup" --no-dcg > "$WORK/bseed-$short.log" 2>&1 < /dev/null \
+    || { sed 's/^/    | /' "$WORK/bseed-$short.log"; fail "$short's own ./setup --no-dcg exited non-zero on a clean HOME"; }
+  if [ ! -f "$h/.claude/.hov-stack/setup-settings-base.json" ]; then
+    boot_norecord=$short
+    continue
+  fi
+  grep -q -F 'settings-apply.js' "$h/.claude/settings.json" || { ok "bootstrap, seeded at $short: settings-apply.js was not registered yet, so no session start could run the gate (skipped)"; continue; }
+  move_to_head "$c"
+  rm -f "$h/.claude/.hov-stack/settings-apply.stamp"
+  session_start "$h" HOV_UPDATE=off > "$WORK/boot-$short.out" 2>&1
+  [ -f "$h/.claude/.hov-stack/settings-apply.stamp" ] \
+    || { sed 's/^/    | /' "$WORK/boot-$short.out"; fail "bootstrap, seeded at $short: the session start did not run ./setup --sync --no-pull (no gate stamp)"; }
+  [ "$(cat "$h/.claude/.hov-stack/settings-apply.stamp")" = "$(gate_hash "$h" "$c")" ] \
+    || fail "bootstrap, seeded at $short: the stamp is not the hash the gate compares with, so every session would merge again"
+  report=$(check_hooks "$h" "boot-$short")
+  last=${report##*$'\n'}
+  read -r _ n skipped problems <<<"$last"
+  [ "$problems" -eq 0 ] || { printf '%s\n' "$report" | sed '$d'; fail "bootstrap, seeded at $short: a registered hook breaks after the session-start merge"; }
+  boot_done=$((boot_done + 1))
+  ok "bootstrap, seeded at $short: a hand-moved checkout is merged by the next session start (stamp written), $n hook commands run clean"
+done
+[ "$boot_done" -ge 1 ] || fail "no seed with a record exercised the bootstrap hop"
+[ -n "$boot_norecord" ] || fail "no seed without a record, so the adopt path was not exercised"
+# The no-record install: nothing moves, settings.json is byte-identical, the notice names the commands.
+h=$WORK/bh-$boot_norecord
+c=$(git -C "$WORK/bc-$boot_norecord" rev-parse --show-toplevel)
+move_to_head "$c"
+sum=$(cksum < "$h/.claude/settings.json")
+# HOV_UPDATE=off asked for no background update, so the notice (whose point is to enable one) is held.
+out=$(session_start "$h" HOV_UPDATE=off)
+if grep -q -F -- "--adopt --yes" <<<"$out"; then printf '%s\n' "$out"; fail "bootstrap, no record: the adopt notice was shown under HOV_UPDATE=off"; fi
+out=$(session_start "$h" HOV_UPDATE=on)
+[ "$(cksum < "$h/.claude/settings.json")" = "$sum" ] || fail "bootstrap, no record: settings.json was changed"
+grep -q -F "$c/setup --adopt --yes" <<<"$out" || { printf '%s\n' "$out"; fail "bootstrap, no record: the session start did not name ./setup --adopt --yes"; }
+ok "bootstrap, seeded at $boot_norecord (no record): settings.json is untouched and the session start names setup --adopt and --adopt --yes"
+
+# ---- steady state: the checkout follows its origin by itself ----------------------------------
+# A bare origin at HEAD, an install from it, then a successor commit that adds a hook and its
+# registration. A session start with the sync interval at 0 starts the detached ./setup --sync;
+# within a bounded wait HEAD is the successor, the registration is merged and every hook runs.
+# steady <name>: sets SO (origin), SC (checkout), SH (home), SW (a writer clone).
+steady() {
+  local n=$1
+  SO=$WORK/$n-origin.git SC=$WORK/$n-checkout SH=$WORK/$n-home SW=$WORK/$n-writer
+  mkdir -p "$SH"
+  git clone -q --bare "$ROOT" "$SO"
+  git -C "$SO" branch -f main "$head_sha"
+  git -C "$SO" symbolic-ref HEAD refs/heads/main
+  git clone -q "$SO" "$SC"
+  git -C "$SC" checkout -q main
+  # What is on disk here, as move_to_head does for a detached checkout.
+  local f
+  while IFS= read -r -d '' f; do
+    if [ -e "$ROOT/$f" ]; then mkdir -p "$SC/$(dirname "$f")"; cp -p "$ROOT/$f" "$SC/$f"; else rm -f "$SC/$f"; fi
+  done < <(cd "$ROOT" && git diff -z --no-renames --name-only HEAD && git ls-files -z -o --exclude-standard)
+  run_clean "$SH" bash "$SC/setup" --no-dcg > "$WORK/$n-install.log" 2>&1 < /dev/null \
+    || { sed 's/^/    | /' "$WORK/$n-install.log"; fail "$n: the install failed"; }
+  [ -f "$SH/.claude/.hov-stack/setup-settings-base.json" ] || fail "$n: setup kept no record"
+  git clone -q "$SO" "$SW"
+}
+# successor <hook-file> <ship|noship>: push a commit registering hooks/SessionStart/<hook-file>.
+successor() {
+  if [ "$2" = ship ]; then
+    printf '// added upstream\n' > "$SW/hooks/SessionStart/$1"
+  fi
+  node -e '
+    const fs = require("fs");
+    const p = process.argv[1];
+    const s = JSON.parse(fs.readFileSync(p, "utf8"));
+    s.hooks.SessionStart.push({ hooks: [{ type: "command", command: `"$HOME/.claude/hooks/bin/node-hook" "$HOME/.claude/hooks/SessionStart/${process.argv[2]}"`, timeout: 5 }] });
+    fs.writeFileSync(p, JSON.stringify(s, null, 2) + "\n");
+  ' "$SW/settings.json" "$1"
+  git -C "$SW" add -A
+  git -c user.name=t -c user.email=t@example.invalid -c commit.gpgsign=false -C "$SW" commit -q -m "successor $1"
+  git -C "$SW" push -q origin main
+  succ_sha=$(git -C "$SW" rev-parse HEAD)
+}
+# wait_for <seconds> <command...>: poll until it succeeds.
+wait_for() {
+  local limit=$(( $1 * 10 )) i=0; shift
+  until "$@" > /dev/null 2>&1; do
+    i=$((i + 1)); [ "$i" -lt "$limit" ] || return 1
+    sleep 0.1
+  done
+}
+sync_log_has() { grep -q -F "$1" "$SH/.claude/.hov-stack/sync.log" 2>/dev/null; }
+head_is_successor() { [ "$(git -C "$SC" rev-parse HEAD)" = "$succ_sha" ]; }
+
+steady good
+successor successor-hook.js ship
+session_start "$SH" HOV_UPDATE=on HOV_SYNC_INTERVAL=0 > "$WORK/good-session.out" 2>&1
+wait_for 90 head_is_successor || { cat "$WORK/good-session.out"; cat "$SH/.claude/.hov-stack/sync.log" 2>/dev/null; fail "steady: HEAD never reached the successor"; }
+wait_for 30 sync_log_has 'sync: moved' || { cat "$SH/.claude/.hov-stack/sync.log"; fail "steady: the detached sync did not finish with a moved result"; }
+grep -q 'successor-hook.js' "$SH/.claude/settings.json" || fail "steady: the successor's registration was not merged"
+[ -f "$SH/.claude/hooks/SessionStart/successor-hook.js" ] || fail "steady: the successor's hook file is not reachable"
+# (Before check_hooks, which runs every hook and so claims the result.) The next session start shows the result once.
+out=$(session_start "$SH" HOV_UPDATE=off)
+grep -q '^\[hov-stack\] hov-stack updated ' <<<"$out" || { printf '%s\n' "$out"; fail "steady: the next session start did not show what the sync did"; }
+out=$(session_start "$SH" HOV_UPDATE=off)
+! grep -q '^\[hov-stack\] hov-stack updated ' <<<"$out" || fail "steady: the result was shown twice"
+report=$(check_hooks "$SH" good)
+last=${report##*$'\n'}; read -r _ n skipped problems <<<"$last"
+[ "$problems" -eq 0 ] || { printf '%s\n' "$report" | sed '$d'; fail "steady: a hook breaks after the background sync"; }
+ok "steady state: a successor adding a hook and its registration is pulled and merged in the background, shown once, and every hook runs"
+
+# Planted negative: a settings.json the merge cannot plan keeps the checkout where it was.
+steady blocked
+cp "$SH/.claude/settings.json" "$SH/registered-settings.json"
+printf '[1, 2]\n' > "$SH/.claude/settings.json"
+successor never-moved.js ship
+before=$(git -C "$SC" rev-parse HEAD)
+rm -f "$SH/.claude/.hov-stack/sync.log"
+SESSION_SETTINGS="$SH/registered-settings.json" session_start "$SH" HOV_UPDATE=on HOV_SYNC_INTERVAL=0 > "$WORK/blocked-session.out" 2>&1
+wait_for 60 sync_log_has 'sync: blocked' || { cat "$SH/.claude/.hov-stack/sync.log" 2>/dev/null; fail "steady, unmergeable: the detached sync never reported a refusal"; }
+[ "$(git -C "$SC" rev-parse HEAD)" = "$before" ] || fail "steady, unmergeable: the checkout moved under a settings.json that cannot be merged"
+ok "planted: an unmergeable settings.json leaves the checkout where it was, and the sync says so"
+
+# Planted negative: a successor that registers a hook file it does not ship fails the hook check by name.
+steady ghost
+successor ghost-hook.js noship
+session_start "$SH" HOV_UPDATE=on HOV_SYNC_INTERVAL=0 > "$WORK/ghost-session.out" 2>&1
+wait_for 90 head_is_successor || fail "steady, ghost: HEAD never reached the successor"
+wait_for 30 sync_log_has 'sync: warning' || { cat "$SH/.claude/.hov-stack/sync.log"; fail "steady, ghost: the detached sync did not finish with a warning"; }
+sync_log_has 'hook(s) skipped' || fail "steady, ghost: the result does not name the skipped hook"
+grep -q -P '^[0-9]+\twarning\t' "$SH/.claude/.hov-stack/sync-result" || fail "steady, ghost: the result file is not a warning"
+# The merge refuses to register a hook whose file is missing, so the install stays whole...
+if grep -q -F 'ghost-hook.js' "$SH/.claude/settings.json"; then fail "steady, ghost: the merge registered a hook file the successor does not ship"; fi
+report=$(check_hooks "$SH" ghost)
+last=${report##*$'\n'}; read -r _ n skipped problems <<<"$last"
+[ "$problems" -eq 0 ] || { printf '%s\n' "$report" | sed '$d'; fail "steady, ghost: the install breaks although the merge skipped the missing hook"; }
+# ...and the check itself is not blind: the same registration made by hand is found by name.
+node -e '
+  const fs = require("fs");
+  const p = process.argv[1];
+  const s = JSON.parse(fs.readFileSync(p, "utf8"));
+  s.hooks.SessionStart.push({ hooks: [{ type: "command", command: "\"$HOME/.claude/hooks/bin/node-hook\" \"$HOME/.claude/hooks/SessionStart/ghost-hook.js\"", timeout: 5 }] });
+  fs.writeFileSync(p, JSON.stringify(s, null, 2) + "\n");
+' "$SH/.claude/settings.json"
+report=$(check_hooks "$SH" ghost)
+last=${report##*$'\n'}; read -r _ n skipped problems <<<"$last"
+[ "$problems" -ge 1 ] && grep -q -F 'ghost-hook.js' <<<"$report" \
+  || { printf '%s\n' "$report"; fail "a registered hook with no file did not fail the check by name; the check is blind to a successor's mistake"; }
+ok "planted: a successor registering ghost-hook.js without shipping it is skipped by the merge, and a hand registration of it fails the hook check by name"
 
 echo "setup-upgrade: $pass passed"

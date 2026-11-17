@@ -24,6 +24,13 @@
 #     so an actively-working agent's checkout is never yanked mid-task
 # Switching never deletes anything: the parked branch ref stays intact.
 #
+# The harness checkout itself (the repository whose hooks/ the config dir links to, with a
+# ./setup) is never fast-forwarded here: moving it without merging settings.json right after
+# strands a hook's file and its registration apart. It goes through `./setup --sync`, which
+# moves the checkout only when it can merge settings.json too, under one lock. With --heal that
+# runs detached and its result shows at the next session start; otherwise it runs here, in the
+# foreground, and its one `sync:` line is the output.
+#
 # Env: SITES_ROOT (default ~/SITES), DRY_RUN=1 (report only, no mutation),
 #      FRESHEN_FETCH_TIMEOUT seconds (default 60; the hook passes 4).
 set -uo pipefail
@@ -95,6 +102,68 @@ in_progress() {
     || [ -e "$g/CHERRY_PICK_HEAD" ] || [ -e "$g/BISECT_LOG" ]
 }
 
+# The config dir the way wt-done resolves it.
+freshen_cfg() { printf '%s' "${CLAUDE_HOME:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}}"; }
+
+# 0 when <repo> is the harness checkout the live config dir runs from.
+is_harness_checkout() {
+  local repo=$1 cfg
+  [ -x "$repo/setup" ] || return 1
+  cfg=$(freshen_cfg)
+  [ -e "$cfg/hooks" ] && [ -e "$repo/hooks" ] || return 1
+  [ "$(readlink -f "$cfg/hooks")" = "$(readlink -f "$repo/hooks")" ]
+}
+
+# 0 when a ./setup --sync holds the lock: the lock is a directory with its owner's pid, stale
+# when the pid is dead or the directory is older than 15 minutes (a lock with no pid yet is
+# young for a minute), as ./setup's own sync_lock_stale judges it.
+sync_lock_live() {
+  local d=$1/.hov-stack/sync.lock pid
+  [ -d "$d" ] || return 1
+  pid=$(cat "$d/pid" 2>/dev/null) || pid=
+  if [ -z "$pid" ]; then
+    [ -z "$(find "$d" -prune -mmin +1 2>/dev/null)" ]
+    return
+  fi
+  kill -0 "$pid" 2>/dev/null || return 1
+  [ -z "$(find "$d" -prune -mmin +15 2>/dev/null)" ]
+}
+
+# The harness checkout's refresh: ./setup --sync (see the header).
+sync_harness() {
+  local repo=$1 heal=$2 name cfg out line
+  name=$(basename "$repo")
+  cfg=$(freshen_cfg)
+  if [ "$DRY" = "1" ]; then
+    echo "launchpad $name: would run ./setup --sync (DRY_RUN)"
+    return
+  fi
+  if [ "$heal" = "1" ]; then
+    # The hook kills this helper at 7 s; the sync is not bounded by that, so it is detached
+    # and its result is shown by the next session start (hooks/SessionStart/settings-apply.js).
+    if sync_lock_live "$cfg"; then
+      # A sync is already running: starting another would only skip, and would truncate the
+      # log the running one is writing.
+      echo "launchpad $name: handed to ./setup --sync in the background; its result shows at the next session start"
+      return
+    fi
+    mkdir -p "$cfg/.hov-stack" 2>/dev/null
+    CLAUDE_CONFIG_DIR=$cfg HOV_SYNC_LOCK_WAIT=0 nohup bash "$repo/setup" --sync \
+      > "$cfg/.hov-stack/sync.log" 2>&1 < /dev/null &
+    disown 2>/dev/null || true
+    echo "launchpad $name: handed to ./setup --sync in the background; its result shows at the next session start"
+    return
+  fi
+  # Waits for a running sync up to a minute: wt-done stops this helper at 90 s.
+  out=$(CLAUDE_CONFIG_DIR=$cfg HOV_SYNC_LOCK_WAIT=${HOV_SYNC_LOCK_WAIT:-60} HOV_SYNC_FETCH_TIMEOUT=$FETCH_T bash "$repo/setup" --sync 2>&1 < /dev/null)
+  line=$(printf '%s\n' "$out" | grep '^sync: ' | tail -n 1)
+  if [ -n "$line" ]; then
+    echo "launchpad $name: $line"
+  else
+    echo "WARN launchpad $name: ./setup --sync printed no result line"
+  fi
+}
+
 process_repo() {
   local repo=$1 heal=$2 name def branch tracked behind state pushed tipage mergeerr
   name=$(basename "$repo")
@@ -138,6 +207,11 @@ process_repo() {
       return
     fi
     echo "launchpad $name: healed, switched '$state' -> $def (branch left intact)"
+  fi
+
+  if is_harness_checkout "$repo"; then
+    sync_harness "$repo" "$heal"
+    return
   fi
 
   if declare -F repo_fetch_origin >/dev/null; then

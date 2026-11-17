@@ -34,6 +34,55 @@
 #                          account's skills, so setup does not run it.
 #                      Claude Code itself, the codex CLI and anything installed some other way
 #                      are not touched.
+#   ./setup --sync [--no-pull]
+#                      what keeps an install current without anyone running --update: bring the
+#                      checkout up to date and merge the template's changes into settings.json
+#                      right after, so a hook's file and its registration move together. It
+#                      runs by itself from the SessionStart hook (once a day on a member's
+#                      install, every 5 minutes on a host sync.sh keeps a record for); run it
+#                      by hand to see what it does. Not with --check, --update, --adopt or
+#                      --yes (exit 2); --no-pull goes only with --sync (exit 2). --no-dcg is
+#                      accepted and ignored. Under one lock ($CLAUDE_CONFIG_DIR/.hov-stack/
+#                      sync.lock; a second run waits up to HOV_SYNC_LOCK_WAIT seconds, 120 by
+#                      default, then prints that it skipped and exits 0), in order:
+#                        - refuses (blocked, exit 1, nothing touched) unless the config dir's
+#                          hooks/ leads into this checkout: run from a worktree or a second
+#                          clone it would merge that tree's template into the live file.
+#                        - finds how this host merges: setup's own record of the seed it wrote
+#                          (a member's install), or sync.sh's record on a workstation or
+#                          satellite host. A settings.json with neither is never merged and the
+#                          checkout is never moved: the result says ./setup --adopt shows the
+#                          merge and ./setup --adopt --yes makes it once, after which hov-stack
+#                          keeps itself current.
+#                        - fast-forwards the checkout the way --update does (the same checks;
+#                          it never stashes, resets or rebases), after confirming that the
+#                          merge into settings.json would run, and only then. HOV_UPDATE=notice
+#                          reports how far behind the checkout is and moves nothing;
+#                          HOV_UPDATE=off, or --no-pull, skips the fetch and the move and
+#                          still merges. A fetch is capped at HOV_SYNC_FETCH_TIMEOUT seconds
+#                          (60; 0 for no cap), with or without `timeout`. A refusal (detached
+#                          HEAD, no upstream, commits of yours, a collision with a local edit)
+#                          leaves everything as it was and says the fix; git's own error text
+#                          is never kept.
+#                        - links what is missing (a path that is absent, or a link to nothing),
+#                          and leaves anything else at a link's path alone, counted: only a
+#                          full ./setup moves a file of yours into ~/.hov-stack-backups/. Then
+#                          the overlay import and the data and helper commands, the same way.
+#                          It installs no dcg and touches no plugin or marketplace.
+#                        - merges the template's changes into settings.json, as a run does.
+#                      It prints one line, `sync: <state>: <text>`, and keeps it with its time
+#                      in $CLAUDE_CONFIG_DIR/.hov-stack/sync-result, which the next session
+#                      shows once. States: moved, current, notice, warning, blocked, failed.
+#                      warning is a merge that ran but left something for you: a template
+#                      change held back (a deny rule the template dropped, a hook whose file
+#                      is missing, a setting that failed validation; on a host sync.sh keeps a
+#                      record for, also a setting you and the template both changed). The text
+#                      still says what moved. Exit 0 for moved, current, notice, warning and a
+#                      skipped run; 1 for blocked and failed. The check before the move
+#                      rehearses the merge with the current checkout's template and merge code:
+#                      a successor whose own merge fails leaves the checkout moved and the
+#                      result failed, with the move in its text, and the next session start's
+#                      gate tries the merge again.
 #   ./setup --adopt    for a settings.json setup has no record of creating (one seeded before
 #                      setup kept records, or one you merged settings.hov-stack.json into):
 #                      takes the seed nearest the file of those this checkout's git history
@@ -144,7 +193,8 @@
 # a JSON object, or gives a setting another kind of value than the template's), the merge
 # into a settings.json setup has a record of creating failed, --adopt left the file alone
 # or its merge failed, or --check found a step not in place; 2 for an unknown option,
-# --update with --check, --adopt with either, or --yes without --adopt. With
+# --update with --check, --adopt with either, --sync with any of those or --yes, --no-pull
+# without --sync, or --yes without --adopt. With
 # --update a program whose install-release.sh run fails (download, checksum or its own
 # --version check) also makes it 1; a refused pull, a program left alone and a command that
 # needs the network and could not reach it are rows with their fix, not failures.
@@ -190,12 +240,18 @@ no_dcg=0
 update=0
 adopt=0
 yes=0
+sync=0
+no_pull=0
 # The arguments as given, so --update can run the new setup with the same ones. The id in
 # HOV_STACK_UPDATE_FROM is the checkout --update left; it is read once and removed from the
 # environment so nothing setup runs inherits it.
 orig_args=("$@")
 update_from=${HOV_STACK_UPDATE_FROM:-}
 unset HOV_STACK_UPDATE_FROM
+# --sync's hand-off: the pid of the process that holds the sync lock, passed across the exec
+# into the new setup, which keeps the same pid. Read once and removed like the id above.
+sync_locked_by=${HOV_STACK_SYNC_LOCKED:-}
+unset HOV_STACK_SYNC_LOCKED
 for arg in "$@"; do
   case "$arg" in
     -h|--help) usage; exit 0 ;;
@@ -204,7 +260,9 @@ for arg in "$@"; do
     --update) update=1 ;;
     --adopt) adopt=1 ;;
     --yes) yes=1 ;;
-    *) echo "setup: unknown option $arg (--no-dcg, --check, --update, --adopt, --yes, --help)" >&2; exit 2 ;;
+    --sync) sync=1 ;;
+    --no-pull) no_pull=1 ;;
+    *) echo "setup: unknown option $arg (--no-dcg, --check, --update, --adopt, --yes, --sync, --no-pull, --help)" >&2; exit 2 ;;
   esac
 done
 if [ "$update" = 1 ] && [ "$check" = 1 ]; then
@@ -213,6 +271,14 @@ if [ "$update" = 1 ] && [ "$check" = 1 ]; then
 fi
 if [ "$adopt" = 1 ] && { [ "$check" = 1 ] || [ "$update" = 1 ]; }; then
   echo "setup: --adopt runs on its own (with --yes to make the merge): run ./setup --update or ./setup --check separately" >&2
+  exit 2
+fi
+if [ "$sync" = 1 ] && { [ "$check" = 1 ] || [ "$update" = 1 ] || [ "$adopt" = 1 ] || [ "$yes" = 1 ]; }; then
+  echo "setup: --sync runs on its own: use ./setup --check, --update or --adopt separately, and --yes only with --adopt" >&2
+  exit 2
+fi
+if [ "$no_pull" = 1 ] && [ "$sync" = 0 ]; then
+  echo "setup: --no-pull goes with --sync: ./setup --sync --no-pull merges without pulling" >&2
   exit 2
 fi
 if [ "$yes" = 1 ] && [ "$adopt" = 0 ]; then
@@ -256,16 +322,24 @@ urow() { row_uncounted=1; row "$@"; row_uncounted=0; }
 # changed yet, so exec-ing into the new file loses nothing; the old process printed no row.
 # Every refusal is one row with its fix, and the run goes on with the checkout as it is.
 git_in() { git -C "$HOV_STACK" "$@"; }
-update_checkout() {
-  local top head old new branch up remote out ahead behind first
+# The pull --update and --sync share: every check, then the fast-forward. It prints nothing but
+# --update's "fetching" line and keeps no git text but --update's first error line; the caller
+# words each outcome. Sets pull_status to one of
+#   notgit nocommits handoff detached noupstream fetchfail current diverged ffrefused moved
+# and, for sync only, whatever sync_before_move sets (it can stop the move before it is made).
+# pull_head is HEAD when it started, pull_new HEAD after a move, pull_old the hand-off's id.
+checkout_advance() {  # checkout_advance update|sync
+  local mode=$1 top head old new branch up remote out ahead behind first
+  pull_status= pull_head= pull_old= pull_new= pull_branch= pull_up= pull_remote= pull_ahead=0 pull_behind=0 pull_first=
   top=$(git_in rev-parse --show-toplevel 2>/dev/null) || top=
   if [ -z "$top" ] || [ "$(cd "$top" && pwd -P)" != "$HOV_STACK" ]; then
-    urow checkout skipped "$HOV_STACK is not the top of a git checkout, so there is nothing to pull: clone https://github.com/$MARKETPLACE_SOURCE and run ./setup --update from the clone"
+    pull_status=notgit
     return 0
   fi
   head=$(git_in rev-parse HEAD 2>/dev/null) || head=
+  pull_head=$head
   if [ -z "$head" ]; then
-    urow checkout skipped "$HOV_STACK has no commits, so there is nothing to pull"
+    pull_status=nocommits
     return 0
   fi
   # The previous run's hand-off: honoured only for a full commit id that is an ancestor of
@@ -277,47 +351,95 @@ update_checkout() {
     old=
   fi
   if [ -n "$old" ] && [ "$old" != "$head" ] && git_in merge-base --is-ancestor "$old" HEAD >/dev/null 2>&1; then
-    echo "hov-stack: ${old:0:7} -> ${head:0:7}"
-    urow checkout ok "updated ${old:0:7} -> ${head:0:7}"
+    pull_old=$old
+    pull_status=handoff
     return 0
   fi
   branch=$(git_in symbolic-ref -q --short HEAD 2>/dev/null) || branch=
+  pull_branch=$branch
   if [ -z "$branch" ]; then
-    urow checkout skipped "HEAD is detached, so there is no branch to pull: git -C $HOV_STACK switch <your branch>, then re-run ./setup --update"
+    pull_status=detached
     return 0
   fi
   up=$(git_in rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null) || up=
+  pull_up=$up
   if [ -z "$up" ]; then
-    urow checkout skipped "$branch has no upstream branch to pull from: git -C $HOV_STACK branch --set-upstream-to=origin/$branch, then re-run ./setup --update"
+    pull_status=noupstream
     return 0
   fi
   remote=$(git_in config --get "branch.$branch.remote" 2>/dev/null) || remote=.
-  echo "hov-stack: fetching $up"
-  if ! GIT_TERMINAL_PROMPT=0 git_in fetch --quiet "$remote"; then
-    urow checkout skipped "could not fetch $remote (offline?): re-run ./setup --update when online"
+  pull_remote=$remote
+  if [ "$mode" = update ]; then
+    echo "hov-stack: fetching $up"
+    if ! GIT_TERMINAL_PROMPT=0 git_in fetch --quiet "$remote"; then
+      pull_status=fetchfail
+      return 0
+    fi
+  elif ! sync_fetch "$remote"; then
+    pull_status=fetchfail
     return 0
   fi
   if git_in merge-base --is-ancestor '@{u}' HEAD >/dev/null 2>&1; then
     ahead=$(git_in rev-list --count '@{u}..HEAD' 2>/dev/null) || ahead=0
-    if [ "$ahead" = 0 ]; then urow checkout ok "up to date at ${head:0:7}"
-    else urow checkout ok "up to date at ${head:0:7} ($ahead commits of yours are not on $up; nothing to pull)"
-    fi
+    pull_ahead=$ahead
+    pull_status=current
     return 0
   fi
   if ! git_in merge-base --is-ancestor HEAD '@{u}' >/dev/null 2>&1; then
     ahead=$(git_in rev-list --count '@{u}..HEAD' 2>/dev/null) || ahead="?"
     behind=$(git_in rev-list --count 'HEAD..@{u}' 2>/dev/null) || behind="?"
-    urow checkout skipped "$branch has $ahead commits $up lacks and $up has $behind you lack, so it cannot fast-forward; setup never rebases or resets: rebase or merge in $HOV_STACK yourself, then re-run ./setup --update"
+    pull_ahead=$ahead pull_behind=$behind
+    pull_status=diverged
     return 0
+  fi
+  if [ "$mode" = sync ]; then
+    pull_behind=$(git_in rev-list --count 'HEAD..@{u}' 2>/dev/null) || pull_behind="?"
+    # --sync's own gates between "behind" and the move: HOV_UPDATE=notice, and the preflight of
+    # the merge. It sets pull_status itself when it stops the move.
+    if ! sync_before_move; then return 0; fi
   fi
   if ! out=$(git_in -c merge.autostash=false merge --ff-only '@{u}' 2>&1); then
     first=$(printf '%s\n' "$out" | grep -m1 '^error:') || first=${out%%$'\n'*}
-    urow checkout skipped "git would not fast-forward $branch to $up (${first#error: }): commit or move those changes, then re-run ./setup --update"
+    pull_first=$first
+    pull_status=ffrefused
     return 0
   fi
   new=$(git_in rev-parse HEAD)
-  echo "hov-stack: checkout moved ${head:0:7} -> ${new:0:7}; running the new setup"
-  exec env HOV_STACK_UPDATE_FROM="$head" bash "$HOV_STACK/setup" ${orig_args[@]+"${orig_args[@]}"}
+  pull_new=$new
+  pull_status=moved
+}
+update_checkout() {
+  local head ahead
+  checkout_advance update
+  head=$pull_head
+  case $pull_status in
+    notgit)
+      urow checkout skipped "$HOV_STACK is not the top of a git checkout, so there is nothing to pull: clone https://github.com/$MARKETPLACE_SOURCE and run ./setup --update from the clone" ;;
+    nocommits)
+      urow checkout skipped "$HOV_STACK has no commits, so there is nothing to pull" ;;
+    handoff)
+      echo "hov-stack: ${pull_old:0:7} -> ${head:0:7}"
+      urow checkout ok "updated ${pull_old:0:7} -> ${head:0:7}" ;;
+    detached)
+      urow checkout skipped "HEAD is detached, so there is no branch to pull: git -C $HOV_STACK switch <your branch>, then re-run ./setup --update" ;;
+    noupstream)
+      urow checkout skipped "$pull_branch has no upstream branch to pull from: git -C $HOV_STACK branch --set-upstream-to=origin/$pull_branch, then re-run ./setup --update" ;;
+    fetchfail)
+      urow checkout skipped "could not fetch $pull_remote (offline?): re-run ./setup --update when online" ;;
+    current)
+      ahead=$pull_ahead
+      if [ "$ahead" = 0 ]; then urow checkout ok "up to date at ${head:0:7}"
+      else urow checkout ok "up to date at ${head:0:7} ($ahead commits of yours are not on $pull_up; nothing to pull)"
+      fi ;;
+    diverged)
+      urow checkout skipped "$pull_branch has $pull_ahead commits $pull_up lacks and $pull_up has $pull_behind you lack, so it cannot fast-forward; setup never rebases or resets: rebase or merge in $HOV_STACK yourself, then re-run ./setup --update" ;;
+    ffrefused)
+      urow checkout skipped "git would not fast-forward $pull_branch to $pull_up (${pull_first#error: }): commit or move those changes, then re-run ./setup --update" ;;
+    moved)
+      echo "hov-stack: checkout moved ${head:0:7} -> ${pull_new:0:7}; running the new setup"
+      exec env HOV_STACK_UPDATE_FROM="$head" bash "$HOV_STACK/setup" ${orig_args[@]+"${orig_args[@]}"} ;;
+  esac
+  return 0
 }
 if [ "$update" = 1 ]; then update_checkout; fi
 
@@ -461,7 +583,7 @@ done < "$HOV_STACK/lib/default-plugins.txt"
 # or above the floor. A version that does not parse is tried anyway and reported unknown.
 claude_state=missing
 claude_version=
-if command -v claude >/dev/null 2>&1; then
+if [ "$sync" = 0 ] && command -v claude >/dev/null 2>&1; then
   claude_out=$(claude --version) || claude_out=
   claude_version=${claude_out%% *}
   case "$claude_version" in
@@ -998,12 +1120,12 @@ same_bytes() {  # same_bytes <a> <b>: 0 when both files hold the same bytes
 # SETTINGS_BACKUPS/settings-apply-<timestamp>-*/ before it writes, then updates the record.
 # plan writes nothing. Sets merge_rc (0 done, 1 the merge failed, 2 no seed could be built),
 # merge_n (changes made or planned), merge_conflicts, merge_backup, merge_why, merge_lines (the
-# engine's item lines), merge_dcg_path and merge_changed (1 when a failed run still left the
-# file with other bytes). merge_tmp keeps today's seed for the caller; merge_done removes it.
+# engine's item lines), merge_final (its closing `settings: ...` line), merge_dcg_path and
+# merge_changed (1 when a failed run still left the file with other bytes). merge_tmp keeps today's seed for the caller; merge_done removes it.
 settings_merge() {
   local mode=$1 base=${2:-$SEED_BASE} rc=0 final f
   local -a flags=()
-  merge_rc=0 merge_n=0 merge_conflicts=0 merge_backup= merge_why= merge_lines= merge_changed=0
+  merge_rc=0 merge_n=0 merge_conflicts=0 merge_backup= merge_why= merge_lines= merge_changed=0 merge_final=
   merge_dcg_path=$(merge_dcg)
   merge_tmp=$(mktemp -d "${TMPDIR:-/tmp}/hov-stack-merge.XXXXXX") || {
     merge_tmp= merge_rc=1 merge_why="could not make a temporary directory"
@@ -1048,6 +1170,7 @@ settings_merge() {
     return 0
   fi
   final=$(grep '^settings: ' "$merge_tmp/out" | tail -n 1 || :)
+  merge_final=$final
   case $final in
     "settings: applied "*) merge_n=${final#settings: applied }; merge_n=${merge_n%%;*} ;;
     "settings: plan "*) merge_n=${final#settings: plan }; merge_n=${merge_n%% *} ;;
@@ -1335,6 +1458,416 @@ adopt_settings() {
   echo "  could not keep a record at $(_lf_display "$SEED_BASE"), so later runs of ./setup leave settings.json alone; the merge above stays, and the file from before is at $merge_backup"
   return 2
 }
+# --sync: bring the checkout up to date and merge settings.json right after it, under one lock,
+# so a hook's file and its registration move together. It is what the SessionStart hook starts
+# in the background (hooks/SessionStart/settings-apply.js) and what launchpad-freshen.sh runs for
+# this checkout. Every refusal leaves the checkout and settings.json as they were and says the
+# fix; nothing here prints or keeps git's own error text, which can carry a remote's URL.
+sync_locked=0
+sync_holder=
+sync_lock_dir=$CFG/.hov-stack/sync.lock
+sync_route=none
+sync_why=
+
+# The result: one line on stdout and, with its time, in the file the next session shows.
+sync_result_write() {  # sync_result_write <state> <text>
+  local dir=$CFG/.hov-stack tmp text=$2
+  text=${text//$'\n'/ }
+  text=${text//$'\t'/ }
+  mkdir -p "$dir" 2>/dev/null && chmod 700 "$dir" 2>/dev/null || return 0
+  tmp=$(mktemp "$dir/.sync-result.XXXXXX" 2>/dev/null) || return 0
+  if printf '%s\t%s\t%s\n' "$(date +%s)" "$1" "$text" > "$tmp" && chmod 600 "$tmp" && mv -f "$tmp" "$dir/sync-result"; then
+    return 0
+  fi
+  rm -f "$tmp"
+  return 0
+}
+sync_finish() {  # sync_finish <state> <text>: exit status for the run is left to the caller
+  local text=$2
+  text=${text//$'\n'/ }
+  echo "sync: $1: $text"
+  sync_result_write "$1" "$text"
+}
+
+# The lock is a directory (mkdir is atomic on every platform; macOS has no flock) holding the
+# pid of its owner. A dead owner, or one older than 15 minutes, is stale: it is removed and the
+# lock taken again. A live, young one is waited for up to HOV_SYNC_LOCK_WAIT seconds (default
+# 120; the session-start hook and the detached runs pass 0 and skip at once). The pid survives
+# --sync's exec into the new setup, which is told so by HOV_STACK_SYNC_LOCKED.
+sync_lock_stale() {  # sync_lock_stale <pid read from the lock, or empty>
+  if [ -z "$1" ]; then
+    # No pid yet: its owner may be between mkdir and the write, so only an old directory is stale.
+    [ -n "$(find "$sync_lock_dir" -prune -mmin +1 2>/dev/null)" ]
+    return
+  fi
+  if ! kill -0 "$1" 2>/dev/null; then return 0; fi
+  [ -n "$(find "$sync_lock_dir" -prune -mmin +15 2>/dev/null)" ]
+}
+sync_lock() {  # 0 held by this run, 1 held by another run past the wait, 2 could not be made
+  local wait=${HOV_SYNC_LOCK_WAIT:-120} waited=0 retaken=0 gone=0 pid again
+  case $wait in ''|*[!0-9]*) wait=120 ;; esac
+  { mkdir -p "$CFG/.hov-stack" && chmod 700 "$CFG/.hov-stack"; } 2>/dev/null || return 2
+  while :; do
+    if mkdir "$sync_lock_dir" 2>/dev/null; then
+      printf '%s\n' "$$" > "$sync_lock_dir/pid" 2>/dev/null || :
+      sync_locked=1
+      return 0
+    fi
+    if [ ! -d "$sync_lock_dir" ]; then
+      # mkdir failed and the directory is gone: its owner released it in between. Try again a
+      # few times; only a path that can never be made (a file in the way, no permission) ends here.
+      gone=$((gone + 1))
+      [ "$gone" -le 5 ] || return 2
+      sleep 0.1 2>/dev/null || sleep 1
+      continue
+    fi
+    pid=$(cat "$sync_lock_dir/pid" 2>/dev/null) || pid=
+    if [ -n "$sync_locked_by" ] && [ "$sync_locked_by" = "$$" ] && [ "$pid" = "$$" ]; then
+      sync_locked=1
+      return 0
+    fi
+    if [ "$retaken" -lt 5 ] && sync_lock_stale "$pid"; then
+      retaken=$((retaken + 1))
+      # Reap atomically: only the run that still sees the pid it judged stale moves the
+      # directory aside (mv of a directory is one rename, so a second reaper finds nothing to
+      # move) and only then removes it. A lock another run just took has a different pid.
+      again=$(cat "$sync_lock_dir/pid" 2>/dev/null) || again=
+      if [ "$again" = "$pid" ] && mv "$sync_lock_dir" "$sync_lock_dir.stale.$$" 2>/dev/null; then
+        rm -rf "$sync_lock_dir.stale.$$"
+      fi
+      continue
+    fi
+    sync_holder=${pid:-unknown}
+    [ "$waited" -lt "$wait" ] || return 1
+    sleep 1
+    waited=$((waited + 1))
+  done
+}
+sync_unlock() {
+  [ "$sync_locked" = 1 ] || return 0
+  if [ "$(cat "$sync_lock_dir/pid" 2>/dev/null)" = "$$" ]; then rm -rf "$sync_lock_dir"; fi
+  sync_locked=0
+}
+sync_cleanup() { sync_unlock; adopt_done; }
+
+# How this host merges settings.json: a member's install through setup's own record, a host
+# sync.sh keeps a record for through sync.sh (when its role applies settings), else not at all.
+# Sets sync_route (member, owner or none) and, for none, sync_why.
+sync_route_find() {
+  local role=
+  sync_route=none
+  sync_why=
+  if [ -L "$CFG/settings.json" ]; then
+    sync_why="$CFG/settings.json is a symlink, and setup never writes through one"
+  elif [ ! -e "$CFG/settings.json" ]; then
+    sync_why="there is no $CFG/settings.json: ./setup seeds one and keeps its record"
+  elif [ ! -f "$CFG/settings.json" ]; then
+    sync_why="$CFG/settings.json is not a regular file"
+  elif [ -e "$SYNC_BASE" ] || [ -L "$SYNC_BASE" ]; then
+    if [ -f "$SYNC_BASE" ] && [ ! -L "$SYNC_BASE" ] && [ -x "$HOV_STACK/sync.sh" ]; then
+      role=$( ( . "$HOV_STACK/lib/profile.sh"; profile_role ) 2>/dev/null ) || role=
+      case $role in
+        workstation|satellite) sync_route=owner ;;
+        *) sync_why="sync.sh keeps its own record of $CFG/settings.json, but this host has no workstation or satellite role to apply it (hosts.tsv), so sync.sh's merge does not run here and neither does setup's" ;;
+      esac
+    else
+      sync_why="sync.sh keeps its own record of $CFG/settings.json ($(_lf_display "$SYNC_BASE")), but it is not a regular file next to an executable sync.sh, so the merge cannot run"
+    fi
+  elif settings_mergeable; then
+    sync_route=member
+  else
+    sync_why="$CFG/settings.json has no record of ./setup creating it, so hov-stack never moves it or the checkout by itself: ./setup --adopt shows the merge into it, and ./setup --adopt --yes makes it once, after which hov-stack keeps itself current"
+  fi
+}
+
+# git fetch, capped where `timeout` exists, never prompting, never showing git's text.
+sync_fetch() {  # sync_fetch <remote>
+  local t=${HOV_SYNC_FETCH_TIMEOUT:-60}
+  case $t in ''|*[!0-9]*) t=60 ;; esac
+  t=$((10#$t))  # 08 and 09 are decimal here, not bad octal
+  if [ "$t" = 0 ]; then
+    # 0 is no cap, as it is for `timeout`.
+    GIT_TERMINAL_PROMPT=0 git -C "$HOV_STACK" fetch --quiet "$1" > /dev/null 2>&1 < /dev/null
+  elif command -v timeout >/dev/null 2>&1; then
+    GIT_TERMINAL_PROMPT=0 timeout "$t" git -C "$HOV_STACK" fetch --quiet "$1" > /dev/null 2>&1 < /dev/null
+  else
+    # No `timeout` (macOS): run the fetch in the background and watch it from here, in 0.1 s
+    # steps, so nothing is left behind (no separate watchdog process to clean up) and the cap
+    # holds under bash 3.2.
+    local fpid steps=0 limit=$((t * 10)) frc=0
+    # Job control gives the background fetch its own process group, so the cap can end the
+    # transport child (ssh) with it, as `timeout` does.
+    set -m
+    GIT_TERMINAL_PROMPT=0 git -C "$HOV_STACK" fetch --quiet "$1" > /dev/null 2>&1 < /dev/null &
+    fpid=$!
+    set +m
+    while kill -0 "$fpid" 2>/dev/null; do
+      if [ "$steps" -eq "$limit" ]; then
+        # TERM, then CONT, as `timeout` does: in a hand run, an ssh that reads the terminal
+        # stops this background group (SIGTTIN), and a stopped process holds TERM until it is
+        # continued. KILL two seconds on if anything in the group is still there.
+        kill -TERM -- "-$fpid" 2>/dev/null || kill "$fpid" 2>/dev/null || :
+        kill -CONT -- "-$fpid" 2>/dev/null || kill -CONT "$fpid" 2>/dev/null || :
+      elif [ "$steps" -ge $((limit + 20)) ]; then
+        kill -KILL -- "-$fpid" 2>/dev/null || kill -KILL "$fpid" 2>/dev/null || :
+        break
+      fi
+      sleep 0.1 2>/dev/null || sleep 1
+      steps=$((steps + 1))
+    done
+    wait "$fpid" 2>/dev/null || frc=$?
+    return "$frc"
+  fi
+}
+# The two gates between "the checkout is behind" and the move. HOV_UPDATE=notice reports and
+# stops; otherwise the merge that must follow the move is rehearsed first (a plan, which writes
+# nothing), so a settings.json that cannot be merged never gets a checkout moved under it.
+sync_before_move() {
+  local plan_rc=0
+  if [ "${HOV_UPDATE:-}" = notice ]; then
+    pull_status=notice
+    return 1
+  fi
+  case $sync_route in
+    member)
+      settings_merge plan
+      merge_done
+      if [ "$merge_rc" != 0 ]; then
+        sync_why="the merge into settings.json would not run (${merge_why%%$'\n'*})"
+        pull_status=preflight
+        return 1
+      fi ;;
+    owner)
+      CLAUDE_HOME="$CFG" bash "$HOV_STACK/sync.sh" apply-settings --plan --quiet > /dev/null 2>&1 < /dev/null || plan_rc=$?
+      if [ "$plan_rc" != 0 ]; then
+        sync_why="sync.sh apply-settings --plan exits $plan_rc, so its merge would not run"
+        pull_status=preflight
+        return 1
+      fi ;;
+  esac
+  return 0
+}
+
+# Step 4: link what is missing and never move anything aside. A path that is absent gets the
+# link, a link to nothing is pointed at ours, one already resolving to ours is in place, and
+# anything else (a file of the user's own, a link elsewhere) is left alone and counted:
+# ~/.claude/claude-env.sh is a regular file on a host where something rewrites CLAUDE_ENV_FILE,
+# and link_file would back it up on every sync.
+sync_linked=0 sync_kept=0 sync_bad=0
+sync_links() {
+  local i=0 src dst
+  mkdir -p "$CFG/skills" 2>/dev/null || :
+  while [ "$i" -lt "${#srcs[@]}" ]; do
+    src=${srcs[i]} dst=${dsts[i]}
+    i=$((i + 1))
+    if [ -L "$dst" ] && [ "$dst" -ef "$src" ]; then
+      continue
+    fi
+    if [ -e "$dst" ]; then
+      sync_kept=$((sync_kept + 1))
+      echo "  left alone, not hov-stack's: $(_lf_display "$dst")"
+      continue
+    fi
+    if [ ! -e "$src" ]; then
+      sync_bad=$((sync_bad + 1))
+      echo "  could not link $(_lf_display "$dst"): $src is missing" >&2
+      continue
+    fi
+    if mkdir -p "$(dirname "$dst")" && ln -sfn "$src" "$dst"; then
+      sync_linked=$((sync_linked + 1))
+      echo "  linked $(_lf_display "$dst")"
+    else
+      sync_bad=$((sync_bad + 1))
+      echo "  could not link $(_lf_display "$dst")" >&2
+    fi
+  done
+}
+
+sync_merge_text=
+sync_merge_failed=0
+sync_merge_warn=
+# Step 5: the merge, by the host's own route; sets sync_merge_text and sync_merge_failed.
+sync_merge() {
+  local out rc=0 status n final
+  sync_merge_text= sync_merge_failed=0 sync_merge_warn=
+  case $sync_route in
+    member)
+      settings_merge run
+      final=${merge_final#settings: }
+      case $merge_rc in
+        0)
+          # What the engine held back. A conflict (a value you and the template both changed)
+          # stays quiet here: a plain run keeps the file's value too, and so does this.
+          case $final in
+            *"held deny"*|*"hook(s) skipped"*|*"setting(s) skipped"*) sync_merge_warn=${final%%; backup at *} ;;
+          esac
+          [ -z "$merge_lines" ] || merge_show
+          if [ "$merge_n" -gt 0 ]; then sync_merge_text="merged $merge_n change(s) into settings.json"
+          else sync_merge_text="nothing to merge into settings.json"
+          fi
+          # The session-start gate compares its inputs with this stamp; the merge just made is
+          # what it would make, so it stays quiet.
+          node "$HOV_STACK/lib/settings-apply.js" --write-gate-stamp --config-dir "$CFG" > /dev/null 2>&1 || :
+          ;;
+        2)
+          sync_merge_failed=1
+          sync_merge_text="settings.json was not merged: lib/settings-seed.js built no seed (${merge_why%%$'\n'*})"
+          ;;
+        *)
+          sync_merge_failed=1
+          if [ "$merge_changed" = 1 ] && [ -n "$merge_backup" ]; then
+            sync_merge_text="the merge into settings.json was written but did not finish (${merge_why%%$'\n'*}); the file from before is at $merge_backup"
+          elif [ "$merge_changed" = 1 ]; then
+            sync_merge_text="the merge into settings.json was written but did not finish (${merge_why%%$'\n'*})"
+          else
+            sync_merge_text="settings.json was not merged and is as it was (${merge_why%%$'\n'*})"
+          fi
+          ;;
+      esac
+      merge_done ;;
+    owner)
+      out=$(CLAUDE_HOME="$CFG" bash "$HOV_STACK/sync.sh" apply-settings --quiet 2>/dev/null < /dev/null) || rc=$?
+      status=$(printf '%s\n' "$out" | sed -n 's/^settings: //p' | tail -n 1)
+      case $status in
+        '')
+          sync_merge_failed=1
+          sync_merge_text="sync.sh apply-settings gave no result (exit $rc); sync.sh apply-settings --plan shows why" ;;
+        "skipped ("*)
+          sync_merge_failed=1
+          sync_merge_text="settings.json was not merged: sync.sh $status; the next session start retries it" ;;
+        *)
+          if [ "$rc" != 0 ]; then
+            sync_merge_failed=1
+            sync_merge_text="sync.sh apply-settings exited $rc ($status); sync.sh apply-settings --plan shows why"
+          else
+            case $status in
+              "applied "*) n=${status#applied }; n=${n%%[!0-9]*}; sync_merge_text="merged ${n:-0} change(s) into settings.json" ;;
+              *) sync_merge_text="nothing to merge into settings.json" ;;
+            esac
+            case $status in
+              *"conflict(s)"*|*"held deny"*|*skipped*) sync_merge_warn=${status%%; backup at *} ;;
+            esac
+          fi ;;
+      esac ;;
+  esac
+}
+
+# sync_main: 0 or 1, the exit status of the run.
+sync_main() {
+  local hooks_real lock_rc=0 moved=0 from= to= n pulled=0 text head mv_text=
+  # 0. Identity.
+  hooks_real=$(cd "$CFG/hooks" 2>/dev/null && pwd -P) || hooks_real=
+  if [ "$hooks_real" != "$HOV_STACK/hooks" ]; then
+    echo "sync: blocked: $CFG/hooks does not lead into this checkout ($HOV_STACK/hooks), so ./setup --sync from here would merge this tree's template into settings.json: run it from the checkout $CFG/hooks leads to"
+    return 1
+  fi
+  # 1. Lock.
+  sync_lock || lock_rc=$?
+  case $lock_rc in
+    0) ;;
+    1) echo "sync: skipped (another sync is running, pid $sync_holder)"; return 0 ;;
+    *) echo "sync: failed: could not make the lock under $CFG/.hov-stack"; return 1 ;;
+  esac
+  # 2. Route.
+  sync_route_find
+  if [ "$sync_route" = none ]; then
+    sync_finish blocked "hov-stack not updated: $sync_why"
+    return 1
+  fi
+  # 3. Pull. HOV_UPDATE=off and --no-pull skip it and nothing else.
+  if [ "$no_pull" = 0 ] && [ "${HOV_UPDATE:-}" != off ]; then
+    pulled=1
+    checkout_advance sync
+    case $pull_status in
+      handoff) moved=1 from=$pull_old to=$pull_head ;;
+      current) ;;
+      moved)
+        sync_result_write moving "hov-stack updated ${pull_head:0:7} -> ${pull_new:0:7}; merging"
+        exec env HOV_STACK_UPDATE_FROM="$pull_head" HOV_STACK_SYNC_LOCKED="$$" bash "$HOV_STACK/setup" ${orig_args[@]+"${orig_args[@]}"} ;;
+      notice)
+        sync_finish notice "hov-stack is $pull_behind commit(s) behind $pull_up: ./setup --update brings it current"
+        return 0 ;;
+      notgit)
+        sync_finish blocked "hov-stack not updated: $HOV_STACK is not the top of a git checkout, so there is nothing to pull"
+        return 1 ;;
+      nocommits)
+        sync_finish blocked "hov-stack not updated: $HOV_STACK has no commits, so there is nothing to pull"
+        return 1 ;;
+      detached)
+        sync_finish blocked "hov-stack not updated: HEAD is detached, so there is no branch to pull: git -C $HOV_STACK switch <your branch>, then ./setup --sync"
+        return 1 ;;
+      noupstream)
+        sync_finish blocked "hov-stack not updated: $pull_branch has no upstream branch to pull from: git -C $HOV_STACK branch --set-upstream-to=origin/$pull_branch, then ./setup --sync"
+        return 1 ;;
+      fetchfail)
+        sync_finish failed "hov-stack not updated: could not fetch $pull_remote (offline?): ./setup --sync tries again when online"
+        return 1 ;;
+      diverged)
+        sync_finish blocked "hov-stack not updated: $pull_branch has $pull_ahead commits $pull_up lacks and $pull_up has $pull_behind you lack, so it cannot fast-forward; setup never rebases or resets: rebase or merge in $HOV_STACK yourself, then ./setup --sync"
+        return 1 ;;
+      ffrefused)
+        sync_finish blocked "hov-stack not updated: git would not fast-forward $pull_branch to $pull_up because a local change collides with an incoming one: commit or move it, then ./setup --sync"
+        return 1 ;;
+      preflight)
+        sync_finish blocked "hov-stack not updated: $sync_why, so the checkout was not moved: fix that, then ./setup --sync"
+        return 1 ;;
+      *)
+        sync_finish failed "hov-stack not updated: the pull ended in a state setup does not know ($pull_status)"
+        return 1 ;;
+    esac
+  fi
+  # 4. Link what is missing, then the overlay import and the commands.
+  sync_links
+  if overlay_usable && [ -f "$OVERLAY/CLAUDE.md" ] && [ -z "$(overlay_rule_target || :)" ] \
+    && { [ -e "$OVERLAY_RULE" ] || [ -L "$OVERLAY_RULE" ]; }; then
+    sync_kept=$((sync_kept + 1))
+    echo "  left alone, not hov-stack's: $(_lf_display "$OVERLAY_RULE")"
+  elif ! overlay_import; then
+    sync_bad=$((sync_bad + 1))
+  fi
+  commands_row run
+  helpers_row run
+  [ "$failed" = 0 ] || sync_bad=$((sync_bad + 1))
+  # 5. Merge.
+  sync_merge
+  text=$sync_merge_text
+  [ "$sync_kept" = 0 ] || text="$text; $sync_kept path(s) left alone"
+  if [ "$moved" = 1 ]; then
+    n=$(git_in rev-list --count "$from..$to" 2>/dev/null) || n="?"
+    mv_text="hov-stack updated ${from:0:7} -> ${to:0:7} ($n commit(s))"
+  fi
+  if [ "$sync_bad" != 0 ]; then
+    sync_finish failed "${mv_text:+$mv_text; }hov-stack: $sync_bad link(s) could not be made (see the lines above); $text"
+    return 1
+  fi
+  if [ "$sync_merge_failed" = 1 ]; then
+    sync_finish failed "${mv_text:+$mv_text; }hov-stack: $text"
+    return 1
+  fi
+  [ -z "$sync_merge_warn" ] || text="$text; the merge left something for you: $sync_merge_warn"
+  # 6. Result.
+  if [ "$moved" = 1 ]; then
+    if [ -n "$sync_merge_warn" ]; then sync_finish warning "$mv_text; $text"
+    else sync_finish moved "$mv_text; $text"
+    fi
+  else
+    head=$(git_in rev-parse HEAD 2>/dev/null) || head=
+    if [ "$pulled" = 1 ]; then text="hov-stack is up to date at ${head:0:7}; $text"
+    else text="hov-stack is at ${head:0:7} (no pull); $text"
+    fi
+    if [ -n "$sync_merge_warn" ]; then sync_finish warning "$text"
+    else sync_finish current "$text"
+    fi
+  fi
+  return 0
+}
+if [ "$sync" = 1 ]; then
+  trap sync_cleanup EXIT
+  sync_rc=0
+  sync_main || sync_rc=$?
+  exit "$sync_rc"
+fi
+
 if [ "$adopt" = 1 ]; then
   if [ "$yes" = 1 ]; then echo "hov-stack: adopting $CFG/settings.json into ./setup's merge"
   else echo "hov-stack: adopting $CFG/settings.json into ./setup's merge, as a plan (settings.json is not changed)"

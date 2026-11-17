@@ -592,3 +592,95 @@ test('stray .git: a lib that fails to load costs only its own note', async () =>
     rmTmp(base);
   }
 });
+
+// ---- ./setup --sync hand-off and the adopt notice -------------------------------------------
+function copiedTree(script) {
+  const tree = mkTmp('lpa-sync-');
+  const hooks = path.join(tree, 'hooks');
+  fs.mkdirSync(path.join(hooks, 'SessionStart'), { recursive: true });
+  fs.mkdirSync(path.join(hooks, 'lib'));
+  fs.mkdirSync(path.join(tree, 'scripts'));
+  fs.copyFileSync(path.join(__dirname, '..', HOOK), path.join(hooks, HOOK));
+  fs.copyFileSync(path.join(__dirname, '..', 'lib', 'hook-output.js'), path.join(hooks, 'lib', 'hook-output.js'));
+  fs.symlinkSync(path.join(__dirname, '..', '..', 'scripts', 'repo-route.py'), path.join(tree, 'scripts', 'repo-route.py'));
+  fs.writeFileSync(path.join(tree, 'scripts', 'launchpad-freshen.sh'), `#!/usr/bin/env bash\n${script}\n`);
+  return { tree, hooks };
+}
+const HANDED = "printf '%s\\n' 'launchpad fixture: handed to ./setup --sync in the background; its result shows at the next session start'";
+
+test('hand-off: a checkout handed to ./setup --sync is not a diagnostic, and a behind checkout says the sync is bringing it current', async () => {
+  const fixture = repo();
+  const { tree, hooks } = copiedTree(HANDED);
+  const cfg = mkTmp('lpa-cfg-');
+  try {
+    advanceRemote(fixture);
+    gexec(fixture.dir, 'fetch -q origin');
+    const res = await runHook(path.join(hooks, HOOK), { cwd: fixture.dir, hook_event_name: 'SessionStart' }, { env: { HOME: cfg } });
+    assert.strictEqual(res.code, 0, res.stderr);
+    assert.match(res.stdout, /1 commits behind origin\/main; \.\/setup --sync was started in the background and its result shows at the next session start/);
+    assert.doesNotMatch(res.stdout, /bringing it current/);
+    assert.doesNotMatch(res.stdout, /diagnostics|declined|not confirmed|Checkout is now fresh|fast-forwarded/i);
+    // Planted negative: with HOV_UPDATE off or notice no background sync was asked for, so no note.
+    for (const held of ['off', 'notice']) {
+      const r = await runHook(path.join(hooks, HOOK), { cwd: fixture.dir, hook_event_name: 'SessionStart' }, { env: { HOME: cfg, HOV_UPDATE: held } });
+      assert.doesNotMatch(r.stdout, /was started in the background/, `HOV_UPDATE=${held}`);
+    }
+    // Planted negative: a line that only resembles the hand-off is still a diagnostic.
+    const t2 = copiedTree("printf '%s\\n' 'launchpad fixture: handed to something else'");
+    try {
+      const r2 = await runHook(path.join(t2.hooks, HOOK), { cwd: fixture.dir, hook_event_name: 'SessionStart' }, { env: { HOME: cfg } });
+      assert.doesNotMatch(r2.stdout, /bringing it current in the background/);
+    } finally {
+      rmTmp(t2.tree);
+    }
+  } finally {
+    rmTmp(tree);
+    rmTmp(cfg);
+    rmTmp(fixture.base);
+  }
+});
+
+test('adopt notice: a harness install with no record is told once a day to adopt; a record or a foreign config dir silences it', async () => {
+  const { tree, hooks } = copiedTree('exit 0');
+  const home = mkTmp('lpa-home-');
+  const { base, dir } = repo();
+  try {
+    const cfg = path.join(home, '.claude');
+    fs.mkdirSync(path.join(cfg, '.hov-stack'), { recursive: true });
+    fs.symlinkSync(hooks, path.join(cfg, 'hooks'));
+    fs.writeFileSync(path.join(cfg, 'settings.json'), '{}');
+    const go = () => runHook(path.join(hooks, HOOK), { cwd: dir, hook_event_name: 'SessionStart' }, { env: { HOME: home, CLAUDE_HOME: cfg } });
+    const first = await go();
+    assert.strictEqual(first.code, 0, first.stderr);
+    assert.ok(first.stdout.includes(`${fs.realpathSync(tree)}/setup --adopt shows that merge`), first.stdout);
+    assert.ok(first.stdout.includes('setup --adopt --yes makes it once'));
+    // Once a day: the second session does not repeat it.
+    assert.doesNotMatch((await go()).stdout, /setup --adopt/);
+    // The stamp ages past a day: it speaks again.
+    const old = new Date(Date.now() - 25 * 3600 * 1000);
+    fs.utimesSync(path.join(cfg, '.hov-stack', 'adopt-notice'), old, old);
+    assert.match((await go()).stdout, /setup --adopt/);
+    // Planted negative: HOV_UPDATE off or notice silences it, even with a stale stamp.
+    for (const held of ['off', 'notice']) {
+      fs.utimesSync(path.join(cfg, '.hov-stack', 'adopt-notice'), old, old);
+      const r = await runHook(path.join(hooks, HOOK), { cwd: dir, hook_event_name: 'SessionStart' }, { env: { HOME: home, CLAUDE_HOME: cfg, HOV_UPDATE: held } });
+      assert.doesNotMatch(r.stdout, /setup --adopt/, `HOV_UPDATE=${held}`);
+    }
+    // Planted negatives: a record (either kind) silences it, even with a stale stamp.
+    fs.utimesSync(path.join(cfg, '.hov-stack', 'adopt-notice'), old, old);
+    fs.writeFileSync(path.join(cfg, '.hov-stack', 'setup-settings-base.json'), '{}');
+    assert.doesNotMatch((await go()).stdout, /setup --adopt/);
+    fs.rmSync(path.join(cfg, '.hov-stack', 'setup-settings-base.json'));
+    fs.writeFileSync(path.join(cfg, '.hov-stack', 'settings-base.json'), '{}');
+    assert.doesNotMatch((await go()).stdout, /setup --adopt/);
+    fs.rmSync(path.join(cfg, '.hov-stack', 'settings-base.json'));
+    // A config dir whose hooks lead somewhere else is not this checkout's business.
+    fs.rmSync(path.join(cfg, 'hooks'));
+    fs.mkdirSync(path.join(cfg, 'hooks'));
+    assert.doesNotMatch((await go()).stdout, /setup --adopt/);
+  } finally {
+    rmTmp(tree);
+    rmTmp(home);
+    rmTmp(base);
+  }
+});

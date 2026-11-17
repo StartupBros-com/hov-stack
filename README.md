@@ -53,6 +53,10 @@ Run `./setup --update` in the checkout. It fast-forwards the checkout to the lat
 
 It leaves alone a `settings.json` setup has no record of creating, anything you installed some other way, a program that changed since `/hov-setup` installed it (jsm updates itself, and `cass upgrade` updates cass), and a checkout with commits or changes of yours that a fast-forward would lose, and says what it left and why. Plugin updates reach sessions started after it. Claude Code updates itself, and `jsm upgrade` updates the jeffreys-skills skills: setup prints that line rather than running it, since those skills come from your own subscription.
 
+### Staying current without typing it
+
+On an install whose `settings.json` setup has a record of creating, hov-stack keeps itself current: a new Claude Code session starts `./setup --sync` in the background about once a day. It fetches, fast-forwards the checkout, links any new files, and merges the template into `settings.json`, under one lock, so a hook's file and the line that registers it arrive together. It moves the checkout only when it could also merge `settings.json`, and it says what it did at the start of your next session, once. `./setup --sync --no-pull` merges without pulling (for a checkout you moved by hand), and `HOV_UPDATE=notice` only reports how far behind the checkout is. `HOV_UPDATE=off` stops the background pull; the merge into a template you pulled yourself still runs. An install with no record of setup creating its `settings.json` is never moved or merged by itself: a session start tells you, at most once a day, to run `./setup --adopt` to see the merge and `./setup --adopt --yes` to make it.
+
 ## Quick start
 
 1. Run `./setup`

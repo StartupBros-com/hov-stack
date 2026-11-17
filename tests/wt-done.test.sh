@@ -1352,6 +1352,43 @@ out=$(WT_DONE_SETTINGS_TIMEOUT=1 SETTINGS_SLEEP=1 runordinary)
 has 'settings timeout is explicit' "$out" '!! activation: settings apply failed (rc=124;'
 out=$(SETTINGS_STATUS='unchanged; 1 conflict(s), see sync.sh check' runordinary)
 has 'settings conflict is explicit' "$out" '!! activation: settings unchanged; 1 conflict(s)'
+# A member's install (./setup keeps the record, sync.sh none): closeout runs ./setup --sync --no-pull
+# in place of sync.sh apply-settings, which would write the gate stamp and silence the backstop.
+SETUP_CALLS="$TMP/settings-fresh/setup.calls"
+export SETUP_CALLS
+cat >"$C/setup" <<'SETUP_STUB'
+#!/usr/bin/env bash
+printf '%s|%s\n' "$*" "${CLAUDE_CONFIG_DIR:-}" >>"$SETUP_CALLS"
+echo "sync: ${SETUP_STATE:-current}: fixture"
+exit "${SETUP_RC:-0}"
+SETUP_STUB
+chmod +x "$C/setup"
+mkdir -p "$CLAUDE_HOME/.hov-stack"
+printf '{}\n' >"$CLAUDE_HOME/.hov-stack/setup-settings-base.json"
+: >"$SETTINGS_CALLS"; : >"$SETUP_CALLS"
+out=$(runordinary)
+has 'member install: closeout runs setup --sync --no-pull on the config dir' "$(cat "$SETUP_CALLS")" "--sync --no-pull|$CLAUDE_HOME"
+chk 'member install: sync.sh apply-settings is not run' '' "$(cat "$SETTINGS_CALLS")"
+has 'member install: reports the sync line' "$out" 'activation: settings sync: current: fixture'
+hasnot 'member install: a current sync is not flagged' "$out" '!! activation: settings'
+out=$(SETUP_STATE=warning runordinary)
+has 'member install: a warning is flagged' "$out" '!! activation: settings sync: warning: fixture'
+out=$(SETUP_STATE=blocked SETUP_RC=1 runordinary)
+has 'member install: a refusal is flagged' "$out" '!! activation: settings sync: blocked: fixture'
+out=$(cd "$W" && DRY_RUN=1 bash "$ORDINARY_SCRIPT" 2>&1)
+has 'member install: preview names setup' "$out" "would: $C/setup --sync --no-pull"
+# Planted negatives: an owner host (sync.sh's record) and a host with no record keep sync.sh.
+printf '{}\n' >"$CLAUDE_HOME/.hov-stack/settings-base.json"
+: >"$SETTINGS_CALLS"; : >"$SETUP_CALLS"
+out=$(runordinary)
+chk 'owner host: sync.sh apply-settings still runs' 'apply-settings --quiet' "$(cat "$SETTINGS_CALLS")"
+hasnot 'owner host: setup is not asked to merge' "$(cat "$SETUP_CALLS")" '--no-pull'
+rm -f "$CLAUDE_HOME/.hov-stack/settings-base.json" "$CLAUDE_HOME/.hov-stack/setup-settings-base.json"
+: >"$SETTINGS_CALLS"; : >"$SETUP_CALLS"
+out=$(runordinary)
+chk 'no-record host: sync.sh apply-settings still runs' 'apply-settings --quiet' "$(cat "$SETTINGS_CALLS")"
+hasnot 'no-record host: setup is not asked to merge' "$(cat "$SETUP_CALLS")" '--no-pull'
+rm -f "$C/setup"
 unlink "$CLAUDE_HOME/hooks"
 mkdir "$CLAUDE_HOME/hooks"
 : >"$SETTINGS_CALLS"

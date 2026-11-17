@@ -618,6 +618,26 @@ settings_activation() {
   cfg=${CLAUDE_HOME:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}}
   [ -x "$repo/sync.sh" ] && [ -f "$repo/lib/settings-apply.js" ] || return 0
   [ "$(readlink -f "$cfg/hooks")" = "$(readlink -f "$repo/hooks")" ] || return 0
+  if [ ! -e "$cfg/.hov-stack/settings-base.json" ] && [ -f "$cfg/.hov-stack/setup-settings-base.json" ] \
+    && [ -x "$repo/setup" ]; then
+    # A member's install (./setup keeps the record, sync.sh none): sync.sh apply-settings would
+    # skip on role but still write the session-start gate's stamp, which silences the backstop
+    # that merges a hand-moved checkout. ./setup --sync --no-pull makes the merge and the stamp.
+    if [ "$DRY_RUN" = 1 ]; then
+      echo "      would: $repo/setup --sync --no-pull"
+      return 0
+    fi
+    out=$(CLAUDE_CONFIG_DIR="$cfg" timeout --kill-after=5 "${WT_DONE_SETTINGS_TIMEOUT:-60}" bash "$repo/setup" --sync --no-pull 2>/dev/null < /dev/null); rc=$?
+    status=$(printf '%s\n' "$out" | grep '^sync: ' | tail -1)
+    if [ -z "$status" ]; then
+      echo "      !! activation: settings apply failed (rc=$rc; 124 means timeout); ./setup --sync --no-pull shows why"
+    elif [[ "$status" == "sync: current: "* || "$status" == "sync: moved: "* || "$status" == "sync: notice: "* ]] && [ "$rc" = 0 ]; then
+      echo "      activation: settings $status"
+    else
+      echo "      !! activation: settings $status"
+    fi
+    return 0
+  fi
   if [ "$DRY_RUN" = 1 ]; then
     echo "      would: $repo/sync.sh apply-settings"
     return 0
