@@ -156,15 +156,20 @@ function heal(top) {
   const lines = clipped.slice(0, HEAL_NOTE_MAX_LINES).filter((line) => line.trim());
   const isFastForward = (line) => /^launchpad .+: fast-forwarded \d+ commit\(s\)(?:, carried \d+ unrelated local edit\(s\))?$/.test(line);
   const isFresh = (line) => /^launchpad .+: fresh$/.test(line);
+  // The harness checkout is refreshed by ./setup --sync, started in the background: its result
+  // shows at a later session start (hooks/SessionStart/settings-apply.js), so this line is a
+  // completed hand-off, neither a mutation nor a diagnostic.
+  const isHanded = (line) => /^launchpad .+: handed to \.\/setup --sync in the background; its result shows at the next session start$/.test(line);
   const isMutation = (line) => /^launchpad .+: healed, switched '.+' -> .+ \(branch left intact\)$/.test(line) || isFastForward(line);
   const mutations = lines.filter(isMutation);
-  const diagnostics = lines.filter((line) => !isMutation(line) && !isFresh(line));
+  const diagnostics = lines.filter((line) => !isMutation(line) && !isFresh(line) && !isHanded(line));
   if (truncated) diagnostics.push(`[helper stdout truncated at ${HEAL_NOTE_MAX_CHARS} characters / ${HEAL_NOTE_MAX_LINES} lines]`);
   if (failure) diagnostics.push(failure);
   if (!lines.length) diagnostics.push('No helper stdout detail was returned.');
-  const completed = lines.some((line) => isFresh(line) || isFastForward(line));
+  const handed = lines.some(isHanded);
+  const completed = lines.some((line) => isFresh(line) || isFastForward(line) || isHanded(line));
   if (!completed && !diagnostics.length) diagnostics.push('Self-heal helper returned no refresh completion detail.');
-  return { mutations, diagnostics, fresh: completed && diagnostics.length === 0 };
+  return { mutations, diagnostics, handed, fresh: completed && diagnostics.length === 0 };
 }
 
 // A DrvFs/9p Windows mount: /mnt/c, /mnt/d, ... Measured 2026-08-06 against
@@ -220,6 +225,42 @@ function windowsMountAdvisory(cwd) {
   );
 }
 
+// An install whose settings.json neither ./setup nor sync.sh keeps a record of is never merged
+// into and its checkout is never moved by itself (./setup --sync refuses it). Say so, at most
+// once a day, naming the two commands that change that. Only the harness checkout asks: the
+// config dir's hooks/ must lead into this very tree.
+const ADOPT_NOTICE_SECONDS = 24 * 60 * 60;
+// HOV_UPDATE=off or notice: the owner asked for no background update, so neither the advisory's
+// "a sync was started" note nor the adopt notice (whose point is to enable one) is shown.
+function updateHeld() {
+  return ['off', 'notice'].includes(process.env.HOV_UPDATE);
+}
+function adoptNotice() {
+  try {
+    if (updateHeld()) return '';
+    const home = os.homedir();
+    const cfg = process.env.CLAUDE_HOME || process.env.CLAUDE_CONFIG_DIR || path.join(home, '.claude');
+    const hooksDir = path.resolve(__dirname, '..');
+    if (fs.realpathSync(path.join(cfg, 'hooks')) !== fs.realpathSync(hooksDir)) return '';
+    const settings = path.join(cfg, 'settings.json');
+    const lst = fs.lstatSync(settings);
+    if (!lst.isFile() || lst.isSymbolicLink()) return '';
+    const state = path.join(cfg, '.hov-stack');
+    const has = (f) => { try { fs.lstatSync(path.join(state, f)); return true; } catch { return false; } };
+    if (has('setup-settings-base.json') || has('settings-base.json')) return '';
+    const stamp = path.join(state, 'adopt-notice');
+    try {
+      if (Date.now() - fs.statSync(stamp).mtimeMs < ADOPT_NOTICE_SECONDS * 1000) return '';
+    } catch { /* no stamp yet */ }
+    fs.mkdirSync(state, { recursive: true, mode: 0o700 });
+    fs.writeFileSync(stamp, `${new Date().toISOString()}\n`);
+    const root = path.dirname(fs.realpathSync(hooksDir));
+    return `[hov-stack] This install's settings.json has no record of ./setup creating it, so hov-stack does not update the checkout or merge the template into it by itself. ${root}/setup --adopt shows that merge; ${root}/setup --adopt --yes makes it once, and after that hov-stack keeps itself current.`;
+  } catch {
+    return ''; // fail-open: never break session start
+  }
+}
+
 // The stray-.git heal runs before everything else and its note is prepended:
 // a stray .git on a launch anchor (lib/stray-dot-git.js) fences whole
 // directory trees for the session, which outranks any branch-state advice.
@@ -233,7 +274,7 @@ function run(rawInput) {
   // dispatch and respawn into them is not refused (lib/workspace-trust.js).
   try { require('../lib/workspace-trust').seed(); } catch { /* fail-open */ }
   const note = launchAdvisory(input);
-  return [strayNote, note].filter(Boolean).join('\n');
+  return [strayNote, note, adoptNotice()].filter(Boolean).join('\n');
 }
 
 function launchAdvisory(input) {
@@ -293,6 +334,10 @@ function launchAdvisory(input) {
     const ageNote = age != null && age > 0 ? ` (last fetch ~${age}d ago, so counts may understate)` : '';
 
     const offDefault = !detached && branch !== def;
+    if (healed.handed && !updateHeld() && !detached && !offDefault && behind > 0) {
+      notes.push(`[launchpad-advisory] This harness checkout is ${behind} commits behind origin/${def}; ./setup --sync was started in the background and its result shows at the next session start.`);
+      return notes.join('\n');
+    }
     if (!detached && !offDefault && behind === 0) {
       if (healed.fresh && healed.mutations.length) {
         notes.push(`[launchpad-advisory] Checkout is now fresh on ${def}.`);
