@@ -373,11 +373,11 @@ contains 'permissions.deny'
 ok 'owner merge failure is reported and apply-settings stderr remains visible'
 
 # A soft papercut failure lets the merge run; when the merge fails as well, the
-# settings row names both, as `sync.sh install` once reported them together.
+# settings row names both, as the removed install verb once reported them together.
 select_home "$WORK/papercut-and-merge-failure" workstation
 printf '{"permissions":{"deny":"invalid"}}\n' | tee "$HOV_STACK_OVERLAY/settings.json" >/dev/null
 CLAUDE_SYNC_SKIP_HOOK_RECONCILE=0 CLAUDE_SYNC_CLAUDE_BIN="$WORK/claude-fails" run 1 setup --no-dcg
-grep -q '^  settings *failed .*apply-settings exited.*papercut install failed' <<<"$output" || {
+grep -q '^  settings *failed .*apply-settings.*papercut install failed' <<<"$output" || {
   printf '%s\n' "$output"
   fail 'settings row did not name both the merge and the papercut failure'
 }

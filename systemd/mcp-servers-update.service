@@ -1,6 +1,6 @@
 # TEMPLATE: Weekly update of the host MCP server checkout (runs update-mcp-servers.sh).
 # Nothing to replace in this file. Before enabling, set HOV_MCP_EXPECTED_ORIGIN=<owner>/<repo>,
-# the GitHub origin the checkout must match, in the overlay’s env file: `./setup --enable-units`
+# the GitHub origin the checkout must match, in the overlay's env file: `./setup --enable-units`
 # copies this file over the live one, so a value set here is lost at the next install.
 # See systemd/README.md.
 
