@@ -153,13 +153,13 @@ r=$( DOTFILES_ROLE=satellite profile_role no-such-host-xyz 2>&1 )
 rc=$?
 [ "$rc" -eq 1 ] && [ -z "$r" ] && ok || bad "undeclared host accepted satellite override (rc=$rc, output='$r')"
 
-# 13. install() must RECONCILE, not only enable. Without a disable path a
+# 13. The enable phase must RECONCILE, not only enable. Without a disable path a
 #     satellite keeps every singleton timer it already had, and the migration
 #     this model exists for is a no-op against the real collision risk.
 grep -q 'systemctl --user disable --now' "$REPO/sync.sh" \
-  && ok || bad "no role-driven disable path in install()"
+  && ok || bad "no role-driven disable path in the enable phase"
 
-# 14. An unrecognised role must be FATAL at install and DRIFT at check. It used
+# 14. An unrecognised role must be FATAL at setup and DRIFT at check. It used
 #     to enable nothing while check() still called the host mapped, so a typo on
 #     a rebuilt machine produced a green check and zero scheduled work.
 grep -q 'unrecognised role' "$REPO/sync.sh" \

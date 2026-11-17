@@ -690,66 +690,6 @@ const target = (f) =>
     apply("");
     assert.equal(url(), moved, "the overlay env's URL must reach live when none is exported");
   });
-  await test("install reaches apply and writes its base", (f) => {
-    fs.copyFileSync(
-      path.join(tree, "claude-env.sh"),
-      path.join(f.root, "claude-env.sh"),
-    );
-    fs.writeFileSync(
-      path.join(f.root, "hosts.tsv"),
-      os.hostname().split(".")[0] + "\tsatellite\n",
-    );
-    const bin = path.join(f.tmp, "test-bin");
-    fs.mkdirSync(bin);
-    for (const command of ["systemctl", "sudo"])
-      fs.writeFileSync(path.join(bin, command), "#!/bin/sh\nexit 1\n", {
-        mode: 0o755,
-      });
-    const r = f.run(["install"], {
-      CCFLARE_URL_SATELLITE: "http://127.0.0.1:8788",
-      PATH: bin + ":" + f.env.PATH,
-      CLAUDE_SYNC_SKIP_HOOK_RECONCILE: "0",
-      CLAUDE_SYNC_CLAUDE_BIN: path.join(f.tmp, "no-claude"),
-      CLAUDE_SYNC_MANAGED_LOCK: path.join(f.tmp, "etc-managed/settings.json"),
-      CLAUDE_SYNC_SYSTEM_SYS_DIR: path.join(f.tmp, "etc-systemd"),
-    });
-    assert.ok(
-      fs.existsSync(path.join(f.cfg, ".hov-stack/settings-base.json")),
-      r.stdout + r.stderr,
-    );
-    assert.match(r.stdout, /settings: /);
-  });
-  await test("install reports settings and papercut failures together", (f) => {
-    fs.copyFileSync(
-      path.join(tree, "claude-env.sh"),
-      path.join(f.root, "claude-env.sh"),
-    );
-    fs.writeFileSync(
-      path.join(f.root, "hosts.tsv"),
-      os.hostname().split(".")[0] + "\tsatellite\n",
-    );
-    const bin = path.join(f.tmp, "test-bin");
-    fs.mkdirSync(bin);
-    for (const command of ["systemctl", "sudo", "claude"])
-      fs.writeFileSync(path.join(bin, command), "#!/bin/sh\nexit 1\n", {
-        mode: 0o755,
-      });
-    const sync = path.join(f.root,"sync.sh");
-    fs.writeFileSync(sync, fs.readFileSync(sync,"utf8").replace("apply_settings || settings_apply_failed=1", "false || settings_apply_failed=1"));
-    // The aggregation test needs a working user manager to reach closeout.
-    fs.writeFileSync(path.join(bin,"systemctl"), '#!/bin/sh\ncase "$*" in *is-active*) echo inactive; exit 3 ;; esac\nexit 0\n', {mode:0o755});
-    const r = f.run(["install"], {
-      CCFLARE_URL_SATELLITE: "http://127.0.0.1:8788",
-      PATH: bin + ":" + f.env.PATH,
-      CLAUDE_SYNC_SKIP_HOOK_RECONCILE: "0",
-      CLAUDE_SYNC_CLAUDE_BIN: path.join(bin, "claude"),
-      CLAUDE_SYNC_MANAGED_LOCK: path.join(f.tmp, "etc-managed/settings.json"),
-      CLAUDE_SYNC_SYSTEM_SYS_DIR: path.join(f.tmp, "etc-systemd"),
-    });
-    assert.notEqual(r.status,0);
-    assert.match(r.stderr,/settings apply failed/);
-    assert.match(r.stderr,/FAILED to install/);
-  });
   if (mirrors) fs.rmSync(mirrors, { recursive: true, force: true });
   console.log(`${pass} passed; ${fail} failed`);
   process.exitCode = fail ? 1 : 0;

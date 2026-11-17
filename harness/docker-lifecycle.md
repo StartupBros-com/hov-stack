@@ -15,7 +15,7 @@ are recorded under Current status.
   hosts do not run the workstation policy check.
 - Dotfiles owns only the Docker daemon `init` key. Adoption and rollback retain
   every unrelated daemon key and preserve the target's restrictive metadata.
-- First adoption is explicit. Routine `install`, `check`, and
+- First adoption is explicit. Routine `./setup --root`, `check`, and
   `reconcile-docker-init` do not first-publish the key.
 - Adoption state and recovery metadata live outside the repository at
   `/var/lib/dotfiles/docker-init-adoption.json` and

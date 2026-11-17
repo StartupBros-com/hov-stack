@@ -333,6 +333,8 @@ for role in workstation satellite; do
   contains "settings.json merged through sync.sh into $CLAUDE_HOME/settings.json"
   grep -q '^  overlay *ok ' <<<"$output" || fail "$role owner overlay row is not ok"
   jq -e '.env.ROLE_OVERLAY_TEST == "merged"' "$CLAUDE_HOME/settings.json" >/dev/null || fail "$role owner overlay key was not merged"
+  # select_home seeds the base as {}; the apply records what it merged.
+  jq -e '.env.ROLE_OVERLAY_TEST == "merged"' "$CLAUDE_HOME/.hov-stack/settings-base.json" >/dev/null || fail "$role owner merge did not record its base"
   quiet_managers
   ok "$role owner overlay merge is reported correctly"
 done
@@ -369,6 +371,15 @@ contains 'the merge into'
 [[ "$output" != *'wrote no seed'* ]] || fail 'failed owner merge reported missing seed'
 contains 'permissions.deny'
 ok 'owner merge failure is reported and apply-settings stderr remains visible'
+
+# A soft papercut failure lets the merge run; when the merge fails as well, the
+# settings row names both, as `sync.sh install` once reported them together.
+select_home "$WORK/papercut-and-merge-failure" workstation
+printf '{"permissions":{"deny":"invalid"}}\n' | tee "$HOV_STACK_OVERLAY/settings.json" >/dev/null
+CLAUDE_SYNC_SKIP_HOOK_RECONCILE=0 CLAUDE_SYNC_CLAUDE_BIN="$WORK/claude-fails" run 1 setup --no-dcg
+grep -q '^  settings *failed .*the merge into.*papercut install failed' <<<"$output" || fail 'settings row did not name both the merge and the papercut failure'
+quiet_managers
+ok 'papercut and merge failures are reported together'
 
 select_home "$WORK/partial-refresh" satellite
 mkdir -p "$HOME/.config/systemd/user"
@@ -500,6 +511,19 @@ chmod 700 "$CLAUDE_HOME/.hov-stack"
 contains 'failed to record pending user-unit reload; leaving dcg-auto-update.service alone'
 [ "$(cat "$HOME/.config/systemd/user/dcg-auto-update.service")" = 'keep this edit' ] || fail 'unit rewritten although the pending marker could not be written'
 ok 'refresh leaves a unit alone when it cannot record the pending reload'
+
+# The same holds for a posture drop-in, which refresh rewrites after the unit loop.
+select_home "$WORK/posture-marker-unwritable" satellite
+printf 'wt-sweep DRY_RUN=1\n' >> "$HOV_STACK_OVERLAY/hygiene-posture"
+mkdir -p "$HOME/.config/systemd/user/wt-sweep.service.d"
+printf 'previous generated header\n' | tee "$HOME/.config/systemd/user/wt-sweep.service.d/50-hygiene-posture.conf" >/dev/null
+chmod 500 "$CLAUDE_HOME/.hov-stack"
+clear_logs
+run 1 sync role refresh
+chmod 700 "$CLAUDE_HOME/.hov-stack"
+contains 'failed to record pending user-unit reload; leaving'
+[ "$(cat "$HOME/.config/systemd/user/wt-sweep.service.d/50-hygiene-posture.conf")" = 'previous generated header' ] || fail 'posture drop-in rewritten although the pending marker could not be written'
+ok 'refresh leaves a posture drop-in alone when it cannot record the pending reload'
 
 # setup accepts a run with no dcg at ~/.local/bin/dcg (--no-dcg, or a dcg elsewhere on
 # PATH). The owner phase then skips only the dcg reconcile, which would refuse the

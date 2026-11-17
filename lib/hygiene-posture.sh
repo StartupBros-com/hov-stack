@@ -5,7 +5,7 @@
 #
 # The shipped units (systemd/wt-sweep.*, reclaim-sweep.*, docker-hygiene.*,
 # pkg-cache-prune.*) are plan-only, and `./setup --enable-units` copies them over the live
-# ones, so a host that runs one with deletion on lost that setting at the next install
+# ones, so a host that runs one with deletion on lost that setting at the next copy
 # and kept a disabled timer. A host declares its posture in <overlay>/hygiene-posture
 # instead, one setting per line; a # after optional leading whitespace starts a comment
 # line and blank lines are skipped:
@@ -16,8 +16,8 @@
 #   reclaim-sweep RECLAIM_SWEEP_APPLY=1
 #   pkg-cache-prune
 #
-# A stem named on any line is DECLARED: install enables <stem>.timer. OnCalendar goes to
-# a timer drop-in, every other key to a service drop-in as Environment=. Install writes
+# A stem named on any line is DECLARED: setup enables <stem>.timer. OnCalendar goes to
+# a timer drop-in, every other key to a service drop-in as Environment=. Setup writes
 # the drop-ins as 50-hygiene-posture.conf, which sorts before a hand-written
 # override.conf (`systemctl --user edit`), so a manual override still wins.
 #
@@ -25,7 +25,7 @@
 # typo such as DRYRUN) is an error, because a silently ignored key is the failure this
 # file exists to remove. overlay_dir (lib/overlay.sh) finds the overlay. A relative
 # overlay path is an error here, not "nothing declared": the posture is unknown, and an
-# empty answer would let install remove the drop-ins the host did declare.
+# empty answer would let setup remove the drop-ins the host did declare.
 
 # Resolved through any symlink, so a fixture that links this file alone still finds
 # its sibling.
@@ -67,7 +67,7 @@ hygiene_posture_load() {
   fi
   [ -e "$file" ] || [ -L "$file" ] || return 0
   # Present but unreadable (or not a regular file) is invalid, never "nothing declared":
-  # an empty answer would let install remove the drop-ins the host did declare.
+  # an empty answer would let setup remove the drop-ins the host did declare.
   if [ ! -f "$file" ] || [ ! -r "$file" ]; then
     printf 'hygiene-posture: cannot read the posture file: %s\n' "$file" >&2
     return 1

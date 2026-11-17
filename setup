@@ -2168,7 +2168,13 @@ if [ "$sync_route" = owner ]; then
       fi
     else
       merge_state=failed
-      row settings failed "$sync_merge_text"
+      # A papercut failure is soft, so it does not stop the merge; when the merge then
+      # fails too, the row names both rather than letting the second hide the first.
+      if [ "$owner_rc" = 3 ]; then
+        row settings failed "$sync_merge_text; $role_text"
+      else
+        row settings failed "$sync_merge_text"
+      fi
     fi
   else
     merge_state=failed

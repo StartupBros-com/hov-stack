@@ -16,17 +16,17 @@
 #       the three-way apply, preserving live edits and holding deny removals.
 #   MANAGED LOCK   (/etc/claude-code/managed-settings.json — the root-owned deny
 #       floor that holds even in bypassPermissions/YOLO mode) is deployed FROM
-#       this repo by `install` (needs sudo) and captured by `push`. It cannot be
+#       this repo by `./setup --root` (needs sudo) and captured by `push`. It cannot be
 #       symlinked: Claude Code reads it as root-level policy. Verified by
 #       harness-doctor check 12 (existence + root ownership + content match).
 #   SYSTEM UNITS   (systemd-system/ -> /etc/systemd/system, root-owned; a literal
-#       $HOME/ in a template is rendered for this account on install and reversed by push) — for
+#       $HOME/ in a template is rendered for this account by `./setup --root` and reversed by push) — for
 #       units whose resource (swap) is kernel-global, boot-scoped state that
 #       belongs to multi-user.target, not the per-user `systemd --user` manager
 #       (see zram-swap.service; this box's sudo policy is unscoped NOPASSWD:ALL,
 #       so passwordless privilege isn't why these can't be --user units).
 #       Deployed the same way as the managed lock (sudo install, graceful no-sudo
-#       fallback) but NEVER auto-enabled by `install` — activation is an explicit
+#       fallback) but NEVER auto-enabled by `./setup --root` — activation is an explicit
 #       operator step, unlike the --user timers below.
 #
 # Usage:
@@ -307,7 +307,7 @@ UNITS_FOREIGN=$(foreign_units_with_overlay "$UNITS_FOREIGN")
 [ -n "$CCFLARE_URL_SATELLITE" ] || CCFLARE_URL_SATELLITE=$(overlay_env_get CCFLARE_URL_SATELLITE)
 
 # Root-owned system units (systemd-system/ -> $SYSTEM_SYS), NOT --user units —
-# see the header comment. Deliberately never enabled/started by `install`; see
+# see the header comment. Deliberately never enabled/started by `./setup --root`; see
 # the OPERATOR ACTIVATION CHECKLIST in the PR that introduced zram-swap.service.
 SYSTEM_UNITS="zram-swap.service fstrim.timer.d/10-wsl.conf fstrim.service.d/10-wsl.conf docker-containers.slice"
 # Overridable for the same hermetic-test reason as SYSTEM_SYS above; unset on the real box.
@@ -535,7 +535,7 @@ memory_push() {
 # apply_settings (hov-stack #479), which puts it where the tracked file groups it.
 #
 # The 4th argument exists so a caller can reconcile against a NORMALIZED copy of
-# the canonical settings without first mutating the tracked file. `install` must
+# the canonical settings without first mutating the tracked file. `./setup` must
 # not write anything inside the checkout — see reconcile_dcg_hook.
 #
 # A registered hook command resolves through the $H/hooks symlink into the MAIN
@@ -578,7 +578,7 @@ target_in_harness_home() {
 
 # A system unit template spells the harness home as a literal $HOME/.claude/ (any other
 # home path as $HOME/) for the same reason settings.json does. A system unit runs as root,
-# where %h is /root, so the installed copy must carry the absolute path: `install` renders
+# where %h is /root, so the installed copy must carry the absolute path: `./setup --root` renders
 # the template for this account and compares the live file with that rendering, and
 # `push` reverses it so a captured unit stays a template.
 render_system_unit() { # $1 template, $2 rendered output
@@ -883,7 +883,7 @@ reconcile_hook_group() {
 #     so the generic "target missing" twin rule below would never fire for it
 #     and a promote would leave two guards registered.
 #
-# Without the flag this is READ-ONLY against the checkout (what `install`
+# Without the flag this is READ-ONLY against the checkout (what `./setup`
 # uses; an unattended writer inside the checkout manufactures the local
 # modification that makes the next fast-forward refuse, dotfiles#479).
 #
@@ -990,7 +990,7 @@ papercut_plugin_active() {
 # (./setup's job; adding a marketplace trusts a new source).
 # CLAUDE_SYNC_CLAUDE_BIN names the claude CLI to run (default: the one on PATH); a
 # path that is not executable counts as no CLI. Returns 1 when the CLI is there and
-# the install or enable failed; install() then finishes and exits non-zero.
+# the install or enable failed; `role owner` then finishes and exits 3.
 PAPERCUT_MARKETPLACE_SOURCE=StartupBros-com/hov-stack
 PAPERCUT_INSTALL_ERROR=
 papercut_claude() {
@@ -1067,7 +1067,7 @@ ENSURE_ENTER_PLAN_MODE_DENIED_JQ='def ensure_enter_plan_mode_denied:
     else .permissions.deny = $deny + ["EnterPlanMode"]
     end;'
 
-# Shared by install preflight, runtime reconciliation and the drift projection.
+# Shared by the owner-phase preflight, runtime reconciliation and the drift projection.
 # Test the type before floor: malformed non-numeric live values are drift, not
 # a jq failure that could accidentally empty both sides of a comparison.
 VALID_COMPACT_WINDOW_JQ='def valid_compact_window:
@@ -1206,7 +1206,7 @@ reconcile_runtime_env() (
   }
 
   # The mods the harness loads in every session are reached through the
-  # ~/.claude/mods STABLE_DIRS symlink (linked by install, like the env file
+  # ~/.claude/mods STABLE_DIRS symlink (linked by ./setup, like the env file
   # above), so each CLAUDE_CODE_PLUGIN_DIRS entry is mapped through CLAUDE_HOME
   # and must carry a plugin manifest first: a settings entry pointing at a
   # missing folder makes the engine log a failed load in every session, and
@@ -1873,6 +1873,19 @@ reconcile_role_timers() {
 # An invalid file returns 1 having touched no drop-in; an overlay path that is not
 # absolute returns 0 having touched none and declared nothing. Only ever writes or removes files
 # named $HYGIENE_POSTURE_DROPIN: a hand-written override.conf is the operator's.
+# role refresh sets HYGIENE_POSTURE_PENDING to its pending-reload marker. A posture
+# drop-in is a unit file too: the marker goes down before the first rewrite or removal,
+# so a refresh killed in between still reloads on the next run.
+hygiene_posture_mark_pending() {
+  [ -n "${HYGIENE_POSTURE_PENDING:-}" ] || return 0
+  [ ! -f "$HYGIENE_POSTURE_PENDING" ] || return 0
+  if mkdir -p "$(dirname "$HYGIENE_POSTURE_PENDING")" && touch "$HYGIENE_POSTURE_PENDING"; then
+    return 0
+  fi
+  echo "  failed to record pending user-unit reload; leaving $1 alone" >&2
+  return 1
+}
+
 apply_hygiene_posture() {
   local file rows stem kind dir dest want
   HYGIENE_POSTURE_DECLARED=""
@@ -1915,6 +1928,7 @@ apply_hygiene_posture() {
           echo "  ERROR: $dest is a directory; hygiene posture drop-in not written" >&2
           return 1
         fi
+        hygiene_posture_mark_pending "$dest" || return 1
         if ! mkdir -p "$dir" \
            || ! printf '%s\n' "$want" >"$dest.tmp.$$" \
            || ! mv -f "$dest.tmp.$$" "$dest"; then
@@ -1925,6 +1939,7 @@ apply_hygiene_posture() {
         HYGIENE_POSTURE_CHANGED=$((HYGIENE_POSTURE_CHANGED + 1))
         echo "  hygiene posture: wrote $dest"
       elif [ -e "$dest" ] || [ -L "$dest" ]; then
+        hygiene_posture_mark_pending "$dest" || return 1
         if ! rm -f -- "$dest"; then
           echo "  ERROR: could not remove stale hygiene posture drop-in $dest" >&2
           return 1
@@ -2015,7 +2030,7 @@ install_retire_loop_quality() {
 
 install_runtime_policy() {
   # Unlike hook commands, these settings are portable and their CLAUDE_ENV_FILE
-  # target was just linked through STABLE_FILES above. Reconcile them even when
+  # target is linked through STABLE_FILES by ./setup. Reconcile them even when
   # a foreign-host smoke test explicitly skips absolute hook registrations.
   reconcile_runtime_env || return 1
   reconcile_windows_auto_mode || return 1
@@ -2093,7 +2108,7 @@ install_user_unit() {
 
 install_hygiene_posture() {
   # Host-declared hygiene posture (lib/hygiene-posture.sh). An invalid file is reported
-  # and fails the install at the end, after everything unrelated has been updated.
+  # and fails the enable phase at the end, after everything unrelated has been updated.
   if apply_hygiene_posture; then posture_ok=1; else posture_failed=1; fi
 }
 
@@ -2285,7 +2300,9 @@ role_unit_files() {
     fi
   done
   if [ "$phase" = refresh ]; then
+    HYGIENE_POSTURE_PENDING=$pending
     apply_hygiene_posture refresh || failed=$((failed + 1))
+    HYGIENE_POSTURE_PENDING=
     changed=$((changed + HYGIENE_POSTURE_CHANGED))
   fi
   if [ "$changed" -gt 0 ]; then
@@ -2925,7 +2942,7 @@ EOF_LIVE_UNITS
     drift=1
   fi
   # SYSTEM_UNITS deliberately KEEPS the both-exist guard. Installing one needs
-  # sudo and is an explicit operator act (the install path prints a manual
+  # sudo and is an explicit operator act (the root phase prints a manual
   # command when sudo is unavailable), so "absent" is a legitimate state there
   # rather than drift. Flagged rather than changed: making it drift is a
   # separate decision with a different blast radius.
