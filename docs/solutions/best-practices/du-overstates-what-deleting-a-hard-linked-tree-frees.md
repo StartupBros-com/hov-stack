@@ -30,7 +30,7 @@ During the 2026-11-14 to 11-18 root-disk audit on the WSL host, hand-run `du` si
 
 Earlier sessions saw the same gap from the other side (session history). A `uv cache clean` on a Windows drive reported 35.0 GiB removed while the drive's free space rose 1.98 GiB. That session put the gap down to cache files still linked from Python environments, without confirming it. Deleting a pnpm-installed `node_modules` tree listed at 4.41 GiB raised free space by 3.17 GiB, with other writers active during the 21-minute delete.
 
-The automated sweep already handles this. `scripts/reclaim-sweep.py` counts single-link bytes as `unshared`, documented as "a floor on what removal frees" (`TreeScan`, line 745; summed at line 879). It prints them next to the apparent size (lines 1887 and 1894-1897) and claims freed bytes only from the statvfs change across the run (lines 1854-1857). The gap is the hand-run audit. The disk-watermark alert's own hint starts it with `du -x --max-depth=2 ~ | sort -h | tail` (`scripts/disk-watermark.sh:216`), and nothing at that point says what `du` cannot see.
+The automated sweep already handles this. `scripts/reclaim-sweep.py` counts single-link bytes as `unshared`, documented as "a floor on what removal frees" (`TreeScan`, line 745; summed at line 879). It prints them next to the apparent size (lines 1887 and 1894-1897) and claims freed bytes only from the statvfs change across the run (lines 1854-1857). The gap was the hand-run audit. The disk-watermark alert's own hint starts it with `du -x --max-depth=2 ~ | sort -h | tail` (`scripts/disk-watermark.sh:216`), and until 2026-11-18 nothing at that point said what `du` cannot see. The hint now prints recipe 1 below right after that line (`scripts/disk-watermark.sh:220-221`).
 
 ## Guidance
 
@@ -89,7 +89,7 @@ Deleting A frees 6 MiB, because the 8 MiB file survives through B. `du` puts A a
 
 - `scripts/reclaim-sweep.py`: the automated sweep, which already sizes by single-link bytes and claims freed bytes from statvfs.
 - `scripts/pkg-cache-prune.sh`: the weekly cache prune; its `current:` and `after:` lines are `du` sizes.
-- `scripts/disk-watermark.sh:216`: the alert hint that starts hand-run audits with `du`. Changing it to recipe 1 would put this guidance where the audit begins (not done here).
+- `scripts/disk-watermark.sh:215-221`: the alert hint that starts hand-run audits with `du`, then prints recipe 1 for sizing a candidate. `tests/disk-watermark.test.sh` runs the printed recipe on a hard-linked tree.
 - #697: the open item to measure what the weekly uv prune actually reclaims. Its 2026-11-18 comment records why the prune reports BUSY: long-running `uv run` processes hold a shared lock on uv's cache.
 - #644: the issue that added the hourly disk-watermark alert.
 - `docs/solutions/best-practices/measure-anon-vs-cache-before-bounding-a-units-memory-then-judge-the-bound-by-stall-not-peak.md`: the same move for memory, finding out which bytes are which before acting on a total.

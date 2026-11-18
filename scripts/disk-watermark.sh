@@ -214,6 +214,11 @@ if [ "$n_alerted" -gt 0 ]; then
   printf '%s' "$BREACHES"
   echo "reclaim levers: docker-hygiene.sh, wt-sweep.sh, pkg-cache-prune.sh, or find the fattest directories with:"
   echo "  du -x --max-depth=2 ~ | sort -h | tail"
+  # du also counts files hard-linked from outside a tree (uv and pnpm caches,
+  # their venvs and node_modules), so its figure overstates what deleting the
+  # tree frees: docs/solutions/best-practices/du-overstates-what-deleting-a-hard-linked-tree-frees.md
+  echo "du counts files hard-linked from elsewhere too; size what deleting DIR frees by its single-link bytes (a floor):"
+  printf '%s\n' "  find DIR -xdev -type f -links 1 -printf '%b\n' | awk '{s+=\$1} END {printf \"%.2f GiB\n\", s*512/2^30}'"
   send "disk-watermark: $n_alerted filesystem(s) breached a disk watermark or got worse — $(printf '%s' "$BREACHES" | tr '\n' ' ')" input
   send_rc=$?
   if [ "$send_rc" -eq 0 ]; then
