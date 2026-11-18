@@ -76,12 +76,24 @@ unchanged() {
 # config directory (or $HOME/.claude), the way the real CLI was observed to in a
 # scratch config dir on 2.1.316: install writes a user-scope registry entry and
 # enabledPlugins[id] = true. STUB_MODE=fail exits 1 with the CLI's not-found text;
-# STUB_MODE=noop exits 0 and writes nothing.
+# STUB_MODE=noop exits 0 and writes nothing. `plugin marketplace list --json` is logged
+# to $STUB_LOG.list and answers by STUB_MARKET: listed (default) names hov, absent lists
+# only another marketplace (a fresh host, #754), fail exits 1, garbage is not JSON.
 STUB=$TMP/bin/claude
 mkdir -p "$TMP/bin"
 cat >"$STUB" <<'SH'
 #!/usr/bin/env bash
 cfg=${CLAUDE_CONFIG_DIR:-$HOME/.claude}
+if [ "$*" = "plugin marketplace list --json" ]; then
+  printf '%s|%s\n' "${CLAUDE_CONFIG_DIR-<unset>}" "$*" >>"$STUB_LOG.list"
+  case ${STUB_MARKET:-listed} in
+    listed) echo '[{"name":"other","source":"github"},{"name":"hov","source":"github"}]' ;;
+    absent) echo '[{"name":"other","source":"github"}]' ;;
+    fail) echo "marketplace list failed" >&2; exit 1 ;;
+    garbage) echo 'not json' ;;
+  esac
+  exit 0
+fi
 printf '%s|%s\n' "${CLAUDE_CONFIG_DIR-<unset>}" "$*" >>"$STUB_LOG"
 case ${STUB_MODE:-ok} in
   fail) echo "Installing plugin \"$3\"...✘ Failed to install plugin \"$3\": Plugin \"papercut\" not found in marketplace \"hov\"."; exit 1 ;;
@@ -195,6 +207,46 @@ h=$(new_home ensure-noop)
 ensure "$h" STUB_MODE=noop
 [ "$rc" -ne 0 ] || fail "a CLI that installed nothing was taken as success:"$'\n'"$out"
 case $out in *"still not installed"*) ok ;; *) fail "the no-op install was not named:"$'\n'"$out" ;; esac
+
+# 16. A fresh host (#754): the CLI lists no hov marketplace, so the install is left to
+#     ./setup's marketplace and plugins steps: exit 0, no install call, no ERROR, settings
+#     untouched. The list call reads the same config dir the install would.
+h=$(new_home ensure-no-market); cp "$h/.claude/settings.json" "$h/before.json"
+ensure "$h" STUB_MARKET=absent
+[ "$rc" -eq 0 ] && [ "$(calls "$h")" -eq 0 ] || fail "an absent marketplace still ran the install ($rc):"$'\n'"$out"
+[ "$(cat "$h/stub.log.list" 2>/dev/null)" = "<unset>|plugin marketplace list --json" ] ||
+  fail "the marketplace list did not run once against the default config dir: $(cat "$h/stub.log.list" 2>/dev/null)"
+case $out in *"ERROR"*) fail "an absent marketplace printed an error:"$'\n'"$out" ;; esac
+case $out in *"marketplace is not added yet"*"./setup's marketplace and plugins steps"*) ;;
+  *) fail "the deferral was not named:"$'\n'"$out" ;; esac
+unchanged "$h" "an absent marketplace"
+alt=$(new_home ensure-no-market-alt)/.claude
+h=$TMP/ensure-no-market-alt-home; mkdir -p "$h"
+rc=0
+out=$(env -u CLAUDE_INSTALLED_PLUGINS -u CLAUDE_CONFIG_DIR HOME="$h" CLAUDE_HOME="$alt" STUB_LOG="$h/stub.log" \
+  STUB_MARKET=absent CLAUDE_SYNC_CLAUDE_BIN="$STUB" "$SYNC" ensure-papercut-plugin 2>&1) || rc=$?
+[ "$rc" -eq 0 ] && [ "$(calls "$h")" -eq 0 ] && [ "$(cut -d'|' -f1 "$h/stub.log.list")" = "$alt" ] ||
+  fail "a non-default CLAUDE_HOME was not the marketplace list's config dir ($rc): $(cat "$h/stub.log.list" 2>/dev/null)"$'\n'"$out"
+ok
+
+# 17. A marketplace list the CLI could not give (non-zero, not JSON) never defers: the
+#     install runs as before and its result decides.
+for mode in fail garbage; do
+  h=$(new_home "ensure-list-$mode")
+  ensure "$h" STUB_MARKET="$mode"
+  [ "$rc" -eq 0 ] && [ "$(cut -d'|' -f2 "$h/stub.log")" = "plugin install papercut@hov --scope user" ] && active "$h/.claude" ||
+    fail "an unreadable marketplace list ($mode) skipped the install ($rc): $(cat "$h/stub.log" 2>/dev/null)"$'\n'"$out"
+done
+ok
+
+# 18. Installed at user scope but unenabled, marketplace absent: enable still runs (setup's
+#     plugins step sees the plugin installed and would not enable it), and no list call.
+h=$(new_home ensure-enable-no-market); plugin "$h" user absent
+ensure "$h" STUB_MARKET=absent
+[ "$rc" -eq 0 ] && [ "$(cut -d'|' -f2 "$h/stub.log")" = "plugin enable papercut@hov --scope user" ] && active "$h/.claude" &&
+  [ ! -e "$h/stub.log.list" ] ||
+  fail "an installed, unenabled plugin was deferred instead of enabled ($rc): $(cat "$h/stub.log" 2>/dev/null)"$'\n'"$out"
+ok
 
 # The owner phase runs DCG before plugin installation and defers plugin failure.
 body=$(sed -n '/^role_phase() {/,/^}/p' "$SYNC")

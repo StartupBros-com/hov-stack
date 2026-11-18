@@ -280,10 +280,22 @@ function loadRegistry(registryPath) {
   } catch {
     return { ok: false, reason: 'unreadable' };
   }
-  const entries = parsed && parsed.plugins && Array.isArray(parsed.plugins['compound-engineering@every-marketplace'])
-    ? parsed.plugins['compound-engineering@every-marketplace']
-    : [];
-  return { ok: true, entries };
+  return { ok: true, entries: ceEntries(parsed && parsed.plugins) };
+}
+
+// A marketplace keeps the name it had when it was added: Every's is
+// `every-marketplace` on hosts that added it early and
+// `compound-engineering-plugin` after a fresh `claude plugin marketplace add`. So
+// when the exact key is absent, take the plugin's entries from every
+// `compound-engineering@<marketplace>` key, in key order.
+const CE_KEY = 'compound-engineering@every-marketplace';
+function ceEntries(plugins) {
+  if (!plugins || typeof plugins !== 'object') return [];
+  if (Array.isArray(plugins[CE_KEY])) return plugins[CE_KEY];
+  return Object.keys(plugins)
+    .filter((k) => k.startsWith('compound-engineering@') && Array.isArray(plugins[k]))
+    .sort()
+    .flatMap((k) => plugins[k]);
 }
 
 // Matches the M_CODEX="..." (and M_CLAUDE=/M_GROK=/M_COMPOSER=) mapping lines
