@@ -38,13 +38,13 @@
         "source": "git-subdir",
         "url": "https://github.com/StartupBros-com/hov-stack.git",
         "path": "plugins/pro-gate",
-        "sha": "a5993284b5feb58e551272f9e1ec406c50e417ff"
+        "sha": "aec4be7eebab4356bc05d8c3e4b24bce6f765298"
       },
       "description": "Run a final pull request review using the Pro model selected by your ChatGPT account, with guided runtime setup and no automatic merge.",
       "metadata": {
-        "version": "0.65.10",
-        "releaseId": 449478466,
-        "releaseTag": "pro-gate--v0.65.10"
+        "version": "0.65.11",
+        "releaseId": 449545547,
+        "releaseTag": "pro-gate--v0.65.11"
       },
       "card": {
         "rows": [
@@ -108,13 +108,13 @@
         "source": "git-subdir",
         "url": "https://github.com/StartupBros-com/hov-stack.git",
         "path": "plugins/memory-dream",
-        "sha": "e460f56e4eb9a9b208d75ecfb327128cc338321f"
+        "sha": "ec0689a20ec1aac2293a624fa0391c91b18ebadc"
       },
       "description": "The sleep cycle for Claude Code's auto-memory. /memory-dream:dream runs an operator-gated consolidation pass: deterministic triage finds superseded, stale, and oversized notes, a zero-tool subagent drafts the fixes it cannot apply, and you approve each change by hand before anything is written. /memory-dream:eval measures whether recall actually improved. Also a standalone stdlib-only CLI; it never merges, deletes, or compresses a note on its own.",
       "metadata": {
-        "version": "0.4.3",
-        "releaseId": 445100353,
-        "releaseTag": "memory-dream--v0.4.3"
+        "version": "0.4.4",
+        "releaseId": 449521565,
+        "releaseTag": "memory-dream--v0.4.4"
       },
       "card": {
         "rows": [
@@ -131,13 +131,13 @@
         "source": "git-subdir",
         "url": "https://github.com/StartupBros-com/hov-stack.git",
         "path": "plugins/design-rails",
-        "sha": "7907c32fc0e9df94b631fa60f6467c64e9ec0f8e"
+        "sha": "ec0689a20ec1aac2293a624fa0391c91b18ebadc"
       },
       "description": "Guardrails that keep AI agents on your design system. Posture-check whether a real, agent-wired, CI-enforced design system exists, derive a Google-spec DESIGN.md from the code you already ship, put open taste decisions on visual pages for the human to pick, and ratchet drift budgets that only move down. Read-only on application source \u2014 it authors under design/ and never edits your code.",
       "metadata": {
-        "version": "0.14.1",
-        "releaseId": 447706232,
-        "releaseTag": "design-rails--v0.14.1"
+        "version": "0.14.2",
+        "releaseId": 449521516,
+        "releaseTag": "design-rails--v0.14.2"
       },
       "card": {
         "rows": [
