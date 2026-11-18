@@ -263,6 +263,7 @@ DOTFILES_UNLINKED=(
   LICENSE
   NOTICE.md        # third-party attributions; read in place
   README.md
+  renovate.json    # Renovate's repo config (ignorePaths); the Renovate app reads it on GitHub, links nowhere
   SECURITY.md
   STRATEGY.md
   docs
