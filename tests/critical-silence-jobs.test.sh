@@ -5,6 +5,7 @@ set -uo pipefail
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 MCP_SCRIPT=$REPO/scripts/update-mcp-servers.sh
 SKILLS_SCRIPT=$REPO/scripts/update-skills.sh
+MEMORY_SCRIPT=$REPO/scripts/memory-mine-weekly.sh
 CRON_OWNERSHIP=$REPO/scripts/cron-ownership.py
 SYSTEMD_DIR=$REPO/systemd
 
@@ -515,7 +516,7 @@ for document in "$REPO/docs/layout.md" "$REPO/harness/wsl-crontab-and-cookie-syn
     && ok || bad "scheduler documentation omits watchdog/control-plane exclusions: $document"
 done
 
-for scheduled_script in "$MCP_SCRIPT" "$SKILLS_SCRIPT"; do
+for scheduled_script in "$MCP_SCRIPT" "$SKILLS_SCRIPT" "$MEMORY_SCRIPT"; do
   not_contains "$scheduled_script" 'discord-notify' \
     && ok || bad "scheduled script adds a second Discord alert path: $scheduled_script"
   not_contains "$scheduled_script" '/notify.sh' \
@@ -662,6 +663,17 @@ if [ -f "$MCP_SCRIPT" ]; then
 else
   bad "missing MCP updater: $MCP_SCRIPT"
 fi
+
+expect_success "memory compatibility shim does not parse" bash -n "$MEMORY_SCRIPT"
+contains "$MEMORY_SCRIPT" 'memory-mine-controller.py' \
+  && contains "$MEMORY_SCRIPT" '--scheduled' \
+  && ok || bad "memory compatibility shim does not exec the scheduled controller"
+contains "$MEMORY_SCRIPT" 'exec python3' \
+  && ok || bad "memory compatibility shim does not preserve controller exit status"
+not_contains "$MEMORY_SCRIPT" 'claude -p' \
+  && not_contains "$MEMORY_SCRIPT" '/memory-mine ' \
+  && not_contains "$MEMORY_SCRIPT" 'MAX_STORES' \
+  && ok || bad "memory compatibility shim retained dynamic parent orchestration"
 
 expect_success "skills updater does not parse" bash -n "$SKILLS_SCRIPT"
 if grep -qi 'systemd\|timer' "$SKILLS_SCRIPT" && ! grep -q 'Wired to crontab' "$SKILLS_SCRIPT"; then

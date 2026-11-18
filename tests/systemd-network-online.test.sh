@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # systemd-network-online.test.sh: no --user unit under systemd/ or
-# systemd/user/ orders on network-online.target, and the five units that
-# did (dotfiles#1458) carry a user-scope readiness mechanism or say why none
+# systemd/user/ orders on network-online.target, and the six selected units
+# carry a user-scope readiness mechanism or say why none
 # is needed.
 #
 # WHY: network-online.target belongs to the system manager. In the user
@@ -22,7 +22,7 @@
 #     false-positive, and a multi-value line (`After=network-online.target
 #     basic.target`), trailing whitespace or a CRLF cannot slip past; a
 #     scratch file of those three shapes proves the detector sees them.
-#  2. Each of the five #1458 units, and systemd/user/pi-local-champion-
+#  2. Each of the six selected units, and systemd/user/pi-local-champion-
 #     tunnel.service which carried the same pair, has either the shared probe
 #     (ExecStartPre=-%h/.claude/scripts/net-ready.sh ...) or a
 #     `# No network-readiness probe:` comment stating why none is needed.
@@ -41,7 +41,7 @@
 #     as decimal, not octal; exits 2 without --url or with a non-numeric
 #     --wait; exits 3 with a WARN when curl is not on PATH. pro-gate rounds
 #     1 and 2 on #1465 reproduced the stall, clock and octal failures.
-#  5. systemd-analyze verify accepts the five services and their timers
+#  5. systemd-analyze verify accepts the six services and their timers
 #     after the edit. System mode, because --user needs a manager the CI
 #     runner lacks; Exec* lines are rewritten to /bin/true because the
 #     verifier resolves executables on the current host.
@@ -70,6 +70,7 @@ SYSD=systemd
 USERD=systemd/user
 SCRIPT=scripts/net-ready.sh
 UNITS=(
+  cass-release-promote
   codex-auto-update
   dcg-auto-update
   mcp-servers-update
@@ -112,7 +113,7 @@ else
   bad "1: the directive detector saw '$shape_hits'; expected the multi-value and CRLF files only"
 fi
 
-# ── 2. each of the five units: probe, or a stated reason for none ───────
+# ── 2. each of the six units: probe, or a stated reason for none ───────
 for u in "${UNITS[@]}"; do
   f=$SYSD/$u.service
   if [ ! -f "$f" ]; then
@@ -420,7 +421,7 @@ if command -v systemd-analyze >/dev/null 2>&1; then
            -e 's|^ExecCondition=.*|ExecCondition=/bin/true|' "$f"
   done
   if systemd-analyze verify "${verify_args[@]}" "$TMP/verify/harness-unit-failure-alert@.service" 2>"$TMP/verify.err"; then
-    ok "5: systemd-analyze verify accepts the five services and their timers"
+    ok "5: systemd-analyze verify accepts the six services and their timers"
   else
     bad "5: systemd-analyze verify rejected a unit: $(cat "$TMP/verify.err")"
   fi
