@@ -66,7 +66,8 @@ pre-registration. The README lists every wording.
 
 Round 1 (r01 to r40, $2.77) met every rule except Q1. The "values on the design system" item
 (D1) on t4 failed in 3 of 4 ui-design runs against 0 of 4 for the pack:
-- r11 and r31 used `h-6` and `h-5`, steps the project's reset theme does not define;
+- r31 used `h-5`, a step the project's reset theme does not define (r11 did the same with `h-6`
+  on t1, where one fail sits inside the noise floor);
 - r32 sized the local toggle with `h-[20px] w-[36px] p-[2px]` and listed them as "arbitrary values";
 - r03 used an inline `marginInline: 2px`.
 
@@ -129,11 +130,26 @@ cells from the replies themselves:
   The collision check found no overlap in descriptions.
 - **Always-loaded cost.** The description costs context on every turn of every member session:
   56 words.
+- **Checked after ship (2026-11-17).** The copy a member gets loads on the fixture's prompts.
+  - Installed from the `hov` marketplace into a clean home directory, hov-stack 0.3.6 lists
+    `hov-stack:ui-design`, and all 13 route targets resolve.
+  - The fixture's own p1 and rv prompts loaded ui-design 3 of 3 each, on CLI 2.1.326 (the
+    fixture's) and on 2.1.327, which came out after the fixture ran and adds a built-in `design`
+    skill. c2 loaded it 0 of 2 on 2.1.327.
+  - The rv runs read all eight sibling files by path from the installed copy.
+  - On 2.1.327, two of the three p1 runs loaded ui-design but read no sibling file, where every
+    2.1.326 p1 run read two. Whether that changes the polish is not measured.
+- **A plain review ask can miss.** "Review this pricing page (index.html) for problems before we
+  ship it", in a repo holding only that page, loaded ui-design in 0 of 4 runs, though the
+  description names "reviewing a page … for problems". It has not been tried in a real frontend
+  project, where the repo itself may change the routing.
 
 ## 6. Re-audit triggers
 
 - Any edit to ui-design's description or "Building from a design" section. Both were measured;
   re-run this fixture before landing either.
 - A new pack design skill: add a route-table row, and re-run L1/L2 if the description changes.
+- A Claude Code release that adds or changes a built-in design skill (2.1.327 added `design`):
+  re-run L1/L2, and check that a run which loads ui-design still reads the sibling its row names.
 - An upstream jakubkrehel/skills re-pin of the `better-*` skills: better-interface must move with
   its domain skills.

@@ -111,6 +111,12 @@ One independent agent run inside a comparison: every arm gets the same fixture a
 
 An arm's envelope is only what the launcher hands it: the caller's own instruction files and memory are kept out, because their presence changes the answers and the cost, and the shape of that envelope is recorded with the run so results from different envelopes are never compared as if they were the same measurement.
 
+### Extract verdict
+
+The vet verdict that keeps a useful pattern from a candidate tool and ports it into the harness's own idiom, instead of installing the candidate as it is or changing how it is delivered.
+
+The candidate was measured whole, so a port that shapes behaviour is a new treatment: it needs its own live-task result before it lands, or an explicit unverified-value marker naming the measurement that would decide it.
+
 ### State surface
 
 The query a system exposes over what currently exists or is currently collectable, keyed by present identity and answered from current state rather than reconstructed from history.

@@ -10,6 +10,15 @@ launch). Synthetic project and designs only.
 
 ## Headline
 
+> **Update, later on 2026-11-17: the port landed under option 2.** The operator allowed one
+> model-invoked design skill (section 4). The two lines went into a new pack-written entry skill,
+> `ui-design`, which shipped in hov-stack 0.3.6 (#730) after its own pre-registered live run in
+> `harness/vet-fixtures/ui-design-2026-11/`. In that run's round 1, the first wording around the
+> two lines put the billing-page toggle off the theme in 3 of 4 runs. One disclosed revision fixed
+> it.
+> Results and verdict: `docs/vets/2026-11-17-ui-design-entry.md`. The sections below record this
+> vet as measured; dated notes mark where the outcome changed.
+
 - **Verdict: EXTRACT by the pre-registered rule; the port is not landed.** build-design is not
   adopted, and nothing in the pack changes.
   - No pack skill a member would invoke when handing over a design could carry the port, under
@@ -210,7 +219,7 @@ All 23 dropped cells had every arm passing every run:
 
 | component | target | verdict | placement | activation | evidence | state |
 |---|---|---|---|---|---|---|
-| build-design @ `6c21201` | hov-stack skill pack | **EXTRACT** by the rule; not landed | no installation | none | section 2: R2 8/8 against the pack's 1/8; no outcome regression | port not landed: no pack skill a member invokes when building from a design under the invoke-only posture; the posture question is the operator's (section 4) |
+| build-design @ `6c21201` | hov-stack skill pack | **EXTRACT** by the rule; not landed | no installation | none | section 2: R2 8/8 against the pack's 1/8; no outcome regression | at vet time, port not landed: no pack skill a member invokes when building from a design under the invoke-only posture; the posture question is the operator's (section 4). **2026-11-17: landed in `ui-design` (#730, 0.3.6) under option 2** |
 | design-to-code-fidelity @ `5548960` | none | SKIP for this job | no installation | none | D1 (t4) 0/4, a regression against the pack; asked before building in 7 of 12 build runs; median $0.097 | alternatives/GitHub, deep-vetted |
 | hov-stack skill pack 0.3.5 | already installed | no change | no change | as installed | outcome at ceiling; R2 1/8 | incumbent |
 | Figma `figma-design-to-code` (figma/mcp-server-guide @ `490a73c`) | none | not evaluated under this fixture | no installation | none | needs the Figma MCP server; connecting one is the operator's security-posture call | alternatives/Web, pass 2, triaged |
@@ -225,7 +234,8 @@ All 23 dropped cells had every arm passing every run:
 
 ## 4. The change
 
-**No pack change.**
+**No pack change** at vet time. *2026-11-17: the operator took option 2; see the note under the
+headline.*
 
 - **The port the rule names.** These are the candidate's lines behind the R2 gain, `SKILL.md`
   lines 18 and 22 at the pin:
@@ -262,6 +272,8 @@ All 23 dropped cells had every arm passing every run:
        labelled a planted value "Matches" when the build differs.
      - It would need its own plain-prompt live run (four runs each of t1 and t4) before it
        lands.
+     - *Taken 2026-11-17* as a pack-written skill, `ui-design` (#730), after that run:
+       `harness/vet-fixtures/ui-design-2026-11/`.
   3. **Vendor build-design slash-only as `/hov-stack:build-design`.** This is exactly the
      measured candidate arm. But the rule gave EXTRACT, not ADOPT, so this overrides the
      pre-registration, and it reaches only members who know to type it.
@@ -284,7 +296,8 @@ All 23 dropped cells had every arm passing every run:
     - On planted values, the scored runs made no false match (0 of 8 on t1 and t4).
     - It did make them in calibration (r15) and in the plain-prompt probe (r71, arguably r70).
     - A port of the estimate lines would carry that table habit with it unless the port's live
-      run checks R5.
+      run checks R5. *2026-11-17: the ui-design run scored R5, with 1 fail in round 1 and 0 in
+      round 2.*
   - The 36×20 toggle is where it slips: off-scale in 2 of 8 billing-page builds across both
     forms.
 - **Target fit.**
@@ -357,7 +370,8 @@ All 23 dropped cells had every arm passing every run:
   compare step;
 - a second turn supplies real values, which measures the payoff of asking first;
 - the operator changes the invoke-only posture for a design-build skill (then run the port, or
-  build-design itself, with plain prompts on t1 and t4 before it lands);
+  build-design itself, with plain prompts on t1 and t4 before it lands). *Fired 2026-11-17: the
+  port ran in `harness/vet-fixtures/ui-design-2026-11/` before it landed in #730;*
 - the fixture gains a second model;
 - for the contender: `design-to-code-fidelity/SKILL.md` changes from sha256 `864564fd…9f6d`.
 
