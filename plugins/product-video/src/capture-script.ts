@@ -8,7 +8,16 @@ type HeroScriptOptions = {
 };
 
 export function parseCdpEndpoint(value: string) {
-  const endpoint = new URL(value);
+  let endpoint: URL;
+  try {
+    endpoint = new URL(value);
+  } catch (error) {
+    // The value is not echoed: a string that fails to parse can still carry credentials.
+    throw new Error(
+      '--cdp must be a full URL with scheme and port, such as http://127.0.0.1:9223',
+      { cause: error },
+    );
+  }
   if (!['http:', 'https:'].includes(endpoint.protocol)) {
     throw new Error('--cdp must use http or https');
   }

@@ -58,6 +58,29 @@ test('parseCdpEndpoint accepts loopback and refuses remote browser endpoints', (
   assert.throws(() => parseCdpEndpoint('file:///tmp/socket'), /http/i);
 });
 
+test('parseCdpEndpoint names the flag for a value that is not a URL, without echoing it', () => {
+  for (const value of [
+    '127.0.0.1:9223',
+    'not a url',
+    'http://user:secret@[::1:9223',
+  ]) {
+    assert.throws(
+      () => parseCdpEndpoint(value),
+      (error: unknown) => {
+        assert.ok(error instanceof Error);
+        assert.match(error.message, /^--cdp must be a full URL/);
+        assert.match(error.message, /http:\/\/127\.0\.0\.1:9223/);
+        assert.ok(
+          !error.message.includes('secret'),
+          'message echoed the password',
+        );
+        assert.ok(error.cause instanceof TypeError);
+        return true;
+      },
+    );
+  }
+});
+
 test('parseCaptureDimensions accepts bounded positive dimensions', () => {
   assert.deepEqual(parseCaptureDimensions('1280', '720'), {
     width: 1280,

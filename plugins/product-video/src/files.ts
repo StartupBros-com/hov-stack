@@ -15,7 +15,13 @@ export const fixtureManifestPath = path.join(
 );
 
 export async function readJsonFile(filePath: string) {
-  return JSON.parse(await readFile(filePath, 'utf8')) as unknown;
+  const text = await readFile(filePath, 'utf8');
+  try {
+    return JSON.parse(text) as unknown;
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new Error(`Could not parse ${filePath}: ${reason}`, { cause: error });
+  }
 }
 
 export async function writeTextFile(filePath: string, content: string) {
