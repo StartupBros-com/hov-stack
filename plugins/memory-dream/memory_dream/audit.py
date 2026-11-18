@@ -38,7 +38,11 @@ from memory_dream import compat, config
 
 ALLOWED_TYPES = {"user", "feedback", "project", "reference"}
 YAML_LITERALS = {"null", "~", "true", "false", "none"}
-LINK_RE = re.compile(r"\]\((?P<target><[^>]+>|(?:\\.|[^)])+)\)")
+# A backslash takes exactly one branch (an escape pair, a backslash before a
+# newline, or a lone trailing backslash), so a line of many `\(` cannot backtrack
+# exponentially. Same matches as the old `(?:\\.|[^)])+`; scripts/memory-audit.py
+# keeps an identical copy, and tests/test_memory_audit.py checks the two agree.
+LINK_RE = re.compile(r"\]\((?P<target><[^>]+>|(?:[^)\\]|\\[^\n]|\\(?=\n))+\\?|\\)\)")
 WIKILINK_RE = re.compile(r"\[\[([^\]]+)\]\]")
 DATE_PATTERNS = (
     re.compile(r"(?i)\b(?:status|checkpoint|status\s+as\s+of|checkpoint\s+as\s+of)\s*[:=-]?\s*(20\d{2}-\d{2}-\d{2})\b"),

@@ -775,16 +775,33 @@ async function simpleFetch(url: string, signal?: AbortSignal): Promise<string> {
       throw new Error(`HTTP ${response.status}: ${response.statusText}`);
     }
 
-    const html = await response.text();
-    const withoutScripts = html
-      .replace(/<script[\s\S]*?<\/script>/gi, "")
-      .replace(/<style[\s\S]*?<\/style>/gi, "")
-      .replace(/<noscript[\s\S]*?<\/noscript>/gi, "");
-
-    return withoutScripts.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim().slice(0, 12000);
+    return htmlToText(await response.text()).slice(0, 12000);
   } finally {
     cleanup();
   }
+}
+
+// Script, style and noscript bodies are dropped before tags are stripped. An end
+// tag may carry whitespace or attributes (`</script >`), and an unclosed block runs
+// to the end of the page. Removal repeats so nested input such as
+// `<scr<script></script>ipt>` cannot rebuild an opener; past four passes the text
+// is cut at the first block still standing, so a deeply nested page costs four
+// passes, not one per level. tests/pi-research-fabric-html.test.sh runs this code.
+const HIDDEN_BLOCKS = [
+  /<script\b[\s\S]*?(?:<\/script\b[^>]*>|$)/gi,
+  /<style\b[\s\S]*?(?:<\/style\b[^>]*>|$)/gi,
+  /<noscript\b[\s\S]*?(?:<\/noscript\b[^>]*>|$)/gi,
+];
+
+export function htmlToText(html: string): string {
+  let text = html;
+  for (let pass = 0; pass < 4; pass++) {
+    const before = text;
+    for (const block of HIDDEN_BLOCKS) text = text.replace(block, "");
+    if (text === before) break;
+  }
+  text = text.replace(/<(?:script|style|noscript)\b[\s\S]*$/i, "");
+  return text.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
 }
 
 function prefersDynamicFetch(url: string, config: ResearchFabricConfig): boolean {

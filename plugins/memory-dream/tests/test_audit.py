@@ -147,6 +147,18 @@ class MemoryAuditTests(unittest.TestCase):
             escaped = [item for item in json.loads(result.stdout)["findings"] if item.get("path") == "space(copy).md"]
             self.assertFalse(any(item["kind"] == "unindexed_markdown" for item in escaped))
 
+    def test_index_link_scan_is_linear_on_escaped_parens(self):
+        # The old link pattern let each backslash take either of two branches, so
+        # an index line with an unclosed link and 40 `\(` pairs needed about 2^40
+        # steps (24 pairs already took over a second). Run it in a child process
+        # so a regression fails on the timeout instead of hanging the suite.
+        line = "- [x](a" + "\\(" * 40 + "\n"
+        code = "import sys; from memory_dream import audit; audit.index_targets(sys.stdin.read())"
+        env = dict(os.environ, PYTHONPATH=str(Path(audit.__file__).resolve().parents[1]))
+        subprocess.run([sys.executable, "-c", code], input=line, text=True, env=env, timeout=20, check=True)
+        targets, _ = audit.index_targets("- [Escaped](space\\(copy\\).md)\n- [Trailing](a\\).md)\n")
+        self.assertEqual(targets, {"space(copy).md", "a).md"})
+
     def test_frontmatter_duplicates_sensitive_redaction_and_stale_date(self):
         with tempfile.TemporaryDirectory() as temp:
             fixture = Fixture(Path(temp))

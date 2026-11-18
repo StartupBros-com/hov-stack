@@ -9,6 +9,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
 import unittest
@@ -180,6 +181,25 @@ class MemoryAuditTests(unittest.TestCase):
                 self.assertIn(expected, kinds)
             escaped = [item for item in json.loads(result.stdout)["findings"] if item.get("path") == "space(copy).md"]
             self.assertFalse(any(item["kind"] == "unindexed_markdown" for item in escaped))
+
+    def test_index_link_scan_is_linear_on_escaped_parens(self):
+        # The old link pattern let each backslash take either of two branches, so
+        # an index line with an unclosed link and 40 `\(` pairs needed about 2^40
+        # steps. A child process turns a regression into a timeout, not a hang.
+        line = "- [x](a" + "\\(" * 40 + "\n"
+        code = (
+            "import importlib.util, sys; s = importlib.util.spec_from_file_location('ma', sys.argv[1]); "
+            "m = importlib.util.module_from_spec(s); s.loader.exec_module(m); m.index_targets(sys.stdin.read())"
+        )
+        subprocess.run([sys.executable, "-c", code, str(AUDITOR)], input=line, text=True, timeout=20, check=True)
+        targets, _ = MA.index_targets("- [Escaped](space\\(copy\\).md)\n- [Trailing](a\\).md)\n")
+        self.assertEqual(targets, {"space(copy).md", "a).md"})
+
+    def test_link_pattern_matches_memory_dream_copy(self):
+        # memory-dream's audit.py carries the same pattern; a fix to one copy
+        # that misses the other brings the stall back there.
+        plugin = (CLAUDE / "plugins" / "memory-dream" / "memory_dream" / "audit.py").read_text(encoding="utf-8")
+        self.assertIn(f'LINK_RE = re.compile(r"{MA.LINK_RE.pattern}")', plugin)
 
     def test_frontmatter_duplicates_sensitive_redaction_and_stale_date(self):
         with tempfile.TemporaryDirectory() as temp:
