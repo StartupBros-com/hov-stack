@@ -40,6 +40,10 @@ trap 'chmod -R u+w "$TMP" 2>/dev/null; rm -rf "$TMP"' EXIT
 export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@example.invalid
 export GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@example.invalid
 STAMP=$(date +%Y%m%d)
+# Work two days old, for the cases that must reach the preserve path: work younger
+# than FRESH_WORK_HOURS (24) is held there instead (hov-stack#721,
+# wt-sweep-fresh-work.test.sh).
+D2="$(( $(date +%s) - 2 * 86400 )) +0000"
 
 pass=0; fail=0
 ok(){ echo "  ok: $1"; pass=$((pass+1)); }
@@ -217,8 +221,9 @@ grep -qx 'must survive' "$WT/.claude/deliverables/report.md" && ok "failed copy:
 # --- 14. a detached HEAD with WIP is pinned before removal -------------------------
 mkfix det
 WT="$TMP/det/repo-wt"; REF="refs/heads/recovered/wt-sweep-$STAMP/repo-wt"
-{ git -C "$WT" checkout -q --detach; echo unshipped >"$WT/u.txt"; git -C "$WT" add -A; git -C "$WT" commit -qm unshipped; } >/dev/null 2>&1
-echo wip >"$WT/wip.txt"
+{ git -C "$WT" checkout -q --detach; echo unshipped >"$WT/u.txt"; git -C "$WT" add -A
+  GIT_AUTHOR_DATE="$D2" GIT_COMMITTER_DATE="$D2" git -C "$WT" commit -qm unshipped; } >/dev/null 2>&1
+echo wip >"$WT/wip.txt"; touch -d '-2 days' "$WT/wip.txt"
 out=$(sweep "$TMP/det" 1 "$EMPTY")
 has "detached dry run: plans the pin" "$out" "would: git -C '$TMP/det/repo' update-ref '$REF'"
 git -C "$TMP/det/repo" rev-parse -q --verify "$REF" >/dev/null && no "detached dry run: wrote no ref" || ok "detached dry run: wrote no ref"
@@ -231,7 +236,8 @@ has "detached: counted as preserved" "$out" "preserved-local:1"
 # --- 15. PLANTED NEGATIVE: a pin that cannot be written keeps the worktree ---------
 mkfix detcol
 WT="$TMP/detcol/repo-wt"; REF="refs/heads/recovered/wt-sweep-$STAMP/repo-wt"
-{ git -C "$WT" checkout -q --detach; echo unshipped >"$WT/u.txt"; git -C "$WT" add -A; git -C "$WT" commit -qm unshipped; } >/dev/null 2>&1
+{ git -C "$WT" checkout -q --detach; echo unshipped >"$WT/u.txt"; git -C "$WT" add -A
+  GIT_AUTHOR_DATE="$D2" GIT_COMMITTER_DATE="$D2" git -C "$WT" commit -qm unshipped; } >/dev/null 2>&1
 git -C "$TMP/detcol/repo" update-ref "$REF" main
 out=$(sweep "$TMP/detcol" 0 "$EMPTY")
 kept "pin collision: worktree kept" "$WT"

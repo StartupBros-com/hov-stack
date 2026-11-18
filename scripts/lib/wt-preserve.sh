@@ -144,6 +144,73 @@ wt_rescue_deliverables() {
   echo "      ok: copied $n ignored deliverable file(s) to $dest"
 }
 
+# Prints "<epoch><TAB><what>" for the newest local work in worktree $1 and returns
+# 0, or prints why it cannot tell and returns 1; the caller must then keep the
+# worktree (hov-stack#721). Local work is every path `git status` lists, untracked
+# files one by one, dated by its own mtime; a path that no longer exists (a delete,
+# a rename's source) is dated by its nearest surviving directory, whose mtime the
+# delete moved. When $2, the unshipped count, is above 0, HEAD's committer time
+# counts too: HEAD is then itself unshipped and the newest such commit. A session
+# that drives a worktree only through script files or another harness names it in
+# no tool call, so wt_session_hold cannot see it; this date can.
+# Gitignored files are not looked at: `git status` does not list them.
+wt_newest_work() {
+  local wt="$1" unp="${2:-0}" list stats e p q t best=-1 what="" i=0 n
+  local -a ents=() cands=() times=()   # set, not just declared: callers run under set -u
+  list=$(mktemp) || { printf 'cannot make a temp file'; return 1; }
+  if ! git -C "$wt" status --porcelain=v1 -z --untracked-files=all >"$list" 2>/dev/null; then
+    rm -f "$list"; printf 'cannot list changed files'; return 1
+  fi
+  mapfile -d '' -t ents <"$list"; rm -f "$list"
+  n=${#ents[@]}
+  while (( i < n )); do
+    e=${ents[i]}; i=$((i+1))
+    p=${e:3}
+    # With -z a rename or copy puts its source in the next field, without a status.
+    # Either column can carry the R or C: ` R` is a rename only the work tree shows,
+    # as after `git add -N` on the new path. Missing it read the source as a record
+    # of its own, cut its first three characters and dated the wrong path.
+    case ${e:0:2} in R?|C?|?R|?C) (( i < n )) && { cands+=("${ents[i]}"); i=$((i+1)); } ;; esac
+    cands+=("$p")
+  done
+  for i in "${!cands[@]}"; do
+    q=${cands[i]%/}; [ -n "$q" ] || q=.
+    # Climb no higher than the worktree itself: if that is gone too, it was removed
+    # or moved after the listing, and the caller keeps it.
+    while [ ! -e "$wt/$q" ] && [ ! -L "$wt/$q" ]; do
+      if [ "$q" = . ]; then printf 'the worktree vanished during the scan'; return 1; fi
+      case $q in */*) q=${q%/*} ;; *) q=. ;; esac
+      [ -n "$q" ] || q=.
+    done
+    cands[i]=$q
+  done
+  if (( ${#cands[@]} > 0 )); then
+    stats=$(mktemp) || { printf 'cannot make a temp file'; return 1; }
+    # stat's own exit status counts: a path gone between the listing and here is a
+    # sign of live work, not something to date by the survivors.
+    if ! (cd "$wt" && printf '%s\0' "${cands[@]}" | xargs -0 stat --printf '%Y %n\0' --) >"$stats" 2>/dev/null; then
+      rm -f "$stats"; printf 'cannot read the mtime of every changed path'; return 1
+    fi
+    mapfile -d '' -t times <"$stats"; rm -f "$stats"
+    for e in "${times[@]}"; do
+      t=${e%% *}
+      case $t in ''|*[!0-9]*) printf 'unreadable mtime for %s' "${e#* }"; return 1 ;; esac
+      if (( t > best )); then best=$t; what=${e#* }; fi
+    done
+  fi
+  if [ "$unp" -gt 0 ] 2>/dev/null; then
+    t=$(git -C "$wt" log -1 --format=%ct HEAD 2>/dev/null)
+    case $t in ''|*[!0-9]*) printf 'cannot read the time of the newest unshipped commit'; return 1 ;; esac
+    if (( t > best )); then
+      best=$t; what="unshipped commit $(git -C "$wt" rev-parse --short HEAD 2>/dev/null)"
+    fi
+  elif [ "$unp" != 0 ]; then
+    printf 'unshipped count %s is not a number' "$unp"; return 1
+  fi
+  if (( best < 0 )); then printf 'git status listed no local work'; return 1; fi
+  printf '%s\t%s' "$best" "$what"
+}
+
 # Pins the detached HEAD of worktree $2 at refs/heads/recovered/wt-sweep-$3/<name>
 # in repo $1, refusing to overwrite an existing ref. $4 is DRY_RUN. Returns 0 once
 # the ref holds HEAD; otherwise the caller must keep the worktree. Not the

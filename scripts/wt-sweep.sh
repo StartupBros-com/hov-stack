@@ -12,6 +12,10 @@
 #   within this many minutes (assumed owned by a live session).
 #   IDLE_RELEASE_HOURS=24 — a worktree held only by a session transcript that has
 #   not named it for this many hours may be released (see Policy); 0 turns that off.
+#   FRESH_WORK_HOURS=24 — a worktree whose newest uncommitted or unshipped work is
+#   younger than this many hours is skipped, whatever the session check found
+#   (see Policy); 0 turns that off. A whole number of at most 9 digits, read as
+#   decimal (08 is 8), or the sweep refuses to run.
 #
 # Policy (smart-selective, zero-loss):
 #   clean & all commits on remote ............ remove worktree
@@ -28,6 +32,19 @@
 #                                               is a cache or a rescued deliverable, and HEAD is
 #                                               on origin/<default> or wt-done reconciles it to a
 #                                               merged PR; otherwise SKIP. Plan and apply agree.
+#   uncommitted or unshipped work under FRESH_WORK_HOURS old (hov-stack#721)
+#                                     ........ SKIP, before the WIP-commit and bundle paths: a
+#                                               session that drives a worktree only through script
+#                                               files or another harness names it in no tool call,
+#                                               so the session check above cannot see it. Newest
+#                                               work is the newest mtime among the paths git status
+#                                               lists, or HEAD's commit time when it is unshipped.
+#                                               Gitignored files and edits inside a nested
+#                                               checkout or submodule are not seen; a file dated
+#                                               in the future holds until that date. The guard
+#                                               reads no DRY_RUN, but a branch wt-done reconciles
+#                                               counts as shipped in a plan and is re-counted on
+#                                               apply, so an apply can hold one the plan removed.
 #   before ANY removal ........................ copy ignored .claude/deliverables/ files to the
 #                                               main checkout; a detached HEAD on the preserve
 #                                               path is pinned at refs/heads/recovered/... first
@@ -40,6 +57,15 @@ set -uo pipefail
 # this script and wt-new.sh cannot silently drift apart again (issue #511).
 DRY_RUN="${DRY_RUN:-1}"; PUSH="${PUSH:-0}"
 ONLY="${ONLY:-}"; ACTIVE_MIN="${ACTIVE_MIN:-120}"; IDLE_RELEASE_HOURS="${IDLE_RELEASE_HOURS:-24}"
+FRESH_WORK_HOURS="${FRESH_WORK_HOURS:-24}"
+# A value that is not a whole number would make the guard's test error to false,
+# which reads as "old enough" and silently turns the guard off. Leading zeros are
+# read as decimal: bash arithmetic would take 08 as bad octal and 010 as 8. More
+# than 9 digits is refused rather than left to overflow.
+case $FRESH_WORK_HOURS in
+  ''|*[!0-9]*|??????????*) echo "wt-sweep: FRESH_WORK_HOURS must be a whole number of hours, at most 9 digits (got '$FRESH_WORK_HOURS'); nothing swept" >&2; exit 2 ;;
+esac
+FRESH_WORK_HOURS=$(( 10#$FRESH_WORK_HOURS ))
 # Preview reads must not refresh an index or acquire optional Git locks. Every
 # mutation is separately routed through run(), but status itself may otherwise
 # rewrite index metadata while answering a read-only question.
@@ -416,6 +442,23 @@ except Exception:
         else n_keep=$((n_keep+1)); fi
       fi
       continue
+    fi
+    # Fresh local work keeps the worktree, on both paths below (hov-stack#721). A job
+    # that drives a worktree only through script files or another harness names it in
+    # no tool call, and edits below the top directory leave its mtime alone, so every
+    # check above can miss it. The stale path dates only HEAD, so a dirty worktree on
+    # an old branch needs this too. Nothing here reads DRY_RUN (but see the reconcile
+    # above: a plan counts a reconciled branch as shipped, an apply re-counts it).
+    if [ "$FRESH_WORK_HOURS" -gt 0 ]; then
+      if ! fresh=$(wt_newest_work "$wt" "$unp"); then
+        echo "      => SKIP (cannot date local work: $fresh; nothing removed)"; n_skip=$((n_skip+1)); continue
+      fi
+      fresh_t=${fresh%%$'\t'*}
+      # Asked as "old enough?" so that a test that errors keeps the worktree.
+      if ! (( now - fresh_t >= FRESH_WORK_HOURS * 3600 )); then
+        echo "      => SKIP (local work $(( (now - fresh_t) / 3600 ))h old, under FRESH_WORK_HOURS=${FRESH_WORK_HOURS}: ${fresh#*$'\t'}; nothing removed)"
+        n_skip=$((n_skip+1)); continue
+      fi
     fi
     # untracked files never qualify for the bundle-and-drop path (bundles hold commits, not untracked)
     stale=0; (( age>AGE_ALIVE_DAYS && behind>BEHIND_STALE && unp<2 && unt==0 )) && stale=1
