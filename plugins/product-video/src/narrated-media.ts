@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { lstat, readFile, rm } from 'node:fs/promises';
 import path from 'node:path';
 
+import { readJsonFile } from './files';
 import { runNarratedCommand as run } from './narrated-command';
 import {
   assertRenderableNarratedCapture,
@@ -328,9 +329,7 @@ export async function prepareNarratedCapture({
 }) {
   await assertSingleLinkRegularFile(captureBundlePath);
   const capture = assertRenderableNarratedCapture(
-    parseNarratedCaptureBundle(
-      JSON.parse(await readFile(captureBundlePath, 'utf8')) as unknown,
-    ),
+    parseNarratedCaptureBundle(await readJsonFile(captureBundlePath)),
   );
   const paths = getNarratedRunPaths(capture.runId);
   await assertNarratedRunFile(
@@ -351,9 +350,7 @@ export async function prepareNarratedCapture({
     assertNarratedFileSha256(captureVideoPath, capture.digests.videoSha256),
     assertNarratedFileSha256(telemetryPath, capture.digests.telemetrySha256),
   ]);
-  const telemetry = parseNarratedTelemetry(
-    JSON.parse(await readFile(telemetryPath, 'utf8')) as unknown,
-  );
+  const telemetry = parseNarratedTelemetry(await readJsonFile(telemetryPath));
   assertTelemetryMatchesCapture(telemetry, capture);
 
   const sourceMedia = probeLocalMedia(captureVideoPath);
