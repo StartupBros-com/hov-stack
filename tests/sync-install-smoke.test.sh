@@ -2,10 +2,7 @@
 # Tests for sync.sh's `install` (and `check`) modes -- the smoke coverage
 # missing per dotfiles#379: nothing under tests/ exercised sync.sh's install
 # path, so #370/#373 (new SYSTEM_UNITS install class, 8 new unit files) shipped
-# with zero CI coverage. install-smoke.yml is NOT the right home for this --
-# it tests install.sh, a DIFFERENT installer; adding ** to its paths
-# filter would re-run install.sh on every harness PR without necessarily
-# exercising sync.sh at all (motion without coverage -- see the issue).
+# with zero CI coverage. This suite exercises sync.sh directly.
 #
 # Hermetic: builds its own $TMP/$HOME and distinct $CLAUDE_HOME, and points
 # sync.sh's two system-scoped
@@ -18,8 +15,7 @@
 # `sudo install -D ...` code path is exercised end-to-end; only the
 # destination is fake.
 #
-# CLAUDE_SYNC_SKIP_HOOK_RECONCILE=1 (the same flag install-smoke.yml already
-# sets for install.sh): the DCG/memory/papercut hook-reconcile functions resolve
+# CLAUDE_SYNC_SKIP_HOOK_RECONCILE=1: the DCG/memory/papercut hook-reconcile functions resolve
 # their targets through THIS box's home (e.g. ~/.local/bin/dcg), which a scratch
 # $HOME does not carry -- see reconcile_dcg_hook's own comment.
 #
@@ -44,7 +40,7 @@ copy_tracked() { cp -a "$1" "$2" && chmod -R u=rwX,go=rX "$2"; }
 # source changes as drift, but that host state is unrelated to this fixture.
 mkdir -p "$TMP/dotfiles"
 # The harness tree is what ./setup installs: copy each DOTFILES_HARNESS entry rather
-# than the whole checkout, so docs/, harnesses/ and the repo-only root files stay out
+# than the whole checkout, so docs/, Codex-only skills and the repo-only root files stay out
 # of the fixture the way the old mirror directory kept them out.
 # shellcheck source=../lib/manifest.sh
 . "$REPO/lib/manifest.sh"
@@ -56,7 +52,7 @@ copy_tracked "$REPO/lib" "$TMP/dotfiles/lib"
 copy_tracked "$REPO/setup" "$TMP/dotfiles/setup"
 # config/ holds the harness's policy files (dispatcher.env, repo-routes.json,
 # system/docker-daemon.patch.json) beside the tool configs
-# install.sh links; sync.sh reads and links from it, so the directory comes along whole.
+# the owner’s checkout links; sync.sh reads and links from it, so the directory comes along whole.
 copy_tracked "$REPO/config" "$TMP/dotfiles/config"
 # NOT a copy of the real table. Appending to it looked right and was wrong: the
 # developer box is already listed (satellite-host -> satellite), profile_role takes

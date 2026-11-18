@@ -18,7 +18,7 @@
  * --exec runs the command unchanged.
  *
  * Deploy: versioned at bin/codex-pick, symlinked to
- * ~/.local/bin/codex-pick by install.sh (lib/manifest.sh). The resolver is
+ * ~/.local/bin/codex-pick by the owner’s checkout (lib/manifest.sh). The resolver is
  * reached through this file's real path, so the worktree copy works before
  * deploy and ~/.claude/bin/codex-pick after (sync.sh symlinks the whole
  * bin directory). Never prints a token, an account id, or a key.

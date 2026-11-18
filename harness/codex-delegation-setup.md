@@ -64,7 +64,7 @@ Will drives Claude Code as his daily agent and delegates implementation/review t
   `model_context_window` at all. Ground truth is
   `grep -ao '"model_context_window":[0-9]*'` on the newest `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl`.
   Live values: `828400` effective (95% of 872000), auto-compact at 500000.
-- **`~/.codex/config.toml` remains OUT of dotfiles by design** (`harnesses/codex/README.md`, `harnesses/codex/sync.sh`);
+- **`~/.codex/config.toml` remains OUT of dotfiles by design** (`$DOTFILES_REPO/codex/README.md`, `$DOTFILES_REPO/codex/sync.sh`);
   dotfiles owns only `hooks.json`. Config changes survive only as local `config.toml.bak.*`.
 
 **Account state re-verified 2026-08-26:** direct Codex remains outside better-ccflare. `caam list` shows one saved profile (`acct-f`), but `caam limits codex --format json` returns `unauthorized: token expired or invalid`, while the active `~/.codex/auth.json` succeeds against wham and is not selected by caam (`caam which codex` → none). Therefore caam activation/rotation is **not** a recovery path until the operator explicitly refreshes or re-backs-up credentials. better-ccflare separately holds three healthy Codex accounts for Claude-side fallback; do not conflate that pool with the direct Codex lane or import credentials without approval.

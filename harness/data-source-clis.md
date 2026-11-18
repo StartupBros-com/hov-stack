@@ -1030,7 +1030,7 @@ Rules that bite on the first call:
 - **Native Windows shells** (Claude Code's Git Bash tool, PowerShell, cmd,
   Codex on Windows) get `vastai` and `vast-ssh` as hops into this wrapper, not
   a second install: `windows/bin/{vastai,vast-ssh}` (sh, for Git Bash) and
-  their `.cmd` twins, deployed by `install.sh` as real copies into
+  their `.cmd` twins, deployed by the owner’s checkout as real copies into
   `C:\Users\user\.local\bin` (`DOTFILES_COPIES` in `lib/manifest.sh`;
   `manifest_check` reports drift). Each runs `wsl.exe -e
   /home/user/.local/bin/<name> …`; the venv, the credential chain and every
@@ -1312,7 +1312,7 @@ effect immediately — no re-install step. `./setup` links each wrapper that
 A path there that already holds something else (a `vastai` of your own, a link
 into another copy) is left alone and named in setup's `commands` row, and that
 wrapper still runs as `~/.claude/bin/<name>`; `./setup --check` names any not yet
-linked. `install.sh` links the same list on the maintainer's machines, through
+linked. `install_manifest_links` in `lib/link.sh` can link the same list on the maintainer's machines, through
 `DOTFILES_LINKS` rows built from `DATA_CLIS`. Separately, `./setup` links the
 whole `bin` directory to `~/.claude/bin` (not on PATH), so `gsc.py`, `ga4.py`, `discord_cli.py`, `resend_cli.py`, `stripe_api.py`, `posthog_api.py`, `supabase_api.py`, `fal_api.py`, `dfs.py`, and `exa.py` resolve
 back into the checkout the same way. `resend-cli` additionally needs the

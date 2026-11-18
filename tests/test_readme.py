@@ -162,7 +162,7 @@ class PlantedFailures(unittest.TestCase):
 
     def test_a_dotfile_is_looked_up_under_its_bullets_directory(self):
         # .wslconfig is under windows/, not the top level; moved to a bullet with no directory it fails.
-        line = next(line for line in README.splitlines() if line.startswith("- `install.sh`"))
+        line = next(line for line in README.splitlines() if line.startswith("- `sync.sh`"))
         readme = self.changed(line, line + " See `.wslconfig`.")
         self.assertNamed(problems({"README.md": readme}), "paths", "'.wslconfig'", "at the top level")
         self.assertFalse([p for p in problems() if ".wslconfig" in p])

@@ -42,11 +42,11 @@ install_windows_copies() {
     [ -n "$pair" ] || continue
     repo_path=${pair%%|*}
     if [ ! -f "$repo_root/$repo_path" ]; then
-      echo "install.sh: copy manifest declares missing source: $repo_path" >&2
+      echo "install_windows_copies: copy manifest declares missing source: $repo_path" >&2
       return 1
     fi
     if ! dotfiles_validate_windows_copy "$repo_path" "$repo_root/$repo_path"; then
-      echo "install.sh: refusing invalid Windows config: $repo_path" >&2
+      echo "install_windows_copies: refusing invalid Windows config: $repo_path" >&2
       return 1
     fi
   done

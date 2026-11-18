@@ -59,7 +59,7 @@ check 'grep -q SENTINEL-do-not-lose-me "$BK/.precious" 2>/dev/null' \
                                                                 "real file was DESTROYED, not backed up"
 
 # ── 3. real directory at destination is moved whole, not rm -rf'd ────────────────────────
-# This is the ~/.pi/agent/{extensions,prompts,bin} case: install.sh used to rm -rf these
+# This is the ~/.pi/agent/{extensions,prompts,bin} case: the former root installer used to rm -rf these
 # unconditionally on every run.
 BK=$HOME/backups/case3
 mkdir -p "$HOME/.adir"; printf 'USER-DIR-CONTENT\n' >"$HOME/.adir/mine"
@@ -191,7 +191,7 @@ for name in vastai vast-ssh; do
 done
 
 # ── 9. manifest completeness: no unaccounted top-level repo entry ────────────────────────
-# The install.sh-never-heard-of-pi-lens case. Its inverse (an undeclared dir IS caught) is
+# The undeclared-topic case. Its inverse (an undeclared dir IS caught) is
 # asserted in case 10.
 covered=" "
 for f in "${DOTFILES_ROOT_FILES[@]}"; do covered="$covered$f "; done
@@ -201,6 +201,7 @@ for t in "${DOTFILES_HARNESS[@]}" "${DOTFILES_TOPICS[@]}" "${DOTFILES_UNLINKED[@
 # carries untracked scratch (.claude/worktrees, .pytest_cache) that is not repo content.
 while IFS= read -r entry; do
   [ -n "$entry" ] || continue
+  [ -e "$REPO/$entry" ] || [ -L "$REPO/$entry" ] || continue
   case "$covered" in
     *" $entry "*) ;;
     *) bad "top-level repo entry absent from lib/manifest.sh: $entry" ;;
@@ -318,7 +319,7 @@ printf '#!/bin/sh\nprintf "%%s\\n" "$2"\n' >"$FAKEBIN/wslpath"
 chmod +x "$FAKEBIN/wezterm.exe" "$FAKEBIN/wslpath"
 export PATH="$FAKEBIN:$PATH"
 
-# The same manifest-driven function used by install.sh deploys both Windows files.
+# The manifest-driven copy function deploys both Windows files.
 # Pin pro-gate #1683 round 3: successful-copy tests must not reach the host's
 # Windows executables (WSL interop may be unavailable). These stubs exercise the
 # validation boundary, not the native parser's config-syntax checks.
@@ -487,64 +488,6 @@ for pair in "${DOTFILES_LINKS[@]}"; do
   [ "$pair" = "config/ccusage/ccusage.json|.config/claude/ccusage.json" ] && found=1
 done
 check '[ "$found" = 1 ]'                                        "manifest no longer links config/ccusage/ccusage.json to .config/claude/ccusage.json"
-
-# ── 20. root installer propagates a selected Docker-policy sync failure ──────
-# Exercise install.sh's real ordered call boundary with inert fixture scripts.
-# Nothing in this tree can reach HOME, Docker, systemd, or the operator's repo.
-ROOT_INSTALL=$TMP/root-installer
-ROOT_INSTALL_HOME=$TMP/root-installer-home
-ROOT_INSTALL_BIN=$TMP/root-installer-bin
-ROOT_INSTALL_REACHED=$TMP/root-installer-reached
-mkdir -p "$ROOT_INSTALL/lib" "$ROOT_INSTALL/dcg" "$ROOT_INSTALL/scripts" \
-  "$ROOT_INSTALL/harnesses/codex" "$ROOT_INSTALL/windows" "$ROOT_INSTALL/harnesses/fx" \
-  "$ROOT_INSTALL_HOME" "$ROOT_INSTALL_BIN"
-cp "$REPO/install.sh" "$ROOT_INSTALL/install.sh"
-cat >"$ROOT_INSTALL/lib/manifest.sh" <<'SH'
-DOTFILES_ROOT_FILES=()
-DOTFILES_LINKS=()
-SH
-cat >"$ROOT_INSTALL/lib/link.sh" <<'SH'
-install_manifest_links() { :; }
-SH
-cat >"$ROOT_INSTALL/lib/windows.sh" <<'SH'
-dotfiles_windows_home() { return 1; }
-install_windows_copies() { return 99; }
-SH
-for fixture in dcg/install.sh dcg/sync.sh; do
-  printf '#!/usr/bin/env bash\nexit 0\n' >"$ROOT_INSTALL/$fixture"
-done
-cat >"$ROOT_INSTALL/sync.sh" <<'SH'
-#!/usr/bin/env bash
-printf '%s\n' 'docker-init: ERROR: fixture adopted-policy validation failed' >&2
-exit 37
-SH
-for fixture in harnesses/codex/sync.sh windows/sync-claude-skills-to-codex.sh harnesses/fx/sync.sh; do
-  cat >"$ROOT_INSTALL/$fixture" <<SH
-#!/usr/bin/env bash
-printf '%s\\n' '$fixture' >>'$ROOT_INSTALL_REACHED'
-exit 0
-SH
-done
-for command_name in git curl tar xz jq rsync sha256sum minisign python3 node; do
-  printf '#!/usr/bin/env bash\nexit 0\n' >"$ROOT_INSTALL_BIN/$command_name"
-  chmod +x "$ROOT_INSTALL_BIN/$command_name"
-done
-if root_install_out=$(PATH="$ROOT_INSTALL_BIN:/usr/bin:/bin" \
-  DOTFILES="$ROOT_INSTALL" DOTFILES_HOME="$ROOT_INSTALL_HOME" \
-  INSTALL_SKIP_PI_DOCTOR=1 /usr/bin/bash "$ROOT_INSTALL/install.sh" 2>&1); then
-  root_install_status=0
-else
-  root_install_status=$?
-fi
-if [ "$root_install_status" -eq 37 ] \
-   && grep -Fq 'adopted-policy validation failed' <<<"$root_install_out" \
-   && ! grep -Fq 'Installed harness' <<<"$root_install_out" \
-   && ! grep -Fq 'Done!' <<<"$root_install_out" \
-   && [ ! -e "$ROOT_INSTALL_REACHED" ]; then
-  ok
-else
-  bad "root installer swallowed or ran past a Docker policy sync failure (exit $root_install_status):"$'\n'"$root_install_out"
-fi
 
 # Missing sources are distinct to callers, while manifest installs still skip them.
 # The check helper evals its arguments; HOME's earlier subshell edits are intentional.

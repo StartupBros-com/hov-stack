@@ -1,7 +1,0 @@
-{
-  "searchProviders": ["exa", "brave", "firecrawl"],
-  "fetchProviders": ["firecrawl", "brave"],
-  "codeContextProviders": ["exa"],
-  "siteMapProviders": ["firecrawl"],
-  "preferDynamicFetchForDomains": ["openai.com", "anthropic.com"]
-}

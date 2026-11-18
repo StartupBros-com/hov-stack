@@ -44,16 +44,16 @@ install nowhere under `~/.claude` and `./setup` never touches them:
 
 | Entry                                                                   | What it is                                                                                                 |
 | ----------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| `.bashrc`, `.inputrc`, `.ripgreprc`, `.editorconfig`, `.gitignore_global` | shell and editor dotfiles, linked into `$HOME` by `install.sh` (`DOTFILES_ROOT_FILES`)                     |
-| `.gitmessage`, `ssh/`                                                   | the author's commit template and ssh config and helpers, which `install.sh` would link (`DOTFILES_ROOT_FILES`, `DOTFILES_LINKS`); absent from this copy, so `manifest_check` names them as missing sources |
+| `.bashrc`, `.inputrc`, `.ripgreprc`, `.editorconfig`, `.gitignore_global` | shell and editor dotfiles, linked into `$HOME` by the owner’s checkout (`DOTFILES_ROOT_FILES`)                     |
+| `.gitmessage`, `ssh/`                                                   | the author's commit template and ssh config and helpers, which the owner’s checkout links (`DOTFILES_ROOT_FILES`, `DOTFILES_LINKS`); absent from this copy, so `manifest_check` names them as missing sources |
 | `git/`, `git-setup.sh`                                                  | shared git config, spliced into `~/.gitconfig` once by `git-setup.sh`                                      |
-| `install.sh`, `lib/`                                                    | the author's full installer and its link, check and manifest libraries                                     |
+| `lib/`                                                    | link, check and manifest libraries; no installer here calls `install_manifest_links`                                     |
 | `setup`                                                                 | the guided installer for a fresh clone: links the harness into `~/.claude`, seeds `settings.json` once    |
 | `CONCEPTS.md`                                                           | the shared vocabulary the docs and skills cite                                                             |
 | `.gitignore`                                                            | ignores the transient `.claude/` worktree state and the split's bookkeeping file                          |
-| `config/`                                                               | tool configs `install.sh` links (`DOTFILES_LINKS`) beside the harness's policy files `sync.sh` reads in place |
+| `config/`                                                               | tool configs the owner’s checkout links (`DOTFILES_LINKS`) beside the harness's policy files `sync.sh` reads in place |
 | `dcg/`, `windows/`                                                      | the DCG guard install and the Windows-side copies, each with its own installer                             |
-| `harnesses/`                                                            | the author's codex, fx, pi and pi-lens harnesses: untested here, see `harnesses/README.md`                 |
+| `harnesses/codex/skills/` | Codex-only skills installed by `scripts/skills-localize.sh` |
 | `hosts.tsv`                                                             | the host-to-role table `lib/profile.sh` reads in place; absent from this copy, so each host keeps a copy of the fleet table in the private overlay (`<overlay>/hosts.tsv`), and `sync.sh check` reports a host whose live tree has neither |
 | `tests/repo/`                                                           | suites about the repository itself (`setup`, the suite runner, this layout), run by CI directly            |
 | `docs/`, `README.md`, `CONTRIBUTING.md`, `SECURITY.md`, `STRATEGY.md`, `LICENSE`, `NOTICE.md`, `.github/`, `.gitleaks.toml`, `.public-safety-allow`, `.public-safety-repos`, `.compound-engineering/`, `renovate.json` | repository docs and CI config, read in place (`DOTFILES_UNLINKED`)                                         |
@@ -96,8 +96,8 @@ the mapping, for anyone reading an older commit or a path in the history docs:
 | `claude/README.md`                 | `docs/layout.md` (this file)              |
 | `claude/config/*`                  | `config/`                                 |
 | `claude/tests/setup.test.sh`, `claude/tests/run-claude-tests.test.sh` | `tests/repo/`          |
-| `codex/`, `fx/`, `pi/`, `pi-lens/` | `harnesses/<name>/`                       |
-| `systemd/user/` (the tunnel unit)  | `harnesses/pi/systemd/user/`              |
+| `codex/`, `fx/`, `pi/`, `pi-lens/` | owner’s private `$DOTFILES_REPO/<name>/`                       |
+| `systemd/user/` (the tunnel unit)  | owner’s private `$DOTFILES_REPO/pi/systemd/user/`              |
 | `claude/plugins/harness-optimizer` | gone; `harness-optimizer@hov`             |
 
 ## Cron-ownership-gated reliability timers

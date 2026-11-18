@@ -22,8 +22,7 @@
 #     false-positive, and a multi-value line (`After=network-online.target
 #     basic.target`), trailing whitespace or a CRLF cannot slip past; a
 #     scratch file of those three shapes proves the detector sees them.
-#  2. Each of the six selected units, and systemd/user/pi-local-champion-
-#     tunnel.service which carried the same pair, has either the shared probe
+#  2. Each of the six selected units has either the shared probe
 #     (ExecStartPre=-%h/.claude/scripts/net-ready.sh ...) or a
 #     `# No network-readiness probe:` comment stating why none is needed.
 #  3. A probe line carries the `-` prefix (its exit status must never fail
@@ -128,19 +127,6 @@ for u in "${UNITS[@]}"; do
     bad "2: $u.service has neither a net-ready.sh ExecStartPre nor a '# No network-readiness probe:' comment (dotfiles#1458 acceptance: a user-scope readiness mechanism or a reason for none)"
   fi
 done
-# The one unit outside systemd/ that carried the pair: the pi harness's
-# tunnel unit (symlinked into ~/.config/systemd/user by lib/manifest.sh).
-f=harnesses/pi/systemd/user/pi-local-champion-tunnel.service
-if [ ! -f "$f" ]; then
-  bad "2: $f is missing"
-elif grep -q "$PROBE_RE" "$f"; then
-  ok "2: pi-local-champion-tunnel.service waits for its host through net-ready.sh"
-elif grep -q '^# No network-readiness probe:' "$f"; then
-  ok "2: pi-local-champion-tunnel.service states why it has no readiness probe"
-else
-  bad "2: pi-local-champion-tunnel.service has neither a net-ready.sh ExecStartPre nor a '# No network-readiness probe:' comment (it carried the dead pair outside systemd/)"
-fi
-
 # ── 3. probe lines: `-` prefix, and a wait that leaves the script its budget ─
 timeout_seconds() {
   # TimeoutStartSec= value in seconds; a bare number is seconds already.

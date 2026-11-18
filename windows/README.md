@@ -19,7 +19,7 @@ bin/                             # Hops into WSL tools, deployed to %USERPROFILE
 ## bin/ — Windows-side hops into WSL tools
 
 `bin/vastai` and `bin/vast-ssh` (sh, for Git Bash and Claude Code's Bash tool)
-plus their `.cmd` twins (cmd, PowerShell, Codex) are deployed by `install.sh` as
+plus their `.cmd` twins (cmd, PowerShell, Codex) are deployed by the owner’s checkout as
 real copies into `%USERPROFILE%\.local\bin` (`DOTFILES_COPIES` in
 `lib/manifest.sh`; `manifest_check` reports drift). Each runs
 `wsl.exe -e sh -c 'exec "$HOME/.local/bin/<name>" "$@"' <name> …`, so the WSL

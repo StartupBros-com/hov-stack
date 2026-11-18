@@ -62,5 +62,5 @@ Between the rename and the members-app deploy every announcement fails closed. E
 | Guided setup skill | `skills/`, orchestrating the per-plugin guided setups that already exist |
 | Loop wrapper | `bin/`, part of the permission layer |
 | NOTICE | `NOTICE.md` plus per-skill LICENSE files |
-| Other harnesses (pi, codex, fx, windows) | `harnesses/<name>`, labeled untested |
+| Other harnesses (pi, codex, fx, windows) | Superseded 2026-11-18: pi, codex, fx and pi-lens config moved to the owner’s private checkout; `harnesses/codex/skills/` stays. |
 | Private overlay | read from `~/.config/hov-stack/`; absent on a stranger's machine means the single-host default |

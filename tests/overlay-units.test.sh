@@ -260,22 +260,15 @@ run 0 role refresh
 ok 'failed reload retains marker and unchanged retry recovers it'
 
 fresh
-tracked=$REPO/harnesses/pi/systemd/user/pi-local-champion-tunnel.service
-cp "$tracked" "$WORK/tracked-before"
-ln -s "$tracked" "$SYS/pi-local-champion-tunnel.service"
-printf '%s\n' $'pi-local-champion-tunnel.service\tservice' \
-  $'wt-sweep.service.d/50-hygiene-posture.conf\tdropin' \
+printf '%s\n' $'wt-sweep.service.d/50-hygiene-posture.conf\tdropin' \
   $'docker-hygiene.timer.d/50-hygiene-posture.conf\tdropin' \
   $'wt-sweep.service.d/example.conf\tdropin' | write "$HOV_STACK_OVERLAY/units"
 run 0 role enable
-contains 'overlay units: line 1: collision with a path lib/manifest.sh owns'
+contains 'overlay units: line 1: collision with a path the hygiene posture owns'
 contains 'overlay units: line 2: collision with a path the hygiene posture owns'
-contains 'overlay units: line 3: collision with a path the hygiene posture owns'
-cmp -s "$WORK/tracked-before" "$tracked" || fail 'an overlay row wrote through the manifest link into the tracked file'
-[ -L "$SYS/pi-local-champion-tunnel.service" ] || fail 'the manifest link was replaced'
 [ ! -e "$SYS/wt-sweep.service.d/50-hygiene-posture.conf" ] || fail 'the overlay installed a hygiene-posture drop-in'
 cmp -s "$SYS/wt-sweep.service.d/example.conf" "$HOV_STACK_OVERLAY/dropin" || fail 'another drop-in on a hygiene unit was refused'
-ok 'rows naming a manifest-linked unit or a generated hygiene drop-in are refused; other drop-ins install'
+ok 'rows naming a generated hygiene drop-in are refused; other drop-ins install'
 
 fresh
 printf 'outside\n' | write "$WORK/outside-unit.service"

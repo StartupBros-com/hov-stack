@@ -161,26 +161,6 @@ emit "launchpadlib-cache-clean.timer enabled enabled" "/usr/lib/systemd/user/lau
 mk_systemctl "$D" "$R" 0 "$F"
 case "$(run_check "$D")" in *launchpadlib*) bad "distro unit under /usr/lib was reported" ;; *) ok ;; esac
 
-# 6. A unit declared by lib/manifest.sh — a SYMLINK into this repo rather than a
-#    $UNITS copy — is silent. pi-local-champion-tunnel.service is the live case;
-#    reporting it would be crying wolf at a correctly-managed unit.
-TH=$TMP/home; mkdir -p "$TH/.config/systemd/user"
-if [ -e "$REPO/harnesses/pi/systemd/user/pi-local-champion-tunnel.service" ]; then
-  ln -sfn "$REPO/harnesses/pi/systemd/user/pi-local-champion-tunnel.service" \
-     "$TH/.config/systemd/user/pi-local-champion-tunnel.service"
-  emit "pi-local-champion-tunnel.service enabled enabled" \
-       "$TH/.config/systemd/user/pi-local-champion-tunnel.service"
-  mk_systemctl "$D" "$R" 0 "$F"
-  # HOME is the fixture home, so the fragment IS under $HOME and the readlink
-  # branch runs for real. Deleting that branch now makes this case fail.
-  case "$(run_check "$D" "$TH")" in
-    *pi-local-champion*) bad "manifest-symlinked unit was reported" ;;
-    *) ok ;;
-  esac
-else
-  bad "fixture source missing: $REPO/systemd/user/pi-local-champion-tunnel.service"
-fi
-
 # 7. A FAILED enumeration must be DRIFT, not silence. Previously the status was
 #    never tested, so a dead user manager let check() print "in sync" — the
 #    zero-run-green shape, inside the check meant to catch silent gaps.
