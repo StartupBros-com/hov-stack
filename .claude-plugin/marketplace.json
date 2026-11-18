@@ -223,13 +223,13 @@
         "source": "git-subdir",
         "url": "https://github.com/StartupBros-com/hov-stack.git",
         "path": "plugins/product-video",
-        "sha": "a89fa854acd0324820763ea4685b3b1cb11ad549"
+        "sha": "271889304e0295b832ceff5b8e8bdf075da4aac4"
       },
       "description": "Agent-native product walkthrough videos. Capture a real authenticated browser tour over CDP at a forced 16:9 geometry so a tall operator window cannot letterbox the recording, overlay a real cursor driven by telemetry that carries no URLs, DOM text, or account data, compose in Remotion, and render a digest-bound H.264 you can verify frame by frame.",
       "metadata": {
-        "version": "0.2.2",
-        "releaseId": 448097229,
-        "releaseTag": "product-video--v0.2.2"
+        "version": "0.2.3",
+        "releaseId": 449272321,
+        "releaseTag": "product-video--v0.2.3"
       },
       "card": {
         "rows": [
@@ -327,7 +327,7 @@
       },
       "card": {
         "rows": [
-          "\u26a1 **47 skills in one install** \u00b7 design review, writing, research, verification and agent workflows",
+          "\u26a1 **49 skills in one install** \u00b7 design review, writing, research, verification and agent workflows",
           "\ud83c\udfa8 **Review and polish, not just generate** \u00b7 interface, accessibility, color, layout and writing passes that catch what you would miss",
           "\ud83d\udee1\ufe0f **Skills, not a takeover** \u00b7 installing it changes no settings or hooks; /hov-setup runs only when typed and asks before each change; the full harness is a separate ./setup"
         ],

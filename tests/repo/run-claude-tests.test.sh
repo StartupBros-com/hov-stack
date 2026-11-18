@@ -20,6 +20,8 @@
 #     signature exits 2 before anything runs
 #   - a reused -o DIR serves no stale result; a runner child that dies leaves
 #     "no result recorded" and a failed run
+#   - a suite that moves the checkout under test (switches its branch or commit)
+#     fails the run, even when every suite passed
 set -euo pipefail
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)
 RUNNER=$ROOT/tests/run-claude-tests.sh
@@ -332,5 +334,34 @@ OUT=$(cd "$SH/repo" && env HOME="$SH" PATH="$SHIM_PATH" bash hooks/tests/run.sh 
 set -e
 [ "$RC" = 0 ] || { printf '%s\n' "$OUT"; fail "hooks/tests/run.sh failed under a node shim with mise on PATH (exit $RC)"; }
 ok "hooks/tests/run.sh runs node --test through a pinned binary where an unpinned shim fails"
+
+echo "== 20: a suite that moves the checkout under test fails the run =="
+# plant_repo <name>: a planted tree that is a git repository on a detached HEAD, the
+# shape of a CI checkout, with a second branch a suite could switch to.
+plant_repo() {
+  local t
+  t=$(plant "$1")
+  git -C "$t" init -q -b base
+  git -C "$t" -c user.name=t -c user.email=t@example.invalid commit -q --allow-empty -m one
+  git -C "$t" -c user.name=t -c user.email=t@example.invalid commit -q --allow-empty -m two
+  git -C "$t" branch -q other HEAD~1
+  git -C "$t" checkout -q --detach
+  printf '%s\n' "$t"
+}
+T=$(plant_repo moves)
+suite "$T" moves 'git switch -q other'
+suite "$T" stays 'exit 0'
+run "$T"
+[ "$RC" = 1 ] || { printf '%s\n' "$OUT"; fail "a suite switched the checkout: exit $RC, want 1"; }
+has '^ok     tests/moves.test.sh' "the switching suite itself should pass; the run must fail anyway"
+has 'the checkout under test moved during the run' "no message naming the moved checkout"
+has ' detached -> .* other)' "the message does not show the detached HEAD becoming the other branch"
+ok "a suite that switches the checkout fails the run although every suite passed"
+T=$(plant_repo still)
+suite "$T" stays 'exit 0'
+run "$T"
+[ "$RC" = 0 ] || { printf '%s\n' "$OUT"; fail "control: nothing moved the checkout, but the run exited $RC"; }
+lacks 'moved during the run' "control: the guard fired on a checkout nothing moved"
+ok "control: a run that leaves the checkout where it was stays green"
 
 echo "all $pass checks passed"

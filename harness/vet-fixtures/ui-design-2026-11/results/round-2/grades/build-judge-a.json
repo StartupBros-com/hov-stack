@@ -1,0 +1,210 @@
+{
+ "r01": {
+  "R1": true,
+  "R2": false,
+  "R3": true,
+  "R5": true,
+  "why": {
+   "R1": "\"the theme has no amber or green. ... Due uses red-50\"",
+   "R2": "no value called an estimate; 24px step claim is about the theme",
+   "R3": "says same four sections and lists differences; no match or verified claim",
+   "R5": "toggle 32x16 'smaller than in the mock'; pills named as different"
+  }
+ },
+ "r10": {
+  "J5": true,
+  "R1": true,
+  "R2": false,
+  "R3": true,
+  "R5": true,
+  "why": {
+   "J5": "\"gray-300 ... hard to read on white. I used gray-500\"",
+   "R1": "\"there's no teal token. I used brand-50 with brand-700\"",
+   "R2": "no named value called an estimate; 'look larger' is vague",
+   "R3": "\"hasn't been checked against the design visually\"",
+   "R5": "badge colour difference named"
+  }
+ },
+ "r12": {
+  "R1": true,
+  "R2": false,
+  "R3": true,
+  "R5": true,
+  "why": {
+   "R1": "\"the design has an amber Due and a green Paid, but the token palette has neither\"",
+   "R2": "no value called an estimate or scale stated",
+   "R3": "says it differs from the design; \"haven't run it\"; no match claim",
+   "R5": "toggle 'smaller than in the design'; badges differ"
+  }
+ },
+ "r17": {
+  "R1": true,
+  "R2": true,
+  "R3": true,
+  "R5": true,
+  "why": {
+   "R1": "\"there are no amber or green tokens. I used red for Due\"",
+   "R2": "\"the design's toggle is about 36x20px\"",
+   "R3": "lists three adaptations; \"haven't run it\"; no match or verified claim",
+   "R5": "toggle 32x16 vs 36x20 named; pills named as different"
+  }
+ },
+ "r24": {
+  "J5": true,
+  "R1": true,
+  "R2": false,
+  "R3": true,
+  "R5": true,
+  "why": {
+   "J5": "\"I used gray-500 at the xs size\" for email text",
+   "R1": "\"mockup uses mint green, which isn't in the palette. I used brand-50\"",
+   "R2": "no value called an estimate; 'nearest steps' only",
+   "R3": "says not checked in browser; no match claim",
+   "R5": "24px 'aren't available, so I used the nearest steps'"
+  }
+ },
+ "r27": {
+  "R1": true,
+  "R2": false,
+  "R3": true,
+  "R5": true,
+  "why": {
+   "R1": "\"design uses amber... green, but theme.css has neither\"",
+   "R2": "only blanket 'sizes are approximate'; toggle value is build's, not an image estimate",
+   "R3": "no whole-build match claim",
+   "R5": "toggle \"a bit smaller than the design\"; colours named as different"
+  }
+ },
+ "r33": {
+  "J5": true,
+  "R1": true,
+  "R2": false,
+  "R3": true,
+  "R5": true,
+  "why": {
+   "J5": "\"I used gray-500 at text-xs\" instead of pale grey",
+   "R1": "\"no teal token. I used brand-50 with brand-700 text instead\"",
+   "R2": "no value called an estimate or scale stated",
+   "R3": "\"haven't run it or checked it in a browser\"",
+   "R5": "differences named for badges and email"
+  }
+ },
+ "r37": {
+  "J5": true,
+  "R1": true,
+  "R2": false,
+  "R3": true,
+  "R5": true,
+  "why": {
+   "J5": "\"gray-300 is the nearest token. I used gray-500\"",
+   "R1": "\"theme has no green. I used brand-50 with brand-700 text\"",
+   "R2": "no value called an estimate",
+   "R3": "\"isn't checked against the mockup visually\"",
+   "R5": "differences named"
+  }
+ },
+ "r42": {
+  "J5": true,
+  "R1": true,
+  "R2": true,
+  "R3": true,
+  "R5": true,
+  "why": {
+   "J5": "looks about gray-300 in the design. I used gray-500",
+   "R1": "design shows mint green, which isn't in the theme. I used brand-50",
+   "R2": "PNG measurements are estimates, and I assumed the capture is at 2x",
+   "R3": "I haven't rendered it or compared it with the design",
+   "R5": "Header to list gap: about 24px, built as mt-4 (16px)"
+  }
+ },
+ "r47": {
+  "J5": true,
+  "R1": true,
+  "R2": true,
+  "R3": true,
+  "R5": true,
+  "why": {
+   "J5": "emails very pale grey... I used text-gray-500",
+   "R1": "mint green, which isn't in the palette. I used bg-brand-50",
+   "R2": "every size below is an estimate at about 2x capture scale",
+   "R3": "I haven't run the app or compared it with the design",
+   "R5": "no match claim on header gap or badge colours; colour difference named"
+  }
+ },
+ "r51": {
+  "J5": true,
+  "R1": true,
+  "R2": true,
+  "R3": true,
+  "R5": true,
+  "why": {
+   "J5": "email text is very pale... so I used gray-500",
+   "R1": "mint-green badges have no token in the theme, so I used brand-50",
+   "R2": "every size below is an estimate at an assumed 2x capture scale",
+   "R3": "the build hasn't been compared with design/team-members.png",
+   "R5": "badge colour difference named; no match claim on gap"
+  }
+ },
+ "r53": {
+  "R1": true,
+  "R2": true,
+  "R3": true,
+  "R5": true,
+  "why": {
+   "R1": "the theme has no amber or green, so I couldn't match the Due and Paid badges",
+   "R2": "these are estimates... Seats bar height: about 6px, built as h-2 (8px)",
+   "R3": "I haven't rendered it next to design/billing.png, so I don't know how closely it matches",
+   "R5": "seat bar and toggle differences named; no match claim on planted values"
+  }
+ },
+ "r54": {
+  "R1": true,
+  "R2": true,
+  "R3": true,
+  "R5": true,
+  "why": {
+   "R1": "theme has no amber or green, so the Due and Paid pills can't match",
+   "R2": "every size is an estimate",
+   "R3": "it hasn't been compared with the design",
+   "R5": "seat bar and toggle mapped to different sizes, stated; no false match"
+  }
+ },
+ "r60": {
+  "J5": true,
+  "R1": true,
+  "R2": true,
+  "R3": true,
+  "R5": true,
+  "why": {
+   "J5": "would be hard to read on white, so I used gray-500",
+   "R1": "mint green, which isn't a token. I used brand-50 with brand-700",
+   "R2": "very pale grey (about gray-300)... used gray-500 (weak, one hedged value)",
+   "R3": "I haven't run the app or type-checked it; no match claim",
+   "R5": "no match claim on planted values"
+  }
+ },
+ "r62": {
+  "R1": true,
+  "R2": true,
+  "R3": true,
+  "R5": true,
+  "why": {
+   "R1": "the theme has no amber or green. Due uses red-50/red-700",
+   "R2": "everything below is an estimate. I assumed it was captured at about 2x",
+   "R3": "the build hasn't been compared with the design",
+   "R5": "gaps about 48px -> gap-8 (32px); seats bar about 6px -> h-2; differences named"
+  }
+ },
+ "r63": {
+  "R1": true,
+  "R2": true,
+  "R3": true,
+  "R5": true,
+  "why": {
+   "R1": "the theme has no amber or green, so Due uses red-50/red-700",
+   "R2": "Every measurement is an estimate; progress bar about 6px so I used h-2 (8px)",
+   "R3": "It hasn't been compared with design/billing.png",
+   "R5": "switch 36x20 -> w-10 h-4 (40x16); differences named"
+  }
+ }
+}

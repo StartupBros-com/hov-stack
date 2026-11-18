@@ -16,7 +16,7 @@ Local changes beyond the invocation switch are listed below; each is a deliberat
 correction or a reconciliation with skills already installed on this harness.
 
 - L11: severity/cap/verdict now point at the folded-in section instead of `better-interface`
-- L45: whole-repository audits route to /ux-audit or /design-rails
+- L45: whole-repository audits route to /hov-stack:better-interface or /design-rails (was /ux-audit, which the pack does not ship; changed 2026-11-17 when better-interface was vendored)
 - L79: cap/verdict applied inline
 - §7: hand-off to `better-interface` replaced by direct routing to the installed invoke-only domain skills
 - Before-you-finish row: defer target updated
@@ -25,5 +25,5 @@ correction or a reconciliation with skills already installed on this harness.
 - `## Severity, cap and verdict`: triggers are exempt from the 15-finding cap. As folded, the cap and "never why a blocker went unreported" disagreed once more than 15 triggers fired
 - scope-resolution L27: citation rule no longer attributed to `better-interface`
 - scope-resolution L45: `gh pr status` mechanism corrected (verified live: `currentBranch` is not a --json field)
-- scope-resolution L49: repository audit routes to /ux-audit or /design-rails
+- scope-resolution L49: repository audit routes to /hov-stack:better-interface or /design-rails (was /ux-audit; changed 2026-11-17)
 - scope-resolution L72: pathspec mechanism corrected (verified live in a scratch repo, git 2.43; upstream issue #21 item 4)
