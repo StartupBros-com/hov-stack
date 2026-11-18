@@ -7,7 +7,7 @@ bun = "latest"
 # >=2.6.2 or >=3.0.4 for the repaired bundle-verification logic. Do NOT pin an
 # exact 3.0.x here thinking it is safer -- that pins BELOW current and freezes
 # out later fixes.
-cosign = "3"
+cosign = "3.1.4"
 # dcg/install.sh and dcg-update.sh both verify release signatures with this and
 # refuse to proceed without it (dotfiles#513). Not optional on any machine that
 # installs or auto-updates the guard.
