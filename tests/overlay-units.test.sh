@@ -84,7 +84,7 @@ if [ -f "$HOME/enabled/example-disabled.timer" ] || grep -E -- '--user (enable|s
   fail 'disabled timer without on stays disabled'
 fi
 ok 'disabled timer without on stays disabled'
-grep -Fxq -- '--user enable --now example-report.timer' "$HOME/systemctl.log" || fail 'on timer not enabled with --now'
+grep -Fxq -- '--user enable --now -- example-report.timer' "$HOME/systemctl.log" || fail 'on timer not enabled with --now'
 ok 'enable activates the on timer with --now'
 
 printf 'old service\n' | write "$SYS/example-backup.service"
@@ -198,6 +198,13 @@ direct=$(foreign_units_with_overlay 'check-fleet-drift voxtype' "$units")
 [ "$register" = "$direct" ] || fail 'register readers disagree'
 [ "$register" = 'check-fleet-drift voxtype example-backup example-backup example-report example-enabled example-disabled' ] || fail "unexpected register: $register"
 ok 'both registers silently include accepted stems and exclude drop-ins and refused rows'
+printf '%s\n' $'example-each@.service\tservice' | write "$HOV_STACK_OVERLAY/units"
+register=$(foreign_units_register "$REPO/sync.sh" 2>&1)
+foreign_unit_listed example-each@daily "$register" || fail 'a registered template does not own its instance'
+foreign_unit_listed example-each@ "$register" || fail 'a registered template does not own itself'
+if foreign_unit_listed example-each "$register"; then fail 'a template owns the plain unit of its name'; fi
+if foreign_unit_listed example-other@daily "$register"; then fail 'an unregistered template instance is owned'; fi
+ok 'a template row owns its instances, and only its instances, through foreign_unit_listed'
 
 fresh
 declare_units
@@ -226,7 +233,7 @@ cp "$WORK/bin/systemctl" "$WORK/manager-stub"
 cat <<EOF | write "$WORK/bin/systemctl"
 #!/usr/bin/env bash
 case "\$*" in
-  '--user enable --now example-report.timer') exit 41 ;;
+  '--user enable --now -- example-report.timer') exit 41 ;;
 esac
 exec bash "$WORK/manager-stub" "\$@"
 EOF
@@ -251,6 +258,47 @@ run 0 role refresh
 [ ! -f "$CLAUDE_HOME/.hov-stack/units-reload-pending" ] || fail 'retry did not clear marker'
 [ "$(grep -c -- '--user daemon-reload' "$HOME/systemctl.log")" = 1 ] || fail 'pending-only retry did not reload once'
 ok 'failed reload retains marker and unchanged retry recovers it'
+
+fresh
+tracked=$REPO/harnesses/pi/systemd/user/pi-local-champion-tunnel.service
+cp "$tracked" "$WORK/tracked-before"
+ln -s "$tracked" "$SYS/pi-local-champion-tunnel.service"
+printf '%s\n' $'pi-local-champion-tunnel.service\tservice' \
+  $'wt-sweep.service.d/50-hygiene-posture.conf\tdropin' \
+  $'docker-hygiene.timer.d/50-hygiene-posture.conf\tdropin' \
+  $'wt-sweep.service.d/example.conf\tdropin' | write "$HOV_STACK_OVERLAY/units"
+run 0 role enable
+contains 'overlay units: line 1: collision with a path lib/manifest.sh owns'
+contains 'overlay units: line 2: collision with a path the hygiene posture owns'
+contains 'overlay units: line 3: collision with a path the hygiene posture owns'
+cmp -s "$WORK/tracked-before" "$tracked" || fail 'an overlay row wrote through the manifest link into the tracked file'
+[ -L "$SYS/pi-local-champion-tunnel.service" ] || fail 'the manifest link was replaced'
+[ ! -e "$SYS/wt-sweep.service.d/50-hygiene-posture.conf" ] || fail 'the overlay installed a hygiene-posture drop-in'
+cmp -s "$SYS/wt-sweep.service.d/example.conf" "$HOV_STACK_OVERLAY/dropin" || fail 'another drop-in on a hygiene unit was refused'
+ok 'rows naming a manifest-linked unit or a generated hygiene drop-in are refused; other drop-ins install'
+
+fresh
+printf 'outside\n' | write "$WORK/outside-unit.service"
+mkdir -p "$WORK/outside-dir"
+ln -s "$WORK/outside-unit.service" "$SYS/example-linked.service"
+printf '%s\n' $'example-linked.service\tservice' | write "$HOV_STACK_OVERLAY/units"
+run 1 role enable
+contains 'refusing overlay unit outside user unit directory: example-linked.service'
+[ "$(cat "$WORK/outside-unit.service")" = outside ] || fail 'enable wrote through a symlink out of the unit directory'
+ln -s "$WORK/outside-dir" "$SYS/example-linkdir.service.d"
+printf '%s\n' $'example-linkdir.service.d/override.conf\tdropin' | write "$HOV_STACK_OVERLAY/units"
+run 1 role enable
+contains 'refusing overlay unit outside user unit directory: example-linkdir.service.d/override.conf'
+[ ! -e "$WORK/outside-dir/override.conf" ] || fail 'enable wrote into a drop-in directory linked out of the unit directory'
+ok 'enable refuses an overlay destination that resolves outside the unit directory'
+
+fresh
+printf '%s\n' $'-example-dash.timer\ttimer\ton' | write "$HOV_STACK_OVERLAY/units"
+run 0 role enable
+[ -f "$HOME/enabled/-example-dash.timer" ] || fail 'a timer whose name starts with - was not enabled'
+run 0 role check
+[[ "$output" != *'overlay timer -example-dash.timer is not enabled'* ]] || fail 'check misread an enabled timer whose name starts with -'
+ok 'a timer whose name starts with - reaches systemctl as an operand in enable and check'
 
 fresh
 for phase in enable refresh check; do run 0 role "$phase"; done

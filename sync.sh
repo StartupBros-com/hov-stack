@@ -2105,6 +2105,13 @@ install_user_units() {
   for index in "${!OVERLAY_UNIT_PATHS[@]}"; do
     u=${OVERLAY_UNIT_PATHS[$index]}
     mkdir -p "$(dirname "$SYS/$u")" || return 1
+    # The refresh path's containment check (role_unit_file): a destination that resolves
+    # outside the unit directory, through a symlinked unit or drop-in directory, is not
+    # written.
+    case "$(readlink -f "$SYS/$u")" in
+      "$(readlink -f "$SYS")"/*) ;;
+      *) echo "  refusing overlay unit outside user unit directory: $u" >&2; return 1 ;;
+    esac
     install_user_unit "$u" "${OVERLAY_UNIT_SOURCES[$index]}" || return 1
   done
 }
@@ -2251,7 +2258,8 @@ install_role_timers() {
   if [ "${#overlay_timers[@]}" -gt 0 ]; then
     if systemctl --user show-environment >/dev/null 2>&1; then
       # A failure is reported and held until the posture timers below have run.
-      if systemctl --user enable --now "${overlay_timers[@]}"; then
+      # --: an accepted name may start with -, which systemctl would read as an option.
+      if systemctl --user enable --now -- "${overlay_timers[@]}"; then
         echo "  overlay timers enabled: ${overlay_timers[*]}"
       else
         echo "  ERROR: could not enable overlay timers: ${overlay_timers[*]}" >&2
@@ -2340,7 +2348,7 @@ overlay_unit_timers_check() {
       reachable=1
     fi
     unit=${OVERLAY_UNIT_PATHS[$index]}
-    if ! systemctl --user is-enabled "$unit" >/dev/null 2>&1; then
+    if ! systemctl --user is-enabled -- "$unit" >/dev/null 2>&1; then
       echo "${1}overlay timer $unit is not enabled (./setup --enable-units)"
       result=1
     fi
@@ -2993,7 +3001,7 @@ check() {
       while read -r unit _; do
         [ -n "$unit" ] || continue
         case " $UNITS " in *" $unit "*) continue ;; esac
-        case " $UNITS_FOREIGN " in *" ${unit%.*} "*) continue ;; esac
+        if foreign_unit_listed "${unit%.*}" "$UNITS_FOREIGN"; then continue; fi
         # SAME DISEASE AS THE ENUMERATION, ONE LAYER DOWN. This used to suppress
         # errors and never test the status, so a `show` that failed returned an
         # empty FragmentPath, which then took the non-$HOME `continue` below --

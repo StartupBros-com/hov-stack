@@ -87,7 +87,7 @@ failed_unit_sweep() {
       else
         printf 'BROKEN_UNALERTED\t%s\t%s\n' "$unit" "shipped here and wired to nothing"
       fi
-    elif grep -qF " $base " <<<" $foreign "; then
+    elif foreign_unit_listed "$base" "$foreign"; then
       printf 'FOREIGN\t%s\t%s\n' "$unit" "declared foreign in sync.sh UNITS_FOREIGN"
     else
       printf 'UNOWNED\t%s\t%s\n' "$unit" "live on this box and declared nowhere"

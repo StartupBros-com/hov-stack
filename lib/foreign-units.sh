@@ -44,6 +44,18 @@ foreign_units_with_overlay() {
   printf '%s\n' "$list"
 }
 
+# foreign_unit_listed STEM REGISTER: true when STEM, a unit name without its type
+# suffix, is in the space-separated REGISTER, or is an instance (foo@bar) of a template
+# the register names as foo@. All three readers match through this, so a registered
+# template owns its instances in each of them.
+foreign_unit_listed() {
+  case " $2 " in *" $1 "*) return 0 ;; esac
+  case $1 in
+    ?*@?*) case " $2 " in *" ${1%%@*}@ "*) return 0 ;; esac ;;
+  esac
+  return 1
+}
+
 # foreign_units_register SYNC_SH: the static UNITS_FOREIGN line of SYNC_SH with the
 # overlay's names appended. Prints nothing when that line is missing, so a reader that
 # needs the register still fails closed on a sync.sh it cannot parse.
