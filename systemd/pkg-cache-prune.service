@@ -6,7 +6,13 @@ OnFailure=harness-unit-failure-alert@%n.service
 
 [Service]
 Type=oneshot
-TimeoutStartSec=20m
+# 30m since 2026-11-17 (#697). Two runs that day measured the busy path: pnpm
+# and npm about 1 min each, the uv size step about 2 min, then the full 900 s
+# UV_LOCK_TIMEOUT wait (uv stayed busy both times). That is about 19 min before
+# the huggingface lane, and the second run was killed at the old 20m limit
+# with that lane unrun. 30m covers the busy path. A uv prune that actually gets
+# the lock on a 25G cache has never been timed.
+TimeoutStartSec=30m
 # Promoted DRY_RUN=1 -> 0 (2026-08-16) after the first observe run:
 # all three commands are the package managers' own safe cache-GC entry points
 # (pnpm store prune / npm cache verify / uv cache prune — none touch anything a
@@ -33,7 +39,7 @@ Environment=PATH=%h/.local/bin:%h/.local/share/mise/shims:/usr/local/sbin:/usr/l
 # First live run (2026-08-18) lost the 29G uv cache to a lock timeout: uv's
 # default lock wait is 300s and this box's agent fleet keeps uv busy even at
 # 01:41. 900s outwaits routine contention while still fitting inside
-# TimeoutStartSec=20m alongside the pnpm/npm passes; on a genuinely wedged
+# TimeoutStartSec (see its note above) alongside the pnpm/npm passes; on a genuinely wedged
 # lock the run still fails visibly (unit goes red) rather than forcing it —
 # `uv cache prune --force` could race a live writer, so we wait, not seize.
 Environment=UV_LOCK_TIMEOUT=900
