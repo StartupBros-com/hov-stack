@@ -38,13 +38,13 @@
         "source": "git-subdir",
         "url": "https://github.com/StartupBros-com/hov-stack.git",
         "path": "plugins/pro-gate",
-        "sha": "7dbcde4f612b05ae380385805503703ec55a4adf"
+        "sha": "a5993284b5feb58e551272f9e1ec406c50e417ff"
       },
       "description": "Run a final pull request review using the Pro model selected by your ChatGPT account, with guided runtime setup and no automatic merge.",
       "metadata": {
-        "version": "0.65.9",
-        "releaseId": 446520591,
-        "releaseTag": "pro-gate--v0.65.9"
+        "version": "0.65.10",
+        "releaseId": 449478466,
+        "releaseTag": "pro-gate--v0.65.10"
       },
       "card": {
         "rows": [
