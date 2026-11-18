@@ -75,6 +75,11 @@ lists a path outside its run dir is void and re-run under a new number. The runn
 the slash commands sent, any that did not resolve, every skill the Skill tool loaded, and any
 permission refusal; those logs are diffed across arms before scoring.
 
+The seed's `package.json` is committed as `package.json.fixture`, so GitHub's dependency graph does
+not list the fake app as a dependency of this repository and raise alerts on its pinned vite.
+`make_runs.py` (and ui-design's) copies the seed with `../fixture_seed.py`, which puts the real name
+back, so a run dir holds the same files as before the rename.
+
 ## Pilot and calibration (not scored)
 
 - **Pilot** (one t1 run per arm, skills as user skills, no pack): no shell calls, no permission

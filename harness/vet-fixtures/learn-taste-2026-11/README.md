@@ -197,3 +197,10 @@ environment is emptied except PATH and the model-route variables, which pass
 by name. `sessions.py` builds the repo by replaying the planted session onto
 `seed/`, and it fails if any edit's old text is not found exactly once.
 Everything in `seed/` and `sessions.py` is synthetic.
+
+`seed/acme-notes/package.json` is committed as `package.json.fixture`, so
+GitHub's dependency graph and Renovate leave the fake app alone; `sessions.py`
+copies the seed with `../fixture_seed.py`, which puts the real name back. It
+holds the versions the vet ran: vite 5.4.10, the version the planted session's
+build and dev logs print, and postcss 8.4.47. Renovate had raised both (#708,
+#709, #727) before the rename.
