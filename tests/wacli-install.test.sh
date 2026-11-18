@@ -18,6 +18,7 @@ cat >"$TMP/bin/curl" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
 out=
+[ -z "${WACLI_TEST_CURL_LOG:-}" ] || printf 'curl invoked\n' >>"$WACLI_TEST_CURL_LOG"
 while (($#)); do
   if [ "$1" = -o ]; then
     shift
@@ -306,7 +307,7 @@ out=$(run_installer "$ROOT" "$GOOD_ARCHIVE" "$GOOD_ARCHIVE_SHA" "$GOOD_BINARY_SH
 if [ "$status" -eq 0 ]; then ok; else bad "readable non-wacli peer metadata blocked install: $out"; fi
 
 # A zombie cannot execute and legitimately has an empty cmdline/exe. Readable
-# State=Z is the sole metadata-free peer exception.
+# State=Z is positive evidence that the peer can no longer execute.
 ROOT=$TMP/case-readable-zombie-peer
 mkdir -p "$ROOT/proc/2224"
 printf 'zombie\n' >"$ROOT/proc/2224/comm"
@@ -314,6 +315,175 @@ printf 'zombie\n' >"$ROOT/proc/2224/comm"
 printf 'Name:\tzombie\nState:\tZ (zombie)\n' >"$ROOT/proc/2224/status"
 out=$(run_installer "$ROOT" "$GOOD_ARCHIVE" "$GOOD_ARCHIVE_SHA" "$GOOD_BINARY_SHA" 9.9.9 2>&1); status=$?
 if [ "$status" -eq 0 ]; then ok; else bad "readable zombie peer blocked install: $out"; fi
+
+# Mutate only fake /proc files immediately after the real Bash read.
+# This makes exit races deterministic without sleeps or timing assumptions in
+# the tests, and does not replace any installer decision or read result.
+cat >"$TMP/proc-race-env" <<'SH'
+read() {
+  local read_status=0 reads=0
+  builtin read "$@" || read_status=$?
+  if [ "$#" -eq 2 ] && [ "$1" = -r ] && [ "$2" = comm ]; then
+    [ ! -f "$WACLI_INSTALL_TEST_ROOT/metadata-reads" ] \
+      || reads=$(cat "$WACLI_INSTALL_TEST_ROOT/metadata-reads")
+    reads=$((reads + 1))
+    printf '%s\n' "$reads" >"$WACLI_INSTALL_TEST_ROOT/metadata-reads"
+    case $WACLI_PROC_EVENT in
+      vanished) rm -rf "$WACLI_INSTALL_TEST_ROOT/proc/2225" ;;
+      dead-on-retry)
+        if [ "$reads" -eq 2 ]; then
+          printf 'State:\tX (dead)\n' >"$WACLI_INSTALL_TEST_ROOT/proc/2225/status"
+        fi
+        ;;
+      wacli-on-retry)
+        if [ "$reads" -eq 2 ]; then
+          printf '/opt/wacli\0sync\0' >"$WACLI_INSTALL_TEST_ROOT/proc/2225/cmdline"
+        fi
+        ;;
+      readable-on-retry)
+        if [ "$reads" -eq 2 ]; then
+          printf '/usr/bin/peer\0' >"$WACLI_INSTALL_TEST_ROOT/proc/2225/cmdline"
+        fi
+        ;;
+    esac
+  fi
+  return "$read_status"
+}
+SH
+
+cat >"$TMP/bin/systemctl" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$WACLI_INSTALL_TEST_ROOT/systemctl-calls"
+[ "$*" = '--user is-active wacli-sync.service' ] && exit 3
+exit 91
+SH
+
+make_ambiguous_peer() {
+  mkdir -p "$ROOT/proc/2225"
+  printf 'peer\n' >"$ROOT/proc/2225/comm"
+  : >"$ROOT/proc/2225/cmdline"
+  printf 'State:\tD (disk sleep)\n' >"$ROOT/proc/2225/status"
+}
+
+run_peer_preflight() {
+  out=$(run_installer_mode preflight "$ROOT" "$GOOD_ARCHIVE" "$GOOD_ARCHIVE_SHA" \
+    "$GOOD_BINARY_SHA" 9.9.9 env BASH_ENV="$TMP/proc-race-env" \
+    WACLI_PROC_EVENT="${1:-none}" CURL_SHOULD_FAIL=1 \
+    WACLI_TEST_CURL_LOG="$ROOT/curl-called" 2>&1); status=$?
+  if [ ! -e "$ROOT/curl-called" ] && [ ! -e "$ROOT/bin" ] \
+     && [ ! -e "$ROOT/lib" ] && [ ! -e "$ROOT/backups" ] \
+     && [ "$(cat "$ROOT/systemctl-calls")" = '--user is-active wacli-sync.service' ]; then
+    ok
+  else
+    bad "preflight fixture ${ROOT##*/} downloaded, installed, or controlled a service"
+  fi
+}
+
+peer_ok() { ok; printf 'ok — %s\n' "$1"; }
+
+for dead_state in X x; do
+  ROOT=$TMP/case-dead-peer-$dead_state
+  make_ambiguous_peer
+  printf 'State:\t%s (dead)\n' "$dead_state" >"$ROOT/proc/2225/status"
+  run_peer_preflight
+  if [ "$status" -eq 0 ]; then
+    peer_ok "dead State=$dead_state peer completes proof"
+  else
+    bad "dead State=$dead_state peer blocked preflight: $out"
+  fi
+done
+
+# A process can lose comm before the dead state becomes observable, too.
+ROOT=$TMP/case-dead-peer-missing-comm
+make_ambiguous_peer
+rm "$ROOT/proc/2225/comm"
+printf 'State:\tX (dead)\n' >"$ROOT/proc/2225/status"
+run_peer_preflight
+if [ "$status" -eq 0 ]; then peer_ok 'dead peer with missing comm completes proof'; else bad "dead peer with missing comm blocked preflight: $out"; fi
+
+for comm_result in success failure; do
+  ROOT=$TMP/case-vanished-peer-$comm_result
+  make_ambiguous_peer
+  # No newline makes Bash read return 1, with the directory removed afterward.
+  [ "$comm_result" != failure ] || printf 'peer' >"$ROOT/proc/2225/comm"
+  run_peer_preflight vanished
+  if [ "$status" -eq 0 ] && [ ! -d "$ROOT/proc/2225" ]; then
+    peer_ok "vanished peer after comm read $comm_result completes proof"
+  else
+    bad "vanished peer after comm read $comm_result blocked preflight: $out"
+  fi
+done
+
+ROOT=$TMP/case-vanished-only-peer
+make_ambiguous_peer
+WACLI_TEST_SKIP_PROC_FIXTURE=1 run_peer_preflight vanished
+if [ "$status" -ne 0 ] && [ ! -d "$ROOT/proc/2225" ] \
+   && [[ $out == *'/proc could not prove'* ]]; then
+  peer_ok 'vanished-only proc tree still requires readable evidence'
+else
+  bad "vanished-only proc tree was not refused: $out"
+fi
+
+for event in dead-on-retry readable-on-retry; do
+  ROOT=$TMP/case-peer-$event
+  make_ambiguous_peer
+  run_peer_preflight "$event"
+  if [ "$status" -eq 0 ] && [ "$(cat "$ROOT/metadata-reads")" -eq 2 ]; then
+    peer_ok "$event completes proof after rereading"
+  else
+    bad "$event did not resolve on the second read: $out"
+  fi
+done
+
+ROOT=$TMP/case-persistent-ambiguous-peer
+make_ambiguous_peer
+run_peer_preflight
+if [ "$status" -ne 0 ] && [ "$(cat "$ROOT/metadata-reads")" -eq 3 ] \
+   && [[ $out == *'pid 2225: empty or unreadable cmdline, state D after 3 reads'* ]] \
+   && [[ $out == *'/proc could not prove'* ]]; then
+  peer_ok 'persistent ambiguity fails closed with bounded reads and PID/reason'
+else
+  bad "persistent ambiguity did not fail closed after three reads with details: $out"
+fi
+
+# No dead state or readable comm means an incomplete proof, even with argv0.
+ROOT=$TMP/case-persistent-missing-comm
+make_ambiguous_peer
+rm "$ROOT/proc/2225/comm"
+printf '/usr/bin/peer\0' >"$ROOT/proc/2225/cmdline"
+run_peer_preflight
+if [ "$status" -ne 0 ] && [[ $out == *'pid 2225: unreadable comm after 3 reads'* ]] \
+   && [[ $out == *'/proc could not prove'* ]]; then
+  peer_ok 'persistent missing comm still fails closed'
+else
+  bad "persistent missing comm was not refused: $out"
+fi
+
+# Positive argv0 evidence takes priority, even over a stale dead-state sample.
+for argv0 in wacli /opt/wacli; do
+  ROOT=$TMP/case-wacli-argv-${argv0##*/}-${#argv0}
+  make_ambiguous_peer
+  printf '%s\0sync\0' "$argv0" >"$ROOT/proc/2225/cmdline"
+  printf 'State:\tX (dead)\n' >"$ROOT/proc/2225/status"
+  run_peer_preflight
+  if [ "$status" -ne 0 ] && [[ $out == *'another wacli process is running'* ]]; then
+    peer_ok "running argv0 $argv0 still blocks preflight"
+  else
+    bad "running argv0 $argv0 was not detected: $out"
+  fi
+done
+
+ROOT=$TMP/case-wacli-on-retry
+make_ambiguous_peer
+run_peer_preflight wacli-on-retry
+if [ "$status" -ne 0 ] && [ "$(cat "$ROOT/metadata-reads")" -eq 2 ] \
+   && [[ $out == *'another wacli process is running'* ]]; then
+  peer_ok 'running wacli discovered on reread still blocks preflight'
+else
+  bad "running wacli on reread was not detected: $out"
+fi
+
+write_inactive_systemctl
 
 # A host without systemctl uses the same process proof rather than skipping it.
 ROOT=$TMP/case-no-systemctl-clean
