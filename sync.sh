@@ -991,7 +991,9 @@ papercut_plugin_active() {
 # without the plugin, a fresh host captures no failures. Left alone: an explicit
 # enabledPlugins["papercut@hov"] = false (a choice; harness-doctor section 19 still
 # reports the dead capture), a host with no claude CLI, and adding the hov marketplace
-# (./setup's job; adding a marketplace trusts a new source).
+# (./setup's job; adding a marketplace trusts a new source). While the CLI lists no hov
+# marketplace, the install is left to setup's marketplace and plugins steps, which run
+# after these owner steps in the same ./setup and add hov, then papercut (#754).
 # CLAUDE_SYNC_CLAUDE_BIN names the claude CLI to run (default: the one on PATH); a
 # path that is not executable counts as no CLI. Returns 1 when the CLI is there and
 # the install or enable failed; `role owner` then finishes and exits 3.
@@ -1008,7 +1010,7 @@ papercut_claude() {
   fi
 }
 ensure_papercut_plugin() {
-  local claude registry verb out rc=0
+  local claude registry verb out market listed rc=0
   local -a run=()
   PAPERCUT_INSTALL_ERROR=
   if papercut_plugin_active; then
@@ -1028,12 +1030,21 @@ ensure_papercut_plugin() {
     echo "  papercut: no claude CLI${claude:+ at $claude}, so $PAPERCUT_PLUGIN_ID was not installed (install Claude Code, then re-run ./setup)"
     return 0
   fi
+  command -v timeout >/dev/null 2>&1 && run=(timeout 300)
   registry=${CLAUDE_INSTALLED_PLUGINS:-$H/plugins/installed_plugins.json}
   verb=install
   [ -f "$registry" ] \
     && jq -e --arg id "$PAPERCUT_PLUGIN_ID" '(.plugins[$id] // []) | any(.scope == "user")' "$registry" >/dev/null 2>&1 \
     && verb=enable
-  command -v timeout >/dev/null 2>&1 && run=(timeout 300)
+  # An install needs the marketplace. Only a list the CLI returned that lacks it defers;
+  # a list it could not give falls through to the install, which reports its own failure.
+  market=${PAPERCUT_PLUGIN_ID#*@}
+  if [ "$verb" = install ] \
+    && listed=$(papercut_claude "${run[@]}" "$claude" plugin marketplace list --json </dev/null 2>/dev/null) \
+    && jq -e --arg m "$market" 'type == "array" and all(.[]; .name != $m)' <<<"$listed" >/dev/null 2>&1; then
+    echo "  papercut: the $market marketplace is not added yet, so $PAPERCUT_PLUGIN_ID was left to ./setup's marketplace and plugins steps, which add it and install the plugin"
+    return 0
+  fi
   echo "  papercut: claude plugin $verb $PAPERCUT_PLUGIN_ID --scope user"
   out=$(papercut_claude "${run[@]}" "$claude" plugin "$verb" "$PAPERCUT_PLUGIN_ID" --scope user </dev/null 2>&1) || rc=$?
   [ -n "$out" ] && printf '%s\n' "$out" | sed 's/^/    /'
