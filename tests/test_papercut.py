@@ -63,6 +63,13 @@ class PapercutBase(unittest.TestCase):
         base.update(kw)
         return base
 
+    def run_rollup(self, *argv):
+        env = dict(os.environ, PAPERCUT_STORE=str(self.store))
+        return subprocess.run(
+            [sys.executable, str(PAPERCUT), "rollup", *argv],
+            capture_output=True, text=True, timeout=30, check=False, env=env,
+        )
+
 
 class TestReadRecords(PapercutBase):
     def test_window_excludes_older_records(self):
@@ -195,13 +202,6 @@ class TestAddCommand(PapercutBase):
 
 
 class TestRollup(PapercutBase):
-    def run_rollup(self, *argv):
-        env = dict(os.environ, PAPERCUT_STORE=str(self.store))
-        return subprocess.run(
-            [sys.executable, str(PAPERCUT), "rollup", *argv],
-            capture_output=True, text=True, timeout=30, check=False, env=env,
-        )
-
     def test_emits_the_toast_counter_even_when_empty(self):
         out = self.run_rollup("--days", "7").stdout
         self.assertIn("papercuts-flagged:0", out,
@@ -1644,13 +1644,6 @@ class TestQuarantineRank(PapercutBase):
 
 
 class TestQuarantineRollup(PapercutBase):
-    def run_rollup(self, *argv):
-        env = dict(os.environ, PAPERCUT_STORE=str(self.store))
-        return subprocess.run(
-            [sys.executable, str(PAPERCUT), "rollup", *argv],
-            capture_output=True, text=True, timeout=30, check=False, env=env,
-        )
-
     def test_quarantined_is_excluded_from_flagged_rows_and_counter(self):
         # Planted negative: the two signatures differ ONLY in quarantine
         # classification — identical sessions, counts, and window.
@@ -5339,13 +5332,6 @@ class TestFixtureReadRecords(PapercutBase):
 
 
 class TestFixtureRollup(PapercutBase):
-    def run_rollup(self, *argv):
-        env = dict(os.environ, PAPERCUT_STORE=str(self.store))
-        return subprocess.run(
-            [sys.executable, str(PAPERCUT), "rollup", *argv],
-            capture_output=True, text=True, timeout=30, check=False, env=env,
-        )
-
     def test_fixture_volume_is_counted_never_ranked(self):
         # Five sessions of fixture records would clear the rollup threshold if
         # they counted; they must instead surface ONLY as the dropped counter.
