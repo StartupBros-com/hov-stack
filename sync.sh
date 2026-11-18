@@ -2583,11 +2583,15 @@ check() {
     if [ -L "$H/$d" ]; then
       examined=$((examined + 1))
       [ "$(readlink -f "$H/$d")" = "$(readlink -f "$HERE/$d")" ] ||
-        { echo "DRIFT: ~/.claude/$d is a symlink pointing outside the repo"; drift=1; }
+        { echo "DRIFT: ~/.claude/$d is a symlink pointing outside the repo (./setup relinks it)"; drift=1; }
     elif [ -d "$H/$d" ] && [ -d "$HERE/$d" ]; then
       examined=$((examined + 1))
+      # Every hint below names both directions. Which side is right is the
+      # reader's call: a live copy can hold something that must not reach this
+      # public repo (a hand-run codex hook once left session exports in a live
+      # claude-env.sh), so `sync.sh push` alone is never the whole answer.
       rsync -rcn --delete --out-format='%n' "$H/$d/" "$HERE/$d/" 2>/dev/null | grep -q . &&
-        { echo "DRIFT: $d/ differs from repo (not adopted, or symlink clobbered — sync.sh push or install)"; drift=1; }
+        { echo "DRIFT: $d/ differs from repo, and ~/.claude/$d is not linked to it (./setup links the repo's copy and moves this one to ~/.hov-stack-backups; or sync.sh push to record an intended live edit)"; drift=1; }
     fi
   done
   for f in $STABLE_FILES $VOLATILE_FILES; do
@@ -2755,9 +2759,22 @@ check() {
       [ -z "$settings_apply_check" ] || printf '%s\n' "$settings_apply_check"
       if [[ "$settings_apply_check" == *DRIFT:* ]]; then drift=1; fi
       rm -rf "$settings_tmp"
-    else
-      cmp -s "$H/$f" "$HERE/$f" ||
-        { echo "DRIFT: $f differs from repo copy (sync.sh push)"; drift=1; }
+    elif ! cmp -s "$H/$f" "$HERE/$f"; then
+      drift=1
+      if [ "$f" = "settings.json" ]; then
+        # Reached only without jq, which the key-aware comparison above needs.
+        echo "DRIFT: $f differs from repo copy (install jq for the key-aware check; sync.sh apply-settings takes the repo's entries; or sync.sh push to record an intended live edit)"
+      elif [[ " $STABLE_FILES " == *" $f "* ]]; then
+        # ./setup links these. push skips a link, so a link elsewhere has one fix.
+        if [ -L "$H/$f" ]; then
+          echo "DRIFT: ~/.claude/$f links outside the repo and differs from it (./setup relinks it)"
+        else
+          echo "DRIFT: $f differs from repo copy, and ~/.claude/$f is not linked to it (./setup links the repo's copy and moves this one to ~/.hov-stack-backups; or sync.sh push to record an intended live edit)"
+        fi
+      else
+        # Copied, not linked, and no setup step copies it back.
+        echo "DRIFT: $f differs from repo copy (cp $HERE/$f $H/$f takes the repo's; or sync.sh push to record an intended live edit)"
+      fi
     fi
   done
   if [ -f "$HERE/config/repo-routes.json" ]; then
@@ -2801,7 +2818,7 @@ check() {
     if [ ! -f "$SYS/$u" ]; then
       echo "DRIFT: systemd/$u is not installed (./setup --enable-units)"; drift=1
     elif ! cmp -s "$SYS/$u" "$HERE/systemd/$u"; then
-      echo "DRIFT: systemd/$u differs (sync.sh push)"; drift=1
+      echo "DRIFT: systemd/$u differs (./setup --enable-units installs the repo's copy; or sync.sh push to record an intended live edit)"; drift=1
     fi
   done
 
@@ -2952,7 +2969,7 @@ EOF_LIVE_UNITS
       rendered=$(mktemp) || exit 3
       render_system_unit "$HERE/systemd-system/$u" "$rendered"
       ! cmp -s "$SYSTEM_SYS/$u" "$rendered" &&
-        { echo "DRIFT: systemd-system/$u differs (sync.sh push)"; drift=1; }
+        { echo "DRIFT: systemd-system/$u differs (./setup --root installs the repo's copy; or sync.sh push to record an intended live edit)"; drift=1; }
       rm -f "$rendered"
     fi
   done
