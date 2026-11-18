@@ -170,6 +170,61 @@ export function reviewTextContext(text, marker, promptAt = null) {
   return { claims, verdict, mixed, review, promptAt };
 }
 
+// #744: finalization compares the answer on the page with the result file the engine accepted.
+// The page side is rendered text (readReviewText). The result side is what Oracle saved: rendered
+// text from a build that misses the page's copy button, or the copied markdown from one that finds
+// it (v0.23.1). Both sides go through this key, which removes only markup that rendering removes:
+// every backtick, asterisk, underscore and tilde (so pg_status and pgstatus key alike), backslash
+// escapes, link targets, table pipes, separator rows and rules, leading heading, quote, bullet and
+// list-number markers, fence lines, and runs of whitespace. A fence's language becomes a line of
+// its own, as the page shows it above the block, and the case of one short line (at most two
+// words) just before a quoted or fenced block is ignored, so ```bash and the page's "Bash" agree.
+// That deliberately widens a byte comparison and nothing more: words, digits and other
+// punctuation still count, and an empty key never matches. A language the page names differently
+// (sh against Bash) still refuses, which leaves the tab open as before.
+// It must stay self-contained: the in-page twin embeds it with toString().
+export function renderedReviewKey(value) {
+  const entries = [];
+  let fenced = false;
+  for (const raw of String(value ?? '').replace(/\r\n?/g, '\n').split('\n')) {
+    const fence = raw.match(/^\s*(?:```+|~~~+)\s*([^\s`~]*)/);
+    if (fence) {
+      if (!fenced && fence[1]) entries.push({ raw: fence[1], quoted: false });
+      fenced = !fenced;
+      continue;
+    }
+    // A fenced line renders inside <pre>, which readReviewText quotes line by line.
+    entries.push({ raw, quoted: fenced || /^\s*>/.test(raw) });
+  }
+  const clean = (raw) => {
+    let line = raw.replace(/\\([!-/:-@[-`{-~])/g, '$1').trim();
+    for (let before = ''; before !== line;) {
+      before = line;
+      line = line.replace(/^(?:>\s?|#{1,6}\s+|[-+*]\s+|\d+[.)]\s+)/, '').trim();
+    }
+    if (/^\|?\s*:?-+:?\s*(?:\|\s*:?-+:?\s*)*\|?$/.test(line) || /^(?:[-*_]\s*){3,}$/.test(line)) return '';
+    return line
+      .replace(/!?\[([^\]]*)\]\([^)\s]*(?:\s+"[^"]*")?\)/g, '$1')
+      .replace(/<((?:https?|mailto):[^>\s]*)>/g, '$1')
+      .replace(/[`*_~]/g, '')
+      .replace(/\|/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  };
+  const texts = entries.map((entry) => clean(entry.raw));
+  for (let i = 0; i < entries.length; i += 1) {
+    if (!entries[i].quoted || !texts[i]) continue;
+    let j = i - 1;
+    while (j >= 0 && !texts[j]) j -= 1;
+    // Only the line before a quoted run's first line, and only when it is short and unquoted.
+    if (j < 0 || entries[j].quoted) continue;
+    if (texts[j].length <= 24 && /^[A-Za-z][\w+#.-]*(?: [A-Za-z][\w+#.-]*)?$/.test(texts[j])) {
+      texts[j] = texts[j].toLowerCase();
+    }
+  }
+  return texts.filter(Boolean).join(' ');
+}
+
 function targetContext(marker, conversationUrl, {
   mutationToken,
   mutationExpiresAt,
@@ -271,6 +326,7 @@ function targetContext(marker, conversationUrl, {
     const readReviewText = ${readReviewText.toString()};
     const reviewVerdictClaims = ${reviewVerdictClaims.toString()};
     const reviewTextContext = ${reviewTextContext.toString()};
+    const renderedReviewKey = ${renderedReviewKey.toString()};
     const validateTarget = () => {
       if (!mutationLeaseActive()) return 'mutation-lease-expired';
       if (typeof location !== 'object' || location.href !== expectedUrl) return 'target-url-drift';
@@ -298,8 +354,12 @@ function targetContext(marker, conversationUrl, {
         const answerMarker = verdictLine.match(/\(run marker:\s*(pg-run-[A-Za-z0-9.-]+)\s*\)/i)?.[1] ?? null;
         if (!answerMarker) return 'target-answer-marker-missing';
         if (!sameMarker(answerMarker, expectedMarker)) return 'target-cross-bound';
+        // #744: compare rendered forms, the twin of cdp-salvage.mjs's finalizerOwnership.
         const renderedReview = context.review;
-        if (!renderedReview || normalizeReviewBytes(stripMarkerEcho(renderedReview)) !== expectedFinalReview) {
+        const pageKey = renderedReview
+          ? renderedReviewKey(normalizeReviewBytes(stripMarkerEcho(renderedReview)))
+          : '';
+        if (!pageKey || pageKey !== renderedReviewKey(expectedFinalReview)) {
           return 'target-result-mismatch';
         }
       }
@@ -494,8 +554,11 @@ export function buildRenameConversationExpression(title, {
     if (targetError) return { error: targetError };
     const menuButton = await ensureSidebarMenuButton();
     if (!menuButton) return { error: 'conversation-menu-not-found' };
+    // This template is not String.raw, so the regex escape is doubled: a bare \s here reached the
+    // page as "s" and turned every "s" in the sidebar title into a space, so a renamed title with
+    // an "s" never read as already renamed and the menu opened anyway.
     const sidebarTitle = String(findSidebarConversationLink()?.textContent ?? '')
-      .replace(/\s+/g, ' ').trim();
+      .replace(/\\s+/g, ' ').trim();
     if (sidebarTitle === expected) return { already: true };
     const menuError = guardedPress(menuButton);
     if (menuError) return { error: menuError };
