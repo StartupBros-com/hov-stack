@@ -33,6 +33,7 @@
 #   exited container older than EXITED_DAYS ............. docker rm <id>
 #   dangling (untagged, unreferenced) image ............. docker rmi <id>
 #   image unreferenced by any container ................. report only unless AGGRESSIVE=1
+#     (AGGRESSIVE=1: docker rmi <id>, or docker rmi <tag> once per tag when it has several)
 #   idle stack (every checkout quiet IDLE_DAYS) ......... report (STOP_IDLE=1 acts)
 #   orphan stack (no config.toml anywhere, no live cwd) . report (STOP_ORPHANS=1 acts)
 #   dangling Supabase volume, project undeclared, old ... report (REAP_VOLUMES=1 acts)
@@ -215,13 +216,28 @@ append_action_error_detail() {
   printf '%s\n' "$1" >>"$ACTION_ERRFILE" 2>/dev/null
 }
 
+# Folds a command's stderr (stdin) into one bounded line: the last 3 lines,
+# tabs and line ends as single spaces, at most the final 400 bytes. One line
+# because ACTION_ERRFILE holds one failure per line (see supabase_stop_captured
+# for why the end of the fold is the part kept).
+fold_stderr() {
+  tail -n 3 | tr '\r\n\t' '   ' | tr -s ' ' | tail -c 400 | sed 's/^[[:space:]]*//; s/[[:space:]]*$//'
+}
+
+# The command's stderr is kept for the FAILED line and the action detail:
+# discarding it left `!! FAILED: docker rmi sha256:...` with no cause (#741).
+# It is captured in memory rather than in a scratch file, so a full disk cannot
+# stop the action from running. stdout stays discarded (progress noise).
 run() {
+  local err rc
   if [ "$DRY_RUN" = 1 ]; then echo "      would: $*"; return 0; fi
-  if "$@" >/dev/null 2>&1; then echo "      ok: $*"; return 0
+  if err=$("$@" 2>&1 >/dev/null); then echo "      ok: $*"; return 0
   else
-    echo "      !! FAILED: $*"
+    rc=$?
+    err=$(printf '%s\n' "$err" | fold_stderr)
+    echo "      !! FAILED: $* (rc=$rc): ${err:-(no stderr)}"
     n_actionerr=$(( n_actionerr + 1 ))
-    append_action_error_detail "$*" || :
+    append_action_error_detail "$* rc=$rc stderr: ${err:-(no stderr)}" || :
     return 1
   fi
 }
@@ -231,6 +247,51 @@ run() {
 # This succeeds only for a real, successful action: every "removed" counter
 # is gated on it, never on run() itself.
 applied() { run "$@" && [ "$DRY_RUN" != 1 ]; }
+
+# AGGRESSIVE removal of one image no container referenced at the snapshot:
+# remove_unused_image <id> [<tag>...]. `docker rmi <id>` refuses an image with
+# two or more tags ("must be forced - image is referenced in multiple
+# repositories"), so that image failed every nightly run and paged (#741). It
+# goes one tag at a time instead: `docker rmi <tag>` drops that tag, and
+# dropping the last tag removes the image, so no -f is needed. The daemon checks
+# for containers only when the last tag goes; an earlier untag succeeds even
+# while a container uses the image. So containers are read again for this
+# image just before its first untag (the in-use snapshot predates the rest of
+# the run), and the image keeps every tag if one uses it or the read fails. The
+# loop stops at the first failed tag. Like applied(), this succeeds only for a
+# real, complete removal: an untag also succeeds when a digest reference from
+# another repository (a <none>-tag row, not a tag) keeps the image, so the image
+# counts only once it is gone from the listing.
+remove_unused_image() {
+  local id=$1 users tag short listed
+  shift
+  if [ "$#" -lt 2 ]; then applied docker rmi "$id"; return; fi
+  short=${id#sha256:}; short=${short:0:12}
+  if ! users=$(dock ps -a --no-trunc --filter "ancestor=$id" --format '{{.ID}}'); then
+    echo "      ~ keep $short ($# tags): container re-check failed"
+    return 1
+  fi
+  if [ -n "$users" ]; then
+    echo "      ~ keep $short ($# tags): a container now uses it"
+    return 1
+  fi
+  for tag in "$@"; do
+    run docker rmi "$tag" || return 1
+  done
+  [ "$DRY_RUN" = 1 ] && return 1
+  # -a: Docker 29's default listing hides an image with no tag left, which is
+  # exactly the image a digest reference would still hold.
+  if ! listed=$(dock images -a --no-trunc --format '{{.ID}}'); then
+    echo "      ~ $short: tags removed, but the image listing failed; not counted"
+    return 1
+  fi
+  # A here-string, not a pipe: under pipefail an early grep match can SIGPIPE
+  # the writer, and a still-listed image would read as gone.
+  if grep -Fxq -- "$id" <<<"$listed"; then
+    echo "      ~ $short: tags removed, but a digest reference still holds the image; not counted"
+    return 1
+  fi
+}
 
 report_scratch_failure() {
   echo "docker-hygiene: reporting scratch unavailable; no actions attempted"
@@ -1018,7 +1079,7 @@ supabase_stop_captured() {
     supabase stop --project-id "$proj" >/dev/null 2>"$errf"
   fi
   rc=$?
-  SUPABASE_STOP_STDERR=$(tail -n 3 "$errf" 2>/dev/null | tr '\r\n\t' '   ' | tr -s ' ' | tail -c 400 | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+  SUPABASE_STOP_STDERR=$(fold_stderr 2>/dev/null <"$errf")
   return "$rc"
 }
 
@@ -1210,11 +1271,22 @@ else
       echo "  AGGRESSIVE skipped: all-container image snapshot was incomplete; no tagged image removal is safe"
     else
       echo "  AGGRESSIVE=1 — removing images unreferenced by any container (in-use set snapshotted before any removal)"
-      while read -r id; do
+      # `docker images` prints one row per tag; group the rows by image. A
+      # <none> repository or tag is an untagged or digest-only row, not a tag.
+      declare -A IMG_TAGS=()
+      IMG_IDS=()
+      while IFS=$'\t' read -r id repo tag; do
         [ -z "$id" ] && continue
+        if [ -z "${IMG_TAGS[$id]+set}" ]; then IMG_IDS+=("$id"); IMG_TAGS[$id]=""; fi
+        case "$repo:$tag" in *'<none>'*|:) continue ;; esac
+        IMG_TAGS[$id]+="$repo:$tag "
+      done < <(dock images --no-trunc --format $'{{.ID}}\t{{.Repository}}\t{{.Tag}}' | sort -u)
+      for id in "${IMG_IDS[@]}"; do
         [ -n "${INUSE[$id]:-}" ] && continue
-        applied docker rmi "$id" && n_img=$(( n_img + 1 ))
-      done < <(dock images --no-trunc --format '{{.ID}}' | sort -u)
+        # Tags never contain whitespace, so the unquoted list splits exactly.
+        # shellcheck disable=SC2086
+        remove_unused_image "$id" ${IMG_TAGS[$id]} && n_img=$(( n_img + 1 ))
+      done
     fi
   else
     echo "  tagged-but-unused: ~${img_mb}MB reclaimable — NOT removed (re-pull/rebuild cost); AGGRESSIVE=1 to reclaim"

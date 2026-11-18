@@ -166,6 +166,15 @@ case "${1:-}" in
     if [ "$scenario" = inuse-snapshot-fail ] && [ "${2:-}" = -aq ] && [ -z "${3:-}" ]; then
       exit 1
     fi
+    # The per-image container re-check before a multi-tag image's first untag
+    # (#741): a container created after the in-use snapshot, or a failed read.
+    if [ "${2:-}" = -a ] && [ "${3:-}" = --no-trunc ] && [ "${4:-}" = --filter ]; then
+      case "$scenario" in
+        multitag-raced) printf 'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\n' ;;
+        multitag-recheck-fail) exit 1 ;;
+      esac
+      exit 0
+    fi
     if [ "${2:-}" = -aq ] && [ "${3:-}" = -f ]; then
       case "$scenario" in rm-fail|exited) printf 'aaaaaaaaaaaa\n' ;; esac
       exit 0
@@ -203,7 +212,7 @@ case "${1:-}" in
           fi
         fi
         ;;
-      rm-fail|exited|aggressive)
+      rm-fail|exited|aggressive|multitag*)
         [ "${2:-}" = -aq ] && printf 'aaaaaaaaaaaa\n'
         ;;
     esac
@@ -279,14 +288,65 @@ case "${1:-}" in
   images)
     case "$scenario" in rmi-fail|dangling) printf 'sha256:deadbeef\n' ;; esac
     [ "$scenario" = inuse-snapshot-fail ] && [ "${2:-}" = --no-trunc ] && printf 'sha256:live-image\n'
-    # One image the snapshotted container (aaaaaaaaaaaa) references, one nothing does.
-    [ "$scenario" = aggressive ] && [ "${2:-}" = --no-trunc ] && printf 'sha256:image-aaaaaaaaaaaa\nsha256:unused-image\n'
+    if [ "${2:-}" = --no-trunc ] || { [ "${2:-}" = -a ] && [ "${3:-}" = --no-trunc ]; }; then
+      # One row per tag, as `docker images` prints them; a <none> tag is a
+      # digest-only row from a repository with no tag. A --format without
+      # .Repository gets the ID column only. aaaaaaaaaaaa uses
+      # sha256:image-aaaaaaaaaaaa. Like the daemon, the listing drops a tag
+      # this run already removed, and an image whose rows are all gone; like
+      # Docker 29, only -a lists an image that has no tag left.
+      case "$scenario" in
+        aggressive) rows=$'sha256:image-aaaaaaaaaaaa\tused-repo\tv1\nsha256:unused-image\tunused-repo\tv1' ;;
+        multitag|multitag-raced|multitag-recheck-fail|multitag-tag-fail)
+          rows=$'sha256:image-aaaaaaaaaaaa\tused-repo\tv1\nsha256:multi-image\trepo-a\tv1\nsha256:multi-image\trepo-b\tv2' ;;
+        # A digest reference from another repository is not a tag: after both
+        # untags the image is still there.
+        multitag-digest)
+          rows=$'sha256:image-aaaaaaaaaaaa\tused-repo\tv1\nsha256:multi-image\trepo-a\tv1\nsha256:multi-image\trepo-b\tv2\nsha256:multi-image\tmirror-repo\t<none>' ;;
+        # The two-tag image is the one the snapshotted container references.
+        multitag-inuse) rows=$'sha256:image-aaaaaaaaaaaa\trepo-a\tv1\nsha256:image-aaaaaaaaaaaa\trepo-b\tv2' ;;
+        *) rows= ;;
+      esac
+      if [ -n "$rows" ]; then
+        live=
+        while IFS=$'\t' read -r r_id r_repo r_tag; do
+          grep -Fxq -- "$(printf 'docker\trmi\t%s:%s' "$r_repo" "$r_tag")" "$DOCKER_HYGIENE_TEST_CALLS" && continue
+          live+="$r_id"$'\t'"$r_repo"$'\t'"$r_tag"$'\n'
+        done <<<"$rows"
+        if [ "${2:-}" != -a ] && [ -n "$live" ]; then
+          live=$(printf '%s' "$live" | awk -F'\t' '{ row[NR] = $0; id[NR] = $1; if ($3 != "<none>") tagged[$1] = 1 }
+            END { for (i = 1; i <= NR; i++) if (tagged[id[i]]) print row[i] }')
+          [ -n "$live" ] && live+=$'\n'
+        fi
+        case "$*" in
+          *.Repository*) printf '%s' "$live" ;;
+          *) printf '%s' "$live" | cut -f1 ;;
+        esac
+      fi
+    fi
     exit 0
     ;;
   rmi)
-    [ "$scenario" = rmi-fail ] && [ "${2:-}" = sha256:deadbeef ] && exit 1
+    if [ "$scenario" = rmi-fail ] && [ "${2:-}" = sha256:deadbeef ]; then
+      printf 'Error response from daemon: conflict: unable to delete deadbeef (must be forced) - image is being used by stopped container cccccccccccc\n' >&2
+      exit 1
+    fi
     [ "$scenario" = dangling ] && [ "${2:-}" = sha256:deadbeef ] && exit 0
     [ "$scenario" = aggressive ] && [ "${2:-}" = sha256:unused-image ] && exit 0
+    case "$scenario" in
+      multitag|multitag-raced|multitag-recheck-fail|multitag-tag-fail|multitag-digest)
+        # The daemon's real refusal for an ID with two tags (captured live).
+        if [ "${2:-}" = sha256:multi-image ]; then
+          printf 'Error response from daemon: conflict: unable to delete multi-image (must be forced) - image is referenced in multiple repositories\n' >&2
+          exit 1
+        fi
+        if [ "$scenario" = multitag-tag-fail ] && [ "${2:-}" = repo-a:v1 ]; then
+          printf 'Error response from daemon: unable to remove "repo-a:v1": simulated\n' >&2
+          exit 1
+        fi
+        case "${2:-}" in repo-a:v1|repo-b:v2) exit 0 ;; esac
+        ;;
+    esac
     exit 94
     ;;
   volume)
@@ -815,6 +875,9 @@ equals "$rmi_fail_calls" $'docker\trmi\tsha256:deadbeef' "failed image removal t
 equals "$RUN_RC" 1 "failed image removal makes strict mode fail"
 contains "$RUN_OUT" "images:0" "failed image removal is not counted as removed"
 contains "$RUN_OUT" "action-errors:1" "failed image removal has an action-error counter"
+# #741: the daemon's stderr survives into the FAILED line and the JSON detail.
+contains "$RUN_OUT" "!! FAILED: docker rmi sha256:deadbeef (rc=1): Error response from daemon: conflict: unable to delete deadbeef (must be forced) - image is being used by stopped container cccccccccccc" "#741: failed removal names the daemon's error and exit code"
+assert_json_list_contains "$RUN_OUT" action_error_details "docker rmi sha256:deadbeef rc=1 stderr: Error response from daemon: conflict: unable to delete deadbeef" "#741: JSON action detail carries the daemon's error"
 
 # Issue #1630: run() succeeds under DRY_RUN=1, so each would-rm/would-rmi used
 # to count as removed, and the weekly DRY_RUN=1 JSON=1 report's exited_removed
@@ -869,6 +932,64 @@ equals "$(mutation_calls)" $'docker\trmi\tsha256:unused-image' "#1630: AGGRESSIV
 equals "$RUN_RC" 0 "#1630: a clean AGGRESSIVE removal exits zero under STRICT"
 contains "$RUN_OUT" "images removed .......... 1" "#1630: summary table counts the real AGGRESSIVE removal"
 assert_json_field "$RUN_OUT" images_removed 1 "#1630: JSON counts the real AGGRESSIVE removal"
+
+# #741: `docker rmi <id>` refuses an image with two tags ("must be forced"), so
+# an unused two-tag image failed every AGGRESSIVE run and paged. It is removed
+# one tag at a time; dropping the last tag removes the image, with no -f.
+run_hygiene DOCKER_HYGIENE_TEST_SCENARIO=multitag DRY_RUN=1 AGGRESSIVE=1 JSON=1 STRICT=1
+equals "$(mutation_calls)" "" "#741: two-tag dry run removes nothing"
+equals "$RUN_RC" 0 "#741: two-tag dry run is clean under STRICT"
+contains "$RUN_OUT" "would: docker rmi repo-a:v1" "#741: dry run plans the first tag"
+contains "$RUN_OUT" "would: docker rmi repo-b:v2" "#741: dry run plans the second tag"
+omits "$RUN_OUT" "would: docker rmi sha256:multi-image" "#741: dry run never plans the refused removal by ID"
+assert_json_field "$RUN_OUT" images_removed 0 "#741: two-tag dry run counts nothing"
+
+run_hygiene DOCKER_HYGIENE_TEST_SCENARIO=multitag DRY_RUN=0 AGGRESSIVE=1 JSON=1 STRICT=1
+equals "$(mutation_calls)" $'docker\trmi\trepo-a:v1\ndocker\trmi\trepo-b:v2' "#741: real run removes the unused two-tag image tag by tag, and nothing else"
+equals "$RUN_RC" 0 "#741: two-tag removal exits zero under STRICT"
+contains "$RUN_OUT" " action-errors:0 " "#741: two-tag removal records no action error"
+assert_json_field "$RUN_OUT" images_removed 1 "#741: a two-tag image counts as one removed image"
+assert_json_field "$RUN_OUT" action_errors 0 "#741: JSON records no action error"
+
+# Kept: the two-tag image a container referenced at the snapshot.
+run_hygiene DOCKER_HYGIENE_TEST_SCENARIO=multitag-inuse DRY_RUN=0 AGGRESSIVE=1 JSON=1 STRICT=1
+equals "$(mutation_calls)" "" "#741: a two-tag image a container uses keeps both tags"
+equals "$RUN_RC" 0 "#741: keeping an in-use two-tag image is clean"
+assert_json_field "$RUN_OUT" images_removed 0 "#741: the in-use two-tag image is not counted"
+
+# Kept: a container created after the snapshot. The daemon does not check
+# containers when it drops a tag the image still has another of, so the image
+# is re-checked before its first untag.
+run_hygiene DOCKER_HYGIENE_TEST_SCENARIO=multitag-raced DRY_RUN=0 AGGRESSIVE=1 JSON=1 STRICT=1
+equals "$(mutation_calls)" "" "#741: a container found by the re-check stops every untag"
+equals "$RUN_RC" 0 "#741: a re-check hold is not a strict error"
+contains "$RUN_OUT" "keep multi-image (2 tags): a container now uses it" "#741: the re-check hold is reported"
+assert_json_field "$RUN_OUT" images_removed 0 "#741: a re-check hold removes nothing"
+
+# Kept: the re-check itself failed. It is an inspection error, never a removal.
+run_hygiene DOCKER_HYGIENE_TEST_SCENARIO=multitag-recheck-fail DRY_RUN=0 AGGRESSIVE=1 JSON=1 STRICT=1
+equals "$(mutation_calls)" "" "#741: a failed re-check stops every untag"
+equals "$RUN_RC" 1 "#741: a failed re-check is a strict error"
+contains "$RUN_OUT" "keep multi-image (2 tags): container re-check failed" "#741: the failed re-check is reported"
+assert_json_field "$RUN_OUT" images_removed 0 "#741: a failed re-check removes nothing"
+
+# The first failed tag stops the loop: later tags are not dropped. The daemon's
+# stderr, quotes included, reaches the FAILED line and the JSON detail intact.
+run_hygiene DOCKER_HYGIENE_TEST_SCENARIO=multitag-tag-fail DRY_RUN=0 AGGRESSIVE=1 JSON=1 STRICT=1
+equals "$(mutation_calls)" $'docker\trmi\trepo-a:v1' "#741: a failed untag stops before the next tag"
+equals "$RUN_RC" 1 "#741: a failed untag makes strict mode fail"
+contains "$RUN_OUT" " action-errors:1 " "#741: the failed untag is one action error"
+contains "$RUN_OUT" '!! FAILED: docker rmi repo-a:v1 (rc=1): Error response from daemon: unable to remove "repo-a:v1": simulated' "#741: the FAILED line carries the daemon's error"
+assert_json_list_contains "$RUN_OUT" action_error_details 'docker rmi repo-a:v1 rc=1 stderr: Error response from daemon: unable to remove "repo-a:v1": simulated' "#741: JSON detail keeps the quoted error intact"
+assert_json_field "$RUN_OUT" images_removed 0 "#741: a partly untagged image is not counted"
+
+# Every untag succeeds, but a digest reference from another repository (a
+# <none>-tag row) still holds the image: it is reported, never counted.
+run_hygiene DOCKER_HYGIENE_TEST_SCENARIO=multitag-digest DRY_RUN=0 AGGRESSIVE=1 JSON=1 STRICT=1
+equals "$(mutation_calls)" $'docker\trmi\trepo-a:v1\ndocker\trmi\trepo-b:v2' "#741: a digest-only row is not removed as a tag"
+equals "$RUN_RC" 0 "#741: an image a digest still holds is not a strict error"
+contains "$RUN_OUT" "multi-image: tags removed, but a digest reference still holds the image; not counted" "#741: the digest-held image is reported"
+assert_json_field "$RUN_OUT" images_removed 0 "#741: an image still listed is not counted as removed"
 
 # Mid-inventory Docker inspection failures produce an incomplete/error report,
 # never a clean no-op, and perform no mutation.
