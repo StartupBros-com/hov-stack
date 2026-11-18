@@ -121,6 +121,19 @@ run_case warn 1 1 1 1
 grep -q ' — WARN$' <<<"$OUT" && ok || bad "warn: expected a WARN line in output"
 has warn "(new breach)"
 
+# -- the alert's sizing hint runs as printed and counts only single-link bytes --
+# 6 MiB of the candidate's own plus a 24 MiB file also linked from outside it:
+# the recipe must print 0.01 GiB; counting the shared file would print 0.03.
+echo "=== case: sizing-hint ===" >&2
+recipe=$(grep -F -- '-links 1' <<<"$OUT" | sed 's/^ *//')
+mkdir -p "$TMP/tree/cand" "$TMP/tree/elsewhere"
+head -c $((6 * 1024 * 1024)) /dev/urandom >"$TMP/tree/cand/own"
+head -c $((24 * 1024 * 1024)) /dev/urandom >"$TMP/tree/elsewhere/shared"
+ln "$TMP/tree/elsewhere/shared" "$TMP/tree/cand/shared"
+got=$(bash -c "${recipe/DIR/$TMP/tree/cand}" 2>&1)
+[ "$got" = "0.01 GiB" ] && ok || bad "sizing-hint: printed recipe gave '$got', expected '0.01 GiB': $recipe"
+rm -rf "$TMP/tree"
+
 # -- crit: root crosses CRIT_PCT ----------------------------------------------
 echo "=== case: crit ===" >&2
 fresh; root 95 476; mntc 40 572
