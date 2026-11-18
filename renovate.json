@@ -1,0 +1,20 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": [
+    "Repo-level additions to the fleet's central Renovate config (StartupBros-com/home-infrastructure renovate-config.js).",
+    "harness/vet-fixtures/** holds frozen evidence from harness vets: seed projects and run outputs that are recorded as they were run, and no CI job installs them. Renovate kept opening PRs against their package.json files (#486, #637, #727); bumping them rewrites the evidence, so Renovate does not manage them.",
+    "plugins/** is not ignored: plugins/product-video and the other real plugins stay managed.",
+    "ignorePaths replaces the config:recommended list rather than adding to it, so that list is repeated here."
+  ],
+  "ignorePaths": [
+    "**/node_modules/**",
+    "**/bower_components/**",
+    "**/vendor/**",
+    "**/examples/**",
+    "**/__tests__/**",
+    "**/test/**",
+    "**/tests/**",
+    "**/__fixtures__/**",
+    "harness/vet-fixtures/**"
+  ]
+}
