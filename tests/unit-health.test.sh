@@ -149,6 +149,7 @@ case "$*" in
         echo 'clean.service loaded inactive dead Timer target'
         ;;
       escaped) printf '%s\n' 'worker\x2dname.service loaded active running Escaped daemon' ;;
+      instance) echo 'acme-tmpl@daily.service loaded active running Template instance' ;;
       restarted-loaded) echo 'restarted.service loaded active running Still-loaded daemon' ;;
       error) exit 1 ;;
     esac
@@ -167,6 +168,8 @@ case "$*" in
       printf 'Result=success\nId=daemon.service\nActiveState=active\n\n'
     elif [ "${INVENTORY_CASE:-}" = escaped ]; then
       printf '%s\n' 'Result=success' 'Id=worker\x2dname.service' 'ActiveState=active' ''
+    elif [ "${INVENTORY_CASE:-}" = instance ]; then
+      printf 'Result=success\nId=acme-tmpl@daily.service\nActiveState=active\n\n'
     fi
     case "${JOURNAL_CASE:-}" in
       restarted*) printf 'Result=success\nId=restarted.service\nActiveState=active\n\n' ;;
@@ -281,6 +284,18 @@ jq -e '[.units[] | select(.unit == "daemon.service")] | length == 1 and .[0].cov
   "$fixture/stdout" >/dev/null \
   && ok "without the overlay the same unit is UNOWNED" \
   || bad "a unit nothing declares was not UNOWNED"
+# A template the overlay registers as acme-tmpl@ owns its instances.
+printf 'acme-tmpl@\n' > "$fixture/overlay/foreign-units"
+INVENTORY_CASE=instance HOV_STACK_OVERLAY="$fixture/overlay" journal_fixture empty --json
+jq -e '[.units[] | select(.unit == "acme-tmpl@daily.service")] | length == 1 and .[0].coverage == "FOREIGN"' \
+  "$fixture/stdout" >/dev/null \
+  && ok "an instance of a template registered as acme-tmpl@ is FOREIGN" \
+  || bad "a registered template did not own its instance: $(cat "$fixture/stdout")"
+INVENTORY_CASE=instance journal_fixture empty --json
+jq -e '[.units[] | select(.unit == "acme-tmpl@daily.service")] | length == 1 and .[0].coverage == "UNOWNED"' \
+  "$fixture/stdout" >/dev/null \
+  && ok "without the overlay the same instance is UNOWNED" \
+  || bad "an instance nothing declares was not UNOWNED"
 INVENTORY_CASE=error journal_fixture empty --json
 check_exit "service enumeration failure refuses incomplete inventory" 2 $?
 [ ! -s "$fixture/stdout" ] && ok "inventory failure emits no report" \

@@ -54,7 +54,7 @@ printf '[Unit]\nDescription=silent, wired to nothing\n' \
 printf '[Unit]\nDescription=template\nOnFailure=harness-unit-failure-alert@%%n.service\n' \
   > "$SYSD/tmpl@.service"
 
-FOREIGN="check-fleet-drift someforeign voxtype"
+FOREIGN="check-fleet-drift someforeign voxtype fortmpl@"
 
 # stub_systemctl <exit-code> <unit-rows...>
 # Mimics `list-units --state=failed --no-legend --plain`: unit name first,
@@ -77,14 +77,16 @@ stub_systemctl() {
   chmod +x "$TMP/bin/systemctl"
 }
 
-# sweep -> the function's stdout, with $TMP/bin first on PATH
+# sweep -> the function's stdout, with $TMP/bin first on PATH. The function matches the
+# register through lib/foreign-units.sh's foreign_unit_listed, which the doctor sources
+# before section 29 calls it, so the probe sources it too.
 sweep() {
-  printf '. %q\nfailed_unit_sweep %q %q\n' "$TMP/fn.sh" "$SYSD" "$FOREIGN" > "$TMP/probe"
+  printf '. %q\n. %q\nfailed_unit_sweep %q %q\n' "$REPO/lib/foreign-units.sh" "$TMP/fn.sh" "$SYSD" "$FOREIGN" > "$TMP/probe"
   PATH="$TMP/bin:$PATH" bash "$TMP/probe" 2>/dev/null
 }
 sweep_rc() {
-  printf '. %q\nfailed_unit_sweep %q %q >/dev/null 2>&1\necho $?\n' \
-    "$TMP/fn.sh" "$SYSD" "$FOREIGN" > "$TMP/probe"
+  printf '. %q\n. %q\nfailed_unit_sweep %q %q >/dev/null 2>&1\necho $?\n' \
+    "$REPO/lib/foreign-units.sh" "$TMP/fn.sh" "$SYSD" "$FOREIGN" > "$TMP/probe"
   PATH="$TMP/bin:$PATH" bash "$TMP/probe"
 }
 class_of() { sweep | awk -F'\t' -v u="$1" '$2==u {print $1; exit}'; }
@@ -121,6 +123,11 @@ stub_systemctl 0 voxtype-extra.service
 [ "$(class_of voxtype-extra.service)" = UNOWNED ] && ok \
   || bad "voxtype-extra matched the foreign register by substring ($(class_of voxtype-extra.service))"
 
+# ---- 6c: a template the register names as fortmpl@ owns its instances -------
+stub_systemctl 0 fortmpl@daily.service
+[ "$(class_of fortmpl@daily.service)" = FOREIGN ] && ok \
+  || bad "an instance of a template registered as fortmpl@ classified as $(class_of fortmpl@daily.service)"
+
 # ---- 7: a query that could not run must NOT look like a clean box -----------
 stub_systemctl 3
 [ "$(sweep_rc)" != 0 ] && ok \
@@ -143,7 +150,7 @@ ROOT29=$TMP/root29
 mkdir -p "$ROOT29/systemd" "$ROOT29/lib" "$TMP/overlay29"
 printf 'UNITS_FOREIGN="check-fleet-drift voxtype"\n' > "$ROOT29/sync.sh"
 ln -s "$REPO/lib/foreign-units.sh" "$ROOT29/lib/foreign-units.sh"
-printf 'hostowned\n' > "$TMP/overlay29/foreign-units"
+printf 'hostowned\nhosttmpl@\n' > "$TMP/overlay29/foreign-units"
 # The doctor's own warn/ok, as the section expects to find them.
 # shellcheck disable=SC2016  # the stubs are written literally, expanded when sourced
 printf '%s\n' 'WARNS=0' \
@@ -165,6 +172,10 @@ case "$out29" in *"failed foreign unit: hostowned.service"*) ok ;;
 out29=$(run29 "$TMP/no-overlay29")
 case "$out29" in *"failed unit nothing declares: hostowned.service"*) ok ;;
   *) bad "without the overlay, section 29 did not name the unit as undeclared: $out29" ;; esac
+stub_systemctl 0 hosttmpl@x.service
+out29=$(run29 "$TMP/overlay29")
+case "$out29" in *"failed foreign unit: hosttmpl@x.service"*) ok ;;
+  *) bad "section 29 did not give an overlay-registered template its instance: $out29" ;; esac
 rm "$ROOT29/lib/foreign-units.sh"
 out29=$(run29 "$TMP/overlay29")
 case "$out29" in *"cannot read the unit register"*) ok ;;

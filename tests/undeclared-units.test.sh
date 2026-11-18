@@ -126,6 +126,14 @@ case "$(run_check "$D")" in *check-fleet-drift*) bad "in-tree foreign unit was r
 emit "acme-unlisted.timer enabled enabled" "$HOME/.config/systemd/user/acme-unlisted.timer"
 mk_systemctl "$D" "$R" 0 "$F"
 case "$(run_check "$D")" in *acme-unlisted*) ok ;; *) bad "unit absent from both lists was not reported" ;; esac
+# 4b. A template the overlay registers as acme-tmpl@ owns an enabled instance; the same
+#     instance is reported once the template is not registered.
+printf 'acme-growth-backup\nacme-tmpl@\n' > "$OVERLAY/foreign-units"
+emit "acme-tmpl@daily.timer enabled enabled" "$HOME/.config/systemd/user/acme-tmpl@.timer"
+mk_systemctl "$D" "$R" 0 "$F"
+case "$(run_check "$D")" in *acme-tmpl@daily*) bad "instance of a registered template was reported" ;; *) ok ;; esac
+printf 'acme-growth-backup\n' > "$OVERLAY/foreign-units"
+case "$(run_check "$D")" in *acme-tmpl@daily*) ok ;; *) bad "instance of an unregistered template was not reported" ;; esac
 # Missing files and relative overlays cannot suppress the inverse check.
 rm "$OVERLAY/foreign-units"
 emit "acme-growth-backup.timer enabled enabled" "$HOME/.config/systemd/user/acme-growth-backup.timer"

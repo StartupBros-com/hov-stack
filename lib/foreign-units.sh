@@ -18,10 +18,12 @@
 # its sibling.
 # shellcheck source=lib/overlay.sh
 . "$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")/overlay.sh"
+# shellcheck source=lib/overlay-units.sh
+. "$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")/overlay-units.sh"
 
 # foreign_units_with_overlay LIST: print LIST with the overlay's unit names appended.
 foreign_units_with_overlay() {
-  local list=$1 dir line content
+  local list=$1 dir line content path
   if dir=$(overlay_dir) && [ -f "$dir/foreign-units" ]; then
     while IFS= read -r line || [ -n "$line" ]; do
       content=${line#"${line%%[![:space:]]*}"}
@@ -34,16 +36,34 @@ foreign_units_with_overlay() {
       esac
     done < "$dir/foreign-units"
   fi
+  overlay_units_load "${2:-}"
+  for path in "${OVERLAY_UNIT_PATHS[@]}"; do
+    case $path in */*) continue ;; esac
+    list="$list ${path%.*}"
+  done
   printf '%s\n' "$list"
+}
+
+# foreign_unit_listed STEM REGISTER: true when STEM, a unit name without its type
+# suffix, is in the space-separated REGISTER, or is an instance (foo@bar) of a template
+# the register names as foo@. All three readers match through this, so a registered
+# template owns its instances in each of them.
+foreign_unit_listed() {
+  case " $2 " in *" $1 "*) return 0 ;; esac
+  case $1 in
+    ?*@?*) case " $2 " in *" ${1%%@*}@ "*) return 0 ;; esac ;;
+  esac
+  return 1
 }
 
 # foreign_units_register SYNC_SH: the static UNITS_FOREIGN line of SYNC_SH with the
 # overlay's names appended. Prints nothing when that line is missing, so a reader that
 # needs the register still fails closed on a sync.sh it cannot parse.
 foreign_units_register() {
-  local static
+  local static units
   [ -f "$1" ] || return 0
   static=$(sed -n 's/^UNITS_FOREIGN="\(.*\)"$/\1/p' "$1") || return 0
   [ -n "$static" ] || return 0
-  foreign_units_with_overlay "$static"
+  units=$(sed -n 's/^UNITS="\(.*\)"$/\1/p' "$1") || return 0
+  foreign_units_with_overlay "$static" "$units"
 }

@@ -182,7 +182,7 @@ coverage_class() {
       # not FOREIGN (no other repo claims it either).
       echo UNOWNED
     fi
-  elif grep -qF " $base " <<<" $FOREIGN "; then
+  elif foreign_unit_listed "$base" "$FOREIGN"; then
     echo FOREIGN
   else
     echo UNOWNED
