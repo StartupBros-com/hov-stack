@@ -2,7 +2,7 @@
 set -euo pipefail
 umask 022
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
-WORK=$(mktemp -d)
+WORK=$(mktemp -d) || exit 1
 trap 'rm -rf -- "$WORK"' EXIT
 pass=0
 fail() { printf 'FAIL: %s\npassed: %s; failed: 1\n' "$*" "$pass" >&2; exit 1; }
@@ -26,8 +26,8 @@ export CLAUDE_SYNC_SKIP_HOOK_RECONCILE=1
 export CCFLARE_URL_SATELLITE=https://proxy.example.test
 
 fresh() {
-  HOME=$(mktemp -d "$WORK/home-XXXXXX")
-  HOV_STACK_OVERLAY=$(mktemp -d "$WORK/overlay-XXXXXX")
+  HOME=$(mktemp -d "$WORK/home-XXXXXX") || return 1
+  HOV_STACK_OVERLAY=$(mktemp -d "$WORK/overlay-XXXXXX") || return 1
   export HOME HOV_STACK_OVERLAY
   export CLAUDE_HOME="$HOME/.claude" CLAUDE_CONFIG_DIR="$HOME/.claude"
   export CLAUDE_WINDOWS_HOME="$HOME/windows" CLAUDE_SYNC_SYSTEM_SYS_DIR="$HOME/system-units"
@@ -188,8 +188,9 @@ units=$(sed -n 's/^UNITS="\(.*\)"$/\1/p' "$REPO/sync.sh")
 overlay_units_load "$units"
 [ "${#OVERLAY_UNIT_PATHS[@]}" = 6 ] || fail 'path validation accepted bad row'
 [ "${#OVERLAY_UNIT_ERRORS[@]}" = 13 ] || fail 'validation refused row count'
+refused=$(printf '%s\n' "${OVERLAY_UNIT_ERRORS[@]}")
 for number in {7..19}; do
-  printf '%s\n' "${OVERLAY_UNIT_ERRORS[@]}" | grep -q "line $number:" || fail "missing refused line $number"
+  grep -q "line $number:" <<<"$refused" || fail "missing refused line $number"
 done
 ok 'unsafe paths, duplicate paths, empty or extra fields and directory sources are refused'
 register=$(foreign_units_register "$REPO/sync.sh" 2>&1)
