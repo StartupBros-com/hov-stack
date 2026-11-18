@@ -56,7 +56,7 @@ install nowhere under `~/.claude` and `./setup` never touches them:
 | `harnesses/`                                                            | the author's codex, fx, pi and pi-lens harnesses: untested here, see `harnesses/README.md`                 |
 | `hosts.tsv`                                                             | the host-to-role table `lib/profile.sh` reads in place; absent from this copy, so each host keeps a copy of the fleet table in the private overlay (`<overlay>/hosts.tsv`), and `sync.sh check` reports a host whose live tree has neither |
 | `tests/repo/`                                                           | suites about the repository itself (`setup`, the suite runner, this layout), run by CI directly            |
-| `docs/`, `README.md`, `CONTRIBUTING.md`, `SECURITY.md`, `STRATEGY.md`, `LICENSE`, `NOTICE.md`, `.github/`, `.gitleaks.toml`, `.public-safety-allow`, `.public-safety-repos`, `.compound-engineering/` | repository docs and CI config, read in place (`DOTFILES_UNLINKED`)                                         |
+| `docs/`, `README.md`, `CONTRIBUTING.md`, `SECURITY.md`, `STRATEGY.md`, `LICENSE`, `NOTICE.md`, `.github/`, `.gitleaks.toml`, `.public-safety-allow`, `.public-safety-repos`, `.compound-engineering/`, `renovate.json` | repository docs and CI config, read in place (`DOTFILES_UNLINKED`)                                         |
 
 `tests/run-claude-tests.sh` discovers the harness suites directly under `tests/` and
 `scripts/tests/` and never descends into `tests/repo/`, so the repository suites
