@@ -494,10 +494,17 @@ def resolve_session(con: sqlite3.Connection, session_id: str, cwd: str | None, f
     Commits its own writes: the connection runs implicit transactions, and until 0.1.1 the cached name and the
     lookup throttle only reached the database when the caller happened to commit something else afterwards
     (the hook on a delivery; `hov whoami` never).
+
+    SAFETY: the agents listing runs only after that commit. It is another process and may take seconds (the
+    default command is allowed 5s). Holding the mailbox write lock across it made every other writer, including
+    a hook whose busy timeout is 2s, fail with "database is locked" and drop that turn's delivery.
     """
     host = local_host()
     ts = now_ms()
-    with con:
+    if con.in_transaction:
+        con.commit()
+    con.execute("BEGIN IMMEDIATE")
+    try:
         row = con.execute("SELECT name, last_lookup FROM sessions WHERE session_id=?", (session_id,)).fetchone()
         if row is None:
             # first_seen is the session's first contact, a stamp; last_seen and the lookup throttle stay wall time
@@ -511,18 +518,39 @@ def resolve_session(con: sqlite3.Connection, session_id: str, cwd: str | None, f
             name, last_lookup = row["name"], row["last_lookup"]
             con.execute("UPDATE sessions SET last_seen=?, cwd=COALESCE(?, cwd) WHERE session_id=?", (ts, cwd, session_id))
         if not force and ts - last_lookup < LOOKUP_INTERVAL_MS:
+            con.commit()
             return name
         # A cached name is refreshed, not frozen: Claude Code can retitle a session after its first exchange (an
-        # interactive session gets an auto-title), so the name listed at SessionStart can be a short id it outgrows. Re-read on force and whenever the
-        # throttle lapses; keep the cached name when the listing has no row or no name for this session.
+        # interactive session gets an auto-title), so the name listed at SessionStart can be a short id it outgrows.
+        # Re-read on force and whenever the throttle lapses; keep the cached name when the listing has no row or no
+        # name for this session. The throttle is committed before the listing so peers are not stuck behind it.
         con.execute("UPDATE sessions SET last_lookup=? WHERE session_id=?", (ts, session_id))
-        for r in agents_rows():
-            if r.get("sessionId") == session_id and r.get("name"):
-                fresh = str(r["name"])
-                if fresh != name:
-                    con.execute("UPDATE sessions SET name=?, cwd=COALESCE(?, cwd) WHERE session_id=?", (fresh, r.get("cwd"), session_id))
-                return fresh
+        con.commit()
+    except BaseException:
+        con.rollback()
+        raise
+    fresh = None
+    fresh_cwd = None
+    for r in agents_rows():
+        if r.get("sessionId") == session_id and r.get("name"):
+            fresh = str(r["name"])
+            fresh_cwd = r.get("cwd")
+            break
+    if fresh is None or fresh == name:
         return name
+    if con.in_transaction:
+        con.commit()
+    con.execute("BEGIN IMMEDIATE")
+    try:
+        con.execute(
+            "UPDATE sessions SET name=?, cwd=COALESCE(?, cwd) WHERE session_id=?",
+            (fresh, fresh_cwd, session_id),
+        )
+        con.commit()
+    except BaseException:
+        con.rollback()
+        raise
+    return fresh
 
 
 def whoami(con: sqlite3.Connection, as_name: str | None = None, session_id: str | None = None, cwd: str | None = None, force: bool = False) -> Me:

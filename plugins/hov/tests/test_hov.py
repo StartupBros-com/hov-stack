@@ -427,6 +427,36 @@ class HovCase(HovFixture):
         again = json.loads(self.hov("whoami", "--json", env_extra={"CLAUDE_CODE_SESSION_ID": SID_A, "HOV_AGENTS_CMD": ""}).stdout)
         self.assertEqual((again["name"], again["how"]), ("alpha", "session"))
 
+    def test_agents_lookup_releases_the_write_lock(self):
+        # The listing is another process and may take seconds. A peer BEGIN IMMEDIATE from inside it must
+        # succeed: the write lock is committed before the listing, then a changed name is written after.
+        probe = Path(self.tmp.name) / "lock-probe.py"
+        result = Path(self.tmp.name) / "lock-probe-result"
+        probe.write_text(
+            "import json, os, sqlite3, sys\n"
+            "con = sqlite3.connect(os.environ['MAIL_DB'], timeout=0.2)\n"
+            "try:\n"
+            "    con.execute('BEGIN IMMEDIATE')\n"
+            "    open(os.environ['PROBE_OUT'], 'w').write('free')\n"
+            "    con.rollback()\n"
+            "except sqlite3.OperationalError:\n"
+            "    open(os.environ['PROBE_OUT'], 'w').write('locked')\n"
+            "json.dump([{'sessionId': os.environ['SID'], 'name': 'alpha', 'cwd': '/tmp/a'}], sys.stdout)\n"
+        )
+        me = json.loads(self.hov("whoami", "--json", env_extra={
+            "CLAUDE_CODE_SESSION_ID": SID_A,
+            "HOV_AGENTS_CMD": f"{sys.executable} -I {probe}",
+            "MAIL_DB": str(self.state / "mail.db"),
+            "PROBE_OUT": str(result),
+            "SID": SID_A,
+        }).stdout)
+        self.assertEqual(result.read_text(), "free")
+        self.assertEqual((me["name"], me["how"]), ("alpha", "session"))
+        cached = json.loads(self.hov("whoami", "--json", env_extra={
+            "CLAUDE_CODE_SESSION_ID": SID_A, "HOV_AGENTS_CMD": "",
+        }).stdout)
+        self.assertEqual(cached["name"], "alpha")
+
     def age_lookup(self, session_id):
         con = sqlite3.connect(self.state / "mail.db")
         with con:
