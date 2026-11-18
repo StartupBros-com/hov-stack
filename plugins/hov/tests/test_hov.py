@@ -427,6 +427,69 @@ class HovCase(HovFixture):
         again = json.loads(self.hov("whoami", "--json", env_extra={"CLAUDE_CODE_SESSION_ID": SID_A, "HOV_AGENTS_CMD": ""}).stdout)
         self.assertEqual((again["name"], again["how"]), ("alpha", "session"))
 
+    def test_agents_lookup_releases_the_write_lock(self):
+        # The listing is another process and may take seconds. A peer BEGIN IMMEDIATE from inside it must
+        # succeed: the write lock is committed before the listing, then a changed name is written after.
+        probe = Path(self.tmp.name) / "lock-probe.py"
+        result = Path(self.tmp.name) / "lock-probe-result"
+        probe.write_text(
+            "import json, os, sqlite3, sys\n"
+            "con = sqlite3.connect(os.environ['MAIL_DB'], timeout=0.2)\n"
+            "try:\n"
+            "    con.execute('BEGIN IMMEDIATE')\n"
+            "    open(os.environ['PROBE_OUT'], 'w').write('free')\n"
+            "    con.rollback()\n"
+            "except sqlite3.OperationalError:\n"
+            "    open(os.environ['PROBE_OUT'], 'w').write('locked')\n"
+            "json.dump([{'sessionId': os.environ['SID'], 'name': 'alpha', 'cwd': '/tmp/a'}], sys.stdout)\n"
+        )
+        me = json.loads(self.hov("whoami", "--json", env_extra={
+            "CLAUDE_CODE_SESSION_ID": SID_A,
+            "HOV_AGENTS_CMD": f"{sys.executable} -I {probe}",
+            "MAIL_DB": str(self.state / "mail.db"),
+            "PROBE_OUT": str(result),
+            "SID": SID_A,
+        }).stdout)
+        self.assertEqual(result.read_text(), "free")
+        self.assertEqual((me["name"], me["how"]), ("alpha", "session"))
+        cached = json.loads(self.hov("whoami", "--json", env_extra={
+            "CLAUDE_CODE_SESSION_ID": SID_A, "HOV_AGENTS_CMD": "",
+        }).stdout)
+        self.assertEqual(cached["name"], "alpha")
+
+    def test_superseded_lookup_cannot_replace_or_return_an_older_name(self):
+        # Deterministic interleaving on two real SQLite connections: A has committed its claim but is still
+        # listing; B claims, lists and commits; only then does A's listing return. Equal or backwards wall
+        # clocks must not let A's result impersonate B's claim. No threads or timing sleeps are needed.
+        for offset in (0, -700, 700):
+            for older_name in ("obsolete", "cached", None):
+                with self.subTest(clock_step=offset, older_name=older_name), self.hov_module() as mod:
+                    sid = f"{SID_A}-{offset}-{older_name}"
+                    con, peer = mod.db(), mod.db()
+                    try:
+                        mod.now_ms = lambda: 100_000
+                        mod.agents_rows = lambda: [{"sessionId": sid, "name": "cached", "cwd": "/fixture/cached"}]
+                        self.assertEqual(mod.resolve_session(con, sid, None, True), "cached")
+                        first_seen = con.execute("SELECT first_seen FROM sessions WHERE session_id=?", (sid,)).fetchone()[0]
+                        mod.now_ms = lambda: 200_000
+
+                        def older_listing():
+                            self.assertFalse(con.in_transaction)
+                            mod.now_ms = lambda: 200_000 + offset
+                            mod.agents_rows = lambda: [{"sessionId": sid, "name": "newer", "cwd": "/fixture/newer"}]
+                            self.assertEqual(mod.resolve_session(peer, sid, None, True), "newer")
+                            return [{"sessionId": sid, "name": older_name, "cwd": "/fixture/older"}] if older_name else []
+
+                        mod.agents_rows = older_listing
+                        self.assertEqual(mod.resolve_session(con, sid, None, True), "newer")
+                        row = con.execute("SELECT name, cwd, first_seen FROM sessions WHERE session_id=?", (sid,)).fetchone()
+                        self.assertEqual(tuple(row), ("newer", "/fixture/newer", first_seen))
+                        self.assertFalse(con.in_transaction)
+                        self.assertFalse(peer.in_transaction)
+                    finally:
+                        con.close()
+                        peer.close()
+
     def age_lookup(self, session_id):
         con = sqlite3.connect(self.state / "mail.db")
         with con:
