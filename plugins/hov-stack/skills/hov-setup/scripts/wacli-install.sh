@@ -42,7 +42,7 @@ for dependency in "$CURL_BIN" /usr/bin/sha256sum /usr/bin/tar /usr/bin/install \
                   /usr/bin/realpath /usr/bin/readlink /usr/bin/uname /usr/bin/awk \
                   /usr/bin/grep /usr/bin/mkdir /usr/bin/mktemp /usr/bin/rm \
                   /usr/bin/cp /usr/bin/date /usr/bin/mv /usr/bin/ln /usr/bin/chmod \
-                  /usr/bin/id /usr/bin/stat; do
+                  /usr/bin/id /usr/bin/stat /usr/bin/sleep; do
   [ -x "$dependency" ] || fail "required executable not found: $dependency"
 done
 
@@ -103,50 +103,66 @@ if [ -e "$LIVE" ] && [ -d "$LIVE" ]; then
 fi
 versioned_wacli_process_state() {
   local allowed_pid=${1:-} current_uid process_dir owner exe pid resolved
-  local comm argv0 state readable=0
+  local comm argv0 state attempt reason comm_readable argv_readable readable=0
   current_uid=$(/usr/bin/id -u) || return 2
   for process_dir in "$PROC_ROOT"/[0-9]*; do
-    [ -d "$process_dir" ] || continue
-    owner=$(/usr/bin/stat -c %u "$process_dir" 2>/dev/null) || {
-      [ -d "$process_dir" ] && return 2
-      continue
-    }
-    [ "$owner" = "$current_uid" ] || continue
     pid=${process_dir##*/}
     exe=$process_dir/exe
-    if resolved=$(/usr/bin/readlink "$exe" 2>/dev/null); then
-      readable=$((readable + 1))
-      resolved=${resolved% (deleted)}
-      case $resolved in
-        */wacli)
-          [ -n "$allowed_pid" ] && [ "$pid" = "$allowed_pid" ] && continue
-          return 0
-          ;;
-      esac
-      continue
-    fi
-    [ -d "$process_dir" ] || continue
-
-    # Some same-UID services are non-dumpable, so /proc/<pid>/exe is unreadable.
-    # Require both comm and argv0 to rule out wacli; hidepid-style loss of those
-    # peer signals remains an incomplete proof and fails closed.
-    comm=
-    IFS= read -r comm <"$process_dir/comm" 2>/dev/null || return 2
-    argv0=
-    if IFS= read -r -d '' argv0 <"$process_dir/cmdline" 2>/dev/null; then
-      case $argv0 in
-        wacli|*/wacli) return 0 ;;
-      esac
-      [ "$comm" = wacli ] && return 0
-      readable=$((readable + 1))
-      continue
-    fi
-    state=$(/usr/bin/awk '/^State:/{print $2}' "$process_dir/status" 2>/dev/null) || return 2
-    if [ "$state" = Z ]; then
-      readable=$((readable + 1))
-      continue
-    fi
-    return 2
+    for attempt in 1 2 3; do
+      [ -d "$process_dir" ] || break
+      if ! owner=$(/usr/bin/stat -c %u "$process_dir" 2>/dev/null); then
+        reason='unreadable process owner'
+      elif [ "$owner" != "$current_uid" ]; then
+        break
+      elif resolved=$(/usr/bin/readlink "$exe" 2>/dev/null); then
+        readable=$((readable + 1))
+        resolved=${resolved% (deleted)}
+        case $resolved in
+          */wacli)
+            [ -n "$allowed_pid" ] && [ "$pid" = "$allowed_pid" ] && break
+            return 0
+            ;;
+        esac
+        break
+      else
+        # Non-dumpable peers need both comm and argv0 to rule out wacli.
+        # Exit can remove any of these files between reads: only a vanished
+        # directory or a positively dead state makes missing metadata safe.
+        comm='' argv0='' comm_readable=0 argv_readable=0
+        IFS= read -r comm 2>/dev/null <"$process_dir/comm" && comm_readable=1
+        IFS= read -r -d '' argv0 2>/dev/null <"$process_dir/cmdline" && argv_readable=1
+        case $argv0 in
+          wacli|*/wacli) return 0 ;;
+        esac
+        if [ "$argv_readable" -eq 1 ]; then
+          [ "$comm" = wacli ] && return 0
+          if [ "$comm_readable" -eq 1 ]; then
+            readable=$((readable + 1))
+            break
+          fi
+          reason='unreadable comm'
+        else
+          state=
+          if state=$(/usr/bin/awk '/^State:/{print $2}' "$process_dir/status" 2>/dev/null); then
+            case $state in
+              Z|X|x)
+                readable=$((readable + 1))
+                break
+                ;;
+            esac
+          fi
+          reason="empty or unreadable cmdline, state ${state:-unreadable}"
+        fi
+      fi
+      [ -d "$process_dir" ] || break
+      if [ "$attempt" -eq 3 ]; then
+        echo "wacli-install: /proc pid $pid: $reason after $attempt reads" >&2
+        return 2
+      fi
+      # Give an exiting peer time to finish, but never turn exhausted retries
+      # into proof. Recheck ownership and executable on every new observation.
+      /usr/bin/sleep 0.01 || return 2
+    done
   done
   [ "$readable" -gt 0 ] && return 1
   return 2
