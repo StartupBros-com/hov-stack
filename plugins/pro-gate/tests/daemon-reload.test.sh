@@ -371,11 +371,22 @@ HOME="$TDIR" PRO_GATE_HOME="$TDIR" PRO_GATE_CONSENT_HOME="$TDIR/.config/pro-gate
   PRO_GATE_BROWSER_MODE=native PRO_GATE_DAEMON_SELF_RELOAD=1 PATH="/usr/bin:/bin" \
   bash "$TDIR/run-daemon.sh" > "$DLOG3" 2>&1 &
 DPID=$!
-for _ in $(seq 1 50); do grep -q 'review-decision identity is missing' "$DLOG3" 2>/dev/null && break; sleep 0.2; done
+# #620: each wait polls for every line its check requires. Exiting on the first line alone let the
+# check run before the daemon wrote the rest (CI failed this way twice on one commit on 2026-11-18).
+for _ in $(seq 1 50); do
+  grep -q 'review-decision identity is missing' "$DLOG3" 2>/dev/null \
+    && grep -q 'globally deferring PR processing' "$DLOG3" 2>/dev/null && break
+  sleep 0.2
+done
 check 'missing identity globally defers before browser or worker work' "$(grep -q 'review-decision identity is missing' "$DLOG3" && grep -q 'globally deferring PR processing' "$DLOG3" && ! grep -q 'reviewing ' "$DLOG3"; echo $?)" "$(tail -5 "$DLOG3" 2>/dev/null)"
 cp "$HERE/../skills/pro-gate/review-decision-v1.json" "$TDIR/review-decision-v1.json"
 printf 'identity-converged-%s\n' "$(date +%s)" > "$TDIR/.deploy-stamp.tmp" && mv -f "$TDIR/.deploy-stamp.tmp" "$TDIR/.deploy-stamp"
-for _ in $(seq 1 60); do [ "$(grep -c 'pro-review-daemon starting' "$DLOG3" 2>/dev/null)" -ge 2 ] && break; sleep 0.2; done
+# Readiness is the reloaded daemon's first idle poll, which logs after its startup line.
+for _ in $(seq 1 60); do
+  [ "$(grep -c 'pro-review-daemon starting' "$DLOG3" 2>/dev/null)" -ge 2 ] \
+    && grep -q 'no PRs pending' "$DLOG3" 2>/dev/null && break
+  sleep 0.2
+done
 check 'compatible identity deploy reloads and recovers daemon readiness' "$( [ "$(grep -c 'pro-review-daemon starting' "$DLOG3" 2>/dev/null)" -ge 2 ] && [ "$(grep -c 'review-decision identity is missing' "$DLOG3" 2>/dev/null)" -eq 1 ] && grep -q 'no PRs pending' "$DLOG3"; echo $?)" "$(tail -8 "$DLOG3" 2>/dev/null)"
 
 [ "$TEST_FAILURES" -eq 0 ] && { echo "ALL PASS"; exit 0; } || { echo "$TEST_FAILURES FAILURES"; exit 1; }
