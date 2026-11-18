@@ -16,6 +16,7 @@ and the `NOTICE` that ux-writing carries.
 | `apple-design` | https://github.com/emilkowalski/skills | MIT | Emil Kowalski |
 | `better-accessibility` | https://github.com/jakubkrehel/skills | MIT | Jakub Krehel |
 | `better-colors` | https://github.com/jakubkrehel/skills | MIT | Jakub Krehel |
+| `better-interface` | https://github.com/jakubkrehel/skills | MIT | Jakub Krehel |
 | `better-layout` | https://github.com/jakubkrehel/skills | MIT | Jakub Krehel |
 | `better-typography` | https://github.com/jakubkrehel/skills | MIT | Jakub Krehel |
 | `better-ui` | https://github.com/jakubkrehel/skills | MIT | Jakub Krehel |
@@ -44,6 +45,7 @@ and the `NOTICE` that ux-writing carries.
 | `review-animations` | https://github.com/emilkowalski/skills | MIT | Emil Kowalski |
 | `show-me` | https://github.com/humanlayer/skills | MIT | HumanLayer |
 | `thermo-nuclear-code-quality-review` | https://github.com/cursor/plugins | MIT | Cursor |
+| `ui-design` | https://github.com/StartupBros-com/hov-stack<br>https://github.com/jakubkrehel/skills | MIT | StartupBros LLC; Jakub Krehel |
 | `ux-writing` | https://github.com/scarletkc/agents | Apache-2.0 | scarletkc |
 | `writing-for-agents` | https://github.com/StartupBros-com/skill-tuner<br>https://github.com/mattpocock/skills | MIT | StartupBros / House of Vibe; Matt Pocock |
 | `youtube-transcript` | https://github.com/davidondrej/skills | MIT | David Ondrej |

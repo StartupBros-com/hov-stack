@@ -8,7 +8,7 @@ description: Reviews your work across multiple categories like UI, typography, l
 
 This skill reviews a change rather than a screen. It resolves the scope, expands the changed files to the surfaces they affect, reads both sides of the diff and classifies every finding.
 
-Scope is all it owns. Domain rules belong to the `better-*` skills. Severity, consolidation, coverage, the cap and the verdict are defined in `## Severity, cap and verdict` at the end of this file, folded in from the upstream orchestrator skill (better-interface), which this harness does not install.
+Scope is all it owns. Domain rules belong to the `better-*` skills. Severity, consolidation, coverage, the cap and the verdict are defined in `## Severity, cap and verdict` at the end of this file, folded in from the upstream orchestrator skill (better-interface), which the pack now ships as `/hov-stack:better-interface` for screen reviews.
 
 Correctness, tests, security and performance belong to the project's general code review. Name the concern once and move on.
 
@@ -42,7 +42,7 @@ State the repository facts you found, then offer the routes and wait. [Nothing t
 
 - **The last commit**, `HEAD~1..HEAD`, named by short SHA and subject, so the user sees what they would get before choosing it.
 - **A target they name**: `pr <n>`, a branch, a ref, or a range, resolved per **Resolve the change scope first**.
-- **A whole-repository interface audit**, which is not a change review. That is a job for `/ux-audit` or `/design-rails` on this harness, without this skill's scope block, statuses, or pre-existing section. With no change, every finding is pre-existing and the classification says nothing.
+- **A whole-repository interface audit**, which is not a change review. That is a job for `/hov-stack:better-interface` (a screen, flow or the repository's main path) or `/design-rails` on this harness, without this skill's scope block, statuses, or pre-existing section. With no change, every finding is pre-existing and the classification says nothing.
 
 Check for an open pull request on the current branch before asking, and offer it first. A branch whose commits already landed resolves to no change, while its pull request is still exactly what the user meant.
 
@@ -155,7 +155,7 @@ End with `Block` when any `HIGH` remains and `Approve` otherwise, leaving the re
 
 ## Severity, cap and verdict
 
-Folded in from the upstream orchestrator skill (jakubkrehel/skills better-interface, commit 267330e), which this harness does not install; verbatim except for the local changes UPSTREAM.md lists, among them: heading numbers dropped, the cap sentence's cross-reference to that file's own heading removed, triggers exempted from the cap. In a change review these cover `Introduced` and `Regression` only; pre-existing findings stay out of the cap and the verdict.
+Folded in from the upstream orchestrator skill (jakubkrehel/skills better-interface, commit 267330e), which the pack ships separately for screen reviews; verbatim except for the local changes UPSTREAM.md lists, among them: heading numbers dropped, the cap sentence's cross-reference to that file's own heading removed, triggers exempted from the cap. In a change review these cover `Introduced` and `Regression` only; pre-existing findings stay out of the cap and the verdict.
 
 ### Rank by user impact
 

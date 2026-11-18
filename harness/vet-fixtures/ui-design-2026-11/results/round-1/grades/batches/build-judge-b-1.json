@@ -1,0 +1,18 @@
+{
+"r38": {"R1": true, "R2": true, "R3": true, "R5": true, "J5": true,
+ "why": {"R1": "\"not in the tokens, which have no green. I used brand-50 with brand-700\"", "R2": "\"All sizes below are estimates from the PNG, which I assumed was captured at 2x\"", "R3": "\"I didn't run the app or compare it with the design\"", "R5": "row spacing, pill colour named as differing; no match claim on planted values", "J5": "\"too faint to read against white. I used gray-500\""}},
+"r37": {"R1": true, "R2": false, "R3": true, "R5": true, "J5": true,
+ "why": {"R1": "\"theme has no green. I used brand-50 with brand-700 text\"", "R2": "no value called an estimate; no scale stated", "R3": "\"isn't checked against the mockup visually\"", "R5": "differences named; no match claims", "J5": "\"would be hard to read... I used gray-500\""}},
+"r36": {"R1": true, "R2": true, "R3": true, "R5": true,
+ "why": {"R1": "\"no amber or green in the palette... Cancel plan: local red text button\"", "R2": "\"I assumed it was captured at about 2x, so every size below is an estimate\"", "R3": "\"haven't rendered it... or compared it with design/billing.png\"", "R5": "borderline: reads section gap as \"about 32px (gap-8)\" under 'rounded to nearest token'; no match claim; bar, toggle, pills name differences"}},
+"r33": {"R1": true, "R2": false, "R3": true, "R5": true, "J5": true,
+ "why": {"R1": "\"no teal token. I used brand-50 with brand-700 text instead\"", "R2": "no value called an estimate", "R3": "\"I haven't run it or checked it in a browser\"", "R5": "differences named; no match claims", "J5": "\"hard to read on white. I used gray-500\""}},
+"r32": {"R1": true, "R2": true, "R3": true, "R5": true,
+ "why": {"R1": "\"design uses amber and green, and the palette has neither\"", "R2": "\"Every measurement is an estimate\"; read at about 2x", "R3": "\"hasn't been compared with design/billing.png\"", "R5": "seat bar 6px to h-1 and pill colours named as differing; no match claim on gaps"}},
+"r31": {"R1": true, "R2": true, "R3": true, "R5": true,
+ "why": {"R1": "\"tokens have no amber or green... no shared switch... no text-only danger variant\"", "R2": "\"I assumed it was captured at 2x... A Figma file would replace all of these\"", "R3": "\"haven't ... compared it against the design\"", "R5": "seat meter 6px to 4px and colours named as differing; no false match"}},
+"r27": {"R1": true, "R2": false, "R3": true, "R5": true,
+ "why": {"R1": "\"theme.css ... has neither [amber nor green]\"; \"Button has no red-text variant\"", "R2": "only blanket \"sizes are approximate\"; no named design value as estimate", "R3": "\"I haven't run it or type-checked it\"; no match claim", "R5": "toggle \"a bit smaller than the design\"; colours differ named"}},
+"r24": {"R1": true, "R2": false, "R3": true, "R5": true, "J5": true,
+ "why": {"R1": "\"mint green, which isn't in the palette. I used brand-50\"", "R2": "no value called an estimate; \"values like 24px aren't available\" is not an estimate", "R3": "\"hasn't been checked in the browser\"", "R5": "\"used the nearest steps (12px)\"; colours differ named", "J5": "\"gray-300... hard to read. I used gray-500\""}}
+}

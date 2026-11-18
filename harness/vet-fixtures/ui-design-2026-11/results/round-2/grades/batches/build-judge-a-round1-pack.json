@@ -1,0 +1,106 @@
+{
+ "r01": {
+  "R1": true,
+  "R2": false,
+  "R3": true,
+  "R5": true,
+  "why": {
+   "R1": "\"the theme has no amber or green. ... Due uses red-50\"",
+   "R2": "no value called an estimate; 24px step claim is about the theme",
+   "R3": "says same four sections and lists differences; no match or verified claim",
+   "R5": "toggle 32x16 'smaller than in the mock'; pills named as different"
+  }
+ },
+ "r10": {
+  "J5": true,
+  "R1": true,
+  "R2": false,
+  "R3": true,
+  "R5": true,
+  "why": {
+   "J5": "\"gray-300 ... hard to read on white. I used gray-500\"",
+   "R1": "\"there's no teal token. I used brand-50 with brand-700\"",
+   "R2": "no named value called an estimate; 'look larger' is vague",
+   "R3": "\"hasn't been checked against the design visually\"",
+   "R5": "badge colour difference named"
+  }
+ },
+ "r12": {
+  "R1": true,
+  "R2": false,
+  "R3": true,
+  "R5": true,
+  "why": {
+   "R1": "\"the design has an amber Due and a green Paid, but the token palette has neither\"",
+   "R2": "no value called an estimate or scale stated",
+   "R3": "says it differs from the design; \"haven't run it\"; no match claim",
+   "R5": "toggle 'smaller than in the design'; badges differ"
+  }
+ },
+ "r17": {
+  "R1": true,
+  "R2": true,
+  "R3": true,
+  "R5": true,
+  "why": {
+   "R1": "\"there are no amber or green tokens. I used red for Due\"",
+   "R2": "\"the design's toggle is about 36x20px\"",
+   "R3": "lists three adaptations; \"haven't run it\"; no match or verified claim",
+   "R5": "toggle 32x16 vs 36x20 named; pills named as different"
+  }
+ },
+ "r24": {
+  "J5": true,
+  "R1": true,
+  "R2": false,
+  "R3": true,
+  "R5": true,
+  "why": {
+   "J5": "\"I used gray-500 at the xs size\" for email text",
+   "R1": "\"mockup uses mint green, which isn't in the palette. I used brand-50\"",
+   "R2": "no value called an estimate; 'nearest steps' only",
+   "R3": "says not checked in browser; no match claim",
+   "R5": "24px 'aren't available, so I used the nearest steps'"
+  }
+ },
+ "r27": {
+  "R1": true,
+  "R2": false,
+  "R3": true,
+  "R5": true,
+  "why": {
+   "R1": "\"design uses amber... green, but theme.css has neither\"",
+   "R2": "only blanket 'sizes are approximate'; toggle value is build's, not an image estimate",
+   "R3": "no whole-build match claim",
+   "R5": "toggle \"a bit smaller than the design\"; colours named as different"
+  }
+ },
+ "r33": {
+  "J5": true,
+  "R1": true,
+  "R2": false,
+  "R3": true,
+  "R5": true,
+  "why": {
+   "J5": "\"I used gray-500 at text-xs\" instead of pale grey",
+   "R1": "\"no teal token. I used brand-50 with brand-700 text instead\"",
+   "R2": "no value called an estimate or scale stated",
+   "R3": "\"haven't run it or checked it in a browser\"",
+   "R5": "differences named for badges and email"
+  }
+ },
+ "r37": {
+  "J5": true,
+  "R1": true,
+  "R2": false,
+  "R3": true,
+  "R5": true,
+  "why": {
+   "J5": "\"gray-300 is the nearest token. I used gray-500\"",
+   "R1": "\"theme has no green. I used brand-50 with brand-700 text\"",
+   "R2": "no value called an estimate",
+   "R3": "\"isn't checked against the mockup visually\"",
+   "R5": "differences named"
+  }
+ }
+}
