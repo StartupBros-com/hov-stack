@@ -2537,6 +2537,17 @@ EV_UNAVAIL='[browser] Model selection evidence: requested=gpt-5.5-pro; resolved=
 EV_BENIGN='[browser] Model selection evidence: requested=Pro; resolved=(unavailable); status=already-selected; strategy=current; verified=no.'
 EV_WEAK='[browser] Model selection evidence: requested=gpt-5.5-pro; resolved=GPT-4o mini; status=ok; strategy=current; verified=yes.'
 EV_ULTRA='[browser] Model selection evidence: requested=gpt-5.5-pro; resolved=GPT-5.6 Sol Ultra; status=ok; strategy=current; verified=yes.'
+# #737: Oracle 0.17.0 and later (0.20.0-sb.5, 0.23.1) print resolvedLabel= in this field order
+# (formatBrowserModelSelectionEvidence). The fixtures above keep the 0.16-and-earlier resolved= shape; both must parse.
+# The shape every recorded resolvedLabel= line has carried: a healthy current-strategy run whose
+# model was already selected. Before #737 it read as no status at all and warned.
+EV_LABEL_BENIGN='[browser] Model selection evidence: requestedKey=gpt-5.6; target=GPT-5.6 Sol; resolvedLabel=(unavailable); status=already-selected; strategy=current; verified=no; source=chatgpt-model-picker; capturedAt=2026-09-04T20:47:52.008Z'
+EV_LABEL_PRO='[browser] Model selection evidence: requestedKey=gpt-5.5-pro; target=GPT-5.5 Pro; resolvedLabel=GPT-5.6 Pro; status=already-selected; strategy=current; verified=yes; source=chatgpt-model-picker; capturedAt=2026-11-18T03:00:00.000Z'
+EV_LABEL_UNAVAIL='[browser] Model selection evidence: requestedKey=gpt-5.5-pro; target=GPT-5.5 Pro; resolvedLabel=(unavailable); status=unavailable; strategy=current; verified=no; source=config; capturedAt=2026-11-18T03:00:00.000Z'
+# Oracle logs its effort-picker line right after the model line, and it too carries resolvedLabel=
+# and status=. Only the model line may feed the model and status.
+EV_LABEL_THEN_THINKING="$EV_LABEL_PRO"$'\n''[browser] Thinking effort evidence: requestedLevel=extended; status=switched; resolvedLabel=Extended; verified=yes; failClosed=no; targetModelKind=pro; observedModelKind=pro; source=chatgpt-thinking-picker; capturedAt=2026-11-18T03:00:01.000Z'
+EV_LABEL_WEAK='[browser] Model selection evidence: requestedKey=gpt-5.5-pro; target=GPT-5.5 Pro; resolvedLabel=GPT-4o mini; status=switched; strategy=current; verified=yes; source=chatgpt-model-picker; capturedAt=2026-11-18T03:00:00.000Z'
 
 
 freshrun() { # $1=home $2=argv-file $3=evidence $4=out [strategy] [legacy browser archive]
@@ -2662,6 +2673,26 @@ check 'benign already-selected run exits 0' "$([ "$RC" -eq 0 ]; echo $?)" "rc=$R
 check 'benign already-selected does NOT warn' "$([ -z "$(warn_of "$TDIR/o-benign.md.status")" ]; echo $?)" "warn=$(warn_of "$TDIR/o-benign.md.status")"
 check 'benign already-selected model is role-based (no version)' "$(grep -q 'reasoning model' <<<"$(model_of "$TDIR/o-benign.md.status")"; echo $?)" "model=$(model_of "$TDIR/o-benign.md.status")"
 check 'benign already-selected emits no model WARNING line' "$(! grep -qE 'weak-model denylist|could not confirm the resolved model' "$TDIR/stderr"; echo $?)" "$(grep -i warning "$TDIR/stderr" | head -2)"
+
+echo '# #737: the resolvedLabel= evidence shape parses like resolved='
+freshrun "$TDIR/home-label-benign" "$TDIR/argv-label-benign.txt" "$EV_LABEL_BENIGN" "$TDIR/o-label-benign.md"
+check '#737: a recorded already-selected resolvedLabel= run exits 0' "$([ "$RC" -eq 0 ]; echo $?)" "rc=$RC $(tail -2 "$TDIR/stderr")"
+check '#737: a recorded already-selected resolvedLabel= run does NOT warn' "$([ -z "$(warn_of "$TDIR/o-label-benign.md.status")" ]; echo $?)" "warn=$(warn_of "$TDIR/o-label-benign.md.status")"
+check '#737: a recorded already-selected resolvedLabel= run emits no model WARNING line' "$(! grep -qE 'weak-model denylist|could not confirm the resolved model' "$TDIR/stderr"; echo $?)" "$(grep -i warning "$TDIR/stderr" | head -2)"
+check '#737: a recorded already-selected resolvedLabel= model is role-based' "$(grep -q 'reasoning model' <<<"$(model_of "$TDIR/o-label-benign.md.status")"; echo $?)" "model=$(model_of "$TDIR/o-label-benign.md.status")"
+freshrun "$TDIR/home-label" "$TDIR/argv-label.txt" "$EV_LABEL_PRO" "$TDIR/o-label.md"
+check '#737: a resolvedLabel= run exits 0' "$([ "$RC" -eq 0 ]; echo $?)" "rc=$RC $(tail -2 "$TDIR/stderr")"
+check '#737: status model equals the resolvedLabel= value' "$([ "$(model_of "$TDIR/o-label.md.status")" = 'GPT-5.6 Pro' ]; echo $?)" "model=$(model_of "$TDIR/o-label.md.status")"
+check '#737: ledger model equals the resolvedLabel= value' "$(grep -q '"model":"GPT-5.6 Pro"' "$TDIR/home-label/ledger.jsonl"; echo $?)" "$(cat "$TDIR/home-label/ledger.jsonl" 2>/dev/null)"
+check '#737: a read resolvedLabel= emits no model WARNING line' "$(! grep -qE 'weak-model denylist|could not confirm the resolved model' "$TDIR/stderr"; echo $?)" "$(grep -i warning "$TDIR/stderr" | head -2)"
+freshrun "$TDIR/home-label-unav" "$TDIR/argv-label-unav.txt" "$EV_LABEL_UNAVAIL" "$TDIR/o-label-unav.md"
+check '#737: resolvedLabel=(unavailable) degrades to role-based text and warns' \
+  "$(grep -q 'reasoning model' <<<"$(model_of "$TDIR/o-label-unav.md.status")" && [ -n "$(warn_of "$TDIR/o-label-unav.md.status")" ]; echo $?)" \
+  "model=$(model_of "$TDIR/o-label-unav.md.status") warn=$(warn_of "$TDIR/o-label-unav.md.status")"
+freshrun "$TDIR/home-label-think" "$TDIR/argv-label-think.txt" "$EV_LABEL_THEN_THINKING" "$TDIR/o-label-think.md"
+check '#737: the effort line after the model line does not become the model' "$([ "$(model_of "$TDIR/o-label-think.md.status")" = 'GPT-5.6 Pro' ]; echo $?)" "model=$(model_of "$TDIR/o-label-think.md.status")"
+freshrun "$TDIR/home-label-weak" "$TDIR/argv-label-weak.txt" "$EV_LABEL_WEAK" "$TDIR/o-label-weak.md"
+check '#737: a weak resolvedLabel= model hits the denylist warning' "$(grep -q 'weak-model denylist' "$TDIR/stderr"; echo $?)" "$(tail -3 "$TDIR/stderr")"
 
 echo '# U2: pg_model_label renders captured value or role-based fallback (R5)'
 LBL_CAP="$(bash -c ". '$HERE/../lib/pro-gate-lib.sh'; pg_model_label 'GPT-5.6 Pro'")"
