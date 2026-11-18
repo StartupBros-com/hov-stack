@@ -1,0 +1,11 @@
+P0: none
+
+P1: none
+
+P2: none
+
+P3: none
+
+Reviewed every hunk in the supplied diff. In `plugins/pro-gate/bin/oracle-review.sh:4748`, the parser correctly prefers `resolvedLabel=` and retains the legacy `resolved=` fallback. All 18 focused checks of the exact parser and existing warning/label helpers passed, covering missing and unavailable evidence, mixed-format logs, field precedence, weak-model warnings, and exclusion of the following effort line. I also traced the status and ledger consumers and inspected the added assertions in `plugins/pro-gate/tests/engine.test.sh:2678`. Both version files and the release documentation are consistent. The full engine suite was not rerun. No actionable defects found.
+
+VERDICT: SHIP — Both evidence formats preserve expected capture and warning behavior.

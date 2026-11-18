@@ -26,6 +26,7 @@ import {
   buildThrottleModalExpression,
   ORGANIZER_MUTATION_LEASE_MS,
   readReviewText,
+  renderedReviewKey,
 } from '../bin/cdp-organizer-expressions.mjs';
 import {
   parseTestPollMs,
@@ -3397,6 +3398,155 @@ const FOREIGN_ANSWER = (m) => [
     cdp.ui.events.length === 0 && !cdp.ui.archived && cdp.closed.length === 0,
     `events=${JSON.stringify(cdp.ui.events)} closed=${cdp.closed}`);
   cdp.stop();
+}
+
+{ // #744: Oracle v0.23.1 finds the page's copy button and saves the answer as markdown, while the
+  // page side of the finalizer's comparison is the rendered text readReviewText reads. Both
+  // checks (the helper's finalizerOwnership and the in-page twin) must compare the two forms.
+  //
+  // The canary fixtures are a REAL pair from the #737 canary (PR #742, 2026-11-18): the result
+  // file Oracle saved, byte for byte, and the answer span readReviewText read from the same
+  // conversation. They differ only by the inline-code backticks that rendering drops. Before
+  // #744 the finalizer refused this pair as result-mismatch and the review's tab stayed open.
+  const fixtureDir = path.join(path.dirname(SALVAGE), '..', 'tests', 'fixtures', 'finalizer-markdown');
+  const canaryMarker = 'pg-run-StartupBros-com-hov-stack-742-1794974428-3366965';
+  const canaryPage = fs.readFileSync(path.join(fixtureDir, 'canary-742-page.txt'), 'utf8').replace(/\n$/, '');
+  const canaryResult = fs.readFileSync(path.join(fixtureDir, 'canary-742-result.md'), 'utf8').replace(/\n$/, '');
+  // SYNTHESIZED pair: the markdown side is hand-written, and the page side is a model of what
+  // readReviewText returns for it, not a capture. Its shapes come from saved page captures: list
+  // markers, emphasis and link targets do not render, and a fenced block reads as its language
+  // label on one line followed by the code lines with readReviewText's "> " prefix.
+  const markdownResult = [
+    'P0: none',
+    '',
+    'P1: none',
+    '',
+    '### P2',
+    '',
+    '- **Stale label.** `pg_status` prints the old [model field](https://example.com/model) name.',
+    '- A second item with _emphasis_.',
+    '',
+    '1. First step',
+    '2. Second step',
+    '',
+    '```bash',
+    'pg_status --json',
+    '```',
+    '',
+    'P3: none',
+    '',
+    '**VERDICT: SHIP** — only formatting differs.',
+  ].join('\n');
+  const renderedAnswer = (marker) => [
+    'P0: none',
+    '',
+    'P1: none',
+    '',
+    'P2',
+    '',
+    'Stale label. pg_status prints the old model field name.',
+    'A second item with emphasis.',
+    '',
+    'First step',
+    'Second step',
+    '',
+    'Bash',
+    '> pg_status --json',
+    '',
+    'P3: none',
+    '',
+    `VERDICT: SHIP — only formatting differs. (run marker: ${marker})`,
+  ].join('\n');
+  const finalizeAgainst = async (label, marker, page, result, expected) => {
+    const title = `pro-gate review: ${label} [pro-gate]`;
+    const cdp = await mockCdp(`run marker: ${marker}\n${page}`);
+    const r = await runSalvage(finalizerArgs(marker), cdp.port, seedOrganizer(marker, title, null, result));
+    cdp.stop();
+    const fixture = organizerExpressionFixture(`run marker: ${marker}\n${page}`, { title });
+    const guard = await runInNewContext(buildRenameConversationExpression(title, {
+      marker,
+      conversationUrl: 'https://chatgpt.com/c/mock-conversation',
+      mutationToken: 'finalizer-markdown.744',
+      mutationExpiresAt: Date.now() + 10_000,
+      expectedReview: result,
+    }), fixture.context);
+    if (expected === 'owned') {
+      check(`finalizer owns ${label}`,
+        /archive=archived close=closed reason=ok/.test(r.stdout), `stdout=${r.stdout}`);
+      check(`in-page finalization guard owns ${label}`,
+        guard.status === 'already' && fixture.sidebarReads() > 0 && fixture.events.length === 0,
+        `result=${JSON.stringify(guard)} events=${fixture.events.join(',')}`);
+    } else {
+      check(`finalizer refuses ${label}`,
+        /reason=result-mismatch/.test(r.stdout) && cdp.closed.length === 0 && !cdp.ui.archived,
+        `stdout=${r.stdout} closed=${cdp.closed}`);
+      check(`in-page finalization guard refuses ${label}`,
+        guard.status === 'skipped' && guard.reason === 'target-result-mismatch' && fixture.events.length === 0,
+        `result=${JSON.stringify(guard)}`);
+    }
+  };
+  await finalizeAgainst('the real #737 canary markdown/rendered pair', canaryMarker, canaryPage, canaryResult, 'owned');
+  await finalizeAgainst('a synthesized markdown/rendered pair', MARKER, renderedAnswer(MARKER), markdownResult, 'owned');
+  await finalizeAgainst('a markdown result with one changed word', MARKER, renderedAnswer(MARKER),
+    markdownResult.replace('prints the old', 'prints the new'), 'refused');
+  await finalizeAgainst('a markdown result with one changed number', canaryMarker, canaryPage,
+    canaryResult.replace('oracle-review.sh:4748', 'oracle-review.sh:4749'), 'refused');
+  await finalizeAgainst('a markdown result with an extra sentence', MARKER, renderedAnswer(MARKER),
+    markdownResult.replace('- A second item', '- Also checked the ledger.\n- A second item'), 'refused');
+  check('rendered-form key of empty or markup-only bytes is empty, which never matches',
+    renderedReviewKey('') === '' && renderedReviewKey('```\n```') === '' &&
+      renderedReviewKey('**``**\n\n---\n| --- | :-: |') === '');
+  check('rendered-form key maps a fenced block to the page\'s label line and quoted lines',
+    renderedReviewKey('Run:\n\n```bash\npg_status --json\n```') === renderedReviewKey('Run:\n\nBash\n> pg_status --json') &&
+      // Underscores go on both sides, so an identifier keys without them; the label keeps its
+      // word and loses only its case.
+      renderedReviewKey('Run:\n\nBash\n> pg_status --json') === 'Run: bash pgstatus --json');
+  // The short line before a quoted or fenced block is matched without case, never dropped: its
+  // markdown and rendered forms agree, and a changed word in it still refuses.
+  const sameKey = (a, b) => renderedReviewKey(a) === renderedReviewKey(b);
+  check('rendered-form key matches a heading, bold line or bullet before a quote or fence',
+    sameKey('### P2\n\n> quoted', 'P2\n\n> quoted') &&
+      sameKey('**Evidence**\n\n> quoted', 'Evidence\n\n> quoted') &&
+      sameKey('- Stale label\n  ```\n  x\n  ```', 'Stale label\n> x'));
+  check('rendered-form key refuses a changed word on the line before a quote',
+    !sameKey('### P1\n\n> quoted', 'P2\n\n> quoted') &&
+      !sameKey('P1\n\n> quoted', 'P2\n\n> quoted') &&
+      !sameKey('P1\n> quoted', 'P2\n> quoted') &&
+      !sameKey('```sh\nx\n```', 'Bash\n> x'));
+  check('rendered-form key keeps a mid-line rule-like run, case and punctuation',
+    renderedReviewKey('a --- b') === 'a --- b' && renderedReviewKey('Line 12.') !== renderedReviewKey('line 12'));
+  { // The rename already-check read the sidebar through /s+/ (an unescaped \s in a plain template),
+    // so a real-shaped title with an "s" never read as renamed and the menu opened on every finalize.
+    const sTitle = 'pro-gate review: StartupBros-com/hov-stack#742 [pro-gate]';
+    const sFixture = organizerExpressionFixture(`run marker: ${canaryMarker}\n${canaryPage}`, { title: sTitle });
+    const sResult = await runInNewContext(buildRenameConversationExpression(sTitle, {
+      marker: canaryMarker,
+      conversationUrl: 'https://chatgpt.com/c/mock-conversation',
+      mutationToken: 'finalizer-markdown.s-title',
+      mutationExpiresAt: Date.now() + 10_000,
+      expectedReview: canaryResult,
+    }), sFixture.context);
+    check('rename reads a sidebar title containing "s" as already renamed without opening the menu',
+      sResult.status === 'already' && sFixture.sidebarReads() > 0 && sFixture.events.length === 0,
+      `result=${JSON.stringify(sResult)} events=${sFixture.events.join(',')}`);
+  }
+  // The in-page twin cannot import, so it embeds the one key function; a fix to one side only
+  // would refuse at runtime with nothing in the helper's own tests to show it.
+  const twin = buildRenameConversationExpression('t', {
+    marker: MARKER,
+    conversationUrl: 'https://chatgpt.com/c/mock-conversation',
+    mutationToken: 'finalizer-markdown.twin',
+    mutationExpiresAt: Date.now() + 10_000,
+    expectedReview: 'x',
+  });
+  check('in-page twin embeds renderedReviewKey and keeps no byte-exact result comparison',
+    twin.includes(`const renderedReviewKey = ${renderedReviewKey.toString()}`) &&
+      /pageKey !== renderedReviewKey\(expectedFinalReview\)/.test(twin) &&
+      !/\)\) !== expectedFinalReview/.test(twin));
+  const salvageSource = fs.readFileSync(SALVAGE, 'utf8');
+  check('helper finalizer compares rendered forms, not raw bytes',
+    /pageKey !== renderedReviewKey\(acceptedReview\)/.test(salvageSource) &&
+      !/\)\) !== acceptedReview/.test(salvageSource));
 }
 
 {

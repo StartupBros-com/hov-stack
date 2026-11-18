@@ -102,6 +102,7 @@ import {
   ORGANIZER_MUTATION_LEASE_MS,
   THROTTLE_RE,
   readReviewText,
+  renderedReviewKey,
   reviewTextContext,
 } from './cdp-organizer-expressions.mjs';
 import {
@@ -1821,8 +1822,11 @@ function finalizerOwnership(text) {
   if (!sameMarker(answerMarker, marker)) {
     return { owned: false, reason: 'cross-bound', foreignMarker: answerMarker };
   }
+  // #744: the result file can hold Oracle's copied markdown while the page holds its rendering, so
+  // both sides compare in rendered form (renderedReviewKey; the in-page twin does the same).
   const review = extractReview(text);
-  if (!review || normalizeReviewBytes(stripMarkerEcho(review)) !== acceptedReview) {
+  const pageKey = review ? renderedReviewKey(normalizeReviewBytes(stripMarkerEcho(review))) : '';
+  if (!pageKey || pageKey !== renderedReviewKey(acceptedReview)) {
     return { owned: false, reason: 'result-mismatch' };
   }
   return { owned: true, reason: 'completed' };
