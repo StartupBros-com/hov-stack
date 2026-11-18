@@ -51,9 +51,9 @@ manifest_check() {
     fi
     if [ ! -L "$home/$f" ]; then
       if [ -e "$home/$f" ]; then
-        echo "~/$f is a real file, not a symlink into dotfiles (drifted; rerun install.sh, which backs it up first)"
+        echo "~/$f is a real file, not a symlink into dotfiles (drifted; use install_manifest_links (lib/link.sh), which backs it up first)"
       else
-        echo "~/$f is missing (declared in lib/manifest.sh; run install.sh)"
+        echo "~/$f is missing (declared in lib/manifest.sh; use install_manifest_links (lib/link.sh))"
       fi
     elif [ "$(readlink -f "$home/$f")" != "$(readlink -f "$root/$f")" ]; then
       echo "~/$f symlinks outside dotfiles: $(readlink "$home/$f")"
@@ -66,9 +66,9 @@ manifest_check() {
     [ -e "$root/$src" ] || { echo "lib/manifest.sh declares missing source: $src"; continue; }
     if [ ! -L "$home/$dst" ]; then
       if [ -e "$home/$dst" ]; then
-        echo "~/$dst is a real file/dir, not a symlink to $src (drifted; rerun install.sh, which backs it up first)"
+        echo "~/$dst is a real file/dir, not a symlink to $src (drifted; use install_manifest_links (lib/link.sh), which backs it up first)"
       else
-        echo "~/$dst is missing (declared in lib/manifest.sh; run install.sh)"
+        echo "~/$dst is missing (declared in lib/manifest.sh; use install_manifest_links (lib/link.sh))"
       fi
     elif [ "$(readlink -f "$home/$dst")" != "$(readlink -f "$root/$src")" ]; then
       echo "~/$dst symlinks to $(readlink "$home/$dst"), not $src"
@@ -128,11 +128,11 @@ manifest_check() {
       copy_src=${pair%%|*}
       copy_dst=${pair##*|}
       if [ -L "$windows_home/$copy_dst" ]; then
-        echo "$copy_src is deployed as a symlink at $windows_home/$copy_dst (Windows requires a real file; run install.sh)"
+        echo "$copy_src is deployed as a symlink at $windows_home/$copy_dst (Windows requires a real file; use install_manifest_links (lib/link.sh))"
       elif [ ! -f "$windows_home/$copy_dst" ]; then
-        echo "$copy_src is not deployed to $windows_home/$copy_dst (run install.sh)"
+        echo "$copy_src is not deployed to $windows_home/$copy_dst (use install_manifest_links (lib/link.sh))"
       elif ! cmp -s "$root/$copy_src" "$windows_home/$copy_dst"; then
-        echo "$copy_src differs from deployed $windows_home/$copy_dst (re-run install.sh, or pull the live edit back into the repo)"
+        echo "$copy_src differs from deployed $windows_home/$copy_dst (use install_manifest_links (lib/link.sh), or pull the live edit back into the repo)"
       fi
     done
   fi

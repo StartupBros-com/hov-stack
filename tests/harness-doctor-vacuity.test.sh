@@ -113,7 +113,7 @@ make_home() {
     "$home/.claude/skills" \
     "$home/dotfiles/scripts" \
     "$home/dotfiles/harness" \
-    "$home/dotfiles/harnesses/codex" \
+    "$home/dotfiles/codex" \
     "$home/windows-home/.claude"
   write_settings "$home" "$count" "$hosted"
   printf '%s\n' '{"permissions":{"allow":[],"deny":[],"ask":[],"disableAutoMode":"disable"}}' \
@@ -133,7 +133,7 @@ echo "EXAMINED: ${SYNC_EXAMINED:-1}"
 echo "in sync"
 exit "${SYNC_STATUS:-0}"
 STUB
-  cat >"$home/dotfiles/harnesses/codex/sync.sh" <<'STUB'
+  cat >"$home/dotfiles/codex/sync.sh" <<'STUB'
 #!/usr/bin/env bash
 [ -n "${CODEX_OUTPUT:-}" ] && printf '%s\n' "$CODEX_OUTPUT"
 exit "${CODEX_STATUS:-0}"
@@ -159,7 +159,7 @@ print(json.dumps({"critical_count": 0, "warn_count": 0}))
 STUB
   chmod +x \
     "$home/dotfiles/sync.sh" \
-    "$home/dotfiles/harnesses/codex/sync.sh" \
+    "$home/dotfiles/codex/sync.sh" \
     "$home/.claude/scripts/skill-collision-check.py" \
     "$home/dotfiles/scripts/skills-beads-sweep-check.py"
   printf '%s\n' "$home"
@@ -1933,6 +1933,38 @@ contains "$TENC_UNNAMED" "ok: not applicable: the home manifest belongs to a dot
 omits "$TENC_UNNAMED" "planted manifest drift" \
   "10c planted negative: with DOTFILES_REPO unset, manifest_check never runs"
 omits "$TENC_UNNAMED" "WARN:" "10c with DOTFILES_REPO unset emits no warning"
+
+TENE_HOME=$(make_home tene 0 0)
+mkdir -p "$TENE_HOME/.codex"
+python3 - "$TENE_HOME/.codex" <<'PYFIXTURE'
+import json
+import pathlib
+import sys
+
+home = pathlib.Path(sys.argv[1])
+existing = home / "present hook.js"
+existing.touch()
+missing = home / "missing-binary"
+commands = [f'node "{existing}"', str(missing), "relative-hook"]
+hooks_path = home / "hooks.json"
+hooks_path.write_text(json.dumps({"hooks": {"PreToolUse": [{"hooks": [
+    {"command": command} for command in commands
+]}]}}))
+(home / "config.toml").write_text("".join(
+    f'[{json.dumps("hooks")}.{json.dumps("state")}.{json.dumps(f"{hooks_path}:pre_tool_use:0:{index}")}]\ntrusted_hash = "fixture"\n'
+    for index in range(len(commands))
+))
+PYFIXTURE
+tene_section() { awk '/^== 10e\./{p=1; next} /^== 10f\./{p=0} p'; }
+TENE_MISSING=$(CODEX_HOME="$TENE_HOME/.codex" run_doctor "$TENE_HOME" "$EMPTY_HARNESS" 1 | tene_section)
+contains "$TENE_MISSING" "WARN: codex hook command path missing: $TENE_HOME/.codex/missing-binary" "10e catches a missing absolute binary"
+omits "$TENE_MISSING" "path missing: $TENE_HOME/.codex/present hook.js" "10e accepts an existing quoted script"
+omits "$TENE_MISSING" "path missing: relative-hook" "10e does not guess relative paths"
+omits "$TENE_MISSING" "all absolute command paths exist" "10e missing paths cannot report clean"
+touch "$TENE_HOME/.codex/missing-binary"
+TENE_PRESENT=$(CODEX_HOME="$TENE_HOME/.codex" run_doctor "$TENE_HOME" "$EMPTY_HARNESS" 1 | tene_section)
+omits "$TENE_PRESENT" "WARN:" "10e all-present trusted hooks produce no warning"
+contains "$TENE_PRESENT" "all absolute command paths exist" "10e confirms all absolute paths exist"
 
 if [ "$fail" -ne 0 ]; then
   echo "FAILED — harness-doctor vacuity: $pass passed, $fail failed" >&2

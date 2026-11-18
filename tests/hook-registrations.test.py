@@ -20,7 +20,7 @@ template is checked as it is now AND as it ever was on this branch's history:
    loads nothing and that, run with a 2 MiB payload, reads all of it, prints nothing and
    exits 0.
 4. Every script a plugin's hooks.json names under ${CLAUDE_PLUGIN_ROOT}, and every module a
-   mod's hooks.json lists, exists; harnesses/codex/hooks.json is checked as settings.json is.
+   mod's hooks.json lists, exists; live Codex paths are checked by harness-doctor 10e.
 5. No script is registered twice: twice in one event of settings.json, by settings.json and a
    plugin, or by a plugin after an earlier template registered it and the current one dropped
    it (an install that never merged then runs both). MOVED_TO_PLUGIN names the known cases;
@@ -336,9 +336,6 @@ class HookRegistrations(unittest.TestCase):
         manifests = plugin_manifests(ROOT)
         for plugin, path, inline in manifests:
             problems += plugin_problems(plugin, path, inline)
-        codex = ROOT / "harnesses" / "codex" / "hooks.json"
-        if codex.is_file():
-            problems += [f"harnesses/codex {e}: {rel} does not exist" for e, _, rel in missing_paths(json.loads(codex.read_text()), ROOT)]
         self.assertEqual(problems, [])
         self.assertGreaterEqual(len(manifests), 2, "found no plugin hook manifests; the scan is looking in the wrong place")
         print(f"ok - {len(manifests)} plugin and mod hook manifests name only files that exist")

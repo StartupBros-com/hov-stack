@@ -1,4 +1,4 @@
-# pnpm global config. Symlinked to ~/.config/pnpm/rc by install.sh (lib/manifest.sh).
+# pnpm global config. Symlinked to ~/.config/pnpm/rc by the owner’s checkout (lib/manifest.sh).
 #
 # Adopted into the repo 2026-08-07. Before that this was a plain untracked file from
 # 2026-03-20 sitting in a config layer nothing installed, linked, diffed or backed up —

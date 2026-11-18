@@ -970,14 +970,18 @@ else
   [ "$WARNS" -eq "$w0" ] && ok "every manifest link holds + no unaccounted or undeclared entries"
 fi
 
-echo "== 10d. harnesses/codex hooks in sync with repo =="
+echo "== 10d. codex hooks in sync with repo =="
 w0=$WARNS
-# Same bridge shape as check 10's sync.sh: harnesses/codex/sync.sh check emits
+# Same bridge shape as check 10's sync.sh: codex/sync.sh check emits
 # DRIFT lines and "in sync". dcg deliberately has no bridge here — the weekly
 # already runs its contract + update check (HARNESS.md § Automation), and a
 # second reporter would double-count the same drift.
-CODEX_SYNC=$DOTFILES_REPO/harnesses/codex/sync.sh
-if [ -f "$CODEX_SYNC" ]; then
+# The repo copy lives in the owner's dotfiles checkout, so like 10c this runs only
+# when the caller names that checkout; 10e checks the live hooks.json either way.
+CODEX_SYNC=$DOTFILES_REPO/codex/sync.sh
+if [ -z "$HD_DOTFILES_REPO_NAMED" ]; then
+  ok "not applicable: codex hooks are tracked in a dotfiles checkout; DOTFILES_REPO=<that checkout> runs it"
+elif [ -f "$CODEX_SYNC" ]; then
   _codex_out=$(bash "$CODEX_SYNC" check 2>&1); _codex_status=$?
   _codex_drifts=0
   while IFS= read -r line; do
@@ -990,13 +994,13 @@ if [ -f "$CODEX_SYNC" ]; then
   fi
   [ "$WARNS" -eq "$w0" ] && ok "codex hooks match repo"
 else
-  ok "harnesses/codex not present in dotfiles checkout"
+  ok "codex not present in dotfiles checkout"
 fi
 
 echo "== 10e. Codex hook-trust state covers every live hook entry =="
 w0=$WARNS
-# harnesses/codex/sync.sh (check 10d) only proves hooks.json's CONTENT matches the repo; it
-# explicitly never touches config.toml's [hooks.state] (harnesses/codex/README.md says so).
+# codex/sync.sh (check 10d) only proves hooks.json's CONTENT matches the repo; it
+# explicitly never touches config.toml's [hooks.state] (codex/README.md says so).
 # Codex hash-pins trust per hook entry (codex-rs/hooks/src/engine/discovery.rs):
 # an entry with no [hooks.state."<hooks.json>:<event>:<gi>:<hi>"].trusted_hash is
 # Untrusted, and one whose live command no longer hashes to the stored value is
@@ -1007,7 +1011,7 @@ w0=$WARNS
 # 2026-07-23 until discovered 2026-08-10.
 CODEX_HOME_CHECK=${CODEX_HOME:-$HOME/.codex}
 _codex_trust=$(python3 - "$CODEX_HOME_CHECK" <<'PY'
-import json, os, sys
+import json, os, shlex, sys
 try:
     import tomllib
 except ImportError:
@@ -1028,6 +1032,21 @@ try:
     hooks = json.load(open(hooks_path))
 except Exception:
     sys.exit(0)  # check 10d already reports a missing/invalid hooks.json
+missing_paths = set()
+for groups in hooks.get("hooks", {}).values():
+    for group in groups:
+        for hook in group.get("hooks", []):
+            command = hook.get("command", "")
+            try:
+                tokens = shlex.split(command)
+            except ValueError as error:
+                print(f"codex hook command cannot be parsed: {command!r}: {error}")
+                continue
+            for token in tokens:
+                if os.path.isabs(token) and not os.path.exists(token):
+                    missing_paths.add(token)
+for path in sorted(missing_paths):
+    print(f"codex hook command path missing: {path}")
 try:
     cfg = tomllib.load(open(config_path, "rb"))
 except Exception:
@@ -1045,17 +1064,19 @@ for event, groups in hooks.get("hooks", {}).items():
 PY
 ) || warn "check 10e: codex hook-trust scan errored (python/tomllib)"
 while IFS= read -r m; do [ -n "$m" ] && warn "$m"; done <<< "$_codex_trust"
-[ "$WARNS" -eq "$w0" ] && ok "every live codex hook entry has a trust entry"
+[ "$WARNS" -eq "$w0" ] && ok "every live codex hook entry has a trust entry and all absolute command paths exist"
 
-echo "== 10f. harnesses/fx skill bridge + settings in sync with repo =="
+echo "== 10f. fx skill bridge + settings in sync with repo =="
 w0=$WARNS
-# Same bridge shape as check 10d's harnesses/codex/sync.sh: harnesses/fx/sync.sh check emits DRIFT
+# Same bridge shape as check 10d's codex/sync.sh: fx/sync.sh check emits DRIFT
 # lines and "in sync". Verifies that bridged plugin skills are current (SKILL.md
 # fingerprint match) and that ~/.fx/settings.json carries the context_limits the
 # repo tracks (skill_catalog_bytes — without it, the catalog cap defaults to
 # 16 KiB and most bridged skills don't surface in /skills).
-FX_SYNC=$DOTFILES_REPO/harnesses/fx/sync.sh
-if [ -f "$FX_SYNC" ]; then
+FX_SYNC=$DOTFILES_REPO/fx/sync.sh
+if [ -z "$HD_DOTFILES_REPO_NAMED" ]; then
+  ok "not applicable: the fx bridge is tracked in a dotfiles checkout; DOTFILES_REPO=<that checkout> runs it"
+elif [ -f "$FX_SYNC" ]; then
   _fx_out=$(bash "$FX_SYNC" check 2>&1); _fx_status=$?
   _fx_drifts=0
   while IFS= read -r line; do
@@ -1068,7 +1089,7 @@ if [ -f "$FX_SYNC" ]; then
   fi
   [ "$WARNS" -eq "$w0" ] && ok "fx skill bridge + settings match repo"
 else
-  ok "harnesses/fx not present in dotfiles checkout"
+  ok "fx not present in dotfiles checkout"
 fi
 
 # The SessionStart plugin-auto-update hook records bridge failures into

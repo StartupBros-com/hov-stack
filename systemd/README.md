@@ -80,7 +80,6 @@ These carry a `# TEMPLATE:` header at the top that lists the lines to change. "N
 | `harness-unit-failure-alert@` | none (started by `OnFailure=`) | 14: `DISCORD_WEBHOOK_URL` requirement | See the pager section |
 | `docker-containers.slice` (system) | none | 27, 28: `MemoryHigh=12G`, `MemorySwapMax=6G` | Sized for the author's machine. Needs `"cgroup-parent"` in `/etc/docker/daemon.json` |
 | `zram-swap.service` (system) | none | 30, 42, 49: `$HOME/.claude/scripts/zram-swap.sh`; `ZRAM_SIZE=4G` | `%h` would resolve to `/root` in a system unit, so the installed copy needs absolute paths: `./setup --root` renders `$HOME/.claude/` to your harness home; by hand, substitute it |
-| `pi-local-champion-tunnel.service` (user, under `harnesses/pi/systemd/user/`) | none | 33-36: `TUNNEL_USER`, `TUNNEL_HOST`, `TUNNEL_LOCAL_PORT`, `TUNNEL_REMOTE_PORT` | `TUNNEL_HOST=gateway.invalid` cannot resolve until you set it. Pairs with `harnesses/pi/agent/bin/pi-local` |
 
 Install a system template the same way as the fstrim drop-ins, with `sudo install -D -m 0644 <file> /etc/systemd/system/<name>`, then `sudo systemctl daemon-reload`.
 

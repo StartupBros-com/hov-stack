@@ -1,4 +1,3 @@
-import json
 import os
 from pathlib import Path
 import subprocess
@@ -35,11 +34,6 @@ class RentCheckCloseoutTest(unittest.TestCase):
         self.assertNotIn("BWS_ACCESS_TOKEN=$(cat", result.stderr)
         self.assertNotIn("$(cat ~/.config/bws/sb-project-id)", result.stderr)
         self.assertIn("Write-created script", result.stderr)
-
-    def test_pi_uses_only_canonical_subagent_package(self):
-        settings = json.loads((ROOT / "harnesses/pi/agent/settings.json").read_text())
-        self.assertIn("~/SITES/pi-subagents", settings["packages"])
-        self.assertNotIn("npm:pi-side-agents", settings["packages"])
 
     def test_google_iam_inventory_is_resolved(self):
         text = (ROOT / "harness/data-source-clis.md").read_text()

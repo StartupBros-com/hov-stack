@@ -2,7 +2,7 @@
 # vast-ssh from Git Bash on Windows (Claude Code's Bash tool): hop into the WSL
 # wrapper, which owns the agent ssh key, the sibling vastai wrapper and every
 # guard. Nothing vast.ai is installed or stored on the Windows side.
-# Deployed as a real copy into %USERPROFILE%\.local\bin by install.sh
+# Deployed as a real copy into %USERPROFILE%\.local\bin by the owner’s checkout
 # (DOTFILES_COPIES in lib/manifest.sh). Context: harness/data-source-clis.md.
 #
 # The hop runs `sh -c` inside WSL so $HOME resolves there, in the WSL account's

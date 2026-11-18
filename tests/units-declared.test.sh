@@ -63,11 +63,6 @@ compare() {
     [ -n "$name" ] || continue
     case " $sysunits " in *" $name "*) ;; *) echo "systemd-system/$name ships but is not in SYSTEM_UNITS" ;; esac
   done < <(tree_files "$root/systemd-system")
-  while IFS= read -r name; do
-    [ -n "$name" ] || continue
-    grep -qF "harnesses/pi/systemd/user/$name" "$root/lib/manifest.sh" 2>/dev/null \
-      || echo "harnesses/pi/systemd/user/$name ships but lib/manifest.sh does not declare it"
-  done < <(tree_files "$root/harnesses/pi/systemd/user")
 }
 
 # 0. Zero-run-green guard: the parse must yield real lists.
@@ -81,22 +76,15 @@ problems=$(compare "$REPO")
 [ -z "$problems" ] && ok || bad "unit declaration mismatch:
 $problems"
 
-# 4b. The tunnel unit is declared by lib/manifest.sh instead of UNITS.
-grep -qF 'harnesses/pi/systemd/user/pi-local-champion-tunnel.service' "$REPO/lib/manifest.sh" \
-  && ok || bad "lib/manifest.sh does not declare harnesses/pi/systemd/user/pi-local-champion-tunnel.service"
-[ -f "$REPO/harnesses/pi/systemd/user/pi-local-champion-tunnel.service" ] \
-  && ok || bad "harnesses/pi/systemd/user/pi-local-champion-tunnel.service is absent"
-
 # 5. Planted negative: an undeclared timer in a scratch copy must be reported.
 SCRATCH=$(mktemp -d "${TMPDIR:-/tmp}/units-declared.XXXXXX") || { bad "no scratch dir"; SCRATCH=; }
 if [ -n "$SCRATCH" ]; then
   trap 'rm -rf "$SCRATCH"' EXIT
-  mkdir -p "$SCRATCH/lib" "$SCRATCH/harnesses/pi/systemd"
+  mkdir -p "$SCRATCH/lib"
   cp "$REPO/sync.sh" "$SCRATCH/sync.sh"
   cp -R "$REPO/systemd" "$SCRATCH/systemd"
   cp -R "$REPO/systemd-system" "$SCRATCH/systemd-system"
   cp "$REPO/lib/manifest.sh" "$SCRATCH/lib/manifest.sh"
-  [ -d "$REPO/harnesses/pi/systemd/user" ] && cp -R "$REPO/harnesses/pi/systemd/user" "$SCRATCH/harnesses/pi/systemd/user"
   : > "$SCRATCH/systemd/zz-probe.timer"
   probe=$(compare "$SCRATCH")
   case "$probe" in

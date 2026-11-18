@@ -2,7 +2,7 @@
 rem vast-ssh from a native Windows shell (cmd, PowerShell, Codex): hop into the
 rem WSL wrapper, which owns the agent ssh key, the sibling vastai wrapper and
 rem every guard. Nothing vast.ai is installed or stored on the Windows side.
-rem Deployed as a real copy into %USERPROFILE%\.local\bin by install.sh
+rem Deployed as a real copy into %USERPROFILE%\.local\bin by the owner’s checkout
 rem (DOTFILES_COPIES in lib/manifest.sh). Context: harness/data-source-clis.md.
 rem The hop runs sh -c inside WSL so $HOME resolves there, in the WSL account's
 rem own home: no user name is spelled here. cmd leaves $ alone and \" reaches

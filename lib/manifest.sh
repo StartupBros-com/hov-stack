@@ -1,22 +1,22 @@
 #!/usr/bin/env bash
 # shellcheck shell=bash
 # SC2034: this file is pure data. Every array here is consumed by a script that
-# sources it (install.sh, harness-doctor.sh §10c, the test suite), never locally.
+# sources it (setup, the test suite), never locally.
 # shellcheck disable=SC2034
 #
-# manifest.sh — the single source of truth for what install.sh puts in $HOME.
+# manifest.sh — the single source of truth for what a home install links into $HOME.
 #
 # Why this file exists (dotfiles#204): the link set used to live only as inline
-# arguments inside install.sh, which meant it had exactly one consumer and could
-# never be checked. Two whole classes of defect hid in that gap, both observed
-# live on 2026-08-06:
+# arguments inside the old root install.sh, which meant it had exactly one consumer
+# and could never be checked. Two whole classes of defect hid in that gap, both
+# observed live on 2026-08-06:
 #
 #   1. Links that silently stopped being links. ~/.bashrc, ~/.config/ru/config
 #      and ~/.config/ru/repos.d had all degraded from symlink to a real copy
 #      (identical content, so zero visible symptom) while their siblings stayed
 #      linked. Edits on either side would have diverged in silence.
 #   2. Repo content nothing installs. config/dcg/config.toml, config/zellij and
-#      harnesses/pi-lens/config.json were all live in $HOME as HAND-MADE symlinks that no
+#      the pi-lens config were all live in $HOME as HAND-MADE symlinks that no
 #      installer creates — so a fresh machine would silently come up without
 #      them, falling back to tool defaults.
 #
@@ -24,12 +24,15 @@
 # This repo carries DCG and a root-owned managed-settings lock; an explicit,
 # reviewable manifest beats magic discovery. The point of centralizing is not to
 # make adding a topic automatic — it still takes an edit here — but to make a
-# SKIPPED edit detectable. harness-doctor.sh §10c reads this file and warns.
+# SKIPPED edit detectable.
 #
 # Consumers:
-#   install.sh                       — creates the links (via lib/link.sh)
-#   scripts/harness-doctor.sh — §10c verifies them, read-only
-#   setup                            — DATA_CLIS only, linked into ~/.local/bin
+#   setup                            — DATA_CLIS and HELPER_CLIS, linked into ~/.local/bin
+#   lib/link.sh                      — install_manifest_links creates the links; no
+#                                      installer in this repo calls it since the root
+#                                      install.sh was removed
+#   lib/check.sh                     — manifest_check verifies them, read-only
+# harness-doctor.sh §10c runs that check with a named dotfiles checkout's own copy.
 #
 # Paths are repo-relative on the left, $HOME-relative on the right. No leading
 # slashes, no ~, no $HOME — both consumers prefix their own roots so the whole
@@ -62,15 +65,6 @@ DOTFILES_LINKS=(
   "config/ru/repos.d|.config/ru/repos.d"
   # SSH config only — never keys.
   "ssh/config|.ssh/config"
-  "harnesses/pi/agent/settings.json|.pi/agent/settings.json"
-  "harnesses/pi/agent/AGENTS.md|.pi/agent/AGENTS.md"
-  "harnesses/pi/agent/maintenance.repos.json|.pi/agent/maintenance.repos.json"
-  "harnesses/pi/agent/extensions|.pi/agent/extensions"
-  "harnesses/pi/agent/prompts|.pi/agent/prompts"
-  "harnesses/pi/agent/bin|.pi/agent/bin"
-  # Self-healing local-champion SSH tunnel used by pi-local.
-  "harnesses/pi/systemd/user/pi-local-champion-tunnel.service|.config/systemd/user/pi-local-champion-tunnel.service"
-  "harnesses/pi-lens/config.json|.pi-lens/config.json"
   # One read-only pre-commit/review snapshot for the three Git commands agents
   # assembled explicitly 357 times in the 90-day transcript sample.
   "bin/git-preflight|.local/bin/git-preflight"
@@ -107,7 +101,6 @@ DOTFILES_LINKS=(
   "config/nautilus-python/extensions/taildrop.py|.local/share/nautilus-python/extensions/taildrop.py"
   # Live hand-made links found undeclared by the #210 audit — the exact class
   # §10c(c) exists to catch. Declared here so a fresh machine gets them.
-  "harnesses/pi/agent/optional-extensions|.pi/agent/optional-extensions"
   "ssh/bin/pishosts|.local/bin/pishosts"
   "ssh/bin/pissh|.local/bin/pissh"
   # python -> python3 shim (papercut dotfiles#577): agents keep generating
@@ -121,8 +114,8 @@ DOTFILES_LINKS=(
 
 # The data CLIs: one wrapper each in bin/, run by name. ./setup links these same
 # names into ~/.local/bin for everyone who installs hov-stack (leaving alone a path that
-# holds anything else); install.sh links them through the rows built below. One list,
-# so the two installers cannot drift apart.
+# holds anything else); install_manifest_links links them through the rows built below. One list,
+# so setup and the link library share the same declarations.
 #
 # gsc and dfs. This comment used to claim they were already
 # "versioned-then-symlinked". They were not, and neither was the claim in
@@ -174,7 +167,7 @@ DOTFILES_MODES=(
 )
 
 # Real copies into the Windows user profile. Windows cannot consume WSL
-# symlinks, so install.sh deploys these with backup-before-replace semantics and
+# symlinks, so install_windows_copies in lib/windows.sh deploys these with backup-before-replace semantics and
 # manifest_check reports byte drift. Destinations are Windows-home-relative.
 DOTFILES_COPIES=(
   "windows/.wslconfig|.wslconfig"
@@ -231,13 +224,9 @@ DOTFILES_HARNESS=(
   workflows
 )
 
-# Top-level directories that own their own installer. install.sh invokes these
-# in an explicit, hand-ordered sequence — DCG must land before anything that
-# references it, and the Pi DCG doctor must run after the harnesses/pi links
-# exist. That ordering is security-relevant, so it stays imperative in install.sh
-# and is NOT driven from this list. Named here only so §10c can count them as
-# covered. harnesses/ holds the codex, fx, pi and pi-lens harnesses: codex and fx
-# carry their own sync scripts; pi and pi-lens are DOTFILES_LINKS sources above.
+# Top-level directories that own their own installer: dcg/ has dcg/install.sh, and
+# harnesses/ now holds only codex/skills, which scripts/skills-localize.sh installs.
+# Named here only so manifest_check can count them as covered.
 DOTFILES_TOPICS=(
   dcg
   harnesses
@@ -271,7 +260,6 @@ DOTFILES_UNLINKED=(
                   # (git-setup.sh registers it once); nothing to link. §10c(e) verifies
                   # the splice resolves.
   git-setup.sh     # registers the include.path bootstrap; idempotent, run by hand
-  install.sh
   hosts.tsv        # host -> role table. Read in place by lib/profile.sh; links
                    # nowhere. Deliberately NOT a $HOME dotfile: a machine that
                    # declared its own role locally would be config nothing owns,
