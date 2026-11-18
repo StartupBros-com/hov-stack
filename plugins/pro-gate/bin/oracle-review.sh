@@ -4738,10 +4738,18 @@ done
 # SUCCESS path the line is present; under `current` a model that was already selected reports
 # resolved=(unavailable); status=already-selected (still healthy). resolved=(unavailable) or
 # absence degrades to empty. Mirrors the $RUNLOG session-slug recovery grep above.
+# #737: Oracle 0.17.0 and later (0.20.0-sb.5, 0.23.1) name the field resolvedLabel= (after
+# requestedKey= and target=); 0.16 and earlier named it resolved=. Read whichever the line carries.
+# The effort line Oracle logs next ("Thinking effort evidence:") never matches the grep below.
 if [ -f "$RUNLOG" ]; then
   EVIDENCE_LINE="$(grep -a 'Model selection evidence:' "$RUNLOG" 2>/dev/null | tail -1)"
-  if [ -n "$EVIDENCE_LINE" ] && [ "${EVIDENCE_LINE#*resolved=}" != "$EVIDENCE_LINE" ]; then
-    RM="${EVIDENCE_LINE#*resolved=}"; RM="${RM%%;*}"; RM="${RM%.}"
+  RM_FIELD=""
+  case "$EVIDENCE_LINE" in
+    *'resolvedLabel='*) RM_FIELD='resolvedLabel=' ;;
+    *'resolved='*) RM_FIELD='resolved=' ;;
+  esac
+  if [ -n "$RM_FIELD" ]; then
+    RM="${EVIDENCE_LINE#*"$RM_FIELD"}"; RM="${RM%%;*}"; RM="${RM%.}"
     RM="$(printf '%s' "$RM" | tr -d '\t\n' | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"
     case "$RM" in ''|'(unavailable)') RESOLVED_MODEL="" ;; *) RESOLVED_MODEL="$RM" ;; esac
     if [ "${EVIDENCE_LINE#*status=}" != "$EVIDENCE_LINE" ]; then
