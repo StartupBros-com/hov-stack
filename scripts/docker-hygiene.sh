@@ -2,6 +2,8 @@
 # docker-hygiene — dev-container lifecycle + disk reclaim, in the wt-sweep mould.
 #
 #   DRY_RUN=1 (default) prints the plan as `would:` lines; DRY_RUN=0 executes.
+#                    Recycled counts represent successful restarts only;
+#                    recycled_names retains planned names in a dry run.
 #                    The "removed" counters (summary table, trailing summary
 #                    line, JSON *_removed) count real removals only and stay 0
 #                    in a dry run.
@@ -1008,7 +1010,8 @@ while IFS=$'\t' read -r cid cname; do
   fi
   echo "  + $short: $z direct / $z_total total zombie(s) — recyclable and idle, recycling"
   if run docker restart "$cid"; then
-    n_recycled=$(( n_recycled + 1 )); RECYCLED+=("$short")
+    RECYCLED+=("$short")
+    [ "$DRY_RUN" = 1 ] || n_recycled=$(( n_recycled + 1 ))
     [ "$DRY_RUN" = 1 ] && action_result=planned || action_result=succeeded
     record_container_observation "$cid" "$short" "$proj" "$svc" "$z" "$z_total" "$init_state" \
       "recycled" "direct_threshold_met" "$action_result"

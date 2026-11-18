@@ -1084,6 +1084,8 @@ run_hygiene DOCKER_HYGIENE_TEST_SCENARIO=zombies ZOMBIE_MAX=1 JSON=1
 plan_calls=$(grep -E $'^(docker\t(restart|rm|rmi|stop|builder)|supabase\t)' "$CALLS" || true)
 equals "$plan_calls" "" "dry run performs no mutation"
 contains "$RUN_OUT" "would: docker restart aaaaaaaaaaaa" "dry run still names exact planned restart"
+contains "$RUN_OUT" "containers recycled ..... 0" "dry-run table counts no planned restart as recycled"
+contains "$RUN_OUT" "docker-hygiene: zombies:2 recycled:0" "dry-run summary counts no planned restart as recycled"
 plan_json=$(printf '%s\n' "$RUN_OUT" | tail -1)
 if python3 - "$plan_json" <<'PY'
 import json
@@ -1092,6 +1094,8 @@ obj = json.loads(sys.argv[1])
 row = next(row for row in obj["container_observations"] if row["id"] == "aaaaaaaaaaaa")
 assert row["action_result"] == "planned"
 assert obj["zombies"] == 2
+assert obj["recycled"] == 0
+assert obj["recycled_names"] == ["supabase_studio_alpha"]
 PY
 then ok; else bad "dry-run JSON does not distinguish planned action"; fi
 
