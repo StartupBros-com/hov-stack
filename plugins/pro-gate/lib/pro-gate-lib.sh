@@ -1374,23 +1374,61 @@ pg_delivery_condition_dir() { printf '%s\n' "${PRO_GATE_DELIVERY_CONDITION_DIR:-
 # the timeout command is unavailable. An empty read is tried once more: the refund and the next
 # query each read the build, and one slow start under load reading as a different build would
 # silently restart the failed-delivery count.
+#
+# An unknown build stops the next fresh review as delivery-state-unavailable, so the read gets a
+# limit a busy host can meet and says on stderr why it gave up (#735): Oracle 0.20.0-sb.5 took
+# about 7.4 s to print its version under a 5% CPU quota, which the old 5 s limit read as unknown.
 pg_oracle_identity() {
-  local oracle_bin="${PRO_GATE_ORACLE_BIN:-oracle}" timeout_bin="${PRO_GATE_TIMEOUT_BIN:-timeout}" v="" raw tries=0
+  local oracle_bin="${PRO_GATE_ORACLE_BIN:-oracle}" timeout_bin="${PRO_GATE_TIMEOUT_BIN:-timeout}" v="" raw rc tries=0
+  local limit outcomes=""
   if [[ "$oracle_bin" == */* ]]; then
-    [ -x "$oracle_bin" ] || { printf 'unknown\n'; return 0; }
+    [ -x "$oracle_bin" ] || { pg_oracle_identity_unknown "$oracle_bin is not an executable file"; return 0; }
   else
-    pg_have "$oracle_bin" || { printf 'unknown\n'; return 0; }
+    pg_have "$oracle_bin" || { pg_oracle_identity_unknown "command $oracle_bin is not installed"; return 0; }
   fi
-  if { [[ "$timeout_bin" == */* ]] && [ -x "$timeout_bin" ]; } || pg_have "$timeout_bin"; then
-    while [ -z "$v" ] && [ "$tries" -lt 2 ]; do
-      tries=$(( tries + 1 ))
-      # A failing probe may print a plausible version. Its stdout is not build evidence.
-      if raw="$(set -o pipefail; "$timeout_bin" 5s "$oracle_bin" --version </dev/null 2>/dev/null | head -c 4096)"; then
-        v="$(printf '%s\n' "$raw" | head -n 1 | tr -cd 'A-Za-z0-9._+-' | cut -c1-64)"
-      fi
-    done
+  if ! { { [[ "$timeout_bin" == */* ]] && [ -x "$timeout_bin" ]; } || pg_have "$timeout_bin"; }; then
+    pg_oracle_identity_unknown "the timeout command $timeout_bin is unavailable"; return 0
   fi
-  printf '%s\n' "${v:-unknown}"
+  limit="$(pg_oracle_version_timeout)"
+  while [ -z "$v" ] && [ "$tries" -lt 2 ]; do
+    tries=$(( tries + 1 ))
+    # A failing probe may print a plausible version. Its stdout is not build evidence.
+    if raw="$(set -o pipefail; "$timeout_bin" "${limit}s" "$oracle_bin" --version </dev/null 2>/dev/null | head -c 4096)"; then
+      rc=0
+    else
+      rc=$?
+    fi
+    if [ "$rc" -eq 0 ]; then
+      v="$(printf '%s\n' "$raw" | head -n 1 | tr -cd 'A-Za-z0-9._+-' | cut -c1-64)"
+      [ -n "$v" ] || outcomes="${outcomes:+$outcomes; }try $tries printed no version"
+    elif [ "$rc" -eq 124 ]; then
+      outcomes="${outcomes:+$outcomes; }try $tries timed out after $limit s"
+    else
+      outcomes="${outcomes:+$outcomes; }try $tries exited $rc"
+    fi
+  done
+  if [ -z "$v" ]; then
+    case "$outcomes" in
+      *'timed out'*) outcomes="$outcomes; set PRO_GATE_ORACLE_VERSION_TIMEOUT to allow longer" ;;
+    esac
+    pg_oracle_identity_unknown "$oracle_bin --version: $outcomes"; return 0
+  fi
+  printf '%s\n' "$v"
+}
+
+pg_oracle_identity_unknown() { # reason: say on stderr why the build is unknown, then print unknown
+  printf '[pro-gate] Oracle build unknown: %s\n' "$1" >&2
+  printf 'unknown\n'
+}
+
+# Seconds allowed for each `oracle --version` read: PRO_GATE_ORACLE_VERSION_TIMEOUT in whole seconds,
+# 1-3600. Anything else is the 20 s default, never 0, which timeout(1) reads as no limit at all.
+pg_oracle_version_timeout() {
+  local s="${PRO_GATE_ORACLE_VERSION_TIMEOUT:-}"
+  case "$s" in ''|*[!0-9]*) s=20 ;; esac
+  s="${s#"${s%%[!0]*}"}"
+  if [ -z "$s" ] || [ "${#s}" -gt 4 ] || [ "$s" -gt 3600 ]; then s=20; fi
+  printf '%s\n' "$s"
 }
 
 pg_delivery_condition_digest() { # relation-identity input-mode attachment-policy oracle-identity

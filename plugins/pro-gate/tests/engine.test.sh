@@ -8362,6 +8362,55 @@ chmod +x "$TDIR/bin/oracle-version-flaky"
 rm -f "$TDIR/oracle-flaky-once"
 check '#204: one empty --version read is retried, so a slow start does not read as a different Oracle build' \
   "$([ "$(PRO_GATE_ORACLE_BIN="$TDIR/bin/oracle-version-flaky" PG_TEST_FLAKY_MARK="$TDIR/oracle-flaky-once" pg_oracle_identity)" = 1.0 ]; echo $?)"
+# #735: each read gets PRO_GATE_ORACLE_VERSION_TIMEOUT seconds (default 20), and a read that gives
+# up says how each try ended. The recorder returns timeout's own 124 without running Oracle, so the
+# limit checks read the duration handed to timeout, never the wall clock.
+cat > "$TDIR/bin/timeout-record-124" <<'TIMEOUT_RECORD_124'
+#!/usr/bin/env bash
+printf '%s\n' "$1" >> "${PG_TEST_TIMEOUT_LIMITS:?}"
+exit 124
+TIMEOUT_RECORD_124
+cat > "$TDIR/bin/oracle-version-exit3" <<'ORACLE_VERSION_EXIT3'
+#!/usr/bin/env bash
+[ "${1:-}" = --version ] || exit 99
+exit 3
+ORACLE_VERSION_EXIT3
+chmod +x "$TDIR/bin/timeout-record-124" "$TDIR/bin/oracle-version-exit3"
+ov_read() { # [VAR=value ...]: one identity read in a clean shell; stdout, stderr and limits land in $TDIR/ov.*
+  rm -f "$TDIR/ov.limits"; : > "$TDIR/ov.limits"
+  env -u PRO_GATE_ORACLE_VERSION_TIMEOUT PRO_GATE_ORACLE_BIN="$TDIR/bin/oracle-version-fixture" \
+    PRO_GATE_TIMEOUT_BIN=/usr/bin/timeout PG_TEST_TIMEOUT_LIMITS="$TDIR/ov.limits" "$@" \
+    bash -c '. "$1"; pg_oracle_identity' _ "$LIB" > "$TDIR/ov.out" 2> "$TDIR/ov.err"
+}
+ov_limits() { ov_read PRO_GATE_TIMEOUT_BIN="$TDIR/bin/timeout-record-124" "$@"; tr '\n' ' ' < "$TDIR/ov.limits"; }
+ov_detail() { printf 'limits=%s out=%s err=%s' "$(tr '\n' ' ' < "$TDIR/ov.limits")" "$(cat "$TDIR/ov.out")" "$(cat "$TDIR/ov.err")"; }
+check '#735: each Oracle --version read is allowed 20 s by default, twice, before the build reads as unknown' \
+  "$([ "$(ov_limits)" = '20s 20s ' ] && [ "$(cat "$TDIR/ov.out")" = unknown ]; echo $?)" "$(ov_detail)"
+check '#735: a read that gives up names the limit and each timed-out try on stderr' \
+  "$(ov_limits >/dev/null && grep -Fq '[pro-gate] Oracle build unknown:' "$TDIR/ov.err" \
+     && grep -Fq 'try 1 timed out after 20 s; try 2 timed out after 20 s' "$TDIR/ov.err" \
+     && grep -Fq 'PRO_GATE_ORACLE_VERSION_TIMEOUT' "$TDIR/ov.err"; echo $?)" "$(ov_detail)"
+check '#735: PRO_GATE_ORACLE_VERSION_TIMEOUT sets the per-read limit in whole seconds' \
+  "$([ "$(ov_limits PRO_GATE_ORACLE_VERSION_TIMEOUT=45)" = '45s 45s ' ] \
+     && [ "$(ov_limits PRO_GATE_ORACLE_VERSION_TIMEOUT=3600)" = '3600s 3600s ' ]; echo $?)" "$(ov_detail)"
+OV_FELL_THROUGH=""
+for ov_value in '' abc 0 00 -3 1.5 '20 ' 3601 99999999999; do
+  [ "$(ov_limits "PRO_GATE_ORACLE_VERSION_TIMEOUT=$ov_value")" = '20s 20s ' ] || OV_FELL_THROUGH="$OV_FELL_THROUGH [$ov_value]=$(tr '\n' ' ' < "$TDIR/ov.limits")"
+done
+check '#735: an empty, non-integer, zero or over-an-hour limit is the 20 s default, never no limit' \
+  "$([ -z "$OV_FELL_THROUGH" ]; echo $?)" "$OV_FELL_THROUGH"
+check '#735: the diagnostic says a try exited nonzero or printed no version' \
+  "$(ov_read PRO_GATE_ORACLE_BIN="$TDIR/bin/oracle-version-exit3" && [ "$(cat "$TDIR/ov.out")" = unknown ] \
+     && grep -Fq 'try 1 exited 3; try 2 exited 3' "$TDIR/ov.err" && ! grep -Fq PRO_GATE_ORACLE_VERSION_TIMEOUT "$TDIR/ov.err" \
+     && ov_read PG_TEST_VERSION_TEXT= && [ "$(cat "$TDIR/ov.out")" = unknown ] \
+     && grep -Fq 'try 1 printed no version; try 2 printed no version' "$TDIR/ov.err"; echo $?)" "$(ov_detail)"
+check '#735: a missing Oracle or timeout command is named on stderr and the build stays unknown' \
+  "$(ov_read PRO_GATE_ORACLE_BIN="$TDIR/no-such-oracle" && [ "$(cat "$TDIR/ov.out")" = unknown ] \
+     && grep -Fq "$TDIR/no-such-oracle" "$TDIR/ov.err" \
+     && ov_read PRO_GATE_TIMEOUT_BIN="$TDIR/no-such-timeout" && [ "$(cat "$TDIR/ov.out")" = unknown ] \
+     && grep -Fq "$TDIR/no-such-timeout" "$TDIR/ov.err"; echo $?)" "$(ov_detail)"
+check '#735: a build read on the first try prints nothing on stderr' \
+  "$(ov_read && [ "$(cat "$TDIR/ov.out")" = 1.0 ] && [ ! -s "$TDIR/ov.err" ]; echo $?)" "$(ov_detail)"
 DC_SNAP_BAD="$(jq -cn '{source:"disposition",state:"not-submitted",fresh_eligible:true,marker:"pg-run-acme-dc-5-1700020006-6"}')"
 DC_BAD_OUT="$(dc_facts "$DC_SNAP_BAD" relation:aaa 2>"$TDIR/dc-bad.stderr")"
 DC_UNKNOWN_OUT="$(dc_facts "$DC_SNAP_M2" relation:aaa PG_TEST_VERSION_TEXT= 2>"$TDIR/dc-unknown.stderr")"

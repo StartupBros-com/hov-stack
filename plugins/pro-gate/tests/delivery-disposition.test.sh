@@ -26,7 +26,7 @@ clear_fixture_env(){
   unset PRO_GATE_THROTTLE_COOLDOWN
   PRO_GATE_BROWSER_ATTACHMENTS=auto
 }
-fixture_timeout(){ [ "$1" = 5s ] || return 97; shift; "$@"; }
+fixture_timeout(){ [ "$1" = 20s ] || return 97; shift; "$@"; }
 fixture_oracle(){
   [ "${1:-}" = --version ] || return 98
   printf 'version\n' >> "$PRO_GATE_HOME/oracle-probes"
