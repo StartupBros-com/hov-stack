@@ -10,6 +10,11 @@ transcript of a coding session that trips most of them. The task given to every
 arm is identical: read the transcript and the repo's steering files, then say
 what to change so the next session goes better.
 
+Its `package.json` is committed as `orderflow/package.json.fixture`, so GitHub's
+dependency graph does not treat the fake service as a dependency of this
+repository. `build-fixture.sh` writes the real `package.json` into the fixture
+it builds, so the arms see the usual name.
+
 The answer key is `answer-key.md`. It stays with the grader, never with an arm.
 
 ## Why it is shaped this way

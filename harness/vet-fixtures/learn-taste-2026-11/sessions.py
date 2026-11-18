@@ -18,10 +18,14 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import uuid
 from datetime import datetime, timedelta, timezone
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.dirname(HERE))
+from fixture_seed import copy_seed  # noqa: E402  (seed manifests are stored as <name>.fixture)
+
 SEED = os.path.join(HERE, "seed")
 VERSION = "2.1.318"
 MODEL = "claude-sonnet-5-5"
@@ -460,10 +464,11 @@ def build(home):
     home = os.path.abspath(home)
     acme = os.path.join(home, "code", "acme-notes")
     billing = os.path.join(home, "code", "billing-portal")
-    for src, dst in ((os.path.join(SEED, "acme-notes"), acme), (os.path.join(SEED, "billing-portal"), billing)):
+    for src, dst, expect in ((os.path.join(SEED, "acme-notes"), acme, ("package.json",)),
+                             (os.path.join(SEED, "billing-portal"), billing, ())):
         if os.path.exists(dst):
             shutil.rmtree(dst)
-        shutil.copytree(src, dst)
+        copy_seed(src, dst, expect)
 
     git(acme, "init", "-q", "-b", "main", date="2026-11-10T09:30:00Z")
     git(acme, "add", "-A", date="2026-11-10T09:30:00Z")

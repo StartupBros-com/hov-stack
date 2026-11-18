@@ -31,6 +31,9 @@ import subprocess
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.dirname(HERE))
+from fixture_seed import copy_seed  # noqa: E402  (seed manifests are stored as <name>.fixture)
+
 SEED = os.path.join(HERE, "seed", "acme-console")
 
 TASKS = {
@@ -107,7 +110,7 @@ def main():
             raise SystemExit("make_runs: %s exists" % run)
         home = os.path.join(run, "user")
         repo = os.path.join(home, "code", "acme-console")
-        shutil.copytree(SEED, repo)
+        copy_seed(SEED, repo, ("package.json",))
         git(repo, "init", "-q", "-b", "main")
         git(repo, "add", "-A")
         git(repo, "commit", "-q", "-m", "Settings page with profile and notification cards")

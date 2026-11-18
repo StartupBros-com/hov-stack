@@ -24,7 +24,9 @@ BD = os.path.join(HERE, "..", "build-design-2026-11")
 SEED = os.path.join(BD, "seed", "acme-console")
 REVIEW_PAGE = os.path.join(HERE, "..", "jakubkrehel-skills", "fixture.html")
 sys.path.insert(0, BD)
+sys.path.insert(0, os.path.dirname(HERE))
 import make_runs as bd  # noqa: E402  (the build-design fixture's prompts, turn 2 and git identity)
+from fixture_seed import copy_seed  # noqa: E402  (seed manifests are stored as <name>.fixture)
 
 TASKS = {
     "t1": bd.TASKS["t1"],
@@ -74,7 +76,7 @@ def main():
             raise SystemExit("make_runs: %s already exists" % rid)
         home = os.path.join(run, "user")
         repo = os.path.join(home, "code", "acme-console")
-        shutil.copytree(SEED, repo)
+        copy_seed(SEED, repo, ("package.json",))
         if task == "rv":
             os.makedirs(os.path.join(repo, "prototypes"))
             shutil.copy(REVIEW_PAGE, os.path.join(repo, "prototypes", "account.html"))
