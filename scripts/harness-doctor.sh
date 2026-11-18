@@ -563,8 +563,9 @@ _agent_hook_cmds=$(for _agent in "$HOME"/.claude/agents/*.md; do
 done)
 # The hook commands of every enabled, user-scope plugin's hooks/hooks.json.
 # papercut@hov runs papercut-log, read-ceiling-chunk and structured-output-unwrap
-# this way, from copies scripts/papercut-vendor.py builds out of these files
-# (harness-weekly's --verify-delivered keeps them equal), and sync.sh retires the
+# this way, from its copies under plugins/papercut (scripts/papercut-vendor.py
+# first built them out of these files; since #339 they are edited in place and
+# nothing checks that the two stay equal), and sync.sh retires the
 # settings.json copies, so settings.json never names them on a plugin host.
 _hook_registry=${CLAUDE_INSTALLED_PLUGINS:-$HOME/.claude/plugins/installed_plugins.json}
 _plugin_hook_cmds=""
