@@ -82,7 +82,13 @@ const flagNum = (name, dflt) => {
 const only = flagList("only");
 const skip = flagList("skip");
 const excludes = flagList("exclude");
-const vendorGlobs = flagList("vendor").map((g) => new RegExp(g.replace(/\*\*/g, ".*").replace(/\*/g, "[^/]*"), "i"));
+// --vendor takes globs: `**` crosses folders, `*` stays inside one folder, and
+// every other character is literal, so `src/a.b/**` does not also match
+// `src/axb/` and a stray `[` or `(` cannot crash or stall the scan.
+const escapeRegExp = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const globToRegExp = (glob) =>
+  new RegExp(glob.split("**").map((part) => part.split("*").map(escapeRegExp).join("[^/]*")).join(".*"), "i");
+const vendorGlobs = flagList("vendor").map(globToRegExp);
 const TOP = flagNum("top", 8);
 // --full dumps the complete inventory (every colour, every arbitrary value,
 // every palette utility, with counts) under findings.*.all. Used by
@@ -607,13 +613,58 @@ const parseIds = (raw) =>
  *  the first self-scan of this very repo reported it as a colour.
  *
  *  `//` only opens a comment at line start or after whitespace, which is what
- *  keeps `https://…` from being treated as one. */
-function stripComments(line) {
-  return line
-    .replace(/<!--.*?(-->|$)/g, " ")
-    .replace(/\/\*.*?(\*\/|$)/g, " ")
-    .replace(/(^|\s)\/\/.*$/, "$1")
-    .replace(/^\s*\*.*$/, " "); // jsdoc continuation line
+ *  keeps `https://…` from being treated as one.
+ *
+ *  `state` carries an open block comment (`/* …` or `<!-- …`) onto the next
+ *  lines, so a commented-out block's middle lines are blanked too, not just
+ *  its first. Only an opener in comment position carries: at line start or
+ *  after whitespace or one of `{ } ; , ( ) >`, and not after an unclosed
+ *  quote. Any other opener (`"src/*"`, a regex `/\/*$/`, JSX text
+ *  `/docs/*`) is blanked to the end of its line only, as before. A wrongly
+ *  carried comment would hide live code until the next closer, and hidden
+ *  drift is the worse error for a guardrail. */
+const BLOCK_COMMENTS = [["/*", "*/"], ["<!--", "-->"]];
+const LINE_COMMENT = /(?:^|\s)\/\//;
+const COMMENT_POSITION = /^$|[\s{};,()>]$/;
+
+const openQuote = (code) => {
+  const bare = code.replace(/\\./g, "");
+  return ['"', "'", "`"].some((q) => bare.split(q).length % 2 === 0);
+};
+
+function stripComments(line, state = {}) {
+  let code = "";
+  let rest = line;
+  for (;;) {
+    if (state.close) {
+      code += " ";
+      const end = rest.indexOf(state.close);
+      if (end < 0) break; // the comment runs on past this line
+      rest = rest.slice(end + state.close.length);
+      state.close = null;
+    }
+    let open = null;
+    for (const [token, close] of BLOCK_COMMENTS) {
+      const at = rest.indexOf(token);
+      if (at >= 0 && (!open || at < open.at)) open = { at, token, close };
+    }
+    const lc = LINE_COMMENT.exec(rest);
+    const lcAt = lc ? lc.index + lc[0].length - 2 : -1;
+    if (lcAt >= 0 && (!open || lcAt < open.at)) {
+      code += rest.slice(0, lcAt);
+      break;
+    }
+    if (!open) {
+      code += rest;
+      break;
+    }
+    code += rest.slice(0, open.at);
+    rest = rest.slice(open.at + open.token.length);
+    state.close = open.close;
+    state.carry = COMMENT_POSITION.test(code) && !openQuote(code);
+  }
+  if (state.close && !state.carry) state.close = null;
+  return code.replace(/^\s*\*.*$/, " "); // jsdoc continuation line
 }
 
 const suppressed = (ids, id) => ids !== undefined && (ids === null || ids.includes(id));
@@ -649,6 +700,7 @@ function scanFile(abs) {
   let touchCarry = null;
 
   let nextIgnore;
+  const commentState = {};
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     const lineIgnore = (() => {
@@ -667,7 +719,7 @@ function scanFile(abs) {
 
     // Directives are read from the raw line above (they live in comments);
     // detectors run against code only.
-    const code = stripComments(line);
+    const code = stripComments(line, commentState);
 
     for (const m of code.matchAll(VAR_DEF)) hits.varDefs.push(m[1]);
     for (const m of code.matchAll(VAR_DEF_NEXT_FONT)) hits.varDefs.push(m[1]);

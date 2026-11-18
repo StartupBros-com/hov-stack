@@ -299,6 +299,62 @@ test("values inside comments are not drift", () => {
   });
 });
 
+test("values inside multi-line comments are not drift", () => {
+  // Comments were stripped one line at a time, so only the opener line of a
+  // commented-out block was blanked and its middle lines counted as drift.
+  withTempProject((root) => {
+    write(
+      root,
+      "src/a.tsx",
+      [
+        `/*`,
+        `  old: color #ff0000`,
+        `*/ const live = "#00ff00";`,
+        `{/*`,
+        `  <a className="p-[7px]" />`,
+        `*/}`,
+        `<!--`,
+        `  <b style="color:#abcdef" />`,
+        `-->`,
+        `<i className="p-[13px]" />`,
+      ].join("\n"),
+    );
+    const r = scan(root);
+    assert.equal(r.findings.color.occurrences, 1, "only the colour after the closer counts");
+    assert.equal(r.findings.color.top[0].value, "#00ff00");
+    assert.equal(r.findings.arbitrary.occurrences, 1);
+    assert.equal(r.findings.arbitrary.top[0].value, "p-[13px]");
+  });
+});
+
+test("a comment opener outside comment position does not hide the lines after it", () => {
+  // Carrying a false opener would blank live code down to the next closer.
+  withTempProject((root) => {
+    write(
+      root,
+      "src/a.tsx",
+      [
+        `const glob = "src/*"; const g2 = '<!--';`,
+        `const c = "#ff0000";`,
+        `// a line comment that mentions /* does not open a block`,
+        `const d = "#00ff00";`,
+        `const base = url.replace(/\\/*$/, "");`,
+        `const f = "#00ffff";`,
+        `<p>All /docs/* pages</p>`,
+        `<i className="p-[13px]" />`,
+        "const help = `",
+        `tool src/*.ts`,
+        "`;",
+        `const g = "#ffff00";`,
+        `/** jsdoc */ const e = "#0000ff";`,
+      ].join("\n"),
+    );
+    const r = scan(root);
+    assert.equal(r.findings.color.occurrences, 5);
+    assert.equal(r.findings.arbitrary.occurrences, 1);
+  });
+});
+
 test("a protocol-relative URL does not start a comment", () => {
   // The naive fix (split on "//") would eat the rest of any line containing a
   // URL, silently hiding real hits after it.
@@ -443,6 +499,26 @@ test("vendored code is counted separately and never mixed into first-party total
     assert.equal(r.findings.color.occurrences, 1, "first-party count excludes vendored");
     assert.equal(r.findings.color.vendorOccurrences, 1);
     assert.equal(r.findings.color.top[0].value, "#00ff00");
+  });
+});
+
+test("--vendor is a glob: only * and ** are wildcards", () => {
+  // The flag was turned into a regex with only the stars translated, so `.`
+  // matched any character and a stray `[` crashed the scan at startup.
+  withTempProject((root) => {
+    write(root, "src/a.b/x.tsx", `const v = "#ff0000";`);
+    write(root, "src/axb/y.tsx", `const v = "#00ff00";`);
+    write(root, "lib/kit/deep/z.tsx", `const v = "#0000ff";`);
+    let r = scan(root, "--vendor=src/a.b/*");
+    assert.equal(r.findings.color.vendorOccurrences, 1, "a literal dot matches only a dot");
+    assert.equal(r.findings.color.occurrences, 2);
+    r = scan(root, "--vendor=lib/**");
+    assert.equal(r.findings.color.vendorOccurrences, 1, "** crosses folders");
+    r = scan(root, "--vendor=lib/*/z.tsx");
+    assert.equal(r.findings.color.vendorOccurrences, 0, "* stays inside one folder");
+    r = scan(root, "--vendor=src/[a", "--vendor=(a+)+$");
+    assert.equal(r.findings.color.vendorOccurrences, 0, "regex syntax is literal, so nothing matches");
+    assert.equal(r.findings.color.occurrences, 3);
   });
 });
 
