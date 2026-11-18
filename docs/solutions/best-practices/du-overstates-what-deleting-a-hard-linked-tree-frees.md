@@ -4,7 +4,7 @@ date: 2026-11-18
 category: best-practices
 module: disk-reclaim
 problem_type: best_practice
-component: development_workflow
+component: infrastructure
 severity: medium
 applies_when:
   - "Ranking folders to delete on a nearly full disk from du output, including the du hint the disk-watermark alert prints"
@@ -24,8 +24,8 @@ tags: [du, hard-links, disk-reclaim, single-link-bytes, statvfs, df, uv-cache, p
 
 During the 2026-11-14 to 11-18 root-disk audit on the WSL host, hand-run `du` sizing overstated three reclaim candidates. Each folder was large by `du` and held much less of its own:
 
-- An agent job folder read 26 GiB in `du -xs -BG <jobs-dir>/*`. Its single-link files came to 0.8 GiB.
-- A `/tmp` scratch directory read 17.0 GiB by `du`, of which 11.1 GiB was single-link.
+- An ideation run's `/tmp` folder read 26 GiB by `du`. It was mostly hard links to live session transcripts, and its single-link files came to 0.8 GiB.
+- Another job's `/tmp` scratch folders read 17.0 GiB by `du`, of which 11.1 GiB was single-link.
 - The uv cache read 26G by `du -sh`. 12.86 GiB of it was single-link. Of the 12.41 GiB in multi-link files, 1.27 GiB was linked only from inside the cache. Deleting the whole cache would free about 14.1 GiB, and the weekly prune, which removes only part of it, frees an unmeasured amount less.
 
 Earlier sessions saw the same gap from the other side (session history). A `uv cache clean` on a Windows drive reported 35.0 GiB removed while the drive's free space rose 1.98 GiB. That session put the gap down to cache files still linked from Python environments, without confirming it. Deleting a pnpm-installed `node_modules` tree listed at 4.41 GiB raised free space by 3.17 GiB, with other writers active during the 21-minute delete.
