@@ -350,6 +350,34 @@ test('loadRegistry: missing file, malformed JSON, and a valid registry are all d
   }
 });
 
+test('loadRegistry: compound-engineering under a renamed marketplace is still found', () => {
+  const dir = mktemp('cm-registry-renamed-');
+  try {
+    const user = { scope: 'user', version: '3.38.1', installPath: '/plugins/ce-renamed' };
+    const project = { scope: 'project', version: '3.38.1', installPath: '/plugins/ce-p', projectPath: '/repo' };
+    const other = { scope: 'user', version: '1.0.0', installPath: '/plugins/extra' };
+
+    // Only the name a fresh `claude plugin marketplace add` gives; a look-alike plugin is not taken.
+    const renamed = path.join(dir, 'renamed.json');
+    fs.writeFileSync(renamed, JSON.stringify({ plugins: {
+      'compound-engineering-extra@x': [other],
+      'compound-engineering@compound-engineering-plugin': [project, user],
+    } }));
+    assert.deepStrictEqual(C.loadRegistry(renamed), { ok: true, entries: [project, user] });
+
+    // The exact key wins when both are present.
+    const both = path.join(dir, 'both.json');
+    const exact = [{ scope: 'user', version: '3.28.2', installPath: '/plugins/ce' }];
+    fs.writeFileSync(both, JSON.stringify({ plugins: {
+      'compound-engineering@compound-engineering-plugin': [user],
+      'compound-engineering@every-marketplace': exact,
+    } }));
+    assert.deepStrictEqual(C.loadRegistry(both), { ok: true, entries: exact });
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('loadRegistry: a registry under a directory without search permission is unreadable, not missing', (t) => {
   if (IS_ROOT) {
     t.skip(ROOT_SKIP);
