@@ -29,17 +29,25 @@ tags:
 
 Issue #770 assessed whether a wave of large hov-stack files could be split without changing
 behavior. Python extractions were tried as disposable patches against `bin/firecrawl_cli.py`,
-`bin/papercut.py` with `plugins/papercut/papercut/cli.py`, `scripts/memory-audit.py`, three
-harness-optimizer test runners (`run_native.py`, `run_behavioral.py`, `test_native_launch.py`) and
-three test files (`tests/test_papercut.py`, `tests/test_memory_audit.py`,
-`tests/test_reclaim_sweep.py`). Every extraction passed its selected suites. Every one still changed
-observable behavior, and none shipped.
+`bin/papercut.py` with `plugins/papercut/papercut/cli.py`, `scripts/memory-audit.py`, the two
+harness-optimizer runners (`run_native.py`, `run_behavioral.py`), the native-launch test
+(`test_native_launch.py`) and three more test files (`tests/test_papercut.py`,
+`tests/test_memory_audit.py`, `tests/test_reclaim_sweep.py`). Every extraction passed its selected
+suites. Every one still changed observable behavior, and none shipped. The counterexamples used
+deliberate namespace, loading and introspection conditions. They are not reports of ordinary
+requests failing, and they show the tested cuts were not equivalent, not that no cut could be.
 
-The cause is one Python rule. A function looks up a free name in `func.__globals__`, the namespace
-of the module where its `def` ran, and then in that module's builtins. Where a name resolves is part
-of a function's behavior, and moving the code moves it. No existing test happened to exercise the
-difference, which is why the suites stayed green. The four shapes below were reproduced in #770. A
-minimal standalone demo on Python 3.12 reproduced each one again before this was written.
+Most of the difference comes from one Python rule. A function looks up a free name in
+`func.__globals__`, the namespace of the module where its `def` ran, and then in that module's
+builtins. Where a name resolves is part of a function's behavior, and moving the code moves it. That
+rule explains shape 1 and the copied bindings in shape 4. The rest come from neighbouring rules:
+- the import cache, for shape 2
+- call evaluation order, for shape 3
+- pickling functions by reference and `sys.path` at selection time, for the remainder of shape 4
+
+No existing test happened to exercise any of these, which is why the suites stayed green. #770
+records all four shapes. A minimal standalone demo on Python 3.12 reproduced each one again before
+this was written.
 
 ## Guidance
 
@@ -180,7 +188,9 @@ the candidate:
 from unittest import mock
 
 with mock.patch.object(run_native, "any", side_effect=RuntimeError("owner lookup"), create=True):
-    run_native.result_sequence(events)   # the original raises; a moved copy that ignores the owner does not
+    run_native.result_sequence(events)
+# With events that reach the any() call (an async_launched tool result), the original raises.
+# A moved copy that ignores the owner returns normally.
 ```
 
 Whatever the inventory found that the challenge did not reach, report as not demonstrated. Do not
@@ -194,5 +204,5 @@ count it as covered.
   import selection and callable identity.
 - [verify-parity-claims-by-exercising-both-sides](verify-parity-claims-by-exercising-both-sides.md)
   covers the same principle of running both sides rather than trusting a description.
-- Issue #770, the decomposition assessment these counterexamples came from. Its recommendation is
-  not to adopt the tested extractions.
+- Issue #770 is the decomposition assessment these counterexamples came from. It recommends keeping
+  the current boundaries until the missing proof support and evidence exist.
