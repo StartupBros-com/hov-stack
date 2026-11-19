@@ -45,6 +45,7 @@ StartupBros/ccusage
 StartupBros/coding_agent_session_search
 StartupBros/failure-class
 StartupBros/hov-router
+StartupBros-com/hov-router
 StartupBros/mlx-embeddings
 StartupBros/omlx
 StartupBros/oracle

@@ -19,7 +19,6 @@
 # plants an impostor product that the helper must refuse.
 ^release/scripts/tool-drop-announce\.sh$	^[m]embers\.startupbros$	the announce helper's fixed endpoint; its test binds the OIDC audience to this endpoint and rejects a caller-supplied one, so it stays a literal	private-token
 ^release/tests/tool-drop-announce\.test\.sh$	^[m]embers\.startupbros$	the announce test's copy of the endpoint it asserts the helper keeps	private-token
-^release/tests/tool-drop-announce\.test\.sh$	^[S]tartupBros-com/hov-router$	the announce test's impostor product, a repository that does not exist, which the helper must refuse	private-repo
 # A listed public repository whose name begins with the name of a private one.
 ^\.public-safety-repos$	^[p]i-evals$	the public evidence repository's entry, whose name begins with a private project's name; the entry is the public repository	private-token
 # The setup suite plants a user outside the placeholder set so its own host-literal scan
