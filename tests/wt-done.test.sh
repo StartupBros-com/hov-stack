@@ -1280,6 +1280,29 @@ chk "transcript elsewhere, the caller's own: exits 0" 0 "$rc"
 hasnot "transcript elsewhere, the caller's own: no session refusal" "$out" "a Claude session holds"
 chk "transcript elsewhere, the caller's own: pointer moved" "$S" "$(git -C "$TMP/heldfar/wt" rev-parse HEAD)"
 
+# --- 53a. a done job bound to the worktree within its resumable window refuses
+#          another caller's run, and never the job's own closeout (hov-stack#793)
+S=$(mkfix heldresume); export STUB_GH_OUT="7 $S"
+H="$TMP/h-heldresume"; T="$H/projects/-launch/sid-r.jsonl"
+mkdir -p "$H/jobs/j1" "$(dirname "$T")"
+printf '{"state":"done","name":"waiting","sessionId":"sid-r","cwd":"%s","linkScanPath":"%s","lastTerminalAt":"%s"}\n' \
+  "$TMP/heldresume/repo" "$T" "$(date -u -d '-5 hours' +%Y-%m-%dT%H:%M:%S.000Z)" >"$H/jobs/j1/state.json"
+printf '{"type":"worktree-state","worktreeSession":{"worktreePath":"%s","sessionId":"sid-r"},"sessionId":"sid-r"}\n' \
+  "$TMP/heldresume/wt" >"$T"
+touch -d '-5 hours' "$T"
+before=$(git -C "$TMP/heldresume/wt" rev-parse HEAD)
+out=$(CLAUDE_CODE_SESSION_ID=sid-b WT_CLAUDE_HOME="$H" WT_HOLD_CACHE_DIR="$TMP/hold-cache" \
+  DRY_RUN=0 bash "$SCRIPT" --reconcile-only "$TMP/heldresume/wt" 2>&1); rc=$?
+chk "resumable done job, another caller: exits 1" 1 "$rc"
+has "resumable done job, another caller: names the job and binding" "$out" \
+  "job j1 \"waiting\" is done and can be resumed: its last turn ended 5.0h ago; its transcript $T binds it to $TMP/heldresume/wt"
+chk "resumable done job, another caller: pointer unmoved" "$before" "$(git -C "$TMP/heldresume/wt" rev-parse HEAD)"
+out=$(CLAUDE_CODE_SESSION_ID=sid-r WT_CLAUDE_HOME="$H" WT_HOLD_CACHE_DIR="$TMP/hold-cache" \
+  DRY_RUN=0 bash "$SCRIPT" --reconcile-only "$TMP/heldresume/wt" 2>&1); rc=$?
+chk "resumable done job, its own closeout: exits 0" 0 "$rc"
+hasnot "resumable done job, its own closeout: no session refusal" "$out" "a Claude session holds"
+chk "resumable done job, its own closeout: pointer moved" "$S" "$(git -C "$TMP/heldresume/wt" rev-parse HEAD)"
+
 # --- 53b. wt-sweep's idle window (hov-stack#644): a mention 48 hours old holds
 #          a plain run, and no longer holds --reconcile-only --idle-release-hours 24 --
 S=$(mkfix idlefar); export STUB_GH_OUT="7 $S"

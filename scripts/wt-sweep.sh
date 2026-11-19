@@ -25,7 +25,9 @@
 #   recently active / under /tmp or .claude/jobs ..... SKIP (a live job owns it)
 #   any live process has its cwd inside ...... SKIP (/proc scan — mtime alone is not liveness)
 #   locked (git worktree lock) ............... SKIP, before any other check
-#   a Claude Code job/session holds it ....... SKIP (lib/wt_session_hold.py; a done job only warns)
+#   a Claude Code job/session holds it ....... SKIP (lib/wt_session_hold.py; a done job holds the
+#                                               worktree it is bound to for WT_RESUMABLE_HOURS (24)
+#                                               after its last turn, then only warns: hov-stack#793)
 #     held only by a transcript that has not named it for IDLE_RELEASE_HOURS
 #     (hov-stack#644) ........................ remove, on the clean path, only when it is on a
 #                                               branch, `git status` is clean, every ignored file
@@ -348,7 +350,12 @@ except Exception:
         *) echo "  ~ skip (Claude session: $hold): $(basename "$wt")"; n_skip=$((n_skip+1)); continue ;;
       esac
     fi
-    if [ $idle = 0 ] && [ -n "$hold" ]; then printf '%s\n' "$hold" | sed 's/^/  ~ /'; n_resume=$((n_resume+1)); fi
+    # Builtins only: journald files a line from a process that has already exited
+    # (a `| sed`) without the unit's name, so `journalctl -u` never showed these.
+    if [ $idle = 0 ] && [ -n "$hold" ]; then
+      while IFS= read -r l; do echo "  ~ $l"; done <<<"$hold"
+      n_resume=$((n_resume+1))
+    fi
     base=$(basename "$wt"); bf="${base//\//_}"
     br=$(git -C "$wt" symbolic-ref --short HEAD 2>/dev/null||echo ""); det=0; [ -z "$br" ]&&det=1
     porc=$(git -C "$wt" status --porcelain 2>/dev/null)

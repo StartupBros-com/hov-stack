@@ -178,7 +178,7 @@ out=$(hold -- "$M/env"); rc=$?
 chk "helper: without --idle-hours a mention holds (exit 0)" 0 "$rc"
 out=$(hold --idle-hours 24 -- "$M/fresh"); rc=$?
 chk "helper: a mention inside the window holds (exit 0)" 0 "$rc"
-cachefile=$(ls "$C"/*.v2.json 2>/dev/null | head -n 1)
+cachefile=$(ls "$C"/*.v3.json 2>/dev/null | head -n 1)
 [ -n "$cachefile" ] && ok "helper: writes a versioned cache" || no "helper: writes a versioned cache"
 printf '{not json' >"$cachefile"
 out=$(hold --idle-hours 24 -- "$M/fresh"); rc=$?
@@ -362,9 +362,9 @@ else
   # A fresh transcript makes the next run rewrite the cache while TQ is still
   # unreadable; a run without the window then holds only if TQ's entry was kept.
   mkdir -p "$H3/projects/-other"; rec "$TMP" "$(ago '1 minute')" >"$H3/projects/-other/o.jsonl"
-  before=$(cat "$C3"/*.v2.json | md5sum)
+  before=$(cat "$C3"/*.v3.json | md5sum)
   hold3 --idle-hours 24 -- "$Q/cw" >/dev/null 2>&1
-  after=$(cat "$C3"/*.v2.json | md5sum)
+  after=$(cat "$C3"/*.v3.json | md5sum)
   [ "$before" != "$after" ] && ok "unreadable transcript: the cache was rewritten meanwhile" \
     || no "unreadable transcript: the cache was rewritten meanwhile"
   out=$(hold3 -- "$Q/cw" 2>/dev/null); rc=$?

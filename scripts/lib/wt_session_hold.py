@@ -9,7 +9,8 @@ Claude Code itself records, under the Claude home directory:
 
   jobs/<id>/state.json    a job that is not `done` holds the worktree it names in
                           `worktreePath` or `cwd`, or whose transcript project
-                          directory (`linkScanPath`) is the worktree's slug;
+                          directory (`linkScanPath`) is the worktree's slug; a
+                          `done` job holds it too while it can be resumed (below);
   sessions/<pid>.json     a session whose `cwd` is inside the worktree holds it
                           while that pid runs (`procStart` guards pid reuse);
   projects/<slug>/        a transcript written there within --active-min minutes;
@@ -82,6 +83,26 @@ transcript's last cwd no longer holds either (a resume of it would find the
 worktree gone, as a done job's would). Such a worktree is reported idle, never
 unheld, so a sweep releases it only if it is clean, cache-only and shipped.
 
+A `done` job is one whose last turn has ended: the state of every background job
+left waiting for its user, overnight for instance. Its process is gone by then and
+so, by the time a sweep runs, is the worktree's `git worktree lock`, but resuming
+the job re-enters the worktree it is bound to, and finding it gone the session
+carries on in the launch checkout (hov-stack#793: 27 such removals on the author's
+host in three days, every job resumed within 24 hours of its last turn). So a done
+job holds the worktree it is bound to while its last turn ended less than
+--resumable-hours ago (default 24, or WT_RESUMABLE_HOURS; 0 turns it off). Bound
+means `worktreePath` or `cwd` in its state.json is inside the worktree, its
+transcript project directory is the worktree's slug, or the last `worktree-state`
+record of its own transcript (`linkScanPath`, or `<sessionId>.jsonl`) names it; an
+earlier record that a later one replaced or cleared binds nothing. The clock is
+`lastTerminalAt`, not the file's mtime, which Claude Code rewrites without the job
+doing anything; only a job without a readable `lastTerminalAt` falls back to the
+mtime, which errs toward holding. Inside the window a done job whose own transcript could not be read holds
+every worktree under its `cwd` or `originCwd`, since its binding is unknown. The
+hold never lapses into `idle:`; once the window has passed the job only warns again
+and the worktree takes the caller's normal path. The default lives here, so wt-sweep
+and wt-done, which both call through lib/wt-preserve.sh, always agree on it.
+
 Nothing is reported idle when a job or session record, or a candidate transcript,
 could not be read (hov-stack#660), or when the sessions, jobs or projects
 directory, or one under it, exists but could not be listed: unread bytes may name
@@ -115,6 +136,7 @@ working keeps writing its transcript.
 
 import argparse
 import json
+import math
 import os
 import re
 import sys
@@ -122,13 +144,17 @@ import tempfile
 import time
 from datetime import datetime
 
-# v2 maps each path to the newest record time naming it (v1 kept a bare list). The
-# file name carries the version, so an installed v1 helper and this one never
-# throw each other's index away.
-CACHE_VERSION = 2
+# v2 maps each path to the newest record time naming it (v1 kept a bare list). v3
+# adds each transcript's last `worktree-state` binding (hov-stack#793): a v2 entry
+# already read to its end would never be read again, so it could never learn one.
+# The file name carries the version, so an installed older helper and this one
+# never throw each other's index away.
+CACHE_VERSION = 3
+DEFAULT_RESUMABLE_HOURS = 24.0
 RETAIN_DAYS = 3
 _CWD = re.compile(rb'"cwd":"((?:[^"\\]|\\.)*)"')
 _TS = b'"timestamp":"'
+_WS = b'"worktree-state"'
 # An absolute (or ~/) path token in a shell command, after a separator a shell or
 # an option would put before it (`git -C /x`, `--cd=/x`, `cd "/x"`, `(cd /x`).
 _TOKEN = re.compile(r"""(?:^|(?<=[\s'"=:(]))(~?/[^\s'"`;|&<>(){}$\\,]+)""")
@@ -301,6 +327,41 @@ def _when(line: bytes, d, fallback: float) -> float:
     return fallback
 
 
+def _instant(v):
+    """A job record's time as epoch seconds: an ISO 8601 string with a zone, or a
+    number of milliseconds (of seconds when too small to be milliseconds). None when
+    it is neither, or not finite."""
+    if isinstance(v, bool):
+        return None
+    if isinstance(v, (int, float)):
+        t = v / 1000.0 if v > 1e11 else float(v)
+    elif isinstance(v, str):
+        try:
+            d = datetime.fromisoformat(v.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        if d.tzinfo is None:
+            return None
+        t = d.timestamp()
+    else:
+        return None
+    return t if math.isfinite(t) else None
+
+
+def last_turn_age(d: dict, state_path: str, now: float) -> float:
+    """Seconds since a done job's last turn ended: from `lastTerminalAt`, else from
+    its state.json mtime. The mtime is rewritten without the job doing anything, so
+    it can only make the job look more recent than it is: a fallback that errs
+    toward holding. Never negative."""
+    t = _instant(d.get("lastTerminalAt"))
+    if t is None:
+        try:
+            t = os.stat(state_path).st_mtime
+        except OSError:
+            t = now
+    return max(0.0, now - t)
+
+
 def _record_paths(line: bytes, found: dict, fallback: float):
     """Note in `found` each path `line` drives, with the newest record time naming
     it, and return the record's cwd (None if it has none)."""
@@ -343,12 +404,28 @@ def _record_paths(line: bytes, found: dict, fallback: float):
     return cwd
 
 
+def _binding(line: bytes):
+    """The worktree a `worktree-state` record binds its session to: the path, or ""
+    when the record clears the binding. None when `line` is no such record."""
+    if _WS not in line:
+        return None
+    try:
+        d = json.loads(line)
+    except ValueError:
+        return None
+    if not (isinstance(d, dict) and d.get("type") == "worktree-state"):
+        return None
+    ws = d.get("worktreeSession")
+    p = ws.get("worktreePath") if isinstance(ws, dict) else None
+    return _norm(p) if isinstance(p, str) and p.startswith("/") else ""
+
+
 def scan(path: str, offset: int, found: dict, transient: dict, fallback: float):
     """Add the driven paths in `path` from `offset` on; return the offset after the
-    last complete line and the last cwd recorded there (None if none). A trailing
-    line still being written goes to `transient`, which is used now but never
-    cached."""
-    last = None
+    last complete line, the last cwd recorded there and the last `worktree-state`
+    binding recorded there (each None if none). A trailing line still being written
+    goes to `transient`, which is used now but never cached."""
+    last = bind = None
     with open(path, "rb") as f:
         f.seek(offset)
         for line in f:
@@ -356,8 +433,11 @@ def scan(path: str, offset: int, found: dict, transient: dict, fallback: float):
                 _record_paths(line, transient, fallback)
                 break
             last = _record_paths(line, found, fallback) or last
+            b = _binding(line)
+            if b is not None:
+                bind = b
             offset += len(line)
-    return offset, last
+    return offset, last, bind
 
 
 def _cache_path(cache_dir: str, home: str) -> str:
@@ -368,15 +448,18 @@ def _cache_path(cache_dir: str, home: str) -> str:
 def _entry_ok(e, st) -> bool:
     if not (isinstance(e, dict) and e.get("dev") == st.st_dev and e.get("ino") == st.st_ino
             and isinstance(e.get("offset"), int) and 0 <= e["offset"] <= st.st_size
-            and isinstance(e.get("paths"), dict) and (e.get("cwd") is None or isinstance(e["cwd"], str))):
+            and isinstance(e.get("paths"), dict) and (e.get("cwd") is None or isinstance(e["cwd"], str))
+            and (e.get("bind") is None or isinstance(e["bind"], str))):
         return False
     return all(isinstance(w, (int, float)) and not isinstance(w, bool) for w in e["paths"].values())
 
 
 def driven_paths(transcripts: dict, cache_file: str):
     """Map each readable transcript (a dict of path -> owning session id) to
-    (paths, last cwd): each path its records drive with the newest record time
-    naming it, and the last cwd it recorded. Return that map and the list of
+    (paths, last cwd, binding): each path its records drive with the newest record
+    time naming it, the last cwd it recorded, and the worktree its last
+    `worktree-state` record binds it to ("" if that record cleared the binding,
+    None if it has none). Return that map and the list of
     transcripts that could not be read. One whose new bytes cannot be read keeps
     what its cache entry, and any lines read before the error, recorded; the rest
     of it is unknown, so the caller must not call a worktree idle on it.
@@ -411,14 +494,14 @@ def driven_paths(transcripts: dict, cache_file: str):
             skipped.append(t)
             continue
         e = entries.get(t)
-        offset, found, cwd = 0, {}, None
+        offset, found, cwd, bind = 0, {}, None, None
         cached = _entry_ok(e, st)
         if cached:
-            offset, found, cwd = e["offset"], dict(e["paths"]), e.get("cwd")
+            offset, found, cwd, bind = e["offset"], dict(e["paths"]), e.get("cwd"), e.get("bind")
         transient = {}
         if offset < st.st_size:
             try:
-                new_offset, last = scan(t, offset, found, transient, st.st_mtime)
+                new_offset, last, new_bind = scan(t, offset, found, transient, st.st_mtime)
             except OSError as err:
                 print(f"wt_session_hold: skipped unreadable {t}: {err}", file=sys.stderr)
                 skipped.append(t)
@@ -426,17 +509,18 @@ def driven_paths(transcripts: dict, cache_file: str):
                     kept[t] = e
                 for p, w in transient.items():
                     found[p] = max(w, found.get(p, w))
-                if found:
-                    out[t] = (found, cwd)
+                if found or bind is not None:
+                    out[t] = (found, cwd, bind)
                 continue
             dirty = dirty or new_offset != offset or e is None
             offset, cwd = new_offset, last or cwd
+            bind = bind if new_bind is None else new_bind
         kept[t] = {"owner": transcripts[t], "dev": st.st_dev, "ino": st.st_ino,
-                   "offset": offset, "paths": found, "cwd": cwd}
+                   "offset": offset, "paths": found, "cwd": cwd, "bind": bind}
         merged = dict(found)
         for p, w in transient.items():
             merged[p] = max(w, merged.get(p, w))
-        out[t] = (merged, cwd)
+        out[t] = (merged, cwd, bind)
     if cache_file and kept and (dirty or set(kept) != set(entries)):
         tmp = ""
         try:
@@ -504,10 +588,11 @@ def walk_transcripts(projects: str, bad: list) -> list:
 
 
 def check(wt: str, home: str, active_min: int, procfs: str, cache_dir: str = "", exclude: str = "",
-          idle_hours: float = 0.0):
+          idle_hours: float = 0.0, resumable_hours: float = DEFAULT_RESUMABLE_HOURS):
     """Return (holder or None, [resumable lines], idle). `idle` is True only when
     idle_hours is set and the holds left are transcript holds, or dead and stale
-    jobs (hov-stack#403), that lapsed."""
+    jobs (hov-stack#403), that lapsed. A done job inside resumable_hours holds
+    and is never idle (hov-stack#793)."""
     names = spellings(wt)
     wt = names[0]
     slugs = list(dict.fromkeys(slug(s) for s in names))
@@ -520,6 +605,7 @@ def check(wt: str, home: str, active_min: int, procfs: str, cache_dir: str = "",
     unreadable = []  # records and transcripts that could not be read: nothing is idle
     now = time.time()
     window = max(idle_hours * 3600, active_min * 60) if idle_hours > 0 else 0
+    resume_window = resumable_hours * 3600 if resumable_hours > 0 else 0
 
     # Session records first: a job's liveness is read from them (hov-stack#403).
     live, live_ids = [], set()
@@ -546,6 +632,7 @@ def check(wt: str, home: str, active_min: int, procfs: str, cache_dir: str = "",
 
     lapsed_here = []  # (why, state.json mtime) of each lapsed job naming this worktree
     lapsed_ids, held_ids = set(), set()
+    bound = []  # (why, session ids, transcript, launch dirs) of each resumable done job not matched by name
     for e in _entries(os.path.join(home, "jobs"), unreadable):
         if e.name.startswith(".") or not _is_dir(e, unreadable):
             continue
@@ -581,10 +668,21 @@ def check(wt: str, home: str, active_min: int, procfs: str, cache_dir: str = "",
                     owners.append((sid, why))
         named = [p for p in (d.get("worktreePath"), d.get("cwd")) if isinstance(p, str) and p]
         project = os.path.basename(os.path.dirname(link)) if link else ""
-        if not (any(within(p) for p in named) or project in slugs):
-            continue
+        matched = any(within(p) for p in named) or project in slugs
         if state == "done":
-            resumable.append(f"resumable: {label} is done; resuming it would find this worktree gone")
+            # Resuming a done job re-enters the worktree it is bound to (hov-stack#793).
+            age = last_turn_age(d, path, now)
+            if resume_window and age < resume_window:
+                why = f"{label} is done and can be resumed: its last turn ended {age / 3600:.1f}h ago"
+                if matched:
+                    return why, resumable, False
+                ids = {v for v in (d.get("sessionId"), d.get("resumeSessionId")) if isinstance(v, str) and v}
+                dirs = [p for p in (d.get("cwd"), d.get("originCwd")) if isinstance(p, str) and p.startswith("/")]
+                bound.append((why, ids, link if link.endswith(".jsonl") else "", dirs))
+            elif matched:
+                resumable.append(f"resumable: {label} is done; resuming it would find this worktree gone")
+            continue
+        if not matched:
             continue
         if lapsed:
             lapsed_here.append((why, mtime))
@@ -649,12 +747,32 @@ def check(wt: str, home: str, active_min: int, procfs: str, cache_dir: str = "",
     def here(p: str) -> bool:
         return p in names or p.startswith(prefixes)
 
+    # A resumable done job's own transcripts (never its agents'): their last
+    # `worktree-state` record is the worktree resuming it re-enters.
+    binds = {}  # transcript -> owning session id
+    bound_ts = []  # (why, [transcripts], launch dirs)
+    for why_b, ids, link, dirs in bound:
+        ts = [p for sid in sorted(ids) for p in by_owner.get(sid, ()) if os.path.basename(p) == sid + ".jsonl"]
+        if link and transcript_owner(link) != exclude and link not in ts:
+            ts.append(link)
+        for t in ts:
+            binds[t] = transcript_owner(t)
+        bound_ts.append((why_b, ts, dirs))
+
     cache_file = _cache_path(cache_dir, home) if cache_dir else ""
-    driven, skipped = driven_paths({**fresh, **candidates}, cache_file)
+    driven, skipped = driven_paths({**binds, **fresh, **candidates}, cache_file)
     unreadable += skipped
+    for why_b, ts, dirs in bound_ts:
+        for t in ts:
+            b = driven.get(t, ({}, None, None))[2]
+            if b and here(b):
+                return f"{why_b}; its transcript {t} binds it to {b}", resumable, False
+            if t in skipped and any(inside(s, d) for s in names for d in dirs):
+                unread = f"{why_b}; its transcript {t} could not be read and this worktree is under its launch directory"
+                return unread, resumable, False
     holder = None
     for t in sorted(candidates):
-        hit = sorted(p for p in driven.get(t, ({}, None))[0] if here(p))
+        hit = sorted(p for p in driven.get(t, ({}, None, None))[0] if here(p))
         if hit:
             holder = f"{why[t]}; its transcript {t} names {hit[0]}"
             break
@@ -664,7 +782,10 @@ def check(wt: str, home: str, active_min: int, procfs: str, cache_dir: str = "",
         holder = lapsed_here[0][0]  # a lapse needs a window, so this is never reported unheld
     if not window:
         return holder, resumable, False
-    named_at = [w for found, _ in driven.values() for p, w in found.items() if here(p)]
+    # Only the transcripts asked about before #793: a done job's own transcript is
+    # read for its binding alone and never moves the idle clock.
+    named_at = [w for t, (found, *_) in driven.items() if t in fresh or t in candidates
+                for p, w in found.items() if here(p)]
     last = max(named_at + [m for _, m in lapsed_here], default=now)
     if now - last < window:
         return holder, resumable, False
@@ -672,10 +793,27 @@ def check(wt: str, home: str, active_min: int, procfs: str, cache_dir: str = "",
         return (f"{holder}; not called idle: {len(unreadable)} record(s) or transcript(s) could not be read",
                 resumable, False)
     for t, sid in sorted(candidates.items()):
-        cwd = driven.get(t, ({}, None))[1]
+        cwd = driven.get(t, ({}, None, None))[1]
         if cwd and within(cwd) and transcript_owner(t) == sid and sid not in lapsed_ids:
             return f"{holder}; its session last recorded its cwd at {cwd}", resumable, False
     return f"idle: {holder}; last named {int((now - last) // 3600)}h ago", resumable, True
+
+
+def _env_hours(name: str, default: float) -> float:
+    """Hours from the environment, or `default` (with a note) when it is not a
+    finite number of 0 or more: a typo there must not stop every sweep."""
+    v = os.environ.get(name, "")
+    if not v:
+        return default
+    try:
+        h = float(v)
+    except ValueError:
+        h = -1.0
+    if h >= 0 and math.isfinite(h):
+        return h
+    print(f"wt_session_hold: ignored {name}={v!r} (not a number of hours, 0 or more); using {default:g}",
+          file=sys.stderr)
+    return default
 
 
 def main(argv=None) -> int:
@@ -689,13 +827,20 @@ def main(argv=None) -> int:
     ap.add_argument("--exclude-session", default="", help="a session id that never counts as a holder")
     ap.add_argument("--idle-hours", type=float, default=0.0,
                     help="report a transcript-only hold idle after this many hours unnamed (0 = never)")
+    ap.add_argument("--resumable-hours", type=float,
+                    default=_env_hours("WT_RESUMABLE_HOURS", DEFAULT_RESUMABLE_HOURS),
+                    help="a done job holds the worktree it is bound to for this many hours after its last"
+                         f" turn (default {DEFAULT_RESUMABLE_HOURS:g}, or WT_RESUMABLE_HOURS; 0 = never)")
     ap.add_argument("worktree")
     args = ap.parse_args(argv)
     if not args.idle_hours >= 0:
         ap.error("--idle-hours must be 0 or more")
+    if not (args.resumable_hours >= 0 and math.isfinite(args.resumable_hours)):
+        ap.error("--resumable-hours must be a finite number, 0 or more")
     try:
         holder, resumable, idle = check(args.worktree, args.claude_home, args.active_min, args.procfs,
-                                        args.cache_dir, args.exclude_session, args.idle_hours)
+                                        args.cache_dir, args.exclude_session, args.idle_hours,
+                                        args.resumable_hours)
     except Exception as err:  # any failure reads as held: exit 1 would let a sweep remove it
         print(f"wt_session_hold: check failed, treat as held: {err!r}", file=sys.stderr)
         return 4
