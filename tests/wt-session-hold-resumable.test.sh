@@ -199,6 +199,87 @@ else
   echo "  skip: unreadable-transcript cases (running as root)"
 fi
 
+# --- 12b. a cache entry an older helper wrote (no binding) learns its binding
+#          without re-dating its paths: a re-read dates undated records by the
+#          file's mtime and would call idle worktrees live again --------------------
+H="$TMP/h12b"; T="$H/projects/$(slug "$LAUNCH")/sid-12b.jsonl"
+transcript "$T" sid-12b "$LAUNCH" "$WA"
+printf '{"type":"assistant","sessionId":"sid-12b","message":{"content":[{"type":"tool_use","input":{"file_path":"%s/undated.txt"}}]}}\n' "$WB" >>"$T"
+touch -d '-5 hours' "$T"
+job "$H" r12b sid-12b "$LAUNCH" "$T" "\"$H30\""
+hold "$H" --idle-hours 24 -- "$WA" >/dev/null 2>&1  # indexes T (written within the idle window)
+CF=$(ls "$TMP"/cache/*h12b*.v2.json 2>/dev/null | head -n 1)
+python3 - "$CF" "$T" <<'PY'
+import json, sys
+path, t = sys.argv[1], sys.argv[2]
+d = json.load(open(path))
+e = d["entries"][t]
+assert e.get("bind"), "the new helper recorded the binding"
+del e["bind"]  # as the installed (older) helper writes it
+json.dump(d, open(path, "w"))
+PY
+chk "old-helper entry: the fixture cache was found and stripped" 0 "$?"
+before=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["entries"][sys.argv[2]]["paths"])' "$CF" "$T")
+job "$H" r12b sid-12b "$LAUNCH" "$T" "\"$H5\""
+out=$(hold "$H" -- "$WA"); rc=$?
+chk "old-helper entry without a binding, 5h: binding learned, held (exit 0)" 0 "$rc"
+has "old-helper entry: names the binding" "$out" "binds it to $WA"
+after=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["entries"][sys.argv[2]]["paths"])' "$CF" "$T")
+chk "old-helper entry: recorded path times unchanged" "$before" "$after"
+has "old-helper entry: the binding is now cached" "$(cat "$CF")" "\"bind\":\"$WA\""
+
+# --- 12c. PLANTED NEGATIVE: a bad lastTerminalAt never fails the whole check -------
+H="$TMP/h12c"; T="$H/projects/$(slug "$WA")/sid-12c.jsonl"
+transcript "$T" sid-12c "$LAUNCH"
+job "$H" r12c sid-12c "$LAUNCH" "$T" "1$(printf '0%.0s' $(seq 1 400))"
+out=$(hold "$H" -- "$WA" 2>&1); rc=$?
+chk "lastTerminalAt too large for a float: the mtime decides, held (exit 0, never 4)" 0 "$rc"
+touch -d '-30 hours' "$H/jobs/r12c/state.json"
+out=$(hold "$H" -- "$WA" 2>&1); rc=$?
+chk "lastTerminalAt too large, state.json 30h old: not held (exit 1)" 1 "$rc"
+job "$H" r12c sid-12c "$LAUNCH" "$T" '"2099-01-01T00:00:00Z"'
+touch -d '-30 hours' "$H/jobs/r12c/state.json"
+out=$(hold "$H" -- "$WA"); rc=$?
+chk "lastTerminalAt far in the future, state.json 30h old: not held (exit 1)" 1 "$rc"
+touch "$H/jobs/r12c/state.json"
+out=$(hold "$H" -- "$WA"); rc=$?
+chk "lastTerminalAt far in the future, fresh state.json: held by the mtime (exit 0)" 0 "$rc"
+job "$H" r12c sid-12c "$LAUNCH" "$T" "\"$(iso '+30 minutes')\""
+out=$(hold "$H" -- "$WA"); rc=$?
+chk "lastTerminalAt 30 minutes ahead (clock skew): held (exit 0)" 0 "$rc"
+
+# --- 12d. the caller excluded by the job's resume session id -----------------------
+H="$TMP/h12d"; T="$H/projects/$(slug "$WA")/sid-12d.jsonl"
+transcript "$T" sid-12d "$LAUNCH"
+mkdir -p "$H/jobs/r12d"
+printf '{"state":"done","name":"overnight","sessionId":"sid-12d","resumeSessionId":"sid-12d-resumed","cwd":"%s","linkScanPath":"%s","lastTerminalAt":"%s"}\n' \
+  "$LAUNCH" "$T" "$H5" >"$H/jobs/r12d/state.json"
+out=$(hold "$H" --exclude-session sid-12d-resumed -- "$WA"); rc=$?
+chk "own session excluded by its resume id: not held (exit 1)" 1 "$rc"
+out=$(hold "$H" --exclude-session someone-else -- "$WA"); rc=$?
+chk "another caller: held (exit 0)" 0 "$rc"
+
+# --- 12e. PLANTED NEGATIVE: a done job's unreadable transcript does not stop
+#          another worktree from being called idle. Its transcript is older than
+#          the 1h idle window, so only the done-job read could reach it -----------
+if [ "$(id -u)" != 0 ]; then
+  H="$TMP/h12e"; WC="$W/repo/.claude/worktrees/c"; mkdir -p "$WC"
+  TW="$H/projects/-elsewhere/sid-work.jsonl"; mkdir -p "$(dirname "$TW")"
+  printf '{"type":"assistant","sessionId":"sid-work","timestamp":"%s","message":{"content":[{"type":"tool_use","input":{"file_path":"%s/x.txt"}}]}}\n' \
+    "$(iso '-48 hours')" "$WC" >"$TW"
+  touch -d '-5 hours' "$TW"
+  mkdir -p "$H/jobs/rw"
+  printf '{"state":"working","name":"toucher","sessionId":"sid-work","cwd":"%s","linkScanPath":"%s"}\n' "$LAUNCH" "$TW" >"$H/jobs/rw/state.json"
+  out=$(hold "$H" --idle-hours 1 -- "$WC"); rc=$?
+  chk "idle control: a 48h-old mention is idle (exit 3)" 3 "$rc"
+  T="$H/projects/$(slug "$LAUNCH")/sid-12e.jsonl"
+  transcript "$T" sid-12e "$TMP/other-launch" "$WA"; chmod 000 "$T"
+  job "$H" r12e sid-12e "$TMP/other-launch" "$T" "\"$H5\""
+  out=$(hold "$H" --idle-hours 1 -- "$WC" 2>/dev/null); rc=$?
+  chk "a done job's unreadable transcript: the other worktree is still idle (exit 3)" 3 "$rc"
+  chmod 600 "$T"
+fi
+
 # --- 13. through wt-sweep: kept inside the window, removed past it ----------------
 # ROOT holding one repo whose worktree is clean and pushed: the clean path removes
 # it unless something holds it.

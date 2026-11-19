@@ -144,13 +144,17 @@ import tempfile
 import time
 from datetime import datetime
 
-# v2 maps each path to the newest record time naming it (v1 kept a bare list). v3
-# adds each transcript's last `worktree-state` binding (hov-stack#793): a v2 entry
-# already read to its end would never be read again, so it could never learn one.
-# The file name carries the version, so an installed older helper and this one
-# never throw each other's index away.
-CACHE_VERSION = 3
+# v2 maps each path to the newest record time naming it (v1 kept a bare list). The
+# file name carries the version, so an installed older helper and this one never
+# throw each other's index away. Since hov-stack#793 an entry also carries `bind`,
+# its transcript's last `worktree-state` binding. An entry without one, written by
+# an older helper, is read once more for bindings alone when a done job needs it,
+# keeping every path's recorded time. That is why this is not a version bump: a
+# full re-read dates each record without a timestamp by the transcript's current
+# mtime, and on 2026-11-19 a rebuilt index called 44 idle worktrees live again.
+CACHE_VERSION = 2
 DEFAULT_RESUMABLE_HOURS = 24.0
+FUTURE_SKEW = 3600.0  # seconds a done job's last-turn time may run ahead of now
 RETAIN_DAYS = 3
 _CWD = re.compile(rb'"cwd":"((?:[^"\\]|\\.)*)"')
 _TS = b'"timestamp":"'
@@ -334,7 +338,10 @@ def _instant(v):
     if isinstance(v, bool):
         return None
     if isinstance(v, (int, float)):
-        t = v / 1000.0 if v > 1e11 else float(v)
+        try:
+            t = v / 1000.0 if v > 1e11 else float(v)
+        except OverflowError:  # an int too large for a float: one bad file must not fail every check
+            return None
     elif isinstance(v, str):
         try:
             d = datetime.fromisoformat(v.replace("Z", "+00:00"))
@@ -352,14 +359,18 @@ def last_turn_age(d: dict, state_path: str, now: float) -> float:
     """Seconds since a done job's last turn ended: from `lastTerminalAt`, else from
     its state.json mtime. The mtime is rewritten without the job doing anything, so
     it can only make the job look more recent than it is: a fallback that errs
-    toward holding. Never negative."""
-    t = _instant(d.get("lastTerminalAt"))
-    if t is None:
-        try:
-            t = os.stat(state_path).st_mtime
-        except OSError:
-            t = now
-    return max(0.0, now - t)
+    toward holding. A time more than FUTURE_SKEW ahead of now is not believed (a
+    bad clock or a wrong unit would otherwise hold until that time), so the mtime
+    is tried instead; with no believable time the job holds nothing (math.inf)."""
+    for t in (_instant(d.get("lastTerminalAt")), None):
+        if t is None:
+            try:
+                t = os.stat(state_path).st_mtime
+            except OSError:
+                return math.inf
+        if t <= now + FUTURE_SKEW:
+            return max(0.0, now - t)
+    return math.inf
 
 
 def _record_paths(line: bytes, found: dict, fallback: float):
@@ -454,12 +465,28 @@ def _entry_ok(e, st) -> bool:
     return all(isinstance(w, (int, float)) and not isinstance(w, bool) for w in e["paths"].values())
 
 
-def driven_paths(transcripts: dict, cache_file: str):
+def last_binding(path: str, end: int):
+    """The last `worktree-state` binding in the first `end` bytes of `path` (a line
+    boundary), as _binding() spells it, or None if there is none."""
+    bind, n = None, 0
+    with open(path, "rb") as f:
+        for line in f:
+            n += len(line)
+            if n > end:
+                break
+            b = _binding(line)
+            if b is not None:
+                bind = b
+    return bind
+
+
+def driven_paths(transcripts: dict, cache_file: str, need_bind=()):
     """Map each readable transcript (a dict of path -> owning session id) to
     (paths, last cwd, binding): each path its records drive with the newest record
     time naming it, the last cwd it recorded, and the worktree its last
     `worktree-state` record binds it to ("" if that record cleared the binding,
-    None if it has none). Return that map and the list of
+    None if it has none, or if it is unknown and the transcript is not in
+    `need_bind`). Return that map and the list of
     transcripts that could not be read. One whose new bytes cannot be read keeps
     what its cache entry, and any lines read before the error, recorded; the rest
     of it is unknown, so the caller must not call a worktree idle on it.
@@ -494,29 +521,34 @@ def driven_paths(transcripts: dict, cache_file: str):
             skipped.append(t)
             continue
         e = entries.get(t)
-        offset, found, cwd, bind = 0, {}, None, None
+        offset, found, cwd, bind, known = 0, {}, None, None, True
         cached = _entry_ok(e, st)
         if cached:
-            offset, found, cwd, bind = e["offset"], dict(e["paths"]), e.get("cwd"), e.get("bind")
+            offset, found, cwd = e["offset"], dict(e["paths"]), e.get("cwd")
+            bind, known = e.get("bind"), "bind" in e  # an older helper's entry has no binding
         transient = {}
-        if offset < st.st_size:
-            try:
+        try:
+            if not known and t in need_bind:
+                bind, known, dirty = last_binding(t, offset), True, True
+            if offset < st.st_size:
                 new_offset, last, new_bind = scan(t, offset, found, transient, st.st_mtime)
-            except OSError as err:
-                print(f"wt_session_hold: skipped unreadable {t}: {err}", file=sys.stderr)
-                skipped.append(t)
-                if cached:
-                    kept[t] = e
-                for p, w in transient.items():
-                    found[p] = max(w, found.get(p, w))
-                if found or bind is not None:
-                    out[t] = (found, cwd, bind)
-                continue
-            dirty = dirty or new_offset != offset or e is None
-            offset, cwd = new_offset, last or cwd
-            bind = bind if new_bind is None else new_bind
+                dirty = dirty or new_offset != offset or e is None
+                offset, cwd = new_offset, last or cwd
+                bind = bind if new_bind is None else new_bind
+        except OSError as err:
+            print(f"wt_session_hold: skipped unreadable {t}: {err}", file=sys.stderr)
+            skipped.append(t)
+            if cached:
+                kept[t] = e
+            for p, w in transient.items():
+                found[p] = max(w, found.get(p, w))
+            if found or bind is not None:
+                out[t] = (found, cwd, bind if known else None)
+            continue
         kept[t] = {"owner": transcripts[t], "dev": st.st_dev, "ino": st.st_ino,
-                   "offset": offset, "paths": found, "cwd": cwd, "bind": bind}
+                   "offset": offset, "paths": found, "cwd": cwd}
+        if known:
+            kept[t]["bind"] = bind
         merged = dict(found)
         for p, w in transient.items():
             merged[p] = max(w, merged.get(p, w))
@@ -671,6 +703,9 @@ def check(wt: str, home: str, active_min: int, procfs: str, cache_dir: str = "",
         matched = any(within(p) for p in named) or project in slugs
         if state == "done":
             # Resuming a done job re-enters the worktree it is bound to (hov-stack#793).
+            # The caller may carry either of its ids, so either one excludes it.
+            if exclude and d.get("resumeSessionId") == exclude:
+                continue
             age = last_turn_age(d, path, now)
             if resume_window and age < resume_window:
                 why = f"{label} is done and can be resumed: its last turn ended {age / 3600:.1f}h ago"
@@ -760,8 +795,10 @@ def check(wt: str, home: str, active_min: int, procfs: str, cache_dir: str = "",
         bound_ts.append((why_b, ts, dirs))
 
     cache_file = _cache_path(cache_dir, home) if cache_dir else ""
-    driven, skipped = driven_paths({**binds, **fresh, **candidates}, cache_file)
-    unreadable += skipped
+    driven, skipped = driven_paths({**binds, **fresh, **candidates}, cache_file, need_bind=set(binds))
+    # A done job's transcript that cannot be read holds below; it must not also
+    # stop every other worktree from being called idle.
+    unreadable += [t for t in skipped if t in fresh or t in candidates]
     for why_b, ts, dirs in bound_ts:
         for t in ts:
             b = driven.get(t, ({}, None, None))[2]
