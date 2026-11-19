@@ -288,7 +288,8 @@ class SkillPackTests(unittest.TestCase):
     def test_no_linked_skill_takes_a_built_in_command_name(self):
         # ./setup links every pack and skills-stack skill into ~/.claude/skills by its
         # directory name, so a skill named like a built-in shadows it there; the doctor
-        # warned on the pack's own `verify` until it became verify-phases.
+        # warned on the pack's own `verify` until it was renamed verify-phases (0.3.8)
+        # and then removed (0.3.9).
         builtins = builtin_slash_commands()
         self.assertTrue({"verify", "doctor", "review"} <= builtins, "doctor's built-in list did not parse")
         names = {p.name for p in skills()} | {p.name for p in stack_skills() if p.is_dir()}
