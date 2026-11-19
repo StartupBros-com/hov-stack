@@ -21,7 +21,7 @@ tags: [claude-code, background-jobs, job-state, done-state, last-terminal-at, wt
 
 Code that reads Claude Code's job store (`~/.claude/jobs/<id>/state.json`) took `"state": "done"` to mean the job was over. It only means the job's latest turn has ended. The job is at rest, waiting for its user, who can resume it into the same worktree and scratch directory.
 
-wt-sweep acted on the wrong reading. On one host it removed 27 worktrees in 3.5 days, and every job behind them was resumed within 24 hours of its last turn (hov-stack#793).
+wt-sweep acted on the wrong reading. On one host it removed 27 worktrees in 3.5 days. Of the 13 jobs whose timeline survived, every one was resumed within 24 hours of its last turn (hov-stack#793).
 
 ## Symptoms
 
@@ -43,7 +43,7 @@ wt-sweep acted on the wrong reading. On one host it removed 27 worktrees in 3.5 
 
 PR #796 changed `scripts/lib/wt_session_hold.py` so a done job holds the worktree it is bound to for `WT_RESUMABLE_HOURS` (default 24) after its last turn. "Resumable hold" in `harness/worktree-fleet-hygiene.md` describes the hold and what binds a job to a worktree. Two parts carry beyond the sweep:
 
-- **Clock.** `last_turn_age` (`scripts/lib/wt_session_hold.py:358`) reads `lastTerminalAt`. It falls back to the state.json mtime only when that field is absent, which errs toward holding. A time more than an hour ahead of now is not believed (`FUTURE_SKEW`, `:157`). An unparseable or overflowing value never fails the whole check.
+- **Clock.** `last_turn_age` (`scripts/lib/wt_session_hold.py:358`) reads `lastTerminalAt`. It falls back to the state.json mtime only when that field is absent or unusable, which errs toward holding. A time more than an hour ahead of now is not believed (`FUTURE_SKEW`, `:157`). An unparseable or overflowing value never fails the whole check.
 - **Identity.** The caller is excluded by any of the job's ids:
 
 ```python
@@ -55,7 +55,7 @@ if state == "done":
         continue
 ```
 
-(`scripts/lib/wt_session_hold.py:704`; the `sessionId` match comes earlier, at `:675`.)
+(`scripts/lib/wt_session_hold.py:704-709`; the `sessionId` match comes earlier, at `:675`.)
 
 ## Why This Works
 
@@ -82,7 +82,7 @@ A hold keyed to the last turn, scoped to the worktree the job will re-enter and 
 ## Related Issues
 
 - hov-stack#793 (the incident) and PR #796 (the fix).
-- #451 and #453: reclaim-sweep keeps a done job's scratch when its last turn delivered no result. Its per-turn comment predates them.
+- #451 and #453: reclaim-sweep keeps a done job's scratch to the 72-hour floor when its last turn delivered no result. Its per-turn comment predates them.
 - #403: the not-done job hold this extends.
 - `harness/worktree-fleet-hygiene.md`: the Resumable hold paragraph.
 - `docs/solutions/best-practices/diff-installed-and-patched-sweep-plans-on-the-real-host-before-shipping-a-session-hold-change.md`: the countermetric that checked #796 on the real host.
