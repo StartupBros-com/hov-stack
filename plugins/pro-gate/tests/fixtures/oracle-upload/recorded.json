@@ -1,0 +1,536 @@
+[
+  {
+    "trial": 12,
+    "startedAt": "2026-11-18T20:36:39.719Z",
+    "model": "gpt-5.6",
+    "strategy": "current",
+    "phases": {
+      "connected": 141,
+      "navigated": 1230,
+      "loggedIn": 1598,
+      "promptReady": 2898,
+      "modelReady": 3500,
+      "uploadStart": 4118,
+      "queued": 4883,
+      "allUploaded": 6907,
+      "cleanupStart": 6907
+    },
+    "requests": [
+      {
+        "phase": "navigate",
+        "method": "POST",
+        "host": "chatgpt.com",
+        "path": "/backend-api/sentinel/chat-requirements/prepare",
+        "status": 200,
+        "ms": 1365,
+        "statusMs": 1602,
+        "finished": true,
+        "finishedMs": 1630
+      },
+      {
+        "phase": "navigate",
+        "method": "POST",
+        "host": "chatgpt.com",
+        "path": "/backend-api/sentinel/chat-requirements/finalize",
+        "status": 200,
+        "ms": 1676,
+        "statusMs": 2038,
+        "finished": true,
+        "finishedMs": 2042
+      },
+      {
+        "phase": "navigate",
+        "method": "POST",
+        "host": "chatgpt.com",
+        "path": "/cdn-cgi/challenge-platform/h/b/jsd/oneshot/*/*/*",
+        "status": 200,
+        "ms": 1777,
+        "statusMs": 1892,
+        "finished": true,
+        "finishedMs": 1892
+      },
+      {
+        "phase": "navigate",
+        "method": "POST",
+        "host": "chatgpt.com",
+        "path": "/backend-api/conversation/init",
+        "status": 200,
+        "ms": 2616,
+        "statusMs": 3036,
+        "finished": true,
+        "finishedMs": 3212
+      },
+      {
+        "phase": "navigate",
+        "method": "POST",
+        "host": "chatgpt.com",
+        "path": "/ces/v1/%72gstr",
+        "status": 202,
+        "ms": 2940,
+        "statusMs": 3165,
+        "finished": true,
+        "finishedMs": 3271
+      },
+      {
+        "phase": "navigate",
+        "method": "POST",
+        "host": "chatgpt.com",
+        "path": "/ces/v1/%72gstr",
+        "status": 202,
+        "ms": 2942,
+        "statusMs": 3236,
+        "finished": true,
+        "finishedMs": 3440
+      },
+      {
+        "phase": "navigate",
+        "method": "POST",
+        "host": "chatgpt.com",
+        "path": "/backend-api/codex/notification/subscriptions",
+        "status": 200,
+        "ms": 3270,
+        "statusMs": 3534,
+        "finished": true,
+        "finishedMs": 3650
+      },
+      {
+        "phase": "navigate",
+        "method": "POST",
+        "host": "chatgpt.com",
+        "path": "/backend-api/aip/connectors/links/list_accessible",
+        "status": 200,
+        "ms": 3425,
+        "statusMs": 3681,
+        "finished": true,
+        "finishedMs": 3703
+      },
+      {
+        "phase": "navigate",
+        "method": "POST",
+        "host": "chatgpt.com",
+        "path": "/backend-api/codex/notification/subscriptions",
+        "status": 200,
+        "ms": 3498,
+        "statusMs": 3772,
+        "finished": true,
+        "finishedMs": 3793
+      },
+      {
+        "phase": "prep",
+        "method": "POST",
+        "host": "chatgpt.com",
+        "path": "/backend-api/amphora/clear_settings_cache",
+        "status": 200,
+        "ms": 4102,
+        "statusMs": 4243,
+        "finished": true,
+        "finishedMs": 4254
+      },
+      {
+        "phase": "upload",
+        "method": "POST",
+        "host": "chatgpt.com",
+        "path": "/backend-api/f/conversation/prepare",
+        "status": 200,
+        "ms": 4373,
+        "statusMs": 4873,
+        "finished": true,
+        "finishedMs": 4874
+      },
+      {
+        "phase": "upload",
+        "method": "POST",
+        "host": "chatgpt.com",
+        "path": "/backend-api/composer/items/interactions",
+        "status": 204,
+        "ms": 4374,
+        "statusMs": 4504,
+        "failed": "net::ERR_ABORTED",
+        "canceled": true,
+        "failedMs": 4531
+      },
+      {
+        "phase": "upload",
+        "method": "POST",
+        "host": "chatgpt.com",
+        "path": "/backend-api/composer/items/interactions",
+        "status": 204,
+        "ms": 4374,
+        "statusMs": 4668,
+        "failed": "net::ERR_ABORTED",
+        "canceled": true,
+        "failedMs": 4670
+      },
+      {
+        "phase": "upload",
+        "method": "POST",
+        "host": "chatgpt.com",
+        "path": "/backend-api/composer/items/interactions",
+        "status": 204,
+        "ms": 4375,
+        "statusMs": 4529,
+        "failed": "net::ERR_ABORTED",
+        "canceled": true,
+        "failedMs": 4535
+      },
+      {
+        "phase": "upload",
+        "method": "POST",
+        "host": "chatgpt.com",
+        "path": "/backend-api/files",
+        "status": 200,
+        "ms": 4375,
+        "statusMs": 4537,
+        "finished": true,
+        "finishedMs": 4544
+      },
+      {
+        "phase": "upload",
+        "method": "PUT",
+        "host": "sdmntpreastus3.oaiusercontent.com",
+        "path": "/files/*/raw",
+        "status": 201,
+        "ms": 4668,
+        "statusMs": 4869,
+        "finished": true,
+        "finishedMs": 4870
+      },
+      {
+        "phase": "upload",
+        "method": "POST",
+        "host": "chatgpt.com",
+        "path": "/backend-api/files/process_upload_stream",
+        "status": 200,
+        "ms": 4870,
+        "statusMs": 5042,
+        "failed": "net::ERR_ABORTED",
+        "canceled": true,
+        "failedMs": 5609
+      },
+      {
+        "phase": "upload",
+        "method": "POST",
+        "host": "chatgpt.com",
+        "path": "/backend-api/file_upload_action_suggestions",
+        "status": 200,
+        "ms": 5608,
+        "statusMs": 5856,
+        "finished": true,
+        "finishedMs": 5856
+      },
+      {
+        "phase": "upload",
+        "method": "POST",
+        "host": "chatgpt.com",
+        "path": "/backend-api/f/conversation/prepare",
+        "status": 200,
+        "ms": 5609,
+        "statusMs": 5767,
+        "finished": true,
+        "finishedMs": 5767
+      },
+      {
+        "phase": "upload",
+        "method": "POST",
+        "host": "chatgpt.com",
+        "path": "/ces/v1/telemetry/intake",
+        "status": 202,
+        "ms": 6684,
+        "statusMs": 6766,
+        "failed": "net::ERR_ABORTED",
+        "canceled": true,
+        "failedMs": 6766
+      }
+    ],
+    "tripwire": null,
+    "kindsBefore": {
+      "blank": 1,
+      "chatgptRoot": 0,
+      "conversation": 2,
+      "other": 0
+    },
+    "attachmentMode": "upload",
+    "composerChars": 939,
+    "attachments": [
+      {
+        "name": "pr.filtered.diff",
+        "sizeBytes": 242339,
+        "generatedBundle": false
+      }
+    ],
+    "targetCreated": true,
+    "chatMode": "chat",
+    "modelEvidence": "{\"requestedModel\":\"GPT-5.6 Sol\",\"resolvedLabel\":\"Thinking effort\\nPro\",\"strategy\":\"current\",\"status\":\"already-selected\",\"verified\":false,\"source\":\"chatgpt-model-picker\",\"capturedAt\":\"2026-11-18T20:36:43.127Z\"}",
+    "outcome": "chip",
+    "holdMs": 0,
+    "visibleBeforeClear": true,
+    "clearedAfter": true,
+    "targetClose": {
+      "gone": true,
+      "afterMs": 503,
+      "kinds": {
+        "blank": 1,
+        "chatgptRoot": 0,
+        "conversation": 2,
+        "other": 0
+      }
+    },
+    "upload": {
+      "creates": 1,
+      "createsOk": 1,
+      "puts": 1,
+      "putsOk": 1,
+      "finals": 1,
+      "finalClasses": ["2xx-then-cancel"],
+      "finalPaths": ["/backend-api/files/process_upload_stream"],
+      "signal": true,
+      "realFinding": false,
+      "doubleUpload": false
+    },
+    "pass": true,
+    "totalMs": 8963
+  },
+  {
+    "trial": 15,
+    "startedAt": "2026-11-18T20:38:32.987Z",
+    "model": "gpt-5.6",
+    "strategy": "current",
+    "phases": {
+      "connected": 305,
+      "navigated": 2997,
+      "loggedIn": 3253,
+      "promptReady": 4543,
+      "modelReady": 4941,
+      "uploadStart": 5250
+    },
+    "requests": [
+      {
+        "phase": "navigate",
+        "method": "POST",
+        "host": "chatgpt.com",
+        "path": "/backend-api/sentinel/chat-requirements/prepare",
+        "status": 200,
+        "ms": 3186,
+        "statusMs": 3676,
+        "finished": true,
+        "finishedMs": 3676
+      },
+      {
+        "phase": "navigate",
+        "method": "POST",
+        "host": "chatgpt.com",
+        "path": "/backend-api/sentinel/chat-requirements/finalize",
+        "status": 200,
+        "ms": 3697,
+        "statusMs": 6588,
+        "finished": true,
+        "finishedMs": 6605
+      },
+      {
+        "phase": "navigate",
+        "method": "POST",
+        "host": "chatgpt.com",
+        "path": "/backend-api/conversation/init",
+        "status": 200,
+        "ms": 4272,
+        "statusMs": 6733,
+        "finished": true,
+        "finishedMs": 6761
+      },
+      {
+        "phase": "navigate",
+        "method": "POST",
+        "host": "chatgpt.com",
+        "path": "/backend-api/settings/announcement_viewed",
+        "status": 200,
+        "ms": 4539,
+        "statusMs": 8355,
+        "finished": true,
+        "finishedMs": 8355
+      },
+      {
+        "phase": "navigate",
+        "method": "POST",
+        "host": "chatgpt.com",
+        "path": "/ces/v1/%72gstr",
+        "status": 202,
+        "ms": 4720,
+        "statusMs": 8022,
+        "finished": true,
+        "finishedMs": 8023
+      },
+      {
+        "phase": "navigate",
+        "method": "POST",
+        "host": "chatgpt.com",
+        "path": "/ces/v1/%72gstr",
+        "status": 202,
+        "ms": 4724,
+        "statusMs": 8235,
+        "finished": true,
+        "finishedMs": 8235
+      },
+      {
+        "phase": "upload",
+        "method": "POST",
+        "host": "chatgpt.com",
+        "path": "/cdn-cgi/challenge-platform/h/b/jsd/oneshot/*/*/*",
+        "status": 200,
+        "ms": 6480,
+        "statusMs": 8705,
+        "finished": true,
+        "finishedMs": 8705
+      },
+      {
+        "phase": "upload",
+        "method": "POST",
+        "host": "chatgpt.com",
+        "path": "/backend-api/aip/connectors/links/list_accessible",
+        "status": 200,
+        "ms": 6526,
+        "statusMs": 8915,
+        "finished": true,
+        "finishedMs": 8915
+      },
+      {
+        "phase": "upload",
+        "method": "POST",
+        "host": "chatgpt.com",
+        "path": "/ces/v1/telemetry/intake",
+        "status": 202,
+        "ms": 8487,
+        "statusMs": 9153,
+        "failed": "net::ERR_ABORTED",
+        "canceled": true,
+        "failedMs": 9153
+      },
+      {
+        "phase": "upload",
+        "method": "POST",
+        "host": "chatgpt.com",
+        "path": "/backend-api/codex/notification/subscriptions",
+        "status": 200,
+        "ms": 9495,
+        "statusMs": 9753,
+        "finished": true,
+        "finishedMs": 9753
+      },
+      {
+        "phase": "upload",
+        "method": "POST",
+        "host": "chatgpt.com",
+        "path": "/backend-api/codex/notification/subscriptions",
+        "status": 200,
+        "ms": 9582,
+        "statusMs": 9867,
+        "finished": true,
+        "finishedMs": 9867
+      },
+      {
+        "phase": "upload",
+        "method": "POST",
+        "host": "chatgpt.com",
+        "path": "/backend-api/amphora/clear_settings_cache",
+        "status": 200,
+        "ms": 10174,
+        "statusMs": 10466,
+        "finished": true,
+        "finishedMs": 10476
+      },
+      {
+        "phase": "upload",
+        "method": "POST",
+        "host": "chatgpt.com",
+        "path": "/backend-api/composer/items/interactions",
+        "status": 204,
+        "ms": 10262,
+        "statusMs": 10690,
+        "failed": "net::ERR_ABORTED",
+        "canceled": true,
+        "failedMs": 10691
+      },
+      {
+        "phase": "upload",
+        "method": "POST",
+        "host": "chatgpt.com",
+        "path": "/backend-api/composer/items/interactions",
+        "status": 204,
+        "ms": 10262,
+        "statusMs": 10802,
+        "failed": "net::ERR_ABORTED",
+        "canceled": true,
+        "failedMs": 10804
+      },
+      {
+        "phase": "upload",
+        "method": "POST",
+        "host": "chatgpt.com",
+        "path": "/backend-api/composer/items/interactions",
+        "status": 204,
+        "ms": 10263,
+        "statusMs": 10803,
+        "failed": "net::ERR_ABORTED",
+        "canceled": true,
+        "failedMs": 10804
+      },
+      {
+        "phase": "upload",
+        "method": "POST",
+        "host": "chatgpt.com",
+        "path": "/ces/v1/telemetry/intake",
+        "status": 202,
+        "ms": 14283,
+        "statusMs": 14582,
+        "failed": "net::ERR_ABORTED",
+        "canceled": true,
+        "failedMs": 14582
+      }
+    ],
+    "tripwire": null,
+    "kindsBefore": {
+      "blank": 1,
+      "chatgptRoot": 0,
+      "conversation": 2,
+      "other": 0
+    },
+    "attachmentMode": "upload",
+    "composerChars": 939,
+    "attachments": [
+      {
+        "name": "pr.filtered.diff",
+        "sizeBytes": 242339,
+        "generatedBundle": false
+      }
+    ],
+    "targetCreated": true,
+    "chatMode": "chat",
+    "modelEvidence": "{\"requestedModel\":\"GPT-5.6 Sol\",\"resolvedLabel\":\"Thinking effort\\nPro\",\"strategy\":\"current\",\"status\":\"already-selected\",\"verified\":false,\"source\":\"chatgpt-model-picker\",\"capturedAt\":\"2026-11-18T20:38:37.907Z\"}",
+    "error": "Attachment did not appear in ChatGPT composer.",
+    "outcome": "drop",
+    "clearedAfter": true,
+    "targetClose": {
+      "gone": true,
+      "afterMs": 504,
+      "kinds": {
+        "blank": 1,
+        "chatgptRoot": 0,
+        "conversation": 2,
+        "other": 0
+      }
+    },
+    "upload": {
+      "creates": 0,
+      "createsOk": 0,
+      "puts": 0,
+      "putsOk": 0,
+      "finals": 0,
+      "finalClasses": [],
+      "finalPaths": [],
+      "signal": false,
+      "realFinding": false,
+      "doubleUpload": false
+    },
+    "pass": false,
+    "totalMs": 16617
+  }
+]

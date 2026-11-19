@@ -576,8 +576,11 @@ EOF
 # exec, so timeout(1) signals the sleeper itself; an orphaned child would hold the pipe open.
 printf '#!/usr/bin/env bash\nexec sleep 30\n' > "$TDIR/oracle-stalled"
 chmod +x "$VERSION_NPM_DIR/npm" "$TDIR/oracle-current" "$TDIR/oracle-stalled"
+# pg_augment_path prepends HOME/.local/bin, so put the npm fixture there as well.
+mkdir -p "$VERSION_NPM_DIR/home/.local/bin"
+ln -s "$VERSION_NPM_DIR/npm" "$VERSION_NPM_DIR/home/.local/bin/npm"
 run_version_doctor() { # oracle-bin output
-  PATH="$VERSION_NPM_DIR:$PATH" ORACLE_CALLS="$TDIR/oracle-current.calls" PRO_GATE_ORACLE_BIN="$1" \
+  HOME="$VERSION_NPM_DIR/home" PATH="$VERSION_NPM_DIR:$PATH" ORACLE_CALLS="$TDIR/oracle-current.calls" PRO_GATE_ORACLE_BIN="$1" \
     PRO_GATE_ORACLE_VERSION_TIMEOUT=1 PRO_GATE_HOME="$RUNTIME3" PRO_GATE_EXPECTED_VERSION="$VERSION" \
     PRO_GATE_CONSENT_HOME="$CONSENT3" PRO_GATE_BROWSER_MODE=native \
     bash "$ROOT/bin/pro-gate-doctor.sh" >"$2" 2>&1 || true
@@ -589,6 +592,43 @@ check "doctor reads the oracle version once" test "$(grep -c -x -- '--version' "
 run_version_doctor "$TDIR/oracle-stalled" "$TDIR/doctor-oracle-stalled.log"
 check "doctor never calls an unread oracle build up to date" bash -c '! grep -q "oracle up to date" "$1"' _ "$TDIR/doctor-oracle-stalled.log"
 check "doctor says the oracle version could not be read in time" grep -q 'printed no version within 1s' "$TDIR/doctor-oracle-stalled.log"
+
+# The hand-started Oracle lane's record is advisory and never followed through a symlink.
+export ORACLE_UPDATE_STATE_DIR="$TDIR/oracle-update-state"
+mkdir -p "$ORACLE_UPDATE_STATE_DIR"
+run_version_doctor "$TDIR/oracle-current" "$TDIR/doctor-no-gated-record.log"
+check "absent gate record adds no untested warning" bash -c '! grep -q "last gated bump\|: untested" "$1"' _ "$TDIR/doctor-no-gated-record.log"
+printf '{"version":"0.23.1","verifiedAt":"2026-11-18T20:00:00Z"}\n' > "$ORACLE_UPDATE_STATE_DIR/verified-version.json"
+run_version_doctor "$TDIR/oracle-current" "$TDIR/doctor-gated-record.log"
+check "doctor names the last gated build" grep -q 'oracle 0.23.1 is the last gated bump (verified 2026-11-18T20:00:00Z)' "$TDIR/doctor-gated-record.log"
+printf '{"version":"0.22.0","verifiedAt":"2026-11-18T20:00:00Z"}\n' > "$ORACLE_UPDATE_STATE_DIR/verified-version.json"
+run_version_doctor "$TDIR/oracle-current" "$TDIR/doctor-untested-record.log"
+check "doctor warns on an untested build" grep -q 'oracle 0.23.1 differs from the last gated bump 0.22.0: untested' "$TDIR/doctor-untested-record.log"
+printf '{"version":"0.23.1","origin":"gate","verifiedAt":"2026-11-18T20:00:00Z"}\n' > "$ORACLE_UPDATE_STATE_DIR/verified-version.json"
+run_version_doctor "$TDIR/oracle-current" "$TDIR/doctor-gate-origin.log"
+check "doctor reads a gate origin as a gated bump" grep -q 'oracle 0.23.1 is the last gated bump (verified 2026-11-18T20:00:00Z)' "$TDIR/doctor-gate-origin.log"
+# PLANTED NEGATIVE: a rollback is never shown as a gated bump.
+printf '{"version":"0.23.1","previousVersion":"0.24.0","origin":"rollback","restoredAt":"2026-11-19T10:00:00Z","gate":null}\n' > "$ORACLE_UPDATE_STATE_DIR/verified-version.json"
+run_version_doctor "$TDIR/oracle-current" "$TDIR/doctor-rollback-record.log"
+check "doctor warns that a rollback was not trialled" grep -q 'oracle 0.23.1 was restored by --rollback from 0.24.0 (2026-11-19T10:00:00Z); the gate did not trial it' "$TDIR/doctor-rollback-record.log"
+check "doctor never calls a rollback a gated bump" bash -c '! grep -q "last gated bump" "$1"' _ "$TDIR/doctor-rollback-record.log"
+printf '{"version":"0.22.0","previousVersion":"0.24.0","origin":"rollback","restoredAt":"2026-11-19T10:00:00Z","gate":null}\n' > "$ORACLE_UPDATE_STATE_DIR/verified-version.json"
+run_version_doctor "$TDIR/oracle-current" "$TDIR/doctor-rollback-differs.log"
+check "doctor warns on a build that differs from a rollback" grep -q 'oracle 0.23.1 differs from the rolled-back record 0.22.0: untested' "$TDIR/doctor-rollback-differs.log"
+mv "$ORACLE_UPDATE_STATE_DIR/verified-version.json" "$TDIR/record-symlink-target"
+ln -s "$TDIR/record-symlink-target" "$ORACLE_UPDATE_STATE_DIR/verified-version.json"
+run_version_doctor "$TDIR/oracle-current" "$TDIR/doctor-symlink-record.log"
+check "doctor rejects a symlink record" bash -c '! grep -q "differs from the last gated bump" "$1"' _ "$TDIR/doctor-symlink-record.log"
+rm "$ORACLE_UPDATE_STATE_DIR/verified-version.json"
+printf '#!/bin/sh\nexit 0\n' > "$TDIR/oracle-update.sh"; chmod +x "$TDIR/oracle-update.sh"
+export PRO_GATE_ORACLE_UPDATE_BIN="$TDIR/oracle-update.sh"
+printf '#!/bin/sh\necho 0.24.0\n' > "$VERSION_NPM_DIR/npm"
+run_version_doctor "$TDIR/oracle-current" "$TDIR/doctor-lane-hint.log"
+check "doctor names the gated lane in upgrade hint" grep -Fq "DRY_RUN=0 $TDIR/oracle-update.sh" "$TDIR/doctor-lane-hint.log"
+PRO_GATE_ORACLE_UPDATE_BIN="$TDIR/missing-update.sh" run_version_doctor "$TDIR/oracle-current" "$TDIR/doctor-old-hint.log"
+check "doctor preserves today's hint without a lane" grep -Fq 'upgrade deliberately (pnpm add -g @steipete/oracle) if reviews misbehave' "$TDIR/doctor-old-hint.log"
+printf '#!/bin/sh\necho 0.23.1\n' > "$VERSION_NPM_DIR/npm"
+unset PRO_GATE_ORACLE_UPDATE_BIN ORACLE_UPDATE_STATE_DIR
 
 # The distribution lookup is advisory, but it must be exact and bounded: a
 # broken network/CLI can never hold the doctor open or invent a skew warning.

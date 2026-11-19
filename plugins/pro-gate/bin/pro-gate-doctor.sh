@@ -184,6 +184,52 @@ if have_bin "$ORACLE_BIN"; then
 else
   X "configured oracle command missing: $ORACLE_BIN"
 fi
+# Advisory lane record. O_NOFOLLOW closes the symlink race between testing and opening it.
+ORACLE_VERIFIED_RECORD="${ORACLE_UPDATE_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/oracle-update}/verified-version.json"
+if [ -L "$ORACLE_VERIFIED_RECORD" ]; then
+  W 'oracle gated bump record is a symlink: ignored'
+elif [ -f "$ORACLE_VERIFIED_RECORD" ] && [ -n "$ORACLE_LOCAL" ] && pg_have python3; then
+  ORACLE_VERIFIED="$(python3 -I -S - "$ORACLE_VERIFIED_RECORD" <<'PY'
+import json, os, re, stat, sys
+try:
+    fd = os.open(sys.argv[1], os.O_RDONLY | os.O_NOFOLLOW)
+    with os.fdopen(fd) as stream:
+        info = os.fstat(stream.fileno())
+        if not stat.S_ISREG(info.st_mode) or info.st_size > 4096:
+            sys.exit(1)
+        record = json.load(stream)
+    # Records before 0.66.0 carry no origin and come only from the gate.
+    origin, version = record.get('origin', 'gate'), record['version']
+    if origin == 'gate':
+        stamp, source = record['verifiedAt'], '-'
+    elif origin == 'rollback':
+        stamp, source = record['restoredAt'], record['previousVersion']
+    else:
+        sys.exit(1)
+    semver = r'[0-9]+\.[0-9]+\.[0-9]+'
+    if not re.fullmatch(semver, version) or not re.fullmatch(r'[0-9T:Z.+-]+', stamp) \
+            or not (source == '-' or re.fullmatch(semver, source)):
+        sys.exit(1)
+    print('\t'.join([origin, version, stamp, source]))
+except (OSError, ValueError, KeyError, TypeError):
+    sys.exit(1)
+PY
+  )" || ORACLE_VERIFIED=''
+  if [ -n "$ORACLE_VERIFIED" ]; then
+    IFS=$'\t' read -r ORACLE_RECORD_ORIGIN ORACLE_GATED_VERSION ORACLE_GATED_AT ORACLE_ROLLED_FROM <<< "$ORACLE_VERIFIED"
+    if [ "$ORACLE_RECORD_ORIGIN" = rollback ]; then
+      if [ "$ORACLE_LOCAL" = "$ORACLE_GATED_VERSION" ]; then
+        W "oracle $ORACLE_LOCAL was restored by --rollback from $ORACLE_ROLLED_FROM ($ORACLE_GATED_AT); the gate did not trial it"
+      else
+        W "oracle $ORACLE_LOCAL differs from the rolled-back record $ORACLE_GATED_VERSION: untested"
+      fi
+    elif [ "$ORACLE_LOCAL" = "$ORACLE_GATED_VERSION" ]; then
+      P "oracle $ORACLE_LOCAL is the last gated bump (verified $ORACLE_GATED_AT)"
+    else
+      W "oracle $ORACLE_LOCAL differs from the last gated bump $ORACLE_GATED_VERSION: untested"
+    fi
+  fi
+fi
 # oracle is NOT pinned: install.sh runs `pnpm add -g @steipete/oracle` (unpinned), so it
 # floats to npm latest at install time and is then never auto-upgraded. Two warn-only,
 # offline-tolerant signals below: a version FLOOR (releases below it are known-broken for
@@ -205,7 +251,12 @@ if have_bin "$ORACLE_BIN" && have_bin "$TIMEOUT_BIN"; then
   if pg_have npm; then
     ORACLE_LATEST="$(run_bounded 10 npm view @steipete/oracle version 2>/dev/null || true)"
     if [ -n "$ORACLE_LATEST" ] && [ -n "$ORACLE_LOCAL" ] && [ "$ORACLE_LATEST" != "$ORACLE_LOCAL" ]; then
-      W "oracle $ORACLE_LOCAL installed, $ORACLE_LATEST published — upgrade deliberately (pnpm add -g @steipete/oracle) if reviews misbehave"
+      ORACLE_UPDATE_BIN="${PRO_GATE_ORACLE_UPDATE_BIN:-$HOME/.claude/scripts/oracle-update.sh}"
+      if [ -x "$ORACLE_UPDATE_BIN" ]; then
+        W "oracle $ORACLE_LOCAL installed, $ORACLE_LATEST published — upgrade deliberately (DRY_RUN=0 $ORACLE_UPDATE_BIN) if reviews misbehave"
+      else
+        W "oracle $ORACLE_LOCAL installed, $ORACLE_LATEST published — upgrade deliberately (pnpm add -g @steipete/oracle) if reviews misbehave"
+      fi
     elif [ -n "$ORACLE_LATEST" ] && [ -n "$ORACLE_LOCAL" ]; then
       P "oracle up to date ($ORACLE_LOCAL = npm latest)"
     fi
