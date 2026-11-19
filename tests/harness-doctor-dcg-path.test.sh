@@ -87,11 +87,9 @@ section_11b() {
   SYNC_EXAMINED=1 SYNC_STATUS=0 CODEX_OUTPUT="in sync" CODEX_STATUS=0 \
   COLLISION_OUTPUT="" COLLISION_STATUS=0 SWEEP_OUTPUT="" SWEEP_STATUS=0 \
   DEFERRAL_WATCHLIST_FILE="$TMP/deferral-quiet.tsv" \
-  DISPATCHER_LEDGER_FILE="$TMP/dispatcher-quiet.jsonl" \
-  DISPATCHER_CONFIG="$TMP/dispatcher-quiet.env" \
     bash "$DOCTOR" 2>&1 | sed -n '/== 11b\./,/== 12\./p'
 }
-: >"$TMP/deferral-quiet.tsv"; : >"$TMP/dispatcher-quiet.jsonl"; printf 'RUNG=0\n' >"$TMP/dispatcher-quiet.env"
+: >"$TMP/deferral-quiet.tsv"
 
 # The tracked copy spells the symlink with the template's literal $HOME.
 SYM='$HOME/.local/bin/dcg'

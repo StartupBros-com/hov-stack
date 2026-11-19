@@ -2686,6 +2686,16 @@ class CitedEnforcerTests(unittest.TestCase):
         count = subprocess.run(["python3", "-c", programs["_memory_actionable"]], input=payload, text=True, capture_output=True, check=True)
         return line.stdout.strip(), int(count.stdout.strip())
 
+    def doctor_alarm(self, summary):
+        # The doctor WARNs only on this count (phantom citations plus scope warnings);
+        # blocking findings alone render as a note.
+        text = (AUDITOR.parent / "harness-doctor.sh").read_text()
+        match = re.search(r"_memory_alarm=\$\(python3 -c '(.*?)' <<<", text)
+        self.assertIsNotNone(match, "_memory_alarm snippet not found in harness-doctor.sh")
+        payload = json.dumps({"summary": summary})
+        out = subprocess.run(["python3", "-c", match.group(1)], input=payload, text=True, capture_output=True, check=True)
+        return int(out.stdout.strip())
+
     def gate_audit(self, *args):
         # The in-process copy-gate run: sync.sh passes only --copy-gate, so the
         # enforcer repo and both discovery roots are the production defaults.
@@ -2700,9 +2710,11 @@ class CitedEnforcerTests(unittest.TestCase):
         self.write("n", "Run `gone.sh`, then `gone-too.sh`.")
         _result, live, _flagged = self.audit()
         self.assertEqual(self.doctor_line(live["summary"]), (f"{prefix}, 2 phantom enforcer citation(s)", 2))
+        self.assertEqual(self.doctor_alarm(live["summary"]), 2)
         gone = self.repo.parent / "gone-repo"
         _result, missing, _flagged = self.audit(enforcer_repo=gone)
         self.assertEqual(self.doctor_line(missing["summary"]), (f"{prefix}, cited-enforcer repo unavailable ({gone})", 1))
+        self.assertEqual(self.doctor_alarm(missing["summary"]), 1)
         for path in self.live.iterdir():
             path.unlink()
             (self.mirror / path.name).unlink()
@@ -2712,12 +2724,16 @@ class CitedEnforcerTests(unittest.TestCase):
             self.doctor_line(zero["summary"]),
             (f"{prefix}, cited-enforcer check covered 0 feedback notes (project {self.key})", 1),
         )
+        self.assertEqual(self.doctor_alarm(zero["summary"]), 1)
         skipped = self.gate_audit()["summary"]
         self.assertEqual(skipped["cited_enforcer_scope"], {"skipped": "copy-gate"})
         self.assertEqual(self.doctor_line(skipped), (prefix, 0))
+        self.assertEqual(self.doctor_alarm(skipped), 0)
         # An auditor older than the check writes no scope block at all.
         base = {"blocking_findings": 3, "review_candidates": 1}
         self.assertEqual(self.doctor_line(base), ("3 actionable, 1 stale-date review candidate(s)", 3))
+        # Planted negative: blocking findings alone are the standing backlog, a note.
+        self.assertEqual(self.doctor_alarm(base), 0)
         # Last, because unreadable_dir skips the test where mode 000 stays readable
         # (root): every shape above must have asserted before that can happen. The
         # live store now holds only the project note, so this is the two-warning line.
@@ -2740,6 +2756,7 @@ class CitedEnforcerTests(unittest.TestCase):
             self.doctor_line(combined["summary"]),
             (f"{prefix}, 2 phantom enforcer citation(s), cited-enforcer discovery degraded (1 error(s))", 3),
         )
+        self.assertEqual(self.doctor_alarm(combined["summary"]), 3)
 
     def test_missing_enforcer_repo_is_reported_not_clean(self):
         # A deleted checkout or a wrong --enforcer-repo checks 0 notes. That is a

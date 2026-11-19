@@ -250,36 +250,6 @@ printf '%s\n' "vquiet${DTAB}active${DTAB}2026-08-21${DTAB}-${DTAB}fixture-src${D
 } >"$TMP/deferral-alarm.tsv"
 
 
-# Section 28 (dispatcher ledger integrity) fixtures: every run_doctor call
-# must stay deterministic regardless of the operator's real dispatcher
-# state, so the default ledger/config pair is a quiet one-kept-run ledger at
-# rung 0 (built through the real dispatcher-ledger.sh, the same producer
-# dispatcher-ledger.test.sh exercises, so this fixture can never drift from
-# the row shape the consumer actually parses). The dedicated B28 cases below
-# swap in a stale/broken alarm ledger, a rung-1 config with the ledger
-# absent, and a directory masquerading as the ledger file to pin the
-# fail-closed "cannot verify" path.
-DISPATCHER_LEDGER_SCRIPT=$REPO/scripts/dispatcher-ledger.sh
-DISPATCHER_LEDGER_FILE="$TMP/dispatcher-ledger-quiet.jsonl" "$DISPATCHER_LEDGER_SCRIPT" append --event claimed --run-id DQUIET1 >/dev/null
-DISPATCHER_LEDGER_FILE="$TMP/dispatcher-ledger-quiet.jsonl" "$DISPATCHER_LEDGER_SCRIPT" append --event launched --run-id DQUIET1 --pid 1 >/dev/null
-DISPATCHER_LEDGER_FILE="$TMP/dispatcher-ledger-quiet.jsonl" "$DISPATCHER_LEDGER_SCRIPT" append --event ended --run-id DQUIET1 --exit 0 --cost 1 --tokens 1 --overlap false >/dev/null
-DISPATCHER_LEDGER_FILE="$TMP/dispatcher-ledger-quiet.jsonl" "$DISPATCHER_LEDGER_SCRIPT" append --event kept --run-id DQUIET1 >/dev/null
-printf 'RUNG=0\n' >"$TMP/dispatcher-quiet.env"
-
-DISPATCHER_LEDGER_FILE="$TMP/dispatcher-ledger-alarm.jsonl" "$DISPATCHER_LEDGER_SCRIPT" append --event claimed --run-id DBROKEN1 >/dev/null
-DISPATCHER_LEDGER_FILE="$TMP/dispatcher-ledger-alarm.jsonl" "$DISPATCHER_LEDGER_SCRIPT" append --event launched --run-id DBROKEN1 --pid 1 >/dev/null
-DISPATCHER_LEDGER_FILE="$TMP/dispatcher-ledger-alarm.jsonl" "$DISPATCHER_LEDGER_SCRIPT" append --event broken --run-id DBROKEN1 >/dev/null
-# A claimed+launched run whose own ts is planted far in the past (mirrors
-# B/T3's orphaned-claim technique in dispatcher-ledger.test.sh) -- no
-# terminal row, so it stays undispositioned, and its age alone (not tick
-# count) is what pushes it into summary's stale_undisp bucket.
-{
-  printf '%s\n' '{"fp":1,"ts":"2020-01-01T00:00:00Z","run_id":"DSTALE1","issue":null,"repo":null,"event":"claimed","config":{"k":null,"yield_max":null,"ratchets":null}}'
-  printf '%s\n' '{"fp":1,"ts":"2020-01-01T00:05:00Z","run_id":"DSTALE1","issue":null,"repo":null,"event":"launched","pid":999999999}'
-} >>"$TMP/dispatcher-ledger-alarm.jsonl"
-
-printf 'RUNG=1\n' >"$TMP/dispatcher-rung1.env"
-mkdir -p "$TMP/dispatcher-ledger-dir"
 
 run_doctor() {
   local home=$1 harness_repo=$2 skip_tests=$3
@@ -303,8 +273,6 @@ run_doctor() {
   COLLISION_OUTPUT="${COLLISION_OUTPUT:-}" COLLISION_STATUS="${COLLISION_STATUS:-0}" \
   SWEEP_OUTPUT="${SWEEP_OUTPUT:-}" SWEEP_STATUS="${SWEEP_STATUS:-0}" \
   DEFERRAL_WATCHLIST_FILE="${DEFERRAL_WATCHLIST_FILE:-$TMP/deferral-quiet.tsv}" \
-  DISPATCHER_LEDGER_FILE="${DISPATCHER_LEDGER_FILE:-$TMP/dispatcher-ledger-quiet.jsonl}" \
-  DISPATCHER_CONFIG="${DISPATCHER_CONFIG:-$TMP/dispatcher-quiet.env}" \
   CLAUDE_CODEX_MODELS_CACHE="" CLAUDE_INSTALLED_PLUGINS="" \
   CLAUDE_CM_AUDITOR="${CLAUDE_CM_AUDITOR:-}" CLAUDE_CM_TIMEOUT="${CLAUDE_CM_TIMEOUT:-}" \
     ${DOCTOR_UNSET_DOTFILES_REPO:+env -u DOTFILES_REPO} bash "${DOCTOR_UNDER_TEST:-$DOCTOR}" 2>&1
@@ -496,29 +464,6 @@ contains "$ALARM_OUT" "source: fired-src" "B27 fired WARN names the entry's own 
 contains "$ALARM_OUT" "deferral trigger check BROKEN: vbroken" "B27 broken entry WARNs distinctly"
 omits "$ALARM_OUT" "deferral watchlist: no fired or broken triggers" "B27 alarm run must not print the clean ok-line"
 
-# B28: section 28's consumer path (rung-aware missing-ledger branch, summary
-# delegation, flagged-count parse, fail-closed cannot-verify path) is pinned
-# against fixtures -- dispatcher-ledger.test.sh covers the PRODUCER only.
-# EMPTY_OUT already ran through run_doctor()'s new quiet dispatcher-ledger
-# default (one kept run, rung 0), so it doubles as the quiet-fixture control
-# here exactly as B27 reuses it above.
-contains "$EMPTY_OUT" "dispatcher ledger: integrity checks quiet" "B28 quiet fixture default ok-line"
-DISPATCHER_LEDGER_FILE=$TMP/dispatcher-ledger-alarm.jsonl \
-  DISPATCH_ALARM_OUT=$(run_doctor "$EMPTY_HOME" "$EMPTY_HARNESS" 1)
-contains "$DISPATCH_ALARM_OUT" "dispatcher ledger: 2 flagged (broken runs or stale undispositioned)" "B28 broken+stale fixture warns the exact flagged count"
-omits "$DISPATCH_ALARM_OUT" "dispatcher ledger: integrity checks quiet" "B28 alarm run must not print the clean ok-line"
-DISPATCHER_LEDGER_FILE=$TMP/dispatcher-ledger-missing.jsonl \
-  DISPATCHER_CONFIG=$TMP/dispatcher-rung1.env \
-  DISPATCH_RUNG1_MISSING_OUT=$(run_doctor "$EMPTY_HOME" "$EMPTY_HARNESS" 1)
-contains "$DISPATCH_RUNG1_MISSING_OUT" "dispatcher ledger absent at $TMP/dispatcher-ledger-missing.jsonl (rung=1 — a live dispatcher writing nothing is the silent-stall shape)" "B28 missing ledger at rung>=1 WARNs (silent-stall shape)"
-DISPATCHER_LEDGER_FILE=$TMP/dispatcher-ledger-missing.jsonl \
-  DISPATCHER_CONFIG=$TMP/dispatcher-quiet.env \
-  DISPATCH_RUNG0_MISSING_OUT=$(run_doctor "$EMPTY_HOME" "$EMPTY_HARNESS" 1)
-contains "$DISPATCH_RUNG0_MISSING_OUT" "dispatcher ledger absent (rung 0 — no runs expected)" "B28 missing ledger at rung 0 is ok, not a warn"
-DISPATCHER_LEDGER_FILE=$TMP/dispatcher-ledger-dir \
-  DISPATCH_CORRUPT_OUT=$(run_doctor "$EMPTY_HOME" "$EMPTY_HARNESS" 1)
-contains "$DISPATCH_CORRUPT_OUT" "dispatcher ledger: cannot verify ($TMP/dispatcher-ledger-dir exists but is not a regular file)" "B28 non-regular-file ledger path fails closed (cannot verify)"
-unset DISPATCHER_LEDGER_FILE DISPATCHER_CONFIG
 
 ln -s "$TMP/no-such-hooks" "$EMPTY_HOME/.claude/hooks"
 SYNC_EXAMINED=1 CODEX_STATUS=0 COLLISION_STATUS=0 SWEEP_STATUS=0 \
@@ -864,6 +809,9 @@ omits "$AGENTS_OUT" "stub-clean:" "B5 nested pointer present is clean"
 omits "$AGENTS_OUT" "dotclaude-pointer:" "B5 a nested .claude/CLAUDE.md pointer counts as a sibling"
 omits "$AGENTS_OUT" "fallback-ok:" "B5 no root CLAUDE.md means the fallback loads it"
 omits "$AGENTS_OUT" "dual instruction files" "B5 root pointers are not twins"
+contains "$AGENTS_OUT" "  note: stub-dead: 2 nested AGENTS.md" "B5 a dead nested AGENTS.md is a note, not a WARN"
+omits "$AGENTS_OUT" "WARN: stub-dead:" "B5 the drift count never moves the exit code"
+omits "$AGENTS_OUT" "instruction files present + no drifting twins" "B5 a section that printed a note does not print its all-clear"
 
 # B12: the doctor's own WARN-emission arm (scanner exit 1 with findings) and
 # its crash arm (exit 1 with none — python's unhandled-exception status).
@@ -1117,6 +1065,8 @@ contains "$HYGIENE_OUT" "e.g. $HYGIENE_HOME/.claude/projects/project/session/wor
 omits "$HYGIENE_OUT" "Broken pipe" "B23 the example-path cap must drain its input, not close the pipe"
 omits "$HYGIENE_OUT" "unpinned agent() call" "B23 pinned fixture must not trip the exit-code path"
 omits "$HYGIENE_OUT" "workflow scripts pinned, capped, and schema-lean" "B23 soft findings suppress the clean line"
+contains "$HYGIENE_OUT" "  note: wf-pin-audit soft findings" "B23 soft findings are a note"
+omits "$HYGIENE_OUT" "WARN: wf-pin-audit soft findings" "B23 soft findings never move the exit code"
 omits "$EMPTY_OUT" "wf-pin-audit soft findings" "B23 planted negative: no scripts, no tally"
 omits "$FULL_OUT" "wf-pin-audit soft findings" "B23 planted negative: only a 30-day-old script, no tally"
 
@@ -1181,6 +1131,19 @@ contains "$WF_TIMEOUT_OUT" "wf-pin-audit: timed out after 1s" \
   "B23 an oversized corpus that hangs the lexer times out with a named WARN"
 omits "$WF_TIMEOUT_OUT" "workflow scripts pinned, capped, and schema-lean" \
   "B23 planted negative: a timed-out run must never render the ok-line"
+
+# Exit 1 is both the auditor's "unpinned call sites" verdict and python's status
+# for an unhandled exception. Only the first, recognised by the auditor's own count
+# line, is the standing backlog note; the second must stay a WARN.
+printf '%s\n' 'import sys' 'print("wf-pin-audit: 3 unpinned agent() call(s) in 2 script(s) (9 distinct script(s), 0 duplicate file(s) skipped, 8d window)")' 'sys.exit(1)' >"$TMP/wf-pin-audit-unpinned.py"
+printf '%s\n' 'import sys' 'print("Traceback (most recent call last):")' 'sys.exit(1)' >"$TMP/wf-pin-audit-crash.py"
+WF_UNPINNED_OUT=$(CLAUDE_WF_PIN_AUDIT="$TMP/wf-pin-audit-unpinned.py" run_doctor "$EMPTY_HOME" "$EMPTY_HARNESS" 1)
+contains "$WF_UNPINNED_OUT" "  note: wf-pin-audit: 3 unpinned agent() call(s) in 2 script(s)" "B23 the unpinned count is a note"
+omits "$WF_UNPINNED_OUT" "WARN: wf-pin-audit" "B23 the unpinned count never moves the exit code"
+omits "$WF_UNPINNED_OUT" "workflow scripts pinned, capped, and schema-lean" "B23 an unpinned count suppresses the clean line"
+WF_CRASH_OUT=$(CLAUDE_WF_PIN_AUDIT="$TMP/wf-pin-audit-crash.py" run_doctor "$EMPTY_HOME" "$EMPTY_HARNESS" 1)
+contains "$WF_CRASH_OUT" "WARN: wf-pin-audit exited 1 without its count line: Traceback (most recent call last):" "B23 planted negative: a crashed auditor stays a WARN"
+omits "$WF_CRASH_OUT" "workflow scripts pinned, capped, and schema-lean" "B23 a crashed auditor never renders the ok-line"
 
 # Check 33 (#1355, round 3 / #1356): the comparison itself now lives in
 # scripts/cross-model-catalog-check.js (node --test covers it
