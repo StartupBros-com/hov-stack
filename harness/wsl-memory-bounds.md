@@ -263,7 +263,10 @@ a command that enters it by writing `0` to its `cgroup.procs` is killed with
 ## What this does not fix
 
 `vmmemWSL` on the Windows side keeps its high-water mark
-(`autoMemoryReclaim=dropCache` returns only page cache; `gradual` was rejected
-with citations in `.wslconfig`). It shrinks on a WSL restart or by lowering
+(`autoMemoryReclaim=dropCache` returns only page cache; `gradual` was rejected:
+microsoft/WSL#10675 reports multi-minute command hangs with it on systemd
+distros, microsoft/WSL#11066 reports it freezing WSL beside Docker Desktop's
+Resource Saver, and the candidate fix, microsoft/WSL#13154, was closed unmerged
+on 2026-01-29). It shrinks on a WSL restart or by lowering
 `memory=` — a policy call, not a bug. Guest PSI at the time was `full
 avg60=0.07`: the guest was not thrashing; the pressure was host-side.
