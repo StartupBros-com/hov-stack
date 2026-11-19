@@ -1933,6 +1933,13 @@ contains "$TENC_UNNAMED" "ok: not applicable: the home manifest belongs to a dot
 omits "$TENC_UNNAMED" "planted manifest drift" \
   "10c planted negative: with DOTFILES_REPO unset, manifest_check never runs"
 omits "$TENC_UNNAMED" "WARN:" "10c with DOTFILES_REPO unset emits no warning"
+# Named, but the checkout has no lib/check.sh: say so, and never point at the
+# deleted dotfiles installer (dotup, gone in dotfiles#2154).
+TENC_ABSENT_HOME=$(make_home tencabsent 0 0)
+TENC_ABSENT=$(run_doctor "$TENC_ABSENT_HOME" "$EMPTY_HARNESS" 1 | tenc_section)
+contains "$TENC_ABSENT" "ok: not applicable: $TENC_ABSENT_HOME/dotfiles has no lib/check.sh" \
+  "10c names the missing checker when DOTFILES_REPO is not a dotfiles checkout"
+omits "$TENC_ABSENT" "dotup" "10c no longer tells the user to run the deleted dotup"
 
 TENE_HOME=$(make_home tene 0 0)
 mkdir -p "$TENE_HOME/.codex"

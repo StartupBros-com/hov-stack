@@ -960,7 +960,7 @@ DOTFILES_REPO=${DOTFILES_REPO:-$HD_ROOT}
 if [ -z "$HD_DOTFILES_REPO_NAMED" ]; then
   ok "not applicable: the home manifest belongs to a dotfiles checkout; DOTFILES_REPO=<that checkout> runs it"
 elif [ ! -f "$DOTFILES_REPO/lib/check.sh" ]; then
-  ok "dotfiles manifest checker not present yet (merge dotfiles#210, then dotup)"
+  ok "not applicable: $DOTFILES_REPO has no lib/check.sh, so it is not a dotfiles checkout"
 else
   # shellcheck source=/dev/null
   . "$DOTFILES_REPO/lib/check.sh"
