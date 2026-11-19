@@ -102,6 +102,10 @@ write_service() {
       printf '%s\n' '[Service]' 'Environment=DRY_RUN=0' 'Environment=AGGRESSIVE=1' \
         'ExecStart=%h/.claude/scripts/docker-hygiene.sh' > "$path"
       ;;
+    plan-only)
+      printf '%s\n' '[Service]' 'Environment=DRY_RUN=1' 'Environment=AGGRESSIVE=1' \
+        'Environment=STRICT=1' 'ExecStart=%h/.claude/scripts/docker-hygiene.sh' > "$path"
+      ;;
     stop-idle)
       printf '%s\n' '[Service]' 'Environment=DRY_RUN=0' 'Environment=AGGRESSIVE=1' \
         'Environment=STRICT=1' 'Environment=STOP_IDLE=1' \
@@ -141,7 +145,7 @@ ok() { printf '  ok: %s\n' "$*"; }
 . "$DOCTOR_FUNCTION"
 docker_adoption_health \
   "$PROFILE_LIB" "$DOCKER_HELPER" "$SERVICE_FILE" "$PATCH_FILE" \
-  "$TARGET_FILE" "$STATE_FILE" "$BACKUP_FILE" "$LOCK_FILE" "$DOCKERD_FILE"
+  "$TARGET_FILE" "$STATE_FILE" "$BACKUP_FILE" "$LOCK_FILE" "$DOCKERD_FILE" "${POSTURE_TEXT-}"
 printf 'WARNS=%s\n' "$WARNS"
 SH
   chmod +x "$dir/probe.sh"
@@ -155,7 +159,7 @@ SH
     LOCK_FILE="$dir/policy.lock" DOCKERD_FILE="$dir/dockerd" \
     DOCKER_HELPER_LOG="$dir/helper.log" DOCKER_SUDO_LOG="$dir/sudo.log" \
     FORBIDDEN_ACTION_LOG="$TMP/forbidden-actions.log" \
-    HELPER_MODE="$mode" SUDO_MODE="$sudo_mode" \
+    HELPER_MODE="$mode" SUDO_MODE="$sudo_mode" POSTURE_TEXT="${CASE_POSTURE-}" \
     bash "$dir/probe.sh" > "$dir/output" 2>&1
   CASE_DIR=$dir
   CASE_OUT=$(<"$dir/output")
@@ -258,6 +262,28 @@ contains "$CASE_OUT" 'Environment=STOP_IDLE=1' 'STOP_IDLE invariant is named'
 
 run_case missing-service workstation adopted missing
 contains "$CASE_OUT" 'strict-service wiring unavailable: service unit unreadable at' 'missing service file warns'
+
+# The wiring check judges the DECLARED posture: the template plus the overlay's
+# rendered drop-in. The shipped template is plan-only (DRY_RUN=1) by design.
+CASE_POSTURE=$'[Service]\nEnvironment=DRY_RUN=0\n'
+run_case posture-declared workstation adopted plan-only
+contains "$CASE_OUT" 'WARNS=0' 'a declared DRY_RUN=0 drop-in satisfies the wiring check'
+omits "$CASE_OUT" 'strict-service wiring missing or unsafe' 'declared DRY_RUN=0 raises no wiring warning'
+
+CASE_POSTURE=
+run_case posture-undeclared workstation adopted plan-only
+contains "$CASE_OUT" 'strict-service wiring missing or unsafe: required Environment=DRY_RUN=0' \
+  'an undeclared host (plan-only template, no posture) still warns'
+
+CASE_POSTURE=$'[Service]\nEnvironment=DRY_RUN=1\n'
+run_case posture-last-wins workstation adopted valid
+contains "$CASE_OUT" 'strict-service wiring missing or unsafe: required Environment=DRY_RUN=0' \
+  'a later DRY_RUN=1 in the drop-in overrides the template DRY_RUN=0'
+
+CASE_POSTURE=$'[Service]\nEnvironment=DRY_RUN=0\n# Environment=DRY_RUN=1\n'
+run_case posture-comment workstation adopted plan-only
+omits "$CASE_OUT" 'strict-service wiring missing or unsafe' 'a comment line naming DRY_RUN=1 does not count'
+CASE_POSTURE=
 
 # Aggregate action-set guard: every recorded helper invocation is exactly check;
 # neither the helper nor this focused function may run Docker, hygiene, or systemd.

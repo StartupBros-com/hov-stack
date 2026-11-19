@@ -1421,6 +1421,12 @@ rm -rf "$TMP/home/SITES/monorepo/.claude/worktrees/y" "$TMP/home/SITES/_archive"
 # assertions above stand on their own.
 unit_env=()
 unit_path=""
+# %h is the home the user manager expands it to, the user database's entry, not
+# this shell's $HOME: tests/run-claude-tests.sh gives every suite a scratch
+# HOME, and a $HOME expansion pointed the probe's PATH into that empty tree, so
+# supabase exited 127 under the runner and passed when run directly (2026-11-19).
+unit_home=$(getent passwd "$(id -u)" | cut -d: -f6)
+[ -n "$unit_home" ] || unit_home=$HOME
 while IFS= read -r line; do
   val=${line#Environment=}
   # The parser models one bare KEY=VALUE per line with %h as the only
@@ -1431,13 +1437,13 @@ while IFS= read -r line; do
   case "${val//%h/}" in
     *%*) bad "unit Environment= line uses a specifier other than %h, which this parser does not expand: $line"; continue ;;
   esac
-  val=${val//%h/$HOME}
+  val=${val//%h/$unit_home}
   case "$val" in PATH=*) unit_path=${val#PATH=} ;; esac
   unit_env+=("--setenv=$val")
 done < <(grep -E '^Environment=' "$REPO/systemd/docker-hygiene.service")
 equals "$(printf '%s\n' "${unit_env[@]}" | grep -c '^--setenv=PATH=')" 1 "unit declares exactly one PATH"
 case "$unit_path" in
-  "$HOME/.local/bin:$HOME/.local/share/mise/shims:"*) ok ;;
+  "$unit_home/.local/bin:$unit_home/.local/share/mise/shims:"*) ok ;;
   *) bad "unit PATH does not lead with ~/.local/bin and the mise shims after %h expansion: $unit_path" ;;
 esac
 exec_start=$(sed -nE 's/^ExecStart=//p' "$REPO/systemd/docker-hygiene.service")
