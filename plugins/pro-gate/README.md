@@ -693,6 +693,8 @@ semantics. Native mode keeps the prompt's title hint and does not run remote-CDP
 | `bin/cdp-salvage.mjs`               | Marker-owned CDP salvage and conversation organizer: recover, exact-rename, archive, and local cleanup decisions    |
 | `bin/cdp-organizer-expressions.mjs` | Auditable ChatGPT UI expressions for exact rename and archive; no backend API calls                                 |
 | `bin/cdp-test-timing.mjs`           | Test-only timing override parsers that cdp-salvage.mjs imports; production keeps its own defaults                   |
+| `bin/oracle-bump-gate.sh`           | Holds all review slots and runs the hand-started Oracle bump gate                                                   |
+| `bin/oracle-upload-trial.mjs`       | Static no-Send audit, attachment trial, summary and predeclared verdict                                             |
 | `bin/pro-gate-doctor.sh`            | One-command setup verification (deps, versions, browser, consent)                                                   |
 | `bin/pro-gate-stats.sh`             | Ledger stats: clean rate, exits, per-PR history                                                                     |
 | `bin/pro-gate-autoupdate.sh`        | The opt-in hourly skew-follower                                                                                     |
@@ -702,6 +704,58 @@ semantics. Native mode keeps the prompt's title hint and does not run remote-CDP
 | `daemon/daemon.sh`                  | Label-gated watcher (per-SHA idempotent, cost/failure caps)                                                         |
 | `daemon/run-oracle-chrome.sh`       | WSL/Linux durable Xvfb Chrome (CDP)                                                                                 |
 | `install.sh`                        | Cross-platform installer (see flags in [Installation](#installation))                                               |
+
+## Hand-started Oracle bumps: predeclared decision rule
+
+In hov-stack, `scripts/oracle-update.sh` reports by default (`DRY_RUN=1`). Start a bump
+with `DRY_RUN=0 scripts/oracle-update.sh`; there is no timer. The candidate must be a newer
+stable release at least three days old. The gate holds every configured review slot through
+testing and promotion, with a budget capped at `PRO_GATE_LOCK_WAIT - 300` seconds. The
+trials stop 720 seconds before the budget ends so promotion has time; when too little
+budget is left the bump defers.
+
+A trial counts when it reached upload start with no review overlap: neither Oracle
+(`oracle-cli.js`) nor the salvage helper (`cdp-salvage.mjs`) running before or after it. A
+review waiting for a slot the bump holds runs neither, so it is not overlap. Pre-upload errors,
+harness errors and overlaps are inconclusive and do not count. Up to three are replaced;
+more than three make the run inconclusive and defer the bump. A drop, any other error after
+upload start, a double upload, a chip gone (or not confirmed) by cleanup, or a chip without
+the network signal counts as a failure.
+The signal is a 2xx file create, blob PUT and finalize before cleanup.
+
+| Result                                                                                                         | Verdict                       |
+| -------------------------------------------------------------------------------------------------------------- | ----------------------------- |
+| Candidate has at most 2 failures in 20 counted trials                                                          | Pass                          |
+| Candidate reaches 3 failures and the control passes 20 trials                                                  | Reject and hold the candidate |
+| Candidate reaches 3 failures and the control also fails                                                        | Defer without a hold          |
+| Candidate or control is inconclusive, including insufficient deadline                                          | Defer without a hold          |
+| Import failure, unacknowledged new audit lines, send block, tripwire, blocked/login or own-tab cleanup failure | Broken; exit 1                |
+
+The candidate and control stop as soon as they reach three failures. The preventive block
+arms on the trial's own CDP client before navigation and blocks conversation submission.
+The static audit reads every JavaScript file under the candidate's `dist` for click, key,
+dispatched-event and submit lines, and its `package.json` for dependency names, install
+scripts and `bin` entries. Pre-submit steps click legitimately (the chat-mode toggle, the
+model menu, removing an attachment), so only items that are new since the live build
+count: they stop the gate as broken until `PRO_GATE_BUMP_AUDIT_ACK` carries the digest
+the gate prints, which covers exactly that set for that candidate and live version. Lines
+are compared by their text, so a known line moved to another file stays known. The audit
+does not read dependency code, and neither control proves what future Oracle code does
+on a path the trial never runs. The served model is not checked, and a
+5–10% upload regression is below what 20 trials can detect. The live path is proven only by
+hermetic tests until the first hand-started bump is observed; issue #781 stays open for that
+run. Remove the live trial after ten consecutive bumps without a catch (candidate fails,
+control passes), or remove this lane if Oracle ships its own self-test.
+
+A successful bump records the versions, verification date and gate counts in
+`${XDG_STATE_HOME:-$HOME/.local/state}/oracle-update/verified-version.json`. The doctor
+compares it with the installed version. `DRY_RUN=0 scripts/oracle-update.sh --rollback`
+reinstalls the recorded previous version under the same review hold and holds the version
+it replaced. Its record says the version came from a rollback, and the doctor warns that
+the gate did not trial it. A rollback never reinstalls a held version. Ctrl-C, or TERM or HUP
+to the updater itself, reaches the held run, and the updater waits for its outcome. An
+interrupt during promotion holds the candidate and tries to reinstall the previous version. Rejections hold
+only that candidate; a successful newer bump clears the hold.
 
 ## Safety and scale
 

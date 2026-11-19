@@ -43,6 +43,8 @@ leg_review=(
   "bash tests/review-facts.test.sh"
 )
 leg_rest=(
+  "node --test tests/oracle-upload-trial.test.mjs"
+  "bash tests/oracle-bump-gate.test.sh"
   "bash tests/trusted-data.test.sh"
   "node --test tests/github-status.test.mjs"
   "node --test tests/github-base-fetch.test.mjs"
