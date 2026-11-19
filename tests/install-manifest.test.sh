@@ -351,8 +351,6 @@ if ! PATH="$VALIDBIN:$HOSTBIN:$PATH" install_windows_copies "$REPO" "$WINDOWS_IN
 fi
 check 'grep -Fxq "$REPO/windows/wezterm.lua" "$WINDOWS_VALIDATION_LOG"' \
                                                                 "round 3: successful Windows copy bypassed the isolated parser"
-check 'cmp -s "$REPO/windows/.wslconfig" "$WINDOWS_INSTALL/.wslconfig"' \
-                                                                "Windows installer did not deploy .wslconfig"
 check 'cmp -s "$REPO/windows/wezterm.lua" "$WINDOWS_INSTALL/.wezterm.lua"' \
                                                                 "Windows installer did not deploy .wezterm.lua"
 for name in vastai vastai.cmd vast-ssh vast-ssh.cmd; do
@@ -369,18 +367,24 @@ fi
 check 'grep -Fxq "$REPO/windows/wezterm.lua" "$WINDOWS_VALIDATION_LOG"' \
                                                                 "round 3: idempotent Windows copy bypassed the isolated parser"
 
-# Validation is all-or-nothing: one invalid config leaves every live copy alone.
+# Validation is all-or-nothing: one invalid config leaves every live copy alone. This
+# manifest puts a row the validator passes (a vast.ai hop) ahead of the invalid WezTerm
+# config, so an installer that validated and copied row by row would already have
+# replaced the hop when it reached the bad row.
 INVALID_HOME=$TMP/windows-invalid
-mkdir -p "$INVALID_HOME"
-printf 'LIVE-WSLCONFIG\n' >"$INVALID_HOME/.wslconfig"
+mkdir -p "$INVALID_HOME/.local/bin"
+printf 'LIVE-VASTAI\n' >"$INVALID_HOME/.local/bin/vastai"
 printf 'LIVE-WEZTERM\n' >"$INVALID_HOME/.wezterm.lua"
 printf '#!/bin/sh\nexit 1\n' >"$FAKEBIN/wezterm.exe"
-if install_windows_copies "$REPO" "$INVALID_HOME" "$HOME/backups/invalid" >/dev/null 2>&1; then
+if (
+  DOTFILES_COPIES=("windows/bin/vastai|.local/bin/vastai" "windows/wezterm.lua|.wezterm.lua")
+  install_windows_copies "$REPO" "$INVALID_HOME" "$HOME/backups/invalid"
+) >/dev/null 2>&1; then
   bad "Windows installer accepted an invalid WezTerm config"
 else
   ok
 fi
-check 'grep -q LIVE-WSLCONFIG "$INVALID_HOME/.wslconfig"'        "validation failure partially deployed another Windows config"
+check 'grep -q LIVE-VASTAI "$INVALID_HOME/.local/bin/vastai"'   "validation failure partially deployed another Windows copy"
 check 'grep -q LIVE-WEZTERM "$INVALID_HOME/.wezterm.lua"'       "validation failure replaced the working WezTerm config"
 
 # ── 16. copy_file is idempotent and silent on identical content ──────────────────────────
@@ -454,13 +458,11 @@ copy_file "$SRC/thing" "$OUT/.wslconfig" "$BK" >/dev/null
 check 'grep -q WINDOWS-SIDE-VALUE "$BK/.wslconfig" 2>/dev/null' "destination outside \$HOME was not backed up"
 check 'grep -q from-repo "$OUT/.wslconfig"'                     "destination outside \$HOME was not updated"
 
-# Copied Windows configs are part of the manifest exactly once.
-found_wslconfig=0 found_wezterm=0
+# The copied WezTerm config is part of the manifest exactly once.
+found_wezterm=0
 for pair in "${DOTFILES_COPIES[@]:-}"; do
-  [ "$pair" = "windows/.wslconfig|.wslconfig" ] && found_wslconfig=$((found_wslconfig + 1))
   [ "$pair" = "windows/wezterm.lua|.wezterm.lua" ] && found_wezterm=$((found_wezterm + 1))
 done
-check '[ "$found_wslconfig" -eq 1 ]'                           "copy manifest does not own Windows .wslconfig exactly once"
 check '[ "$found_wezterm" -eq 1 ]'                            "copy manifest does not own Windows .wezterm.lua exactly once"
 
 # ── 19. python shim (papercut dotfiles#577): declared, executable, execs python3 ─────────
