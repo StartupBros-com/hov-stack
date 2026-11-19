@@ -1030,11 +1030,12 @@ Rules that bite on the first call:
 - **Native Windows shells** (Claude Code's Git Bash tool, PowerShell, cmd,
   Codex on Windows) get `vastai` and `vast-ssh` as hops into this wrapper, not
   a second install: `windows/bin/{vastai,vast-ssh}` (sh, for Git Bash) and
-  their `.cmd` twins, deployed by the owner’s checkout as real copies into
-  `C:\Users\user\.local\bin` (`DOTFILES_COPIES` in `lib/manifest.sh`;
-  `manifest_check` reports drift). Each runs `wsl.exe -e
-  /home/user/.local/bin/<name> …`; the venv, the credential chain and every
-  guard stay in WSL. The WSL shim puts `~/.local/bin` back on PATH because a
+  their `.cmd` twins, deployed by `install_windows_copies` as real copies into
+  `%USERPROFILE%\.local\bin` (`DOTFILES_COPIES` in `lib/manifest.sh`;
+  `manifest_check` reports drift). Each runs
+  `wsl.exe -e sh -c 'exec "$HOME/.local/bin/<name>" "$@"'`, so `$HOME`
+  resolves inside WSL and no user name is spelled; the venv, the credential
+  chain and every guard stay in WSL. The WSL shim puts `~/.local/bin` back on PATH because a
   non-login hop (or a systemd timer) arrives without it and `bws` lives there;
   before that fix the chain answered exit 5 "bws could not be read" from any
   non-login caller. The sh twins set `MSYS_NO_PATHCONV=1`, or Git Bash

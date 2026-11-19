@@ -160,12 +160,21 @@ class PlantedFailures(unittest.TestCase):
         readme = self.changed("`stripe-accounts.json`", "`stripe-account.json`")
         self.assertNamed(problems({"README.md": readme}), "paths", "'stripe-account.json'", "at the top level")
 
-    def test_a_dotfile_is_looked_up_under_its_bullets_directory(self):
-        # .wslconfig is under windows/, not the top level; moved to a bullet with no directory it fails.
+    def test_a_file_name_is_looked_up_under_its_bullets_directory(self):
+        # windows-terminal.json is under windows/, not the top level; moved to a bullet with no
+        # directory it fails.
+        self.assertIn("`windows-terminal.json`", README)
+        self.assertFalse([p for p in problems() if "windows-terminal.json" in p])
         line = next(line for line in README.splitlines() if line.startswith("- `sync.sh`"))
+        readme = self.changed(line, line + " See `windows-terminal.json`.")
+        self.assertNamed(problems({"README.md": readme}), "paths", "'windows-terminal.json'",
+                         "at the top level")
+
+    def test_a_dotfile_missing_under_its_bullets_directory_fails(self):
+        # windows/ holds no .wslconfig (each machine keeps its own); named under that bullet it fails.
+        line = next(line for line in README.splitlines() if line.startswith("- `windows/`"))
         readme = self.changed(line, line + " See `.wslconfig`.")
-        self.assertNamed(problems({"README.md": readme}), "paths", "'.wslconfig'", "at the top level")
-        self.assertFalse([p for p in problems() if ".wslconfig" in p])
+        self.assertNamed(problems({"README.md": readme}), "paths", "'.wslconfig'", "under 'windows/'")
 
     def test_a_hook_that_does_not_run_before_a_tool_call_fails(self):
         readme = self.changed("`loop-guard`", "`verify-on-stop`")

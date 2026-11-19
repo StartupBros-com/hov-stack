@@ -169,8 +169,9 @@ DOTFILES_MODES=(
 # Real copies into the Windows user profile. Windows cannot consume WSL
 # symlinks, so install_windows_copies in lib/windows.sh deploys these with backup-before-replace semantics and
 # manifest_check reports byte drift. Destinations are Windows-home-relative.
+# .wslconfig is not here: its memory, swap and kernel settings belong to one
+# machine, so each machine keeps its own.
 DOTFILES_COPIES=(
-  "windows/.wslconfig|.wslconfig"
   "windows/wezterm.lua|.wezterm.lua"
   # vast.ai hops for native Windows shells: each execs the WSL wrapper through
   # `wsl.exe -e`; the venv, credential chain and guards stay in WSL. The sh
