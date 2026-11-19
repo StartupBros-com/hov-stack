@@ -35,9 +35,9 @@ Each case was solved locally, and the lesson stayed where it was found:
   - `-u` matched 0 "already up to date" lines; 89 were in the same window without it.
   - The unit failed five nights running with the reason missing from `-u`.
   - The fix (stream through `| tee`) and the mechanism live in a comment at `scripts/jsm-auto-update-wrapper.sh:88`.
-- **docker-hygiene, 2026-09-30 (dotfiles#1555).**
-  - `-u` had the summary and the exit status, but not the failure lines.
-  - The PATH learning recorded this as a script that "prints its failure lines in a burst at exit" (`docs/solutions/integration-issues/the-user-managers-stock-path-has-no-local-bin-house-path-preflight-and-kept-stderr-on-the-unit.md:117`). That is one way to get there, not the cause.
+- **docker-hygiene, the 2026-09-30 run (dotfiles#1555).**
+  - `-u` had the summary and the exit status and "none of the 25 details" (`docs/solutions/integration-issues/the-user-managers-stock-path-has-no-local-bin-house-path-preflight-and-kept-stderr-on-the-unit.md:41`).
+  - That learning blames a script that "prints its failure lines in a burst at exit" (`:117`). That is one way to get there, not the cause.
 - **wt-sweep, 2026-11-19 (hov-stack#793).**
   - wt-sweep printed each Claude-session hold line through `printf | sed`, and `journalctl --user -u wt-sweep.service` showed about half of them.
   - `journalctl --user -t wt-sweep.sh` showed all of them.
@@ -61,7 +61,7 @@ Run as `systemd-run --user --wait --unit=<name> bash probe.sh`, `journalctl --us
 
 - In bash, use builtins (`echo`, `printf`, a `while IFS= read -r` loop) at the point of output instead of piping into `sed`, `awk`, `cut` or `head`.
 - Stream long output with `| tee` instead of capturing it and replaying it at the end.
-- PR #796 did this for the hold lines in `scripts/wt-sweep.sh` (`:353`) and `scripts/wt-done.sh`. The jsm wrapper did it earlier.
+- PR #796 did this for the hold lines in `scripts/wt-sweep.sh:353-356` and `scripts/wt-done.sh:392`. The jsm wrapper did it earlier.
 
 **Reader side: when a unit's lines look missing, change the selector, not the conclusion.**
 
@@ -74,15 +74,15 @@ A unit's stdout records carry its syslog identifier, which by default is the nam
 
 ## Why This Works
 
-The wrapper's comment records the mechanism found in dotfiles#1215: "journald resolves a stdout record's originating unit from the sending process's cgroup at the moment it DRAINS the pipe; by then the process was gone, so the records carried no _SYSTEMD_USER_UNIT at all" (`scripts/jsm-auto-update-wrapper.sh:90`).
+The wrapper's comment records the mechanism found in dotfiles#1215: "journald resolves a stdout record's originating unit from the sending process's cgroup at the moment it DRAINS the pipe; by then the process was gone, so the records carried no _SYSTEMD_USER_UNIT at all" (`scripts/jsm-auto-update-wrapper.sh:92-94`).
 
 The probe fits it. A `sed` that writes one line and exits races journald's read, and about half the time it has exited first. A builtin's line comes from the long-lived shell, which is still in the unit's cgroup when journald reads it. Selecting by `-t` or by time does not depend on the unit field, so it finds the record either way.
 
 ## Prevention
 
 - **Reach, as of this writing.**
-  - These unit scripts still print reporting lines through a short-lived pipeline child: `scripts/backup-harness.sh:97` and `:101`, `scripts/pkg-cache-prune.sh:123`, `scripts/codex-update.sh:176` (`tail | sed`), and wt-sweep's failure path at `scripts/wt-sweep.sh:220`.
-  - Each loses lines from `-u` the same way. That is harmless while readers know to fall back to `-t`, and costly when they don't.
+  - These unit scripts still print reporting lines through a short-lived pipeline child: `scripts/backup-harness.sh:97` and `:101`, `scripts/pkg-cache-prune.sh:123`, `scripts/codex-update.sh:176` (`tail | sed`, run by `codex-auto-update.service`), and wt-sweep's failure path at `scripts/wt-sweep.sh:220`.
+  - Each can lose lines from `-u` the same way; this was not measured per script. That is harmless while readers know to fall back to `-t`, and costly when they don't.
 - **Advice that reads only `-u`:** `harness/run-it-now.md:75` and `:78`, and the post-merge activation learning's "`journalctl --user -u dotup-refresh.service` names the reason". When `-u` looks short, read again by `-t` or by time before concluding anything.
 - **Unaffected:** checks that count the manager's own lines through `-u`, such as `scripts/unit-health.sh`'s `Failed with result` count. Those records carry `USER_UNIT`.
 - **No automated check.** A static rule for "output through a pipeline child in a unit script" cannot tell a reporting line from a captured value (`$(... | sed)` is fine). The reader-side fallback is what holds.
