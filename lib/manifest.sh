@@ -58,7 +58,6 @@ DOTFILES_LINKS=(
   # malformed for months in an unmanaged config layer — variant 3 of the defects above:
   # not a degraded link and not uninstalled repo content, but live config nothing owned.
   "config/pnpm/rc|.config/pnpm/rc"
-  "config/zellij|.config/zellij"
   "config/dcg/config.toml|.config/dcg/config.toml"
   # ru (repo_updater): config + curated repo lists; ru writes no state here.
   "config/ru/config|.config/ru/config"
