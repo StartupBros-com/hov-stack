@@ -103,7 +103,8 @@ that lists what it would do). A start that hangs may be waiting on a lock anothe
 
 1. **A run already going:** CI on the PR, a workflow you dispatched, a background job or
    subagent you started. Wait on that run with `gh pr checks --watch`, `gh run watch` or the
-   task notification, and run the same checks locally while it queues.
+   task notification (for your own PR, `scripts/pr-land.sh` in the background waits, merges and
+   closes out in one call), and run the same checks locally while it queues.
 2. **Elapsed time the result needs:** a 14-day count, an email that sends at a fixed hour, a real
    event that has not happened. Do every offline part now (tests, a scratch or synthetic proof),
    then say which part waits and why. Put that proof in your report, not on the issue or channel
