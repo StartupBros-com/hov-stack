@@ -35,6 +35,8 @@ For any harness that runs `claude -p` as an arm:
 - Do not reach for `--bare` unless the harness authenticates with an API key only. Bare mode is the cheaper envelope, but it is an auth-mode decision, not an isolation knob.
 - Treat the change as an envelope change: record a new adapter shape in every manifest the arms write (skill-tuner uses `claude-p-user-message-isolated` and `claude-p-doctrine-system-prompt-isolated`) and make the comparison refuse to pair runs of different shapes. Figures measured under the old envelope are stale as per-call costs and say so in the cost doc; the direction of earlier findings does not depend on them.
 - `--setting-sources ""` stays for what it does govern, settings files; it is not a substitute.
+- The switch isolates Claude Code's instruction files and memory, nothing else. A browser the arm, its regeneration step or the scorer launches still inherits the operator's home directory and needs `XDG_CONFIG_HOME` and `XDG_CACHE_HOME` per run and per scorer call; a per-arm config directory or a scratch `--user-data-dir` does not do it (harness-vet phase 4, `plugins/harness-vet/skills/harness-vet/SKILL.md`).
+- One documented exception to "every arm": when the treatment under test is itself an instruction file, the switch would strip the thing being measured. The correct-2026-10 fixture isolates every one of its arms with a fresh per-arm `CLAUDE_CONFIG_DIR` and arm paths with no ancestor `CLAUDE.md`, and skipped the switch for the whole fixture because one arm's treatment is itself a CLAUDE.md inside the arm's config directory; its README says so (`harness/vet-fixtures/correct-2026-10/README.md`).
 
 ## Why This Matters
 
@@ -55,4 +57,6 @@ Verified by launching the arm from a directory with instruction files and asking
 - `docs/vets/2026-09-20-claude-plugin-eval-harness-vet.md` (the measurement and the rejected `--bare` proposal)
 - skill-tuner's cost document (its docs folder), section "Arms no longer carry the caller's CLAUDE.md and memory" (the re-baseline boundary)
 - The headless documentation's bare-mode section (bare mode reads no OAuth credentials)
+- `plugins/harness-vet/skills/harness-vet/SKILL.md`, phase 4 (the browser half of the same envelope: the XDG pair per run and per scorer call)
+- `harness/vet-fixtures/correct-2026-10/README.md` (the fixture whose treatment is an instruction file, isolated by config directory instead of the switch)
 - CONCEPTS.md: Arm
