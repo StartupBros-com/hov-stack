@@ -703,8 +703,9 @@ def check(wt: str, home: str, active_min: int, procfs: str, cache_dir: str = "",
         matched = any(within(p) for p in named) or project in slugs
         if state == "done":
             # Resuming a done job re-enters the worktree it is bound to (hov-stack#793).
-            # The caller may carry either of its ids, so either one excludes it.
-            if exclude and d.get("resumeSessionId") == exclude:
+            # The caller may carry any of its ids (its transcript's name can differ
+            # from its sessionId), so any one excludes it.
+            if exclude and exclude in (d.get("resumeSessionId"), transcript_owner(link) if link else None):
                 continue
             age = last_turn_age(d, path, now)
             if resume_window and age < resume_window:

@@ -259,6 +259,27 @@ chk "own session excluded by its resume id: not held (exit 1)" 1 "$rc"
 out=$(hold "$H" --exclude-session someone-else -- "$WA"); rc=$?
 chk "another caller: held (exit 0)" 0 "$rc"
 
+# --- 12f. PLANTED NEGATIVE: the caller excluded by its transcript's id when that
+#          differs from the job's sessionId, for a project-dir and a state-path match
+H="$TMP/h12f"; T="$H/projects/$(slug "$WA")/t12f.jsonl"
+transcript "$T" t12f "$LAUNCH"
+mkdir -p "$H/jobs/r12f"
+printf '{"state":"done","name":"overnight","sessionId":"s12f","cwd":"%s","linkScanPath":"%s","lastTerminalAt":"%s"}\n' \
+  "$LAUNCH" "$T" "$H5" >"$H/jobs/r12f/state.json"
+out=$(hold "$H" --exclude-session t12f -- "$WA"); rc=$?
+chk "project-dir match, caller carries the transcript's id: not held (exit 1)" 1 "$rc"
+out=$(hold "$H" --exclude-session someone-else -- "$WA"); rc=$?
+chk "project-dir match, another caller: held (exit 0)" 0 "$rc"
+H="$TMP/h12f2"; T="$H/projects/$(slug "$LAUNCH")/t12g.jsonl"
+transcript "$T" t12g "$LAUNCH"
+mkdir -p "$H/jobs/r12g"
+printf '{"state":"done","name":"overnight","sessionId":"s12g","cwd":"%s","linkScanPath":"%s","lastTerminalAt":"%s"}\n' \
+  "$WA" "$T" "$H5" >"$H/jobs/r12g/state.json"
+out=$(hold "$H" --exclude-session t12g -- "$WA"); rc=$?
+chk "state-path match, caller carries the transcript's id: not held (exit 1)" 1 "$rc"
+out=$(hold "$H" --exclude-session someone-else -- "$WA"); rc=$?
+chk "state-path match, another caller: held (exit 0)" 0 "$rc"
+
 # --- 12e. PLANTED NEGATIVE: a done job's unreadable transcript does not stop
 #          another worktree from being called idle. Its transcript is older than
 #          the 1h idle window, so only the done-job read could reach it -----------
