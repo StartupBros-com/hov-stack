@@ -167,9 +167,20 @@ fi
 if ! have_bin "$TIMEOUT_BIN"; then
   X "configured timeout command missing: $TIMEOUT_BIN"
 fi
+# One bounded `oracle --version` read feeds the install line, the floor and the release nudge. It
+# takes the engine's limit (pg_oracle_version_timeout: 20 s unless PRO_GATE_ORACLE_VERSION_TIMEOUT
+# says otherwise): under a 5% CPU quota it took 7.4 s (#735), so the doctor's old 5 s reads came
+# back empty, after which the release nudge called the unread build up to date (#772).
+ORACLE_VERSION=""; ORACLE_LOCAL=""
+ORACLE_VERSION_LIMIT="$(pg_oracle_version_timeout)"
 if have_bin "$ORACLE_BIN"; then
-  ORACLE_VERSION="$(run_bounded 5 "$ORACLE_BIN" --version 2>/dev/null | head -1 || true)"
-  P "oracle installed${ORACLE_VERSION:+ ($ORACLE_VERSION)}"
+  ORACLE_VERSION="$(run_bounded "$ORACLE_VERSION_LIMIT" "$ORACLE_BIN" --version </dev/null 2>/dev/null | head -1 || true)"
+  ORACLE_LOCAL="$(printf '%s\n' "$ORACLE_VERSION" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)"
+  if [ -n "$ORACLE_VERSION" ] || ! have_bin "$TIMEOUT_BIN"; then
+    P "oracle installed${ORACLE_VERSION:+ ($ORACLE_VERSION)}"
+  else
+    W "oracle installed, but $ORACLE_BIN --version printed no version within ${ORACLE_VERSION_LIMIT}s, so the version floor and the release check are skipped (set PRO_GATE_ORACLE_VERSION_TIMEOUT to allow longer)"
+  fi
 else
   X "configured oracle command missing: $ORACLE_BIN"
 fi
@@ -179,7 +190,6 @@ fi
 # pro-gate) and a skew nudge (a newer release than installed often fixes ChatGPT UI drift).
 ORACLE_MIN="${PRO_GATE_ORACLE_MIN_VERSION:-0.16.0}"
 if have_bin "$ORACLE_BIN" && have_bin "$TIMEOUT_BIN"; then
-  ORACLE_LOCAL="$(run_bounded 5 "$ORACLE_BIN" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)"
   # Version floor (no network needed): below 0.16.0 oracle can capture a settled preamble as
   # the final answer and flag healthy ChatGPT pages as Cloudflare challenges; pro-gate's round
   # budget and Cloudflare backoff then amplify those into spurious exit-12 blocks and account
@@ -196,7 +206,7 @@ if have_bin "$ORACLE_BIN" && have_bin "$TIMEOUT_BIN"; then
     ORACLE_LATEST="$(run_bounded 10 npm view @steipete/oracle version 2>/dev/null || true)"
     if [ -n "$ORACLE_LATEST" ] && [ -n "$ORACLE_LOCAL" ] && [ "$ORACLE_LATEST" != "$ORACLE_LOCAL" ]; then
       W "oracle $ORACLE_LOCAL installed, $ORACLE_LATEST published — upgrade deliberately (pnpm add -g @steipete/oracle) if reviews misbehave"
-    elif [ -n "$ORACLE_LATEST" ]; then
+    elif [ -n "$ORACLE_LATEST" ] && [ -n "$ORACLE_LOCAL" ]; then
       P "oracle up to date ($ORACLE_LOCAL = npm latest)"
     fi
   fi

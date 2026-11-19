@@ -2539,8 +2539,9 @@ EV_WEAK='[browser] Model selection evidence: requested=gpt-5.5-pro; resolved=GPT
 EV_ULTRA='[browser] Model selection evidence: requested=gpt-5.5-pro; resolved=GPT-5.6 Sol Ultra; status=ok; strategy=current; verified=yes.'
 # #737: Oracle 0.17.0 and later (0.20.0-sb.5, 0.23.1) print resolvedLabel= in this field order
 # (formatBrowserModelSelectionEvidence). The fixtures above keep the 0.16-and-earlier resolved= shape; both must parse.
-# The shape every recorded resolvedLabel= line has carried: a healthy current-strategy run whose
-# model was already selected. Before #737 it read as no status at all and warned.
+# The single-line shape every resolvedLabel= line carried until 0.23.1 began reading the picker
+# label: a healthy current-strategy run whose model was already selected. Before #737 it read as
+# no status at all and warned.
 EV_LABEL_BENIGN='[browser] Model selection evidence: requestedKey=gpt-5.6; target=GPT-5.6 Sol; resolvedLabel=(unavailable); status=already-selected; strategy=current; verified=no; source=chatgpt-model-picker; capturedAt=2026-09-04T20:47:52.008Z'
 EV_LABEL_PRO='[browser] Model selection evidence: requestedKey=gpt-5.5-pro; target=GPT-5.5 Pro; resolvedLabel=GPT-5.6 Pro; status=already-selected; strategy=current; verified=yes; source=chatgpt-model-picker; capturedAt=2026-11-18T03:00:00.000Z'
 EV_LABEL_UNAVAIL='[browser] Model selection evidence: requestedKey=gpt-5.5-pro; target=GPT-5.5 Pro; resolvedLabel=(unavailable); status=unavailable; strategy=current; verified=no; source=config; capturedAt=2026-11-18T03:00:00.000Z'
@@ -2548,6 +2549,16 @@ EV_LABEL_UNAVAIL='[browser] Model selection evidence: requestedKey=gpt-5.5-pro; 
 # and status=. Only the model line may feed the model and status.
 EV_LABEL_THEN_THINKING="$EV_LABEL_PRO"$'\n''[browser] Thinking effort evidence: requestedLevel=extended; status=switched; resolvedLabel=Extended; verified=yes; failClosed=no; targetModelKind=pro; observedModelKind=pro; source=chatgpt-thinking-picker; capturedAt=2026-11-18T03:00:01.000Z'
 EV_LABEL_WEAK='[browser] Model selection evidence: requestedKey=gpt-5.5-pro; target=GPT-5.5 Pro; resolvedLabel=GPT-4o mini; status=switched; strategy=current; verified=yes; source=chatgpt-model-picker; capturedAt=2026-11-18T03:00:00.000Z'
+# #772: Oracle 0.23.1 reads the picker label under `current`, and ChatGPT's label holds a line
+# break, so the record continues on the next line. Recorded from a 0.23.1 run on 2026-11-18.
+# Before #772 the model read as "Thinking effort" and status= was lost.
+EV_LABEL_TWOLINE='[browser] Model selection evidence: requestedKey=gpt-5.6; target=GPT-5.6 Sol; resolvedLabel=Thinking effort'$'\n''Pro; status=already-selected; strategy=current; verified=no; source=chatgpt-model-picker; capturedAt=2026-11-18T21:38:10.329Z'
+# The same shape with a weak model on the second line: the denylist has to see it.
+EV_LABEL_TWOLINE_WEAK='[browser] Model selection evidence: requestedKey=gpt-5.6; target=GPT-5.6 Sol; resolvedLabel=Thinking effort'$'\n''Instant; status=switched; strategy=current; verified=no; source=chatgpt-model-picker; capturedAt=2026-11-18T21:38:10.329Z'
+# A first line without status= must never absorb the next log record, here the effort line.
+EV_LABEL_NOSTATUS_THEN_THINKING='[browser] Model selection evidence: requestedKey=gpt-5.6; target=GPT-5.6 Sol; resolvedLabel=GPT-5.6 Pro'$'\n''[browser] Thinking effort evidence: requestedLevel=extended; status=switched; resolvedLabel=Extended; verified=yes; failClosed=no; targetModelKind=pro; observedModelKind=pro; source=chatgpt-thinking-picker; capturedAt=2026-11-18T03:00:01.000Z'
+# An evidence line with neither label field is a format change, not a healthy already-selected run.
+EV_NO_LABEL_FIELD='[browser] Model selection evidence: requestedKey=gpt-5.6; target=GPT-5.6 Sol; observedLabel=GPT-5.6 Pro; status=already-selected; strategy=current; verified=no; source=chatgpt-model-picker; capturedAt=2026-11-18T03:00:00.000Z'
 
 
 freshrun() { # $1=home $2=argv-file $3=evidence $4=out [strategy] [legacy browser archive]
@@ -2694,6 +2705,23 @@ check '#737: the effort line after the model line does not become the model' "$(
 freshrun "$TDIR/home-label-weak" "$TDIR/argv-label-weak.txt" "$EV_LABEL_WEAK" "$TDIR/o-label-weak.md"
 check '#737: a weak resolvedLabel= model hits the denylist warning' "$(grep -q 'weak-model denylist' "$TDIR/stderr"; echo $?)" "$(tail -3 "$TDIR/stderr")"
 
+echo '# #772: a record whose picker label holds a line break is read whole'
+freshrun "$TDIR/home-label-2l" "$TDIR/argv-label-2l.txt" "$EV_LABEL_TWOLINE" "$TDIR/o-label-2l.md"
+check '#772: a two-line record run exits 0' "$([ "$RC" -eq 0 ]; echo $?)" "rc=$RC $(tail -2 "$TDIR/stderr")"
+check '#772: the status model joins both label lines' "$([ "$(model_of "$TDIR/o-label-2l.md.status")" = 'Thinking effort Pro' ]; echo $?)" "model=$(model_of "$TDIR/o-label-2l.md.status")"
+check '#772: the ledger model joins both label lines' "$(grep -q '"model":"Thinking effort Pro"' "$TDIR/home-label-2l/ledger.jsonl"; echo $?)" "$(cat "$TDIR/home-label-2l/ledger.jsonl" 2>/dev/null)"
+check '#772: a two-line Pro record emits no model WARNING line' "$(! grep -qE 'weak-model denylist|could not confirm the resolved model|format may have changed' "$TDIR/stderr"; echo $?)" "$(grep -i warning "$TDIR/stderr" | head -2)"
+freshrun "$TDIR/home-label-2l-weak" "$TDIR/argv-label-2l-weak.txt" "$EV_LABEL_TWOLINE_WEAK" "$TDIR/o-label-2l-weak.md"
+check '#772: a weak model on the second label line hits the denylist warning' "$(grep -q 'weak-model denylist' "$TDIR/stderr"; echo $?)" "$(tail -3 "$TDIR/stderr")"
+freshrun "$TDIR/home-label-nost" "$TDIR/argv-label-nost.txt" "$EV_LABEL_NOSTATUS_THEN_THINKING" "$TDIR/o-label-nost.md"
+check '#772: a first line without status= does not absorb the effort line' "$([ "$(model_of "$TDIR/o-label-nost.md.status")" = 'GPT-5.6 Pro' ]; echo $?)" "model=$(model_of "$TDIR/o-label-nost.md.status")"
+freshrun "$TDIR/home-label-nofield" "$TDIR/argv-label-nofield.txt" "$EV_NO_LABEL_FIELD" "$TDIR/o-label-nofield.md"
+check '#772: a field-less evidence line run still exits 0 (advisory)' "$([ "$RC" -eq 0 ]; echo $?)" "rc=$RC $(tail -2 "$TDIR/stderr")"
+check '#772: a field-less evidence line warns of a format change' \
+  "$(grep -q 'format may have changed' "$TDIR/stderr" && grep -q 'format may have changed' <<<"$(warn_of "$TDIR/o-label-nofield.md.status")"; echo $?)" \
+  "warn=$(warn_of "$TDIR/o-label-nofield.md.status") $(grep -i warning "$TDIR/stderr" | head -2)"
+check '#772: a field-less evidence line model is role-based' "$(grep -q 'reasoning model' <<<"$(model_of "$TDIR/o-label-nofield.md.status")"; echo $?)" "model=$(model_of "$TDIR/o-label-nofield.md.status")"
+
 echo '# U2: pg_model_label renders captured value or role-based fallback (R5)'
 LBL_CAP="$(bash -c ". '$HERE/../lib/pro-gate-lib.sh'; pg_model_label 'GPT-5.6 Pro'")"
 check 'pg_model_label echoes captured model' "$([ "$LBL_CAP" = 'GPT-5.6 Pro' ]; echo $?)" "lbl=$LBL_CAP"
@@ -2709,6 +2737,9 @@ check 'strong captured model -> no warning'      "$([ -z "$(dwarn 'GPT-5.6 Pro' 
 check 'empty model + already-selected -> silent (benign)' "$([ -z "$(dwarn '' 'already-selected')" ]; echo $?)" "w=$(dwarn '' 'already-selected')"
 check 'empty model + other status -> cannot-confirm warning' "$([ -n "$(dwarn '' 'unknown')" ]; echo $?)" "w=$(dwarn '' 'unknown')"
 check 'empty model + empty status -> cannot-confirm warning' "$([ -n "$(dwarn '' '')" ]; echo $?)" "w=$(dwarn '' '')"
+dwarn3() { bash -c ". '$HERE/../lib/pro-gate-lib.sh'; pg_derive_model_warn \"\$1\" \"\$2\" \"\$3\"" _ "$1" "$2" "$3"; }
+check '#772: no label field -> format warning, even beside a benign status' "$(grep -q 'format may have changed' <<<"$(dwarn3 '' 'already-selected' no-label-field)"; echo $?)" "w=$(dwarn3 '' 'already-selected' no-label-field)"
+check '#772: an unknown evidence state is ignored' "$([ -z "$(dwarn3 'GPT-5.6 Pro' 'ok' bogus)" ]; echo $?)" "w=$(dwarn3 'GPT-5.6 Pro' 'ok' bogus)"
 
 echo '# Portable semver compare for the oracle version floor (no sort -V; dogfood PR #32 P2)'
 svlt() { bash -c ". '$HERE/../lib/pro-gate-lib.sh'; pg_semver_lt \"\$1\" \"\$2\"; echo \$?" _ "$1" "$2"; }

@@ -4740,9 +4740,14 @@ done
 # absence degrades to empty. Mirrors the $RUNLOG session-slug recovery grep above.
 # #737: Oracle 0.17.0 and later (0.20.0-sb.5, 0.23.1) name the field resolvedLabel= (after
 # requestedKey= and target=); 0.16 and earlier named it resolved=. Read whichever the line carries.
-# The effort line Oracle logs next ("Thinking effort evidence:") never matches the grep below.
+# The effort line Oracle logs next ("Thinking effort evidence:") never matches, and is never
+# joined into the record (pg_model_evidence_record).
+# #772: Oracle 0.23.1 reads the picker label under `current`, and ChatGPT's label holds a line
+# break, so the record is read through its continuation lines. A line with neither label field
+# is a format change, which warns instead of reading as a healthy already-selected run.
+MODEL_EVIDENCE_STATE=""
 if [ -f "$RUNLOG" ]; then
-  EVIDENCE_LINE="$(grep -a 'Model selection evidence:' "$RUNLOG" 2>/dev/null | tail -1)"
+  EVIDENCE_LINE="$(pg_model_evidence_record "$RUNLOG")"
   RM_FIELD=""
   case "$EVIDENCE_LINE" in
     *'resolvedLabel='*) RM_FIELD='resolvedLabel=' ;;
@@ -4756,6 +4761,8 @@ if [ -f "$RUNLOG" ]; then
       ST="${EVIDENCE_LINE#*status=}"; ST="${ST%%;*}"; ST="${ST%.}"
       MODEL_STATUS="$(printf '%s' "$ST" | tr -d '\t\n' | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"
     fi
+  elif [ -n "$EVIDENCE_LINE" ]; then
+    MODEL_EVIDENCE_STATE=no-label-field
   fi
 fi
 
@@ -4764,7 +4771,7 @@ fi
 # captured); it stays SILENT on the benign `current`+already-selected steady state so it does not
 # cry wolf on healthy default runs. A WARN log line plus a status-file marker the composer shows;
 # it NEVER changes the exit code.
-MODEL_WARN="$(pg_derive_model_warn "$RESOLVED_MODEL" "$MODEL_STATUS")"
+MODEL_WARN="$(pg_derive_model_warn "$RESOLVED_MODEL" "$MODEL_STATUS" "$MODEL_EVIDENCE_STATE")"
 [ -n "$MODEL_WARN" ] && echo "[oracle-review] WARNING: ${MODEL_WARN}." >&2
 
 # v0.13: last-resort CDP tab salvage. oracle (historically <=0.15.x; hardened upstream in
