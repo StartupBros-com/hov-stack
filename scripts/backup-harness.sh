@@ -14,7 +14,8 @@
 # PRIVACY: memory is private, and the backup branch is readable by anyone who can read origin.
 # A run from a public checkout (hov-stack itself, or a fork of it) would publish every note, so
 # nothing is pushed until origin is confirmed private (see the guard below). To back up from a
-# public checkout, point DOTFILES at a checkout of a private repository (for the timer, a drop-in
+# public checkout, point DOTFILES at a clone of this repository whose origin is private (it runs
+# that checkout's sync.sh, so a checkout of some other repository exits; for the timer, a drop-in
 # on backup-harness.service with Environment=DOTFILES=...), and CLAUDE_MEMORY_BACKUP_REPO at the
 # same checkout so memory-audit.py reads the branch this pushes.
 set -euo pipefail
@@ -48,7 +49,7 @@ elif [[ $github_slug =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]]; then
   case $code in
     404) log "origin ($github_slug) is not publicly readable on GitHub; backing up there" ;;
     200)
-      log "REFUSED: origin ($github_slug) is a public GitHub repository, so pushing memory there would publish it. Point DOTFILES at a checkout of a private repository." >&2
+      log "REFUSED: origin ($github_slug) is a public GitHub repository, so pushing memory there would publish it. Point DOTFILES at a clone of this repository whose origin is private." >&2
       exit 1 ;;
     *)
       log "REFUSED: could not confirm origin ($github_slug) is private (GitHub lookup answered HTTP $code); memory is not pushed" >&2

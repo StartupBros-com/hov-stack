@@ -137,7 +137,8 @@ def die(msg: str) -> None:
 
 # Credential shapes scrubbed before anything is written or sent to GitHub. Kept in
 # sync with REDACTIONS in hooks/PostToolUseFailure/papercut-log.js — the two
-# capture paths must not disagree about what is safe to store. Redaction happens
+# capture paths must not disagree about what is safe to store
+# (hooks/tests/papercut-parity.test.js checks that they agree). Redaction happens
 # at CAPTURE, not at read: the store is a plain file and `rollup --apply` copies
 # sample text into an issue body, so a secret must never land in either.
 #
