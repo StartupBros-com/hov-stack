@@ -263,6 +263,22 @@ A re-trigger at the same commit, such as a ready flip or a description edit, add
 
 A red deciding run that the runner fleet produced rather than a test: no suite job failed, and every red job either never reported (the runner's finalize stall), lost its runner's contact with the server, or was stopped by its job timeout with its running step left without a recorded conclusion, the runner having stopped reporting. Its complement is a *test red*: a failed suite job, a failed local suite record, or a job its timeout stopped whose running step the cap concluded `cancelled`, a live runner's verdict, which may be a hang. A job cancelled before any runner took it, which GitHub serves with no runner and a start equal to its queue time, has no steps to read and is on its own a test red. A red whose signature cannot otherwise be read from the run's job steps and annotations is a test red until a later read succeeds: on 2026-10-13 GitHub served one finished job with all its steps and, within a minute, with none (its runner and timestamps intact), so an unreadable red is read again later instead of being called. Only a fleet red is the machine's to retry on its own, through one failed-only rerun (merge-and-end in `CLAUDE.md`); a test red waits for a changed head. Settled by the 2026-10-13 PR Path Recovery brainstorm; the cancelled-step reading of a live-runner hang rests on the classifier's comment, with no real capture yet.
 
+## Worktree sweep
+
+The vocabulary for the scheduled sweep that removes agent worktrees once their work has shipped or been saved.
+
+### Session hold
+
+The sweep's refusal to remove a worktree that a Claude Code session is driving or recently drove. It is judged from what sessions record, because a session can drive a worktree without a process or lock inside it.
+
+A working background job, a live session working inside the worktree, and a recently written transcript that names it all hold it. A finished background job holds only the worktree it is bound to, and only for a window after its last turn. Its process and any worktree lock are gone by then, but the job is at rest, not over: its user can resume it into that worktree. A hold that rests only on transcript mentions lapses through Idle release; the others do not.
+
+### Idle release
+
+The sweep's exception to a Session hold: a worktree held only by transcript mentions that have not named it for a set window is removed anyway, provided it is clean, holds only rebuildable caches and its branch has shipped.
+
+The window is judged by each record's own time. A worktree under a git worktree lock is never removed, so a lock is how to keep one past the window.
+
 ## Autonomous dispatch
 
 The vocabulary for the always-on work dispatcher. Settled by the 2026-08-21 Always-On Work Dispatcher brainstorm. The dispatcher itself retired on 2026-10-17 (dotfiles#1873); the terms stay because open `loop-run` PRs still need a disposition and the ledger readers remain.
