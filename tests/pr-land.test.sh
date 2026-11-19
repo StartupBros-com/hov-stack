@@ -103,7 +103,7 @@ case "$*" in
   "remote get-url origin") echo "https://github.com/$R.git" ;;
   "rev-parse HEAD") echo "${STUB_GIT_TIP:-$H}" ;;
   "fetch -q origin refs/pull/7/head") exit 0 ;;
-  "merge -q --ff-only FETCH_HEAD") exit "${STUB_GIT_FF_RC:-0}" ;;
+  "merge -q --ff-only --no-autostash FETCH_HEAD") exit "${STUB_GIT_FF_RC:-0}" ;;
   *) echo "unexpected git call: $*" >&2; exit 92 ;;
 esac
 STUB
@@ -188,7 +188,7 @@ check 'worktree: tip already the head, no fetch' bash -c '! grep -q -F fetch "$1
 
 reset_case; export STUB_GIT_BRANCH=pr-land STUB_GIT_TIP=$H2; run 7 --repo "$R"
 landed 'worktree tip behind the merged head'
-check 'tip behind: fast-forwarded to the PR head' grep -q -F 'merge -q --ff-only FETCH_HEAD' "$GIT_LOG"
+check 'tip behind: fast-forwarded to the PR head' grep -q -F 'merge -q --ff-only --no-autostash FETCH_HEAD' "$GIT_LOG"
 check 'tip behind: then wt-done' test "$(cat "$WT_LOG")" = 'DRY_RUN=0'
 
 reset_case; export STUB_GIT_BRANCH=pr-land STUB_GIT_TIP=$H2 STUB_GIT_FF_RC=1; run 7 --repo "$R"

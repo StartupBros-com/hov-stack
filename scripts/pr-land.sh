@@ -112,7 +112,7 @@ closeout() {
   if [ "$(git rev-parse HEAD)" != "$HEAD" ]; then
     # The branch moved on GitHub (an update from the base): wt-done proves "merged this exact
     # tip" only once the local tip is the head that merged.
-    git fetch -q origin "refs/pull/$PR/head" >&2 && git merge -q --ff-only FETCH_HEAD >&2 \
+    git fetch -q origin "refs/pull/$PR/head" >&2 && git merge -q --ff-only --no-autostash FETCH_HEAD >&2 \
       || { say "closeout: the local tip is not PR #$PR's merged head ${HEAD:0:12} and cannot fast-forward to it"; return 1; }
   fi
   DRY_RUN=0 "$WT_DONE" >&2
