@@ -271,11 +271,11 @@ The vocabulary for the scheduled sweep that removes agent worktrees once their w
 
 The sweep's refusal to remove a worktree that a Claude Code session is driving or recently drove. It is judged from what sessions record, because a session can drive a worktree without a process or lock inside it.
 
-A working background job, a live session working inside the worktree, and a recently written transcript that names it all hold it. A finished background job holds only the worktree it is bound to, and only for a window after its last turn. Its process and any worktree lock are gone by then, but the job is at rest, not over: its user can resume it into that worktree. A hold that rests only on transcript mentions lapses through Idle release; the others do not.
+A running background job, a live session working inside the worktree, and a recently written transcript that names it all hold it. A finished background job holds only the worktree it is bound to, and only for a window after its last turn. Its process and any worktree lock are gone by then, but the job is at rest, not over: its user can resume it into that worktree. Two kinds of hold lapse through Idle release: one that rests only on old transcript mentions, and one from an unfinished job that has no running session and whose state has not changed for the window. The others do not.
 
 ### Idle release
 
-The sweep's exception to a Session hold: a worktree held only by transcript mentions that have not named it for a set window is removed anyway, provided it is clean, holds only rebuildable caches and its branch has shipped.
+The sweep's exception to a Session hold: a worktree whose only holds have lapsed (old transcript mentions, or an unfinished job that stopped running and has gone quiet for a set window) is removed anyway, provided it is clean, holds only rebuildable caches and its branch has shipped.
 
 The window is judged by each record's own time. A worktree under a git worktree lock is never removed, so a lock is how to keep one past the window.
 

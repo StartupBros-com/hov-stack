@@ -21,13 +21,13 @@ hov-stack#793 needed a per-transcript binding in the session-hold index, the cac
 
 The cause is a mechanism no fixture exercises:
 
-- `_when()` gives a record without a parseable `timestamp` its `fallback` time (`scripts/lib/wt_session_hold.py:308`).
+- `_when()`, defined at `scripts/lib/wt_session_hold.py:308`, gives a record without a parseable `timestamp` its `fallback` time.
 - `driven_paths()` passes the transcript's mtime at scan time as that fallback (`scripts/lib/wt_session_hold.py:534`).
 - The incremental index dates each record once, close to when it was written.
 - The version is part of the cache file name (`scripts/lib/wt_session_hold.py:456`), so a bump starts from an empty index and re-reads every transcript in full.
 - That re-read dates every old undated record by the transcript's current mtime. For a transcript still being written, that is about now, so every worktree it ever named looks freshly named.
 
-Idle release then stops until the window passes again, about a day. At the sweep's 6-hourly live cadence that is about four sweeps (session history).
+Idle release then stops until the window passes again, about a day. On the host where this happened, a systemd drop-in runs the sweep live every 6 hours, so that is about four sweeps (session history). The shipped timer is weekly and plan-only.
 
 An A/B with the installed helper alone confirmed it. On one affected worktree, the helper with the live incremental cache exited 3, `idle: … last named 92h ago`. Against an empty `--cache-dir`, the same helper on the same state exited 0, held. The re-dating itself is open as hov-stack#795. Fixtures build their cache from nothing on every run, so they never hold the accumulated index the defect needs.
 
@@ -44,11 +44,11 @@ An A/B with the installed helper alone confirmed it. On one affected worktree, t
    - Add an optional key and treat its absence as unknown.
    - Fill it from the bytes already indexed without touching any recorded time.
    - #796 did this with `bind`. Case 12b in `tests/wt-session-hold-resumable.test.sh` pins that an older entry learns its binding with its path times unchanged. The comment above `CACHE_VERSION` (`scripts/lib/wt_session_hold.py:147`) records why the version stayed at 2.
-5. **When the branch writes something new into the cache under the same version, run the installed helper on a cache the branch wrote.** The old helper reads that file until the merge activates, and again after any revert. In #796 both dry runs used the live cache. Afterwards the installed helper still called a known idle worktree idle (exit 3) on the cache the branch had added `bind` keys to.
+5. **When the branch writes something new into the cache under the same version, run the installed helper on a cache the branch wrote.** The old helper reads that file until the merge activates, and again after any revert. #796's plan diff predates this advice: both of its dry runs used the live cache. Afterwards the installed helper still called a known idle worktree idle (exit 3) on the cache the branch had added `bind` keys to.
 
 ## Why This Matters
 
-wt-sweep runs live every 6 hours and deletes worktrees. A hold regression either removes work under an agent (too few holds) or pins disk the sweep should have freed (too many). The v3 bump was the second kind, on a host whose root disk was 99% full that day.
+Where wt-sweep runs live (every 6 hours on the host this came from), it deletes worktrees. A hold regression either removes work under an agent (too few holds) or pins disk the sweep should have freed (too many). The v3 bump was the second kind, on a host whose root disk was 99% full that day.
 
 The fixture suites cannot see a defect that only exists in an index accumulated over weeks. A green suite plus a one-line version bump read as safe. The plan diff was the only test that ran against the real index, and each of its two runs took about two minutes.
 
