@@ -143,5 +143,9 @@ out=$(PC_BACKFILL_STDERR="papercut-backfill: skipped /x.jsonl: EACCES" run_secti
 contains "$out" "WARN papercut backfill diagnostics" "backfill stderr is surfaced under its own label"
 contains "$out" "skipped /x.jsonl: EACCES" "the diagnostic text itself reaches the report"
 
+# 8. the weekly report asks the doctor to run the (opt-in) test suites
+if grep -qE '^ *"\$SCRIPTS/harness-doctor\.sh" --with-tests$' "$SRC"; then ok
+else bad "harness-weekly.sh must invoke harness-doctor.sh with --with-tests"; fi
+
 echo "harness-weekly papercut section: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]

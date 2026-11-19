@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # harness-weekly — scheduled READ-ONLY drift report:
-#   1) harness-doctor.sh   (harness config invariants)
+#   1) harness-doctor.sh --with-tests (harness config invariants + the test suites)
 #   2) wt-sweep.sh DRY_RUN=1 (worktree cleanup PLAN — never executes removals)
 #   3) branch-triage.sh DRY_RUN=1 (stale local-branch classification — plan only)
 #   4) launchpad-freshen.sh (mutating by design: ff-only pull of clean,
@@ -33,7 +33,7 @@ chmod 600 "$REPORT"
   echo "# harness weekly — $(date -Iseconds)"
   echo
   echo "## harness-doctor"
-  "$SCRIPTS/harness-doctor.sh"
+  "$SCRIPTS/harness-doctor.sh" --with-tests
   echo
   echo "## wt-sweep plan (DRY_RUN=1 — nothing was removed; run DRY_RUN=0 manually to apply)"
   DRY_RUN=1 "$SCRIPTS/wt-sweep.sh"

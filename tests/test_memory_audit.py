@@ -2278,6 +2278,57 @@ class CitedEnforcerTests(unittest.TestCase):
         flagged = [item for item in payload["findings"] if item["kind"] == "cited_enforcer_missing"]
         return result, payload, flagged
 
+    def alias_to_other_key(self, relative=True):
+        """Make the enforcer repo's memory dir an alias of another project's."""
+        other = "-old-repo-key"
+        other_live, other_mirror = self.fixture.project(other)
+        self.live.rmdir()
+        target = Path("..") / other / "memory" if relative else other_live
+        self.live.symlink_to(target)
+        return other, other_live, other_mirror
+
+    def test_in_root_memory_alias_is_followed_for_cited_enforcer(self):
+        other, other_live, other_mirror = self.alias_to_other_key()
+        self.write("n", "Run `cr-compact.py` first.", live=other_live, mirror=other_mirror)
+        result, payload, flagged = self.audit()
+        self.assertEqual(payload["summary"]["cited_enforcer_scope"]["notes_checked"], 1)
+        self.assertEqual([item["project"] for item in flagged], [other])
+        self.assertEqual(payload["summary"]["cited_enforcer_scope"]["memory_project"], other)
+        self.assertEqual(payload["summary"]["cited_enforcer_scope"]["project"], self.key)
+        self.assertNotIn("live_symlink", [item["kind"] for item in payload["findings"]])
+        self.assertEqual(payload["summary"]["cited_enforcer_scope"]["warnings"], [])
+
+    def test_out_of_root_memory_symlink_still_blocks_and_is_not_followed(self):
+        outside = self.fixture.live.parent / "outside-memory"
+        outside.mkdir()
+        (outside / "n.md").write_text(note("n", note_type="feedback", body="Run `cr-compact.py` first."))
+        self.live.rmdir()
+        self.live.symlink_to(outside)
+        result, payload, flagged = self.audit()
+        self.assertIn("live_symlink", [item["kind"] for item in payload["findings"]])
+        scope = payload["summary"]["cited_enforcer_scope"]
+        self.assertEqual(scope["notes_checked"], 0)
+        self.assertEqual(scope["memory_project"], self.key)
+        self.assertTrue(any("covered 0 feedback notes" in w for w in scope["warnings"]))
+        self.assertEqual(flagged, [])
+
+    def test_copy_gate_still_blocks_in_root_memory_alias(self):
+        other, other_live, other_mirror = self.alias_to_other_key(relative=False)
+        # The enforcer repo maps to the aliased key, so only the copy-gate guard on
+        # the alias resolution keeps live_symlink here; without these flags the
+        # resolver would look at the auditor's own checkout and pass vacuously.
+        command = [
+            "python3", str(AUDITOR),
+            "--live-root", str(self.fixture.live),
+            "--mirror-root", str(self.fixture.mirror),
+            "--enforcer-repo", str(self.repo), "--repo-root", str(self.sites), "--enforcer-extra-root", str(self.plugins),
+            "--copy-gate",
+        ]
+        result = subprocess.run(command, text=True, capture_output=True, check=False)
+        gate = json.loads(result.stdout)
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertEqual([item["kind"] for item in gate["blocked"]], ["live_symlink"])
+
     def test_project_key_matches_claude_code_encoding(self):
         self.assertEqual(MA.project_key(Path("/home/user/dotfiles")), "-home-user-dotfiles")
         # Observed on the author's host 2026-10-08: ~/SITES/coding_agent_session_search

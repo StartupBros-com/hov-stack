@@ -358,6 +358,31 @@ def project_dirs(root: Path, live: bool) -> dict[str, Path]:
     return {item.name: item for item in sorted(root.iterdir(), key=lambda item: item.name) if item.is_dir()}
 
 
+def resolve_memory_alias(live_root: Path, live: dict[str, Path], key: str) -> str | None:
+    """The other live project key that `key`'s symlinked memory dir points at, or None.
+
+    Only a direct alias counts: the project dir is a real directory, its memory dir
+    resolves to <live_root>/<other>/memory, and that memory dir is a real directory
+    of another live project (no chains, nothing outside the root)."""
+    memory_dir = live.get(key)
+    if memory_dir is None or not memory_dir.is_symlink() or memory_dir.parent.is_symlink():
+        return None
+    try:
+        target = memory_dir.resolve(strict=True)
+        root = live_root.resolve(strict=True)
+    except OSError:
+        return None
+    if target.parent.parent != root or target.name != "memory":
+        return None
+    other = target.parent.name
+    if other == key or other not in live:
+        return None
+    other_memory = live[other]
+    if other_memory.is_symlink() or other_memory.parent.is_symlink() or not other_memory.is_dir():
+        return None
+    return other
+
+
 def files(directory: Path, markdown_only: bool = False) -> dict[str, Path]:
     pattern = "*.md" if markdown_only else "*"
     return {
@@ -700,6 +725,15 @@ def audit(args: argparse.Namespace) -> dict[str, Any]:
     enforcer_repo_requested = Path(getattr(args, "enforcer_repo", None) or ENFORCER_REPO_DEFAULT).expanduser()
     enforcer_repo = main_checkout(enforcer_repo_requested, discovery_errors) if enforcer_enabled else enforcer_repo_requested
     enforcer_project = project_key(enforcer_repo)
+    # After a repo rename the new key's memory dir can be an in-root alias
+    # (<live>/<new>/memory -> ../<old>/memory). The target is traversed under its
+    # own key, so the cited-enforcer guard has to follow the alias to it (#784).
+    # Anything else that is a symlink keeps the live_symlink block.
+    enforcer_memory_project = enforcer_project
+    if enforcer_enabled:
+        alias_target = resolve_memory_alias(live_root, live, enforcer_project)
+        if alias_target is not None:
+            enforcer_memory_project = alias_target
     # One probe, shared by the per-note guard and the scope block. Path.is_dir()
     # raises on EACCES under 3.12; a repo the auditor cannot see is reported as
     # unavailable in the scope block rather than ending the audit without a verdict.
@@ -725,6 +759,8 @@ def audit(args: argparse.Namespace) -> dict[str, Any]:
         if mirror_root is not None and project not in mirror:
             findings.append(finding("mirror_missing_project", project))
         memory_dir = live[project]
+        if project == enforcer_project and enforcer_memory_project != enforcer_project:
+            continue  # in-root alias: traversed once, under the target's key
         if memory_dir.is_symlink() or memory_dir.parent.is_symlink():
             # A symlinked project or memory root would make rsync copy an
             # arbitrary external tree; block and skip traversal entirely.
@@ -848,7 +884,7 @@ def audit(args: argparse.Namespace) -> dict[str, Any]:
                 note_type = nested_type or metadata.get("type")
                 if note_type not in ALLOWED_TYPES:
                     problems.append("type or metadata.type must be user|feedback|project|reference")
-                if enforcer_repo_exists and project == enforcer_project and note_type == "feedback":
+                if enforcer_repo_exists and project == enforcer_memory_project and note_type == "feedback":
                     if names_other_repo_ref(str(description or ""), enforcer_repo.name, repo_names + other_repos):
                         enforcer_notes_other_repo += 1  # the note is about another repo's PR or issue
                     else:
@@ -974,7 +1010,7 @@ def audit(args: argparse.Namespace) -> dict[str, Any]:
         if not enforcer_repo_exists:
             enforcer_warnings.append(f"cited-enforcer repo unavailable ({enforcer_repo})")
         elif not enforcer_notes_checked:
-            enforcer_warnings.append(f"cited-enforcer check covered 0 feedback notes (project {enforcer_project})")
+            enforcer_warnings.append(f"cited-enforcer check covered 0 feedback notes (project {enforcer_memory_project})")
         if discovery_errors:
             enforcer_warnings.append(f"cited-enforcer discovery degraded ({len(discovery_errors)} error(s))")
     result: dict[str, Any] = {
@@ -989,6 +1025,7 @@ def audit(args: argparse.Namespace) -> dict[str, Any]:
             "cited_enforcer_missing": counts.get("cited_enforcer_missing", 0),
             "cited_enforcer_scope": {
                 "project": enforcer_project,
+                "memory_project": enforcer_memory_project,
                 "repo": str(enforcer_repo),
                 "repo_requested": str(enforcer_repo_requested),
                 "repo_exists": enforcer_repo_exists,

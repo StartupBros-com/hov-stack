@@ -268,6 +268,7 @@ run_doctor() {
   CLAUDE_MANAGED_SETTINGS_LOCK="$home/.claude/installed-managed-settings.json" \
   CLAUDE_MANAGED_SETTINGS_REF="$home/dotfiles/managed-settings.json" \
   HARNESS_DOCTOR_SKIP_TESTS="$skip_tests" \
+  HARNESS_DOCTOR_WITH_TESTS="${DOCTOR_WITH_TESTS_ENV:-$([ "$skip_tests" = 0 ] && echo 1 || echo 0)}" \
   SYNC_EXAMINED="${SYNC_EXAMINED:-1}" SYNC_STATUS="${SYNC_STATUS:-0}" \
   CODEX_OUTPUT="${CODEX_OUTPUT:-in sync}" CODEX_STATUS="${CODEX_STATUS:-0}" \
   COLLISION_OUTPUT="${COLLISION_OUTPUT:-}" COLLISION_STATUS="${COLLISION_STATUS:-0}" \
@@ -275,7 +276,7 @@ run_doctor() {
   DEFERRAL_WATCHLIST_FILE="${DEFERRAL_WATCHLIST_FILE:-$TMP/deferral-quiet.tsv}" \
   CLAUDE_CODEX_MODELS_CACHE="" CLAUDE_INSTALLED_PLUGINS="" \
   CLAUDE_CM_AUDITOR="${CLAUDE_CM_AUDITOR:-}" CLAUDE_CM_TIMEOUT="${CLAUDE_CM_TIMEOUT:-}" \
-    ${DOCTOR_UNSET_DOTFILES_REPO:+env -u DOTFILES_REPO} bash "${DOCTOR_UNDER_TEST:-$DOCTOR}" 2>&1
+    ${DOCTOR_UNSET_DOTFILES_REPO:+env -u DOTFILES_REPO} bash "${DOCTOR_UNDER_TEST:-$DOCTOR}" ${DOCTOR_ARGS:-} 2>&1
 }
 
 # B4's producer contract: the child discloses comparisons from its actual
@@ -593,6 +594,24 @@ contains "$SKIP_OUT" "bash test suites examined: 4" "B1 skip fixture lists four 
 contains "$SKIP_OUT" "skip: bash: m-manual.test.sh — needs operator-supplied images and containers" "B1 a skip header names the suite and its reason"
 omits "$SKIP_OUT" "FAILING: m-manual.test.sh" "B1 a skip-header suite is not run"
 contains "$SKIP_OUT" "late-marker-case" "B1 a marker after the header does not skip the suite"
+
+# The test suites are opt-in: with no flag and neither env var the doctor skips
+# them and says why; --with-tests or HARNESS_DOCTOR_WITH_TESTS=1 runs them (the
+# planted suite's output proves they ran); SKIP_TESTS=1 wins over both. The
+# skip_tests arg "" leaves HARNESS_DOCTOR_SKIP_TESTS empty (= not skipped) and,
+# by run_doctor's default, HARNESS_DOCTOR_WITH_TESTS=0.
+OPTIN_OUT=$(run_doctor "$FULL_HOME" "$SKIP_HARNESS" "")
+contains "$OPTIN_OUT" "skipped: the test suites are opt-in; pass --with-tests (or HARNESS_DOCTOR_WITH_TESTS=1) to run them" "opt-in default skips with the opt-in line"
+omits "$OPTIN_OUT" "late-marker-case" "opt-in default does not run the planted suite"
+omits "$OPTIN_OUT" "bash test suites examined" "opt-in default runs no suite family"
+OPTIN_FLAG_OUT=$(DOCTOR_ARGS=--with-tests run_doctor "$FULL_HOME" "$SKIP_HARNESS" "")
+contains "$OPTIN_FLAG_OUT" "late-marker-case" "--with-tests runs the planted suite"
+omits "$OPTIN_FLAG_OUT" "the test suites are opt-in" "--with-tests drops the opt-in skip line"
+OPTIN_ENV_OUT=$(DOCTOR_WITH_TESTS_ENV=1 run_doctor "$FULL_HOME" "$SKIP_HARNESS" "")
+contains "$OPTIN_ENV_OUT" "late-marker-case" "HARNESS_DOCTOR_WITH_TESTS=1 runs the planted suite"
+OPTIN_SKIP_OUT=$(DOCTOR_ARGS=--with-tests run_doctor "$FULL_HOME" "$SKIP_HARNESS" 1)
+contains "$OPTIN_SKIP_OUT" "skipped (HARNESS_DOCTOR_SKIP_TESTS=1)" "SKIP_TESTS=1 wins over --with-tests"
+omits "$OPTIN_SKIP_OUT" "late-marker-case" "SKIP_TESTS=1 with --with-tests does not run the planted suite"
 
 # B1 runner (#356): the doctor runs tests/run-claude-tests.sh instead of looping over
 # suites itself, so it and CI cannot disagree. Planted trees below carry the real

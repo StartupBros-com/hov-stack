@@ -71,6 +71,7 @@ run_check() {
     WARNS=0
     warn() { echo "WARN: $*"; WARNS=$((WARNS + 1)); }
     ok()   { echo "  ok: $*"; }
+    note() { echo "  note: $*"; }
     # shellcheck disable=SC1090
     . "$2" 2>&1 )
 }
@@ -232,6 +233,15 @@ omits "$out" "stray /tmp/.git" "a real repository is not called a stray"
 h=$(make_home sdg-missing); rm "$h/.claude/hooks/lib/stray-dot-git.js"
 out=$(run_check "$h" "$TMP/check34.sh")
 contains "$out" "stray-dot-git.js missing" "a missing library is reported"
+
+# 13. every doctor note goes through note(), so the summary count includes it:
+# the only literal `echo "  note:` is inside note()'s own definition.
+note_echoes=$(grep -nF 'echo "  note:' "$DOCTOR")
+case "$note_echoes" in
+  *$'\n'*) bad "more than one literal echo \"  note:\" in the doctor: $note_echoes" ;;
+  *'note() { echo "  note: $*"; NOTES=$((NOTES + 1)); }'*) ok_ ;;
+  *) bad "the only literal echo \"  note:\" must be note()'s definition, got: $note_echoes" ;;
+esac
 
 echo "doctor papercut coverage + stray .git: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]

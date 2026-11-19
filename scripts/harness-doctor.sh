@@ -15,8 +15,27 @@
 #     nested files named CLAUDE.md, so every nested AGENTS.md needs a pointer.
 #
 # Report-only: never modifies anything. Exits 1 if any WARN, 0 if clean.
-# Run manually or via a weekly systemd timer.
+# Run manually or from scripts/harness-weekly.sh.
+#
+# Usage: harness-doctor.sh [--with-tests]
+#   --with-tests                  also run the harness test suites (slow: ~20 min;
+#                                 CI runs them on every PR, harness-weekly.sh passes this)
+#   HARNESS_DOCTOR_WITH_TESTS=1   same as --with-tests
+#   HARNESS_DOCTOR_SKIP_TESTS=1   skip the suites even when asked to run them (wins)
 set -uo pipefail
+HD_WITH_TESTS=${HARNESS_DOCTOR_WITH_TESTS:-0}
+for _hd_arg in "$@"; do
+  case "$_hd_arg" in
+    --with-tests) HD_WITH_TESTS=1 ;;
+    -h|--help)
+      printf 'usage: harness-doctor.sh [--with-tests]\n'
+      printf '  --with-tests   also run the harness test suites (or HARNESS_DOCTOR_WITH_TESTS=1)\n'
+      printf '  HARNESS_DOCTOR_SKIP_TESTS=1 skips them even when asked to run them\n'
+      exit 0 ;;
+    *) printf 'harness-doctor: ignoring unknown argument: %s\n' "$_hd_arg" >&2 ;;
+  esac
+done
+unset _hd_arg
 # Read-only: status probes must not write back the refreshed index, so a probe
 # killed mid-run leaves no zero-byte index.lock behind (dotfiles#1590).
 export GIT_OPTIONAL_LOCKS=0
@@ -39,6 +58,28 @@ ok()   { echo "  ok: $*"; }
 # code, and a section that printed one does not also print its all-clear line.
 NOTES=0
 note() { echo "  note: $*"; NOTES=$((NOTES + 1)); }
+
+# sites_repos: list each ~/SITES entry once, as "$HOME/SITES/<name>/". A compat
+# symlink to a sibling directory (SITES/old-name -> SITES/new-name) is skipped so
+# the repo is not counted twice; real dirs, dangling links and links that point
+# outside SITES are kept. Prints nothing when SITES is empty or missing.
+sites_repos() {
+  local sites_real entry target
+  [ -d "$HOME/SITES" ] || return 0
+  sites_real=$(readlink -f -- "$HOME/SITES") || return 0
+  for entry in "$HOME"/SITES/*/; do
+    [ -e "$entry" ] || [ -L "${entry%/}" ] || continue
+    if [ -L "${entry%/}" ]; then
+      target=$(readlink -f -- "${entry%/}" 2>/dev/null) || target=
+      if [ -n "$target" ] && [ -d "$target" ] && [ "$(dirname -- "$target")" = "$sites_real" ] &&
+         [ ! -L "$target" ]; then
+        continue
+      fi
+    fi
+    printf '%s\n' "$entry"
+  done
+}
+mapfile -t SITES_REPOS < <(sites_repos)
 
 # failed_unit_sweep <systemd-dir> <foreign-list>
 #   prints one "<class>\t<unit>\t<detail>" row per FAILED --user unit
@@ -158,7 +199,10 @@ PY
 }
 
 # docker_adoption_health <profile-lib> <policy-helper> <service-unit> <patch>
-#                        <target> <state> <backup> <lock> <dockerd>
+#                        <target> <state> <backup> <lock> <dockerd> [<posture>]
+#
+# <posture> is the declared service drop-in text (lib/hygiene-posture.sh renders
+# the overlay's hygiene-posture file as 50-hygiene-posture.conf); it may be empty.
 #
 # Read-only by construction: the only policy verb is `check`, and the hygiene
 # script and service manager are never invoked. The helper owns validation of
@@ -167,7 +211,8 @@ PY
 # noninteractive privilege, and translates exact helper outcomes for the doctor.
 docker_adoption_health() {
   local profile_lib=$1 helper=$2 service=$3 patch=$4 target=$5
-  local state=$6 backup=$7 lock=$8 dockerd=$9
+  local state=$6 backup=$7 lock=$8 dockerd=$9 posture=${10-}
+  local effective key want last
   local role role_status role_capture role_error role_payload role_marker=$'\034'
   local policy_out policy_status required
   local -a policy_command=(
@@ -181,22 +226,32 @@ docker_adoption_health() {
     --dockerd "$dockerd"
   )
 
-  # Inspect the declared unit source, not live systemd state. sync.sh check owns
+  # Inspect the declared unit source, not live systemd state. The declared posture
+  # is the template plus the overlay's hygiene-posture drop-in (the shipped
+  # template is plan-only, DRY_RUN=1, by design). sync.sh check owns
   # installed-copy drift and hygiene-posture drift (lib/hygiene-posture.sh: the
   # overlay's declared timers and drop-ins); enabling or changing the
   # deletion-capable timer is deliberately outside this doctor.
   if [ ! -r "$service" ]; then
     warn "docker hygiene strict-service wiring unavailable: service unit unreadable at $service"
   else
+    effective=$(cat -- "$service"; printf '\n%s\n' "$posture")
     for required in \
       'Environment=DRY_RUN=0' \
       'Environment=AGGRESSIVE=1' \
-      'Environment=STRICT=1' \
-      'ExecStart=%h/.claude/scripts/docker-hygiene.sh'; do
-      grep -qxF "$required" "$service" ||
+      'Environment=STRICT=1'; do
+      key=${required#Environment=}
+      key=${key%%=*}
+      last=$(grep -E "^Environment=$key=" <<<"$effective" | tail -n 1)
+      [ "$last" = "$required" ] ||
         warn "docker hygiene strict-service wiring missing or unsafe: required $required"
     done
-    grep -qxF 'Environment=STOP_IDLE=1' "$service" &&
+    required='ExecStart=%h/.claude/scripts/docker-hygiene.sh'
+    grep -qxF "$required" "$service" ||
+      warn "docker hygiene strict-service wiring missing or unsafe: required $required"
+    want='Environment=STOP_IDLE=1'
+    last=$(grep -E '^Environment=STOP_IDLE=' <<<"$effective" | tail -n 1)
+    [ "$last" = "$want" ] &&
       warn "docker hygiene strict-service wiring missing or unsafe: Environment=STOP_IDLE=1 must remain absent"
   fi
 
@@ -359,7 +414,7 @@ _memory_mirror_args=()
 if [ -n "${CLAUDE_MEMORY_MIRROR_ROOT:-}" ] || [ -d "$MEMORY_MIRROR" ]; then
   _memory_mirror_args=(--mirror-root "$MEMORY_MIRROR")
 else
-  echo "  note: no memory mirror at $MEMORY_MIRROR, so the memory audit skips its mirror checks"
+  note "no memory mirror at $MEMORY_MIRROR, so the memory audit skips its mirror checks"
 fi
 if [ -f "$MEMORY_AUDIT" ]; then
   _memory_json=$(python3 "$MEMORY_AUDIT" \
@@ -403,7 +458,7 @@ n5=$NOTES
 w0=$WARNS
 # Repos where the twin convention is upstream's, not ours (upstream-synced content):
 TWIN_EXCEPTIONS="pi-compound-engineering"
-for repo in "$HOME"/SITES/*/; do
+for repo in "${SITES_REPOS[@]}"; do
   name=$(basename "$repo")
   case " $TWIN_EXCEPTIONS " in *" $name "*) continue ;; esac
   a="$repo/AGENTS.md" c="$repo/CLAUDE.md"
@@ -420,7 +475,7 @@ done
 # are the same drift hazard (use '@AGENTS.md' stubs at every level).
 # Flag own-repos whose tracked non-root CLAUDE.md files aren't stubs. Skips .claude/
 # bundles + worktree copies and test fixtures.
-for repo in "$HOME"/SITES/*/; do
+for repo in "${SITES_REPOS[@]}"; do
   name=$(basename "$repo")
   case " $TWIN_EXCEPTIONS " in *" $name "*) continue ;; esac
   git -C "$repo" rev-parse --git-dir >/dev/null 2>&1 || continue
@@ -450,7 +505,7 @@ done
 # real instructions no Claude session ever loaded). A repo with NO root CLAUDE.md
 # is left alone: there the 2.1.277 fallback attaches nested AGENTS.md on Read.
 # Same skips as the loop above.
-for repo in "$HOME"/SITES/*/; do
+for repo in "${SITES_REPOS[@]}"; do
   name=$(basename "$repo")
   case " $TWIN_EXCEPTIONS " in *" $name "*) continue ;; esac
   git -C "$repo" rev-parse --git-dir >/dev/null 2>&1 || continue
@@ -484,7 +539,7 @@ done
 # Active own repos (commit in last 30d) should have an AGENTS.md at all
 now=$(date +%s)
 missing_agents=""
-for repo in "$HOME"/SITES/*/; do
+for repo in "${SITES_REPOS[@]}"; do
   name=$(basename "$repo")
   git -C "$repo" rev-parse --git-dir >/dev/null 2>&1 || continue
   [ -f "$repo/AGENTS.md" ] && continue
@@ -500,7 +555,7 @@ done
 echo "== 6. Worktree accumulation (>8 → run wt-sweep.sh) =="
 w0=$WARNS
 declare -A seen
-for repo in "$HOME"/SITES/*/; do
+for repo in "${SITES_REPOS[@]}"; do
   git -C "$repo" rev-parse --git-dir >/dev/null 2>&1 || continue
   cdir=$(git -C "$repo" rev-parse --git-common-dir 2>/dev/null)
   [ -n "${seen[$cdir]:-}" ] && continue; seen[$cdir]=1
@@ -937,7 +992,7 @@ if [ -f "$SYNC" ]; then
   _memory_pushed=1
   if ! systemctl --user is-enabled backup-harness.timer >/dev/null 2>&1; then
     _memory_pushed=0
-    echo "  note: backup-harness.timer is not enabled, so live memory has no git backup; it is opt-in (systemd/README.md)"
+    note "backup-harness.timer is not enabled, so live memory has no git backup; it is opt-in (systemd/README.md)"
   else
     state=$(systemctl --user is-active backup-harness.timer 2>/dev/null || true)
     [ "$state" != active ] && warn "backup-harness.timer is enabled but not active (state=$state)"
@@ -1553,7 +1608,7 @@ else
   # Age is a note, not a finding: nothing schedules the backfill now, so a
   # WARN here would fire forever. The gaps below still read the file.
   [ -n "$(find "$_pc_cov" -mtime +9 2>/dev/null)" ] \
-    && echo "  note: transcript-backfill coverage is over 9 days old (refresh: node ~/.claude/scripts/papercut-backfill.js --days 14)"
+    && note "transcript-backfill coverage is over 9 days old (refresh: node ~/.claude/scripts/papercut-backfill.js --days 14)"
   if command -v jq >/dev/null 2>&1; then
   if ! _pc_gaps=$(jq -r '.tools // {} | to_entries[]
       | select((.value.visible - .value.visible_captured) >= 20 and (.value.visible_captured * 2) < .value.visible)
@@ -1596,6 +1651,16 @@ if [ -f "$HW" ]; then
   fi
 fi
 DOCKER_POLICY_REPO=${DOTFILES_REPO:-$HD_ROOT}
+# The host's declared drop-in text; empty when it cannot be rendered, so the
+# template-only warnings fire as they always did.
+DOCKER_POSTURE_TEXT=
+if [ -r "$DOCKER_POLICY_REPO/lib/hygiene-posture.sh" ]; then
+  DOCKER_POSTURE_TEXT=$(
+    # shellcheck source=lib/hygiene-posture.sh
+    . "$DOCKER_POLICY_REPO/lib/hygiene-posture.sh" 2>/dev/null &&
+      hygiene_posture_render docker-hygiene service 2>/dev/null
+  ) || DOCKER_POSTURE_TEXT=
+fi
 docker_adoption_health \
   "$DOCKER_POLICY_REPO/lib/profile.sh" \
   "$HOME/.claude/scripts/docker-daemon-config.py" \
@@ -1605,7 +1670,8 @@ docker_adoption_health \
   /var/lib/dotfiles/docker-init-adoption.json \
   /var/lib/dotfiles/docker-init-adoption.original \
   /etc/docker/.daemon.json.dotfiles.lock \
-  /usr/bin/dockerd
+  /usr/bin/dockerd \
+  "$DOCKER_POSTURE_TEXT"
 [ "$WARNS" -eq "$w0" ] && ok "docker hygiene present and gate-wired; Docker init status reported above"
 
 echo "== 21. agent write amplification (SSD endurance) =="
@@ -1747,11 +1813,14 @@ fi
 # silently under an ok line (3 of 4 weekly runs to 2026-10-12 ran 7/131, 8/146
 # and 129/169 suites). node --test hands each test file its own stdin (node
 # 24.12.0), so the node loop's </dev/null and count check are a backstop.
-# Set HARNESS_DOCTOR_SKIP_TESTS=1 to opt out.
+# Opt-in: they run only with --with-tests (or HARNESS_DOCTOR_WITH_TESTS=1;
+# harness-weekly.sh passes the flag), and HARNESS_DOCTOR_SKIP_TESTS=1 wins.
 echo
 echo "-- harness test suites"
 if [ "${HARNESS_DOCTOR_SKIP_TESTS:-0}" = 1 ]; then
   ok "skipped (HARNESS_DOCTOR_SKIP_TESTS=1)"
+elif [ "$HD_WITH_TESTS" != 1 ]; then
+  ok "skipped: the test suites are opt-in; pass --with-tests (or HARNESS_DOCTOR_WITH_TESTS=1) to run them"
 else
   # Absolute, like SYNC/REPO_SETTINGS above. Deriving it from BASH_SOURCE would
   # hit the symlink trap: ~/.claude/scripts is a symlink into dotfiles, so a
@@ -2243,10 +2312,10 @@ EOF
   for _cs_x in $CLI_SUPERSEDES_EXCEPTIONS; do
     _cs_args+=(--exception "$_cs_x")
   done
-  for _cs_repo in "$HOME"/SITES/*/.mcp.json; do
+  for _cs_repo in "${SITES_REPOS[@]/%/.mcp.json}"; do
     [ -f "$_cs_repo" ] && _cs_args+=(--repo-mcp-json "$_cs_repo")
   done
-  for _cs_settings in "$HOME"/SITES/*/.claude/settings.json "$HOME"/SITES/*/.claude/settings.local.json; do
+  for _cs_settings in "${SITES_REPOS[@]/%/.claude/settings.json}" "${SITES_REPOS[@]/%/.claude/settings.local.json}"; do
     [ -f "$_cs_settings" ] && _cs_args+=(--repo-settings-json "$_cs_settings")
   done
   # The memory mirror is opt-in, as in section 4: scan it when it is named or
@@ -2255,7 +2324,7 @@ EOF
   if [ -n "${CLAUDE_MEMORY_MIRROR_ROOT:-}" ] || [ -d "$MEMORY_MIRROR" ]; then
     _cs_args+=(--doc-tree "$MEMORY_MIRROR")
   else
-    echo "  note: no memory mirror at $MEMORY_MIRROR, so the retired-MCP scan skips memory notes"
+    note "no memory mirror at $MEMORY_MIRROR, so the retired-MCP scan skips memory notes"
   fi
   _cs_out=$(python3 "$CLI_AUDIT" \
     --settings "$HOME/.claude/settings.json" \
