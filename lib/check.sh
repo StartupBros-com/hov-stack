@@ -128,11 +128,11 @@ manifest_check() {
       copy_src=${pair%%|*}
       copy_dst=${pair##*|}
       if [ -L "$windows_home/$copy_dst" ]; then
-        echo "$copy_src is deployed as a symlink at $windows_home/$copy_dst (Windows requires a real file; use install_manifest_links (lib/link.sh))"
+        echo "$copy_src is deployed as a symlink at $windows_home/$copy_dst (Windows requires a real file; use install_windows_copies (lib/windows.sh))"
       elif [ ! -f "$windows_home/$copy_dst" ]; then
-        echo "$copy_src is not deployed to $windows_home/$copy_dst (use install_manifest_links (lib/link.sh))"
+        echo "$copy_src is not deployed to $windows_home/$copy_dst (use install_windows_copies (lib/windows.sh))"
       elif ! cmp -s "$root/$copy_src" "$windows_home/$copy_dst"; then
-        echo "$copy_src differs from deployed $windows_home/$copy_dst (use install_manifest_links (lib/link.sh), or pull the live edit back into the repo)"
+        echo "$copy_src differs from deployed $windows_home/$copy_dst (use install_windows_copies (lib/windows.sh), or pull the live edit back into the repo)"
       fi
     done
   fi

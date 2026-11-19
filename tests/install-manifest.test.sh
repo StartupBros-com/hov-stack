@@ -285,11 +285,15 @@ printf 'live-only drift\n' >"$WINDOWS2/.wezterm.lua"
 out=$(manifest_check "$ROOT2" "$HOME2")
 check 'grep -q "windows/wezterm.lua differs" <<<"$out"' \
                                                                 "drifted WezTerm copy was not reported"
+check 'grep "windows/wezterm.lua differs" <<<"$out" | grep -qF "use install_windows_copies (lib/windows.sh)"' \
+                                                                "WezTerm drift hint does not name install_windows_copies, the function that deploys copies"
 cp "$ROOT2/windows/wezterm.lua" "$WINDOWS2/.wezterm.lua"
 rm "$WINDOWS2/.wslconfig"
 out=$(manifest_check "$ROOT2" "$HOME2")
 check 'grep -q "windows/.wslconfig is not deployed" <<<"$out"' \
                                                                 "missing Windows copy was not reported"
+check 'grep "windows/.wslconfig is not deployed" <<<"$out" | grep -qF "use install_windows_copies (lib/windows.sh)"' \
+                                                                "missing-copy hint does not name install_windows_copies"
 cp "$ROOT2/windows/.wslconfig" "$WINDOWS2/.wslconfig"
 
 # Windows cannot consume a WSL symlink even when it resolves to identical bytes.
@@ -298,6 +302,8 @@ ln -s "$ROOT2/windows/wezterm.lua" "$WINDOWS2/.wezterm.lua"
 out=$(manifest_check "$ROOT2" "$HOME2")
 check 'grep -q "windows/wezterm.lua.*symlink" <<<"$out"' \
                                                                 "symlinked WezTerm copy was not reported"
+check 'grep "windows/wezterm.lua.*symlink" <<<"$out" | grep -qF "use install_windows_copies (lib/windows.sh)"' \
+                                                                "symlinked-copy hint does not name install_windows_copies"
 rm "$WINDOWS2/.wezterm.lua"
 cp "$ROOT2/windows/wezterm.lua" "$WINDOWS2/.wezterm.lua"
 
