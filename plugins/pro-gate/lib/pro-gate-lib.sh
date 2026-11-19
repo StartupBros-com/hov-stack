@@ -2091,9 +2091,29 @@ pg_model_label() {
   esac
 }
 
-# pg_derive_model_warn <resolved-model> <selection-status>: compute the advisory downgrade
-# warning (R6), or echo nothing. Advisory only; the caller logs it and stores it in the status
-# file, and it never changes the exit code.
+# pg_model_evidence_record <runlog>: print Oracle's last "Model selection evidence:" record as one
+# line, or nothing. Oracle 0.23.1 copies ChatGPT's picker label verbatim, line break included, so
+# the record can go on past its first line: `...; resolvedLabel=Thinking effort` and then
+# `Pro; status=already-selected; ...` (#772). Up to three following lines are joined with a space
+# until one carries status=, the field after the label in every Oracle format. A line that opens
+# a new log record (`[browser] ...`, like the effort-picker line Oracle logs next) is never
+# joined. When no status= turns up, the first line is printed alone, as before #772.
+pg_model_evidence_record() {
+  [ -f "${1:-}" ] || return 0
+  awk '
+    /Model selection evidence:/ { rec = $0; out = $0; n = 0; open = (index($0, "status=") == 0); next }
+    open && /^\[/ { open = 0 }
+    open { rec = rec " " $0; n++; if (index($0, "status=")) { out = rec; open = 0 } else if (n >= 3) open = 0 }
+    END { if (out != "") print out }
+  ' "$1" 2>/dev/null
+}
+
+# pg_derive_model_warn <resolved-model> <selection-status> [evidence-state]: compute the advisory
+# downgrade warning (R6), or echo nothing. Advisory only; the caller logs it and stores it in the
+# status file, and it never changes the exit code.
+#   - evidence-state no-label-field (Oracle printed an evidence line with neither resolvedLabel=
+#     nor resolved=) -> format-change warning, ahead of every case below: a status= that line
+#     still carries would otherwise read as the benign already-selected run (#772)
 #   - a captured model matching the weak-model denylist (cheap markers) -> weak-model warning
 #   - a captured non-weak model -> no warning
 #   - NO captured model but oracle reported status=already-selected -> BENIGN, no warning: under
@@ -2106,7 +2126,11 @@ pg_model_label() {
 # The denylist (not a Pro-tier allowlist) is deliberate: an allowlist would false-warn on a
 # legitimate future top model whose name lacks "Pro" (e.g. a hypothetical "Sol Ultra").
 pg_derive_model_warn() {
-  local m="${1:-}" st="${2:-}" weak
+  local m="${1:-}" st="${2:-}" evidence="${3:-}" weak
+  if [ "$evidence" = no-label-field ]; then
+    printf '%s\n' "oracle's model-evidence line carries neither resolvedLabel= nor resolved=, so its format may have changed; showing role-based text"
+    return 0
+  fi
   weak="${PRO_GATE_MODEL_WEAK_PATTERN:-mini|nano|instant}"
   if [ -n "$m" ]; then
     grep -qiE "$weak" <<<"$m" 2>/dev/null \

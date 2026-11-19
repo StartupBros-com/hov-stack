@@ -560,6 +560,36 @@ PRO_GATE_ORACLE_BIN="$TDIR/missing-oracle" PRO_GATE_TIMEOUT_BIN="$TDIR/missing-t
 check "doctor reports configured oracle missing" grep -q "configured oracle command missing: $TDIR/missing-oracle" "$TDIR/doctor-missing-bin.log"
 check "doctor reports configured timeout missing" grep -q "configured timeout command missing: $TDIR/missing-timeout" "$TDIR/doctor-missing-bin.log"
 
+# #772: the doctor reads the Oracle build once, under the engine's version-read limit, and never
+# calls a build it could not read up to date. A fake npm answers the registry lookup offline.
+VERSION_NPM_DIR="$TDIR/doctor-version-npm"; mkdir -p "$VERSION_NPM_DIR"
+cat > "$VERSION_NPM_DIR/npm" <<'EOF'
+#!/usr/bin/env bash
+[ "$*" = 'view @steipete/oracle version' ] && { printf '0.23.1\n'; exit 0; }
+exit 1
+EOF
+cat > "$TDIR/oracle-current" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$ORACLE_CALLS"
+printf '0.23.1\n'
+EOF
+# exec, so timeout(1) signals the sleeper itself; an orphaned child would hold the pipe open.
+printf '#!/usr/bin/env bash\nexec sleep 30\n' > "$TDIR/oracle-stalled"
+chmod +x "$VERSION_NPM_DIR/npm" "$TDIR/oracle-current" "$TDIR/oracle-stalled"
+run_version_doctor() { # oracle-bin output
+  PATH="$VERSION_NPM_DIR:$PATH" ORACLE_CALLS="$TDIR/oracle-current.calls" PRO_GATE_ORACLE_BIN="$1" \
+    PRO_GATE_ORACLE_VERSION_TIMEOUT=1 PRO_GATE_HOME="$RUNTIME3" PRO_GATE_EXPECTED_VERSION="$VERSION" \
+    PRO_GATE_CONSENT_HOME="$CONSENT3" PRO_GATE_BROWSER_MODE=native \
+    bash "$ROOT/bin/pro-gate-doctor.sh" >"$2" 2>&1 || true
+}
+: > "$TDIR/oracle-current.calls"
+run_version_doctor "$TDIR/oracle-current" "$TDIR/doctor-oracle-current.log"
+check "doctor calls a read build that matches npm latest up to date" grep -q 'oracle up to date (0.23.1 = npm latest)' "$TDIR/doctor-oracle-current.log"
+check "doctor reads the oracle version once" test "$(grep -c -x -- '--version' "$TDIR/oracle-current.calls")" -eq 1
+run_version_doctor "$TDIR/oracle-stalled" "$TDIR/doctor-oracle-stalled.log"
+check "doctor never calls an unread oracle build up to date" bash -c '! grep -q "oracle up to date" "$1"' _ "$TDIR/doctor-oracle-stalled.log"
+check "doctor says the oracle version could not be read in time" grep -q 'printed no version within 1s' "$TDIR/doctor-oracle-stalled.log"
+
 # The distribution lookup is advisory, but it must be exact and bounded: a
 # broken network/CLI can never hold the doctor open or invent a skew warning.
 DOCTOR_GH_HOME="$TDIR/doctor-gh-home"; DOCTOR_GH_BIN="$DOCTOR_GH_HOME/.local/bin/gh"
