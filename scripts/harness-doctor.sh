@@ -564,8 +564,9 @@ done)
 # The hook commands of every enabled, user-scope plugin's hooks/hooks.json.
 # papercut@hov runs papercut-log, read-ceiling-chunk and structured-output-unwrap
 # this way, from its copies under plugins/papercut (scripts/papercut-vendor.py
-# first built them out of these files; since #339 they are edited in place and
-# nothing checks that the two stay equal), and sync.sh retires the
+# first built them out of these files; since #339 they are edited in place, and
+# hooks/tests/papercut-parity.test.js holds papercut-log's two copies to the
+# same answers), and sync.sh retires the
 # settings.json copies, so settings.json never names them on a plugin host.
 _hook_registry=${CLAUDE_INSTALLED_PLUGINS:-$HOME/.claude/plugins/installed_plugins.json}
 _plugin_hook_cmds=""

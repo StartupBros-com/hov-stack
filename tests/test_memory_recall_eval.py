@@ -455,12 +455,10 @@ class SampleTests(unittest.TestCase):
 
 
 class HookRetireTests(unittest.TestCase):
-    """The memory-access ledger hook was retired in dotfiles#1429: one writer, no reader. It must be gone
-    from the canonical settings, and the path a session cached before the retirement must do nothing.
-    The reconcile verb that took it out of live files was deleted in hov-stack #479, once no host
-    registered it."""
-
-    STUB = CLAUDE / "scripts" / "memory-access-log.py"
+    """The memory-access ledger hook was retired in dotfiles#1429: one writer, no reader. It must stay
+    gone from the canonical settings. The reconcile verb that took it out of live files was deleted in
+    hov-stack #479, once no host registered it, and the no-op stub left at its old path for sessions
+    that had cached it was deleted after its 2026-10-06 expiry (hov-stack#774)."""
 
     def test_canonical_settings_carry_no_memory_access_hook(self):
         settings = json.loads((CLAUDE / "settings.json").read_text())
@@ -472,22 +470,6 @@ class HookRetireTests(unittest.TestCase):
         ]
         self.assertTrue(commands)  # precondition: the canonical file registers hooks at all
         self.assertEqual([c for c in commands if "memory-access-log" in c], [])
-
-    def test_retired_hook_path_writes_nothing(self):
-        # The payload the old hook logged: a Read of a memory note, with the ledger path overridden.
-        with tempfile.TemporaryDirectory() as temp:
-            ledger = Path(temp) / "access.jsonl"
-            payload = json.dumps({
-                "session_id": "sess-1",
-                "tool_input": {"file_path": "/home/x/.claude/projects/-home-x-proj/memory/note_a.md"},
-            })
-            result = subprocess.run(
-                ["python3", str(self.STUB)], input=payload, text=True, capture_output=True, check=False,
-                env={"PATH": "/usr/bin:/bin", "HOME": temp, "MEMORY_ACCESS_LEDGER": str(ledger)},
-            )
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertFalse(ledger.exists())
-            self.assertEqual(list(Path(temp).iterdir()), [])  # nothing written anywhere under HOME
 
 
 if __name__ == "__main__":

@@ -70,7 +70,7 @@ These carry a `# TEMPLATE:` header at the top that lists the lines to change. "N
 
 | Unit | Timer schedule | Lines the header lists | Notes |
 | --- | --- | --- | --- |
-| `backup-harness` | `OnCalendar=*-*-* 03:30:00` | 17: `Environment=DOTFILES=<clone path>` | Uncomment and set it; the script defaults to `~/dotfiles`, and the clone needs an origin to push to. Opt-in: the script refuses a public origin, and `./setup --enable-units` never enables the timer (it disables it on a satellite). Skip it if something else already backs up `~/.claude/projects` |
+| `backup-harness` | `OnCalendar=*-*-* 03:30:00` | 17: `Environment=DOTFILES=<clone path>` | Uncomment and point it at a clone of this repository whose origin is private. The script defaults to the checkout it lives in, refuses a public origin, and exits unless the checkout has `sync.sh` at its root, so a checkout of some other private repository fails too. Opt-in: `./setup --enable-units` never enables the timer (it disables it on a satellite). Skip it if something else already backs up `~/.claude/projects` |
 | `disk-watermark` | `OnCalendar=*-*-* *:23:00` | 26: `WARN_PCT=90` | Tuned to the author's `/mnt/c` drive; the script's own default is 85. Hourly, but it alerts only on a breach that is new or worse than at its last alert (state in `~/.local/state/hov-stack/disk-watermark/`) |
 | `docker-hygiene` | `OnCalendar=*-*-* 01:50:00` | nothing | Ships plan-only |
 | `reclaim-sweep` | `OnCalendar=Fri *-*-* 02:05:00` | nothing | Ships plan-only |
