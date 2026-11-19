@@ -84,6 +84,13 @@ def shipped_elsewhere(root):
     return found
 
 
+def builtin_slash_commands():
+    """The built-in command names harness-doctor section 7 warns on, read from the doctor itself."""
+    text = (CLAUDE / "scripts" / "harness-doctor.sh").read_text()
+    match = re.search(r'^BUILTIN_SLASH_COMMANDS="([^"]*)"$', text, re.MULTILINE)
+    return set(match.group(1).split()) if match else set()
+
+
 def licence_files(skill):
     return sorted(p for p in skill.iterdir() if p.is_file() and LICENCE_FILE.match(p.name))
 
@@ -277,6 +284,15 @@ class SkillPackTests(unittest.TestCase):
                 (root / "plugins" / plugin / "skills" / "x").mkdir(parents=True)
                 (root / "plugins" / plugin / "skills" / "x" / "SKILL.md").write_text("---\nname: x\n---\n")
             self.assertEqual(shipped_elsewhere(root), {"x": ["other"]})
+
+    def test_no_linked_skill_takes_a_built_in_command_name(self):
+        # ./setup links every pack and skills-stack skill into ~/.claude/skills by its
+        # directory name, so a skill named like a built-in shadows it there; the doctor
+        # warned on the pack's own `verify` until it became verify-phases.
+        builtins = builtin_slash_commands()
+        self.assertTrue({"verify", "doctor", "review"} <= builtins, "doctor's built-in list did not parse")
+        names = {p.name for p in skills()} | {p.name for p in stack_skills() if p.is_dir()}
+        self.assertEqual(sorted(names & builtins), [], "skills named like a built-in slash command")
 
     def test_skill_name_pattern_rejects_a_planted_bad_name(self):
         # SKILL_NAME is the guard above; prove it refuses what it should.

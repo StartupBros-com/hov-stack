@@ -1,12 +1,12 @@
 ---
-name: verify
+name: verify-phases
 description: Run sequential verification phases (format → lint → typecheck, +test/audit/status) with project auto-detection and stop-on-failure.
 argument-hint: "[quick|full|pre-pr]  (default: standard — format + lint + typecheck)"
 disable-model-invocation: true
 allowed-tools: Bash, Read, Grep
 ---
 
-# Verify
+# Verify phases
 
 Run verification phases against the current project. Detect the project type automatically, run the appropriate tools, stop on first failure.
 
@@ -118,5 +118,5 @@ If a phase fails, show the relevant error output immediately after the summary s
 - **Never** run `pnpm build` as part of standard verify — it's slow and not needed for code quality checks. Only typecheck matters.
 - If the project has no relevant tooling for a phase, **skip it silently** — don't install anything.
 - Run format BEFORE lint — formatting fixes prevent false lint failures.
-- Use the `--filter` flag if the user passes it (e.g., `/verify --filter acme-app`).
+- Use the `--filter` flag if the user passes it (e.g., `/verify-phases --filter acme-app`).
 - Respect timeouts: 60s for format/lint, 120s for typecheck, 300s for tests.
