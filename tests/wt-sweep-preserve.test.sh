@@ -17,7 +17,8 @@
 #      another project: the one it launched from, after EnterWorktree, `git -C` or
 #      `cd`. In one repo, 31 worktrees were of this kind on 2026-11-03.
 #
-#   Each fix has a planted negative: a done job, a reused pid and an old transcript
+#   Each fix has a planted negative: a done job past its resumable window
+#   (hov-stack#793), a reused pid and an old transcript
 #   must NOT hold a worktree (or nothing would ever be swept); nor may a tool result
 #   or the text a tool writes that names it, or an ended session's transcript; a
 #   copy that cannot be made, a pin that cannot be written, and a missing helper
@@ -107,12 +108,14 @@ out=$(sweep "$TMP/jobwork" 0 "$H")
 kept "working job: worktree kept" "$WT"
 has "working job: skip names the job" "$out" 'skip (Claude session: job j1 "idle ideation" is working)'
 
-# --- 3. PLANTED NEGATIVE: the same job, done, only warns -------------------------
+# --- 3. PLANTED NEGATIVE: the same job, done and past its resumable window, only
+#        warns (inside the window it holds: hov-stack#793, wt-session-hold-resumable)
 mkfix jobdone
 H="$TMP/h-jobdone"; WT="$TMP/jobdone/repo-wt"
 mkdir -p "$H/jobs/j2"
-printf '{"state":"done","name":"finished","cwd":"%s","linkScanPath":"%s"}\n' \
-  "$TMP/jobdone/repo" "$H/projects/$(slug "$WT")/s2.jsonl" >"$H/jobs/j2/state.json"
+printf '{"state":"done","name":"finished","cwd":"%s","linkScanPath":"%s","lastTerminalAt":"%s"}\n' \
+  "$TMP/jobdone/repo" "$H/projects/$(slug "$WT")/s2.jsonl" \
+  "$(date -u -d '-30 hours' +%Y-%m-%dT%H:%M:%S.000Z)" >"$H/jobs/j2/state.json"
 out=$(sweep "$TMP/jobdone" 0 "$H")
 gone "done job: worktree removed" "$WT"
 has "done job: warned as resumable" "$out" 'resumable: job j2 "finished" is done'

@@ -381,7 +381,7 @@ close_one() {
   # mutation. From inside, the caller is the session that holds it, and nothing is
   # removed anyway. The caller's own session never counts: its transcript names
   # the worktree it is closing out (hov-stack#394).
-  local hold
+  local hold l
   if ! run_from_inside "$wt"; then
     if hold=$(wt_session_hold "$wt" "${CLAUDE_CODE_SESSION_ID:-}" "$IDLE_HOURS"); then
       case $hold in
@@ -389,7 +389,7 @@ close_one() {
         *) echo "      => REFUSE (a Claude session holds this worktree: $hold)"; return 1 ;;
       esac
     fi
-    [ -n "$hold" ] && printf '%s\n' "$hold" | sed 's/^/      ~ /'
+    [ -n "$hold" ] && while IFS= read -r l; do echo "      ~ $l"; done <<<"$hold"
   fi
 
   # A lock left by a killed git probe (a 0-byte index.lock, a ref lock) would
