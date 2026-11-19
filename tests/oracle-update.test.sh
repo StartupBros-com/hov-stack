@@ -24,6 +24,9 @@ case ${1:-} in
   [ -n "$spec" ] || exit 91
   if [ -f "$FAKE_DIR/offline-miss" ]; then for arg in "$@"; do [ "$arg" != --offline ] || exit 1; done; fi
   if [ -f "$FAKE_DIR/restore-fails" ] && [ "$spec" = 0.23.1 ]; then exit 1; fi
+  if [ -f "$FAKE_DIR/rollback-blocks" ] && [ "$spec" = 0.23.1 ] && [ "$gdir" = "$FAKE_LIVE" ]; then
+   touch "$FAKE_DIR/in-rollback"; sleep 30
+  fi
   if [ -f "$FAKE_DIR/promote-blocks" ] && [ "$spec" = 0.24.0 ] && [ "$gdir" = "$FAKE_LIVE" ]; then
    rm "$FAKE_DIR/promote-blocks"; touch "$FAKE_DIR/late-install"
   fi
@@ -61,7 +64,7 @@ case $1 in
   shift; [ "$1" = -- ] || exit 97; shift
   deadline=$(($(date +%s)+${FAKE_HOLD_LEFT:-3000})); echo "deadline $deadline" >> "$FAKE_DIR/gate.log"
   [ ! -f "$FAKE_DIR/no-deadline" ] || deadline=''
-  echo "$$" > "$FAKE_DIR/gate.pid"
+  echo "$$" > "$FAKE_DIR/gate.pid"; echo "$PPID" > "$FAKE_DIR/updater.pid"
   # As in the real hold: timeout runs the command in its own process group, and an
   # interrupt to the hold goes to timeout as TERM, which timeout sends to that group.
   PRO_GATE_BUMP_HOLD=1 PRO_GATE_BUMP_DEADLINE=$deadline timeout -k 15 120 "$@" & held=$!
@@ -224,10 +227,10 @@ check 'late pass never installs live' test "$(version)" = 0.23.1
 check 'late pass holds nothing' test ! -e "$C/state/hold"
 # An interrupt to the hold reaches the held phase through timeout's process group.
 interrupt() {
- local marker=$1
- ( run; echo "$rc" > "$C/rc" ) & local lane=$!
+ local marker=$1 who=${2:-gate}; shift 2 2>/dev/null || shift
+ ( run "$@"; echo "$rc" > "$C/rc" ) & local lane=$!
  local n=0; while [ ! -e "$C/fake/$marker" ] && [ "$n" -lt 200 ]; do sleep 0.05; n=$((n+1)); done
- kill -TERM "$(cat "$C/fake/gate.pid")"
+ kill -TERM "$(cat "$C/fake/$who.pid")"
  wait "$lane"; rc=$(cat "$C/rc")
 }
 new_case trial-interrupt; touch "$C/fake/trial-blocks"; interrupt in-trial
@@ -243,6 +246,27 @@ check 'interrupted promotion holds the candidate' test "$(cat "$C/state/hold" 2>
 sleep 4
 check 'interrupted pnpm never finished its install' test ! -e "$C/fake/late-install-finished"
 check 'interrupted promotion leaves the previous version live' test "$(version)" = 0.23.1
+# PLANTED NEGATIVE: TERM to the updater itself, not its process group, still stops the
+# promotion and restores the previous version before the updater exits.
+new_case updater-interrupt; touch "$C/fake/promote-blocks"; interrupt in-promote updater
+check 'updater TERM exits 1' test "$rc" = 1
+check 'updater TERM restores during promotion' jq -e '.outcome=="interrupted-restored"' "$C/state/status.json"
+check 'updater TERM holds the candidate' test "$(cat "$C/state/hold" 2>/dev/null)" = 0.24.0
+sleep 4
+check 'updater TERM stops the install' test ! -e "$C/fake/late-install-finished"
+check 'updater TERM leaves the previous version live' test "$(version)" = 0.23.1
+new_case updater-trial-interrupt; touch "$C/fake/trial-blocks"; interrupt in-trial updater
+check 'updater TERM during the trial exits 1' test "$rc" = 1
+check 'updater TERM during the trial status' jq -e '.outcome=="interrupted" and .detail=="interrupted by TERM during the trial"' "$C/state/status.json"
+check 'updater TERM during the trial leaves live' test "$(version)" = 0.23.1
+# TERM to a rollback updater reaches the held rollback, which stops before it reinstalls.
+new_case rollback-interrupt; run
+check 'rollback-interrupt setup passes' test "$rc" = 0
+touch "$C/fake/rollback-blocks"; interrupt in-rollback updater --rollback
+check 'updater TERM during rollback exits 1' test "$rc" = 1
+check 'updater TERM during rollback is recorded' jq -e '.outcome=="interrupted" and .detail=="interrupted by TERM before the held run recorded an outcome"' "$C/state/status.json"
+check 'updater TERM during rollback leaves the bumped version live' test "$(version)" = 0.24.0
+check 'updater TERM during rollback keeps the gated record' jq -e '.origin=="gate" and .version=="0.24.0"' "$C/state/verified-version.json"
 new_case locked; mkdir -p "$C/state"
 (exec 9>"$C/state/lock"; flock 9; touch "$C/ready"; exec sleep 20) & holder=$!
 while [ ! -e "$C/ready" ]; do sleep 0.05; done

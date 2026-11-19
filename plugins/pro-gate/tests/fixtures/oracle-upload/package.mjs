@@ -91,6 +91,8 @@ export async function call(name,...args){
  if(name==='assembleBrowserPrompt' && scenario==='slow-assemble') await new Promise(resolve=>setTimeout(resolve,400));
  if(name==='assembleBrowserPrompt') return {attachmentMode:'upload',composerText:'not typed',attachments:[{path:args[0].file[0],sizeBytes:100}]};
  if(name==='installJavaScriptDialogAutoDismissal') return ()=>{};
+ if(name==='isAttachmentVisible' && scenario==='chip-gone') return false;
+ if(name==='isAttachmentVisible' && scenario==='probe-error') throw Error('probe failed');
  if(name==='withRetries') return args[0]();
  if(name==='delay') return;
  if(name==='ensureNotBlocked' && scenario==='blocked') throw Error('ChatGPT blocked');

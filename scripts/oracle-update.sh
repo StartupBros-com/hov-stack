@@ -197,6 +197,43 @@ on_signal() {
   echo "oracle-update: interrupted by $1" >&2
   exit 1
 }
+# hold_run <cmd...>: run the gate's hold as a tracked child. A signal sent to this updater
+# alone (kill <pid>, not the terminal's whole group) is forwarded to the gate, which passes
+# it to the held command; the updater then waits until the held run has recorded its outcome.
+HOLD_PID='' HOLD_RC=0 GOT=''
+# shellcheck disable=SC2329 # invoked by the traps in hold_run
+forward_hold() { GOT=$1; [ -z "$HOLD_PID" ] || kill -TERM "$HOLD_PID" 2>/dev/null; }
+hold_run() {
+  "$GATE" hold -- "$@" &
+  HOLD_PID=$!
+  trap 'forward_hold INT' INT
+  trap 'forward_hold TERM' TERM
+  trap 'forward_hold HUP' HUP
+  while :; do
+    wait "$HOLD_PID"
+    HOLD_RC=$?
+    # A trapped signal ends wait early, with the hold still running.
+    kill -0 "$HOLD_PID" 2>/dev/null || break
+  done
+  trap - INT TERM HUP
+  HOLD_PID=''
+}
+# after_hold <what>: map the hold's exit and the held run's record to this run's result.
+after_hold() {
+  local outcome
+  outcome=$(jq -r '.outcome' "$STATUS" 2>/dev/null) || outcome=''
+  if [ -n "$GOT" ]; then
+    if [ "$outcome" = running ] || [ -z "$outcome" ]; then
+      write_status interrupted "interrupted by $GOT before the held run recorded an outcome"
+    fi
+    echo "oracle-update: interrupted by $GOT" >&2
+    exit 1
+  fi
+  if [ "$HOLD_RC" = 4 ]; then write_status deferred 'review capacity busy' || fail 'cannot record deferral'; exit 0; fi
+  if [ "$outcome" = running ] || [ -z "$outcome" ]; then write_status failed "$1 ended without an outcome (exit $HOLD_RC)"; exit 1; fi
+  [ "$HOLD_RC" = 0 ] || exit 1
+  exit 0
+}
 held_phase() {
   local run_dir rc reason live_digest gate install_ok=1 left
   PREVIOUS=$INSTALLED
@@ -291,13 +328,8 @@ if [ "$MODE" = rollback ]; then
   # Re-enter under hold; the marker is set only by the gate, and the lane fd remains open.
   if [ "${ORACLE_UPDATE_ROLLBACK_HELD:-}" != 1 ]; then
     write_status running 'rollback waiting for the review hold' || fail 'cannot record start'
-    "$GATE" hold -- env DRY_RUN=0 ORACLE_UPDATE_ROLLBACK_HELD=1 "$SELF" --rollback
-    rc=$?
-    if [ "$rc" = 4 ]; then write_status deferred 'review capacity busy' || fail 'cannot record deferral'; exit 0; fi
-    outcome=$(jq -r '.outcome' "$STATUS" 2>/dev/null) || outcome=''
-    if [ "$outcome" = running ] || [ -z "$outcome" ]; then write_status failed "rollback hold ended without an outcome (exit $rc)"; exit 1; fi
-    [ "$rc" = 0 ] || exit 1
-    exit 0
+    hold_run env DRY_RUN=0 ORACLE_UPDATE_ROLLBACK_HELD=1 "$SELF" --rollback
+    after_hold 'rollback hold'
   fi
   # The child is already protected by the parent's lane lock. Never attempt a second flock.
   replaced=$INSTALLED
@@ -329,10 +361,5 @@ DIGEST=$(dist_digest "$STAGED") || fail 'cannot digest staged dist'
 # clean its scratch directory. fd 9 stays open through both hold and the held phase.
 # "running" marks this run, so an earlier run's outcome is never read as this one's.
 write_status running 'waiting for the review hold' || fail 'cannot record start'
-"$GATE" hold -- "$SELF" --held-phase "$CANDIDATE" "$STAGED" "$DIGEST"
-rc=$?
-if [ "$rc" = 4 ]; then write_status deferred 'review capacity busy' || fail 'cannot record deferral'; exit 0; fi
-outcome=$(jq -r '.outcome' "$STATUS" 2>/dev/null) || outcome=''
-if [ "$outcome" = running ] || [ -z "$outcome" ]; then write_status failed "hold ended without an outcome (exit $rc)"; exit 1; fi
-[ "$rc" = 0 ] || exit 1
-exit 0
+hold_run "$SELF" --held-phase "$CANDIDATE" "$STAGED" "$DIGEST"
+after_hold hold

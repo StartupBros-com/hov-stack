@@ -354,6 +354,8 @@ for (const scenario of [
   "no-signal",
   "sticky-close",
   "stuck-tab",
+  "chip-gone",
+  "probe-error",
 ])
   test("fake CDP end to end: " + scenario, (t) => {
     const { dir, root } = fixture(t),
@@ -427,6 +429,16 @@ for (const scenario of [
       assert.equal(s.counted, 1);
       assert.equal(s.failures, 1);
       assert.equal(s.stopped, "failures");
+    }
+    // PLANTED NEGATIVE: an upload whose chip is gone by cleanup, or whose final probe
+    // fails, is a failure even when every network response succeeded.
+    if (["chip-gone", "probe-error"].includes(scenario)) {
+      assert.equal(s.counted, 1);
+      assert.equal(s.failures, 1);
+      assert.equal(s.stopped, "failures");
+      assert.deepEqual(s.outcomes, {
+        [scenario === "chip-gone" ? "chip-gone" : "chip-unverified"]: 1,
+      });
     }
     if (scenario === "pre-error") {
       assert.equal(s.counted, 0);
@@ -536,6 +548,43 @@ for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"])
       JSON.parse(readFileSync(path.join(out, "summary.json"))).broken,
       signal,
     );
+  });
+// A review queued for a slot the bump holds shows only its wrapper; the processes that
+// drive the browser are Oracle and the salvage helper.
+for (const [name, busy, overlaps] of [
+  ["a queued review wrapper", "oracle-review\\.sh", false],
+  ["Oracle", "oracle-cli\\.js", true],
+  // PLANTED NEGATIVE: harvest and recovery drive the browser through the salvage helper
+  // without a slot, so it counts even with no review wrapper running.
+  ["the salvage helper", "cdp-salvage\\.mjs", true],
+])
+  test("review overlap: " + name + (overlaps ? " counts" : " does not count"), (t) => {
+    const { dir, root } = fixture(t),
+      bin = path.join(dir, "bin"),
+      out = path.join(dir, "out"),
+      calls = path.join(dir, "calls");
+    mkdirSync(bin);
+    writeFileSync(calls, "");
+    writeFileSync(
+      path.join(bin, "pgrep"),
+      `#!/bin/sh\n[ "$2" = '${busy}' ] && { echo 1; exit 0; }\nexit 1\n`,
+      { mode: 0o755 },
+    );
+    const r = invoke(
+      ["run", "--oracle-root", root, "--out", out, "--count", "2", "--gap-ms", "0"],
+      { FAKE_SCENARIO: "chip", FAKE_CALLS: calls, PATH: bin + ":" + process.env.PATH },
+    );
+    assert.equal(r.status, 0, r.stderr + r.stdout);
+    const s = JSON.parse(readFileSync(path.join(out, "summary.json")));
+    if (overlaps) {
+      assert.equal(s.counted, 0);
+      assert.equal(s.stopped, "inconclusive");
+      assert.equal(readFileSync(calls, "utf8").includes("connectToRemoteChrome"), false);
+    } else {
+      assert.equal(s.counted, 2);
+      assert.equal(s.failures, 0);
+      assert.equal(s.inconclusive, 0);
+    }
   });
 // PLANTED NEGATIVE: a signal that lands before the trial's race starts still stops it
 // before it opens a tab.

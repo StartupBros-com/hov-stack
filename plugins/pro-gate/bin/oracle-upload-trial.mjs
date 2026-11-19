@@ -365,9 +365,13 @@ function pcount(pattern) {
     ),
   );
 }
+// The processes that drive the review browser: Oracle itself, and the salvage helper that
+// harvest, recovery, reservation probes, tab sweeps and the conversation organizer run,
+// several of them without a review slot. A review wrapper waiting for a slot the bump
+// holds runs neither until it is admitted, so it does not count as overlap.
 async function reviewInFlight() {
   const counts = await Promise.all(
-    ["oracle-review\\.sh", "oracle-cli\\.js"].map(pcount),
+    ["oracle-cli\\.js", "cdp-salvage\\.mjs"].map(pcount),
   );
   return { active: counts.some((n) => n !== 0), counts };
 }
@@ -944,6 +948,14 @@ async function run(options) {
                     )
                     .catch(() => null),
                 );
+                // The completion helper can return after the chip is gone. Only a chip
+                // still in the composer at cleanup passes; a probe that cannot tell fails,
+                // like any other error after upload start.
+                if (r.visibleBeforeClear !== true)
+                  r.outcome =
+                    r.visibleBeforeClear === false
+                      ? "chip-gone"
+                      : "chip-unverified";
                 await step(() =>
                   pa.clearComposerAttachments(Runtime, 5000, logger),
                 );

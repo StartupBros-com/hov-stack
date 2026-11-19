@@ -714,10 +714,13 @@ testing and promotion, with a budget capped at `PRO_GATE_LOCK_WAIT - 300` second
 trials stop 720 seconds before the budget ends so promotion has time; when too little
 budget is left the bump defers.
 
-A trial counts when it reached upload start with no review overlap. Pre-upload errors,
+A trial counts when it reached upload start with no review overlap: neither Oracle
+(`oracle-cli.js`) nor the salvage helper (`cdp-salvage.mjs`) running before or after it. A
+review waiting for a slot the bump holds runs neither, so it is not overlap. Pre-upload errors,
 harness errors and overlaps are inconclusive and do not count. Up to three are replaced;
 more than three make the run inconclusive and defer the bump. A drop, any other error after
-upload start, a double upload, or a chip without the network signal counts as a failure.
+upload start, a double upload, a chip gone (or not confirmed) by cleanup, or a chip without
+the network signal counts as a failure.
 The signal is a 2xx file create, blob PUT and finalize before cleanup.
 
 | Result                                                                                                         | Verdict                       |
@@ -749,8 +752,9 @@ A successful bump records the versions, verification date and gate counts in
 compares it with the installed version. `DRY_RUN=0 scripts/oracle-update.sh --rollback`
 reinstalls the recorded previous version under the same review hold and holds the version
 it replaced. Its record says the version came from a rollback, and the doctor warns that
-the gate did not trial it. A rollback never reinstalls a held version. An interrupt during
-promotion holds the candidate and tries to reinstall the previous version. Rejections hold
+the gate did not trial it. A rollback never reinstalls a held version. Ctrl-C, or TERM or HUP
+to the updater itself, reaches the held run, and the updater waits for its outcome. An
+interrupt during promotion holds the candidate and tries to reinstall the previous version. Rejections hold
 only that candidate; a successful newer bump clears the hold.
 
 ## Safety and scale
