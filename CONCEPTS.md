@@ -267,11 +267,15 @@ A red deciding run that the runner fleet produced rather than a test: no suite j
 
 The vocabulary for the scheduled sweep that removes agent worktrees once their work has shipped or been saved.
 
+### Resumable job
+
+A Claude Code background job whose state file says `done`. The word marks the end of its latest turn, not of the job: it is waiting for its user, who can resume it into the same worktree and scratch directory. Its last turn is dated by `lastTerminalAt`, never by when the state file was written, because that file is rewritten while the job does nothing. The worktree sweep reads it through Session hold, and reclaim-sweep reads it before reclaiming a job's scratch.
+
 ### Session hold
 
 The sweep's refusal to remove a worktree that a Claude Code session is driving or recently drove. It is judged from what sessions record, because a session can drive a worktree without a process or lock inside it.
 
-A running background job, a live session working inside the worktree, and a recently written transcript that names it all hold it. A finished background job holds only the worktree it is bound to, and only for a window after its last turn. Its process and any worktree lock are gone by then, but the job is at rest, not over: its user can resume it into that worktree. Two kinds of hold lapse through Idle release: one that rests only on old transcript mentions, and one from an unfinished job that has no running session and whose state has not changed for the window. The others do not.
+A running background job, a live session working inside the worktree, and a recently written transcript that names it all hold it. A Resumable job holds only the worktree it is bound to, and only for a window after its last turn. Its process and any worktree lock are gone by then, but the job is at rest, not over: its user can resume it into that worktree. Two kinds of hold lapse through Idle release: one that rests only on old transcript mentions, and one from an unfinished job that has no running session and whose state has not changed for the window. The others do not.
 
 ### Idle release
 
