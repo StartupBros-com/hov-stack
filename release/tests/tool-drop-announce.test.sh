@@ -1740,6 +1740,8 @@ pass "derive-before-no-ops mutant refuses a draft release with the planted tag, 
 # bare REPOSITORY name that any repository can share.
 # ---------------------------------------------------------------------------
 PRODUCT_FULL_NAME='StartupBros/hov-router'
+PRODUCT_NEW_FULL_NAME='StartupBros-com/hov-router'
+PRODUCT_FULL_NAMES=("$PRODUCT_FULL_NAME" "$PRODUCT_NEW_FULL_NAME")
 PRODUCT_REPO_ID='1278801682'
 PRODUCT_NAME='hov-router'
 PRODUCT_TAG='v3.7.1'
@@ -1785,9 +1787,27 @@ assert_one_bound_request '["notesSummary","operation","releaseId","repository"]'
 [[ "$(<"$BODY_FILE")" == "$PRODUCT_BODY" ]] || die "edited product request body drifted"
 pass "an edited product release announces too"
 
+# The repository moves from the StartupBros user to the StartupBros-com
+# organization keeping its id, so the new owner announces exactly like the old.
+if ! run_product "$PRODUCT_TAG" "$PRODUCT_NEW_FULL_NAME" "$PRODUCT_REPO_ID"; then
+  command cat "$TMP/run-output" >&2
+  die "new-owner product release fixture"
+fi
+assert_one_bound_request '["notesSummary","operation","releaseId","repository"]'
+[[ "$(<"$BODY_FILE")" == "$PRODUCT_BODY" ]] || die "new-owner product request body did not carry repository=hov-router and the release id"
+pass "a latest-stable $PRODUCT_TAG release of $PRODUCT_NEW_FULL_NAME with repository id $PRODUCT_REPO_ID announces as hov-router"
+
+if ! run_product "$PRODUCT_TAG" "$PRODUCT_NEW_FULL_NAME" "$PRODUCT_REPO_ID" false false "$PRODUCT_RELEASE_ID" edited; then
+  command cat "$TMP/run-output" >&2
+  die "edited new-owner product release fixture"
+fi
+assert_one_bound_request '["notesSummary","operation","releaseId","repository"]'
+[[ "$(<"$BODY_FILE")" == "$PRODUCT_BODY" ]] || die "edited new-owner product request body drifted"
+pass "an edited new-owner product release announces too"
+
 # Planted: the same bare name under another owner is never a product, even when
 # it copies the real repository id. It takes the plugin path and fails there.
-for impostor in StartupBros-com/hov-router another-owner/hov-router; do
+for impostor in another-owner/hov-router StartupBros-com-fork/hov-router; do
   if run_product "$PRODUCT_TAG" "$impostor" "$PRODUCT_REPO_ID"; then
     die "$impostor announced as a product"
   fi
@@ -1807,24 +1827,28 @@ pass "a caller without GITHUB_REPOSITORY takes the plugin path"
 
 # Planted: the right full name with a different repository id is a deleted and
 # recreated or transferred repository. It is refused outright.
-for wrong_id in 1278801683 1 ''; do
-  if run_product "$PRODUCT_TAG" "$PRODUCT_FULL_NAME" "$wrong_id"; then
-    die "$PRODUCT_FULL_NAME with repository id '$wrong_id' announced"
-  fi
-  assert_no_request "$PRODUCT_FULL_NAME with repository id '$wrong_id'"
-  grep -Fq '::error' "$TMP/run-output" || die "repository id '$wrong_id' mismatch did not emit an ::error::"
-  grep -Fq "$PRODUCT_FULL_NAME" "$TMP/run-output" || die "repository id '$wrong_id' mismatch did not name the repository"
-  ! grep -Fq 'no VERSION file' "$TMP/run-output" || die "repository id '$wrong_id' mismatch fell through to the plugin path"
-  pass "$PRODUCT_FULL_NAME with repository id '${wrong_id:-<unset>}' is refused, not announced and not routed to the plugin path"
+for owner_name in "${PRODUCT_FULL_NAMES[@]}"; do
+  for wrong_id in 1278801683 1 ''; do
+    if run_product "$PRODUCT_TAG" "$owner_name" "$wrong_id"; then
+      die "$owner_name with repository id '$wrong_id' announced"
+    fi
+    assert_no_request "$owner_name with repository id '$wrong_id'"
+    grep -Fq '::error' "$TMP/run-output" || die "$owner_name repository id '$wrong_id' mismatch did not emit an ::error::"
+    grep -Fq "$owner_name" "$TMP/run-output" || die "$owner_name repository id '$wrong_id' mismatch did not name the repository"
+    ! grep -Fq 'no VERSION file' "$TMP/run-output" || die "$owner_name repository id '$wrong_id' mismatch fell through to the plugin path"
+    pass "$owner_name with repository id '${wrong_id:-<unset>}' is refused, not announced and not routed to the plugin path"
+  done
 done
 
-# Planted: a product releases on plain tags only.
-if run_product "hov-router--$PRODUCT_TAG" "$PRODUCT_FULL_NAME" "$PRODUCT_REPO_ID"; then
-  die "a hov-router--v tag announced in the product repository"
-fi
-assert_no_request "a hov-router--v tag"
-grep -Fq 'is not a plain v<major.minor.patch> tag' "$TMP/run-output" || die "a hov-router--v tag was not refused by the plain tag rule"
-pass "hov-router--$PRODUCT_TAG in the product repository is refused loudly"
+# Planted: a product releases on plain tags only, under either owner.
+for owner_name in "${PRODUCT_FULL_NAMES[@]}"; do
+  if run_product "hov-router--$PRODUCT_TAG" "$owner_name" "$PRODUCT_REPO_ID"; then
+    die "a hov-router--v tag announced in $owner_name"
+  fi
+  assert_no_request "a hov-router--v tag in $owner_name"
+  grep -Fq 'is not a plain v<major.minor.patch> tag' "$TMP/run-output" || die "a hov-router--v tag in $owner_name was not refused by the plain tag rule"
+  pass "hov-router--$PRODUCT_TAG in $owner_name is refused loudly"
+done
 
 for bad_tag in v3.7.1-rc.1 v3.7.1+build v3.7 v03.7.1 3.7.1 v3.7.1.1; do
   if run_product "$bad_tag" "$PRODUCT_FULL_NAME" "$PRODUCT_REPO_ID"; then
@@ -1892,9 +1916,11 @@ expect_product_mutant_announces product-plain-tag-rule-removed \
   '  true' \
   "hov-router--$PRODUCT_TAG" "$PRODUCT_FULL_NAME" "$PRODUCT_REPO_ID" "$PRODUCT_NAME"
 
-# The table is reviewed code: exactly one row.
-[[ "$(sed -n '/^readonly PRODUCTS=(/,/^)/p' "$HELPER" | grep -c "^  '")" == 1 ]] || die "product table does not hold exactly one row"
-grep -Fxq "  'StartupBros/hov-router 1278801682 hov-router'" "$HELPER" || die "product table row drifted"
-pass "the product table holds exactly one row: StartupBros/hov-router 1278801682 hov-router"
+# The table is reviewed code: exactly these two rows, one repository id under
+# both owners of the move.
+[[ "$(sed -n '/^readonly PRODUCTS=(/,/^)/p' "$HELPER" | grep -c "^  '")" == 2 ]] || die "product table does not hold exactly two rows"
+grep -Fxq "  'StartupBros/hov-router 1278801682 hov-router'" "$HELPER" || die "old-owner product table row drifted"
+grep -Fxq "  'StartupBros-com/hov-router 1278801682 hov-router'" "$HELPER" || die "new-owner product table row drifted"
+pass "the product table holds exactly two rows: hov-router id 1278801682 under StartupBros and StartupBros-com"
 
 printf '%d Tool Drop announce checks passed\n' "$pass_count"

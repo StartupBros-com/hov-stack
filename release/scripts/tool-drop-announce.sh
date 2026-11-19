@@ -22,8 +22,9 @@ set -euo pipefail
 # its own repository that is not a marketplace plugin: it has no VERSION file,
 # no .claude-plugin/plugin.json, no marketplace manifest entry and no card in
 # the manifest (the announce service's own product registry holds its card). It is recognised
-# by the caller's full repository name AND repository id in PRODUCTS, never by
-# the bare repository name. For a product release this helper keeps the
+# by the caller's full repository name AND repository id in PRODUCTS (hov-router
+# has one row per owner across its move to StartupBros-com, both with the same id),
+# never by the bare repository name. For a product release this helper keeps the
 # argument and environment checks, the draft/prerelease skip, the published or
 # edited action check and the latest-stable guard, then requires a plain
 # v<major.minor.patch> tag, takes the announced name from the table, skips
@@ -60,13 +61,17 @@ readonly PROMOTION_LAG_ERROR='release does not match the marketplace promotion'
 readonly PROMOTION_LAG_RETRY_SECONDS=30
 
 # Products that may call the workflow, one row each: "<owner/name> <repository id>
-# <product name>". This script runs from the trusted workflow SHA, so a new row
+# <product name>". One product may hold two rows with the same repository id:
+# hov-router moves from the StartupBros user to the StartupBros-com organization
+# and a transfer keeps the id, so both owners resolve to the one repository and
+# any other owner or id stays refused. This script runs from the trusted workflow SHA, so a new row
 # is reviewed code. The product name is what the request body announces; the announce service
 # independently verifies the repository, owner, repository id, workflow ref and
 # lineage claims of the OIDC token and the live GitHub release, so a wrong row
 # cannot make the announce service accept a repository it does not know.
 readonly PRODUCTS=(
   'StartupBros/hov-router 1278801682 hov-router'
+  'StartupBros-com/hov-router 1278801682 hov-router'
 )
 # A product releases on plain v<major.minor.patch> tags with canonical numbers,
 # the same rule latest-stable-release.sh applies to a repository-family tag.
