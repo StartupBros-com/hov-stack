@@ -637,14 +637,6 @@ alias recent="fc -ln -30"
 # owns agent fan-out. Nothing here wraps a shell in a multiplexer. On a REMOTE
 # host, run that host's own tmux by hand — this file never reaches it.
 
-# Keep Zellij available for manual use, but it is no longer the default.
-alias zj="zellij"
-alias zja="zellij attach"
-alias zjl="zellij list-sessions"
-alias zjk="zellij kill-session"
-alias zjd="zellij --layout dev"
-alias zjc="zellij --layout claude"
-
 # Codex CLI alias
 alias cx="codex"
 . "$HOME/.cargo/env"
