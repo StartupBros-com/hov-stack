@@ -55,7 +55,7 @@ for i in $(seq 1 20); do
 done
 ```
 
-Run as `systemd-run --user --wait --unit=<name> bash probe.sh`, `journalctl --user -u <name>` showed 10 of the 20 `sed` lines and 20 of the 20 builtin lines. `journalctl --user -t bash -t sed --since '-5 min'` showed 20 of 20 of each.
+Run as `systemd-run --user --wait --unit=<name> bash probe.sh`, `journalctl --user -u <name>` showed 10 of the 20 `sed` lines and 20 of the 20 builtin lines. `journalctl --user -t bash --since '-5 min'` showed 20 of 20 of each: all 40 lines, the 10 that `-u` missed included, carry `SYSLOG_IDENTIFIER=bash`.
 
 **Writer side: print reporting lines from a process that stays alive.**
 
@@ -70,13 +70,13 @@ journalctl --user -t wt-sweep.sh --since '-1 day' --no-pager      # by syslog id
 journalctl --user --since '<run start>' --until '<run end>' --no-pager   # by time
 ```
 
-A unit's stdout records carry its syslog identifier, which by default is the name of the ExecStart program. For wt-sweep, every attributed line had `SYSLOG_IDENTIFIER=wt-sweep.sh`.
+The syslog identifier belongs to the unit's stdout stream, not to the process that wrote the line, so a line that lost its unit still carries it. By default it is the name of the ExecStart program: `bash` for the probe, `wt-sweep.sh` for wt-sweep.
 
 ## Why This Works
 
 The wrapper's comment records the mechanism found in dotfiles#1215: "journald resolves a stdout record's originating unit from the sending process's cgroup at the moment it DRAINS the pipe; by then the process was gone, so the records carried no _SYSTEMD_USER_UNIT at all" (`scripts/jsm-auto-update-wrapper.sh:92-94`).
 
-The probe fits it. A `sed` that writes one line and exits races journald's read, and about half the time it has exited first. A builtin's line comes from the long-lived shell, which is still in the unit's cgroup when journald reads it. Selecting by `-t` or by time does not depend on the unit field, so it finds the record either way.
+The probe's records show it. The 10 lines `-u` missed have neither `_SYSTEMD_CGROUP` nor `_SYSTEMD_USER_UNIT`, the field `-u` matches a unit's own lines on. Eight of them still name `_COMM=sed`, and two carry no process metadata at all. The 10 `sed` lines `-u` kept and all 20 builtin lines carry the unit's cgroup. A `sed` that writes one line and exits races journald's read, and in this run it lost half the time. A builtin's line comes from the long-lived shell, which is still in the unit's cgroup when journald reads it. Selecting by `-t` or by time does not depend on the unit field, so it finds the record either way.
 
 ## Prevention
 

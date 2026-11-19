@@ -72,7 +72,10 @@ A host's overlay CLAUDE.md names its own live-by-default units and their safe fo
    between tool calls.
 2. **Oneshot unit.** `systemctl --user start X.service` (it blocks until the run ends), then
    `systemctl --user show X.service -p Result -p ExecMainStatus` and
-   `journalctl --user -u X.service -n 50 --no-pager`.
+   `journalctl --user -u X.service -n 50 --no-pager`. `-u` misses a line whose writing process
+   exited before journald read it, so when the output looks short, read again with
+   `-t <ExecStart program name>` before concluding the unit printed nothing
+   (`docs/solutions/integration-issues/journalctl-u-drops-lines-whose-writing-process-exited-before-journald-read-them.md`).
 3. **Long unit** (a start timeout of an hour or more). `systemctl --user start --no-block
    X.service`, then follow it with the Monitor tool or a bounded
    `timeout 300 journalctl --user -u X.service -f --no-pager`. A blocking start can outlast the
