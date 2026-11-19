@@ -115,8 +115,13 @@
  *               the ledger shows no category losses without steering; or CC
  *               ships documented compaction-instruction config (upstream
  *               anthropics/claude-code#55905).
- * verified-at — 2.1.322 (re-run the marker test and bump this stamp when
- *               doctor check 24 flags a version change). 2.1.322: marker test
+ * verified-at — 2.1.328 (re-run the marker test and bump this stamp when
+ *               doctor check 24 flags a version change). 2.1.328 (2026-11-19):
+ *               marker test re-run live in a scratch project, `claude -p` turn
+ *               then `/compact`; XYZZY-MARKER-7734 appeared twice in the
+ *               compact-summary record, which itself carries version 2.1.328.
+ *               The contract string and both deny strings are in the binary.
+ *               2.1.322: marker test
  *               re-run live (XYZZY-MARKER-7734 reached the compact-summary record
  *               itself, not just the hook's echoed output); the hook-help string
  *               and the deny message/reason strings are still in the binary.

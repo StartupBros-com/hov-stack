@@ -61,11 +61,10 @@ printf '%s\n' '{"healthy":true,"health_level":"healthy","index":{"partial":false
 STUB
 chmod +x "$STUBBIN/systemctl" "$STUBBIN/cass"
 
-# Quiet fixtures for sections 27/28 so no run touches the operator's real
-# watchlist or dispatcher state (same convention as harness-doctor-vacuity).
+# A quiet fixture for section 27 so no run touches the operator's real
+# watchlist (same convention as harness-doctor-vacuity).
 DTAB=$'\t'
 printf '%s\n' "pcquiet${DTAB}active${DTAB}2026-08-30${DTAB}-${DTAB}fixture-src${DTAB}false${DTAB}quiet fixture" >"$TMP/deferral-quiet.tsv"
-printf 'RUNG=0\n' >"$TMP/dispatcher-rung0.env"
 
 GIT() { git -C "$1" -c user.email=fixture@test.invalid -c user.name=fixture "${@:2}"; }
 
@@ -113,8 +112,6 @@ run_doctor() {
   CLAUDE_MANAGED_SETTINGS_REF="$home/dotfiles/managed-settings.json" \
   HARNESS_DOCTOR_SKIP_TESTS=1 \
   DEFERRAL_WATCHLIST_FILE="$TMP/deferral-quiet.tsv" \
-  DISPATCHER_LEDGER_FILE="$TMP/absent-dispatcher-ledger.jsonl" \
-  DISPATCHER_CONFIG="$TMP/dispatcher-rung0.env" \
     bash "$DOCTOR" 2>&1
 }
 

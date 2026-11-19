@@ -35,6 +35,10 @@ HD_ROOT=${DOTFILES_REPO:-$(cd "$(dirname "$(readlink -f -- "${BASH_SOURCE[0]}")"
 WARNS=0
 warn() { echo "WARN: $*"; WARNS=$((WARNS + 1)); }
 ok()   { echo "  ok: $*"; }
+# A note is a standing count worth seeing but not a fault: it never moves the exit
+# code, and a section that printed one does not also print its all-clear line.
+NOTES=0
+note() { echo "  note: $*"; NOTES=$((NOTES + 1)); }
 
 # failed_unit_sweep <systemd-dir> <foreign-list>
 #   prints one "<class>\t<unit>\t<detail>" row per FAILED --user unit
@@ -376,8 +380,14 @@ if [ -f "$MEMORY_AUDIT" ]; then
     # real auditor summaries.
     _memory_summary=$(python3 -c 'import json,sys; s=json.load(sys.stdin)["summary"]; scope=s.get("cited_enforcer_scope") or {}; phantom=s.get("cited_enforcer_missing",0); tail=", {} phantom enforcer citation(s)".format(phantom) if phantom else ""; tail+="".join(", "+w for w in (scope.get("warnings") or [])); print("{} actionable, {} stale-date review candidate(s){}".format(s["blocking_findings"], s["review_candidates"], tail))' <<< "$_memory_json")
     _memory_actionable=$(python3 -c 'import json,sys; s=json.load(sys.stdin)["summary"]; scope=s.get("cited_enforcer_scope") or {}; print(s["blocking_findings"] + s.get("cited_enforcer_missing",0) + len(scope.get("warnings") or []))' <<< "$_memory_json")
-    if [ "$_memory_actionable" -gt 0 ]; then
+    # The blocking findings are a standing backlog (hundreds, stable week to week), so
+    # they are a note; a phantom citation or a scope warning means the check itself
+    # cannot stand for the store, and that stays a WARN.
+    _memory_alarm=$(python3 -c 'import json,sys; s=json.load(sys.stdin)["summary"]; scope=s.get("cited_enforcer_scope") or {}; print(s.get("cited_enforcer_missing",0) + len(scope.get("warnings") or []))' <<< "$_memory_json")
+    if [ "$_memory_alarm" -gt 0 ]; then
       warn "memory audit: $_memory_summary (run memory-audit.py for categories)"
+    elif [ "$_memory_actionable" -gt 0 ]; then
+      note "memory audit: $_memory_summary (run memory-audit.py for categories)"
     else
       ok "memory audit: $_memory_summary"
     fi
@@ -389,6 +399,7 @@ fi
 
 
 echo "== 5. Repo AGENTS.md / CLAUDE.md pairs (CLAUDE.md should be '@AGENTS.md') =="
+n5=$NOTES
 w0=$WARNS
 # Repos where the twin convention is upstream's, not ours (upstream-synced content):
 TWIN_EXCEPTIONS="pi-compound-engineering"
@@ -429,7 +440,7 @@ for repo in "$HOME"/SITES/*/; do
     nested=$((nested + 1))
   done < <(git -C "$repo" ls-files '*CLAUDE.md' 2>/dev/null)
   [ "$nested" -gt 0 ] &&
-    warn "$name: $nested nested CLAUDE.md not '@AGENTS.md' stubs (package/app-level twin drift; convert them to '@AGENTS.md' stubs)"
+    note "$name: $nested nested CLAUDE.md not '@AGENTS.md' stubs (package/app-level twin drift; convert them to '@AGENTS.md' stubs)"
 done
 # Inverse of the loop above (Claude Code 2.1.277, 2026-09-18): a root CLAUDE.md
 # keeps the engine on the CLAUDE.md path for the whole project, and the engine
@@ -468,7 +479,7 @@ for repo in "$HOME"/SITES/*/; do
     dead=$((dead + 1))
   done < <(git -C "$repo" ls-files '*AGENTS.md' 2>/dev/null)
   [ "$dead" -gt 0 ] &&
-    warn "$name: $dead nested AGENTS.md with no sibling CLAUDE.md pointer — never loaded while the repo root carries a CLAUDE.md (add '@AGENTS.md' stubs)"
+    note "$name: $dead nested AGENTS.md with no sibling CLAUDE.md pointer — never loaded while the repo root carries a CLAUDE.md (add '@AGENTS.md' stubs)"
 done
 # Active own repos (commit in last 30d) should have an AGENTS.md at all
 now=$(date +%s)
@@ -483,8 +494,8 @@ for repo in "$HOME"/SITES/*/; do
   [ $((now - last)) -lt $((30 * 86400)) ] && missing_agents="$missing_agents $name"
 done
 [ -n "$missing_agents" ] &&
-  warn "$(echo "$missing_agents" | wc -w) active repo(s) missing AGENTS.md — run /scaffold-agents-md in each:$missing_agents"
-[ "$WARNS" -eq "$w0" ] && ok "instruction files present + no drifting twins (own repos)"
+  note "$(echo "$missing_agents" | wc -w) active repo(s) missing AGENTS.md — run /scaffold-agents-md in each:$missing_agents"
+[ "$WARNS" -eq "$w0" ] && [ "$NOTES" -eq "$n5" ] && ok "instruction files present + no drifting twins (own repos)"
 
 echo "== 6. Worktree accumulation (>8 → run wt-sweep.sh) =="
 w0=$WARNS
@@ -1679,6 +1690,7 @@ echo "== 23. Workflow scripts: model pins + fan-out caps + schema breadth =="
 # every one of them (699 in one week) was computed and discarded (rent-check
 # run 2: the same gate, paper tiger for two of its three checks). Tally them.
 w0=$WARNS
+n23=$NOTES
 # CLAUDE_WF_PIN_AUDIT is a test seam (harness-doctor-vacuity.test.sh points it
 # at a stub auditor); the live doctor never sets it. CLAUDE_WF_PIN_AUDIT_TIMEOUT_S
 # overrides the external timeout bound below for the same reason -- a stub
@@ -1697,8 +1709,14 @@ if [ -f "$WF_PIN_AUDIT" ]; then
   if [ "$_wf_status" -eq 124 ]; then
     warn "wf-pin-audit: timed out after ${WF_PIN_AUDIT_TIMEOUT_S}s — run wf-pin-audit.py --days 8 for the list"
   elif [ "$_wf_status" -ne 0 ]; then
+    # Exit 1 with the auditor's own count line is the standing unpinned backlog (a
+    # note); any other exit, or exit 1 without that line (python's status for an
+    # unhandled exception), means the audit did not finish, and stays a WARN.
     _wf_last=$(echo "$_wf_out" | tail -1)
-    warn "wf-pin-audit: ${_wf_last#wf-pin-audit: } — run wf-pin-audit.py --days 8 for the list"
+    case "$_wf_status:$_wf_last" in
+      1:*"unpinned agent() call"*) note "wf-pin-audit: ${_wf_last#wf-pin-audit: } — run wf-pin-audit.py --days 8 for the list" ;;
+      *) warn "wf-pin-audit exited $_wf_status without its count line: $_wf_last" ;;
+    esac
   fi
   # Expected to stay nonzero until a bulk remediation (2026-09-02: 431 and 270
   # of 1,327 scanned) -- the denominator and the example paths are the signal,
@@ -1712,12 +1730,12 @@ if [ -f "$WF_PIN_AUDIT" ]; then
   # report (first live run, 2026-09-02, 692 WARN lines). awk drains its input.
   _wf_paths=$(printf '%s\n' "$_wf_out" | grep '^WARN ' | sed 's/^WARN *//; s/:.*$//' | awk '!seen[$0]++ && n < 3 { print; n++ }' | tr '\n' ' ')
   if [ "$_wf_fanout" -gt 0 ] || [ "$_wf_schema" -gt 0 ] || [ "$_wf_agents" -gt 0 ]; then
-    warn "wf-pin-audit soft findings (last 8 days, ${_wf_scanned:-?} scripts scanned): $_wf_fanout with an uncapped fan-out, $_wf_schema with an over-broad required schema — e.g. ${_wf_paths}— run wf-pin-audit.py --days 8 for the list, $_wf_agents agents file(s) missing omitClaudeMd"
+    note "wf-pin-audit soft findings (last 8 days, ${_wf_scanned:-?} scripts scanned): $_wf_fanout with an uncapped fan-out, $_wf_schema with an over-broad required schema — e.g. ${_wf_paths}— run wf-pin-audit.py --days 8 for the list, $_wf_agents agents file(s) missing omitClaudeMd"
   fi
 else
   warn "wf-pin auditor missing: $WF_PIN_AUDIT"
 fi
-[ "$WARNS" -eq "$w0" ] && ok "workflow scripts pinned, capped, and schema-lean (last 8 days)"
+[ "$WARNS" -eq "$w0" ] && [ "$NOTES" -eq "$n23" ] && ok "workflow scripts pinned, capped, and schema-lean (last 8 days)"
 
 ### harness test suites -------------------------------------------------------
 # Until 2026-08-06 NOTHING ran the harness's own tests, so harness-weekly's run
@@ -2075,74 +2093,10 @@ EOF
 fi
 [ "$WARNS" -eq "$w0" ] && ok "deferral watchlist: no fired or broken triggers"
 
-echo "== 28. dispatcher ledger integrity =="
-# The always-on work dispatcher's keep-rate/cost ledger (issue #444,
-# dispatcher-ledger.sh) is the only record of whether autonomous runs are
-# worth the spend they cost. A dispatcher that is live but writes nothing is
-# the same silent-stall shape as the deferral watchlist above, so this check
-# mirrors section 27's exact template: header, w0 snapshot, delegate to the
-# external script, sentinel exit codes fail closed, final ok-only-if-
-# nothing-warned line.
-w0=$WARNS
-DL=$DOCTOR_DIR/dispatcher-ledger.sh
-# F-P: source the shared lib DEFENSIVELY. This file runs under `set -uo
-# pipefail` with NO `-e`, so a failed `.` (lib missing/unreadable) would NOT
-# abort -- it would silently leave dispatcher_ledger_file undefined, make
-# LEDGER_PATH empty, and the "ledger absent" arm below would then print a
-# FALSE ok at rung 0. That is exactly the silent-broken-check shape this whole
-# section exists to catch, so fail closed: warn and skip the delegate rather
-# than run it against undefined helpers.
-# shellcheck source=lib/dispatcher-common.sh
-if ! . "$DOCTOR_DIR/lib/dispatcher-common.sh" 2>/dev/null || ! command -v dispatcher_ledger_file >/dev/null 2>&1; then
-  warn "dispatcher ledger: cannot verify (lib/dispatcher-common.sh missing, unreadable, or did not define dispatcher_ledger_file)"
-else
-  # config/dispatcher.env is a DIFFERENT unit's deliverable (U3) and may
-  # not exist yet -- absence just means rung 0. Grepped for a literal RUNG=
-  # line, never sourced, mirroring dispatcher-status.sh's own K=/YIELD_MAX=
-  # convention for this same config file (parse, don't eval, on operator-owned
-  # but still external input).
-  DISPATCHER_CONFIG_FILE="${DISPATCHER_CONFIG:-$DOCTOR_DIR/../config/dispatcher.env}"
-  RUNG=0
-  if [ -f "$DISPATCHER_CONFIG_FILE" ]; then
-    _dl_cfg_rung=$(grep -E '^RUNG=' "$DISPATCHER_CONFIG_FILE" 2>/dev/null | tail -n1 | cut -d= -f2-)
-    case "$_dl_cfg_rung" in ''|*[!0-9]*) ;; *) RUNG=$_dl_cfg_rung ;; esac
-  fi
-  LEDGER_PATH="$(dispatcher_ledger_file)"
-  if [ ! -e "$LEDGER_PATH" ]; then
-    if [ "$RUNG" -ge 1 ]; then
-      warn "dispatcher ledger absent at $LEDGER_PATH (rung=$RUNG — a live dispatcher writing nothing is the silent-stall shape)"
-    else
-      ok "dispatcher ledger absent (rung 0 — no runs expected)"
-    fi
-  elif [ ! -f "$LEDGER_PATH" ]; then
-    # Exists but is not a regular file (e.g. a directory) -- the ledger's own
-    # reader silently treats that as "no rows" (read_rows guards with -f), so
-    # this check must catch it itself or a corrupt path would read as quiet.
-    warn "dispatcher ledger: cannot verify ($LEDGER_PATH exists but is not a regular file)"
-  elif [ ! -x "$DL" ]; then
-    warn "dispatcher ledger: cannot verify (dispatcher-ledger.sh missing or not executable at $DL)"
-  else
-    DL_OUT=$("$DL" summary 2>&1); DL_RC=$?
-    DL_FLAGGED=$(printf '%s\n' "$DL_OUT" | grep -oE 'dispatcher-flagged:[0-9]+' | tail -n1 | cut -d: -f2)
-    if [ "$DL_RC" -ne 0 ] || [ -z "$DL_FLAGGED" ]; then
-      warn "dispatcher ledger: cannot verify (summary exited $DL_RC or emitted no dispatcher-flagged counter)"
-    else
-      while IFS= read -r dl_line; do
-        case "$dl_line" in
-          dispatcher-flagged:*) continue ;;
-          WARN*) warn "dispatcher ledger: ${dl_line#WARN }" ;;
-          *) ok "dispatcher ledger: $dl_line" ;;
-        esac
-      done <<EOF
-$DL_OUT
-EOF
-      if [ "$DL_FLAGGED" -gt 0 ] 2>/dev/null; then
-        warn "dispatcher ledger: $DL_FLAGGED flagged (broken runs or stale undispositioned)"
-      fi
-    fi
-  fi
-fi
-[ "$WARNS" -eq "$w0" ] && ok "dispatcher ledger: integrity checks quiet"
+# Section 28 (dispatcher ledger integrity) was retired 2026-11-19 with the dispatcher
+# itself (retired 2026-10-17, HARNESS.md): its 40-odd WARNs were transition rows
+# from canary and dry runs no dispatcher would ever claim. dispatcher-ledger.sh stays;
+# bin/claude-loop.sh still appends to it.
 
 echo "== 29. Live failed --user units (sweep, not an allowlist) =="
 w0=$WARNS
@@ -2511,8 +2465,8 @@ fi
 
 echo
 if [ "$WARNS" -eq 0 ]; then
-  echo "harness-doctor: CLEAN"
+  echo "harness-doctor: CLEAN ($NOTES note(s))"
 else
-  echo "harness-doctor: $WARNS warning(s)"
+  echo "harness-doctor: $WARNS warning(s), $NOTES note(s)"
 fi
 exit "$([ "$WARNS" -eq 0 ] && echo 0 || echo 1)"
