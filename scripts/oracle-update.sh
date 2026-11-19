@@ -111,7 +111,7 @@ smoke() {
   local got pattern=${2//./[.]}
   got=$(cd "$WORK" && timeout -k 2 60 "$1/oracle" --version 2>/dev/null) || return 1
   # A version token must be exact: 0.24.0 must not match 0.24.01 or a prerelease.
-  printf '%s\n' "$got" | grep -Eq "(^|[^0-9A-Za-z.+-])$pattern([^0-9A-Za-z.+-]|$)"
+  grep -Eq "(^|[^0-9A-Za-z.+-])$pattern([^0-9A-Za-z.+-]|$)" <<< "$got"
 }
 report_outcome() {
   echo "$2"
