@@ -31,7 +31,7 @@
 # not support it. The lane was restored 2026-09-29 by `cass index --full
 # --force-rebuild` on v0.9.0 (35,799 conversations published).
 #
-# THREE FAILURE MODES, ALL REAL:
+# FOUR FAILURE MODES, ALL REAL:
 #   - non-zero exit      the index is broken (fuel exhaustion, corrupt checkpoint)
 #   - zero results       the index is EMPTY or the corpus was wiped. A query that
 #                        returns nothing exits 0, so "did it run" is not a health
@@ -41,6 +41,11 @@
 #   - not search JSON    exit 0 but the output is not cass's `--json` contract.
 #                        Counted as broken and named as such, never as "zero
 #                        results": a format change must not read as an empty index.
+#   - budget ran out     exit 0 and no hits, but `budget.timed_out: true`: cass
+#                        stopped the search at its own deadline. Counted as
+#                        broken and named as a slow search, never as "zero
+#                        results": the empty-index alarm would send the
+#                        operator to rebuild an index that is fine.
 #
 # COUNT FROM `--json`, NEVER FROM THE HUMAN OUTPUT. The first version counted
 # numbered lines (`^ *[0-9]+\.`), the shape its own test stub printed. Real cass
@@ -88,6 +93,18 @@ TERMS=${CASS_HEALTH_TERMS:-"error test file commit function"}
 # A run that is merely slow is not the failure this guards; bound it so the check
 # cannot itself hang the unit it is attached to.
 PER_QUERY_TIMEOUT=${CASS_HEALTH_QUERY_TIMEOUT:-90}
+# cass ends every search at its own deadline, 120 s unless `--timeout` sets one,
+# and a search that reaches it exits 0 with no hits and `budget.timed_out: true`.
+# So without a budget, a limit above 120 s changed nothing: on a ten-million-
+# document archive single queries took 60-124 s (2026-11-18), and a slow one came
+# back empty well inside the limit. Give cass 90% of the limit, so it ends first
+# and says why, and the process limit stays the backstop. A limit that is not
+# whole seconds (`timeout` also takes `5m`) leaves cass on its own default.
+case $PER_QUERY_TIMEOUT in
+  ''|*[!0-9]*) SEARCH_BUDGET_MS='' ;;
+  *) SEARCH_BUDGET_MS=$((10#$PER_QUERY_TIMEOUT * 900)) ;;
+esac
+[ "$SEARCH_BUDGET_MS" != 0 ] || SEARCH_BUDGET_MS=''
 # How many of the probe terms must succeed. Not all five: a single term can
 # legitimately miss after a corpus prune, and a check that red-lines on one
 # missing word gets switched off.
@@ -115,7 +132,8 @@ for term in $TERMS; do
   # -k: a cass that ignores SIGTERM must not hold the unit past the budget.
   # Operation-local safety: direct callers need the same protection as the unit.
   out=$(CASS_AUTO_REFRESH=0 group_timeout -k 5 "$PER_QUERY_TIMEOUT" "$CASS_BIN" \
-    search "$term" --no-maintenance --mode lexical --limit 3 --json 2>"$ERR")
+    search "$term" --no-maintenance --mode lexical --limit 3 --json \
+    ${SEARCH_BUDGET_MS:+--timeout "$SEARCH_BUDGET_MS"} 2>"$ERR")
   rc=$?
   diag=$(cat "$ERR"; printf '%s' "$out")
   if [ "$rc" -ne 0 ]; then
@@ -142,6 +160,17 @@ for term in $TERMS; do
     [ -n "$first_error" ] \
       || first_error="exit 0 but output is not cass search JSON: $(printf '%s\n' "$out" | head -1 | cut -c1-80)"
     printf 'cass-search-health:   %-10s exit=0 but output is not cass search JSON\n' "$term" >&2
+    continue
+  fi
+  # Zero hits from a search that ran out of budget is a slow search, not an empty
+  # index. Hits that came back before the budget ran out still show search works.
+  if [ "$hits" -eq 0 ] && printf '%s' "$out" | jq -es '.[0].budget.timed_out == true' >/dev/null; then
+    broken=$((broken + 1))
+    spent=$(printf '%s' "$out" | jq -rs '.[0].budget.elapsed_ms // "?"')
+    [ -n "$first_error" ] \
+      || first_error="the search budget ran out after $spent ms with no results: a slow search, not an empty index"
+    printf 'cass-search-health:   %-10s exit=0 but the search budget ran out after %s ms, before any results\n' \
+      "$term" "$spent" >&2
     continue
   fi
   if [ "$hits" -eq 0 ]; then

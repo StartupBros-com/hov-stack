@@ -70,6 +70,13 @@ FIXTURE=$HERE/tests/fixtures/cass-search-v0.9.0-hits.json
 #   fuel      exit 9 with the real 2026-09-20 fuel-exhaustion message
 #   jsonerr   exit 3 with the real v0.9.0 `{"error":{...}}` stderr line
 #             (missing-index, captured 2026-09-29)
+#   budget    exit 0, a zero-hit `--json` result carrying the budget block cass
+#             0.11.0 returned on 2026-11-18 when a search reached its 120 s
+#             default (`timed_out: true`, `skipped_sections: ["search"]`); the
+#             other keys are the `empty` stub's
+#   partial   exit 0, three hits and `timed_out: true`: results came back
+#             before the budget ran out
+#   argv      the `ok` result, appending each call's argv to $TMP/argv-calls
 make_cass() {
   # Separate statements on purpose: `local name=$1 d=$TMP/$name` expands every
   # RHS before assigning any of them, so $name there resolves to the OUTER
@@ -127,6 +134,15 @@ case "$b" in
   fuel)
     printf 'search failed: executing a Quill lexical query: scalar Quill query fuel exhausted after 10000000/10000000 units (segments=1453, dictionary_blocks=9995906)\n' >&2
     exit 9 ;;
+  budget)
+    printf '{"query":"x","limit":3,"offset":0,"count":0,"total_matches":0,"hits":[],"max_tokens":null,"request_id":null,"cursor":null,"hits_clamped":false,"budget":{"elapsed_ms":120038,"budget_ms":120000,"timed_out":true,"skipped_sections":["search"],"recommended_next_probe":null},"suggestions":[]}\n'
+    exit 0 ;;
+  partial)
+    printf '{"count":3,"hits":[{},{},{}],"budget":{"elapsed_ms":4500,"budget_ms":4500,"timed_out":true,"skipped_sections":[]}}\n'
+    exit 0 ;;
+  argv)
+    printf '%s\n' "\$*" >> '$TMP/argv-calls'
+    cat '$FIXTURE'; exit 0 ;;
   jsonerr)
     printf '{"error":{"code":3,"kind":"missing-index","message":"cass has not been initialized in /x yet, so search cannot run until the first index completes.","hint":"Run cass index --full once.","retryable":true}}\n' >&2
     exit 3 ;;
@@ -234,6 +250,37 @@ rc=$(run "$(make_cass jerr jsonerr)")
 [ "$rc" = 1 ] && ok || bad "JSON-error run exited $rc (want 1)"
 grep -qF 'first cause: missing-index: cass has not been initialized' "$TMP/err" && ok \
   || bad "cass's error kind/message was not surfaced :: $(tail -2 "$TMP/err")"
+
+# 3d. PLANTED NEGATIVE: a search that ran out of cass's own budget exits 0 with no
+#     hits and `budget.timed_out: true`. It must FAIL, and be named as a slow
+#     search, never as an empty index.
+rc=$(run "$(make_cass slow budget)")
+[ "$rc" = 1 ] && ok || bad "budget-exhausted searches exited $rc (want 1)"
+grep -qF '0/5 queries returned results (broken=5 empty=0)' "$TMP/out" && ok \
+  || bad "budget-exhausted searches were not counted as broken :: $(cat "$TMP/out")"
+grep -qF 'first cause: the search budget ran out after 120038 ms' "$TMP/err" && ok \
+  || bad "a budget timeout was not named as the cause :: $(tail -2 "$TMP/err")"
+grep -qF 'ZERO results' "$TMP/err" \
+  && bad "a budget timeout was reported as an empty index" || ok
+
+# 3d'. Hits that came back before the budget ran out still count: search works.
+rc=$(run "$(make_cass partial partial)")
+[ "$rc" = 0 ] && ok || bad "hits inside a spent budget exited $rc (want 0) :: $(tail -1 "$TMP/err")"
+
+# 3e. cass gets a search budget inside the process limit (90%, in ms). Without it
+#     cass's own 120 s default ends the search first, whatever the limit says. A
+#     limit that is not whole seconds passes none and still runs every query.
+ARGV=$(make_cass argv argv)
+: > "$TMP/argv-calls"
+rc=$(run "$ARGV")
+[ "$rc" = 0 ] && ok || bad "the argv fixture exited $rc (want 0)"
+[ "$(grep -c -e '--timeout 4500$' "$TMP/argv-calls")" = 5 ] && ok \
+  || bad "the search budget was not passed as --timeout 4500 :: $(head -1 "$TMP/argv-calls")"
+: > "$TMP/argv-calls"
+rc=$(CASS_HEALTH_BIN="$ARGV" CASS_HEALTH_QUERY_TIMEOUT=5s bash "$SCRIPT" >/dev/null 2>&1; printf '%s' "$?")
+[ "$rc" = 0 ] && ok || bad "a 5s limit exited $rc (want 0)"
+grep -qF -e '--timeout' "$TMP/argv-calls" && bad "a limit that is not whole seconds still passed --timeout" || ok
+[ "$(wc -l < "$TMP/argv-calls")" = 5 ] && ok || bad "a 5s limit did not run all five queries"
 
 # 4. PLANTED NEGATIVE: cannot evaluate must be 2, never 0.
 rc=$(CASS_HEALTH_BIN=/nonexistent/cass bash "$SCRIPT" >/dev/null 2>&1; printf '%s' "$?")
