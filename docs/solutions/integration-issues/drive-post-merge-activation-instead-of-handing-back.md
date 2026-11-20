@@ -33,7 +33,7 @@ tags:
 
 ## Problem
 
-A merged dotfiles PR is not live. `~/.claude/{scripts,hooks,agents,bin,CLAUDE.md}` are symlinks into the canonical checkout at `/home/user/hov-stack`, and skill drops and overlays under `skills-local` and `skills-patches` are copied into `~/.claude/skills` by `scripts/skills-localize.sh` (`HERE` resolved through the symlink at `scripts/skills-localize.sh:59-60`; fork deployment at `scripts/skills-localize.sh:142-179`, patch overlays at `scripts/skills-localize.sh:237-261`). A merge to `main` therefore changes nothing that any session loads until the canonical checkout fast-forwards and the localizer runs. Until PR #915, neither was triggered by a merge, so sessions closed a merged, gate-green PR by handing the operator a command (`sync.sh install`) or by reporting merged code as live.
+A merged dotfiles PR is not live. `~/.claude/{scripts,hooks,agents,bin,CLAUDE.md}` are symlinks into the canonical checkout at `/home/user/hov-stack`, and skill drops and overlays under `skills-local` and `skills-patches` are copied into `~/.claude/skills` by `scripts/skills-localize.sh` (`HERE` resolved through the symlink with `readlink -f`; the script's SOURCES OF TRUTH header lists the forks and patch overlays it deploys). A merge to `main` therefore changes nothing that any session loads until the canonical checkout fast-forwards and the localizer runs. Until PR #915, neither was triggered by a merge, so sessions closed a merged, gate-green PR by handing the operator a command (`sync.sh install`) or by reporting merged code as live.
 
 ## Symptoms
 
@@ -44,14 +44,14 @@ A merged dotfiles PR is not live. `~/.claude/{scripts,hooks,agents,bin,CLAUDE.md
 
 ## What Didn't Work
 
-- **Relying on the hourly timer.** Before #915, its refresh did not include localization: `dotup` never called the localizer at all (`dotup`, the `skills-localize apply` block, records that until 2026-09-02 the only automatic caller was the 03:00 drop-in). The current timer includes that step, but a delayed or refused refresh still cannot establish that a change is live before the next step.
+- **Relying on the hourly timer.** Before #915, its refresh did not include localization: `dotup` never called the localizer at all (`dotup`, the `skills-localize apply` block, records that until 2026-09-02 the only automatic caller was the 03:00 drop-in). The timer later included that step, but a delayed or refused refresh still could not establish that a change was live before the next step; the timer went with the 2026-11-02 switch.
 - **Relying on a blanket clean-checkout rule.** The earlier SessionStart heal refused any tracked modification on the default branch; the 34 memory-mirror files kept dirty by `backup-harness.sh` made that refusal permanent. Current `process_repo()` in `scripts/launchpad-freshen.sh` carries unrelated tracked edits through `git -c merge.autostash=false merge --ff-only` and refuses incoming-path collisions. Off-default healing retains separate clean-tree and pushed-tip/age checks; closeout does not request healing or a branch switch. This canonical-checkout policy does not relax `wt-done`'s requirement that the task worktree itself be clean.
 - **Hiding the actual refresh refusal.** Before #1885, `launchpad-advisory.js` retained only helper success lines and then blamed all dirty state. It now reports bounded helper diagnostics separately from mutations. A failed fetch leaves upstream freshness unconfirmed even when cached origin refs match HEAD; a successful branch switch followed by a failed fetch is partial progress, not a fresh checkout.
 - **Sessions doing it by hand.** Forensics on 2026-09-02 (issue #909): of seven post-merge fast-forwards that day, five were merging sessions running `dotup` or `git merge --ff-only` themselves and two were the timer landing by luck. A worktree-isolated session cannot do even that: Claude Code's built-in worktree verifier blocks `git -C ~/dotfiles` from inside a worktree session, and that is the session that closed PR #893 with a hand-back. On 2026-08-27 the same guard blocked the operator's own pasted deploy command relayed through a session still pinned to a merged worktree (session history).
 - **Hand-updating the dirty checkout.** Twice before this stranded or froze it: an unresolved stash-pop conflict silently blocked every later merge, and `git pull --ff-only` under `rebase.autoStash` stashed 35 tracked modifications and failed to re-apply them (auto memory [claude]). The same trap was seen on 2026-08-27, when `git merge --ff-only` printed a successful fast-forward summary and then "Applying autostash resulted in conflicts", leaving conflict markers in tracked files on the path the hourly timer runs unattended (session history).
-- **The deploy chain that swallowed its own failures.** The first `dotup` ran `repo_ff_update "$HERE" || true`, so a hard refusal and a clean update looked identical and a stale tree got installed with a success report; both merge call sites sent stderr to `/dev/null`; and after the refresher existed, a fail-closed `install.sh` preflight requiring `cosign` and `mise` ran under systemd's bare PATH because the unit had no `Environment=` line, so every hourly run failed silently from one evening onward (PR #480, #485, #544; session history). The current `dotup` fails closed on a refusal (`dotup:155-164`) and the unit carries its PATH (`systemd/dotup-refresh.service:44`).
+- **The deploy chain that swallowed its own failures.** The first `dotup` ran `repo_ff_update "$HERE" || true`, so a hard refusal and a clean update looked identical and a stale tree got installed with a success report; both merge call sites sent stderr to `/dev/null`; and after the refresher existed, a fail-closed `install.sh` preflight requiring `cosign` and `mise` ran under systemd's bare PATH because the unit had no `Environment=` line, so every hourly run failed silently from one evening onward (PR #480, #485, #544; session history). The last `dotup` failed closed on a refusal and its unit carried its PATH; both left with the dotfiles installer at the 2026-11-02 switch.
 - **Reaching for `wt-sweep.sh` instead of `wt-done.sh` at closeout.** One session (PR #830, 2026-09-02) never ran `wt-done`, ran the cleanup sweep from inside its worktree, hit the guard, and declared the work shipped from `gh pr view` alone before closing with "the one command that deploys it" (session history). `wt-done` is the closeout; `wt-sweep` is a later, DRY_RUN-first disposal step.
-- **Rejected designs** (per this session's conclusion): wiring the localizer into `sync.sh install` (that function runs from wherever it is invoked, including worktrees, which is exactly the symlink trap `dotup` itself refuses at `dotup:46-55`); a `dotup --activate` child process (it would lose the systemd unit's own timeout); a route-guard exemption (no repo hook was blocking anything); a `.path` unit or webhook (a fetch or listener nobody runs).
+- **Rejected designs** (per this session's conclusion): wiring the localizer into `sync.sh install` (that function runs from wherever it is invoked, including worktrees, which is exactly the symlink trap `dotup` itself refused); a `dotup --activate` child process (it would lose the systemd unit's own timeout); a route-guard exemption (no repo hook was blocking anything); a `.path` unit or webhook (a fetch or listener nobody runs).
 
 ## Solution
 
@@ -83,6 +83,8 @@ A branch whose tip is already reachable from a remote ref takes `activate_reconc
 
 ### Ordinary repositories: checkout currency
 
+Since the 2026-11-02 switch this is the only activation path, hov-stack's own checkout included: `activate()` in `scripts/wt-done.sh` calls only `activate_checkout()`.
+
 Before #1885, repositories without dotup received `activation: n/a`; that explicit message had replaced silence after seven papercuts from five repos in September 2026. They now use `activate_checkout()`, which reuses the installed sibling `launchpad-freshen.sh --repo "$repo"` **without `--heal`**. It preserves route and in-progress-Git guards, does not switch an off-default checkout, and never automatically stashes colliding edits. Unrelated canonical-checkout edits may survive a fast-forward.
 
 If canonical HEAD already contains the known merge, no helper runs. Otherwise the helper is bounded by `WT_DONE_ACTIVATE_TIMEOUT` (default 90 s), its output is retained, and HEAD is independently re-read. The helper can exit zero after a refusal, so only merge ancestry establishes success:
@@ -93,7 +95,11 @@ activation: checkout current ($repo at <head>; includes <merge>)
 
 If the merge remains absent, closeout reports `!! activation: checkout not current` and retains the actual helper diagnosis, including blocking paths. Inspect that output rather than a dotup service journal. This path establishes containment of the known merge—not freshness against every later upstream commit, a service restart, or runtime deployment. It creates no ordinary-repository timer. Dry-run never calls even the freshener's own dry-run mode, because that helper mode still fetches.
 
-### Dotup-managed repositories: canonical harness activation
+Report the printed line, not your own guess. The always-on rule is the `!! activation:` bullet in `CLAUDE.md`, with detail in `HARNESS.md` → "Merge-anchored closeout"; since the switch it says the line itself names the reason, not a dotup journal.
+
+### History: dotup-managed repositories (before the 2026-11-02 switch)
+
+`wt-done.sh` no longer has this branch, and `dotup`, its unit and its hourly timer left with the dotfiles installer. This section records what #915 shipped; none of its commands, paths or result labels apply today.
 
 For a checkout identified by `dotup_managed()`, `activate()` first asks whether the merge commit is already applied:
 
@@ -129,29 +135,24 @@ The same line can follow other results when the merge remains unapplied, includi
 
 A status-file timestamp older than the activation's own start is reported as `dotup result=stale-status`: the start coalesced into a run that began before this merge, so its result is not this merge's verdict (`activate()` in `scripts/wt-done.sh`). A `live` line proves canonical merge containment; it does not independently prove copied skills were installed or already-running consumers reloaded. The already-contained path skips dotup entirely. Verify the installed files and affected consumer when making a stronger deployment claim.
 
-Activation refusal is printed but does not fail closeout's normal reconciliation result. The hourly dotup timer is a backstop only for dotup-managed repositories, and does not guarantee recovery.
+Activation refusal was printed but did not fail closeout's normal reconciliation result. The hourly dotup timer was a backstop only for dotup-managed repositories, and did not guarantee recovery.
 
-Report the printed line, not your own guess. The always-on rule (`CLAUDE.md`, "Merge-anchored closeout") reads: "`wt-done` proves shipment via GitHub's exact merged head (`headRefOid == HEAD`), a merged head containing the tip, or an empty diff against the merge commit, then activates the canonical checkout and prints its `activation:` line — report that line, not your own guess. After a printed `!! activation:` line, `journalctl --user -u dotup-refresh.service` has the reason; if dotup refused to overwrite local changes, ask the operator for that one decision and re-run `wt-done` yourself once you have it, never a command for them to run."
-
-If dotup refuses, the fix is on the checkout, not on the caller: `journalctl --user -u dotup-refresh.service` names the reason, and `repo_ff_explain` (`lib/repo-update.sh:112-183`) lists the exact untracked or modified paths blocking the fast-forward, with kind-labeled guidance (`lib/repo-update.sh:133-165`). Never fall back to telling the operator to run `sync.sh install`: that command symlinks `~/.claude` at whatever checkout it runs from (`dotup:46-55` states the same trap for `dotup` itself), which from a worktree silently repoints the live harness at a throwaway branch.
+When dotup refused, the fix was on the checkout, not on the caller: the `dotup-refresh.service` journal named the reason, and `repo_ff_explain` in `lib/repo-update.sh` (still there) lists the exact untracked or modified paths blocking the fast-forward, with kind-labeled guidance. The fallback this section ruled out, telling the operator to run `sync.sh install`, symlinked `~/.claude` at whatever checkout it ran from, so from a worktree it silently repointed the live harness at a throwaway branch. `sync.sh install` was later removed in favour of `./setup`.
 
 ## Why This Works
 
-The original gap was structural: the hourly refresh did not run at merge time, and nothing before #915 ran the localizer outside the 03:00 path. A worktree-isolated session could not repair it by directly pulling the shared checkout. The dotup activation branch therefore delegates canonical checkout updates to the existing systemd unit, reusing dotup's lock, fast-forward-only merge with autostash off, refusal semantics, status file and timeout. That does not mean `wt-done` is Git-read-only: its reconciliation path fetches, writes verified anchors and may soft-reset an identical-tree branch pointer. Since #1885 the ordinary-repository activation branch likewise reuses the existing safe freshener rather than inventing another updater.
+The original gap was structural: the hourly refresh did not run at merge time, and nothing before #915 ran the localizer outside the 03:00 path. A worktree-isolated session could not repair it by directly pulling the shared checkout. The dotup activation branch therefore delegated canonical checkout updates to the existing systemd unit, reusing dotup's lock, fast-forward-only merge with autostash off, refusal semantics, status file and timeout; since the 2026-11-02 switch every repository takes the freshener path below. That does not mean `wt-done` is Git-read-only: its reconciliation path fetches, writes verified anchors and may soft-reset an identical-tree branch pointer. Since #1885 the ordinary-repository activation branch likewise reuses the existing safe freshener rather than inventing another updater.
 
-Wiring `skills-localize.sh apply` into `dotup` closed the missing invocation in #915: merge-triggered and hourly refreshes attempt copied-skill deployment after installation. This is a recovery path, not proof that every installation or localization succeeded. The historical first live run took the canonical checkout from `0e44bd5` to `254955a` (PR #915) with `dotup result=ok`; the localizer step's first live run deployed six Codex skill forks the hourly-only path had never carried (session history).
+Wiring `skills-localize.sh apply` into `dotup` closed the missing invocation in #915: merge-triggered and hourly refreshes attempted copied-skill deployment after installation. Since the switch, closeout runs the localizer itself (the 2026-11-14 Update in Solution). This is a recovery path, not proof that every installation or localization succeeded. The historical first live run took the canonical checkout from `0e44bd5` to `254955a` (PR #915) with `dotup result=ok`; the localizer step's first live run deployed six Codex skill forks the hourly-only path had never carried (session history).
 
 Per this session's conclusion, the design was chosen by an 18-agent workflow (four candidate designs, three judges scoring 24.5/30 for this one, six refute-by-default verifiers, five confirmed) before landing as PR #915 (issue #909).
 
 ## Prevention
 
 - After merging your own PR, run `DRY_RUN=0 ~/.claude/scripts/wt-done.sh` from inside the worktree and report its actual `activation:` outcome. Do not equate the merge record, a zero exit status, checkout currency and runtime deployment; verify the consumer-specific state needed for the claim.
-- On a printed `!! activation:` line, inspect the freshener output for an ordinary repository or the service journal for dotup. If a refusal requires a decision about colliding local changes, ask for that one decision and re-run `wt-done` yourself once resolved. Do not automatically stash, discard or commit unrelated state. Do not hand over the re-run or ask for a file decision on a transient `locked`, `unverified`, or `stale-status` result.
-- Tests enforce the receipt contract. `tests/wt-done.test.sh` carries these activation cases:
-  - already live
-  - behind, then live with dotup's result
-  - refused without failing the closeout
-  - stale status
+- On a printed `!! activation:` line, inspect the freshener output it kept. If a refusal requires a decision about colliding local changes, ask for that one decision and re-run `wt-done` yourself once resolved. Do not automatically stash, discard or commit unrelated state. Do not hand over the re-run or ask for a file decision on a transient result such as a freshener timeout.
+- Tests enforce the receipt contract. `tests/wt-done.test.sh` carries these activation cases (its dotup cases went with the switch):
+  - already current: a checkout that includes the merge is left alone
   - dry run
   - `--reconcile-only` never activates
   - ordinary repositories: a real fast-forward carries unrelated local state; collisions preserve HEAD, bytes and stash state; no `--heal` or service start
@@ -160,13 +161,13 @@ Per this session's conclusion, the design was chosen by an 18-agent workflow (fo
   - ordinary exact-merge tips and descendant-head proofs work; missing/off-default merge objects cannot authorize refresh
   - dry-run does not invoke the freshener at all, reconcile-only does not activate, and concurrent commits invalidate cleanup proof
 
-  The named cases in `tests/wt-done.test.sh` include the ordinary-repository handoff fixtures and the tree-proof activation race. Its planted negative still rejects `sync.sh install` in output. `hooks/tests/launchpad-advisory.test.js` covers bounded diagnostics, partial success, failed fetch with current cached refs, and preservation of colliding/unrelated state. `tests/dotup-deploy-loop.test.sh` checks that the localizer runs after installation and a localization failure warns without flipping `result=ok`. These are fixture contracts, not live-deployment evidence.
-- Dotup-managed merges that bypass `wt-done` remain dependent on a later hourly refresh, with its delay and refusal limits. Ordinary repositories do not acquire that timer merely because closeout now freshens their checkout.
+  The named cases in `tests/wt-done.test.sh` include the ordinary-repository handoff fixtures and the tree-proof activation race. Its planted negative still rejects `sync.sh install` in output. `hooks/tests/launchpad-advisory.test.js` covers bounded diagnostics, partial success, failed fetch with current cached refs, and preservation of colliding/unrelated state. These are fixture contracts, not live-deployment evidence.
+- A merge that bypasses `wt-done` stays inert until a session launches in that checkout, because `hooks/SessionStart/launchpad-advisory.js` freshens its launch checkout; the hourly dotup refresh went with the switch.
 - Activation does not reliably reach sessions that are already running.
   - A hook script that changes in the checkout runs on the next call, because every registered hook command starts a fresh process.
   - A rewrite of `settings.json` itself is less certain. Claude Code 2.1.318 applied one atomic-rename replacement of the live hook commands to sessions that were already running (2026-11-04, #414 item 6). Its settings watcher can still miss a replacement (HARNESS.md, "Guard hooks can silently stop firing").
   - So a report may say the hook is live on the checkout and still name sessions that have not picked it up (session history). `scripts/hook-seam-check.py --no-prune` finds the guard seams that went quiet.
-- Any fail-closed check added to the unattended path (`install.sh` preflight, a new guard in `dotup`) has to carry the environment the interactive shell had when it was tested, or the hourly refresher becomes a silent outage (PR #544; session history).
+- Any fail-closed check added to an unattended path (a unit's or hook's preflight) has to carry the environment the interactive shell had when it was tested, or that path becomes a silent outage; the recorded case is `install.sh`'s preflight under the hourly dotup unit (PR #544; session history).
 
 ## Related Issues
 

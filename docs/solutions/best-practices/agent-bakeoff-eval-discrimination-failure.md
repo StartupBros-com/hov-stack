@@ -338,8 +338,10 @@ state to files when handed a filesystem") instead of a permanent, untestable ver
   and per-run receipts for every number cited above.
 - `scripts/rlm-bakeoff/` — the reusable instrument (`stats_paired.py`,
   `run_tournament.py`, `gen_carryover.py`, `gen_corpus.py`). Every `rlm-bakeoff` path in
-  this note left the tree after its decision closed; read one with
-  `git show 070682e5:<path>`, or restore a directory with `git checkout 070682e5 -- <dir>`.
+  this note left the tree after its decision closed, before the harness moved out of
+  dotfiles, so commit `070682e5` is in the dotfiles repository, not this one. Read a file with
+  `git -C ~/dotfiles show 070682e5:claude/scripts/rlm-bakeoff/<file>`; list them with
+  `git -C ~/dotfiles ls-tree --name-only 070682e5:claude/scripts/rlm-bakeoff/`.
 - Issue #367 — `ab-pair.sh`'s cv gate is unreachable for agent-workload comparisons;
   settling the PROVISIONAL context-cost finding depends on it.
 - Machine-local memory note `premise-integrity-saturated-zero-discrimination` (a private evals repository's

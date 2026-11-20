@@ -11,7 +11,7 @@ applies_when:
   - "A job decides from a snapshot it read earlier in the run, then performs a write that cannot be taken back (publish, announce, tag, merge)"
   - "Matching a GitHub App's pull requests or comments by author login"
   - "A reviewer asserts an API field's exact spelling or shape with confidence, and the fix depends on it"
-retire_when: "hov-marketplace stops landing and publishing from its reconciler (repin-reconcile.yml no longer runs scripts/repin-land.sh and scripts/repin-publish.sh)"
+retire_when: "hov-stack (formerly hov-marketplace) stops landing and publishing from its reconciler (repin-reconcile.yml no longer runs release/scripts/repin-land.sh and release/scripts/repin-publish.sh)"
 tags: [release-train, repin-reconcile, idempotency, toctou, github-app, gh-cli, auto-merge, staged-draft]
 related_components:
   - hov-marketplace-repin-reconcile
