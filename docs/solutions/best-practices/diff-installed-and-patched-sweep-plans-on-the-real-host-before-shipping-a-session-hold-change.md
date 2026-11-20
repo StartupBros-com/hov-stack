@@ -29,7 +29,7 @@ The cause is a mechanism no fixture exercises:
 
 Idle release then stops until the window passes again, about a day. On the host where this happened, a systemd drop-in runs the sweep live every 6 hours, so that is about four sweeps (session history). The shipped timer is weekly and plan-only.
 
-An A/B with the installed helper alone confirmed it. On one affected worktree, the helper with the live incremental cache exited 3, `idle: … last named 92h ago`. Against an empty `--cache-dir`, the same helper on the same state exited 0, held. The re-dating itself is open as hov-stack#795. Fixtures build their cache from nothing on every run, so they never hold the accumulated index the defect needs.
+An A/B with the installed helper alone confirmed it. On one affected worktree, the helper with the live incremental cache exited 3, `idle: … last named 92h ago`. Against an empty `--cache-dir`, the same helper on the same state exited 0, held. The re-dating itself was hov-stack#795, fixed with #806: an undated record now takes the time of the dated record before it in its transcript. Fixtures build their cache from nothing on every run, so they never hold the accumulated index the defect needs.
 
 ## Guidance
 
@@ -40,10 +40,10 @@ An A/B with the installed helper alone confirmed it. On one affected worktree, t
    - Never use an empty directory: that forces the rebuild this doc describes.
    - Never use the live directory: the installed timer reads it at its next run (step 5).
 3. **Tell a rebuild from a logic change with an A/B on the installed helper.** Run it on one changed worktree with the live cache, then with an empty `--cache-dir`. If the empty-cache run moves the verdict as well, the cause is the rebuild, not the branch's logic.
-4. **Extend the index; don't bump its version while #795 is open.**
+4. **Prefer an optional key to a version bump.** Since #795 was fixed (#806), a rebuilt index dates every record as the incremental one does, so a bump no longer pauses idle release, but it still re-reads every transcript once.
    - Add an optional key and treat its absence as unknown.
    - Fill it from the bytes already indexed without touching any recorded time.
-   - #796 did this with `bind`. Case 12b in `tests/wt-session-hold-resumable.test.sh` pins that an older entry learns its binding with its path times unchanged. The comment above `CACHE_VERSION` (`scripts/lib/wt_session_hold.py:147`) records why the version stayed at 2.
+   - #796 did this with `bind` (case 12b in `tests/wt-session-hold-resumable.test.sh`) and #806 with `ts` (the `older` index state in `tests/wt-sweep-hold-matrix.test.sh`). The comment above `CACHE_VERSION` in `scripts/lib/wt_session_hold.py` records why the version stayed at 2.
 5. **When the branch writes something new into the cache under the same version, run the installed helper on a cache the branch wrote.** The old helper reads that file until the merge activates, and again after any revert. #796's plan diff predates this advice: both of its dry runs used the live cache. Afterwards the installed helper still called a known idle worktree idle (exit 3) on the cache the branch had added `bind` keys to.
 
 ## Why This Matters
@@ -87,5 +87,5 @@ For #796's final version the diff showed 15 changed verdicts, each one accounted
 ## Related
 
 - `harness/worktree-fleet-hygiene.md`: the idle-release (hov-stack#644) and resumable-hold (hov-stack#793) paragraphs.
-- hov-stack#795: the re-dating defect. Once it is fixed, a version bump stops pausing idle release, and guidance step 4 can go.
+- hov-stack#795: the re-dating defect, fixed with #806. `tests/wt-sweep-hold-matrix.test.sh` runs one plan over a warm, an empty and an older helper's index and requires the same removals from each.
 - `docs/solutions/logic-errors/a-run-ledgers-mtime-is-not-a-liveness-signal-for-an-idle-dispatcher.md`: another case of a file mtime standing in for a time it does not measure.

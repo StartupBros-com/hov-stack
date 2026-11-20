@@ -255,6 +255,10 @@ has "pin collision: says why" "$out" "SKIP (detached HEAD could not be pinned â€
 rec(){ printf '{"type":"user","cwd":"%s","message":{"role":"user","content":"go"}}\n' "$1"; }
 call(){ printf '{"type":"assistant","cwd":"%s","message":{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"%s","input":%s}]}}\n' "$1" "$2" "$3"; }
 result(){ printf '{"type":"user","cwd":"%s","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"%s"}]}}\n' "$1" "$2"; }
+# A record's own time, as every record Claude Code writes carries one. A record
+# with none takes the time of the dated record before it, or none at all
+# (hov-stack#795), so a case that relies on a record's age stamps it.
+dated(){ sed "s/^{/{\"timestamp\":\"$(date -u -d "$1" +%Y-%m-%dT%H:%M:%S.000Z)\",/"; }
 
 # --- 16. a blocked job that entered the worktree holds it (its cwd followed) ------
 mkfix entered
@@ -276,7 +280,7 @@ printf '{"pid":%s,"procStart":"%s","sessionId":"s17","cwd":"%s","name":"driver"}
 # Two hours old: inside the sweep's default idle window (IDLE_RELEASE_HOURS=24), so
 # the mention still holds. Past that window a mention alone no longer holds a
 # shipped, clean, cache-only worktree (hov-stack#644; wt-sweep-idle-release.test.sh).
-call "$TMP" Bash "{\"command\":\"git -C $WT status --short\"}" >"$T"; touch -d '-2 hours' "$T"
+call "$TMP" Bash "{\"command\":\"git -C $WT status --short\"}" | dated '-2 hours' >"$T"; touch -d '-2 hours' "$T"
 out=$(sweep "$TMP/gitc" 0 "$H")
 kept "git -C from a live session: worktree kept" "$WT"
 has "git -C from a live session: skip names the session" "$out" "session pid $$ \"driver\" is live; its transcript $T names $WT"
@@ -285,7 +289,7 @@ has "git -C from a live session: skip names the session" "$out" "session pid $$ 
 mkfix wfagent
 H="$TMP/h-wfagent"; WT="$TMP/wfagent/repo-wt"; T="$H/projects/-elsewhere/s18/subagents/workflows/wf_1/agent-1.jsonl"
 mkdir -p "$(dirname "$T")"
-call "$TMP" Edit "{\"file_path\":\"$WT/base.txt\",\"old_string\":\"a\",\"new_string\":\"b\"}" >"$T"
+call "$TMP" Edit "{\"file_path\":\"$WT/base.txt\",\"old_string\":\"a\",\"new_string\":\"b\"}" | dated now >"$T"
 touch -d '-1 day' "$WT"   # the top-dir mtime gate must not be what keeps it
 out=$(sweep "$TMP/wfagent" 0 "$H" 120)
 kept "recent workflow agent edit: worktree kept" "$WT"
