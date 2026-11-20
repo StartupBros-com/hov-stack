@@ -245,6 +245,7 @@ git -C "$TMP/detcol/repo" update-ref "$REF" main
 out=$(sweep "$TMP/detcol" 0 "$EMPTY")
 kept "pin collision: worktree kept" "$WT"
 has "pin collision: says why" "$out" "SKIP (detached HEAD could not be pinned — nothing removed)"
+has "pin collision: git's reason, indented" "$out" "         fatal: update_ref failed for ref '$REF'"
 [ "$(git -C "$TMP/detcol/repo" rev-parse "$REF")" = "$(git -C "$TMP/detcol/repo" rev-parse main)" ] \
   && ok "pin collision: existing ref not overwritten" || no "pin collision: existing ref not overwritten"
 

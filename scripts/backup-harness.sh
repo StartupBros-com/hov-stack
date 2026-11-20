@@ -92,13 +92,18 @@ PUSH_LOG=$(mktemp "$TMP_ROOT/memory-push.XXXXXX.log") || exit 1
 push_rc=0
 CLAUDE_HOME="${CLAUDE_HOME:-$HOME/.claude}" bash "$WORKTREE/sync.sh" memory-push \
   >"$PUSH_LOG" || push_rc=$?
+# This shell prints the replayed lines itself, not a `| sed`: journald files a line from a process
+# that has already exited without the unit's invocation id, and OnFailure's page
+# (unit-failure-alert.sh) selects by that id, so the lines explaining a failure went missing.
 if [ "$push_rc" -ne 0 ]; then
   log "memory-push failed (exit $push_rc); last 40 lines of its copy plan follow" >&2
-  tail -n 40 "$PUSH_LOG" | sed 's/^/backup-harness:   /' >&2
+  while IFS= read -r line || [ -n "$line" ]; do printf 'backup-harness:   %s\n' "$line"; done \
+    < <(tail -n 40 "$PUSH_LOG") >&2
   rm -f "$PUSH_LOG"
   exit "$push_rc"
 fi
-tail -n 1 "$PUSH_LOG" | sed 's/^/backup-harness: /'
+while IFS= read -r line || [ -n "$line" ]; do printf 'backup-harness: %s\n' "$line"; done \
+  < <(tail -n 1 "$PUSH_LOG")
 rm -f "$PUSH_LOG"
 # -f because .gitignore ignores /memory/ in every checkout (#346): without it new notes
 # are refused as ignored, git exits 1 and nothing is staged.

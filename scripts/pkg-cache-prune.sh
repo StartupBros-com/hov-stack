@@ -117,10 +117,12 @@ _lock_artefact() {
 }
 
 run() {
-  local out rc
+  local out rc line
   if [ "$DRY_RUN" = 1 ]; then echo "  would: $*"; return 0; fi
   out=$("$@" 2>&1); rc=$?
-  [ -n "$out" ] && printf '%s\n' "$out" | sed 's/^/     | /'
+  # Printed by this shell, not a `| sed`: journald files a line from a process that has
+  # already exited without the unit's invocation id, so OnFailure's page missed it.
+  [ -n "$out" ] && while IFS= read -r line; do printf '     | %s\n' "$line"; done <<<"$out"
   if [ "$rc" -eq 0 ]; then echo "  ok: $*"; return 0; fi
 
   # TIER A alone, or TIER B paired with a real lock artefact. See the tier

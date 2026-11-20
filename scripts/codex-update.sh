@@ -171,11 +171,16 @@ fetch() { curl -fsS --max-time 30 --proto '=https,file' "$1" -o "$2" 2>/dev/null
 
 # show_log <lines> <file>: the tail of a pnpm log for the journal, credentials masked. The
 # journal feeds OnFailure's page (unit-failure-alert.sh sends its last lines to Discord),
-# and pnpm can echo a registry URL or auth header it took from ~/.npmrc.
+# and pnpm can echo a registry URL or auth header it took from ~/.npmrc. This shell prints
+# each line, not sed: journald files a line from a process that has already exited without
+# the unit's invocation id, which is how that page selects its lines.
 show_log() {
-  tail -n "$1" "$2" | sed -E -e 's#(://)[^/@[:space:]]+@#\1[redacted]@#g' \
-    -e 's#((_authToken|_auth|_password|token)[=:][[:space:]]*)[^[:space:]]+#\1[redacted]#gI' \
-    -e 's#((Bearer|Basic)[[:space:]]+)[^[:space:]]+#\1[redacted]#gI' -e 's/^/    /'
+  local line
+  while IFS= read -r line || [ -n "$line" ]; do printf '    %s\n' "$line"; done < <(
+    tail -n "$1" "$2" | sed -E -e 's#(://)[^/@[:space:]]+@#\1[redacted]@#g' \
+      -e 's#((_authToken|_auth|_password|token)[=:][[:space:]]*)[^[:space:]]+#\1[redacted]#gI' \
+      -e 's#((Bearer|Basic)[[:space:]]+)[^[:space:]]+#\1[redacted]#gI'
+  )
 }
 
 # exclude_for <package.json|manifest> <version>: the exact cooldown exception a version
