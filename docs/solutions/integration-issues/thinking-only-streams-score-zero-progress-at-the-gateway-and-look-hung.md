@@ -24,7 +24,7 @@ tags: [thinking-display, ccflare, meaningful-progress-timeout, thinking-delta, s
 
 # Thinking-only streams score zero progress at the gateway and long-thinking Claude Code sessions look hung
 
-> **Retired machinery (2026-10-18).** The loop_quality pipeline was removed by #1916 and the always-on dispatcher by #1873 (teardown 2026-10-17/18), so `scripts/lib/loop_quality/sessions.py`, `THINKING_DISPLAY_ARGS` and `tests/loop-quality-sessions.test.sh` no longer resolve, and the dispatcher is no longer a launch path. `bin/claude-loop.sh` still passes `--thinking-display summarized` and `settings.json` still sets `showThinkingSummaries`; their line numbers below were re-checked on 2026-10-18, and the loop_quality references below are kept as history. The lesson still holds for any headless `claude -p` launcher: pass the literal CLI flag.
+> **Retired machinery (2026-10-18).** The loop_quality pipeline was removed by #1916 and the always-on dispatcher by #1873 (teardown 2026-10-17/18), so `scripts/lib/loop_quality/sessions.py`, `THINKING_DISPLAY_ARGS` and `tests/loop-quality-sessions.test.sh` no longer resolve, and the dispatcher is no longer a launch path. `bin/claude-loop.sh` still passes `--thinking-display summarized` and `settings.json` still sets `showThinkingSummaries`; the cites below name them by function or key rather than line number (re-checked 2026-11-20), and the loop_quality references below are kept as history. The lesson still holds for any headless `claude -p` launcher: pass the literal CLI flag.
 
 ## Problem
 

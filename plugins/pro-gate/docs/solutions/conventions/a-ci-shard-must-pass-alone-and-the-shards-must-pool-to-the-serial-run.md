@@ -143,7 +143,7 @@ Fix such tests where they stand; they were flaky before the split.
 
 ## Why This Matters
 
-The `trusted check` gates merges and releases. A split that drops a suite, doubles one, or runs a shard that passes for the wrong reason makes CI faster and weaker at the same time, and a green run looks the same either way. Every failure above was silent at the level CI reports. A missing fixture still printed ALL PASS. A bad selector failed for the wrong reason. An `in_shard` that selected everything would have kept every check green while undoing the speed-up.
+In the standalone repository the `trusted check` gated merges and releases. A split that drops a suite, doubles one, or runs a shard that passes for the wrong reason makes CI faster and weaker at the same time, and a green run looks the same either way. Every failure above was silent at the level CI reports. A missing fixture still printed ALL PASS. A bad selector failed for the wrong reason. An `in_shard` that selected everything would have kept every check green while undoing the speed-up.
 
 ## When to Apply
 

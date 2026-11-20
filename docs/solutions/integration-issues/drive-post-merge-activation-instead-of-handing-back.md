@@ -95,6 +95,8 @@ activation: checkout current ($repo at <head>; includes <merge>)
 
 If the merge remains absent, closeout reports `!! activation: checkout not current` and retains the actual helper diagnosis, including blocking paths. Inspect that output rather than a dotup service journal. This path establishes containment of the known merge—not freshness against every later upstream commit, a service restart, or runtime deployment. It creates no ordinary-repository timer. Dry-run never calls even the freshener's own dry-run mode, because that helper mode still fetches.
 
+Report the printed line, not your own guess. The always-on rule is the `!! activation:` bullet in `CLAUDE.md`, with detail in `HARNESS.md` → "Merge-anchored closeout"; since the switch it says the line itself names the reason, not a dotup journal.
+
 ### History: dotup-managed repositories (before the 2026-11-02 switch)
 
 `wt-done.sh` no longer has this branch, and `dotup`, its unit and its hourly timer left with the dotfiles installer. This section records what #915 shipped; none of its commands, paths or result labels apply today.
@@ -133,11 +135,9 @@ The same line can follow other results when the merge remains unapplied, includi
 
 A status-file timestamp older than the activation's own start is reported as `dotup result=stale-status`: the start coalesced into a run that began before this merge, so its result is not this merge's verdict (`activate()` in `scripts/wt-done.sh`). A `live` line proves canonical merge containment; it does not independently prove copied skills were installed or already-running consumers reloaded. The already-contained path skips dotup entirely. Verify the installed files and affected consumer when making a stronger deployment claim.
 
-Activation refusal is printed but does not fail closeout's normal reconciliation result. The hourly dotup timer is a backstop only for dotup-managed repositories, and does not guarantee recovery.
+Activation refusal was printed but did not fail closeout's normal reconciliation result. The hourly dotup timer was a backstop only for dotup-managed repositories, and did not guarantee recovery.
 
-Report the printed line, not your own guess. The always-on rule is the `!! activation:` bullet in `CLAUDE.md`, with detail in `HARNESS.md` → "Merge-anchored closeout"; since the switch it says the line itself names the reason, not a dotup journal.
-
-If dotup refuses, the fix is on the checkout, not on the caller: `journalctl --user -u dotup-refresh.service` names the reason, and `repo_ff_explain` (`lib/repo-update.sh:112-183`) lists the exact untracked or modified paths blocking the fast-forward, with kind-labeled guidance (`lib/repo-update.sh:133-165`). Never fall back to telling the operator to run `sync.sh install`: that command symlinks `~/.claude` at whatever checkout it runs from (`dotup:46-55` states the same trap for `dotup` itself), which from a worktree silently repoints the live harness at a throwaway branch.
+When dotup refused, the fix was on the checkout, not on the caller: the `dotup-refresh.service` journal named the reason, and `repo_ff_explain` in `lib/repo-update.sh` (still there) lists the exact untracked or modified paths blocking the fast-forward, with kind-labeled guidance. The fallback this section ruled out, telling the operator to run `sync.sh install`, symlinked `~/.claude` at whatever checkout it ran from, so from a worktree it silently repointed the live harness at a throwaway branch. `sync.sh install` was later removed in favour of `./setup`.
 
 ## Why This Works
 
