@@ -216,7 +216,7 @@ wt_newest_work() {
 # the ref holds HEAD; otherwise the caller must keep the worktree. Not the
 # pr-merged namespace: wt-sweep prunes an anchor with no same-named branch.
 wt_pin_detached() {
-  local repo="$1" wt="$2" stamp="$3" dry="$4" ref head out
+  local repo="$1" wt="$2" stamp="$3" dry="$4" ref head out line shown=0
   ref="refs/heads/recovered/wt-sweep-$stamp/$(basename "$wt")"
   if [ "$dry" = 1 ]; then
     echo "      would: git -C '$repo' update-ref '$ref' <HEAD of $wt>"
@@ -228,6 +228,8 @@ wt_pin_detached() {
     return 0
   fi
   echo "      !! FAILED: update-ref $ref $head"
-  [ -n "$out" ] && printf '%s\n' "$out" | head -n 5 | sed 's/^/         /'
+  # Builtins, as in wt-sweep's run(): journald files a line from an exited `sed` without
+  # the unit's invocation id, so OnFailure's page would miss git's reason.
+  [ -n "$out" ] && while [ $shown -lt 5 ] && IFS= read -r line; do echo "         $line"; shown=$((shown+1)); done <<<"$out"
   return 1
 }

@@ -347,6 +347,8 @@ mkfix locked feat
 out=$(sweep "$TMP/locked" "$TMP/wt-done-lock" 0)
 has "names the failed removal" "$out" "!! FAILED: git -C '$TMP/locked/repo' worktree remove --force"
 has "and git's own reason" "$out" "cannot remove a locked working tree"
+# Indented under the FAILED line, as run()'s builtin loop prints it.
+has "git's reason indented under it" "$out" "         fatal: cannot remove a locked working tree"
 [ -d "$TMP/locked/repo-wt" ] && ok "locked worktree left in place" || no "locked worktree left in place"
 git -C "$TMP/locked/repo" rev-parse --verify -q refs/heads/feat >/dev/null \
   && ok "branch kept when its worktree could not be removed" || no "branch kept when its worktree could not be removed"

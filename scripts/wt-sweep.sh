@@ -214,10 +214,13 @@ ROUTE_SKIP_COMMON="$ROUTE_SKIP_COMMON$_skip"
 done < <(wt_roots)
 
 # On failure git's own reason follows the FAILED line, indented and capped at five
-# lines: a bare "!! FAILED" left the journal silent on why a removal refused.
-run(){ local out; if [ "$DRY_RUN" = 1 ]; then echo "      would: $*"; return 0; fi
+# lines: a bare "!! FAILED" left the journal silent on why a removal refused. Builtins
+# print it, as at the hold lines below, so OnFailure's page (it selects by invocation id) has it.
+run(){ local out line shown=0; if [ "$DRY_RUN" = 1 ]; then echo "      would: $*"; return 0; fi
   if out=$(eval "$@" 2>&1); then echo "      ok: $*"; return 0; fi
-  echo "      !! FAILED: $*"; [ -n "$out" ] && printf '%s\n' "$out" | head -n 5 | sed 's/^/         /'; return 1; }
+  echo "      !! FAILED: $*"
+  [ -n "$out" ] && while [ $shown -lt 5 ] && IFS= read -r line; do echo "         $line"; shown=$((shown+1)); done <<<"$out"
+  return 1; }
 # The directories alive() spells each worktree through: WT_ALIAS_ROOTS when set, as
 # for the session-hold helper (lib/wt-preserve.sh), else the repo roots (hov-stack#661).
 if [ -n "${WT_ALIAS_ROOTS+x}" ]; then ALIAS_ROOTS=$WT_ALIAS_ROOTS
