@@ -144,6 +144,19 @@
 # heartbeat module load wrote (runner-guard requires lib/pretooluse-decision). Bash stays covered by the
 # guards that always start.
 #
+# Stdin gate (#810): hooks/PreToolUse/peer-loop-guard.js (matcher SendMessage|Bash, registered
+# directly). run() parses stdin and returns it untouched (writeHookOutput prints nothing, exit 0,
+# empty stderr) unless sendsOf(input) finds a send: tool_name === 'SendMessage', or a Bash
+# tool_input.command that HOV_SEND matches. HOV_SEND is a case-sensitive, flagless regex whose only
+# way to match runs through the literal `send`, so a send needs the DECODED stdin to hold
+# `SendMessage` or `send`. sendsOf is pure; nothing with an effect (transcript read, state, log)
+# runs before it returns a send. The launcher skips node unless stdin holds `send` or `SendMessage`,
+# or one of `\u004`, `\u005`, `\u006`, `\u007`: the JSON escape prefixes of every character of either
+# literal (M U+004D; S U+0053; a d e g n U+0061..U+006E; s U+0073). Tied to HOV_SEND and sendsOf by
+# hooks/tests/node-hook.test.js (drift test). What the skip drops: the seam heartbeat module load
+# wrote (peer-loop-guard requires lib/pretooluse-decision). Bash stays covered by the guards that
+# always start.
+#
 # What the skip drops: the seam heartbeat settings-guard.js wrote on every Edit/Write/MultiEdit.
 # After pass 2 it was the only beat source for those tools, so scripts/hook-seam-check.py
 # BEAT_COVERED_TOOLS is now {Bash, EnterWorktree}. Evidence in that file's header.
@@ -186,6 +199,14 @@ case $_hn_arm in
     if _hn_read; then
       case $_hn_buf in
         *'kill'* | *'systemctl'* | *'\u006'* | *'\u007'*) _hn_stdin=1 ;;
+        *) exit 0 ;;
+      esac
+    fi
+    ;;
+  */PreToolUse/peer-loop-guard.js)
+    if _hn_read; then
+      case $_hn_buf in
+        *'send'* | *'SendMessage'* | *'\u004'* | *'\u005'* | *'\u006'* | *'\u007'*) _hn_stdin=1 ;;
         *) exit 0 ;;
       esac
     fi

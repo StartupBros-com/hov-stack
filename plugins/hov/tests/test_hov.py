@@ -638,6 +638,25 @@ class HovCase(HovFixture):
         self.assertIn("Inbox: hov inbox.", ctx)
         self.assertIn("Reply: hov send --to testhost:ceo", ctx)
 
+    def test_reply_hint_names_the_first_message_that_wants_a_reply(self):
+        # A status note first and a normal note second: the hint answers the second sender, not the first.
+        self.hov("send", "--as", "ceo", "--to", "alpha", "--kind", "status", "build green")
+        self.hov("send", "--as", "cto", "--to", "alpha", "a question")
+        ctx = self.hook("UserPromptSubmit", SID_A)["hookSpecificOutput"]["additionalContext"]
+        # The hint's command is `hov` or `python3 -I <script>` depending on PATH (test_hook_hint_names_a_runnable_command).
+        self.assertIn("from testhost:ceo", ctx)
+        self.assertIn("Reply: ", ctx)
+        self.assertIn(" send --to testhost:cto --thread ", ctx)
+        self.assertNotIn("--to testhost:ceo", ctx)
+        # Only status and low-importance notes: no Reply line at all, and the block says none is expected.
+        self.hov("send", "--as", "ceo", "--to", "beta", "--kind", "status", "deploy done")
+        self.hov("send", "--as", "cto", "--to", "beta", "--importance", "low", "fyi")
+        ctx = self.hook("UserPromptSubmit", SID_B)["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("from testhost:ceo", ctx)
+        self.assertIn("from testhost:cto", ctx)
+        self.assertNotIn("Reply:", ctx)
+        self.assertIn("no reply is expected", ctx)
+
     def test_log_line_per_delivery(self):
         self.hov("send", "--as", "ceo", "--to", "alpha", "logged")
         self.hook("UserPromptSubmit", SID_A)

@@ -14,7 +14,8 @@ Ceremony Test (HARNESS.md § Doctrine):
                 prompt-denial capture.
 
 Sources of a denial and where each is ALREADY counted (skip here by default):
-  git-guard / codex-quota / codex-doghouse (historical) / runner-guard
+  git-guard / codex-quota / codex-doghouse (historical) / runner-guard /
+  peer-loop-guard
                                              -> papercut (guard_blocked:<name>)
   dcg                                        -> nowhere (third-party hook, papercut
                                                 deliberately does not wrap it)
@@ -48,6 +49,7 @@ PAPERCUT_COVERED = {
     "codex-quota-guard",
     "codex-doghouse",  # historical transcript classification
     "runner-guard",
+    "peer-loop-guard",
 }
 
 FALLBACK_MARKERS = (
@@ -110,6 +112,8 @@ def classify_source(kind: str, text: str) -> str:
         return "codex-doghouse"
     if "runner-guard" in text or "kill target" in text:
         return "runner-guard"
+    if text.startswith("peer-loop-guard:"):
+        return "peer-loop-guard"
     if "don't ask mode" in text:
         # Refused only because the session ran unattended — a MODE outcome,
         # not a rule match. Fix menu differs (per-repo grant / mode change /
@@ -313,7 +317,7 @@ def main() -> int:
     ap.add_argument("--root", type=Path, default=Path.home() / ".claude" / "projects")
     ap.add_argument("--json", action="store_true", help="machine-readable clusters")
     ap.add_argument("--include-papercut-covered", action="store_true",
-                    help="also show git-guard/codex-quota/historical-doghouse/runner-guard (papercut already ranks these)")
+                    help="also show git-guard/codex-quota/historical-doghouse/runner-guard/peer-loop-guard (papercut already ranks these)")
     ap.add_argument("--no-fallback", action="store_true",
                     help="disable prose-marker fallback when toolDenialKind yields zero")
     ap.add_argument("--digest", action="store_true",

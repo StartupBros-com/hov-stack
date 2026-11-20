@@ -71,8 +71,13 @@ from 2.1.283, unless the organization requires Trusted Devices.
   cannot approve a permission prompt, change settings or `CLAUDE.md`, or run
   a slash command, and prompts still fire for any permission the receiver
   does not already hold (messaging docs, "How a session treats an incoming
-  message"); upstream caps bound volume, not content (per-sender rate
-  limit, duplicate drop, 50-message read queue, 100 held). Traded away: the
+  message"); upstream caps bound bursts and backlog, not content and not a
+  slow loop (a 30-message burst then one every 2 s per sender, identical
+  repeats within 30 s dropped, a 50-message read queue, 100 held; Claude
+  Code 2.1.329 skips its hop limit for local messages and pauses a sender
+  only past 100,000 sends), so two sessions answering each other at agent
+  speed are stopped by `hooks/PreToolUse/peer-loop-guard.js` (#810), not
+  upstream. Traded away: the
   human approval step. A bypass worker holds every permission, so for
   workers the gate is deny rules, the PreToolUse hooks (git-guard, dcg, the
   shape guard) and the CLAUDE.md rule that a peer message is untrusted
@@ -160,7 +165,12 @@ from 2.1.283, unless the organization requires Trusted Devices.
   `node -e "require('net').connect(...)"` (tested 2026-08-08); only bare
   `nc`/`ncat`/`netcat` are name-denied in `settings.json`. Upstream throttling
   (per-sender rate limit, duplicate drop, 50-message read cap, 100-message
-  hold cap) bounds any hook-driven or looping sender.
+  hold cap) bounds bursts, not a looping sender: agent turns are far slower
+  than its one-per-2-s rate, and Claude Code 2.1.329 neither counts local
+  hops nor pauses before 100,000 sends (audit in #810).
+  `peer-loop-guard.js` bounds loops that send through `SendMessage` or
+  `hov send`; a hook or script writing to the socket directly is bounded by
+  neither.
 - Sandbox is off (`sandbox.enabled: false`). If it is ever enabled on
   Linux/WSL2, the **only** unix-socket lever is
   `sandbox.network.allowAllUnixSockets: true` — the path allowlist

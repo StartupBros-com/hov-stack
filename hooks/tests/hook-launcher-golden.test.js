@@ -209,6 +209,32 @@ add(RG, 'runner-guard: ssh-wrapped stop denied', 'deny', { payload: () => bash(`
 add(RG, 'runner-guard: systemctl status allowed', 'quiet', { payload: () => bash(`systemctl status ${UNIT}`) });
 add(RG, 'runner-guard: other unit restart allowed', 'quiet', { payload: () => bash('sudo systemctl restart nginx') });
 
+// peer-loop-guard fixture: one transcript whose last user record is a peer message carrying a 19-hop chain
+// in which one session token appears 10 times, so the hop rule refuses a native send from that turn.
+const PLG = 'PreToolUse/peer-loop-guard.js';
+const PLG_DIR = mkTmp('golden-plg-');
+process.on('exit', () => rmTmp(PLG_DIR));
+const PLG_STARTER = 'golden-plg-starter-0001';
+const PLG_TX = path.join(PLG_DIR, 'peer-turn.jsonl');
+fs.writeFileSync(PLG_TX, `${JSON.stringify({
+  type: 'user', uuid: PLG_STARTER, timestamp: '2026-11-19T00:00:00.000Z', isMeta: true,
+  origin: { kind: 'peer', from: 'uds:/tmp/golden-peer.sock', name: 'golden-peer', fullHopChain: Array.from({ length: 19 }, (_, i) => (i % 2 ? 'tokA' : 'tokB')) },
+  message: { role: 'user', content: 'PING' },
+})}\n`);
+/** Seed the latch on that message for session `sid`: every further send from it is refused, hov included. */
+const plgLatch = (sid) => (home) => {
+  const d = path.join(home, '.claude', '.peer-loop-state');
+  fs.mkdirSync(d, { recursive: true });
+  fs.writeFileSync(path.join(d, `${sid}.json`), JSON.stringify({ v: 1, mark: null, partners: [], sessCnt: 0, sessLast: null, deniedStarter: PLG_STARTER }));
+};
+const sendMsg = (toolInput) => ({ tool_name: 'SendMessage', tool_input: toolInput, session_id: 'golden-sess-0001', transcript_path: PLG_TX });
+const PLG_SOCK = { to: 'uds:/tmp/golden-peer.sock', recipient_kind: 'session', message: 'PING' };
+add(PLG, 'peer-loop-guard: SendMessage from a 19-hop turn denied', 'deny', { payload: () => sendMsg(PLG_SOCK) });
+add(PLG, 'peer-loop-guard: hov send after a refused send from the same turn denied', 'deny', { home: plgLatch('golden-sess-0001'), payload: () => bash('hov send --to h1:worker "x"', { transcript_path: PLG_TX }) });
+add(PLG, 'peer-loop-guard: SendMessage to a subagent allowed', 'quiet', { payload: () => sendMsg({ to: 'researcher', recipient_kind: 'agent', message: 'PING' }) });
+add(PLG, 'peer-loop-guard: hov send from a 19-hop turn allowed (the hop rule is native only)', 'quiet', { payload: () => bash('hov send --to h1:worker "x"', { transcript_path: PLG_TX }) });
+add(PLG, 'peer-loop-guard: ls skipped by the launcher', 'quiet', { skips: true, payload: () => bash('ls') });
+
 const SR = 'PreToolUse/shape-rewrite.js';
 add(SR, 'shape-rewrite: command substitution rewritten', 'rewrite', { fx: worktreeFx, payload: (fx) => bash('echo $(date)', { cwd: fx.cwd, scratchpad_dir: fx.scratch }) });
 add(SR, 'shape-rewrite: plain echo untouched', 'quiet', { fx: worktreeFx, payload: (fx) => bash('echo hello', { cwd: fx.cwd, scratchpad_dir: fx.scratch }) });
@@ -1855,6 +1881,140 @@ test('PLANTED NEGATIVE RG-9: a gate that tests only `systemctl` and `kill` after
 });
 
 // ---------------------------------------------------------------------------
+// peer-loop-guard (#810): same model as the runner-guard section. Its gate passes stdin holding `send`,
+// `SendMessage`, or a JSON escape prefix of one of their letters (\u004 M, \u005 S, \u006 a d e g n,
+// \u007 s). Denies come from PLG_TX: a native send from that 19-hop turn is refused by the hop rule; a
+// hov send needs the latch seeded in the case's HOME (plgLatch), since the hop rule is native only.
+// ---------------------------------------------------------------------------
+
+const PLG_HEAD = BASH_HEAD.replace('/home/u/.claude/projects/-tmp/golden-bg-0001.jsonl', PLG_TX);
+const PLG_CASES = [];
+const addPlg = (name, expect, skips, payload, extra = {}) => PLG_CASES.push({ name, expect, skips, payload, ...extra });
+const latched = { home: plgLatch('golden-bg-0001') };
+const smRaw = (ti, { head = PLG_HEAD, tool = 'SendMessage' } = {}) => `${head},"tool_name":"${tool}","tool_input":${ti}}`;
+const PLG_SM = JSON.stringify(PLG_SOCK);
+const PLG_HOV = 'hov send --to h1:worker x';
+
+// 1. Native sends from the 19-hop turn: the hop rule refuses.
+addPlg('deny: SendMessage by socket', 'deny', false, smRaw(PLG_SM));
+addPlg('deny: SendMessage by name', 'deny', false, smRaw('{"to":"golden-peer","recipient_kind":"name","message":"PING"}'));
+addPlg('deny: JSON.stringify spelling', 'deny', false, JSON.stringify({ session_id: 'golden-bg-0001', transcript_path: PLG_TX, tool_name: 'SendMessage', tool_input: PLG_SOCK }));
+addPlg('deny: pretty-printed JSON', 'deny', false, JSON.stringify({ session_id: 'golden-bg-0001', transcript_path: PLG_TX, tool_name: 'SendMessage', tool_input: PLG_SOCK }, null, 2));
+addPlg('deny: trailing newlines (3)', 'deny', false, `${smRaw(PLG_SM)}\n\n\n`);
+addPlg('deny: leading and trailing whitespace', 'deny', false, `\n  ${smRaw(PLG_SM)} \t\n`);
+addPlg('deny: 200 KB message body', 'deny', false, smRaw(JSON.stringify({ ...PLG_SOCK, message: 'y'.repeat(200 * 1024) })));
+addPlg('deny: non-ASCII message body', 'deny', false, smRaw(JSON.stringify({ ...PLG_SOCK, message: 'héllo ☃' })));
+addPlg('deny: escaped key name (tool_n\\u0061me) with a plain value', 'deny', false, `${PLG_HEAD},"tool_n\\u0061me":"SendMessage","tool_input":${PLG_SM}}`);
+addPlg('deny: duplicate tool_name key, SendMessage last', 'deny', false, `${PLG_HEAD},"tool_name":"Read","tool_name":"SendMessage","tool_input":${PLG_SM}}`);
+const PLG_SMN = 'SendMessage';
+PLG_SMN.split('').forEach((c, i) => addPlg(`escaped char ${i} (${c}) of the SendMessage tool name denies`, 'deny', false, smRaw(PLG_SM, { tool: bgEscapeAt(PLG_SMN, i) })));
+addPlg('every character of SendMessage escaped denies', 'deny', false, smRaw(PLG_SM, { tool: bgEscapeAll(PLG_SMN) }));
+addPlg('every character of SendMessage escaped, uppercase hex denies', 'deny', false, smRaw(PLG_SM, { tool: bgEscapeAll(PLG_SMN, true) }));
+
+// 2. hov sends from the same turn after a refusal (latch seeded): refused on either channel.
+addPlg('deny (latch): SendMessage after a refused send', 'deny', false, smRaw(PLG_SM), latched);
+for (const c of [PLG_HOV, 'hov send --to h1:worker "x"', '/home/u/.local/bin/hov send --to w x', '"hov" send --to w x', "'hov' send --to=w x", 'ls; hov  send --to w x', 'hov\tsend --to w x', 'python3 -I /x/hov send --to w y', 'cd /tmp && hov send --to h2:* x']) {
+  addPlg(`deny (latch): ${JSON.stringify(c)}`, 'deny', false, bashRaw(c, { head: PLG_HEAD }), latched);
+}
+for (let i = 4; i < 8; i += 1) addPlg(`deny (latch): escaped char ${i} (${PLG_HOV[i]}) of "send"`, 'deny', false, bashRawBody(bgEscapeAt(PLG_HOV, i), PLG_HEAD), latched);
+addPlg('deny (latch): every character of the hov command escaped', 'deny', false, bashRawBody(bgEscapeAll(PLG_HOV), PLG_HEAD), latched);
+addPlg('deny (latch): every character of the hov command escaped, uppercase hex', 'deny', false, bashRawBody(bgEscapeAll(PLG_HOV, true), PLG_HEAD), latched);
+addPlg('deny (latch): escaped key name (comm\\u0061nd) with a plain value', 'deny', false, `${PLG_HEAD},"tool_name":"Bash","tool_input":{"comm\\u0061nd":"${PLG_HOV}"}}`, latched);
+addPlg('deny (latch): escaped tool_name (B\\u0061sh) with a plain command', 'deny', false, `${PLG_HEAD},"tool_name":"B\\u0061sh","tool_input":{"command":"${PLG_HOV}"}}`, latched);
+
+// 3. A literal is present but nothing is sent or refused.
+for (const c of ['echo send', 'discord-cli send 1 --content-file x', 'hovsend --to w x', 'HOV send --to w x', 'hov.send --to w x', 'git log --grep send']) {
+  addPlg(`literal present, no act: ${JSON.stringify(c)}`, 'quiet', false, bashRaw(c, { head: PLG_HEAD }), latched);
+}
+addPlg('hov send from the 19-hop turn, no latch: allowed (the hop rule is native only)', 'quiet', false, bashRaw(PLG_HOV, { head: PLG_HEAD }));
+addPlg('description-only literal (command hov inbox)', 'quiet', false, bashRaw('hov inbox', { head: PLG_HEAD, desc: 'send a reply later' }), latched);
+addPlg('literal only in cwd', 'quiet', false, bashRaw('ls', { head: PLG_HEAD.replace('"cwd":"/tmp/golden"', '"cwd":"/home/u/SITES/sender"') }), latched);
+addPlg('literal only in the transcript path', 'quiet', false, bashRaw('ls', { head: BASH_HEAD.replace('golden-bg-0001.jsonl', 'send-session.jsonl') }));
+addPlg('SendMessage to a subagent: quiet', 'quiet', false, smRaw('{"to":"researcher","recipient_kind":"agent","message":"PING"}'), latched);
+addPlg('SendMessage to a teammate (main): quiet', 'quiet', false, smRaw('{"to":"lead","recipient_kind":"main","message":"PING"}'), latched);
+addPlg('SendMessage broadcast (*): quiet', 'quiet', false, smRaw('{"to":"*","message":"PING"}'), latched);
+addPlg('SendMessage with no transcript on disk: quiet', 'quiet', false, smRaw(PLG_SM, { head: BASH_HEAD }));
+addPlg('lowercase tool name sendmessage: quiet', 'quiet', false, smRaw(PLG_SM, { tool: 'sendmessage' }), latched);
+addPlg('non-Bash tool carrying a hov send: quiet', 'quiet', false, bashRaw(PLG_HOV, { head: PLG_HEAD, tool: 'Edit' }), latched);
+addPlg('no tool_name, hov send command: quiet', 'quiet', false, `{"transcript_path":${JSON.stringify(PLG_TX)},"tool_input":{"command":"${PLG_HOV}"}}`);
+addPlg('command is an array holding a hov send: quiet', 'quiet', false, `${PLG_HEAD},"tool_name":"Bash","tool_input":{"command":["${PLG_HOV}"]}}`, latched);
+addPlg('JSON string holding a hov send: quiet', 'quiet', false, `"${PLG_HOV}"`);
+addPlg('malformed JSON, with a hov send: quiet', 'quiet', false, `{"tool_name":"Bash","tool_input":{"command":"${PLG_HOV}"`);
+addPlg('raw NUL byte inside a hov send (invalid JSON): quiet', 'quiet', false, `{"tool_name":"Bash","tool_input":{"command":"${PLG_HOV}\u0000"}}`);
+
+// 4. No literal anywhere: the gate must skip node (quiet, exit 0, empty stderr).
+for (const c of ['ls -la', 'echo hello', 'git status', 'pnpm test', 'gh pr view 5', 'hov inbox', 'hov read 12', 'hov who', 'hov thread t1', 'cat package.json', 'HOV SEND --to w x', 'Send it', 'sen d x', 'snd x', 'journalctl -n 5']) {
+  addPlg(`no literal: ${c}`, 'quiet', true, bashRaw(c, { head: PLG_HEAD }), latched);
+}
+addPlg('no literal, uppercase tool name SENDMESSAGE', 'quiet', true, smRaw('{"to":"golden-peer","message":"PING"}', { tool: 'SENDMESSAGE' }), latched);
+addPlg('no literal, real-shape head with description', 'quiet', true, bashRaw('pnpm build', { desc: 'Build the workspace' }));
+addPlg('no literal, JSON.stringify spelling', 'quiet', true, JSON.stringify({ session_id: 'golden-bg-0003', cwd: '/tmp/golden', tool_name: 'Bash', tool_input: { command: 'ls' } }));
+addPlg('no literal, pretty-printed', 'quiet', true, JSON.stringify({ tool_name: 'Bash', tool_input: { command: 'ls' } }, null, 2));
+addPlg('ANSI escape (\\u001b) in the command: quiet', 'quiet', true, bashRawBody('printf \\u001b[31mred\\u001b[0m'));
+addPlg('short escapes (\\n \\t \\" \\\\) only: quiet', 'quiet', true, bashRawBody('echo l1\\nl2\\t\\"q\\" \\\\ end'));
+addPlg('escape that is not a literal letter (\\u0000-\\u003f): quiet', 'quiet', true, bashRawBody('echo \\u0007\\u0008\\u000b\\u001f\\u0020\\u003a'));
+addPlg('non-ASCII, no literal: quiet', 'quiet', true, JSON.stringify({ tool_name: 'Bash', tool_input: { command: 'echo héllo ☃ \u{1F600}' } }));
+addPlg('trailing newlines (3), no literal: quiet', 'quiet', true, `${bashRaw('ls')}\n\n\n`);
+addPlg('200 KB command, no literal: quiet', 'quiet', true, bashRaw(`echo ${'y'.repeat(200 * 1024)}`));
+addPlg('Read of a file, no literal: quiet', 'quiet', true, '{"tool_name":"Read","tool_input":{"file_path":"/a/b.js"}}');
+addPlg('malformed JSON, no literal: quiet', 'quiet', true, '{not json');
+addPlg('empty stdin: quiet', 'quiet', true, '');
+addPlg('only a newline: quiet', 'quiet', true, '\n');
+addPlg('JSON null: quiet', 'quiet', true, 'null');
+addPlg('JSON array: quiet', 'quiet', true, '[]');
+addPlg('raw NUL byte, no literal (invalid JSON): quiet', 'quiet', true, '{"tool_name":"Bash","tool_input":{"command":"ls\u0000"}}');
+addPlg('raw \\001 byte, no literal (invalid JSON): quiet', 'quiet', true, '{"tool_name":"Bash","tool_input":{"command":"ls\u0001"}}');
+
+// 5. Over the 1 MiB accumulate cap.
+const plgBig = 'y'.repeat(2 * bgMiB);
+addPlg('2 MiB command, no trigger: quiet', 'quiet', true, bashRaw(`echo ${plgBig}`));
+addPlg('2 MiB command, hov send BEFORE the cap (truncated, invalid JSON): quiet', 'quiet', false, `{"tool_name":"Bash","tool_input":{"command":"${PLG_HOV}; echo ${plgBig}"},"cwd":"/tmp/golden"}`, latched);
+addPlg('2 MiB command, hov send AFTER the cap (node never sees it): quiet', 'quiet', false, `{"tool_name":"Bash","tool_input":{"command":"echo ${plgBig}; ${PLG_HOV}"}}`, latched);
+
+const plgSec = bashGateSection({ hook: PLG, label: 'peer-loop-guard', cases: PLG_CASES });
+bashGateTests(plgSec, { minCases: 90, minDecisive: 40, minSkips: 30, decisive: BG_DECISIVE });
+
+const PLG_ARM_LINE_RE = /( {2}\*\/PreToolUse\/peer-loop-guard\.js\)\n[\s\S]*? {6}case \$_hn_buf in\n {8})(.*)(\) _hn_stdin=1 ;;)/;
+const PLG_PATS = ["*'send'*", "*'SendMessage'*", "*'\\u004'*", "*'\\u005'*", "*'\\u006'*", "*'\\u007'*"];
+const plgPatHit = (p, raw) => raw.includes(p.replace(/^\*'/, '').replace(/'\*$/, ''));
+const plgMutate = (pats) => (s) => s.replace(PLG_ARM_LINE_RE, (m, a, b, c) => `${a}${pats.join(' | ')}${c}`);
+
+test('peer-loop-guard gate: the launcher carries exactly the six expected patterns', () => {
+  assert.deepStrictEqual(LAUNCHER_SRC.match(PLG_ARM_LINE_RE)[2].split(' | '), PLG_PATS);
+});
+
+PLG_PATS.forEach((pat, idx) => {
+  test(`PLANTED NEGATIVE PLG-${idx + 1}: dropping the pattern ${pat} is red on every case that only that pattern lets through`, (t) => {
+    const rest = PLG_PATS.filter((p) => p !== pat);
+    plgSec.planted(t, `without ${pat}`, plgMutate(rest),
+      (spec) => spec.expect !== 'quiet' && plgPatHit(pat, spec.raw) && !rest.some((p) => plgPatHit(p, spec.raw)), 1);
+  });
+});
+
+test('PLANTED NEGATIVE PLG-7: a gate with the plain literals only (no \\u escape prefixes) is red on every escaped-spelling case', (t) => {
+  plgSec.planted(t, 'no escape prefixes', plgMutate(PLG_PATS.slice(0, 2)),
+    (spec) => spec.expect !== 'quiet' && !plgPatHit(PLG_PATS[0], spec.raw) && !plgPatHit(PLG_PATS[1], spec.raw), 10);
+});
+
+test('PLANTED NEGATIVE PLG-8: a gate that drops stdin before node is red on every decisive case', (t) => {
+  plgSec.planted(t, 'dropping gate', (s) => s.split('printf \'%s\' "$_hn_buf" |').join('printf \'\' |'),
+    (spec) => BG_DECISIVE.has(spec.expect) && !spec.skips, 40);
+});
+
+test('PLANTED NEGATIVE PLG-9: a gate that never skips cannot hide behind the seam exclusion (skip cases must see 0 beats)', (t) => {
+  plgSec.planted(t, 'never-skipping gate', plgMutate(['*']), (spec) => spec.skips, 30);
+});
+
+test('PLANTED NEGATIVE PLG-10: a gate that skips everything is red on every decisive case', (t) => {
+  plgSec.planted(t, 'always-skipping gate', plgMutate(["*'__never__'*"]), (spec) => BG_DECISIVE.has(spec.expect), 40);
+});
+
+test('PLANTED NEGATIVE PLG-11: a gate that tests `hov send` (one space) instead of `send` is red on the quoted, tab and double-space spellings', (t) => {
+  plgSec.planted(t, 'hov-space gate', plgMutate(["*'hov send'*", ...PLG_PATS.slice(1)]),
+    (spec) => spec.expect !== 'quiet' && spec.raw.includes('send') && !spec.raw.includes('hov send') && !PLG_PATS.slice(1).some((p) => plgPatHit(p, spec.raw)), 3);
+});
+
+// ---------------------------------------------------------------------------
 // Fail open (#414 items 1 and 3), real hooks and real node. With fd 0 closed, and with a PATH that
 // holds node but no tr or cat, no gate can run, so each gated registration must answer exactly as
 // its OLD form: stdout, exit code, signal, spawn error, stderr and every file under HOME, seam beat
@@ -1872,6 +2032,8 @@ const FO_CASES = [
   { key: CQ, name: 'codex-quota-guard on codex exec, no auth', env: { CODEX_HOME: '/nonexistent-codex-home' }, payload: () => bash('codex exec "ship it"'), nodeOnly: 'quiet' },
   { key: RG, name: 'runner-guard on a runner restart', payload: () => bash(`sudo systemctl restart ${UNIT}`), nodeOnly: 'deny' },
   { key: RG, name: 'runner-guard on ls', payload: () => bash('ls'), nodeOnly: 'quiet' },
+  { key: PLG, name: 'peer-loop-guard on a SendMessage from a 19-hop turn', payload: () => sendMsg(PLG_SOCK), nodeOnly: 'deny' },
+  { key: PLG, name: 'peer-loop-guard on ls', payload: () => bash('ls'), nodeOnly: 'quiet' },
   { key: AF, name: 'auto-format on a .ts write', payload: (fx) => ({ session_id: 'golden-fo-01', tool_name: 'Write', tool_input: { file_path: path.join(fx.cwd, 'zz.ts'), content: 'x' } }) },
   { key: AF, name: 'auto-format on a .md write', payload: () => ({ session_id: 'golden-fo-01', tool_name: 'Write', tool_input: { file_path: '/a/b.md', content: 'x' } }), nodeOnly: 'quiet' },
 ];
@@ -1905,7 +2067,7 @@ function foCompare(mode) {
 }
 
 test('fail open: every gated registration has a case here, and nothing else does', () => {
-  const gated = [LG, SGG, CQ, RG, AF];
+  const gated = [LG, SGG, CQ, RG, AF, PLG];
   assert.deepStrictEqual([...new Set(FO_CASES.map((c) => c.key))].sort(), [...gated].sort());
   for (const k of gated) commandFor(seedHooks(), k);
 });

@@ -105,7 +105,8 @@ TAIL_BYTES = 256 * 1024
 # start: loop-guard (matcher `*`) unless CLAUDE_LOOP_GUARD=1, settings-guard (matcher
 # Edit|Write|MultiEdit) unless stdin can name a settings file (about 98.5% of Edit/Write calls
 # skip), and the Bash guards codex-quota-guard (unless stdin can spell a Codex spend; about 97.5% of
-# Bash calls skip) and runner-guard (unless stdin holds `kill` or `systemctl`; about 93% skip). Bash
+# Bash calls skip), runner-guard (unless stdin holds `kill` or `systemctl`; about 93% skip) and
+# peer-loop-guard on Bash and SendMessage (unless stdin holds `send` or `SendMessage`). Bash
 # stays covered by the Bash guards that always start (grep-cost, heavy-job, whatsapp, git,
 # shape-rewrite, which loads heavy-job-admission and so pretooluse-decision);
 # tests/test_hook_seam_check.py fails if every one of them were gated. So a tool outside
