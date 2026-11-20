@@ -67,15 +67,15 @@ await "$w" "$TMP/a.lock" waiting
 out=$(lock_holders "$TMP/a.lock"); rc=$?
 [ "$rc" -eq 0 ] && ok || bad "lock_holders returned $rc with holders present"
 for p in "$a1" "$a2"; do
-  printf '%s\n' "$out" | grep -q "^     holder: pid $p, running [0-9:-]*: python3 -c import fcntl" && ok \
+  grep -q "^     holder: pid $p, running [0-9:-]*: python3 -c import fcntl" <<<"$out" && ok \
     || bad "holder $p not named with its uptime and command line; got: $out"
 done
-printf '%s\n' "$out" | grep -q "pid ${w}[,:]" && bad "the blocked waiter $w was named as a holder" || ok
-printf '%s\n' "$out" | grep -q "pid ${b1}[,:]" && bad "the holder of a different file ($b1) was named" || ok
-[ "$(printf '%s\n' "$out" | grep -c '^     holder: ')" -eq 2 ] && ok || bad "want exactly 2 holder lines; got: $out"
+grep -q "pid ${w}[,:]" <<<"$out" && bad "the blocked waiter $w was named as a holder" || ok
+grep -q "pid ${b1}[,:]" <<<"$out" && bad "the holder of a different file ($b1) was named" || ok
+[ "$(grep -c '^     holder: ' <<<"$out")" -eq 2 ] && ok || bad "want exactly 2 holder lines; got: $out"
 
 out=$(lock_holders "$TMP/b.lock")
-printf '%s\n' "$out" | grep -q "^     holder: pid $b1, " && ok || bad "b.lock's holder not named; got: $out"
+grep -q "^     holder: pid $b1, " <<<"$out" && ok || bad "b.lock's holder not named; got: $out"
 
 : > "$TMP/free.lock"
 out=$(lock_holders "$TMP/free.lock"); rc=$?
@@ -101,20 +101,20 @@ prune() { env -u UV_CACHE_DIR -u XDG_CACHE_HOME HOME="$TMP/home" PATH="$TMP/bin:
 
 out=$(prune DRY_RUN=0); rc=$?
 [ "$rc" -eq 0 ] && ok || bad "a BUSY uv prune must still exit 0; got $rc"
-printf '%s\n' "$out" | grep -q '~~ BUSY (cache in use; next run will retry): uv cache prune' && ok || bad "no uv BUSY line; got: $out"
-printf '%s\n' "$out" | grep -q "^     holder: pid $u, " && ok || bad "the BUSY uv lane did not name holder $u; got: $out"
-printf '%s\n' "$out" | grep -q "pid ${v}[,:]" && bad "the default lock lookup named the UV_CACHE_DIR holder $v" || ok
-printf '%s\n' "$out" | grep -q 'busy:1' && ok || bad "the summary should count one busy lane; got: $out"
+grep -q '~~ BUSY (cache in use; next run will retry): uv cache prune' <<<"$out" && ok || bad "no uv BUSY line; got: $out"
+grep -q "^     holder: pid $u, " <<<"$out" && ok || bad "the BUSY uv lane did not name holder $u; got: $out"
+grep -q "pid ${v}[,:]" <<<"$out" && bad "the default lock lookup named the UV_CACHE_DIR holder $v" || ok
+grep -q 'busy:1' <<<"$out" && ok || bad "the summary should count one busy lane; got: $out"
 
 out=$(prune DRY_RUN=0 UV_CACHE_DIR="$TMP/alt")
-printf '%s\n' "$out" | grep -q "^     holder: pid $v, " && ok || bad "UV_CACHE_DIR's lock holder $v not named; got: $out"
+grep -q "^     holder: pid $v, " <<<"$out" && ok || bad "UV_CACHE_DIR's lock holder $v not named; got: $out"
 
 out=$(prune DRY_RUN=1)
-printf '%s\n' "$out" | grep -q 'holder' && bad "a dry run printed lock holders; got: $out" || ok
+grep -q 'holder' <<<"$out" && bad "a dry run printed lock holders; got: $out" || ok
 
 printf '#!/bin/sh\nexit 0\n' > "$TMP/bin/uv"
 out=$(prune DRY_RUN=0)
-printf '%s\n' "$out" | grep -q 'holder' && bad "a successful uv prune printed lock holders; got: $out" || ok
+grep -q 'holder' <<<"$out" && bad "a successful uv prune printed lock holders; got: $out" || ok
 
 if [ "$fail" -eq 0 ]; then
   echo "ok — pkg-cache-prune lock holders: $pass/$((pass + fail)) assertions passed"
