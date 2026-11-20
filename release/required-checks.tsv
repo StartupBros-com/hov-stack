@@ -3,6 +3,7 @@
 # The per-plugin job in plugins-ci.yml is implicit. The marketplace's own validation
 # (manifest integrity, the release script suites, policy) must be green at the release
 # commit before a draft is staged, so its always-run job is required here; the
-# variable-gated pinned-sources job may be skipped and is not. Append the staging
-# repository's CI line (ci.yml, setup, hooks, suites, secrets) when that workflow lands.
+# variable-gated pinned-sources job may be skipped and is not. ci.yml is not listed:
+# main's merge queue requires its `ci` check, with no bypass, on the exact commit that
+# becomes main, so every release commit has already passed it (#818).
 validate.yml	Trusted syntax and policy

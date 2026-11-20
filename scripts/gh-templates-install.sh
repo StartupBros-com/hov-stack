@@ -16,8 +16,14 @@
 # are never touched (GitHub folder inheritance is all-or-nothing; reconcile by
 # hand if the canonical shape should replace a custom one).
 #
+# Repos whose owner's public `.github` repository serves .github/ISSUE_TEMPLATE
+# are skipped too: GitHub already shows them those defaults, and a per-repo
+# copy would hide the defaults and stop following later changes to them. If
+# that check cannot be read (any error but a 404), the repo is skipped as
+# unknown rather than seeded.
+#
 # Rate-limit hygiene: sleeps 1s between repos (content-creation secondary limit).
-# Summary line: "gh-templates-install: installed:N skipped-existing:N would-install:N"
+# Summary line: "gh-templates-install: installed:N skipped-existing:N org-default:N would-install:N"
 set -uo pipefail
 
 HERE="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
@@ -28,16 +34,31 @@ SRC="$HERE/gh-templates/payload"
 DRY_RUN="${DRY_RUN:-1}"
 ROOT="${ROOT:-$HOME/SITES}"
 ONLY="${ONLY:-}"
-installed=0 skipped=0 would=0
+installed=0 skipped=0 org_default=0 would=0
+
+# 0: the owner's .github repo serves default issue templates; 1: it does not
+# (404); 2: unknown (any other error).
+owner_serves_templates() {
+  local err
+  err=$(gh api "repos/$1/.github/contents/.github/ISSUE_TEMPLATE" 2>&1 >/dev/null) && return 0
+  case "$err" in *"HTTP 404"*) return 1 ;; esac
+  return 2
+}
 
 seed_repo() {
-  local repo="$1" name="$2" slug def br wt
+  local repo="$1" name="$2" slug def br wt rc
   if [ -d "$repo/.github/ISSUE_TEMPLATE" ]; then
     echo "$name: has own templates, skipped"; skipped=$((skipped+1)); return
   fi
   slug=$(owner_repo_of "$repo")
   if [ -z "$slug" ]; then
     echo "$name: no origin remote, skipped"; skipped=$((skipped+1)); return
+  fi
+  owner_serves_templates "${slug%%/*}"; rc=$?
+  if [ "$rc" = 0 ]; then
+    echo "$name: ${slug%%/*}/.github serves default templates, skipped"; org_default=$((org_default+1)); return
+  elif [ "$rc" = 2 ]; then
+    echo "$name: could not read ${slug%%/*}/.github, skipped"; skipped=$((skipped+1)); return
   fi
   if [ "$DRY_RUN" = 1 ]; then
     echo "$name: (dry) would add templates via draft PR"; would=$((would+1)); return
@@ -71,5 +92,5 @@ seed_repo() {
 }
 
 for_each_repo "$ROOT" seed_repo "$ONLY"
-echo "gh-templates-install: installed:$installed skipped-existing:$skipped would-install:$would"
+echo "gh-templates-install: installed:$installed skipped-existing:$skipped org-default:$org_default would-install:$would"
 [ "$skipped" -gt 0 ] && exit 1 || exit 0

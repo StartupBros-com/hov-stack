@@ -24,18 +24,29 @@ keeps its old name so links stay valid.
 
 ## Templates
 
-Single source of truth: `scripts/gh-templates/payload/.github/`
-(work-spec + quick-capture issue forms with `blank_issues_enabled: false`, and
-the PR template carrying Definition of Done, rejected approaches, and a
-pre-completion checklist). Seed per repo with
-`scripts/gh-templates-install.sh` (`DRY_RUN=1` default; `ONLY=<repo>`
-for one repo). Each install lands as its own draft PR. Repos with their own
-`ISSUE_TEMPLATE` are never clobbered. The public org-level
-`StartupBros-com/.github` repository (created 2026-11-09) holds only a default
-`CONTRIBUTING.md` and `SECURITY.md`, no issue or PR templates, so this payload
-still decides templates. GitHub also shows those two defaults in private org
-repositories that lack their own, so they stay generic and carry no private
-details. See [Public repository baseline](#public-repository-baseline).
+The canonical set is in `scripts/gh-templates/payload/.github/`: the
+work-spec and quick-capture issue forms with `blank_issues_enabled: false`,
+and the PR template carrying Definition of Done, rejected approaches, and a
+pre-completion checklist.
+
+In StartupBros-com the public `StartupBros-com/.github` repository serves the
+same files as org defaults (since StartupBros-com/.github#3, 2026-11-20).
+GitHub shows them in every org repository, public or private, that has no
+`.github/ISSUE_TEMPLATE` of its own. A repo's own folder hides the whole
+default set, so do not copy the payload into an org repo; delete a copy that
+matches the default. Change the payload and the org repository together. A
+form's label is applied only if that label exists in the repository the
+issue is filed in.
+
+`scripts/gh-templates-install.sh` (`DRY_RUN=1` default; `ONLY=<repo>` for one
+repo) seeds the payload into repos whose owner serves no default templates,
+each install as its own draft PR. It skips repos with their own
+`ISSUE_TEMPLATE` and repos whose owner's `.github` serves one.
+
+The org repository also holds a default `CONTRIBUTING.md` and `SECURITY.md`.
+GitHub shows those in private org repositories that lack their own too, so
+they stay generic and carry no private details. See
+[Public repository baseline](#public-repository-baseline).
 
 ## Repo settings
 
