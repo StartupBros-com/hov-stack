@@ -23,7 +23,7 @@ skills do not restate it.
 |---|---|---|---|---|
 | Ephemeral | `/tmp/<unique-dir>/`, or `$CLAUDE_JOB_DIR/tmp` in a background job | no | dies with the session or job | the agent itself |
 | Reviewable | `<repo>/.claude/deliverables/<skill>/<date>-<slug>.<ext>` | no (`~/.gitignore_global`, beside `.claude/scratch/`) | the operator deletes it once read; a worktree's copies move to the main checkout's `.claude/deliverables/from-worktrees/<worktree>/` when `wt-sweep` or `wt-done` removes the worktree | the operator, this week |
-| External workspace | `<project>__<skill>_workspace/` beside the repo; de-monolithize is the one current example (`<project>__demonolith_workspace/`), and a new skill that emits a sibling bundle uses the same shape | no, outside the repo | `wt-sweep.sh` warns past 14 days, same threshold as an abandoned worktree; the skill that made it says when it is done | the operator, until the bundle is consumed |
+| External workspace | `<project>__<skill>_workspace/` beside the repo; de-monolithize is the one current example (`<project>__demonolith_workspace/`), and a new skill that emits a sibling bundle uses the same shape | no, outside the repo | the skill that made it bundles it into an archive directory at the end of its run, records its original absolute path, and asks before deleting; `wt-sweep.sh` warns past 14 days as a backstop | the operator, until the skill archives it |
 | Durable | `docs/<sub>/` (plans, solutions, reality-checks), `design/` (design-rails) | yes | normal repo governance | anyone reading the repo |
 
 Ceremony Test answers for the one new tier, Reviewable: consumer = the operator in the
@@ -49,7 +49,10 @@ invisible work. A job already in a worktree writes in that worktree, as below.
 Choosing a tier: if the file exists so the operator can look at it once, it is Reviewable.
 If it exists so a future reader of the repo finds it, it is Durable and goes through a PR.
 If only the agent reads it, it is Ephemeral. A skill that emits a whole sibling directory
-of many files is the External workspace case.
+of many files is the External workspace case. That skill must, at the end of its run, bundle the
+workspace into an archive directory, record the workspace's original absolute path (tools may
+hard-code it, so a restore must return there), and ask the user before deleting it. `wt-sweep.sh`
+warns past 14 days, the abandoned-worktree threshold, as a backstop only.
 
 Under a worktree the Reviewable tier is per worktree, which is the point: two sessions never
 write over each other. Before `wt-sweep` or `wt-done` removes a worktree, they copy its
