@@ -36,8 +36,8 @@ Paths under `packages/proxy/src/` and `scripts/deploy-ccflare.sh` below live in 
 
 - Client side: `claude -p` produces no output and no error for an unexpectedly long time (observed: multi-hour hangs); when it finally exits it does so only after exhausting client-side retries, never with a clear timeout message.
 - Debug-file shape (`claude -p ... --debug-file <path>`): one `[API REQUEST] /v1/messages`, then only `[Stall] stream_idle_partial ... bytesTotal=38,76,114...` lines (38-byte keepalive pings every ~25 s), then after ~480 s `[ERROR] Error streaming, falling back to non-streaming mode: {"type":"api_error","message":"No compatible account route committed before the recovery deadline"}` and a fresh `[API REQUEST]`. The subagent transcript stops at its last `tool_result` and `subagent_stats.completed` stays 0.
-- Stream-json shape (`experiments/lean-reader-2026-09-19/diag-stream.sh`): long stretches with no `TEXT` or `TOOL_USE` lines for the active subagent, meaning frames are arriving upstream but none register as progress.
-- Reproduced frame counts (`experiments/lean-reader-2026-09-19/RESULTS.md`): headless runs at xhigh and high effort buffered 374 and 340 `thinking_delta` frames respectively with zero classified meaningful.
+- Stream-json shape (dotfiles `claude/experiments/lean-reader-2026-09-19/diag-stream.sh`): long stretches with no `TEXT` or `TOOL_USE` lines for the active subagent, meaning frames are arriving upstream but none register as progress.
+- Reproduced frame counts (dotfiles `claude/experiments/lean-reader-2026-09-19/RESULTS.md`): headless runs at xhigh and high effort buffered 374 and 340 `thinking_delta` frames respectively with zero classified meaningful.
 - Gateway journal shape (`journalctl -u ccflare-stack.service`, or `ccflare-precommit.py <since> <until>` from the same experiment directory): a WARN `[ProxyOperations] anthropic_precommit_stall` record with `reason: "meaningful_progress_timeout"`, `framesSeen=374, structural=373, meaningful=0`, `semanticTimeoutMs=420000`. That reason is distinct from the separate, resetting `semantic_timeout` reason; both are enumerated in `AnthropicPreCommitStallReason` (`packages/proxy/src/anthropic-semantic-preflight.ts:200-208`).
 - Proxy event rows (`ccflare-journal.py <since> <until>`): elapsed climbing toward the meaningful-progress ceiling, an aborting outcome, then a fresh row for the next pooled account repeating the climb, up to `CLAUDE_CODE_MAX_RETRIES` times. The provenance endpoint (`ccflare-provenance.py <session-id>`) shows requested, applied and upstream model all equal: no model rewrite is involved.
 - better-ccflare issue #356 (cited in `packages/proxy/src/anthropic-precommit-rescue.ts:25-35`) recorded the concrete pre-fix failure: 374 frames, 0 meaningful, aborted at 480,070 ms, an 8-minute budget aborting a legitimate long non-interactive thinking phase.
@@ -65,7 +65,7 @@ export const CLAUDE_CODE_PRECOMMIT_RESCUE_COMMITMENT_DEADLINE_MS = 14 * 60 * 100
 2. dotfiles PR #1226 (issue #1225) makes every headless launch path request text-bearing thinking deltas, which is the root-cause fix for dispatched runs. Before: no explicit display flag (or the withdrawn `--forward-subagent-text` and `--settings thinkingDisplay` attempts, both no-ops for this purpose). After, in both headless call sites of the time (only `claude-loop.sh` remains since #1916 removed loop_quality):
 
 ```
-bin/claude-loop.sh:620-626 (abridged)
+bin/claude-loop.sh, the headless launch (abridged)
 env -u ANTHROPIC_API_KEY claude -p "$PROMPT" \
   --permission-mode bypassPermissions \
   --max-budget-usd "$MAX_USD" \
@@ -92,7 +92,7 @@ The flag propagates to subagents spawned inside that run (their transcripts then
 3. dotfiles PR #1246 sets `showThinkingSummaries: true`, the only setting that makes an interactive session's display "summarized"; the CLI flag never reaches interactive sessions and the setting never reaches `claude -p`, so both are needed:
 
 ```json
-// settings.json:909
+// settings.json (top-level key)
 "showThinkingSummaries": true,
 ```
 
@@ -119,12 +119,12 @@ Residual exposure: a thinking phase longer than about 13.5 minutes before its fi
 
 ## Prevention
 
-- Detect fast: a subagent whose only signs of life are 38-byte pings for more than a few minutes is this bug until the journal says otherwise. `ccflare-precommit.py <since> <until>` (`experiments/lean-reader-2026-09-19/`) prints the stall records; `reason: "meaningful_progress_timeout"` is this bug, `reason: "semantic_timeout"` is the unrelated, resetting protocol-idle deadline. Cross-check with `ccflare-journal.py <since> <until>` for the climb-and-retry pattern, and `ccflare-provenance.py <session-id>` to rule out a model rewrite.
+- Detect fast: a subagent whose only signs of life are 38-byte pings for more than a few minutes is this bug until the journal says otherwise. `ccflare-precommit.py <since> <until>` (dotfiles `claude/experiments/lean-reader-2026-09-19/`) prints the stall records; `reason: "meaningful_progress_timeout"` is this bug, `reason: "semantic_timeout"` is the unrelated, resetting protocol-idle deadline. Cross-check with `ccflare-journal.py <since> <until>` for the climb-and-retry pattern, and `ccflare-provenance.py <session-id>` to rule out a model rewrite.
 - What to pass to headless runs: always launch with the literal `--thinking-display summarized` CLI flag. Do not rely on a `--settings` thinkingDisplay key or `--forward-subagent-text`; both were shown to be no-ops for this purpose, and only the CLI flag reaches the launch-time decision. The retired loop-quality pipeline centralized it once in `THINKING_DISPLAY_ARGS` rather than per call site; since #1916, `bin/claude-loop.sh` is the only harness launcher that passes it. A new headless launcher anywhere in the harness inherits the bug unless it passes the flag.
 - Test assertions that guard it:
-  - `tests/claude-loop-budget-stop.test.sh` (around lines 221-222) greps the recorded `claude` argv for `--thinking-display summarized`.
+  - `tests/claude-loop-budget-stop.test.sh` (its `B2` assertion) greps the recorded `claude` argv for `--thinking-display summarized`.
   - `tests/loop-quality-sessions.test.sh` (deleted with the pipeline in #1916) asserted `--thinking-display summarized` on both the first-launch and stdin-prompt argv variants, and asserted a `--settings` flag is absent, guarding against a future edit reintroducing the withdrawn, non-working flag.
-- Diagnostic script for a fresh repro: `diag-stream.sh` (`experiments/lean-reader-2026-09-19/diag-stream.sh`) runs one headless launch with `--output-format stream-json --verbose` and prints per-frame `TOOL_USE`, `TOOL_RESULT` and `TEXT` lines tagged MAIN or SUB; a long gap with no new lines during a thinking-heavy task, on a launch path missing `--thinking-display summarized`, is the signature to check first.
+- Diagnostic script for a fresh repro: `diag-stream.sh` (dotfiles `claude/experiments/lean-reader-2026-09-19/diag-stream.sh`) runs one headless launch with `--output-format stream-json --verbose` and prints per-frame `TOOL_USE`, `TOOL_RESULT` and `TEXT` lines tagged MAIN or SUB; a long gap with no new lines during a thinking-heavy task, on a launch path missing `--thinking-display summarized`, is the signature to check first.
 - Not yet built: the classifier-side fix proposed on better-ccflare issue #356 (count empty `thinking_delta` frames as progress, or reset the meaningful-progress clock on structural frames, under the existing absolute budget) was not implemented as of this writing (auto memory [claude]). The current fix set relies on every launch path requesting non-empty thinking text plus the larger budget, not on changing how the classifier scores empty deltas.
 
 ## Related Issues

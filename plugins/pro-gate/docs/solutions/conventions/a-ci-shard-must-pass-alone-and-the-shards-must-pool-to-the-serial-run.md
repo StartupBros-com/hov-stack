@@ -31,6 +31,8 @@ tags:
 
 # A CI shard must pass alone, and the shards must pool to the serial run's results
 
+**Status:** this was learned in pro-gate's standalone repository, whose `.github/workflows/ci.yml` ran each leg on its own runner. Since the plugin joined hov-stack, `tests/ci.sh` runs the same legs concurrently in one job, checks leg coverage itself before running anything, and is started by hov-stack's `.github/workflows/plugins-ci.yml`, whose `ci` job (`release/scripts/ci-aggregate.sh`) is now the required aggregator. Workflow YAML and line numbers below are from the standalone repository. The rules hold unchanged.
+
 ## Context
 
 pro-gate's required `trusted check` ran all 17 test suites one after another in one job capped at 45 minutes. The baseline run for PR #253 (CI run 37149310962) took 36m19s. Its `Run tests` step took 2112s, of which `tests/engine.test.sh` took 1551s and `tests/cdp-salvage.test.mjs` 370s. Most of that time was waiting, not computing: this work's reading of an earlier run's log found about 80 engine tests that each sat idle for 5s or more.
@@ -48,7 +50,7 @@ The speed-up is arithmetic. The work was making the split safe. The first lone r
 
 ### 1. Split independent suites first, behind an aggregator that keeps the required name
 
-Branch protection and auto-merge wait on a status name. Keep that name on a small job that depends on every leg and fails unless all of them passed (`.github/workflows/ci.yml:88-101`):
+Branch protection and auto-merge wait on a status name. Keep that name on a small job that depends on every leg and fails unless all of them passed (the standalone repository's `.github/workflows/ci.yml`; in hov-stack, the `ci` job in `.github/workflows/plugins-ci.yml`):
 
 ```yaml
 check:
@@ -105,10 +107,10 @@ Separately, the suite exits 1 when no check ran (`tests/engine.test.sh:10441`), 
 
 `tests/ci-assurance.test.sh` checks both the workflow and the suite. Each check rejects a deliberately broken copy:
 
-- **Coverage** (`:15-45`). Every `tests/*.test.sh` and `tests/*.test.mjs` file runs in exactly one leg. A file that declares `PG_TEST_SHARDS=N` runs once per shard, as `PG_TEST_SHARD=1..N`. Planted copies with a dropped suite, a doubled suite, a dropped shard and a doubled shard are each rejected.
-- **Selection** (`:47-70`). Regions are numbered 1..N in file order. For every shard/region pair, `in_shard` selects only its own region, and it selects every region when unsharded. Shard N+1 and `.` must refuse with the range message.
-- **Routing** (`:72-87`). Source validation and the release-notes gate run only in the single `rest` leg. A renamed leg or a misrouted step condition would skip them on every leg while the aggregator stayed green, so both are planted and rejected.
-- **Aggregation** (`:94-103`). The aggregator keeps its name, needs the legs, runs under `always()` and fails unless they succeeded.
+- **Coverage**. Every `tests/*.test.sh` and `tests/*.test.mjs` file runs in exactly one leg. A file that declares `PG_TEST_SHARDS=N` runs once per shard, as `PG_TEST_SHARD=1..N`. Planted copies with a dropped suite, a doubled suite, a dropped shard and a doubled shard are each rejected.
+- **Selection**. Regions are numbered 1..N in file order. For every shard/region pair, `in_shard` selects only its own region, and it selects every region when unsharded. Shard N+1 and `.` must refuse with the range message.
+- **Routing** (standalone repository only; dropped with its workflow file). Source validation and the release-notes gate run only in the single `rest` leg. A renamed leg or a misrouted step condition would skip them on every leg while the aggregator stayed green, so both are planted and rejected.
+- **Aggregation** (standalone repository only; dropped with its workflow file). The aggregator keeps its name, needs the legs, runs under `always()` and fails unless they succeeded.
 
 The pair check exists because an `in_shard` that returned true everywhere would keep full coverage while silently undoing the split. Code review on #256 found that nothing checked for it.
 
@@ -147,7 +149,7 @@ The `trusted check` gates merges and releases. A split that drops a suite, doubl
 
 - Before splitting or rebalancing any CI test job, including adding a fourth engine shard or splitting `cdp-salvage`.
 - When adding a test to `tests/engine.test.sh`. Build what it reads in its own region or in the shared fixture block, and run its shard alone.
-- When adding a suite to `ci.yml`. It must go in exactly one leg (`rest` unless there is a reason otherwise), or `ci-assurance` fails.
+- When adding a suite to `tests/ci.sh`. It must go in exactly one leg array (`leg_rest` unless there is a reason otherwise), or `ci.sh` itself and `ci-assurance` fail.
 
 Known limits that still hold:
 

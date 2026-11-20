@@ -31,7 +31,9 @@ tags:
 
 ## Context
 
-`tests/wacli-install.test.sh` pins the installer lifecycle — preflight, then the guard hook, then the binary, then the unit copy — by grepping the source for five exact strings and comparing the line numbers it gets back (`tests/wacli-install.test.sh:402`-`406`). One of them located the unit-copy loop:
+This happened in dotfiles (PR #1096), before the harness moved to hov-stack on 2026-10-26; the line numbers and `sync.sh` details below are from that tree. hov-stack's copies of these suites no longer grep these anchors.
+
+`tests/wacli-install.test.sh` pinned the installer lifecycle — preflight, then the guard hook, then the binary, then the unit copy — by grepping the source for five exact strings and comparing the line numbers it gets back (`tests/wacli-install.test.sh:402`-`406`). One of them located the unit-copy loop:
 
 ```bash
 unit_line=$(grep -nF "for u in \$UNITS; do" "$REPO/sync.sh" | awk -F: -v after="$wacli_line" '$1 > after { print $1; exit }')
@@ -47,13 +49,13 @@ The ordering was fine. Nothing about the lifecycle had moved. The test failed be
 
 Three details make this worth writing down rather than filing as a typo.
 
-**The rename looked safe by every normal check.** `UNITS` was not deleted — it is still the variable holding the unit inventory (`sync.sh:142`), and `SELECTED_UNITS=$UNITS` (`sync.sh:147`) is what the role-scoped selection narrows. So a symbol search for `UNITS` returns plenty of live, correct hits. Only a search for the *exact loop literal* `for u in $UNITS; do` would have surfaced the dead anchor, and that literal is not an identifier anyone thinks to grep.
+**The rename looked safe by every normal check.** `UNITS` was not deleted — it was still the variable holding the unit inventory, and `SELECTED_UNITS=$UNITS` was what the role-scoped selection narrowed. So a symbol search for `UNITS` returns plenty of live, correct hits. Only a search for the *exact loop literal* `for u in $UNITS; do` would have surfaced the dead anchor, and that literal is not an identifier anyone thinks to grep.
 
 **The coupling lives in a file the change never opened.** `tests/wacli-install.test.sh` does not source `sync.sh`, call into it, or import anything from it. Its entire dependency on the rename is a string argument to `grep -nF`. A reviewer scoping "what does this PR touch" never lands there, and neither does a caller sweep that scopes to code referencing the identifier.
 
 **The failure accused the wrong thing.** The compound guard at `tests/wacli-install.test.sh:410`-`418` ANDs five anchor-resolved checks, two shebang checks, a workflow-call count, and three ordering comparisons, then routes every possible failure to one `bad` message. An empty `unit_line` fails the `[ -n "$unit_line" ]` clause and short-circuits past the `-lt` comparisons into the same `else` a genuine ordering regression would reach. From the output alone, a dead anchor and a real lifecycle break are indistinguishable — so the next reader goes hunting through `install.sh` and `sync.sh` call ordering for a regression that was never there.
 
-This is not a one-off. The repo currently holds eight such anchors: five in `tests/wacli-install.test.sh:402`-`406` and three in `tests/sync-install-smoke.test.sh:1657`-`1659`, the latter pinning `ExecCondition=` lines in a unit file. Every one is exposed to the same rot.
+This was not a one-off: dotfiles then held eight such anchors, five in this suite and three in `tests/sync-install-smoke.test.sh` pinning `ExecCondition=` lines in a unit file. The pattern is still in use here: `tests/harness-doctor-cass-rot.test.sh` locates two `harness-doctor.sh` lines with `grep -nF` and compares their line numbers. `rg -n 'grep -nF' tests/` lists the current ones.
 
 ## Guidance
 
@@ -101,7 +103,7 @@ The same run failed three suites, and the three had nothing in common: this anch
 
 The cost is not the one-line fix — it is the search the message sends you on. A test that says the install lifecycle is broken is making a specific, alarming claim about ordering in production installer code, and the honest response is to go read that code. Here that search was guaranteed to come up empty, because the only thing that changed was a string the test uses to find its way around.
 
-There is a second cost that compounds. These anchors encode a real invariant that nothing else checks — that the binary is published and verified before user units are copied. An anchor that rots into a permanently-red or hand-waved assertion is an invariant quietly going unguarded. Eight anchors currently carry that weight across two files.
+There is a second cost that compounds. Those anchors encoded a real invariant that nothing else checked — that the binary is published and verified before user units are copied. An anchor that rots into a permanently-red or hand-waved assertion is an invariant quietly going unguarded.
 
 ## When to Apply
 
