@@ -643,8 +643,10 @@ class HovCase(HovFixture):
         self.hov("send", "--as", "ceo", "--to", "alpha", "--kind", "status", "build green")
         self.hov("send", "--as", "cto", "--to", "alpha", "a question")
         ctx = self.hook("UserPromptSubmit", SID_A)["hookSpecificOutput"]["additionalContext"]
+        # The hint's command is `hov` or `python3 -I <script>` depending on PATH (test_hook_hint_names_a_runnable_command).
         self.assertIn("from testhost:ceo", ctx)
-        self.assertIn("Reply: hov send --to testhost:cto", ctx)
+        self.assertIn("Reply: ", ctx)
+        self.assertIn(" send --to testhost:cto --thread ", ctx)
         self.assertNotIn("--to testhost:ceo", ctx)
         # Only status and low-importance notes: no Reply line at all, and the block says none is expected.
         self.hov("send", "--as", "ceo", "--to", "beta", "--kind", "status", "deploy done")
