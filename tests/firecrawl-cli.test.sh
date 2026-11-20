@@ -2406,6 +2406,27 @@ fixture scrape
 run_url 'http://user@127.0.0.1:8080' fetch https://example.com --json
 status_is 4 'userinfo API URL refused'
 no_calls 'userinfo API URL starts no vendor process'
+# The refusal must not print what it refuses: a URL password is not a known secret (#825 review).
+fixture scrape
+run_url 'https://alice:proxy-password-825@203.0.113.7' fetch https://example.com --json
+status_is 4 'https API URL with a password refused'
+no_calls 'password API URL starts no vendor process'
+omits "$OUT$ERR" 'proxy-password-825' 'refused https API URL: password in neither stream'
+omits "$OUT$ERR" 'alice' 'refused https API URL: username in neither stream'
+jcheck 'refusal shows only scheme and host' "$OUT" "m=d['error']['message']; assert \"'https://203.0.113.7'\" in m, m"
+fixture scrape
+run_url 'http://bob:lan-password-825@10.255.255.1:8080' fetch https://example.com --json
+status_is 4 'plain-http API URL with a password refused'
+omits "$OUT$ERR" 'lan-password-825' 'refused plain-http API URL: password in neither stream'
+fixture scrape
+run_url 'http://carol:slash-password-825\@127.0.0.1:8080' fetch https://example.com --json
+status_is 4 'backslash API URL with a password refused'
+omits "$OUT$ERR" 'slash-password-825' 'refused backslash API URL: password in neither stream'
+fixture scrape
+run_url 'https://dave:gov-password-825@203.0.113.7' gov 'minimum wage' --json
+status_is 4 'API-direct verb refuses a password API URL'
+no_calls 'API-direct password URL starts no vendor process'
+omits "$OUT$ERR" 'gov-password-825' 'API-direct refusal: password in neither stream'
 fixture scrape
 run_url "$(printf 'http://127.0.0.1\t.evil.example:8080')" fetch https://example.com --json
 status_is 4 'control-character API URL refused'

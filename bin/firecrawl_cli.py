@@ -2281,9 +2281,12 @@ def api_base():
         parsed.scheme not in {"http", "https"} or not parsed.hostname
         or plain_http_elsewhere or ambiguous
     ):
+        # Never echo the value: a refused URL may carry a password redact() cannot
+        # know. The scheme and parsed host never include userinfo.
+        shown = f"{parsed.scheme or '?'}://{parsed.hostname or '?'}"
         raise CliError(
-            f"FIRECRAWL_API_URL={redact(base)!r} must be an https URL, or http to a loopback host, "
-            "with no userinfo, backslash or control character",
+            f"FIRECRAWL_API_URL ({redact(shown)!r}, userinfo and path not shown) must be an "
+            "https URL, or http to a loopback host, with no userinfo, backslash or control character",
             "unset FIRECRAWL_API_URL, or point it at https://api.firecrawl.dev",
         )
     return base.rstrip("/")
