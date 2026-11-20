@@ -530,7 +530,7 @@ while IFS= read -r ws; do
   # a worktree whose stat fails: a bundle we cannot date is a bundle to look at, not to hide.
   age=$(( (now - $(stat -c %Y "$ws" 2>/dev/null || echo 0)) / 86400 ))
   if (( age > AGE_ALIVE_DAYS )); then
-    echo "  • external workspace ${ws} is ${age}d old (>${AGE_ALIVE_DAYS}d): consume it or delete it by hand"
+    echo "  • external workspace ${ws} is ${age}d old (>${AGE_ALIVE_DAYS}d): bundle its history (git bundle create <archive>/<name>.bundle --all), verify it, then ask before deleting"
     n_ws=$((n_ws+1))
   fi
 done < <(wt_roots | while IFS= read -r r; do ls -d "$r"/*__*_workspace 2>/dev/null; done | sort -u)
