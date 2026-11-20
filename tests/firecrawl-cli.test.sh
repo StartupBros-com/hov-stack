@@ -1619,7 +1619,8 @@ for _ in $(seq 1 100); do [[ -s "$TMP/api.port" ]] && break; sleep 0.05; done
 API_PORT=$(cat "$TMP/api.port")
 # Deliberately not fc- or JWT shaped: the generic redaction patterns must not be
 # what keeps this key off the streams; only SECRETS.add(key) can (review 2026-09-13).
-API_KEY='diagnostic-marker-not-fc-shaped-99182736'
+# The old spelling held "fc-shaped-99182736", which the fc- pattern matched (#805).
+API_KEY='diagnostic-marker-not-key-shaped-99182736'
 api_control() { printf '%s\n' "$1" >"$FIRECRAWL_API_TEST_CONTROL"; : >"$FIRECRAWL_API_TEST_LOG"; }
 run_api() {
   ST=0
@@ -2024,6 +2025,15 @@ ST=0
 (cd "$TMP/work" && HOME="$TMP/home" PATH="$TMP/bin" FIRECRAWL_CLI_KEYLESS=1 FIRECRAWL_API_KEY="$API_KEY" FIRECRAWL_API_URL=https://api.firecrawl.dev "$CLI" fetch https://x --json) >"$TMP/out" 2>"$TMP/err" || ST=$?
 status_is 0 'the default API URL stays keyless-eligible'
 jcheck 'keyless leg strips the default API URL' "$(env_seen)" "assert d==[['scrape',False,False]], d"
+# #805: a trailing slash or capitals used to turn keyless-first off silently.
+for url in https://api.firecrawl.dev/ 'HTTPS://API.Firecrawl.dev//'; do
+  kl_configure '{"default":{"fixture":"scrape.json"}}'
+  ST=0
+  (cd "$TMP/work" && HOME="$TMP/home" PATH="$TMP/bin" FIRECRAWL_CLI_KEYLESS=1 FIRECRAWL_API_KEY="$API_KEY" FIRECRAWL_API_URL="$url" "$CLI" fetch https://x --json) >"$TMP/out" 2>"$TMP/err" || ST=$?
+  status_is 0 "default API URL spelled $url stays keyless-eligible"
+  jcheck "default API URL spelled $url runs the keyless leg" "$(env_seen)" "assert d==[['scrape',False,False]], d"
+  jcheck "default API URL spelled $url spends nothing" "$(cat "$TMP/out")" "assert d['credits_spent']==0 and d['degraded'][0].startswith('keyless: answered by'), d"
+done
 kl_configure '{"default":{"fixture":"scrape-session.json"}}'
 run_kl_keyed fetch https://x --json
 jcheck 'keyless scrape id carries the interact caveat' "$OUT" "assert any(n.startswith('keyless: scrape_id comes from a keyless fetch') and 'FIRECRAWL_CLI_KEYLESS=0' in n for n in d['degraded']), d['degraded']"
@@ -2264,6 +2274,175 @@ jcheck 'capabilities free-first contract' "$OUT" "w=[x for x in d['data']['warni
 run_cli --help
 contains "$OUT" 'FIRECRAWL_CLI_KEYLESS=0' 'root help names free-first and its opt-out'
 unset FIRECRAWL_TEST_ENV_LOG
+
+# #805: page content keeps its text. Inside page fields only exact secret values are
+# redacted; the pattern rules stay on errors, stderr and argv echoes.
+python3 - "$TMP/fixtures" "$API_KEY" <<'PY'
+import json, pathlib, sys
+page = ("Require bearer tokens for API endpoints. Pass -keep to retain files. "
+        "Sample JWT eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.c2lnbmF0dXJl and the key "
+        "fc-YOUR_API_KEY_HERE; run tool --api-key sample-value --token abc -k xyz.")
+fixtures = pathlib.Path(sys.argv[1])
+(fixtures / "content-805-page.txt").write_text(page)
+(fixtures / "content-805.json").write_text(json.dumps({
+    "markdown": page + " Echoed key: " + sys.argv[2] + ".",
+    "metadata": {
+        "title": "Bearer token guide", "description": "Use -keep and fc-YOUR_API_KEY_HERE",
+        "sourceURL": "https://x", "statusCode": 200,
+    },
+    "links": ["https://x/docs?jwt=eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.c2lnbmF0dXJl"],
+}))
+# A failed call's payload is diagnostics: a key-shaped value in it stays caught.
+(fixtures / "content-805-fail.json").write_text(json.dumps({
+    "success": False, "error": "invalid request",
+    "metadata": {"hint": "Authorization: Bearer patternONLYsecret99"},
+}))
+PY
+PAGE_CHECK="p=open('$TMP/fixtures/content-805-page.txt').read(); assert x['markdown']==p+' Echoed key: [REDACTED].', x['markdown']; m=x['metadata']; assert m['title']=='Bearer token guide' and m['description']=='Use -keep and fc-YOUR_API_KEY_HERE', m; assert x['links']==['https://x/docs?jwt=eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.c2lnbmF0dXJl'], x['links']"
+run_keyed() {  # a key that is not fc- shaped, so only exact-value redaction can hide it
+  ST=0
+  (cd "$TMP/work" && HOME="$TMP/home" PATH="$TMP/bin" FIRECRAWL_API_KEY="$API_KEY" "$CLI" "$@") >"$TMP/out" 2>"$TMP/err" || ST=$?
+  OUT=$(cat "$TMP/out") ERR=$(cat "$TMP/err")
+}
+fixture content-805
+run_keyed fetch https://x --full --json
+status_is 0 'content fetch --full --json'
+jcheck 'page text survives --full --json' "$OUT" "x=d['data']; $PAGE_CHECK"
+omits "$OUT$ERR" "$API_KEY" 'env key echoed in page text is redacted exactly'
+fixture content-805
+run_keyed fetch https://x --format markdown --json
+jcheck 'page text survives a bounded --format fetch' "$OUT" "x=d['data']; $PAGE_CHECK"
+fixture content-805
+run_keyed fetch https://x --full
+status_is 0 'content fetch default output'
+jcheck 'page text survives the default output' "$OUT" "x=d['data'] if 'ok' in d else d; $PAGE_CHECK"
+fixture content-805
+run_keyed fetch https://x --full --json --output "$TMP/content-805-out.json"
+jcheck 'page text survives the --output file' "$(cat "$TMP/content-805-out.json")" "x=d['data']; $PAGE_CHECK"
+fixture content-805
+run_keyed fetch https://x https://y --full --json
+status_is 0 'content fetch of two URLs'
+jcheck 'two fanned-out items' "$OUT" "assert len(d['data']['items'])==2, d['data']"
+jcheck 'page text survives the first fanned-out item' "$OUT" "x=d['data']['items'][0]['data']; $PAGE_CHECK"
+jcheck 'page text survives the second fanned-out item' "$OUT" "x=d['data']['items'][1]['data']; $PAGE_CHECK"
+configure "{\"default\":{\"stderr_text\":\"HTTP 401 key $API_KEY rejected; Authorization: Bearer abcdefSECRET123 -kshortSECRET\",\"exit\":1}}"
+run_keyed fetch https://x --full --json
+[[ "$ST" -ne 0 ]] && ok || bad 'vendor error carrying the env key exited 0'
+for secret in "$API_KEY" abcdefSECRET123 shortSECRET; do
+  omits "$OUT$ERR" "$secret" 'error text keeps exact and pattern redaction'
+done
+configure '{"default":{"fixture":"content-805-fail.json","exit":1}}'
+run_keyed fetch https://x --full --json
+status_is 1 'failed call with a metadata hint'
+omits "$OUT$ERR" 'patternONLYsecret99' 'a failed payload keeps every pattern, metadata included'
+python3 - "$TMP/fixtures" <<'PY'
+import json, pathlib, sys
+fixtures = pathlib.Path(sys.argv[1])
+page = (fixtures / "content-805-page.txt").read_text()
+(fixtures / "content-805-partial.json").write_text(json.dumps({"items": [
+    {"url": "https://x", "ok": True, "data": {"markdown": page}},
+    {"url": "https://y", "ok": False, "error": {"code": 1, "message": "vendor failure"},
+     "metadata": {"hint": "Authorization: Bearer patternONLYitem77"}, "data": None},
+]}))
+PY
+fixture content-805-partial
+run_keyed fetch https://x --full --json
+status_is 6 'partial result with a failed item'
+omits "$OUT$ERR" 'patternONLYitem77' 'a failed item keeps every pattern, metadata included'
+jcheck 'the successful item keeps its page text' "$OUT" "p=open('$TMP/fixtures/content-805-page.txt').read(); assert d['data']['items'][0]['data']['markdown']==p, d['data']['items'][0]"
+RESULT=$(HOME="$TMP/home" PYTHONDONTWRITEBYTECODE=1 python3 - "$MODULE" <<'PY'
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location('firecrawl_cli', sys.argv[1])
+m = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(m)
+m.SECRETS.clear()
+m.SECRETS.add('exact-secret-value-123')
+page = 'Require bearer tokens; pass -keep; fc-YOUR_API_KEY_HERE; eyJa.eyJb.c2ln; exact-secret-value-123'
+out = m.redact({
+    'data': {'markdown': page, 'passages': [{'text': page}], 'metadata': {'error': 'Bearer abcdef123'}},
+    'error': {'message': 'Bearer abcdef123 -kSECRET fc-abcdefgh12345678', 'metadata': 'Bearer abcdef123'},
+    'text': 'raw stdout fc-abcdefgh12345678',
+})
+expected = page.replace('exact-secret-value-123', '[REDACTED]')
+assert out['data']['markdown'] == expected, out
+assert out['data']['passages'] == [{'text': expected}], out
+assert out['data']['metadata']['error'] == 'Bearer [REDACTED]', out
+for leaked in ('abcdef123', 'kSECRET', 'fc-abcdefgh'):
+    assert leaked not in str(out['error']) and leaked not in out['text'], out
+assert m.redact({'metadata': {'hint': 'Bearer abcdef123'}}, content_keys=frozenset()) == {'metadata': {'hint': 'Bearer [REDACTED]'}}
+assert m.redact({'markdown': '\x1b[31mred\x1b[0m'}) == {'markdown': 'red'}
+print('OK')
+PY
+)
+[[ "$RESULT" == OK ]] && ok || bad "redact content and diagnostic fields: $RESULT"
+
+# #805: a keyed vendor call never inherits a plain-http, non-loopback API URL.
+run_url() {  # $1 the API URL; the rest is the command; a key is set
+  local url=$1
+  shift
+  ST=0
+  (cd "$TMP/work" && HOME="$TMP/home" PATH="$TMP/bin" FIRECRAWL_API_KEY="$API_KEY" FIRECRAWL_API_URL="$url" "$CLI" "$@") >"$TMP/out" 2>"$TMP/err" || ST=$?
+  OUT=$(cat "$TMP/out") ERR=$(cat "$TMP/err")
+}
+fixture scrape
+run_url http://10.255.255.1:8080 fetch https://example.com --format markdown --json
+status_is 4 'plain-http API URL refuses a keyed fetch'
+no_calls 'refused API URL: no credit read, no vendor process'
+jcheck 'API URL refusal names the rule' "$OUT" "assert 'must be an https URL, or http to a loopback host' in d['error']['message'], d['error']"
+fixture scrape
+run_url http://10.255.255.1:8080 raw --json -- crawl https://example.com
+status_is 4 'plain-http API URL refuses raw'
+no_calls 'raw: refused API URL starts no vendor process'
+fixture scrape
+run_url ftp://api.firecrawl.dev fetch https://example.com --json
+status_is 4 'non-http API URL refused'
+no_calls 'non-http API URL starts no vendor process'
+# Python reads these hosts as loopback; the vendor's Node URL parser does not.
+fixture scrape
+run_url 'http://evil.example\@127.0.0.1:8080' fetch https://example.com --json
+status_is 4 'backslash API URL refused'
+no_calls 'backslash API URL starts no vendor process'
+fixture scrape
+run_url 'http://user@127.0.0.1:8080' fetch https://example.com --json
+status_is 4 'userinfo API URL refused'
+no_calls 'userinfo API URL starts no vendor process'
+fixture scrape
+run_url "$(printf 'http://127.0.0.1\t.evil.example:8080')" fetch https://example.com --json
+status_is 4 'control-character API URL refused'
+no_calls 'control-character API URL starts no vendor process'
+fixture scrape
+ST=0
+(cd "$TMP/work" && HOME="$TMP/home" PATH="$TMP/bin" FIRECRAWL_API_URL=http://10.255.255.1:8080 "$CLI" fetch https://example.com --json) >"$TMP/out" 2>"$TMP/err" || ST=$?
+status_is 4 'plain-http API URL refused with no env key, since a stored login would ride along'
+no_calls 'no env key: refused API URL starts no vendor process'
+fixture scrape
+run_url http://127.0.0.1:9 fetch https://example.com --format markdown --json
+status_is 0 'loopback http API URL still runs keyed'
+fixture scrape
+run_url https://firecrawl.example.test fetch https://example.com --format markdown --json
+status_is 0 'another https API URL still runs keyed'
+RESULT=$(HOME="$TMP/home" FIRECRAWL_API_URL=http://10.255.255.1:8080 PYTHONDONTWRITEBYTECODE=1 python3 - "$MODULE" <<'PY'
+import importlib.util, sys
+from unittest.mock import patch
+spec = importlib.util.spec_from_file_location('firecrawl_cli', sys.argv[1])
+m = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(m)
+done = m.subprocess.CompletedProcess([], 0, '{"success": true}', '')
+with patch.object(m, 'vendor_binary', return_value='/bin/true'), \
+        patch.object(m.subprocess, 'run', return_value=done) as run:
+    try:
+        m.invoke_vendor(['credit-usage', '--json'], 5)
+    except m.CliError as exc:
+        assert exc.code == 4 and 'must be an https URL' in str(exc), exc
+    else:
+        raise SystemExit('a keyed invoke_vendor ran with a plain-http API URL')
+    assert not run.called
+    m.invoke_vendor(['scrape', 'https://x'], 5, keyless=True)
+    assert run.call_count == 1 and 'FIRECRAWL_API_URL' not in run.call_args.kwargs['env']
+print('OK')
+PY
+)
+[[ "$RESULT" == OK ]] && ok || bad "invoke_vendor refuses a keyed run with a plain-http API URL: $RESULT"
 
 # settings.json allows only the index verbs, so sessions in a stricter permission
 # mode (claude -p --permission-mode acceptEdits, plan-mode subagents) run them
