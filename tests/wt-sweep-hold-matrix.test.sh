@@ -10,6 +10,8 @@
 #     for another day. Rows r-blob, r-nopred, r-app and h-app pin that an undated
 #     record takes the time of the dated record before it (none: never recent), the
 #     same whether the index is warm, empty, or an older helper's that lacks it.
+#     Row h-part pins the one undated line still dated by the file: the last one,
+#     its newline not yet written.
 #   - A worktree whose name ends in `.`: paths read from transcripts lose a trailing
 #     dot (_norm), so a cwd or `git -C` naming the worktree itself never matched it.
 #     Rows h-dot. and h-cwd.
@@ -58,7 +60,7 @@ ago(){ date -u -d "-$1" +%Y-%m-%dT%H:%M:%S.000Z; }
 S="$TMP/sites"; R="$S/new"; W="$R/.claude/worktrees"
 E="$TMP/elsewhere"; L="$TMP/launch"
 H="$TMP/claude"; P="$H/projects"
-HELD="h-live h-job h-slug h-dot. h-done h-bind h-proj h-cwd. h-unread h-app"
+HELD="h-live h-job h-slug h-dot. h-done h-bind h-proj h-cwd. h-unread h-app h-part"
 IDLE="r-stale r-old r-blob r-nopred r-app"   # released as idle: clean, cache-only, shipped
 UNHELD="r-bindold r-doneold r-cleared r-plain"
 {
@@ -143,6 +145,12 @@ fi
 TA="$P/-elsewhere/s-h-app.jsonl"
 { rec "$E" '2 hours'; printf '{"type":"system","timestamp":"not-a-date","content":"x"}\n'; } >"$TA"
 job h-app working ",\"cwd\":\"$E\",\"linkScanPath\":\"$TA\""
+# h-part: a working job's transcript, written just now, ends in an undated record
+# whose newline has not landed yet, after a dated record 48h old: a line still being
+# written is as recent as the file (renamed).
+T="$P/-elsewhere/s-h-part.jsonl"
+{ rec "$E" '48 hours'; blob "$(old h-part)/base.txt" | tr -d '\n'; } >"$T"
+job h-part working ",\"cwd\":\"$E\",\"linkScanPath\":\"$T\""
 
 # ===== idle: released ==============================================================
 # r-stale: a blocked job's own worktree; its state.json is 30h old, no session runs.

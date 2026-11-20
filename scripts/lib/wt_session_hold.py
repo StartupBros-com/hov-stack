@@ -460,7 +460,8 @@ def scan(path: str, offset: int, found: dict, transient: dict, mtime: float, pri
     gets 0: it names its paths but never makes them recent. Return the offset after
     the last complete line, the last cwd and the last `worktree-state` binding
     recorded there (each None if none), and `prior` at that offset. A trailing line
-    still being written goes to `transient`, which is used now but never cached."""
+    still being written goes to `transient`, which is used now but never cached; it
+    counts as written at `mtime` unless its own timestamp is already there and parses."""
     last = bind = None
 
     def before() -> float:
@@ -475,7 +476,7 @@ def scan(path: str, offset: int, found: dict, transient: dict, mtime: float, pri
             present, t = _stamp(line)
             when = before if not present else (lambda: mtime) if t is None else (lambda t=t: t)
             if not line.endswith(b"\n"):
-                _record_paths(line, transient, when)
+                _record_paths(line, transient, (lambda: mtime) if t is None else when)
                 break
             last = _record_paths(line, found, when) or last
             if t is not None:
