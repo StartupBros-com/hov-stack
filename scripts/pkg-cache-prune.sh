@@ -24,6 +24,10 @@
 #                      unnecessary"), which is a strictly bigger re-fetch bill
 #                      for no extra safety over verify's targeted GC.
 #   uv cache prune     removes unreachable wheels/sdists from uv's cache.
+#                      Expect little: its first unblocked run in weeks
+#                      (2026-11-20) freed 0.4 GiB of 33 GiB. Half the rest
+#                      is hardlinked from live venvs and the other half is
+#                      still reachable in uv's index (#697).
 #   hf partials        deletes orphaned `*.incomplete` download partials under
 #                      ~/.cache/huggingface, age-gated to >1 day untouched.
 #                      Plain find(1), no CLI — see the lane comment for why
@@ -163,6 +167,33 @@ tally() {
 # hub snapshots/ symlinks into blobs/, and -L would double-count those.
 size_of() { du -shH "$1" 2>/dev/null | cut -f1; }
 
+# lock_holders <lock-file>: print one line per process holding the lock file.
+#
+# A BUSY line says the cache is in use, not who is using it. A `uv run` parent keeps a
+# shared lock on the whole uv cache for its child's whole life, so one long-running
+# service started with `uv run` makes every weekly prune BUSY. Naming the holders took a
+# manual /proc/locks read on 2026-11-18, 11-19 and 11-20 (#697); this puts them in the journal.
+# /proc/locks names a file as maj:min:inode with the device numbers in hex, the 6th field
+# of a holder's line, after its pid. A blocked waiter holds nothing; its line has an extra
+# "->" 2nd field, which moves its key to the 7th, so it never matches. An OFD lock shows
+# pid -1 and names no process. Without /proc/locks (not Linux) or a stat that can name
+# the device, it prints nothing. It never changes the run's result.
+lock_holders() {
+  local maj='' min='' ino='' key pids pid up cmd
+  [ -r /proc/locks ] && [ -e "$1" ] || return 0
+  read -r maj min ino < <(stat -Lc '%Hd %Ld %i' "$1" 2>/dev/null) || return 0
+  [ -n "$ino" ] || return 0
+  key=$(printf '%02x:%02x:%s' "$maj" "$min" "$ino")
+  pids=$(awk -v key="$key" '$6 == key && $5 > 0 { print $5 }' /proc/locks | sort -un)
+  if [ -z "$pids" ]; then echo "     holders: none left in /proc/locks"; return 0; fi
+  for pid in $pids; do
+    up=$(ps -o etime= -p "$pid" 2>/dev/null | tr -d ' ')
+    cmd=$(tr '\0' ' ' 2>/dev/null <"/proc/$pid/cmdline" | cut -c1-160)
+    echo "     holder: pid $pid${up:+, running $up}: ${cmd:-(exited)}"
+  done
+  return 0
+}
+
 echo "===== pkg-cache-prune $([ "$DRY_RUN" = 1 ] && echo '(DRY RUN)') ====="
 echo
 
@@ -192,7 +223,9 @@ echo "## uv cache (~/.cache/uv)"
 if command -v uv >/dev/null 2>&1; then
   echo "  current: $(size_of "$HOME/.cache/uv")"
   n_ran=$((n_ran + 1))
-  run uv cache prune; tally $?
+  run uv cache prune; uv_rc=$?; tally "$uv_rc"
+  # The lock uv waited on, by uv's own lookup order (UV_CACHE_DIR, then XDG_CACHE_HOME).
+  if [ "$uv_rc" -eq 2 ]; then lock_holders "${UV_CACHE_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/uv}/.lock"; fi
   [ "$DRY_RUN" != 1 ] && echo "  after: $(size_of "$HOME/.cache/uv")"
 else
   echo "  uv not on PATH — skipped"
