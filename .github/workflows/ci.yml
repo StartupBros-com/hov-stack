@@ -23,8 +23,12 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  test:
-    name: setup, hooks, suites, secrets
+  # The three long parts run side by side, each on its own runner from its own checkout,
+  # so none can lean on what another left behind. Run one after another they took 18-23
+  # minutes (2026-11-20, #816); the required check is the `test` job at the end, which
+  # passes only when every part did.
+  setup:
+    name: setup and layout
     runs-on: ubuntu-26.04
     timeout-minutes: 30
     steps:
@@ -39,10 +43,37 @@ jobs:
         run: bash tests/repo/setup.test.sh
       - name: Layout keeps the root a mirror of the harness with no marketplace collision
         run: bash tests/repo/layout.test.sh
+
+  hooks:
+    name: hook tests
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
       - name: Hook tests
         run: bash hooks/tests/run.sh
+
+  suites:
+    name: suites and secrets scan
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
       # The suite steps run even after an earlier step fails (not after a cancel), so a
-      # hook-test timing flake cannot hide a suite regression; the job still fails.
+      # failing skip-list check cannot hide a suite regression or the secrets scan; the job
+      # still fails.
       # minisign verifies the pinned dcg release in tests/dcg.test.sh, as dcg/install.sh does.
       - name: Tools the suites need that the runner image lacks (ripgrep, gawk, PyYAML, venv, minisign)
         if: ${{ !cancelled() }}
@@ -69,6 +100,25 @@ jobs:
           tar -xzf "$archive" -C "$RUNNER_TEMP" gitleaks
           "$RUNNER_TEMP/gitleaks" git --config .gitleaks.toml --redact --no-banner --exit-code 1 \
             --log-opts="--full-history HEAD" .
+
+  # The required check `setup, hooks, suites, secrets`. A job whose `needs` failed is
+  # skipped unless it runs on always(), and a skipped required check counts as passed, so
+  # this job always runs and fails itself unless every part succeeded. A cancelled run
+  # cancels the parts, and they fail it too.
+  test:
+    name: setup, hooks, suites, secrets
+    needs: [setup, hooks, suites]
+    if: always()
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Every part passed (setup and layout, hook tests, suites and secrets scan)
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: release/scripts/ci-aggregate.sh
 
   public-safety:
     name: public-safety scan

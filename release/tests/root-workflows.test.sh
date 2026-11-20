@@ -116,26 +116,54 @@ pass 'every run is a short script call; runners, pins and checkouts are hardened
 
 # General CI executes contributed code on hosted runners. Every pull request, a
 # fork's included, gets its feedback through `pull_request`; a push runs it only on
-# main, since a branch with a pull request got every run twice. Neither job leaves
-# the checkout token in its git config.
+# main, since a branch with a pull request got every run twice. No job leaves the
+# checkout token in its git config.
+# The tests run as parallel parts (#816). `test` keeps the required check's name and is
+# the one job with an `if:`: always(), because a job whose `needs` failed is otherwise
+# skipped, and a skipped required check counts as passed. It needs every part, and
+# ci-aggregate.sh fails it unless each part succeeded. A part has no `if:` and no `needs`,
+# so it can never be skipped and so pass the aggregate without running.
 yq -o=json '.' .github/workflows/ci.yml >"$TMP/ci.yml.json"
 cat >"$TMP/public-ci.jq" <<'PUBLICCI'
   (.on | keys == ["merge_group","pull_request","push"])
   and .on.pull_request == null and .on.merge_group == null and .on.push == {"branches":["main"]}
   and .permissions == {"contents":"read"}
-  and (.jobs | keys == ["public-safety","test"])
+  and (.jobs | keys == ["hooks","public-safety","setup","suites","test"])
   and .jobs.test.name == "setup, hooks, suites, secrets"
   and .jobs["public-safety"].name == "public-safety scan"
   and all(.jobs[];
-    .["runs-on"] == "ubuntu-26.04" and (has("if") | not)
+    .["runs-on"] == "ubuntu-26.04"
     and (has("permissions") | not) and (has("environment") | not)
     and ([.steps[] | select((.uses // "") | startswith("actions/checkout@"))] | length == 1)
     and all(.steps[] | select((.uses // "") | startswith("actions/checkout@"));
       .with["persist-credentials"] == false))
+  and all(.jobs | to_entries[] | select(.key != "test"); .value | (has("if") or has("needs")) | not)
+  and .jobs.test.if == "always()"
+  and (.jobs.test.needs | type == "array")
+  and ((.jobs.test.needs | sort) == ([.jobs | keys[] | select(. != "test" and . != "public-safety")] | sort))
+  and ([.jobs.test.steps[] | select(.run? == "release/scripts/ci-aggregate.sh")]
+    | length == 1 and .[0].env == {"NEEDS_JSON": "${{ toJSON(needs) }}"} and (.[0] | has("if") | not))
 PUBLICCI
 jq -e -f "$TMP/public-ci.jq" "$TMP/ci.yml.json" >/dev/null || die 'public CI checkout/permission/participation contract'
 pass 'general CI stays open on hosted read-only runners without persisted checkout credentials'
-for job in test public-safety; do
+part_mutants=(
+  'a part left out of needs|.jobs.test.needs -= ["hooks"]'
+  'a part job outside needs|.jobs.lint = .jobs.hooks'
+  'the summary job run only on success|.jobs.test.if = "success()"'
+  'the summary job skipped on a cancel|.jobs.test.if = "!cancelled()"'
+  'the summary job without an if|del(.jobs.test.if)'
+  'no aggregate step|.jobs.test.steps |= map(select(.run? != "release/scripts/ci-aggregate.sh"))'
+  'the aggregate step not fed needs|(.jobs.test.steps[] | select(.run? == "release/scripts/ci-aggregate.sh") | .env.NEEDS_JSON) = "{}"'
+  'the aggregate step itself conditional|(.jobs.test.steps[] | select(.run? == "release/scripts/ci-aggregate.sh") | .if) = "success()"'
+  "an if on a part|.jobs.suites.if = \"github.event_name != 'merge_group'\""
+  'a part waiting on another|.jobs.suites.needs = ["setup"]'
+)
+for mutant in "${part_mutants[@]}"; do
+  jq "${mutant#*|}" "$TMP/ci.yml.json" >"$TMP/ci-mutant.json"
+  if jq -e -f "$TMP/public-ci.jq" "$TMP/ci-mutant.json" >/dev/null; then die "accepted CI part mutant: ${mutant%%|*}"; fi
+done
+pass 'the required check needs every part on always() through the aggregate, and no part can be skipped'
+for job in setup hooks suites test public-safety; do
   for mutation in 'del(.with["persist-credentials"])' '.with["persist-credentials"] = true'; do
     jq --arg job "$job" ".jobs[\$job].steps |= map(if ((.uses // \"\") | startswith(\"actions/checkout@\")) then $mutation else . end)" \
       "$TMP/ci.yml.json" >"$TMP/ci-mutant.json"
@@ -144,7 +172,7 @@ for job in test public-safety; do
     fi
   done
 done
-pass 'both general CI jobs reject missing and enabled credential persistence'
+pass 'every general CI job rejects missing and enabled credential persistence'
 
 # The three CI workflows. A pull request's runs share one group per pull request, so
 # a newer push cancels the run it supersedes. A push runs them only on main, in a
