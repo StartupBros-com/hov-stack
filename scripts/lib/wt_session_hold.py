@@ -162,13 +162,18 @@ from datetime import datetime
 # it. Neither is a version bump. Until #795 a full re-read dated each record without
 # a timestamp by the transcript's current mtime, and on 2026-11-19 a rebuilt index
 # called 44 idle worktrees live again; that is fixed, but a bump still re-reads
-# every transcript once (about 40 s on the author's host).
+# every transcript once (about 40 s on the author's host). Paths indexed before
+# #806 lost a trailing `.`, so such an entry still cannot hold a worktree whose
+# name ends in one, as it could not before; none on that host did.
 CACHE_VERSION = 2
 DEFAULT_RESUMABLE_HOURS = 24.0
 FUTURE_SKEW = 3600.0  # seconds a done job's last-turn time may run ahead of now
 RETAIN_DAYS = 3
 _CWD = re.compile(rb'"cwd":"((?:[^"\\]|\\.)*)"')
 _TS = b'"timestamp":"'
+_TS_KEY = b'"timestamp"'
+_TOOL_USE = b'"tool_use"'
+_NOT_PARSED = object()  # a line no caller has parsed yet
 _WS = b'"worktree-state"'
 # An absolute (or ~/) path token in a shell command, after a separator a shell or
 # an option would put before it (`git -C /x`, `--cd=/x`, `cd "/x"`, `(cd /x`).
@@ -310,32 +315,45 @@ def transcript_owner(path: str) -> str:
 
 
 def _norm(p: str) -> str:
+    """`p` as a path, `~/` expanded. A trailing `.` is kept: `x.` and `x` are two
+    directories (hov-stack#806)."""
     if p.startswith("~/"):
         p = os.path.expanduser(p)
-    p = os.path.normpath(p).rstrip(".")
-    return p or "/"
+    return os.path.normpath(p)
 
 
-def _stamp(line: bytes):
-    """(whether the record carries a `timestamp`, its time or None when that does not
-    parse). The byte grab is used only when the key occurs once: on 2026-11-15 it
-    matched the parsed top-level value on all 1,319,139 such records in 200
-    transcripts; a line with nested timestamps is parsed instead. A line that is
-    not JSON (one still being written) counts as carrying one that does not parse."""
-    n = line.count(_TS)
-    if n == 0:
+def _parse(line: bytes):
+    """`line` as JSON, or None when it is not (one still being written)."""
+    try:
+        return json.loads(line)
+    except ValueError:
+        return None
+
+
+def _stamp(line: bytes, d=_NOT_PARSED):
+    """(whether the record carries a top-level `timestamp`, its time or None when
+    that does not parse). `d` is the record when the caller has parsed it already.
+    A tool use is always parsed, so a timestamp in a tool's input is never taken for
+    the record's. Otherwise the byte grab is used when the key occurs once, written
+    as Claude Code writes it (`"timestamp":"`): on 2026-11-15 it matched the parsed
+    top-level value on all 1,319,139 such records in 200 transcripts. Any other line
+    naming the key is parsed, so a timestamp that is null, a number or spaced
+    otherwise is still present and never taken for a missing one. A line that is
+    not JSON (torn, or still being written) gets the byte grab too when the key
+    occurs once that way, and otherwise counts as one that does not parse."""
+    if _TS_KEY not in line:
         return False, None
-    if n == 1:
-        i = line.index(_TS) + len(_TS)
-        ts = line[i:line.find(b'"', i)].decode("ascii", "replace")
-    else:
-        try:
-            d = json.loads(line)
-        except ValueError:
+    once = line.count(_TS_KEY) == 1 and line.count(_TS) == 1
+    if d is _NOT_PARSED:
+        d = _parse(line) if _TOOL_USE in line or not once else None
+    if d is None:
+        if not once:
             return True, None
-        if not (isinstance(d, dict) and "timestamp" in d):
-            return False, None
-        ts = d["timestamp"]
+        i = line.index(_TS) + len(_TS)
+        d = {"timestamp": line[i:line.find(b'"', i)].decode("ascii", "replace")}
+    if not (isinstance(d, dict) and "timestamp" in d):
+        return False, None
+    ts = d["timestamp"]
     if isinstance(ts, str):
         try:
             t = datetime.fromisoformat(ts.replace("Z", "+00:00"))
@@ -388,10 +406,10 @@ def last_turn_age(d: dict, state_path: str, now: float) -> float:
     return math.inf
 
 
-def _record_paths(line: bytes, found: dict, when):
+def _record_paths(line: bytes, found: dict, when, d=_NOT_PARSED):
     """Note in `found` each path `line` drives, with the newest record time naming
     it (`when()`, asked only if it names one), and return the record's cwd (None if
-    it has none)."""
+    it has none). `d` is the record when the caller has parsed it already."""
     paths, cwd = [], None
     m = _CWD.search(line)
     if m:
@@ -402,11 +420,9 @@ def _record_paths(line: bytes, found: dict, when):
         if isinstance(v, str) and v.startswith("/"):
             cwd = _norm(v)
             paths.append(cwd)
-    if b'"tool_use"' in line:
-        try:
-            d = json.loads(line)
-        except ValueError:
-            d = None
+    if _TOOL_USE in line:
+        if d is _NOT_PARSED:
+            d = _parse(line)
         msg = d.get("message") if isinstance(d, dict) else None
         content = msg.get("content") if isinstance(msg, dict) else None
         for c in content if isinstance(content, list) else ():
@@ -421,7 +437,13 @@ def _record_paths(line: bytes, found: dict, when):
                     paths.append(_norm(v))
             cmd = inp.get("command")
             if isinstance(cmd, str):
-                paths.extend(_norm(t) for t in _TOKEN.findall(cmd))
+                for t in _TOKEN.findall(cmd):
+                    p = _norm(t)
+                    paths.append(p)
+                    # A command's text cannot tell a name ending in `.` from a
+                    # sentence's full stop: such a token names both.
+                    if p.endswith("."):
+                        paths.append(p.rstrip(".") or "/")
     if paths:
         w = when()
         for p in paths:
@@ -473,12 +495,13 @@ def scan(path: str, offset: int, found: dict, transient: dict, mtime: float, pri
     with open(path, "rb") as f:
         f.seek(offset)
         for line in f:
-            present, t = _stamp(line)
+            d = _parse(line) if _TOOL_USE in line else _NOT_PARSED
+            present, t = _stamp(line, d)
             when = before if not present else (lambda: mtime) if t is None else (lambda t=t: t)
             if not line.endswith(b"\n"):
-                _record_paths(line, transient, (lambda: mtime) if t is None else when)
+                _record_paths(line, transient, (lambda: mtime) if t is None else when, d)
                 break
-            last = _record_paths(line, found, when) or last
+            last = _record_paths(line, found, when, d) or last
             if t is not None:
                 prior = t
             b = _binding(line)
@@ -841,12 +864,9 @@ def check(wt: str, home: str, active_min: int, procfs: str, cache_dir: str = "",
         candidates[path] = owner
 
     prefixes = tuple(s.rstrip("/") + "/" for s in names)
-    # A path from a transcript went through _norm(), which drops a trailing `.`, so a
-    # worktree whose name ends in one is matched in that spelling too.
-    exact = set(names) | {_norm(s) for s in names}
 
     def here(p: str) -> bool:
-        return p in exact or p.startswith(prefixes)
+        return p in names or p.startswith(prefixes)
 
     # A resumable done job's own transcripts (never its agents'): their last
     # `worktree-state` record is the worktree resuming it re-enters.
@@ -897,7 +917,7 @@ def check(wt: str, home: str, active_min: int, procfs: str, cache_dir: str = "",
                 resumable, False)
     for t, sid in sorted(candidates.items()):
         cwd = driven.get(t, ({}, None, None))[1]
-        if cwd and here(cwd) and transcript_owner(t) == sid and sid not in lapsed_ids:
+        if cwd and within(cwd) and transcript_owner(t) == sid and sid not in lapsed_ids:
             return f"{holder}; its session last recorded its cwd at {cwd}", resumable, False
     ago = f"{int((now - last) // 3600)}h ago" if last > 0 else "only by records with no time"
     return f"idle: {holder}; last named {ago}", resumable, True

@@ -12,9 +12,15 @@
 #     same whether the index is warm, empty, or an older helper's that lacks it.
 #     Row h-part pins the one undated line still dated by the file: the last one,
 #     its newline not yet written.
-#   - A worktree whose name ends in `.`: paths read from transcripts lose a trailing
-#     dot (_norm), so a cwd or `git -C` naming the worktree itself never matched it.
-#     Rows h-dot. and h-cwd.
+#   - A worktree whose name ends in `.`: paths read from transcripts lost a trailing
+#     dot, so a cwd or `git -C` naming the worktree itself never matched it (rows
+#     h-dot. and h-cwd.). They are now read as written, so `pair.` is never held by
+#     what names its sibling `pair`; only a command's token ending in `.`, which may
+#     be a full stop, names both spellings (h-punct).
+#   - A timestamp that is null, or spaced otherwise than Claude Code writes it, is
+#     present, never missing: it is parsed, or dated by the file, but never by the
+#     record before it (h-tsnull, h-tsspace). A timestamp inside a tool's input is
+#     not the record's (h-nested).
 #   Every other row pins a hold that already works, named as git lists the worktree,
 #   through a renamed checkout's compat link (old -> new), or through a symlinked
 #   worktrees directory (wts -> new/.claude/worktrees). With IDLE_RELEASE_HOURS=0,
@@ -60,9 +66,9 @@ ago(){ date -u -d "-$1" +%Y-%m-%dT%H:%M:%S.000Z; }
 S="$TMP/sites"; R="$S/new"; W="$R/.claude/worktrees"
 E="$TMP/elsewhere"; L="$TMP/launch"
 H="$TMP/claude"; P="$H/projects"
-HELD="h-live h-job h-slug h-dot. h-done h-bind h-proj h-cwd. h-unread h-app h-part"
-IDLE="r-stale r-old r-blob r-nopred r-app"   # released as idle: clean, cache-only, shipped
-UNHELD="r-bindold r-doneold r-cleared r-plain"
+HELD="h-live h-job h-slug h-dot. h-done h-bind h-proj h-cwd. h-unread h-app h-part h-tsnull h-tsspace h-nested h-punct pair"
+IDLE="r-stale r-old r-blob r-torn r-nopred r-app"   # released as idle: clean, cache-only, shipped
+UNHELD="r-bindold r-doneold r-cleared r-plain pair."
 {
   mkdir -p "$S" "$E" "$L" "$H/sessions" "$H/jobs" "$P/-elsewhere" "$P/-launch"
   git init --bare -q -b main "$TMP/origin.git"
@@ -71,8 +77,9 @@ UNHELD="r-bindold r-doneold r-cleared r-plain"
   printf '.claude/worktrees/\n' >"$R/.gitignore"; echo base >"$R/base.txt"
   git -C "$R" add -A; git -C "$R" commit -qm base; git -C "$R" push -q -u origin main
   for n in $HELD $IDLE $UNHELD; do
-    git -C "$R" worktree add -q "$W/$n" -b "${n%.}" main   # a branch name cannot end in `.`
-    git -C "$W/$n" push -q -u origin "${n%.}"
+    b="${n%.}"; [ "$b" = "$n" ] || b="$b-dot"   # a branch name cannot end in `.`
+    git -C "$R" worktree add -q "$W/$n" -b "$b" main
+    git -C "$W/$n" push -q -u origin "$b"
   done
 } >/dev/null 2>&1
 ln -s new "$S/old"                      # a renamed checkout's compat link (hov-stack#661)
@@ -91,6 +98,11 @@ rec(){ printf '{"type":"user","timestamp":"%s","cwd":"%s","message":{"role":"use
 tool(){ # $1 age  $2 tool name  $3 input JSON
   printf '{"type":"assistant","timestamp":"%s","cwd":"%s","message":{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"%s","input":%s}]}}\n' \
     "$(ago "$1")" "$E" "$2" "$3"
+}
+# tool, with the timestamp's value written raw: $1 is all that follows `"timestamp":`.
+toolraw(){
+  printf '{"type":"assistant","timestamp":%s,"cwd":"%s","message":{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"%s","input":%s}]}}\n' \
+    "$1" "$E" "$2" "$3"
 }
 blob(){ printf '{"type":"api-request-blob","sessionId":"s","hash":"h","message":{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"Read","input":{"file_path":"%s"}}]}}\n' "$1"; }
 bind(){ # $1 worktree path, or "" for the record that clears the binding
@@ -151,6 +163,36 @@ job h-app working ",\"cwd\":\"$E\",\"linkScanPath\":\"$TA\""
 T="$P/-elsewhere/s-h-part.jsonl"
 { rec "$E" '48 hours'; blob "$(old h-part)/base.txt" | tr -d '\n'; } >"$T"
 job h-part working ",\"cwd\":\"$E\",\"linkScanPath\":\"$T\""
+# h-tsnull: a working job's transcript, written just now, read in it in a record
+# whose timestamp is null, after a dated record 48h old: dated by the file
+# (symlinked).
+T="$P/-elsewhere/s-h-tsnull.jsonl"
+{ rec "$E" '48 hours'; toolraw null Read "{\"file_path\":\"$(wts h-tsnull)/base.txt\"}"; } >"$T"
+job h-tsnull working ",\"cwd\":\"$E\",\"linkScanPath\":\"$T\""
+# h-tsspace: as h-tsnull, but the timestamp is 2h old and spaced after its colon,
+# and the file was last written 47h ago: the record's own time holds it (renamed).
+T="$P/-elsewhere/s-h-tsspace.jsonl"
+{ rec "$E" '48 hours'; toolraw " \"$(ago '2 hours')\"" Read "{\"file_path\":\"$(old h-tsspace)/base.txt\"}"; } >"$T"
+touch -d '-47 hours' "$T"
+job h-tsspace working ",\"cwd\":\"$E\",\"linkScanPath\":\"$T\""
+# h-nested: a blocked job's transcript: a dated record 3h old, then a resent tool use
+# (no timestamp of its own) whose input carries one 48h old: the input's time is
+# not the record's, which takes the 3h before it (symlinked).
+T="$P/-elsewhere/s-h-nested.jsonl"
+{ rec "$E" '3 hours'
+  printf '{"type":"api-request-blob","sessionId":"s","hash":"h","message":{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"Write","input":{"file_path":"%s/note.json","timestamp":"%s"}}]}}\n' \
+    "$(wts h-nested)" "$(ago '48 hours')"; } >"$T"
+touch -d '-3 hours' "$T"
+job h-nested blocked ",\"cwd\":\"$E\",\"linkScanPath\":\"$T\""
+# h-punct: a blocked job's command named it 3h ago with a full stop after it.
+T="$P/-elsewhere/s-h-punct.jsonl"
+tool '3 hours' Bash "{\"command\":\"echo done in $(real h-punct).\"}" >"$T"; touch -d '-3 hours' "$T"
+job h-punct blocked ",\"cwd\":\"$E\",\"linkScanPath\":\"$T\""
+# pair: a blocked job's session recorded its cwd in it 3h ago. Its sibling `pair.`
+# (unheld below) is another directory, and nothing names it.
+T="$P/-elsewhere/s-pair.jsonl"
+rec "$(real pair)" '3 hours' >"$T"; touch -d '-3 hours' "$T"
+job pair blocked ",\"cwd\":\"$E\",\"linkScanPath\":\"$T\""
 
 # ===== idle: released ==============================================================
 # r-stale: a blocked job's own worktree; its state.json is 30h old, no session runs.
@@ -165,6 +207,13 @@ job r-old blocked ",\"cwd\":\"$E\",\"linkScanPath\":\"$T\""
 T="$P/-elsewhere/s-r-blob.jsonl"
 { rec "$E" '48 hours'; blob "$(old r-blob)/base.txt"; rec "$E" '0 hours'; } >"$T"
 job r-blob working ",\"cwd\":\"$E\",\"linkScanPath\":\"$T\""
+# r-torn: a working job's transcript, written just now, names it only in a torn record
+# (not JSON, a tool use cut off) stamped 48h ago: the torn record keeps its own time.
+T="$P/-elsewhere/s-r-torn.jsonl"
+{ printf '{"type":"assistant","timestamp":"%s","cwd":"%s","message":{"role":"assistant","content":[{"type":"tool_use","id":"t1","inp\n' \
+    "$(ago '48 hours')" "$(real r-torn)"
+  rec "$E" '0 hours'; } >"$T"
+job r-torn working ",\"cwd\":\"$E\",\"linkScanPath\":\"$T\""
 # r-nopred: #795's planted negative: an undated record naming it with no dated record
 # before it, then a dated record written now naming something else.
 T="$P/-elsewhere/s-r-nopred.jsonl"
@@ -184,6 +233,7 @@ job r-doneold "done" ",\"cwd\":\"$E\",\"worktreePath\":\"$(old r-doneold)\",\"la
 T="$P/-launch/s-r-cleared.jsonl"; { bind "$(wts r-cleared)"; bind ""; } >"$T"; touch -d '-3 hours' "$T"
 job r-cleared "done" ",\"cwd\":\"$L\",\"linkScanPath\":\"$T\",\"lastTerminalAt\":\"$(ago '5 hours')\""
 # r-plain: nothing names it.
+# pair.: nothing names it; only its sibling `pair` is named (held above).
 
 for n in $HELD $IDLE $UNHELD; do touch -d '-3 hours' "$W/$n"; done   # older than ACTIVE_MIN
 
