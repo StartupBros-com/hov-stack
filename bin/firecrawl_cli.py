@@ -168,6 +168,50 @@ KEYLESS_LIMIT = 10
 # Set by the first keyless refusal with no key to fall back on, so later targets
 # of the same call fail without sending another refused request.
 KEYLESS_REFUSED = None
+# Firecrawl Local (#807): a vetted local scraper, pinned at firecrawl/firecrawl
+# LOCAL_REV (docs/vets/2026-11-19-firecrawl-local-harness-vet.md), serves an
+# eligible fetch on this machine with no credits; anything it cannot serve falls
+# through to the ladder above with a note starting "local: ". `--version` proves
+# the release, not the commit.
+LOCAL_PREFIX = "local: "
+LOCAL_VERSION = "0.1.1"
+LOCAL_REV = "dc37f52f9670be4ef3077f97f31096b2d0657205"
+LOCAL_INSTALL = (
+    "cargo install --locked --root ~/.local/share/firecrawl-local --git "
+    f"https://github.com/firecrawl/firecrawl --rev {LOCAL_REV} firecrawl-local"
+)
+LOCAL_FORMATS = frozenset({"markdown", "html", "rawHtml", "links"})
+# Seconds per pass (never more than the wrapper --timeout), and how long past the
+# scraper's own timeout the wrapper waits before killing its process group.
+LOCAL_PASS_SECONDS = 30
+LOCAL_GRACE_SECONDS = 10
+LOCAL_SLOTS_CAP = 8
+# The pinned guard's refusals of a private, local or metadata target
+# (apps/local/src/guard.rs, fetch.rs). Those URLs are refused here and never sent
+# to the cloud; every other BLOCKED_TARGET (scheme, credentials, redirect cap)
+# falls through.
+LOCAL_PRIVATE_REFUSALS = (
+    "is a link-local or metadata address",
+    "is a private address",
+    "is a local hostname",
+    "cloud metadata endpoints are never reachable",
+    "does not resolve to an address Firecrawl Local may reach",
+)
+LOCAL_SCRIPT_WARNING = "builds its content with JavaScript"
+# Where the pinned scraper looks for Chrome (apps/local/src/browser.rs find_chrome),
+# for the capabilities report only.
+LOCAL_CHROME_PATHS = (
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    "/Applications/Chromium.app/Contents/MacOS/Chromium",
+    "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
+    "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+    "/usr/bin/google-chrome", "/usr/bin/google-chrome-stable", "/usr/bin/chromium",
+    "/usr/bin/chromium-browser", "/snap/bin/chromium",
+)
+LOCAL_CHROME_NAMES = (
+    "google-chrome", "google-chrome-stable", "chromium", "chromium-browser", "chrome",
+)
+LOCAL_VERSIONS = {}
 # This process's own copy of the cooldown, for when the marker cannot be written.
 KEYLESS_UNTIL = None
 # Vendor 1.19.26 printed these successes as text whatever --json says (#2123):
@@ -791,7 +835,303 @@ def local_time(epoch):
     return datetime.fromtimestamp(epoch).astimezone().isoformat(timespec="minutes")
 
 
+def local_off():
+    return os.environ.get("FIRECRAWL_CLI_LOCAL", "").strip().lower() in KEYLESS_OFF
+
+
+def local_ready(args, surface, command):
+    """A fetch of an http(s) URL without userinfo, to formats Firecrawl Local
+    produces, with no schema or question, and the tier neither off nor skipped."""
+    if args.verb != "fetch" or surface != "scrape" or getattr(args, "cloud", False):
+        return False
+    if local_off() or any(
+        getattr(args, key, None) for key in ("schema", "schema_file", "query")
+    ):
+        return False
+    options = command[2:]
+    formats = options[options.index("--format") + 1].split(",") if "--format" in options else []
+    if not formats or not set(formats) <= LOCAL_FORMATS:
+        return False
+    # The pinned guard refuses embedded credentials; such a URL goes to the ladder untried.
+    parts = urlsplit(command[1])
+    return parts.scheme in {"http", "https"} and not (parts.username or parts.password)
+
+
+def local_binary():
+    """(path, note): FIRECRAWL_CLI_LOCAL_BIN, else the cargo root the install line
+    uses, else PATH. Not installed is silent; a named path that is unusable is a note."""
+    named = os.environ.get("FIRECRAWL_CLI_LOCAL_BIN", "").strip()
+    if named:
+        path = Path(named).expanduser()
+        if path.is_file() and os.access(path, os.X_OK):
+            return str(path.absolute()), None
+        return None, (
+            f"{LOCAL_PREFIX}FIRECRAWL_CLI_LOCAL_BIN {named!r} is not an executable file; "
+            "ran on Firecrawl"
+        )
+    default = Path.home() / ".local/share/firecrawl-local/bin/firecrawl-local"
+    if default.is_file() and os.access(default, os.X_OK):
+        return str(default), None
+    found = shutil.which("firecrawl-local")
+    return (str(Path(found).absolute()), None) if found else (None, None)
+
+
+def local_env(scratch, chrome=None):
+    """Built from nothing: no key, API URL, proxy or login reaches the scraper
+    (a proxy variable defeats its --public-only guard, vet note §5)."""
+    env = {
+        "PATH": os.environ.get("PATH") or os.defpath,
+        "HOME": scratch, "TMPDIR": scratch,
+        "FIRECRAWL_CLOUD": "off", "FIRECRAWL_LOCAL_HOME": scratch,
+    }
+    if chrome:
+        env["FIRECRAWL_CHROME_PATH"] = chrome
+    return env
+
+
+def local_version(binary, scratch):
+    if binary not in LOCAL_VERSIONS:
+        try:
+            done = subprocess.run(
+                [binary, "--version"], capture_output=True, text=True, errors="replace",
+                timeout=10, cwd=scratch, env=local_env(scratch), stdin=subprocess.DEVNULL,
+            )
+            text = done.stdout.strip()
+            version = (
+                text.removeprefix("firecrawl-local ").strip()
+                if not done.returncode and text.startswith("firecrawl-local ") else None
+            )
+        except (OSError, subprocess.SubprocessError):
+            version = None
+        LOCAL_VERSIONS[binary] = version
+    return LOCAL_VERSIONS[binary]
+
+
+def local_chrome():
+    """The Chrome the pinned scraper would launch, by its own search order."""
+    named = os.environ.get("FIRECRAWL_CHROME_PATH")
+    if named and os.path.exists(named):
+        return named
+    for path in LOCAL_CHROME_PATHS:
+        if os.path.exists(path):
+            return path
+    for directory in (os.environ.get("PATH") or "").split(os.pathsep):
+        for name in LOCAL_CHROME_NAMES:
+            if directory and os.path.exists(os.path.join(directory, name)):
+                return os.path.join(directory, name)
+    return None
+
+
+def local_status():
+    """What capabilities (and harness-doctor) report about the local tier."""
+    binary, note = local_binary()
+    status = {
+        "pinned_version": LOCAL_VERSION, "pinned_rev": LOCAL_REV, "install": LOCAL_INSTALL,
+        "binary": binary, "version": None, "chrome": local_chrome(),
+        "browser_slots": local_slot_count(),
+    }
+    if local_off():
+        return {**status, "state": "off"}
+    if binary is None:
+        return {**status, "state": "unusable" if note else "absent", "note": note}
+    with tempfile.TemporaryDirectory(
+        prefix="firecrawl-local-", dir=isolation_root(), ignore_cleanup_errors=True
+    ) as scratch:
+        status["version"] = local_version(binary, scratch)
+    return {**status, "state": "ready" if status["version"] == LOCAL_VERSION else "wrong_version"}
+
+
+def local_slot_count():
+    raw = os.environ.get("FIRECRAWL_CLI_LOCAL_BROWSER_SLOTS", "").strip()
+    try:
+        count = int(raw) if raw else 1
+    except ValueError:
+        count = 1
+    return max(1, min(count, LOCAL_SLOTS_CAP))
+
+
+def local_browser_slot():
+    """(fd, None) holding one of the host's Chrome slots, or (None, note); never waits.
+    The scraper inherits the fd, so the slot stays held until it and its Chrome
+    exit, even when this process dies first."""
+    count = local_slot_count()
+    directory = Path(BUDGET.root) / "local-browser"
+    try:
+        directory.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        return None, f"{LOCAL_PREFIX}no browser slot ({exc.strerror or exc}); ran on Firecrawl"
+    for index in range(count):
+        try:
+            fd = os.open(directory / f"slot-{index}.lock", os.O_RDWR | os.O_CREAT, 0o600)
+        except OSError as exc:
+            return None, f"{LOCAL_PREFIX}no browser slot ({exc.strerror or exc}); ran on Firecrawl"
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return fd, None
+        except OSError:
+            os.close(fd)
+    return None, (
+        f"{LOCAL_PREFIX}the page needs Chrome and all {count} local browser slot(s) "
+        "are in use; ran on Firecrawl"
+    )
+
+
+def local_kill(pid):
+    try:
+        os.killpg(pid, 9)
+    except (ProcessLookupError, PermissionError):
+        pass
+
+
+def local_pass(argv, env, scratch, wall, slot=None):
+    """One scraper run in its own session; on timeout the whole group, Chrome
+    included, is killed. Returns (returncode, stdout, stderr), returncode None on timeout."""
+    process = subprocess.Popen(
+        argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.DEVNULL,
+        text=True, errors="replace", cwd=scratch, env=env, start_new_session=True,
+        pass_fds=(slot,) if slot is not None else (),
+    )
+    try:
+        stdout, stderr = process.communicate(timeout=wall)
+    except subprocess.TimeoutExpired:
+        local_kill(process.pid)
+        try:
+            process.communicate(timeout=5)
+        except subprocess.TimeoutExpired:
+            pass
+        return None, "", ""
+    except BaseException:
+        local_kill(process.pid)
+        raise
+    # A stray browser child left in the group would hold the slot; reap it.
+    local_kill(process.pid)
+    return process.returncode, stdout, stderr
+
+
+def local_outcome(returncode, stdout, stderr, formats, seconds):
+    """Classify one pass: ("served", data), ("script", None), ("refused", why) or
+    ("fall", why), from the pinned scraper's recorded output shapes."""
+    if returncode is None:
+        return "fall", f"timed out after {seconds:g} s"
+    try:
+        document = json.loads(stdout)
+    except ValueError:
+        document = None
+    tail = (stderr or "").strip().splitlines()[-1:]
+    said = f" ({tail[0][:200]})" if tail else ""
+    if returncode < 0:
+        return "fall", f"stopped by signal {-returncode}{said}"
+    if not isinstance(document, dict):
+        return "fall", f"unreadable output (exit {returncode}){said}"
+    if document.get("success") is False or returncode:
+        code = document.get("code") or f"exit {returncode}"
+        error = str(document.get("error") or "").strip()
+        if code == "BLOCKED_TARGET" and any(m in error for m in LOCAL_PRIVATE_REFUSALS):
+            return "refused", error
+        return "fall", f"{code}: {error.splitlines()[0][:300] if error else 'no detail'}"
+    data = document.get("data")
+    if not isinstance(data, dict):
+        return "fall", "unreadable output (no data)"
+    warning = str(data.get("warning") or "").strip()
+    metadata = data.get("metadata") if isinstance(data.get("metadata"), dict) else {}
+    status = metadata.get("statusCode")
+    if data.get("blocked"):
+        return "fall", f"the site did not serve the page to this machine (HTTP {status})"
+    if warning:
+        if LOCAL_SCRIPT_WARNING in warning:
+            return "script", warning
+        return "fall", f"warning: {warning.splitlines()[0][:300]}"
+    if isinstance(status, int) and status >= 400:
+        return "fall", f"the site answered HTTP {status}"
+    if not any(data.get(name) for name in formats):
+        return "fall", "empty result"
+    return "served", data
+
+
+def local_invoke(args, command):
+    """(payload, notes) when Firecrawl Local served the page; (None, notes) to fall
+    through to the ladder. A private or local target raises instead: it never goes
+    to the cloud. Spends nothing and never touches the ledger."""
+    binary, note = local_binary()
+    if binary is None:
+        return None, [note] if note else []
+    options = command[2:]
+    formats = options[options.index("--format") + 1]
+    seconds = min(LOCAL_PASS_SECONDS, args.timeout)
+    base = [
+        binary, "scrape", command[1], "--public-only", "-f", formats,
+        "--timeout", str(max(1000, int(seconds * 1000))), "-c", "1",
+    ]
+    with tempfile.TemporaryDirectory(
+        prefix="firecrawl-local-", dir=isolation_root(), ignore_cleanup_errors=True
+    ) as scratch:
+        version = local_version(binary, scratch)
+        if version != LOCAL_VERSION:
+            return None, [
+                f"{LOCAL_PREFIX}{binary} reports {version or 'no version'}, the wrapper is "
+                f"pinned to {LOCAL_VERSION}; ran on Firecrawl"
+            ]
+        # First pass with Chrome hidden: a static page is served at fetch cost, and a
+        # script-built one says so instead of starting a browser outside the slot.
+        hidden = "/usr/bin/false" if os.path.exists("/usr/bin/false") else "/bin/false"
+        kind, detail = local_outcome(
+            *local_pass(base, local_env(scratch, hidden), scratch, seconds + LOCAL_GRACE_SECONDS),
+            formats.split(","), seconds,
+        )
+        if kind == "script":
+            slot, busy = local_browser_slot()
+            if slot is None:
+                return None, [busy]
+            try:
+                kind, detail = local_outcome(
+                    *local_pass(
+                        [*base, "--browser", "always"],
+                        local_env(scratch, os.environ.get("FIRECRAWL_CHROME_PATH")),
+                        scratch, seconds + LOCAL_GRACE_SECONDS, slot,
+                    ),
+                    formats.split(","), seconds,
+                )
+            finally:
+                os.close(slot)
+            if kind == "script":
+                kind, detail = "fall", f"Chrome did not render it: {detail.splitlines()[0][:300]}"
+    if kind == "refused":
+        retry = shlex.split(args.retry_command)
+        retry.insert(retry.index("--") if "--" in retry else len(retry), "--cloud")
+        error = CliError(
+            f"Firecrawl Local refused the target: {detail}. A private or local target "
+            "is never sent to Firecrawl's cloud",
+            "if the target is in fact public (a split-horizon or VPN name), rerun on "
+            "the cloud: " + shlex.join(retry), 1,
+        )
+        error.error_code = "local_blocked_target"
+        raise error
+    if kind == "fall":
+        return None, [f"{LOCAL_PREFIX}{detail}; ran on Firecrawl"]
+    engine = (detail.get("metadata") or {}).get("engine") or "local"
+    return redact(detail), [
+        f"{LOCAL_PREFIX}served by Firecrawl Local {LOCAL_VERSION} ({engine}); no credits spent"
+    ]
+
+
 def budgeted_invoke(args, surface, command):
+    """Firecrawl Local first for an eligible fetch (#807), then the cloud ladder,
+    carrying the local tier's fall-through note either way."""
+    local_notes = []
+    if local_ready(args, surface, command):
+        payload, local_notes = local_invoke(args, command)
+        if payload is not None:
+            return payload, local_notes
+    try:
+        payload, notes = cloud_invoke(args, surface, command)
+    except CliError as exc:
+        if local_notes:
+            exc.degraded = [*local_notes, *(exc.degraded or [])]
+        raise
+    return payload, [*local_notes, *notes]
+
+
+def cloud_invoke(args, surface, command):
     global KEYLESS_REFUSED
     api = uses_api(args)
     if api and not api_billed(args):
@@ -1375,6 +1715,11 @@ def build_parser():
             help="comma-separated vendor formats replacing the default summary: "
             + ", ".join(SCRAPE_FORMATS) + " (json needs --schema or --schema-file)",
         )
+        if name == "fetch":
+            p.add_argument(
+                "--cloud", action="store_true",
+                help="skip Firecrawl Local and run on Firecrawl's cloud",
+            )
         p.epilog = (
             "Injection check " + INJECTION_CHECK + ". Firecrawl may serve recently "
             "indexed content instead of refetching; --max-age 0 forces a live fetch "
@@ -1382,6 +1727,14 @@ def build_parser():
             "links, or html formats, a schema alone, or a question alone, and PDFs to "
             "summary or markdown, go keyless first and spend no credits; interact "
             "runs keyed, so refetch with FIRECRAWL_CLI_KEYLESS=0 before interact."
+            + (
+                " With Firecrawl Local installed (capabilities: local), a URL fetched "
+                "to markdown, html, rawHtml or links (--full) with no schema or "
+                "question runs on this machine first and spends nothing; a private "
+                "target is refused, never sent to the cloud; --cloud skips it and "
+                "FIRECRAWL_CLI_LOCAL=0 turns it off."
+                if name == "fetch" else ""
+            )
         )
         schema(p)
         p.add_argument("-Q", "--query", help="question about the content; answer in data.answer")
@@ -2408,6 +2761,7 @@ def capabilities(registry):
         "search_tbs": list(TBS_VALUES),
         "search_operators": SEARCH_OPERATORS,
         "fetch_formats": {"scrape": list(SCRAPE_FORMATS), "parse": list(PARSE_FORMATS)},
+        "local": local_status(),
         "budget_environment": {
             key: "FIRECRAWL_CLI_" + key.upper() for key in BUDGET_DEFAULTS
         },
@@ -2432,6 +2786,7 @@ def capabilities(registry):
             "search --country has no shaped equivalent; it is raw -- search <q> --country DE --json",
             "gov and developer are API-direct (POST /v2/search/gov and /v2/search/developer): no vendor binary, no key needed; gov is free with no credit read or reservation; developer without FIRECRAWL_API_KEY is keyless at any limit and runs outside the ledger with a degraded note; with the key, limit 10 or less goes keyless first, and a keyed run costs 2 credits per 10 results",
             "free-first (#2118): with or without FIRECRAWL_API_KEY, an eligible call tries Firecrawl's free keyless tier first, spends no credits, and carries a degraded note starting 'keyless: ' that never wraps plain output (developer keeps its 'keyless developer search:' note, which wraps plain output as it always has). Eligible: fetch or extract of a URL to summary, markdown, links, or html, a schema alone, or a question alone; shot; a PDF to summary or markdown; search over web or images sources and research categories with limit 10 or less; developer with limit 10 or less; raw -- research search-papers. A keyless refusal runs the call keyed once and keeps eligible keyed calls off the keyless tier for its stated window (keyless_cooldown seconds when none is stated, 6 hours at most); without a key the refusal exits 1 as keyless_rate_limited. FIRECRAWL_CLI_KEYLESS=0, a stored vendor login, or a non-default FIRECRAWL_API_URL keeps vendor calls keyed. A keyless fetch's scrape_id may not resolve in keyed interact",
+            "local tier (#807): with Firecrawl Local at the pinned version (local.state ready), fetch of an http(s) URL to markdown, html, rawHtml or links with no schema, question or userinfo runs on this machine first, keyless and ledger-free, with a degraded note starting 'local: '; a page that needs JavaScript reruns in Chrome only when one of the host's browser slots (FIRECRAWL_CLI_LOCAL_BROWSER_SLOTS, default 1) is free, never waiting; a refused, blocked, failed, empty or HTTP 400+ result falls through to the ladder with a 'local: ' note; a private, local-name or metadata target fails with error.code local_blocked_target and is never sent to the cloud; --cloud skips the tier, FIRECRAWL_CLI_LOCAL=0 turns it off",
             "without the vendor firecrawl binary, keyed API-direct calls (search --categories developer, developer with a key) still run under the local session and day caps, but the account floor is unchecked",
             "gov filters combine with AND over labeled pages only; no results does not mean no law; US material only; verify issuer, jurisdiction, and effective status before citing",
         ],
@@ -2753,6 +3108,8 @@ def execute(args, parser, registry):
                     exc.data = {"items": items}
                     exc.surface = surface
                     raise
+                # Routing notes say why this item reached the cloud (#807); keep them.
+                degraded.extend(exc.degraded or [])
                 items.append({
                     "url": target, "ok": False, "error": exc.error_object(),
                     "credits_spent": 0, "data": exc.data,
@@ -2845,9 +3202,10 @@ def main(argv=None):
                 "hint: empty result; try a broader query or another target",
                 file=sys.stderr,
             )
-        # Keyless routing notes describe where the answer came from, not a gap in it.
+        # Keyless and local routing notes describe where the answer came from, not a gap in it.
         wrapped = args.json or verb == "raw" or code in {1, 2} or any(
-            not note.startswith(KEYLESS_PREFIX) for note in result["degraded"] or []
+            not note.startswith((KEYLESS_PREFIX, LOCAL_PREFIX))
+            for note in result["degraded"] or []
         )
         emit(
             result if wrapped else result["data"],

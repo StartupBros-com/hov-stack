@@ -9,6 +9,10 @@ stating a CLI default; the map records null. The injection check
 has no exposed CLI option (see the map's notes), so no default can be checked.
 Settings are read for permissions.allow keys only; no values elsewhere in the
 settings or vendor diagnostics are printed. No data command or network call.
+A deployed firecrawl-cli is also asked for its offline `capabilities --json`
+local-tier report (#807): an installed firecrawl-local that is not the pinned
+version, or a FIRECRAWL_CLI_LOCAL_BIN that names no executable, sends every
+eligible fetch back to paid Firecrawl with only a per-call note, so it warns.
 Exit 0: clean/dormant; 1: WARN findings; 2: could not run, never a clean.
 """
 
@@ -114,6 +118,44 @@ def live_help(binary, command):
     return tokenize(result.stdout, label)
 
 
+def local_tier():
+    """(info lines, findings) for firecrawl-cli's Firecrawl Local tier (#807)."""
+    wrapper = shutil.which("firecrawl-cli")
+    if wrapper is None:
+        return [], []
+    try:
+        result = subprocess.run(
+            [wrapper, "capabilities", "--json"], capture_output=True, text=True,
+            timeout=60, check=False,
+        )
+        local = json.loads(result.stdout)["data"]["local"]
+        state = local["state"]
+    except (OSError, subprocess.TimeoutExpired, ValueError, KeyError, TypeError) as exc:
+        return [], [f"firecrawl-cli capabilities gave no local-tier report ({type(exc).__name__})"]
+    pin = f"{local.get('pinned_version')} ({str(local.get('pinned_rev'))[:8]})"
+    if state == "ready":
+        chrome = local.get("chrome") or "none found, so script-built pages run on Firecrawl"
+        return [
+            f"info: firecrawl-local {local.get('version')} at {local.get('binary')} serves eligible "
+            f"fetches; Chrome: {chrome}; {local.get('browser_slots')} browser slot(s)"
+        ], []
+    if state == "absent":
+        return [
+            f"info: firecrawl-local not installed, so every fetch runs on Firecrawl; optional, "
+            f"pinned to {pin}: {local.get('install')}"
+        ], []
+    if state == "off":
+        return ["info: firecrawl-local tier off (FIRECRAWL_CLI_LOCAL)"], []
+    if state == "wrong_version":
+        return [], [
+            f"firecrawl-local at {local.get('binary')} reports {local.get('version') or 'no version'}, "
+            f"the wrapper is pinned to {pin}, so every eligible fetch runs on paid Firecrawl; "
+            "reinstall the pin, or re-run the vet before moving it (#807)"
+        ]
+    detail = local.get("note") or f"state {state!r}"
+    return [], [f"firecrawl-local tier unusable: {detail}"]
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--settings", required=True)
@@ -156,7 +198,9 @@ def main(argv=None):
         print(f"did NOT run: {exc}", file=sys.stderr)
         return 2
 
-    findings = []
+    local_info, findings = local_tier()
+    for line in local_info:
+        print(line)
     subcommands = flags = defaults = 0
     for parent, expected in verbmap["command_groups"].items():
         if parent not in help_text:

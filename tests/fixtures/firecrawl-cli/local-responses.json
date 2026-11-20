@@ -1,0 +1,47 @@
+{
+ "_source": "Recorded 2026-11-20 from firecrawl-local 0.1.1 (firecrawl/firecrawl dc37f52f) against a loopback fixture server by the #807 build; only the loopback port is rewritten to 8080. rc is the exit status, stdout the bytes printed.",
+ "version": {
+  "rc": 0,
+  "stdout": "firecrawl-local 0.1.1\n"
+ },
+ "plain": {
+  "rc": 0,
+  "stdout": "{\"success\":true,\"data\":{\"links\":[\"http://127.0.0.1:8080/next\"],\"markdown\":\"# Plain page\\n\\nPLAINMARKER PLAINMARKER PLAINMARKER PLAINMARKER PLAINMARKER PLAINMARKER PLAINMARKER PLAINMARKER PLAINMARKER PLAINMARKER PLAINMARKER PLAINMARKER PLAINMARKER PLAINMARKER PLAINMARKER PLAINMARKER PLAINMARKER PLAINMARKER PLAINMARKER PLAINMARKER PLAINMARKER PLAINMARKER PLAINMARKER PLAINMARKER PLAINMARKER PLAINMARKER PLAINMARKER PLAINMARKER PLAINMARKER PLAINMARKER PLAINMARKER PLAINMARKER PLAINMARKER PLAINMARKER PLAINMARKER PLAINMARKER PLAINMARKER PLAINMARKER PLAINMARKER PLAINMARKER [next](http://127.0.0.1:8080/next)\",\"metadata\":{\"title\":\"plain\",\"sourceURL\":\"http://127.0.0.1:8080/plain\",\"url\":\"http://127.0.0.1:8080/plain\",\"statusCode\":200,\"contentType\":\"text/html\",\"engine\":\"local-fetch\",\"creditsUsed\":0},\"source\":\"local\"}}\n"
+ },
+ "script-first": {
+  "rc": 0,
+  "stdout": "{\"success\":true,\"data\":{\"markdown\":\"\",\"warning\":\"This page builds its content with JavaScript, so this result is probably incomplete. The local Chrome could not render it. could not start Chrome at /usr/bin/false: Browser process exited with status ExitStatus(unix_wait_status(256)) before websocket URL could be resolved, stderr: BrowserStderr(\\\"\\\")\",\"metadata\":{\"title\":\"js\",\"sourceURL\":\"http://127.0.0.1:8080/js\",\"url\":\"http://127.0.0.1:8080/js\",\"statusCode\":200,\"contentType\":\"text/html\",\"engine\":\"local-fetch\",\"creditsUsed\":0},\"source\":\"local\"}}\n"
+ },
+ "script-chrome": {
+  "rc": 0,
+  "stdout": "{\"success\":true,\"data\":{\"markdown\":\"# Built by script\\n\\nSCRIPTMARKER SCRIPTMARKER SCRIPTMARKER SCRIPTMARKER SCRIPTMARKER SCRIPTMARKER SCRIPTMARKER SCRIPTMARKER SCRIPTMARKER SCRIPTMARKER SCRIPTMARKER SCRIPTMARKER SCRIPTMARKER SCRIPTMARKER SCRIPTMARKER SCRIPTMARKER SCRIPTMARKER SCRIPTMARKER SCRIPTMARKER SCRIPTMARKER SCRIPTMARKER SCRIPTMARKER SCRIPTMARKER SCRIPTMARKER SCRIPTMARKER SCRIPTMARKER SCRIPTMARKER SCRIPTMARKER SCRIPTMARKER SCRIPTMARKER SCRIPTMARKER SCRIPTMARKER SCRIPTMARKER SCRIPTMARKER SCRIPTMARKER SCRIPTMARKER SCRIPTMARKER SCRIPTMARKER SCRIPTMARKER SCRIPTMARKER\",\"metadata\":{\"title\":\"js\",\"sourceURL\":\"http://127.0.0.1:8080/js\",\"url\":\"http://127.0.0.1:8080/js\",\"statusCode\":200,\"contentType\":\"text/html\",\"engine\":\"local-browser\",\"creditsUsed\":0},\"source\":\"local\"}}\n"
+ },
+ "blocked-403": {
+  "rc": 0,
+  "stdout": "{\"success\":true,\"data\":{\"markdown\":\"# Access denied\\n\\nSorry, you have been blocked. Cloudflare Ray ID: 0\",\"metadata\":{\"title\":\"Just a moment...\",\"sourceURL\":\"http://127.0.0.1:8080/block\",\"url\":\"http://127.0.0.1:8080/block\",\"statusCode\":403,\"contentType\":\"text/html\",\"engine\":\"local-fetch\",\"creditsUsed\":0},\"source\":\"local\",\"blocked\":true,\"warning\":\"This site did not serve the page to this machine (status 403), so the content is missing or is a bot check. Firecrawl cloud can fetch pages like this when FIRECRAWL_CLOUD is auto.\"}}\n"
+ },
+ "notfound-404": {
+  "rc": 0,
+  "stdout": "{\"success\":true,\"data\":{\"markdown\":\"# 404\\n\\nNo such page here.\",\"metadata\":{\"title\":\"Not found\",\"sourceURL\":\"http://127.0.0.1:8080/notfound\",\"url\":\"http://127.0.0.1:8080/notfound\",\"statusCode\":404,\"contentType\":\"text/html\",\"engine\":\"local-fetch\",\"creditsUsed\":0},\"source\":\"local\"}}\n"
+ },
+ "empty-200": {
+  "rc": 0,
+  "stdout": "{\"success\":true,\"data\":{\"markdown\":\"\",\"metadata\":{\"sourceURL\":\"http://127.0.0.1:8080/empty\",\"url\":\"http://127.0.0.1:8080/empty\",\"statusCode\":200,\"contentType\":\"text/html\",\"engine\":\"local-fetch\",\"creditsUsed\":0},\"source\":\"local\"}}\n"
+ },
+ "redirect-loop": {
+  "rc": 1,
+  "stdout": "{\"success\":false,\"url\":\"http://127.0.0.1:8080/loop\",\"code\":\"BLOCKED_TARGET\",\"error\":\"more than 10 redirects\"}\n"
+ },
+ "private": {
+  "rc": 1,
+  "stdout": "{\"success\":false,\"url\":\"http://127.0.0.1:8080/plain\",\"code\":\"BLOCKED_TARGET\",\"error\":\"127.0.0.1 is a private address; private targets are off\"}\n"
+ },
+ "userinfo": {
+  "rc": 1,
+  "stdout": "{\"success\":false,\"url\":\"http://user:pw@example.com/\",\"code\":\"BLOCKED_TARGET\",\"error\":\"URLs with embedded credentials are not fetched\"}\n"
+ },
+ "fetch-failed": {
+  "rc": 1,
+  "stdout": "{\"success\":false,\"url\":\"http://127.0.0.1:9/\",\"code\":\"FETCH_FAILED\",\"error\":\"error sending request for url (http://127.0.0.1:9/): client error (Connect): tcp connect error: Connection refused (os error 111)\"}\n"
+ }
+}

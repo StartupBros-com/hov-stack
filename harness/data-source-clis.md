@@ -190,6 +190,47 @@ exit dictionary; it makes no vendor request.
   (the default spelled with a trailing slash or capitals counts as the default).
   A keyless `fetch` scrape_id may not resolve in keyed `interact`, so refetch
   with `FIRECRAWL_CLI_KEYLESS=0` before an interact session.
+- **Firecrawl Local tier (hov-stack #807):** when the pinned `firecrawl-local`
+  0.1.1 is installed, a `fetch` of an http(s) URL to `markdown`, `html`,
+  `rawHtml` or `links` (`--full` or an explicit `--format`; no `--schema`,
+  `-Q` or userinfo) runs on this machine first, before the keyless leg: no
+  credits, no reservation, and a `degraded` note `local: served by Firecrawl
+  Local 0.1.1 (<engine>); no credits spent` (plain output stays bare). The
+  default `fetch` asks for a server-side summary, which only the cloud makes,
+  so it never runs locally. The scraper runs with `--public-only`, `-c 1` and
+  an environment built from nothing (`PATH`, a scratch `HOME`/`TMPDIR`/
+  `FIRECRAWL_LOCAL_HOME`, `FIRECRAWL_CLOUD=off`): no key, API URL or proxy
+  variable reaches it. A private, loopback or metadata target is refused (exit
+  1, `local_blocked_target`) and never sent to the cloud; its `next_action`
+  is the same call with `--cloud`, for a name that only looks private here
+  (split-horizon DNS, a VPN). A page the site refuses this machine, an HTTP
+  400+ answer, an empty result, a failed, killed or timed-out run (30 s or
+  `--timeout`, whichever is less) falls through to the keyless-then-keyed
+  ladder with a `local: <why>; ran on Firecrawl` note. The first pass hides
+  Chrome; a page that builds its content with JavaScript reruns in Chrome only
+  while it holds one of the host's browser slots (a non-blocking `flock` under
+  `<state dir>/local-browser/`, `FIRECRAWL_CLI_LOCAL_BROWSER_SLOTS`, default 1,
+  at most 8; a browser page peaked near 2 GB in the vet), and falls through at
+  once when every slot is busy. The scraper inherits the slot, so a killed
+  wrapper frees it only when the render ends. Known silent local losses (the
+  vet's blind judge): code blocks collapsed onto one line, dropped list items
+  or math variables, a kept cookie banner. A page that looks mangled is
+  refetched with `--cloud`, which skips the tier. `FIRECRAWL_CLI_LOCAL=0` turns
+  it off; `FIRECRAWL_CLI_LOCAL_BIN` names the binary, else
+  `~/.local/share/firecrawl-local/bin/firecrawl-local`, else `firecrawl-local`
+  on `PATH`. Install: `cargo install --locked --root
+  ~/.local/share/firecrawl-local --git https://github.com/firecrawl/firecrawl
+  --rev dc37f52f9670be4ef3077f97f31096b2d0657205 firecrawl-local`; that root
+  keeps it off `PATH`, so agents reach it only through the wrapper (run bare,
+  its default cloud mode `auto` can send pages to Firecrawl's cloud). Upstream
+  publishes no release for it, so there is no checksummed download and
+  `/hov-setup` does not offer it. `--version` proves 0.1.1, not the commit; a
+  binary reporting another version is skipped with a note on every call, and
+  `harness-doctor` check 32 warns. `firecrawl-cli capabilities --json` reports
+  the tier under `local`. Out of scope: `map` (Firecrawl Local's `map` has no
+  `--public-only`), `crawl`, `serve`, `mcp`, `init`, `login`. Re-run the vet's
+  fixture, egress check and SSRF table before moving the pin
+  (`docs/vets/2026-11-19-firecrawl-local-harness-vet.md`).
 - **API URL and redaction (hov-stack #805):** every verb honors
   `FIRECRAWL_API_URL` only over https or plain http to a loopback host, with no
   userinfo, backslash or control character (Python and the vendor's Node parser
