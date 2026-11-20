@@ -1,5 +1,4 @@
 name: CI
-
 on:
   # Pull requests, a fork's included, run here through pull_request. A push runs
   # CI only on main: a branch with a pull request got every run twice.
@@ -9,10 +8,8 @@ on:
   # A merge queue on main tests a pull request merged onto main before it lands, and
   # that test is this event. Without a queue the event never fires.
   merge_group:
-
 permissions:
   contents: read
-
 # A newer push to a pull request cancels the run it supersedes. A push to main gets
 # a group of its own commit, so the run the release gate reads is never cancelled.
 # A merge group's run is keyed on its commit too, and has finished before main moves.
@@ -21,7 +18,6 @@ permissions:
 concurrency:
   group: ci-yml-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
-
 jobs:
   # The three long parts run side by side, each on its own runner from its own checkout,
   # so none can lean on what another left behind. Run one after another they took 18-23
@@ -32,75 +28,22 @@ jobs:
     runs-on: ubuntu-26.04
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: 22
-      - name: Fresh-HOME install keeps the README's promises
-        run: bash tests/repo/setup.test.sh
-      - name: Layout keeps the root a mirror of the harness with no marketplace collision
-        run: bash tests/repo/layout.test.sh
-
+      - name: 'stub (negative probe for #818)'
+        run: "true"
   hooks:
     name: hook tests
     runs-on: ubuntu-26.04
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: 22
-      - name: Hook tests
-        run: bash hooks/tests/run.sh
-
+      - name: 'forced failure (negative probe for #818)'
+        run: exit 1
   suites:
     name: suites and secrets scan
     runs-on: ubuntu-26.04
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: 22
-      # The suite steps run even after an earlier step fails (not after a cancel), so a
-      # failing skip-list check cannot hide a suite regression or the secrets scan; the job
-      # still fails.
-      # minisign verifies the pinned dcg release in tests/dcg.test.sh, as dcg/install.sh does.
-      - name: Tools the suites need that the runner image lacks (ripgrep, gawk, PyYAML, venv, minisign)
-        if: ${{ !cancelled() }}
-        run: sudo apt-get update -q && sudo apt-get install -y --no-install-recommends ripgrep gawk python3-yaml python3-venv minisign
-      - name: The suite runner fails closed on its own skip list
-        if: ${{ !cancelled() }}
-        run: bash tests/repo/run-claude-tests.test.sh
-      - name: Unit suites under tests/ (tests/claude-tests.skips names what cannot run here, and why)
-        if: ${{ !cancelled() }}
-        run: bash tests/run-claude-tests.sh
-      # Full history of the commit under test, not of every branch. With no --log-opts,
-      # gitleaks runs `git log --all`, and fetch-depth 0 fetches every branch, so one secret
-      # pushed to any branch failed every other pull request (six runs on 2026-11-14, all from
-      # one commit on a branch that never merged). On a pull request HEAD is the merge commit, so main's
-      # history and the PR's own commits are both scanned; a secret later deleted is still found.
-      - name: Secrets scan (full history of HEAD, .gitleaks.toml allowlists the test fixtures)
-        if: ${{ !cancelled() }}
-        run: |
-          archive="$RUNNER_TEMP/gitleaks_8.30.1_linux_x64.tar.gz"
-          curl --fail --location --silent --show-error \
-            https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz \
-            --output "$archive"
-          printf '%s  %s\n' 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb "$archive" | sha256sum --check --status
-          tar -xzf "$archive" -C "$RUNNER_TEMP" gitleaks
-          "$RUNNER_TEMP/gitleaks" git --config .gitleaks.toml --redact --no-banner --exit-code 1 \
-            --log-opts="--full-history HEAD" .
-
+      - name: 'stub (negative probe for #818)'
+        run: "true"
   # The required check `setup, hooks, suites, secrets`. A job whose `needs` failed is
   # skipped unless it runs on always(), and a skipped required check counts as passed, so
   # this job always runs and fails itself unless every part succeeded. A cancelled run
@@ -119,7 +62,6 @@ jobs:
         env:
           NEEDS_JSON: ${{ toJSON(needs) }}
         run: release/scripts/ci-aggregate.sh
-
   public-safety:
     name: public-safety scan
     runs-on: ubuntu-26.04
