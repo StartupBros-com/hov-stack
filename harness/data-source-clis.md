@@ -186,9 +186,23 @@ exit dictionary; it makes no vendor request.
   refusal exits 1 as `keyless_rate_limited` with the retry time. The allowance
   is small: about 15 calls on 2026-10-30, then a refusal whose `Retry-After`
   was about 3.8 hours. `FIRECRAWL_CLI_KEYLESS=0` turns routing off; a stored
-  vendor login or a non-default `FIRECRAWL_API_URL` keeps vendor calls keyed.
+  vendor login or a non-default `FIRECRAWL_API_URL` keeps vendor calls keyed
+  (the default spelled with a trailing slash or capitals counts as the default).
   A keyless `fetch` scrape_id may not resolve in keyed `interact`, so refetch
   with `FIRECRAWL_CLI_KEYLESS=0` before an interact session.
+- **API URL and redaction (hov-stack #805):** every verb honors
+  `FIRECRAWL_API_URL` only over https or plain http to a loopback host, with no
+  userinfo, backslash or control character (Python and the vendor's Node parser
+  read those differently); anything else exits 4 before any credit read or
+  vendor process, because keyed vendor calls inherit it with the key beside it. Output redacts the exact key
+  (`FIRECRAWL_API_KEY`, `--api-key`, `-k`, `--token`) everywhere. The pattern
+  rules (Bearer values, `fc-` and JWT-shaped strings, `-k` and `--token`
+  values, keyless claim links) apply to errors, stderr, warnings and every
+  other field, but not to page content: `markdown`, `html`, `rawHtml`,
+  `summary`, `links`, `metadata`, titles, descriptions, developer passages,
+  abstracts and extraction `json`. A docs page that says "bearer tokens" or
+  shows a sample key comes back as written. A failed call's payload, and a
+  failed item in a partial result, keeps every pattern.
 - **Government and Developer indexes:** `firecrawl-cli gov` and `firecrawl-cli developer`
   are API-direct (`POST /v2/search/gov` and `/v2/search/developer`). They need no
   vendor binary or version, work keyless, send `FIRECRAWL_API_KEY` as a Bearer

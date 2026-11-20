@@ -740,8 +740,9 @@ def keyless_ready(args, surface, command, api):
         return False
     if api:
         return True  # The wrapper itself omits the Bearer.
-    url = os.environ.get("FIRECRAWL_API_URL")
-    return vendor_binary() is not None and url in {None, "", DEFAULT_API_BASE} and not vendor_login()
+    # Spelled with a trailing slash or other case, the default is still the default (#805).
+    url = (os.environ.get("FIRECRAWL_API_URL") or "").strip().rstrip("/").lower()
+    return vendor_binary() is not None and url in {"", DEFAULT_API_BASE} and not vendor_login()
 
 
 def keyless_cooldown_path():
@@ -962,8 +963,11 @@ def keyed_invoke(args, surface, command, api, vendor_present, fallback):
 
 
 def remember_secrets(argv):
-    """KTD9: retain flag values only for redacting subsequent diagnostics."""
+    """KTD9: retain flag values and the environment key only for redacting output.
+    The environment key is held exactly so page content, which skips the pattern
+    rules (#805), still never carries it."""
     SECRETS.clear()
+    SECRETS.add(os.environ.get("FIRECRAWL_API_KEY", ""))
     for index, arg in enumerate(argv):
         name, separator, value = arg.partition("=")
         if name in SECRET_FLAGS:
@@ -976,11 +980,34 @@ def remember_secrets(argv):
     SECRETS.discard("")
 
 
-def redact(value):
+# Fetched or indexed page content: page text, page metadata, map links, search and
+# gov results, developer passages, paper abstracts, extraction output. Inside these
+# only exact secret values are redacted (#805): the pattern rules below rewrite
+# ordinary prose ("bearer tokens", a "-keep" flag, a sample JWT or fc- key in docs)
+# and exist for credentials echoed in vendor errors, stderr and argv. Raw vendor
+# stdout ("text", "value", "answer") stays under the patterns.
+CONTENT_KEYS = frozenset({
+    "markdown", "html", "rawHtml", "summary", "links",
+    "metadata", "title", "description", "passages", "abstract", "json",
+})
+# Vendor-written diagnostics take every pattern rule, all the way down, even inside
+# content: an error object's own "metadata" is not page metadata.
+DIAGNOSTIC_KEYS = frozenset({"error", "errors", "details", "warning", "warnings"})
+
+
+def redact(value, content=False, content_keys=CONTENT_KEYS):
+    """content_keys=frozenset() applies every pattern everywhere, for a failed
+    call's payload; redaction only removes, so a later pass cannot undo it."""
     if isinstance(value, dict):
-        return {redact(k): redact(v) for k, v in value.items()}
+        return {
+            redact(k): (
+                redact(v, False, frozenset()) if k in DIAGNOSTIC_KEYS
+                else redact(v, content or k in content_keys, content_keys)
+            )
+            for k, v in value.items()
+        }
     if isinstance(value, list):
-        return [redact(v) for v in value]
+        return [redact(v, content, content_keys) for v in value]
     if not isinstance(value, str):
         return value
     # CSI and OSC terminal controls, including color and hyperlink sequences.
@@ -990,6 +1017,8 @@ def redact(value):
     for secret in sorted(SECRETS, key=len, reverse=True):
         value = value.replace(shlex.quote(secret), "[REDACTED]")
         value = value.replace(secret, "[REDACTED]")
+    if content:
+        return value
     value = re.sub(r"(?i)(\bbearer\s+)[a-z0-9._~+/-]+=*", r"\1[REDACTED]", value)
     # The keyless refusal's per-install signup link (#2118).
     value = re.sub(r"(?i)\bhttps?://(?:www\.)?firecrawl\.dev/k/[^\s\"'<>)]+", "[REDACTED]", value)
@@ -1227,7 +1256,8 @@ def vendor_failure(command, payload, detail, timing="", retry=None, malformed=Fa
         action += "\n" + exa_fallback(query)
     elif fallback:
         action += "\noperator action: check Firecrawl account/provider status with firecrawl --status"
-    error = CliError(redact(message), redact(action), code, payload)
+    # A failed call's payload is diagnostics, not page content: every pattern applies.
+    error = CliError(redact(message), redact(action), code, redact(payload, content_keys=frozenset()))
     error.error_code = tag
     error.metadata = {"http_status": status}
     error.retry_after = stated
@@ -1820,15 +1850,17 @@ def prepare_interact(args):
 def vendor_arguments(args, parser, registry):
     """KTD2/KTD13: translate one validated target to official v1.26.25 argv."""
     verb = args.verb
+    # Keyed vendor calls inherit FIRECRAWL_API_URL with the key beside it, so every
+    # verb checks it here, before any credit read, reservation or vendor process (#805).
+    api_base()
     if verb == "raw":
         return "raw", raw_arguments(args, parser, registry)
     target = args.target
     if verb in API_DIRECT_VERBS:
         if not target.strip():
             raise CliError("query must not be empty", f"firecrawl-cli {verb} --help")
-        # Validate every filter and the API base before any ledger or network contact.
+        # Validate every filter before any ledger or network contact.
         api_body(args)
-        api_base()
         return verb, [verb, target]
     if verb in {"fetch", "extract"}:
         if verb == "extract" and not (args.schema or args.schema_file or args.query):
@@ -2238,9 +2270,23 @@ def api_base():
     base = os.environ.get("FIRECRAWL_API_URL") or DEFAULT_API_BASE
     parsed = urlsplit(base)
     plain_http_elsewhere = parsed.scheme == "http" and parsed.hostname not in LOOPBACK_HOSTS
-    if parsed.scheme not in {"http", "https"} or not parsed.hostname or plain_http_elsewhere:
+    # Python's parser and the vendor's Node parser read a backslash, userinfo or a
+    # control character differently (http://evil.example\@127.0.0.1 is loopback
+    # here and evil.example there), so the host checked could differ from the host
+    # the vendor connects to with the key (#805).
+    ambiguous = "\\" in base or "@" in parsed.netloc or any(
+        ord(char) < 32 or ord(char) == 127 for char in base
+    )
+    if (
+        parsed.scheme not in {"http", "https"} or not parsed.hostname
+        or plain_http_elsewhere or ambiguous
+    ):
+        # Never echo the value: a refused URL may carry a password redact() cannot
+        # know. The scheme and parsed host never include userinfo.
+        shown = f"{parsed.scheme or '?'}://{parsed.hostname or '?'}"
         raise CliError(
-            f"FIRECRAWL_API_URL={redact(base)!r} must be an https URL, or http to a loopback host",
+            f"FIRECRAWL_API_URL ({redact(shown)!r}, userinfo and path not shown) must be an "
+            "https URL, or http to a loopback host, with no userinfo, backslash or control character",
             "unset FIRECRAWL_API_URL, or point it at https://api.firecrawl.dev",
         )
     return base.rstrip("/")
@@ -2529,8 +2575,11 @@ def plain_text_payload(command, stdout, payload, decoded):
 def invoke_vendor(command, timeout=120, raw=False, retry=None, keyless=False):
     """keyless runs the vendor without the wrapper's credential variables, so it
     answers from Firecrawl's free keyless tier (#2118); the caller has already
-    checked that no stored vendor login would stand in for them."""
+    checked that no stored vendor login would stand in for them. A keyed run
+    inherits FIRECRAWL_API_URL, so it is refused here too unless that is safe."""
     env = {k: v for k, v in os.environ.items() if k not in KEYLESS_STRIPPED} if keyless else None
+    if not keyless:
+        api_base()
     binary = vendor_binary()
     if binary is None:
         raise CliError(
@@ -2622,9 +2671,10 @@ def invoke_vendor(command, timeout=120, raw=False, retry=None, keyless=False):
         failure.degraded = degraded or None
         raise failure
     if item_failures:
+        # A failed item is diagnostics too: every pattern, its metadata included.
         payload["items"] = [
             {
-                **item,
+                **redact(item, content_keys=frozenset()),
                 "error": vendor_failure(
                     [command[0], item.get("url", command[1] if len(command) > 1 else "<target>")],
                     item, "", timing, retry,
