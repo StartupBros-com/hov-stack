@@ -52,6 +52,48 @@ test('allows a specific `./path` (not the whole cwd)', async () => {
   assertQuietPassThrough(await runHook(HOOK, payload));
 });
 
+// With pathspecs, `git add -A a b` stages exactly what `git add a b` does, so the
+// guard refused a safe command and agents fell back to `git add -u` or bare paths.
+test('allows `git add -A` / `--all` limited to plain relative paths', async () => {
+  for (const c of [
+    'git add -A src/foo.ts src/bar.ts',
+    'git add --all -- docs/a.md',
+    'git add src/x.ts -A',
+    'git add -A ./src/x.ts',
+    'git -C /tmp add -A a.txt',
+    'git add -A a.txt 2>&1',
+    'git add -A a.txt > /tmp/add.log',
+    'git add -A a.txt && git status',
+  ]) {
+    assertQuietPassThrough(await runHook(HOOK, cmd(c)));
+  }
+});
+
+test('keeps blocking `git add -A` when a pathspec is not plain', async () => {
+  for (const c of [
+    'git add -A .',
+    'git add -A :/',
+    "git add -A ':(top)'",
+    'git add -A ..',
+    'git add -A ../x',
+    'git add -A src/../..',
+    'git add -A ./.',
+    'git add -A .//',
+    "git add -A '*.md'",
+    'git add -A *.md',
+    'git add -A /abs/x',
+    'git add -A ~/x',
+    'git add -A $X',
+    'git add -A "a b.txt"',
+    'git add -A --pathspec-from-file=list.txt',
+    'git add -A --',
+    'git add --all 2>&1',
+    'git add -A a.txt && git add .',
+  ]) {
+    assert.strictEqual(decisionOf(await runHook(HOOK, cmd(c))), 'block', c);
+  }
+});
+
 test('blocks `git push --force`, allows `--force-with-lease`', async () => {
   assert.strictEqual(decisionOf(await runHook(HOOK, cmd('git push --force'))), 'block');
   // Run outside any git repo so git-guard's on-branch check safely fails → allow.
@@ -257,6 +299,29 @@ test('`git add .` deny suggests -u and names the actual changed files', async ()
     const reason = reasonOf(res) || '';
     assert.ok(reason.includes('git add -u'), 'mentions git add -u: ' + reason);
     assert.ok(reason.includes('newfile.txt'), 'names the actual file: ' + reason);
+  } finally {
+    rmTmp(repo);
+  }
+});
+
+// A modified tracked file is listed first as ` M path`; trimming the whole status
+// output ate that leading space and the hint said `git add ONCEPTS.md`.
+test('`git add .` deny names a modified tracked file with its first letter', async () => {
+  const { reasonOf } = require('./lib/harness');
+  const repo = mkTmp('gg-addmod-');
+  try {
+    const gitEnv = { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' };
+    const git = (...a) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { cwd: repo, stdio: 'pipe', env: gitEnv });
+    git('init', '-q', '-b', 'feature');
+    fs.writeFileSync(path.join(repo, 'CONCEPTS.md'), 'a\n');
+    git('add', 'CONCEPTS.md');
+    git('commit', '-q', '-m', 'init');
+    fs.writeFileSync(path.join(repo, 'CONCEPTS.md'), 'b\n');
+    fs.writeFileSync(path.join(repo, 'zz-new.txt'), 'x');
+    const res = await runHook(HOOK, cmd('git add .'), { cwd: repo });
+    assert.strictEqual(decisionOf(res), 'block');
+    const reason = reasonOf(res) || '';
+    assert.ok(reason.includes('`git add CONCEPTS.md zz-new.txt`'), 'names both files whole: ' + reason);
   } finally {
     rmTmp(repo);
   }

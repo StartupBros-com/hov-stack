@@ -61,16 +61,53 @@ const GIT = String.raw`git\s+(?:` + GIT_OPT + String.raw`\s+)*`;
 const reGit = (body) => new RegExp('^' + GIT + body);
 
 // Stages everything indiscriminately. Confirms it is a `git [-C dir] add` (reGit),
-// then flags the stage-all forms: `-A`/`--all` anywhere, or a whole-cwd pathspec
-// (`.` or `./`, bare or after the `--` pathspec separator). Evaluated against the
-// env-stripped command in run() so a `FOO=bar git add -A` prefix cannot slip past,
-// and `-C`-aware so `git -C repo add -- .` is caught too. A specific `./path` (not
-// the bare cwd) is intentionally allowed.
+// then flags the stage-all forms: a whole-cwd pathspec (`.` or `./`, bare or after
+// the `--` pathspec separator), or `-A`/`--all` with no pathspec that limits it.
+// Evaluated against the env-stripped, quote-scrubbed command in run() so a
+// `FOO=bar git add -A` prefix cannot slip past, and `-C`-aware so
+// `git -C repo add -- .` is caught too. A specific `./path` (not the bare cwd) is
+// intentionally allowed.
+//
+// With pathspecs, `git add -A a b` stages exactly what `git add a b` stages, so it
+// passes when every pathspec is plain: a relative path of ordinary characters that
+// does not normalize to the cwd (`./.`) or climb out of it (`..`). Pathspec magic
+// (`:/`, `:(top)`), absolute and `~` paths, globs, quoted names and shell
+// expansions keep the deny, as does `--pathspec-from-file`, which can't be read
+// here. Redirections (`2>&1`, `> log`) and a trailing `&` are not pathspecs.
+const PLAIN_PATHSPEC = /^[A-Za-z0-9_@%+=,./-]+$/;
+const isPlainPathspec = (p) => {
+  if (!PLAIN_PATHSPEC.test(p) || p.startsWith('/') || p.startsWith('-')) return false;
+  const n = require('path').posix.normalize(p);
+  return n !== '.' && n !== './' && n !== '..' && !n.startsWith('../');
+};
+// The pathspecs of a `git add` segment, or null when they can't be known.
+const addPathspecs = (c) => {
+  const m = reGit(String.raw`add(?:\s|$)`).exec(c);
+  const tokens = c.slice(m[0].length).split(/\s+/).filter(Boolean);
+  const specs = [];
+  let opts = true;
+  for (let i = 0; i < tokens.length; i++) {
+    const t = tokens[i];
+    if (t === '&') continue;
+    if (/[<>]/.test(t)) {
+      if (/[<>]$/.test(t)) i++; // `>` or `2>` alone: its target is the next token
+      continue;
+    }
+    if (opts && t === '--') { opts = false; continue; }
+    if (opts && t.startsWith('-')) {
+      if (t.startsWith('--pathspec-from-file')) return null;
+      continue;
+    }
+    specs.push(t);
+  }
+  return specs;
+};
 const isDangerousAdd = (c) => {
   if (!reGit(String.raw`add(?:\s|$)`).test(c)) return false;
-  if (/(?:^|\s)(?:-A|--all)(?:\s|$)/.test(c)) return true;
   if (/(?:^|\s)(?:--\s+)?\.\/?(?:\s|$)/.test(c)) return true;
-  return false;
+  if (!/(?:^|\s)(?:-A|--all)(?:\s|$)/.test(c)) return false;
+  const specs = addPathspecs(c);
+  return !specs || specs.length === 0 || !specs.every(isPlainPathspec);
 };
 
 // Split a `git push` command's argument list into refspec-shaped tokens:
@@ -489,7 +526,8 @@ function run(rawInput) {
             stdio: ['pipe', 'pipe', 'pipe'],
             cwd: addCwd,
           })
-            .trim()
+            // No trim(): a first line of ` M path` would lose its leading space, and
+            // slice(3) below would then drop the path's first letter.
             .split('\n')
             .filter(Boolean)
             .map((l) => {
