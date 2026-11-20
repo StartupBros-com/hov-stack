@@ -49,8 +49,9 @@ Reading every candidate transcript in full costs about 40 s (4,044 transcripts,
 worktree, so the paths found are cached per transcript under --cache-dir (a later
 call took about 0.5 s) and only bytes appended since are read
 (keyed by device, inode and the offset of the last complete line). The cache keeps,
-per transcript, each path with the newest record time naming it, and the last
-recorded cwd. A transcript that is replaced or shrinks is read again from the
+per transcript, each path with the newest record time naming it, the last
+recorded cwd, and the time of the last dated record read (`ts`, which dates an
+undated record after the offset). A transcript that is replaced or shrinks is read again from the
 start. An entry is dropped once its transcript is gone, or is no longer a
 candidate and was last written more than RETAIN_DAYS ago, so calls with and
 without --idle-hours do not evict each other's entries. A cache that cannot be
@@ -68,9 +69,15 @@ author's host on 2026-11-14 (hov-stack#644). With H set, a worktree held only by
 a transcript is reported idle (exit 3) when no record naming a path under it is
 newer than H hours, in the candidates or in any transcript written within H
 hours, and no candidate session's own transcript last recorded its cwd there (a
-resume would carry on in it). A record's time is its `timestamp`; a record
-without a readable one counts as written at its file's mtime, which is never
-earlier. The live-session and project-directory holds never lapse.
+resume would carry on in it). A record's time is its `timestamp`; one whose
+timestamp does not parse counts as written at its file's mtime, which is never
+earlier. One with no timestamp at all, Claude Code's copy of an earlier message as
+it sends it again (`api-request-blob`), takes the time of the last dated record
+before it in the same transcript, so a rebuilt index dates it as the incremental
+one does (hov-stack#795: the scan-time mtime made every worktree such a copy ever
+named look freshly named after a rebuild). With no dated record before it, it names
+its paths but never makes them recent. The live-session and project-directory holds
+never lapse.
 
 With H set, a job that is not done lapses too once it is dead and stale
 (hov-stack#403): no running session record carries its `sessionId`,
@@ -149,15 +156,24 @@ from datetime import datetime
 # throw each other's index away. Since hov-stack#793 an entry also carries `bind`,
 # its transcript's last `worktree-state` binding. An entry without one, written by
 # an older helper, is read once more for bindings alone when a done job needs it,
-# keeping every path's recorded time. That is why this is not a version bump: a
-# full re-read dates each record without a timestamp by the transcript's current
-# mtime, and on 2026-11-19 a rebuilt index called 44 idle worktrees live again.
+# keeping every path's recorded time. Since hov-stack#795 an entry also carries
+# `ts`, the time of the last dated record before its offset; an entry without one
+# finds it in its own bytes the first time an undated record after the offset needs
+# it. Neither is a version bump. Until #795 a full re-read dated each record without
+# a timestamp by the transcript's current mtime, and on 2026-11-19 a rebuilt index
+# called 44 idle worktrees live again; that is fixed, but a bump still re-reads
+# every transcript once (about 40 s on the author's host). Paths indexed before
+# #806 lost a trailing `.`, so such an entry still cannot hold a worktree whose
+# name ends in one, as it could not before; none on that host did.
 CACHE_VERSION = 2
 DEFAULT_RESUMABLE_HOURS = 24.0
 FUTURE_SKEW = 3600.0  # seconds a done job's last-turn time may run ahead of now
 RETAIN_DAYS = 3
 _CWD = re.compile(rb'"cwd":"((?:[^"\\]|\\.)*)"')
 _TS = b'"timestamp":"'
+_TS_KEY = b'"timestamp"'
+_TOOL_USE = b'"tool_use"'
+_NOT_PARSED = object()  # a line no caller has parsed yet
 _WS = b'"worktree-state"'
 # An absolute (or ~/) path token in a shell command, after a separator a shell or
 # an option would put before it (`git -C /x`, `--cd=/x`, `cd "/x"`, `(cd /x`).
@@ -299,36 +315,53 @@ def transcript_owner(path: str) -> str:
 
 
 def _norm(p: str) -> str:
+    """`p` as a path, `~/` expanded. A trailing `.` is kept: `x.` and `x` are two
+    directories (hov-stack#806)."""
     if p.startswith("~/"):
         p = os.path.expanduser(p)
-    p = os.path.normpath(p).rstrip(".")
-    return p or "/"
+    return os.path.normpath(p)
 
 
-def _when(line: bytes, d, fallback: float) -> float:
-    """The record's own time, or `fallback` (its file's mtime, never earlier) when it
-    has none that parses. The byte grab is used only when the key occurs once: on
-    2026-11-15 it matched the parsed top-level value on all 1,319,139 such records
-    in 200 transcripts; a line with nested timestamps is parsed instead."""
-    ts = None
-    if d is None and line.count(_TS) == 1:
+def _parse(line: bytes):
+    """`line` as JSON, or None when it is not (one still being written)."""
+    try:
+        return json.loads(line)
+    except ValueError:
+        return None
+
+
+def _stamp(line: bytes, d=_NOT_PARSED):
+    """(whether the record carries a top-level `timestamp`, its time or None when
+    that does not parse). `d` is the record when the caller has parsed it already.
+    A tool use is always parsed, so a timestamp in a tool's input is never taken for
+    the record's. Otherwise the byte grab is used when the key occurs once, written
+    as Claude Code writes it (`"timestamp":"`): on 2026-11-15 it matched the parsed
+    top-level value on all 1,319,139 such records in 200 transcripts. Any other line
+    naming the key is parsed, so a timestamp that is null, a number or spaced
+    otherwise is still present and never taken for a missing one. A line that is
+    not JSON (torn, or still being written) gets the byte grab too when the key
+    occurs once that way, and otherwise counts as one that does not parse."""
+    if _TS_KEY not in line:
+        return False, None
+    once = line.count(_TS_KEY) == 1 and line.count(_TS) == 1
+    if d is _NOT_PARSED:
+        d = _parse(line) if _TOOL_USE in line or not once else None
+    if d is None:
+        if not once:
+            return True, None
         i = line.index(_TS) + len(_TS)
-        ts = line[i:line.find(b'"', i)].decode("ascii", "replace")
-    else:
-        if d is None:
-            try:
-                d = json.loads(line)
-            except ValueError:
-                d = None
-        ts = d.get("timestamp") if isinstance(d, dict) else None
+        d = {"timestamp": line[i:line.find(b'"', i)].decode("ascii", "replace")}
+    if not (isinstance(d, dict) and "timestamp" in d):
+        return False, None
+    ts = d["timestamp"]
     if isinstance(ts, str):
         try:
             t = datetime.fromisoformat(ts.replace("Z", "+00:00"))
         except ValueError:
-            return fallback
+            return True, None
         if t.tzinfo is not None:
-            return t.timestamp()
-    return fallback
+            return True, t.timestamp()
+    return True, None
 
 
 def _instant(v):
@@ -373,9 +406,10 @@ def last_turn_age(d: dict, state_path: str, now: float) -> float:
     return math.inf
 
 
-def _record_paths(line: bytes, found: dict, fallback: float):
+def _record_paths(line: bytes, found: dict, when, d=_NOT_PARSED):
     """Note in `found` each path `line` drives, with the newest record time naming
-    it, and return the record's cwd (None if it has none)."""
+    it (`when()`, asked only if it names one), and return the record's cwd (None if
+    it has none). `d` is the record when the caller has parsed it already."""
     paths, cwd = [], None
     m = _CWD.search(line)
     if m:
@@ -386,12 +420,9 @@ def _record_paths(line: bytes, found: dict, fallback: float):
         if isinstance(v, str) and v.startswith("/"):
             cwd = _norm(v)
             paths.append(cwd)
-    d = None
-    if b'"tool_use"' in line:
-        try:
-            d = json.loads(line)
-        except ValueError:
-            d = None
+    if _TOOL_USE in line:
+        if d is _NOT_PARSED:
+            d = _parse(line)
         msg = d.get("message") if isinstance(d, dict) else None
         content = msg.get("content") if isinstance(msg, dict) else None
         for c in content if isinstance(content, list) else ():
@@ -406,12 +437,18 @@ def _record_paths(line: bytes, found: dict, fallback: float):
                     paths.append(_norm(v))
             cmd = inp.get("command")
             if isinstance(cmd, str):
-                paths.extend(_norm(t) for t in _TOKEN.findall(cmd))
+                for t in _TOKEN.findall(cmd):
+                    p = _norm(t)
+                    paths.append(p)
+                    # A command's text cannot tell a name ending in `.` from a
+                    # sentence's full stop: such a token names both.
+                    if p.endswith("."):
+                        paths.append(p.rstrip(".") or "/")
     if paths:
-        when = _when(line, d, fallback)
+        w = when()
         for p in paths:
-            if when > found.get(p, float("-inf")):
-                found[p] = when
+            if w > found.get(p, float("-inf")):
+                found[p] = w
     return cwd
 
 
@@ -431,24 +468,47 @@ def _binding(line: bytes):
     return _norm(p) if isinstance(p, str) and p.startswith("/") else ""
 
 
-def scan(path: str, offset: int, found: dict, transient: dict, fallback: float):
-    """Add the driven paths in `path` from `offset` on; return the offset after the
-    last complete line, the last cwd recorded there and the last `worktree-state`
-    binding recorded there (each None if none). A trailing line still being written
-    goes to `transient`, which is used now but never cached."""
+_UNKNOWN = object()  # an entry an older helper wrote: the time before its offset was not kept
+
+
+def scan(path: str, offset: int, found: dict, transient: dict, mtime: float, prior=None, recover=None):
+    """Add the driven paths in `path` from `offset` on. A record's time is its
+    `timestamp`; one whose timestamp does not parse counts as written at `mtime`,
+    the file's, never earlier. One with no timestamp at all, Claude Code's copy of an
+    earlier message as it sends it again (`api-request-blob`), takes the time of the
+    last dated record before it (hov-stack#795): `prior` at `offset` (None if there is
+    none; _UNKNOWN for an entry an older helper wrote, and then `recover()` works it
+    out the first time it is needed), then each one read. With none before it, it
+    gets 0: it names its paths but never makes them recent. Return the offset after
+    the last complete line, the last cwd and the last `worktree-state` binding
+    recorded there (each None if none), and `prior` at that offset. A trailing line
+    still being written goes to `transient`, which is used now but never cached; it
+    counts as written at `mtime` unless its own timestamp is already there and parses."""
     last = bind = None
+
+    def before() -> float:
+        nonlocal prior
+        if prior is _UNKNOWN:
+            prior = recover() if recover else None
+        return 0.0 if prior is None else prior
+
     with open(path, "rb") as f:
         f.seek(offset)
         for line in f:
+            d = _parse(line) if _TOOL_USE in line else _NOT_PARSED
+            present, t = _stamp(line, d)
+            when = before if not present else (lambda: mtime) if t is None else (lambda t=t: t)
             if not line.endswith(b"\n"):
-                _record_paths(line, transient, fallback)
+                _record_paths(line, transient, (lambda: mtime) if t is None else when, d)
                 break
-            last = _record_paths(line, found, fallback) or last
+            last = _record_paths(line, found, when, d) or last
+            if t is not None:
+                prior = t
             b = _binding(line)
             if b is not None:
                 bind = b
             offset += len(line)
-    return offset, last, bind
+    return offset, last, bind, prior
 
 
 def _cache_path(cache_dir: str, home: str) -> str:
@@ -456,13 +516,34 @@ def _cache_path(cache_dir: str, home: str) -> str:
     return os.path.join(cache_dir, slug(os.path.realpath(home)).strip("-") + f".v{CACHE_VERSION}.json")
 
 
+def _time_ok(w) -> bool:
+    return isinstance(w, (int, float)) and not isinstance(w, bool) and math.isfinite(w)
+
+
 def _entry_ok(e, st) -> bool:
     if not (isinstance(e, dict) and e.get("dev") == st.st_dev and e.get("ino") == st.st_ino
             and isinstance(e.get("offset"), int) and 0 <= e["offset"] <= st.st_size
             and isinstance(e.get("paths"), dict) and (e.get("cwd") is None or isinstance(e["cwd"], str))
-            and (e.get("bind") is None or isinstance(e["bind"], str))):
+            and (e.get("bind") is None or isinstance(e["bind"], str))
+            and (e.get("ts") is None or _time_ok(e["ts"]))):
         return False
-    return all(isinstance(w, (int, float)) and not isinstance(w, bool) for w in e["paths"].values())
+    return all(_time_ok(w) for w in e["paths"].values())
+
+
+def last_stamp(path: str, end: int):
+    """The time of the last dated record in the first `end` bytes of `path` (a line
+    boundary), or None if there is none: what an entry an older helper wrote did
+    not keep."""
+    t, n = None, 0
+    with open(path, "rb") as f:
+        for line in f:
+            n += len(line)
+            if n > end:
+                break
+            s = _stamp(line)[1]
+            if s is not None:
+                t = s
+    return t
 
 
 def last_binding(path: str, end: int):
@@ -521,17 +602,19 @@ def driven_paths(transcripts: dict, cache_file: str, need_bind=()):
             skipped.append(t)
             continue
         e = entries.get(t)
-        offset, found, cwd, bind, known = 0, {}, None, None, True
+        offset, found, cwd, bind, known, prior = 0, {}, None, None, True, None
         cached = _entry_ok(e, st)
         if cached:
             offset, found, cwd = e["offset"], dict(e["paths"]), e.get("cwd")
             bind, known = e.get("bind"), "bind" in e  # an older helper's entry has no binding
+            prior = e.get("ts", _UNKNOWN)  # nor the time of its last dated record
         transient = {}
         try:
             if not known and t in need_bind:
                 bind, known, dirty = last_binding(t, offset), True, True
             if offset < st.st_size:
-                new_offset, last, new_bind = scan(t, offset, found, transient, st.st_mtime)
+                new_offset, last, new_bind, prior = scan(t, offset, found, transient, st.st_mtime, prior,
+                                                         lambda t=t, end=offset: last_stamp(t, end))
                 dirty = dirty or new_offset != offset or e is None
                 offset, cwd = new_offset, last or cwd
                 bind = bind if new_bind is None else new_bind
@@ -549,6 +632,8 @@ def driven_paths(transcripts: dict, cache_file: str, need_bind=()):
                    "offset": offset, "paths": found, "cwd": cwd}
         if known:
             kept[t]["bind"] = bind
+        if prior is not _UNKNOWN:
+            kept[t]["ts"] = prior
         merged = dict(found)
         for p, w in transient.items():
             merged[p] = max(w, merged.get(p, w))
@@ -834,7 +919,8 @@ def check(wt: str, home: str, active_min: int, procfs: str, cache_dir: str = "",
         cwd = driven.get(t, ({}, None, None))[1]
         if cwd and within(cwd) and transcript_owner(t) == sid and sid not in lapsed_ids:
             return f"{holder}; its session last recorded its cwd at {cwd}", resumable, False
-    return f"idle: {holder}; last named {int((now - last) // 3600)}h ago", resumable, True
+    ago = f"{int((now - last) // 3600)}h ago" if last > 0 else "only by records with no time"
+    return f"idle: {holder}; last named {ago}", resumable, True
 
 
 def _env_hours(name: str, default: float) -> float:
