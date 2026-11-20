@@ -45,7 +45,7 @@ rc=$?
 
 pass=0 fail=0
 expect() {
-  if printf '%s\n' "$out" | grep -qxF -- "$1"; then
+  if grep -qxF -- "$1" <<<"$out"; then
     pass=$((pass + 1))
   else
     fail=$((fail + 1)); printf 'FAIL: missing line: %s\n' "$1" >&2
