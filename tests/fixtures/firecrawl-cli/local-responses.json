@@ -1,0 +1,71 @@
+{
+ "_source": "Recorded 2026-11-20 from firecrawl-local 0.1.1 (firecrawl/firecrawl dc37f52f) against a loopback fixture server by the #807 build; only the loopback port is rewritten to 8080. browser-private, browser-metadata, botcheck-200, json-markdown-html, plain-html and plain-all come from the network-namespace run in tests/fixtures/firecrawl-cli/local-live.py (pages on 8.8.4.4), unchanged. rc is the exit status, stdout the bytes printed.",
+ "version": {
+  "rc": 0,
+  "stdout": "firecrawl-local 0.1.1\n"
+ },
+ "plain": {
+  "rc": 0,
+  "stdout": "{\"success\":true,\"data\":{\"links\":[\"http://127.0.0.1:8080/next\"],\"markdown\":\"# Plain page\\n\\nPLAINMARKER PLAINMARKER PLAINMARKER PLAINMARKER PLAINMARKER PLAINMARKER PLAINMARKER PLAINMARKER PLAINMARKER PLAINMARKER PLAINMARKER PLAINMARKER PLAINMARKER PLAINMARKER PLAINMARKER PLAINMARKER PLAINMARKER PLAINMARKER PLAINMARKER PLAINMARKER PLAINMARKER PLAINMARKER PLAINMARKER PLAINMARKER PLAINMARKER PLAINMARKER PLAINMARKER PLAINMARKER PLAINMARKER PLAINMARKER PLAINMARKER PLAINMARKER PLAINMARKER PLAINMARKER PLAINMARKER PLAINMARKER PLAINMARKER PLAINMARKER PLAINMARKER PLAINMARKER [next](http://127.0.0.1:8080/next)\",\"metadata\":{\"title\":\"plain\",\"sourceURL\":\"http://127.0.0.1:8080/plain\",\"url\":\"http://127.0.0.1:8080/plain\",\"statusCode\":200,\"contentType\":\"text/html\",\"engine\":\"local-fetch\",\"creditsUsed\":0},\"source\":\"local\"}}\n"
+ },
+ "script-first": {
+  "rc": 0,
+  "stdout": "{\"success\":true,\"data\":{\"markdown\":\"\",\"warning\":\"This page builds its content with JavaScript, so this result is probably incomplete. The local Chrome could not render it. could not start Chrome at /usr/bin/false: Browser process exited with status ExitStatus(unix_wait_status(256)) before websocket URL could be resolved, stderr: BrowserStderr(\\\"\\\")\",\"metadata\":{\"title\":\"js\",\"sourceURL\":\"http://127.0.0.1:8080/js\",\"url\":\"http://127.0.0.1:8080/js\",\"statusCode\":200,\"contentType\":\"text/html\",\"engine\":\"local-fetch\",\"creditsUsed\":0},\"source\":\"local\"}}\n"
+ },
+ "script-chrome": {
+  "rc": 0,
+  "stdout": "{\"success\":true,\"data\":{\"markdown\":\"# Built by script\\n\\nSCRIPTMARKER SCRIPTMARKER SCRIPTMARKER SCRIPTMARKER SCRIPTMARKER SCRIPTMARKER SCRIPTMARKER SCRIPTMARKER SCRIPTMARKER SCRIPTMARKER SCRIPTMARKER SCRIPTMARKER SCRIPTMARKER SCRIPTMARKER SCRIPTMARKER SCRIPTMARKER SCRIPTMARKER SCRIPTMARKER SCRIPTMARKER SCRIPTMARKER SCRIPTMARKER SCRIPTMARKER SCRIPTMARKER SCRIPTMARKER SCRIPTMARKER SCRIPTMARKER SCRIPTMARKER SCRIPTMARKER SCRIPTMARKER SCRIPTMARKER SCRIPTMARKER SCRIPTMARKER SCRIPTMARKER SCRIPTMARKER SCRIPTMARKER SCRIPTMARKER SCRIPTMARKER SCRIPTMARKER SCRIPTMARKER SCRIPTMARKER\",\"metadata\":{\"title\":\"js\",\"sourceURL\":\"http://127.0.0.1:8080/js\",\"url\":\"http://127.0.0.1:8080/js\",\"statusCode\":200,\"contentType\":\"text/html\",\"engine\":\"local-browser\",\"creditsUsed\":0},\"source\":\"local\"}}\n"
+ },
+ "blocked-403": {
+  "rc": 0,
+  "stdout": "{\"success\":true,\"data\":{\"markdown\":\"# Access denied\\n\\nSorry, you have been blocked. Cloudflare Ray ID: 0\",\"metadata\":{\"title\":\"Just a moment...\",\"sourceURL\":\"http://127.0.0.1:8080/block\",\"url\":\"http://127.0.0.1:8080/block\",\"statusCode\":403,\"contentType\":\"text/html\",\"engine\":\"local-fetch\",\"creditsUsed\":0},\"source\":\"local\",\"blocked\":true,\"warning\":\"This site did not serve the page to this machine (status 403), so the content is missing or is a bot check. Firecrawl cloud can fetch pages like this when FIRECRAWL_CLOUD is auto.\"}}\n"
+ },
+ "notfound-404": {
+  "rc": 0,
+  "stdout": "{\"success\":true,\"data\":{\"markdown\":\"# 404\\n\\nNo such page here.\",\"metadata\":{\"title\":\"Not found\",\"sourceURL\":\"http://127.0.0.1:8080/notfound\",\"url\":\"http://127.0.0.1:8080/notfound\",\"statusCode\":404,\"contentType\":\"text/html\",\"engine\":\"local-fetch\",\"creditsUsed\":0},\"source\":\"local\"}}\n"
+ },
+ "empty-200": {
+  "rc": 0,
+  "stdout": "{\"success\":true,\"data\":{\"markdown\":\"\",\"metadata\":{\"sourceURL\":\"http://127.0.0.1:8080/empty\",\"url\":\"http://127.0.0.1:8080/empty\",\"statusCode\":200,\"contentType\":\"text/html\",\"engine\":\"local-fetch\",\"creditsUsed\":0},\"source\":\"local\"}}\n"
+ },
+ "redirect-loop": {
+  "rc": 1,
+  "stdout": "{\"success\":false,\"url\":\"http://127.0.0.1:8080/loop\",\"code\":\"BLOCKED_TARGET\",\"error\":\"more than 10 redirects\"}\n"
+ },
+ "private": {
+  "rc": 1,
+  "stdout": "{\"success\":false,\"url\":\"http://127.0.0.1:8080/plain\",\"code\":\"BLOCKED_TARGET\",\"error\":\"127.0.0.1 is a private address; private targets are off\"}\n"
+ },
+ "userinfo": {
+  "rc": 1,
+  "stdout": "{\"success\":false,\"url\":\"http://user:pw@example.com/\",\"code\":\"BLOCKED_TARGET\",\"error\":\"URLs with embedded credentials are not fetched\"}\n"
+ },
+ "fetch-failed": {
+  "rc": 1,
+  "stdout": "{\"success\":false,\"url\":\"http://127.0.0.1:9/\",\"code\":\"FETCH_FAILED\",\"error\":\"error sending request for url (http://127.0.0.1:9/): client error (Connect): tcp connect error: Connection refused (os error 111)\"}\n"
+ },
+ "browser-private": {
+  "rc": 1,
+  "stdout": "{\"success\":false,\"url\":\"http://8.8.4.4/r-local\",\"code\":\"BLOCKED_TARGET\",\"error\":\"'localtest.me' resolves to a private address; private targets are off\"}\n"
+ },
+ "browser-metadata": {
+  "rc": 1,
+  "stdout": "{\"success\":false,\"url\":\"http://8.8.4.4/r-metaname\",\"code\":\"BLOCKED_TARGET\",\"error\":\"'metadata-name.example' resolves to a link-local or metadata address, which is never reachable\"}\n"
+ },
+ "botcheck-200": {
+  "rc": 0,
+  "stdout": "{\"success\":true,\"data\":{\"markdown\":\"# Verifying you are human\\n\\nThis may take a few seconds.\",\"html\":\"<!DOCTYPE html><html><body><h1>Verifying you are human</h1><p>This may take a few seconds.</p></body></html>\",\"metadata\":{\"title\":\"Just a moment...\",\"sourceURL\":\"http://8.8.4.4/botcheck\",\"url\":\"http://8.8.4.4/botcheck\",\"statusCode\":200,\"contentType\":\"text/html\",\"engine\":\"local-fetch\",\"creditsUsed\":0},\"source\":\"local\",\"blocked\":true,\"warning\":\"This site did not serve the page to this machine (status 200), so the content is missing or is a bot check. Firecrawl cloud can fetch pages like this when FIRECRAWL_CLOUD is auto.\"}}\n"
+ },
+ "json-markdown-html": {
+  "rc": 0,
+  "stdout": "{\"success\":true,\"data\":{\"markdown\":\"{\\\"marker\\\": \\\"JSONMARKER JSONMARKER JSONMARKER JSONMARKER JSONMARKER JSONMARKER JSONMARKER JSONMARKER JSONMARKER JSONMARKER JSONMARKER JSONMARKER JSONMARKER JSONMARKER JSONMARKER JSONMARKER JSONMARKER JSONMARKER JSONMARKER JSONMARKER \\\"}\",\"metadata\":{\"sourceURL\":\"http://8.8.4.4/data.json\",\"url\":\"http://8.8.4.4/data.json\",\"statusCode\":200,\"contentType\":\"application/json\",\"engine\":\"local-fetch\",\"creditsUsed\":0},\"source\":\"local\"}}\n"
+ },
+ "plain-html": {
+  "rc": 0,
+  "stdout": "{\"success\":true,\"data\":{\"markdown\":\"# Plain A\\n\\nALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER\",\"html\":\"<!DOCTYPE html><html><body><h1>Plain A</h1><p>ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER </p></body></html>\",\"metadata\":{\"title\":\"plain a\",\"sourceURL\":\"http://8.8.4.4/plain-a\",\"url\":\"http://8.8.4.4/plain-a\",\"statusCode\":200,\"contentType\":\"text/html\",\"engine\":\"local-fetch\",\"creditsUsed\":0},\"source\":\"local\"}}\n"
+ },
+ "plain-all": {
+  "rc": 0,
+  "stdout": "{\"success\":true,\"data\":{\"links\":[],\"markdown\":\"# Plain A\\n\\nALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER\",\"html\":\"<!DOCTYPE html><html><body><h1>Plain A</h1><p>ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER </p></body></html>\",\"rawHtml\":\"<!doctype html><html><head><title>plain a</title></head><body><h1>Plain A</h1><p>ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER ALPHAMARKER </p></body></html>\",\"metadata\":{\"title\":\"plain a\",\"sourceURL\":\"http://8.8.4.4/plain-a\",\"url\":\"http://8.8.4.4/plain-a\",\"statusCode\":200,\"contentType\":\"text/html\",\"engine\":\"local-fetch\",\"creditsUsed\":0},\"source\":\"local\"}}\n"
+ }
+}

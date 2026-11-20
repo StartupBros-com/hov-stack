@@ -2490,5 +2490,342 @@ PY
 )
 [[ "$RESULT" == OK ]] && ok || bad "settings permission rules: $RESULT"
 
+# #807: the Firecrawl Local tier. The stub replays output recorded from the pinned
+# 0.1.1 binary and logs each run beside itself, since the wrapper hands the scraper
+# an environment built from nothing.
+LOCAL="$TMP/local"
+SLOTS="$TMP/home/.claude/state/firecrawl-cli/local-browser"
+mkdir -p "$LOCAL"
+cp "$FIXTURES/fake-firecrawl-local.py" "$LOCAL/firecrawl-local"
+cp "$FIXTURES/local-responses.json" "$LOCAL/local-responses.json"
+chmod +x "$LOCAL/firecrawl-local"
+local_control() {
+  if [[ $# -gt 0 ]]; then printf '%s\n' "$1" >"$LOCAL/control.json"; else cat >"$LOCAL/control.json"; fi
+  : >"$LOCAL/calls.jsonl"
+  rm -f "$LOCAL/grandchild.pid"
+}
+local_check() {
+  jcheck "$1" "$(python3 -c 'import json,sys; print(json.dumps([json.loads(l) for l in open(sys.argv[1])]))' "$LOCAL/calls.jsonl")" "r=d; $2"
+}
+local_none() { [[ ! -s "$LOCAL/calls.jsonl" ]] && ok || bad "$1: firecrawl-local ran"; }
+slot_state() {
+  python3 -c 'import fcntl, os, sys
+fd = os.open(sys.argv[1], os.O_RDWR)
+try:
+    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    print("free")
+except OSError:
+    print("held")' "$SLOTS/slot-0.lock"
+}
+SERVED='local: served by Firecrawl Local 0.1.1 (local-fetch); no credits spent'
+export FIRECRAWL_CLI_LOCAL_BIN="$LOCAL/firecrawl-local"
+
+# Served: the page is the scraper's data, no credit read, no vendor, no ledger entry,
+# and nothing from the parent environment reaches the scraper (acceptance 2).
+fixture scrape
+local_control '{"first":"plain"}'
+export FIRECRAWL_API_KEY=fc-local807parentkey FIRECRAWL_API_URL=https://api.firecrawl.dev \
+  HTTP_PROXY=http://127.0.0.1:9 https_proxy=http://127.0.0.1:9 ALL_PROXY=socks5://127.0.0.1:9 \
+  NO_PROXY=example.com FIRECRAWL_CLOUD=auto FIRECRAWL_LOCAL_HOME=/nonexistent-807
+run_cli fetch https://example.com/page --full --json
+unset FIRECRAWL_API_KEY FIRECRAWL_API_URL HTTP_PROXY https_proxy ALL_PROXY NO_PROXY \
+  FIRECRAWL_CLOUD FIRECRAWL_LOCAL_HOME
+status_is 0 'local tier serves a plain page'
+jcheck 'local page is the scraper data, ledger-free' "$OUT" "x=d['data']; assert 'PLAINMARKER' in x['markdown'] and x['metadata']['engine']=='local-fetch', x; assert d['credits_spent']==0, d; assert d['degraded']==['$SERVED'], d['degraded']"
+no_calls 'a served page reads no credits and runs no vendor'
+local_check 'version check, then one pass with Chrome hidden' "assert [x['pass'] for x in r]==['version','first'], r; assert r[1]['argv']==['scrape','https://example.com/page','--public-only','-f','markdown','--timeout','30000','-c','1'], r[1]['argv']"
+# The stub's own Python adds LC_CTYPE=C.UTF-8 to a locale-less environment (PEP 538).
+local_check 'scraper environment is built from nothing' "import os; e=r[1]['env']; assert e.pop('LC_CTYPE', 'C.UTF-8')=='C.UTF-8'; assert set(e)=={'PATH','HOME','TMPDIR','FIRECRAWL_CLOUD','FIRECRAWL_LOCAL_HOME','FIRECRAWL_CHROME_PATH'}, sorted(e); assert e['FIRECRAWL_CLOUD']=='off' and e['FIRECRAWL_CHROME_PATH'].endswith('/false'), e; assert e['HOME']==e['TMPDIR']==e['FIRECRAWL_LOCAL_HOME'] and os.path.dirname(e['HOME'])=='$TMP/home' and os.path.basename(e['HOME']).startswith('firecrawl-local-'), e; assert not os.path.exists(e['HOME']), 'scratch kept'"
+run_cli budget --json
+jcheck 'a served page leaves the ledger untouched' "$OUT" "assert not d['data']['reservations'] and d['data']['day_state']['spent']==0, d['data']"
+local_control '{"first":"plain"}'
+run_cli fetch https://example.com/page --full
+status_is 0 'local plain output'
+jcheck 'a local note keeps plain output plain' "$OUT" "assert 'PLAINMARKER' in d['markdown'] and 'ok' not in d, sorted(d)"
+
+# Eligibility: URL, local formats only, no schema, question, userinfo, --cloud or off switch.
+fixture scrape
+local_control '{"first":"plain-all"}'
+run_cli fetch https://example.com/page --format markdown,links,rawHtml,html --json
+status_is 0 'every local format is eligible'
+local_check 'requested formats pass through to -f' "assert r[1]['argv'][4]=='markdown,links,rawHtml,html', r[1]['argv']"
+jcheck 'every requested format is in the served result' "$OUT" "x=d['data']; assert x['links']==[] and all(x[k] for k in ('markdown','rawHtml','html')), sorted(x); assert '$SERVED' in d['degraded'], d['degraded']"
+no_calls 'local formats never reach the vendor'
+fixture scrape
+local_control '{"first":"plain"}'
+run_cli fetch https://example.com/page --format markdown,links,rawHtml,html --json
+status_is 0 'a result without rawHtml and html falls through'
+jcheck 'missing formats are named in order' "$OUT" "assert d['degraded'][0]=='local: no rawHtml, html in the local result; ran on Firecrawl', d['degraded']"
+for case in default summary cloud schema query userinfo off; do
+  fixture scrape
+  local_control '{"first":"plain"}'
+  case "$case" in
+    default) run_cli fetch https://example.com/page --json ;;
+    summary) run_cli fetch https://example.com/page --format markdown,summary --json ;;
+    cloud) run_cli fetch https://example.com/page --full --cloud --json ;;
+    schema) run_cli fetch https://example.com/page --format json --schema '{"type":"object"}' --json ;;
+    query) run_cli fetch https://example.com/page --full -Q title --json ;;
+    userinfo) run_cli fetch https://user:pw@example.com/page --full --json ;;
+    off)
+      export FIRECRAWL_CLI_LOCAL=0
+      run_cli fetch https://example.com/page --full --json
+      unset FIRECRAWL_CLI_LOCAL ;;
+  esac
+  status_is 0 "ineligible $case fetch runs on the vendor"
+  local_none "ineligible $case fetch"
+  jcheck "ineligible $case carries no local note" "$OUT" "assert not any(n.startswith('local: ') for n in d['degraded'] or []), d['degraded']"
+done
+
+# A script-built page reruns in Chrome while a slot is free.
+fixture scrape
+local_control '{"first":"script-first","chrome":"script-chrome"}'
+export FIRECRAWL_CHROME_PATH=/opt/chrome-807
+run_cli fetch https://example.com/app --full --json
+unset FIRECRAWL_CHROME_PATH
+status_is 0 'script-built page served from Chrome'
+jcheck 'chrome pass serves the built page' "$OUT" "assert 'SCRIPTMARKER' in d['data']['markdown'] and d['credits_spent']==0; assert d['degraded']==['local: served by Firecrawl Local 0.1.1 (local-browser); no credits spent'], d['degraded']"
+no_calls 'a Chrome-served page never reaches the vendor'
+local_check 'second pass forces the browser, with the operator Chrome only there' "assert [x['pass'] for x in r]==['version','first','chrome'], r; assert r[2]['argv']==r[1]['argv']+['--browser','always'], r[2]['argv']; assert r[1]['env']['FIRECRAWL_CHROME_PATH'].endswith('/false') and r[2]['env']['FIRECRAWL_CHROME_PATH']=='/opt/chrome-807', [r[1]['env'], r[2]['env']]"
+run_cli budget --json
+jcheck 'the slot lock file is all a Chrome pass leaves' "$OUT" "assert not d['data']['reservations'], d['data']"
+[[ "$(slot_state)" == free ]] && ok || bad 'slot released after a Chrome pass'
+
+# Acceptance 5: with the one slot held elsewhere, the script-built page goes to the
+# ladder at once and a plain page is still served; a second slot lets Chrome run.
+fixture scrape
+mkdir -p "$SLOTS"
+python3 - "$SLOTS/slot-0.lock" "$TMP/slot-held" <<'PY' &
+import fcntl, os, sys, time
+fd = os.open(sys.argv[1], os.O_RDWR | os.O_CREAT, 0o600)
+fcntl.flock(fd, fcntl.LOCK_EX)
+open(sys.argv[2], "w").close()
+time.sleep(120)
+PY
+HOLDER=$!
+for _ in {1..200}; do [[ -e "$TMP/slot-held" ]] && break; sleep 0.05; done
+local_control '{"first":"script-first","chrome":"script-chrome"}'
+START=$SECONDS
+run_cli fetch https://example.com/app --full --json
+status_is 0 'busy slot falls through'
+(( SECONDS - START < 10 )) && ok || bad 'busy slot waited for the holder'
+jcheck 'busy slot runs on Firecrawl with a note' "$OUT" "assert d['data']['markdown']=='# Example', d['data']; assert d['degraded'][0]=='local: the page needs Chrome and all 1 local browser slot(s) are in use; ran on Firecrawl', d['degraded']; assert d['credits_spent']>=1, d"
+local_check 'busy slot never starts Chrome' "assert [x['pass'] for x in r]==['version','first'], r"
+argv_is 'busy slot ladder scrapes the same URL' "assert d[:2]==['scrape','https://example.com/app'], d"
+local_control '{"first":"plain"}'
+: >"$FIRECRAWL_TEST_LOG"
+run_cli fetch https://example.com/page --full --json
+jcheck 'plain page served while the slot is held' "$OUT" "assert d['degraded']==['$SERVED'], d['degraded']"
+no_calls 'plain page with a held slot reaches no vendor'
+export FIRECRAWL_CLI_LOCAL_BROWSER_SLOTS=2
+local_control '{"first":"script-first","chrome":"script-chrome"}'
+run_cli fetch https://example.com/app --full --json
+unset FIRECRAWL_CLI_LOCAL_BROWSER_SLOTS
+jcheck 'a second slot lets Chrome run' "$OUT" "assert 'SCRIPTMARKER' in d['data']['markdown'], d"
+kill "$HOLDER"
+wait "$HOLDER" 2>/dev/null
+
+# Killing the wrapper mid-render does not free its slot while that render runs; the
+# slot frees when the render exits.
+fixture scrape
+local_control '{"first":"script-first","chrome":{"case":"script-chrome","sleep":4}}'
+(cd "$TMP/work" && HOME="$TMP/home" PATH="$TMP/bin" exec "$CLI" fetch https://example.com/app --full --json) >"$TMP/out" 2>"$TMP/err" &
+WRAPPER=$!
+for _ in {1..200}; do grep -q '"pass": "chrome"' "$LOCAL/calls.jsonl" 2>/dev/null && break; sleep 0.05; done
+kill -9 "$WRAPPER"
+wait "$WRAPPER" 2>/dev/null
+RENDER=$(python3 -c 'import json,sys; print([json.loads(l) for l in open(sys.argv[1])][-1]["pid"])' "$LOCAL/calls.jsonl")
+kill -0 "$RENDER" 2>/dev/null && ok || bad 'render ended with the wrapper (test cannot observe the slot)'
+[[ "$(slot_state)" == held ]] && ok || bad 'slot freed while the killed wrapper render still runs'
+for _ in {1..200}; do kill -0 "$RENDER" 2>/dev/null || break; sleep 0.05; done
+[[ "$(slot_state)" == free ]] && ok || bad 'slot still held after the render exited'
+
+# A pass past its timeout is killed with its whole group, stand-in browser included.
+fixture scrape
+local_control '{"first":{"case":"plain","sleep":60,"spawn":60}}'
+run_cli fetch https://example.com/slow --full --timeout 1 --json
+status_is 0 'timed-out local pass falls through'
+jcheck 'timeout note' "$OUT" "assert d['degraded'][0]=='local: timed out after 1 s; ran on Firecrawl', d['degraded']; assert d['data']['markdown']=='# Example'"
+local_check 'timeout pass asked the scraper for a 1 s timeout' "assert r[1]['argv'][5:7]==['--timeout','1000'], r[1]['argv']"
+GRANDCHILD=$(cat "$LOCAL/grandchild.pid")
+for _ in {1..100}; do kill -0 "$GRANDCHILD" 2>/dev/null || break; sleep 0.05; done
+kill -0 "$GRANDCHILD" 2>/dev/null && bad 'timeout left the stand-in browser running' || ok
+
+# Acceptance 1: each fall-through row runs the ladder keyed, charges it, and leads
+# with its note.
+while IFS='|' read -r spec note; do
+  note=${note//LOCALBIN/$LOCAL/firecrawl-local}
+  fixture scrape
+  local_control "$spec"
+  run_cli fetch https://example.com/page --full --json
+  status_is 0 "fall-through $note"
+  jcheck "fall-through note: $note" "$OUT" "n=d['degraded'][0]; assert n.startswith('local: $note') and n.endswith('; ran on Firecrawl'), d['degraded']; assert d['data']['markdown']=='# Example' and d['credits_spent']>=1 and 'cost estimated, not measured' in d['degraded'], d"
+  argv_is "fall-through $note runs the vendor scrape" "assert d[:2]==['scrape','https://example.com/page'], d"
+done <<'ROWS'
+{"first":"blocked-403"}|the site did not serve the page to this machine (HTTP 403)
+{"first":"notfound-404"}|the site answered HTTP 404
+{"first":"empty-200"}|empty result
+{"first":"redirect-loop"}|BLOCKED_TARGET: more than 10 redirects
+{"first":"userinfo"}|BLOCKED_TARGET: URLs with embedded credentials are not fetched
+{"first":"fetch-failed"}|FETCH_FAILED: error sending request for url
+{"first":{"case":"plain","signal":9}}|stopped by signal 9
+{"first":{"case":"plain","rc":3,"stdout":"not json"}}|unreadable output (exit 3)
+{"first":{"case":"plain","stdout":"{\"success\":true,\"data\":{\"markdown\":\"x\",\"warning\":\"Something new.\",\"metadata\":{\"statusCode\":200}}}"}}|warning: Something new.
+{"first":"script-first","chrome":"script-first"}|Chrome did not render it: This page builds its content with JavaScript
+{"version":{"case":"version","stdout":"firecrawl-local 0.2.0\n"}}|LOCALBIN reports 0.2.0, the wrapper is pinned to 0.1.1
+ROWS
+
+# Private, local-name and metadata targets are refused, never sent to the cloud.
+fixture scrape
+local_control '{"first":"private"}'
+run_cli fetch http://intranet.example/ --full --json
+status_is 1 'private target refused'
+jcheck 'private refusal names the guard and the --cloud rerun' "$OUT" "e=d['error']; assert e['code']=='local_blocked_target' and '127.0.0.1 is a private address' in e['message'] and 'never sent' in e['message'], e; assert '--cloud' in e['next_action'] and 'http://intranet.example/' in e['next_action'], e['next_action']"
+no_calls 'a refused target reads no credits and runs no vendor'
+fixture scrape
+local_control '{"first":"plain","by_url":{"http://intranet.example/":"private"}}'
+run_cli fetch http://intranet.example/ https://example.com/page --full --json
+status_is 6 'private and public targets in one call'
+jcheck 'the private item fails, the public item is served' "$OUT" "i=d['data']['items']; assert i[0]['ok'] is False and i[0]['error']['code']=='local_blocked_target' and i[0]['credits_spent']==0, i[0]; assert i[1]['ok'] and 'PLAINMARKER' in i[1]['data']['markdown'] and i[1]['credits_spent']==0, i[1]"
+no_calls 'a mixed call reaches no vendor'
+
+# Chrome's guard words a private name's refusal "'name' resolves to ..." (recorded in a
+# network namespace): refused on the browser pass too, never sent to the cloud (#826 review).
+for case in browser-private browser-metadata; do
+  fixture scrape
+  local_control "{\"first\":\"script-first\",\"chrome\":\"$case\"}"
+  run_cli fetch https://example.com/page --full --json
+  status_is 1 "$case: the browser pass's refusal is final"
+  jcheck "$case: refused as a private target" "$OUT" "e=d['error']; assert e['code']=='local_blocked_target' and 'resolves to a' in e['message'] and 'never sent' in e['message'], e"
+  no_calls "$case: no credit read, no vendor"
+  local_check "$case: the refusal came from the Chrome pass" "assert [x['pass'] for x in r]==['version','first','chrome'], [x['pass'] for x in r]"
+done
+# Any other BLOCKED_TARGET is refused too unless it is one of the four whole messages
+# that say nothing about where the target is; the host name in a refusal never counts.
+while IFS='|' read -r label error; do
+  fixture scrape
+  local_control "$(python3 -c 'import json, sys
+out = json.dumps({"success": False, "code": "BLOCKED_TARGET", "error": sys.argv[1]})
+print(json.dumps({"first": {"case": "private", "stdout": out}}))' "$error")"
+  run_cli fetch https://example.com/page --full --json
+  status_is 1 "$label refused"
+  jcheck "$label: local_blocked_target" "$OUT" "assert d['error']['code']=='local_blocked_target', d['error']"
+  no_calls "$label: no vendor"
+done <<'ROWS'
+a host named like a passable refusal|'more-than-10-redirects.example' resolves to a private address; private targets are off
+a refusal worded in a way the pin never printed|'intranet.example' is refused for a new reason
+a passable refusal with more after it|URL has no host; 'db.example' resolves to a private address; private targets are off
+ROWS
+while IFS='|' read -r error; do
+  fixture scrape
+  local_control "$(python3 -c 'import json, sys
+out = json.dumps({"success": False, "code": "BLOCKED_TARGET", "error": sys.argv[1]})
+print(json.dumps({"first": {"case": "private", "stdout": out}}))' "$error")"
+  run_cli fetch https://example.com/page --full --json
+  status_is 0 "passable refusal falls through: $error"
+  LOCAL_ERROR=$error jcheck "passable refusal note: $error" "$OUT" "import os; n=d['degraded'][0]; assert n=='local: BLOCKED_TARGET: '+os.environ['LOCAL_ERROR']+'; ran on Firecrawl', d['degraded']"
+done <<'ROWS'
+unsupported URL scheme 'ftp': only http and https are fetched
+URL has no host
+URLs with embedded credentials are not fetched
+more than 10 redirects
+ROWS
+
+# An HTTP-200 bot check is flagged only from markdown, so an html-only fetch asks the
+# scraper for markdown too and falls through on the flag (#826 review).
+fixture scrape
+local_control '{"first":"botcheck-200"}'
+run_cli fetch https://example.com/page --format html --json
+status_is 0 'html-only bot check runs on the cloud'
+jcheck 'html-only bot check note' "$OUT" "assert d['degraded'][0]=='local: the site did not serve the page to this machine (HTTP 200); ran on Firecrawl', d['degraded']"
+local_check 'html-only fetch asks the scraper for markdown as well' "assert r[1]['argv'][3:5]==['-f','html,markdown'], r[1]['argv']"
+fixture scrape
+local_control '{"first":"plain-html"}'
+run_cli fetch https://example.com/page --format html --json
+status_is 0 'html-only page served'
+jcheck 'html-only page: html served, the extra markdown dropped' "$OUT" "x=d['data']; assert 'ALPHAMARKER' in x['html'] and 'markdown' not in x, sorted(x); assert '$SERVED' in d['degraded'] and d['credits_spent']==0, d"
+no_calls 'html-only page served without a vendor call'
+fixture scrape
+local_control '{"first":"plain"}'
+run_cli fetch https://example.com/page --full --json
+local_check 'a markdown fetch asks only for markdown' "assert r[1]['argv'][3:5]==['-f','markdown'], r[1]['argv']"
+
+# A result missing a requested format (a JSON page has no html, a PDF only markdown)
+# runs on the cloud, which produces them all (#826 review).
+fixture scrape
+local_control '{"first":"json-markdown-html"}'
+run_cli fetch https://example.com/page --format markdown,html --json
+status_is 0 'missing html falls through'
+jcheck 'missing html note' "$OUT" "assert d['degraded'][0]=='local: no html in the local result; ran on Firecrawl', d['degraded']; assert d['credits_spent']>=1, d"
+argv_is 'missing html runs the vendor scrape' "assert d[:2]==['scrape','https://example.com/page'], d"
+fixture scrape
+local_control '{"first":"json-markdown-html"}'
+run_cli fetch https://example.com/page --full --json
+status_is 0 'the same page served when only markdown was asked for'
+jcheck 'markdown-only JSON page served' "$OUT" "assert 'JSONMARKER' in d['data']['markdown'] and '$SERVED' in d['degraded'], d['degraded']"
+no_calls 'markdown-only JSON page reaches no vendor'
+
+# In a fan-out, a failed item's fall-through note still reaches the envelope (#807).
+configure '{"default":{"fixture":"scrape.json"},"targets":{"https://example.com/refused":{"text":"{\"success\":false,\"error\":\"unsupported site\"}","exit":1}}}'
+local_control '{"first":"plain","by_url":{"https://example.com/refused":"blocked-403"}}'
+run_cli fetch https://example.com/page https://example.com/refused --full --json
+status_is 6 'served item and a fall-through that fails on the cloud'
+jcheck 'the failed item keeps its local note' "$OUT" "i=d['data']['items']; assert [v['ok'] for v in i]==[True,False], i; assert 'unsupported site' in i[1]['error']['message']; g=d['degraded']; assert '$SERVED' in g and 'local: the site did not serve the page to this machine (HTTP 403); ran on Firecrawl' in g, g"
+
+# A ladder failure after a fall-through still carries the local note; keyless follows it.
+configure '{"default":{"fixture":"quota.json","stderr_text":"HTTP 402","exit":1}}'
+local_control '{"first":"blocked-403"}'
+run_cli fetch https://example.com/page --full --json
+status_is 1 'ladder failure after a local fall-through'
+jcheck 'ladder error keeps the local note first' "$OUT" "assert d['error']['code']=='quota_exhausted' and d['degraded'][0].startswith('local: the site did not serve'), d"
+export FIRECRAWL_CLI_KEYLESS=1
+fixture scrape
+local_control '{"first":"blocked-403"}'
+run_cli fetch https://example.com/page --full --json
+export FIRECRAWL_CLI_KEYLESS=0
+status_is 0 'keyless leg after a local fall-through'
+jcheck 'local note, then the keyless note' "$OUT" "g=d['degraded']; assert g[0].startswith('local: the site did not serve') and g[1].startswith('keyless: answered'), g; assert d['credits_spent']==0, d"
+
+# The binary: a named path that is unusable is a note; not installed is silent;
+# PATH and the cargo root are found.
+fixture scrape
+local_control '{"first":"plain"}'
+export FIRECRAWL_CLI_LOCAL_BIN="$TMP/no-such-firecrawl-local"
+run_cli fetch https://example.com/page --full --json
+jcheck 'unusable named binary is a note' "$OUT" "assert d['degraded'][0]==\"local: FIRECRAWL_CLI_LOCAL_BIN '$TMP/no-such-firecrawl-local' is not an executable file; ran on Firecrawl\", d['degraded']"
+unset FIRECRAWL_CLI_LOCAL_BIN
+fixture scrape
+run_cli fetch https://example.com/page --full --json
+status_is 0 'no firecrawl-local installed'
+local_none 'not installed'
+jcheck 'not installed is silent' "$OUT" "assert d['degraded']==['cost estimated, not measured'], d['degraded']"
+run_cli capabilities --json
+jcheck 'capabilities: absent' "$OUT" "l=d['data']['local']; assert l['state']=='absent' and l['binary'] is None and l['pinned_version']=='0.1.1' and l['pinned_rev'].startswith('dc37f52f') and 'cargo install --locked --root ~/.local/share/firecrawl-local' in l['install'], l"
+ln -s "$LOCAL/firecrawl-local" "$TMP/bin/firecrawl-local"
+fixture scrape
+local_control '{"first":"plain"}'
+run_cli fetch https://example.com/page --full --json
+jcheck 'found on PATH' "$OUT" "assert d['degraded']==['$SERVED'], d['degraded']"
+rm "$TMP/bin/firecrawl-local"
+mkdir -p "$TMP/home/.local/share/firecrawl-local/bin"
+ln -s "$LOCAL/firecrawl-local" "$TMP/home/.local/share/firecrawl-local/bin/firecrawl-local"
+fixture scrape
+local_control '{"first":"plain"}'
+run_cli fetch https://example.com/page --full --json
+jcheck 'found in the cargo root' "$OUT" "assert d['degraded']==['$SERVED'], d['degraded']"
+run_cli capabilities --json
+jcheck 'capabilities: ready' "$OUT" "l=d['data']['local']; assert l['state']=='ready' and l['version']=='0.1.1' and l['binary']=='$TMP/home/.local/share/firecrawl-local/bin/firecrawl-local' and l['browser_slots']==1, l"
+local_control '{"version":{"case":"version","stdout":"firecrawl-local 0.2.0\n"}}'
+run_cli capabilities --json
+jcheck 'capabilities: wrong version' "$OUT" "l=d['data']['local']; assert l['state']=='wrong_version' and l['version']=='0.2.0', l"
+export FIRECRAWL_CLI_LOCAL=off
+run_cli capabilities --json
+unset FIRECRAWL_CLI_LOCAL
+jcheck 'capabilities: off' "$OUT" "assert d['data']['local']['state']=='off', d['data']['local']"
+rm -r "$TMP/home/.local"
+run_cli fetch --help
+contains "$OUT" '--cloud' 'fetch help names --cloud'
+contains "$OUT" 'Firecrawl Local' 'fetch help names the local tier'
+unset FIRECRAWL_CLI_LOCAL_BIN
+
 printf '%s passed, %s failed\n' "$pass" "$fail"
 [[ "$fail" -eq 0 ]]

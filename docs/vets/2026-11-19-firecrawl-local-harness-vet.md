@@ -101,7 +101,7 @@ The six cloud wins over Firecrawl Local name its silent losses: multi-line code 
 | 6to4 `[2002:7f00:1::]` | attempted, unreachable on this host (no IPv6 route), not refused | same |
 | Redirect from a public page to loopback or metadata | not measurable: both public redirectors tried (httpbin, httpbingo) refuse internal targets themselves. Read: every redirect hop goes back through `guard::check_url` (`apps/local/src/fetch.rs:175-182`) and the guarded DNS resolver (`:189`) | same |
 | `HTTP_PROXY` set, name resolving to loopback | **FAIL**: handed to the proxy unrefused (the HTTP client honours proxy variables, and the proxy resolves the name) | not tried |
-| Chrome subresources and navigation | control measured: a loopback page's `<img>` reached a second loopback port by IP and by `localtest.me` through the guard proxy. Refusal under `--public-only`: read in `netguard.rs` (SOCKS guard proxy, `host-resolver-rules=MAP * ~NOTFOUND`, QUIC and non-proxied UDP off), not measured, because no public echo service serves unescaped HTML | not tried |
+| Chrome subresources and navigation | control measured: a loopback page's `<img>` reached a second loopback port by IP and by `localtest.me` through the guard proxy. Refusal under `--public-only`: read in `netguard.rs` (SOCKS guard proxy, `host-resolver-rules=MAP * ~NOTFOUND`, QUIC and non-proxied UDP off), and measured 2026-11-20 (#807, `tests/firecrawl-local-live.test.sh`): in a private network namespace, a page served from a public address (8.8.4.4 on the namespace's loopback), rendered in Chrome, whose `<img>`, `fetch()` and meta refresh point at `localtest.me` (mapped to 127.0.0.1) reached the listener 0 times under `--public-only` and 2 times without it; 302s from that page's host to `localtest.me` and to 169.254.169.254 were refused with 0 listener hits | not tried |
 | `scrape` without `--public-only` (CLI default) | reaches loopback by design ("a person at their own terminal may scrape their own localhost") | n/a |
 | `map` | **no guard**: no `--public-only` flag, private targets always allowed (`main.rs:457`); measured fetching a loopback page and its sitemap | n/a |
 
@@ -188,7 +188,7 @@ Items 1-3 are defects in `firecrawl-cli` on `main`, found while measuring and in
 - **Proxy handling:** it stops honouring proxy variables or applies the guard to proxied requests; then the wrapper's scrub becomes defence in depth instead of the fix.
 - **`mcp` and `init`:** `mcp` pins its npm package or ships its own server, and `init` asks before editing each agent's config.
 - **Pin moves:** before moving past `dc37f52f` or 0.1.x, re-run the fixture, the off-mode egress check and the SSRF table; re-measure at once if the default cloud mode, the guard defaults or the install-id behaviour change.
-- **Browser refusal:** a public fixture page that references `localtest.me` exists (acceptance test 4); until then the browser path is read, not measured.
+- **Browser refusal:** measured 2026-11-20 in a private network namespace (#807, `tests/firecrawl-local-live.test.sh`, SSRF row in section 2); re-run that suite when the pin moves.
 - **crw:** its CLI refuses IP-literal private targets and `serve` binds loopback or requires a key by default.
 - **Trafilatura:** only as a no-browser fallback if Firecrawl Local stops being maintained.
 - **Docker self-host for the hosted app:** the app's own Firecrawl use exceeds the plan's included credits for two months running, or the app gains an always-on server.

@@ -257,5 +257,65 @@ status_is "$ST" 1 'map without update trips on real 1.29.0 help'
 contains "$OUT" "new subcommand 'update'; update the verb map" 'planted negative names the new subcommand'
 count_is "$OUT" 1 'planted negative has exactly one finding'
 
+# #807: a deployed firecrawl-cli reports its Firecrawl Local tier. A pinned, working
+# binary is info; a wrong version or an unusable named binary is a finding, since
+# every eligible fetch then runs on paid Firecrawl with only a per-call note.
+mkdir -p "$TMP/cli"
+printf '#!/bin/sh\n[ "$1 $2" = "capabilities --json" ] || exit 9\nexec /bin/cat "$LOCAL_REPORT"\n' >"$TMP/cli/firecrawl-cli"
+chmod +x "$TMP/cli/firecrawl-cli"
+local_report() {
+  "$PYTHON" - "$TMP/report.json" "$1" <<'PY'
+import json, sys
+local = {"pinned_version": "0.1.1", "pinned_rev": "dc37f52f9670be4ef3077f97f31096b2d0657205",
+         "install": "cargo install --locked --root ~/.local/share/firecrawl-local firecrawl-local",
+         "binary": "/opt/fl/firecrawl-local", "version": "0.1.1",
+         "chrome": "/usr/bin/google-chrome", "browser_slots": 1}
+local.update(json.loads(sys.argv[2]))
+open(sys.argv[1], "w").write(json.dumps({"ok": True, "data": {"local": local}}))
+PY
+  LOCAL_REPORT="$TMP/report.json" PATH="$TMP/cli:$TMP/bin" "$PYTHON" "$SCANNER" --settings "$SETTINGS" 2>&1
+}
+OUT=$(local_report '{"state":"ready"}'); ST=$?
+status_is "$ST" 0 'local tier ready'
+contains "$OUT" 'info: firecrawl-local 0.1.1 at /opt/fl/firecrawl-local serves eligible fetches; Chrome: /usr/bin/google-chrome; 1 browser slot(s)' 'ready names binary, Chrome and slots'
+contains "$OUT" '0 finding(s)' 'ready is clean'
+OUT=$(local_report '{"state":"ready","chrome":null}'); ST=$?
+status_is "$ST" 0 'ready without Chrome'
+contains "$OUT" 'Chrome: none found, so script-built pages run on Firecrawl' 'missing Chrome named'
+OUT=$(local_report '{"state":"absent","binary":null,"version":null}'); ST=$?
+status_is "$ST" 0 'local tier absent'
+contains "$OUT" 'info: firecrawl-local not installed, so every fetch runs on Firecrawl; optional, pinned to 0.1.1 (dc37f52f): cargo install' 'absent names the pinned install'
+OUT=$(local_report '{"state":"off"}'); ST=$?
+status_is "$ST" 0 'local tier off'
+contains "$OUT" 'info: firecrawl-local tier off (FIRECRAWL_CLI_LOCAL)' 'off named'
+OUT=$(local_report '{"state":"wrong_version","version":"0.2.0"}'); ST=$?
+status_is "$ST" 1 'wrong local version'
+count_is "$OUT" 1 'wrong version one warning'
+contains "$OUT" 'WARN firecrawl-cli-drift: firecrawl-local at /opt/fl/firecrawl-local reports 0.2.0, the wrapper is pinned to 0.1.1 (dc37f52f), so every eligible fetch runs on paid Firecrawl' 'wrong version named'
+OUT=$(local_report '{"state":"unusable","binary":null,"note":"local: FIRECRAWL_CLI_LOCAL_BIN '"'"'/x'"'"' is not an executable file; ran on Firecrawl"}'); ST=$?
+status_is "$ST" 1 'unusable named binary'
+contains "$OUT" "WARN firecrawl-cli-drift: firecrawl-local tier unusable: local: FIRECRAWL_CLI_LOCAL_BIN '/x' is not an executable file" 'unusable note passed through'
+printf 'not json' >"$TMP/garbage.json"
+OUT=$(LOCAL_REPORT="$TMP/garbage.json" PATH="$TMP/cli:$TMP/bin" "$PYTHON" "$SCANNER" --settings "$SETTINGS" 2>&1); ST=$?
+status_is "$ST" 1 'unreadable capabilities'
+contains "$OUT" 'WARN firecrawl-cli-drift: firecrawl-cli capabilities gave no local-tier report (JSONDecodeError)' 'unreadable capabilities is a finding'
+
+# The real wrapper and the stand-in scraper agree with the fields read above.
+mkdir -p "$TMP/real" "$TMP/fakelocal" "$TMP/realhome"
+ln -s "$REPO/bin/firecrawl-cli" "$TMP/real/firecrawl-cli"
+cp "$REPO/tests/fixtures/firecrawl-cli/fake-firecrawl-local.py" "$TMP/fakelocal/firecrawl-local"
+cp "$REPO/tests/fixtures/firecrawl-cli/local-responses.json" "$TMP/fakelocal/"
+chmod +x "$TMP/fakelocal/firecrawl-local"
+printf '{}\n' >"$TMP/fakelocal/control.json"
+OUT=$(cd "$TMP" && HOME="$TMP/realhome" FIRECRAWL_CLI_LOCAL_BIN="$TMP/fakelocal/firecrawl-local" \
+  PATH="$TMP/real:$TMP/bin:$(dirname "$PYTHON"):/usr/bin:/bin" "$PYTHON" "$SCANNER" --settings "$SETTINGS" 2>&1); ST=$?
+status_is "$ST" 0 'real wrapper, pinned stand-in'
+contains "$OUT" "info: firecrawl-local 0.1.1 at $TMP/fakelocal/firecrawl-local serves eligible fetches" 'real wrapper report read'
+printf '{"version":{"case":"version","stdout":"firecrawl-local 0.2.0\\n"}}\n' >"$TMP/fakelocal/control.json"
+OUT=$(cd "$TMP" && HOME="$TMP/realhome" FIRECRAWL_CLI_LOCAL_BIN="$TMP/fakelocal/firecrawl-local" \
+  PATH="$TMP/real:$TMP/bin:$(dirname "$PYTHON"):/usr/bin:/bin" "$PYTHON" "$SCANNER" --settings "$SETTINGS" 2>&1); ST=$?
+status_is "$ST" 1 'real wrapper, wrong stand-in version'
+contains "$OUT" "reports 0.2.0, the wrapper is pinned to 0.1.1 (dc37f52f)" 'real wrapper wrong version'
+
 echo "firecrawl-cli-drift-audit: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]

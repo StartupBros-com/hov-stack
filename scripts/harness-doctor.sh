@@ -2362,7 +2362,7 @@ EOF
 fi
 [ "$WARNS" -eq "$w0" ] && ok "no retired MCP server survives its CLI in settings, the global registry, or the harness docs"
 
-echo "== 32. firecrawl-cli drift: the verb map matches the vendor's live help and no Firecrawl MCP allow entry survives =="
+echo "== 32. firecrawl-cli drift: the verb map matches the vendor's live help, no Firecrawl MCP allow entry survives, and Firecrawl Local is the pinned version =="
 # KTD11: hand-maintained capability CLI. The Firecrawl MCP retired on
 # 2026-09-13 (#1178); check 31 owns that retirement row, and this check also
 # asserts no mcp__firecrawl__ allow entry survives so the two never disagree.
@@ -2372,7 +2372,10 @@ echo "== 32. firecrawl-cli drift: the verb map matches the vendor's live help an
 # Accepted limit: help-text drift only, never behavior behind unchanged help.
 # Silent Spark 1 -> spark-2 model rerouting and the parse format undercount
 # both pass; billing rates and model routing require manual re-checks.
-# CLAUDE_FIRECRAWL_DRIFT_AUDIT is the crash/finding test seam.
+# CLAUDE_FIRECRAWL_DRIFT_AUDIT is the crash/finding test seam. The auditor also
+# prints firecrawl-cli's offline local-tier report (#807): the firecrawl-local
+# binary, its version and the Chrome it would launch; a wrong version or an
+# unusable FIRECRAWL_CLI_LOCAL_BIN warns, since it sends fetches back to paid credits.
 w0=$WARNS
 FIRECRAWL_DRIFT_AUDIT=${CLAUDE_FIRECRAWL_DRIFT_AUDIT:-$DOCTOR_DIR/firecrawl-cli-drift-audit.py}
 if [ ! -f "$FIRECRAWL_DRIFT_AUDIT" ]; then
