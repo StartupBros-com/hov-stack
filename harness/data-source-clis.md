@@ -201,12 +201,19 @@ exit dictionary; it makes no vendor request.
   an environment built from nothing (`PATH`, a scratch `HOME`/`TMPDIR`/
   `FIRECRAWL_LOCAL_HOME`, `FIRECRAWL_CLOUD=off`): no key, API URL or proxy
   variable reaches it. A private, loopback or metadata target is refused (exit
-  1, `local_blocked_target`) and never sent to the cloud; its `next_action`
-  is the same call with `--cloud`, for a name that only looks private here
-  (split-horizon DNS, a VPN). A page the site refuses this machine, an HTTP
-  400+ answer, an empty result, a failed, killed or timed-out run (30 s or
-  `--timeout`, whichever is less) falls through to the keyless-then-keyed
-  ladder with a `local: <why>; ran on Firecrawl` note. The first pass hides
+  1, `local_blocked_target`) and never sent to the cloud, whether the fetch or
+  Chrome's guard refused it; fail-closed, every `BLOCKED_TARGET` is refused
+  except four whole messages that say nothing about where the target is (a
+  non-http scheme, URL credentials, no host, the redirect cap). Its
+  `next_action` is the same call with `--cloud`, for a name that only looks
+  private here (split-horizon DNS, a VPN). A page the site refuses this
+  machine, an HTTP 400+ answer, a result missing a requested format (a PDF
+  gives only `markdown`, a text or JSON page only `markdown` and `rawHtml`),
+  an empty result, a failed, killed or timed-out run (30 s or `--timeout`,
+  whichever is less) falls through to the keyless-then-keyed ladder with a
+  `local: <why>; ran on Firecrawl` note. The scraper flags a bot-check page
+  from its markdown, so the wrapper always asks it for `markdown` and drops it
+  from the result when the call did not. The first pass hides
   Chrome; a page that builds its content with JavaScript reruns in Chrome only
   while it holds one of the host's browser slots (a non-blocking `flock` under
   `<state dir>/local-browser/`, `FIRECRAWL_CLI_LOCAL_BROWSER_SLOTS`, default 1,

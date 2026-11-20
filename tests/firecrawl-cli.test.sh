@@ -2545,11 +2545,17 @@ jcheck 'a local note keeps plain output plain' "$OUT" "assert 'PLAINMARKER' in d
 
 # Eligibility: URL, local formats only, no schema, question, userinfo, --cloud or off switch.
 fixture scrape
-local_control '{"first":"plain"}'
+local_control '{"first":"plain-all"}'
 run_cli fetch https://example.com/page --format markdown,links,rawHtml,html --json
 status_is 0 'every local format is eligible'
 local_check 'requested formats pass through to -f' "assert r[1]['argv'][4]=='markdown,links,rawHtml,html', r[1]['argv']"
+jcheck 'every requested format is in the served result' "$OUT" "x=d['data']; assert x['links']==[] and all(x[k] for k in ('markdown','rawHtml','html')), sorted(x); assert '$SERVED' in d['degraded'], d['degraded']"
 no_calls 'local formats never reach the vendor'
+fixture scrape
+local_control '{"first":"plain"}'
+run_cli fetch https://example.com/page --format markdown,links,rawHtml,html --json
+status_is 0 'a result without rawHtml and html falls through'
+jcheck 'missing formats are named in order' "$OUT" "assert d['degraded'][0]=='local: no rawHtml, html in the local result; ran on Firecrawl', d['degraded']"
 for case in default summary cloud schema query userinfo off; do
   fixture scrape
   local_control '{"first":"plain"}'
@@ -2681,6 +2687,82 @@ run_cli fetch http://intranet.example/ https://example.com/page --full --json
 status_is 6 'private and public targets in one call'
 jcheck 'the private item fails, the public item is served' "$OUT" "i=d['data']['items']; assert i[0]['ok'] is False and i[0]['error']['code']=='local_blocked_target' and i[0]['credits_spent']==0, i[0]; assert i[1]['ok'] and 'PLAINMARKER' in i[1]['data']['markdown'] and i[1]['credits_spent']==0, i[1]"
 no_calls 'a mixed call reaches no vendor'
+
+# Chrome's guard words a private name's refusal "'name' resolves to ..." (recorded in a
+# network namespace): refused on the browser pass too, never sent to the cloud (#826 review).
+for case in browser-private browser-metadata; do
+  fixture scrape
+  local_control "{\"first\":\"script-first\",\"chrome\":\"$case\"}"
+  run_cli fetch https://example.com/page --full --json
+  status_is 1 "$case: the browser pass's refusal is final"
+  jcheck "$case: refused as a private target" "$OUT" "e=d['error']; assert e['code']=='local_blocked_target' and 'resolves to a' in e['message'] and 'never sent' in e['message'], e"
+  no_calls "$case: no credit read, no vendor"
+  local_check "$case: the refusal came from the Chrome pass" "assert [x['pass'] for x in r]==['version','first','chrome'], [x['pass'] for x in r]"
+done
+# Any other BLOCKED_TARGET is refused too unless it is one of the four whole messages
+# that say nothing about where the target is; the host name in a refusal never counts.
+while IFS='|' read -r label error; do
+  fixture scrape
+  local_control "$(python3 -c 'import json, sys
+out = json.dumps({"success": False, "code": "BLOCKED_TARGET", "error": sys.argv[1]})
+print(json.dumps({"first": {"case": "private", "stdout": out}}))' "$error")"
+  run_cli fetch https://example.com/page --full --json
+  status_is 1 "$label refused"
+  jcheck "$label: local_blocked_target" "$OUT" "assert d['error']['code']=='local_blocked_target', d['error']"
+  no_calls "$label: no vendor"
+done <<'ROWS'
+a host named like a passable refusal|'more-than-10-redirects.example' resolves to a private address; private targets are off
+a refusal worded in a way the pin never printed|'intranet.example' is refused for a new reason
+a passable refusal with more after it|URL has no host; 'db.example' resolves to a private address; private targets are off
+ROWS
+while IFS='|' read -r error; do
+  fixture scrape
+  local_control "$(python3 -c 'import json, sys
+out = json.dumps({"success": False, "code": "BLOCKED_TARGET", "error": sys.argv[1]})
+print(json.dumps({"first": {"case": "private", "stdout": out}}))' "$error")"
+  run_cli fetch https://example.com/page --full --json
+  status_is 0 "passable refusal falls through: $error"
+  LOCAL_ERROR=$error jcheck "passable refusal note: $error" "$OUT" "import os; n=d['degraded'][0]; assert n=='local: BLOCKED_TARGET: '+os.environ['LOCAL_ERROR']+'; ran on Firecrawl', d['degraded']"
+done <<'ROWS'
+unsupported URL scheme 'ftp': only http and https are fetched
+URL has no host
+URLs with embedded credentials are not fetched
+more than 10 redirects
+ROWS
+
+# An HTTP-200 bot check is flagged only from markdown, so an html-only fetch asks the
+# scraper for markdown too and falls through on the flag (#826 review).
+fixture scrape
+local_control '{"first":"botcheck-200"}'
+run_cli fetch https://example.com/page --format html --json
+status_is 0 'html-only bot check runs on the cloud'
+jcheck 'html-only bot check note' "$OUT" "assert d['degraded'][0]=='local: the site did not serve the page to this machine (HTTP 200); ran on Firecrawl', d['degraded']"
+local_check 'html-only fetch asks the scraper for markdown as well' "assert r[1]['argv'][3:5]==['-f','html,markdown'], r[1]['argv']"
+fixture scrape
+local_control '{"first":"plain-html"}'
+run_cli fetch https://example.com/page --format html --json
+status_is 0 'html-only page served'
+jcheck 'html-only page: html served, the extra markdown dropped' "$OUT" "x=d['data']; assert 'ALPHAMARKER' in x['html'] and 'markdown' not in x, sorted(x); assert '$SERVED' in d['degraded'] and d['credits_spent']==0, d"
+no_calls 'html-only page served without a vendor call'
+fixture scrape
+local_control '{"first":"plain"}'
+run_cli fetch https://example.com/page --full --json
+local_check 'a markdown fetch asks only for markdown' "assert r[1]['argv'][3:5]==['-f','markdown'], r[1]['argv']"
+
+# A result missing a requested format (a JSON page has no html, a PDF only markdown)
+# runs on the cloud, which produces them all (#826 review).
+fixture scrape
+local_control '{"first":"json-markdown-html"}'
+run_cli fetch https://example.com/page --format markdown,html --json
+status_is 0 'missing html falls through'
+jcheck 'missing html note' "$OUT" "assert d['degraded'][0]=='local: no html in the local result; ran on Firecrawl', d['degraded']; assert d['credits_spent']>=1, d"
+argv_is 'missing html runs the vendor scrape' "assert d[:2]==['scrape','https://example.com/page'], d"
+fixture scrape
+local_control '{"first":"json-markdown-html"}'
+run_cli fetch https://example.com/page --full --json
+status_is 0 'the same page served when only markdown was asked for'
+jcheck 'markdown-only JSON page served' "$OUT" "assert 'JSONMARKER' in d['data']['markdown'] and '$SERVED' in d['degraded'], d['degraded']"
+no_calls 'markdown-only JSON page reaches no vendor'
 
 # In a fan-out, a failed item's fall-through note still reaches the envelope (#807).
 configure '{"default":{"fixture":"scrape.json"},"targets":{"https://example.com/refused":{"text":"{\"success\":false,\"error\":\"unsupported site\"}","exit":1}}}'

@@ -180,22 +180,26 @@ LOCAL_INSTALL = (
     "cargo install --locked --root ~/.local/share/firecrawl-local --git "
     f"https://github.com/firecrawl/firecrawl --rev {LOCAL_REV} firecrawl-local"
 )
-LOCAL_FORMATS = frozenset({"markdown", "html", "rawHtml", "links"})
+# The formats Firecrawl Local produces, and the type each field must have in a result
+# the wrapper accepts: a result missing a requested format runs on the cloud instead.
+LOCAL_FORMAT_TYPES = {"markdown": str, "html": str, "rawHtml": str, "links": list}
+LOCAL_FORMATS = frozenset(LOCAL_FORMAT_TYPES)
 # Seconds per pass (never more than the wrapper --timeout), and how long past the
 # scraper's own timeout the wrapper waits before killing its process group.
 LOCAL_PASS_SECONDS = 30
 LOCAL_GRACE_SECONDS = 10
 LOCAL_SLOTS_CAP = 8
-# The pinned guard's refusals of a private, local or metadata target
-# (apps/local/src/guard.rs, fetch.rs). Those URLs are refused here and never sent
-# to the cloud; every other BLOCKED_TARGET (scheme, credentials, redirect cap)
-# falls through.
-LOCAL_PRIVATE_REFUSALS = (
-    "is a link-local or metadata address",
-    "is a private address",
-    "is a local hostname",
-    "cloud metadata endpoints are never reachable",
-    "does not resolve to an address Firecrawl Local may reach",
+# The pinned guard's BLOCKED_TARGET refusals that say nothing about where the target
+# is (apps/local/src/guard.rs check_url, fetch.rs redirect cap), matched whole: their
+# URLs fall through to the cloud. Every other BLOCKED_TARGET, from the fetch guard or
+# the browser's (netguard.rs), names a private, local or metadata target and is
+# refused here, never sent to the cloud. Matched whole because the private refusals
+# quote the host name, which the page's server chooses.
+LOCAL_PASSABLE_BLOCKS = (
+    re.compile(r"unsupported URL scheme '[A-Za-z][A-Za-z0-9+.-]*': only http and https are fetched"),
+    re.compile(r"URLs with embedded credentials are not fetched"),
+    re.compile(r"URL has no host"),
+    re.compile(r"more than [0-9]+ redirects"),
 )
 LOCAL_SCRIPT_WARNING = "builds its content with JavaScript"
 # Where the pinned scraper looks for Chrome (apps/local/src/browser.rs find_chrome),
@@ -1026,7 +1030,9 @@ def local_outcome(returncode, stdout, stderr, formats, seconds):
     if document.get("success") is False or returncode:
         code = document.get("code") or f"exit {returncode}"
         error = str(document.get("error") or "").strip()
-        if code == "BLOCKED_TARGET" and any(m in error for m in LOCAL_PRIVATE_REFUSALS):
+        if code == "BLOCKED_TARGET" and not any(
+            pattern.fullmatch(error) for pattern in LOCAL_PASSABLE_BLOCKS
+        ):
             return "refused", error
         return "fall", f"{code}: {error.splitlines()[0][:300] if error else 'no detail'}"
     data = document.get("data")
@@ -1043,6 +1049,11 @@ def local_outcome(returncode, stdout, stderr, formats, seconds):
         return "fall", f"warning: {warning.splitlines()[0][:300]}"
     if isinstance(status, int) and status >= 400:
         return "fall", f"the site answered HTTP {status}"
+    # A PDF yields only markdown and a text or JSON page only markdown and rawHtml,
+    # with no warning; the cloud produces every format asked for.
+    missing = [name for name in formats if not isinstance(data.get(name), LOCAL_FORMAT_TYPES[name])]
+    if missing:
+        return "fall", f"no {', '.join(missing)} in the local result"
     if not any(data.get(name) for name in formats):
         return "fall", "empty result"
     return "served", data
@@ -1056,7 +1067,11 @@ def local_invoke(args, command):
     if binary is None:
         return None, [note] if note else []
     options = command[2:]
-    formats = options[options.index("--format") + 1]
+    requested = options[options.index("--format") + 1].split(",")
+    # The scraper marks a bot-check page blocked from the markdown it returns, so a
+    # result without markdown would pass one off as content: always ask for it, and
+    # drop it again when the caller did not.
+    formats = ",".join(requested if "markdown" in requested else [*requested, "markdown"])
     seconds = min(LOCAL_PASS_SECONDS, args.timeout)
     base = [
         binary, "scrape", command[1], "--public-only", "-f", formats,
@@ -1076,7 +1091,7 @@ def local_invoke(args, command):
         hidden = "/usr/bin/false" if os.path.exists("/usr/bin/false") else "/bin/false"
         kind, detail = local_outcome(
             *local_pass(base, local_env(scratch, hidden), scratch, seconds + LOCAL_GRACE_SECONDS),
-            formats.split(","), seconds,
+            requested, seconds,
         )
         if kind == "script":
             slot, busy = local_browser_slot()
@@ -1089,7 +1104,7 @@ def local_invoke(args, command):
                         local_env(scratch, os.environ.get("FIRECRAWL_CHROME_PATH")),
                         scratch, seconds + LOCAL_GRACE_SECONDS, slot,
                     ),
-                    formats.split(","), seconds,
+                    requested, seconds,
                 )
             finally:
                 os.close(slot)
@@ -1108,6 +1123,8 @@ def local_invoke(args, command):
         raise error
     if kind == "fall":
         return None, [f"{LOCAL_PREFIX}{detail}; ran on Firecrawl"]
+    if "markdown" not in requested:
+        detail.pop("markdown", None)
     engine = (detail.get("metadata") or {}).get("engine") or "local"
     return redact(detail), [
         f"{LOCAL_PREFIX}served by Firecrawl Local {LOCAL_VERSION} ({engine}); no credits spent"

@@ -23,6 +23,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 PUBLIC, CLOUD, METADATA = "8.8.4.4", "8.8.8.8", "169.254.169.254"
+METADATA_NAME = "metadata-name.example"  # resolves to METADATA in the namespace
 CLOUD_HOSTS = "api.firecrawl.dev firecrawl.dev www.firecrawl.dev"
 FALSE = "/usr/bin/false" if os.path.exists("/usr/bin/false") else "/bin/false"
 
@@ -116,7 +117,9 @@ def ns(wrapper, binary, scratch):
     ):
         subprocess.run(command, check=True)
     hosts = scratch / "hosts"
-    hosts.write_text(f"127.0.0.1 localhost localtest.me\n{CLOUD} {CLOUD_HOSTS}\n")
+    hosts.write_text(
+        f"127.0.0.1 localhost localtest.me\n{CLOUD} {CLOUD_HOSTS}\n{METADATA} {METADATA_NAME}\n"
+    )
     subprocess.run(["mount", "--bind", str(hosts), "/etc/hosts"], check=True)
 
     hits = {"localtest": [], "metadata": [], "cloud": [], "public": []}
@@ -125,7 +128,15 @@ def ns(wrapper, binary, scratch):
         class Handler(BaseHTTPRequestHandler):
             def do_GET(self):
                 hits[name].append(self.path)
-                body = pages.get(self.path.split("?")[0]) if name == "public" else b"listener"
+                path = self.path.split("?")[0]
+                body = pages.get(path) if name == "public" else b"listener"
+                content_type = "text/html"
+                if isinstance(body, tuple) and body[0] == "flip":
+                    # The first request (the plain fetch) gets the page, every later
+                    # one (Chrome's) the redirect.
+                    body = body[1] if hits[name].count(self.path) == 1 else ("redirect", body[2])
+                if isinstance(body, tuple) and body[0] == "typed":
+                    content_type, body = body[1], body[2]
                 if isinstance(body, tuple):
                     self.send_response(302)
                     self.send_header("location", body[1])
@@ -133,7 +144,7 @@ def ns(wrapper, binary, scratch):
                     self.end_headers()
                     return
                 self.send_response(200 if body is not None else 404)
-                self.send_header("content-type", "text/html")
+                self.send_header("content-type", content_type)
                 body = body or b"<html><body>not found</body></html>"
                 self.send_header("content-length", str(len(body)))
                 self.end_headers()
@@ -161,6 +172,18 @@ def ns(wrapper, binary, scratch):
         ),
         "/r-local": ("redirect", f"{trap}/redirect"),
         "/r-metadata": ("redirect", f"http://{METADATA}/latest/meta-data/"),
+        "/r-metaname": ("redirect", f"http://{METADATA_NAME}/latest/meta-data/"),
+        # Script-built on the plain fetch, a redirect to a private name in Chrome: the
+        # refusal comes from the browser's guard, worded "'name' resolves to ...".
+        "/flip-local": ("flip", script_page("FLIPMARKER"), f"{trap}/flip"),
+        "/flip-metadata": ("flip", script_page("FLIPMARKER"),
+                           f"http://{METADATA_NAME}/latest/meta-data/"),
+        # An HTTP-200 bot check: the scraper flags it only from the markdown it returns.
+        "/botcheck": page("Just a moment...", "<h1>Verifying you are human</h1>"
+                          "<p>This may take a few seconds.</p>"),
+        # A JSON page yields markdown and rawHtml only.
+        "/data.json": ("typed", "application/json",
+                       json.dumps({"marker": "JSONMARKER " * 20}).encode()),
     }
     for index in range(1, 5):
         pages[f"/js-{index}"] = script_page(f"PAGE{index}MARKER")
@@ -194,6 +217,8 @@ def ns(wrapper, binary, scratch):
     wrapper_env = {
         "PATH": f"{stubs}:{python_dir}:/usr/bin:/bin", "HOME": str(home),
         "FIRECRAWL_CLI_LOCAL_BIN": binary, "LANG": "C.UTF-8",
+        # A fall-through goes straight to the logging vendor stub, not the keyless API.
+        "FIRECRAWL_CLI_KEYLESS": "0",
     }
     direct_home = scratch / "direct"
     direct_home.mkdir()
@@ -210,10 +235,11 @@ def ns(wrapper, binary, scratch):
         after = snapshot()
         return {name: after[name] - before[name] for name in after}
 
-    def wrapper_run(*urls, out=None):
+    def wrapper_run(*urls, out=None, formats=None):
         before = snapshot()
         vendor_before = vendor_log.read_text().count("\n") if vendor_log.exists() else 0
-        result = measure(out, [*as_user(), wrapper, "fetch", *urls, "--full", "--json"], env=wrapper_env)
+        shape = ["--format", formats] if formats else ["--full"]
+        result = measure(out, [*as_user(), wrapper, "fetch", *urls, *shape, "--json"], env=wrapper_env)
         vendor_after = vendor_log.read_text().count("\n") if vendor_log.exists() else 0
         try:
             result["json"] = json.loads(result["stdout"])
@@ -223,11 +249,11 @@ def ns(wrapper, binary, scratch):
         result["vendor_calls"] = vendor_after - vendor_before
         return result
 
-    def direct_run(url, public_only=True, browser="always", chrome=None):
+    def direct_run(url, public_only=True, browser="always", chrome=None, formats="markdown"):
         before = snapshot()
         argv = [binary, "scrape", url]
         argv += ["--public-only"] if public_only else []
-        argv += ["-f", "markdown", "--timeout", "30000", "-c", "1"]
+        argv += ["-f", formats, "--timeout", "30000", "-c", "1"]
         argv += ["--browser", browser] if browser else []
         env = dict(direct_env)
         if chrome:
@@ -238,8 +264,8 @@ def ns(wrapper, binary, scratch):
             parsed = json.loads(done.stdout)
         except ValueError:
             parsed = None
-        return {"rc": done.returncode, "json": parsed, "stderr": done.stderr[-2000:],
-                "hits": delta(before)}
+        return {"rc": done.returncode, "json": parsed, "stdout": done.stdout,
+                "stderr": done.stderr[-2000:], "hits": delta(before)}
 
     base = f"http://{PUBLIC}"
     results = {"trap_port": port}
@@ -250,6 +276,25 @@ def ns(wrapper, binary, scratch):
     results["redirect_metadata"] = wrapper_run(f"{base}/r-metadata")
     results["chrome_hidden"] = direct_run(f"{base}/js", browser=None, chrome=FALSE)
     results["four_browser"] = wrapper_run(*(f"{base}/js-{i}" for i in range(1, 5)))
+    # Pro review of #826: the browser guard's DNS refusals, the HTML-only bot check and
+    # a result missing a requested format, through the wrapper and as the binary says them.
+    results["flip_local"] = wrapper_run(f"{base}/flip-local")
+    results["flip_metadata"] = wrapper_run(f"{base}/flip-metadata")
+    results["browser_private_direct"] = direct_run(f"{base}/r-local")
+    results["browser_metadata_direct"] = direct_run(f"{base}/r-metaname")
+    results["botcheck_html"] = wrapper_run(f"{base}/botcheck", formats="html")
+    results["botcheck_direct_html"] = direct_run(
+        f"{base}/botcheck", browser=None, chrome=FALSE, formats="html")
+    results["botcheck_direct_html_markdown"] = direct_run(
+        f"{base}/botcheck", browser=None, chrome=FALSE, formats="html,markdown")
+    results["json_markdown_html"] = wrapper_run(f"{base}/data.json", formats="markdown,html")
+    results["json_direct"] = direct_run(
+        f"{base}/data.json", browser=None, chrome=FALSE, formats="markdown,html")
+    results["plain_html"] = wrapper_run(f"{base}/plain-a", formats="html")
+    results["plain_direct_html"] = direct_run(
+        f"{base}/plain-a", browser=None, chrome=FALSE, formats="html,markdown")
+    results["plain_direct_all"] = direct_run(
+        f"{base}/plain-a", browser=None, chrome=FALSE, formats="markdown,links,rawHtml,html")
     results["cloud_connections_total"] = len(hits["cloud"])
     for server in servers:
         server.shutdown()

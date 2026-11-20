@@ -15,6 +15,11 @@
 #                 169.254.169.254 are refused with zero listener hits
 #   acceptance 5: the first pass's hidden Chrome (/bin/false) still yields the
 #                 JavaScript warning for a script-built page
+#   #826 review:  a script-built page whose Chrome load redirects to a private or
+#                 metadata name is refused, never sent to the cloud; an HTTP-200 bot
+#                 check fetched as html, and a JSON page asked for html, run on the
+#                 cloud instead of being served; an html-only page is served without
+#                 the markdown the wrapper asked for internally
 # Part 2, internet, through the wrapper:
 #   three public pages served locally; four script-built public pages served in Chrome
 #   (acceptance 6) with the summed PSS of the whole process tree under 2 GB
@@ -75,6 +80,16 @@ for case in redirect_local redirect_metadata; do
 done
 check 'hidden Chrome still yields the JavaScript warning' "$TMP/ns.json" "d=r['chrome_hidden']['json']['data']; assert 'builds its content with JavaScript' in d['warning'] and not d['markdown'].strip(), d.get('warning')"
 check 'four fixture pages served in Chrome under 2 GB' "$TMP/ns.json" "f=r['four_browser']; assert f['rc']==0 and all(x['ok'] for x in f['json']['data']['items']), f['stdout'][:300]; assert f['vendor_calls']==0 and f['peak_pss_mb']<2048, f"
+for case in flip_local flip_metadata; do
+  check "$case: Chrome's refusal of a private name is final, never sent to the cloud" "$TMP/ns.json" "x=r['$case']; assert x['rc']==1 and x['json']['error']['code']=='local_blocked_target' and 'resolves to a' in x['json']['error']['message'], x['stdout'][:600]; assert x['vendor_calls']==0, x['vendor_calls']"
+  check "$case: zero listener hits" "$TMP/ns.json" "h=r['$case']['hits']; assert h['localtest']==0 and h['metadata']==0 and h['public']==2, h"
+done
+check 'browser guard words its DNS refusals as recorded' "$TMP/ns.json" "a=r['browser_private_direct']['json']; b=r['browser_metadata_direct']['json']; assert a['code']=='BLOCKED_TARGET' and a['error']==\"'localtest.me' resolves to a private address; private targets are off\", a; assert b['code']=='BLOCKED_TARGET' and b['error']==\"'metadata-name.example' resolves to a link-local or metadata address, which is never reachable\", b"
+check 'binary: an HTML-only bot check carries no blocked marker' "$TMP/ns.json" "d=r['botcheck_direct_html']['json']['data']; assert 'blocked' not in d and 'markdown' not in d and 'Verifying' in d['html'], d; e=r['botcheck_direct_html_markdown']['json']['data']; assert e['blocked'] is True, e"
+check 'HTML-only bot check runs on the cloud, not served' "$TMP/ns.json" "x=r['botcheck_html']; g=x['json']['degraded']; assert 'local: the site did not serve the page to this machine (HTTP 200); ran on Firecrawl' in g, g; assert x['vendor_calls']>=1, x"
+check 'binary: a JSON page yields no html' "$TMP/ns.json" "d=r['json_direct']['json']['data']; assert 'JSONMARKER' in d['markdown'] and 'html' not in d, d"
+check 'missing requested format runs on the cloud, not served' "$TMP/ns.json" "x=r['json_markdown_html']; g=x['json']['degraded']; assert 'local: no html in the local result; ran on Firecrawl' in g, g; assert x['vendor_calls']>=1, x"
+check 'HTML-only page served with html and no markdown' "$TMP/ns.json" "x=r['plain_html']; d=x['json']['data']; assert x['rc']==0 and 'ALPHAMARKER' in d['html'] and 'markdown' not in d, x['stdout'][:300]; assert x['vendor_calls']==0, x"
 check 'no connection to a Firecrawl host in the whole run' "$TMP/ns.json" "assert r['cloud_connections_total']==0, r['cloud_connections_total']"
 
 echo "== part 2: public pages through the wrapper =="
