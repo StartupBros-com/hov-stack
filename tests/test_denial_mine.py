@@ -49,6 +49,9 @@ class DenialMineTest(unittest.TestCase):
             + _line("permission-rule",
                     "Blocked: commit on main. ALLOW_MAIN_COMMIT=1 overrides.",
                     cmd="git commit -m x")                   # git-guard: papercut's lane
+            + _line("permission-rule",
+                    "peer-loop-guard: not sent, 8 replies in a row to this session with no work in between.",
+                    tool="SendMessage", cmd="")               # peer-loop-guard: papercut's lane too
         )
         # Depth-7 transcript: subagent workflow nesting. Same denial in a second
         # session file so clustering-by-distinct-sessions is observable.
@@ -90,8 +93,10 @@ class DenialMineTest(unittest.TestCase):
     def test_papercut_covered_excluded_by_default_included_on_flag(self):
         default = {c["source"] for c in self.run_mine()["clusters"]}
         self.assertNotIn("git-guard", default)
+        self.assertNotIn("peer-loop-guard", default)
         merged = {c["source"] for c in self.run_mine("--include-papercut-covered")["clusters"]}
         self.assertIn("git-guard", merged)
+        self.assertIn("peer-loop-guard", merged)
 
     def test_user_rejected_kept(self):
         data = self.run_mine()

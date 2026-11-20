@@ -166,7 +166,7 @@ test('gate drift: the launcher skips exactly when loop-guard.js returns at its f
 test('gate: the seed registers loop-guard through the launcher with no env or flag in the command (gate needs no settings change)', () => {
   const settings = JSON.parse(fs.readFileSync(path.resolve(__dirname, '..', '..', 'settings.json'), 'utf8'));
   const cmds = [];
-  for (const g of settings.hooks.PreToolUse) for (const h of g.hooks) if (h.command.includes('loop-guard.js')) cmds.push([g.matcher, h.command]);
+  for (const g of settings.hooks.PreToolUse) for (const h of g.hooks) if (h.command.includes('/PreToolUse/loop-guard.js')) cmds.push([g.matcher, h.command]);
   assert.deepStrictEqual(cmds, [['*', '"$HOME/.claude/hooks/bin/node-hook" "$HOME/.claude/hooks/PreToolUse/loop-guard.js"']]);
 });
 
@@ -744,6 +744,112 @@ test('runner-guard gate: path-exact, skips without node, hands node every byte o
 });
 
 // ---------------------------------------------------------------------------
+// peer-loop-guard stdin gate (#810): the launcher literals must be what sendsOf / HOV_SEND need
+// ---------------------------------------------------------------------------
+
+const PLG_JS = path.resolve(__dirname, '..', 'PreToolUse', 'peer-loop-guard.js');
+const PLG_ARM_RE = / {2}\*\/PreToolUse\/peer-loop-guard\.js\)\n {4}if _hn_read; then\n {6}case \$_hn_buf in\n {8}(.*)\) _hn_stdin=1 ;;\n {8}\*\) exit 0 ;;\n {6}esac\n {4}fi\n {4};;\n/;
+
+function plgArm() {
+  const arm = fs.readFileSync(LAUNCHER, 'utf8').match(PLG_ARM_RE);
+  assert.ok(arm, 'launcher peer-loop-guard arm not found in its expected shape');
+  return arm[1].split(' | ').map((p) => p.replace(/^\*'/, '').replace(/'\*$/, ''));
+}
+
+/** JSON escape prefixes (`\u00X`) of every character of the given literals: what the arm must also carry. */
+function escapePrefixes(literals) {
+  const out = new Set();
+  for (const lit of literals) for (const ch of lit) out.add(`\\u${ch.charCodeAt(0).toString(16).padStart(4, '0').slice(0, 3)}`);
+  return [...out].sort();
+}
+
+test('peer-loop-guard gate drift: the launcher literals are what sendsOf needs, and nothing reaches an effect before it', () => {
+  const js = fs.readFileSync(PLG_JS, 'utf8');
+  const { HOV_SEND } = require(PLG_JS);
+  // HOV_SEND is flagless (case-sensitive), one top-level alternative, and every match runs through `send`.
+  assert.strictEqual(HOV_SEND.flags, '');
+  assert.strictEqual(topLevelAlternatives(HOV_SEND.source).length, 1);
+  assert.ok(HOV_SEND.source.endsWith('hov[\'"]?[ \\t]+send\\b'), HOV_SEND.source);
+  const literals = ['send', 'SendMessage'];
+  assert.deepStrictEqual(plgArm(), [...literals, ...escapePrefixes(literals)]);
+  // sendsOf: the only two ways to a send are tool_name === 'SendMessage' and a Bash command HOV_SEND matches.
+  const body = js.slice(js.indexOf('function sendsOf(input) {'), js.indexOf('\n}\n', js.indexOf('function sendsOf(input) {')));
+  assert.strictEqual((body.match(/return \[\{/g) || []).length, 1, 'one native return');
+  assert.ok(body.includes("if (input.tool_name === 'SendMessage') {"));
+  assert.ok(body.includes("if (input.tool_name === 'Bash') {"));
+  assert.ok(body.includes('const hit = HOV_SEND.exec(command);\n    if (!hit) return [];'));
+  assert.ok(!/\b(fs\.|process\.env|updateState|readTail|logLine|deny\()/.test(body), 'sendsOf is pure');
+  // run(): parse, object check, sendsOf, then the first effect.
+  const run = js.slice(js.indexOf('function run(rawInput) {'));
+  const head = run.slice(0, run.indexOf('  if (!sends.length) return rawInput;'));
+  assert.ok(head.includes('const sends = sendsOf(input);'));
+  assert.ok(!/\b(fs\.|readTail|updateState|logLine|setDenyContext|deny\(|process\.env)/.test(head), 'nothing with an effect before the send check');
+  // Entry: stdin to the 1 MiB cap, run() output through the quiet writer, exit 0.
+  assert.ok(js.includes('if (data.length < 1024 * 1024) data += chunk;'));
+  assert.ok(js.includes('writeHookOutput(run(data), data);\n    process.exit(0);'));
+});
+
+test('peer-loop-guard gate: the predicate never skips a payload whose DECODED form sendsOf acts on (randomised spellings)', () => {
+  const pats = plgArm();
+  const { sendsOf } = require(PLG_JS);
+  let seed = 4242;
+  const rnd = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x7fffffff; };
+  const cmds = ['hov send --to h1:w "x"', 'hov send --to=a b', '/p/hov send --to w x', '"hov" send --to w', 'ls; hov  send --to w x', 'hov inbox', 'echo send', 'discord-cli send 1 --to w',
+    'ls', 'git status', 'HOV SEND --to w', 'hov sen d --to w', 'hovsend --to w', 'python3 -I /x/hov send --to w y', 'hov\tsend --to w x'];
+  const tools = ['Bash', 'Bash', 'Bash', 'SendMessage', 'Read', 'Edit', 'SENDMESSAGE', 'sendmessage'];
+  const spell = (s) => {
+    let out = '';
+    for (const ch of s) {
+      const enc = JSON.stringify(ch).slice(1, -1);
+      if (rnd() < 0.05 && ch.charCodeAt(0) < 0x10000) { const h = ch.charCodeAt(0).toString(16).padStart(4, '0'); out += `\\u${rnd() < 0.5 ? h : h.toUpperCase()}`; } else out += enc;
+    }
+    assert.strictEqual(JSON.parse(`"${out}"`), s);
+    return out;
+  };
+  let acts = 0; let skipped = 0;
+  for (let i = 0; i < 6000; i += 1) {
+    const tool = tools[Math.floor(rnd() * tools.length)];
+    const command = cmds[Math.floor(rnd() * cmds.length)];
+    const ti = tool === 'SendMessage' ? `{"to":"${spell('plp-b')}","recipient_kind":"${spell(rnd() < 0.2 ? 'agent' : 'name')}"}` : `{"command":"${spell(command)}"}`;
+    const raw = `{"session_id":"s","transcript_path":"/h/.claude/projects/x/abc.jsonl","tool_name":"${spell(tool)}","tool_input":${ti}}`;
+    const hit = sendsOf(JSON.parse(raw)).length > 0;
+    const runs = pats.some((p) => raw.includes(p));
+    if (hit) acts += 1;
+    if (!runs) skipped += 1;
+    if (hit) assert.ok(runs, `skipped a payload sendsOf acts on: ${raw}`);
+  }
+  assert.ok(acts > 1000 && skipped > 300, `degenerate sample: ${acts} act, ${skipped} skip`);
+});
+
+test('peer-loop-guard gate: path-exact, skips without node, hands node every byte otherwise', () => {
+  const base = mkTmp('node-hook-plggate-');
+  try {
+    const dir = path.join(base, 'real');
+    fs.mkdirSync(dir);
+    fs.writeFileSync(path.join(dir, 'node'), '#!/bin/sh\nprintf "[%s]" "$(cat; echo x)"\n', { mode: 0o755 });
+    const env = { ...buildEnv(), PATH: `${dir}:/usr/bin:/bin` };
+    const run = (script, input) => spawnSync('/bin/sh', [LAUNCHER, script], { env, input, encoding: 'utf8' });
+    const hook = '/x/PreToolUse/peer-loop-guard.js';
+    assert.strictEqual(run(hook, '{"tool_name":"Bash","tool_input":{"command":"ls"}}\n').stdout, '');
+    assert.strictEqual(run(hook, '{"tool_name":"Bash","tool_input":{"command":"ls"}}\n').status, 0);
+    for (const raw of ['{"tool_name":"SendMessage","tool_input":{"to":"x"}}\n\n\n', '{"c":"hov send --to w x"}', '{"c":"discord-cli send 1"}', '{"d":"send"}']) {
+      assert.strictEqual(run(hook, raw).stdout, `[${raw}x]`, raw);
+    }
+    for (const esc of ['hov \\u0073end', 'hov s\\u0065nd', 'Send\\u004dessage', '\\u0053endMessage', 'S\\u0065ndMessage', 'SendMess\\u0061ge']) {
+      const raw = `{"c":"${esc}"}`;
+      assert.strictEqual(run(hook, raw).stdout, `[${raw}x]`, esc);
+    }
+    // Case matters: HOV_SEND and the tool-name test are case-sensitive, so these cannot act and are skipped.
+    assert.strictEqual(run(hook, '{"tool_name":"SENDMESSAGE","c":"HOV SEND --to w","d":"Send"}').stdout, '');
+    assert.strictEqual(run(hook, '{"p":"\\u001b[0m \\u000a \\u0009 \\u0020 \\u003a"}').stdout, '');
+    assert.strictEqual(run(hook, '{"c":"hov inbox","d":"sen d","e":"snd"}').stdout, '');
+    for (const other of ['/x/PreToolUse/peer-loop-guard.json', '/x/PostToolUse/peer-loop-guard.js', 'peer-loop-guard.js', '/x/PreToolUse/not-peer-loop-guard.js']) {
+      assert.strictEqual(run(other, '{"c":"ls"}').stdout, '[{"c":"ls"}x]', other);
+    }
+  } finally { rmTmp(base); }
+});
+
+// ---------------------------------------------------------------------------
 // Fail open (#414 items 1 and 3): a gate runs only when it can read stdin and finds its tool;
 // otherwise node starts on the untouched stdin, the command the hook ran before the launcher.
 // Every case runs under /bin/sh and under `bash --posix` (/bin/sh on Arch), and every spawn has a
@@ -769,6 +875,7 @@ function gatedArms(base) {
     ['settings-guard', [`${hooks}/PreToolUse/settings-guard.js`], '{"tool_input":{"file_path":"/a/b.js"}}\n'],
     ['codex-quota-guard', [`${hooks}/PreToolUse/codex-quota-guard.js`], ls],
     ['runner-guard', [`${hooks}/PreToolUse/runner-guard.js`], ls],
+    ['peer-loop-guard', [`${hooks}/PreToolUse/peer-loop-guard.js`], ls],
     ['auto-format', [`${hooks}/run-with-flags.js`, 'post:edit:format', 'PostToolUse/auto-format.js', 'standard,strict'], '{"tool_input":{"file_path":"/a/b.md"}}\n'],
   ];
 }

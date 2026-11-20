@@ -48,6 +48,9 @@ def read_version() -> str:
 VERSION = read_version()
 KINDS = ("note", "task", "handoff", "reply", "status")
 IMPORTANCE = ("low", "normal", "high", "urgent")
+# Mail that asks for no answer: it never wakes a session (wake_candidates) and never gets a Reply line (deliver),
+# so two sessions trading status notes have nothing prompting either to answer.
+NO_REPLY_KIND, NO_REPLY_IMPORTANCE = "status", "low"
 BODY_CAP = 4000
 AGENTS_CMD_DEFAULT = "claude agents --json"
 LOOKUP_INTERVAL_MS = 30_000
@@ -922,9 +925,12 @@ def deliver(con: sqlite3.Connection, me: Me, sid: str, event: str, rows: list[sq
             parts.append(f"subject: {sanitize(r['subject'])}")
             parts.append(sanitize(r["body"]))
             parts.append("---")
-        first = rows[0]
-        reply_to = shlex.quote(f"{shown(first['from_host'])}:{shown(first['from_name'])}")
-        parts.append(f"You are {shown(me.addr)}. Reply: {H} send --to {reply_to} --thread {shlex.quote(shown(first['thread_id']))} \"text\". Inbox: {H} inbox.")
+        first = next((r for r in rows if wants_reply(r)), None)
+        if first is None:
+            parts.append(f"You are {shown(me.addr)}. These are status or low-importance notes; no reply is expected. Inbox: {H} inbox.")
+        else:
+            reply_to = shlex.quote(f"{shown(first['from_host'])}:{shown(first['from_name'])}")
+            parts.append(f"You are {shown(me.addr)}. Reply: {H} send --to {reply_to} --thread {shlex.quote(shown(first['thread_id']))} \"text\". Inbox: {H} inbox.")
         parts.append(f"</{TAG}>")
         text = "\n".join(parts)
     log(f"deliver event={event} session={sid} me={me.addr} mode={mode} n={len(rows)} ids={','.join(r['id'] for r in rows)}")
@@ -979,8 +985,9 @@ def cmd_hook(a: argparse.Namespace) -> int:
 #
 # Bounds. A wake needs a direct message (not a broadcast, not kind `status`, not importance `low`, not the session's
 # own) that the session was neither handed nor woken for. A session is woken at most once per WAKE_COOLDOWN_MS,
-# WAKE_CAP times per hour and WAKE_DAY_CAP times per day, so two sessions that answer each other's mail with nobody
-# prompting either trade at most that many turns. One watcher per session: a newer Stop's watcher replaces the older,
+# WAKE_CAP times per hour and WAKE_DAY_CAP times per day, so two idle sessions that answer each other's mail with
+# nobody prompting either trade at most that many woken turns. Mail that lands during a busy turn is delivered by that
+# turn's own hooks with no wake and no cap, so these bounds do not cover two sessions kept busy by each other. One watcher per session: a newer Stop's watcher replaces the older,
 # the next prompt or main-thread tool call retires it (see stand_down), and a new session id in the same process
 # (/clear, /resume) retires the old id's (see retire_stale_watchers). None outside a `cli` session: under `claude -p`
 # an exit-2 Stop hook starts another turn and the run never ends. Linux only: the watcher finds its Claude Code process
@@ -1166,6 +1173,11 @@ def db_ro() -> sqlite3.Connection:
     return con
 
 
+def wants_reply(r) -> bool:
+    """False for mail that asks for no answer (NO_REPLY_KIND or NO_REPLY_IMPORTANCE)."""
+    return r["kind"] != NO_REPLY_KIND and r["importance"] != NO_REPLY_IMPORTANCE
+
+
 def wake_candidates(con: sqlite3.Connection, me: Me, sid: str) -> list[sqlite3.Row]:
     """Mail that may wake session `sid`: direct, not `status`, not `low`, not its own, and neither handed to it nor
     woken for. Every filter is in the query, so no number of other pending messages can hide one."""
@@ -1173,13 +1185,13 @@ def wake_candidates(con: sqlite3.Connection, me: Me, sid: str) -> list[sqlite3.R
     own = me.own_names()
     q = (
         f"SELECT m.id, m.from_host, m.from_name FROM messages m WHERE {where}"
-        " AND m.to_name <> '*' AND m.kind <> 'status' AND m.importance <> 'low'"
+        " AND m.to_name <> '*' AND m.kind <> ? AND m.importance <> ?"
         " AND NOT (m.from_host = ? AND m.from_name IN (" + ",".join("?" * len(own)) + "))"
         " AND NOT EXISTS (SELECT 1 FROM deliveries d WHERE d.msg_id=m.id AND d.session_id=?)"
         " AND NOT EXISTS (SELECT 1 FROM wakes w WHERE w.msg_id=m.id AND w.session_id=?)"
         " ORDER BY m.ts, m.id LIMIT 200"
     )
-    return con.execute(q, [*params, me.host, *own, sid, sid]).fetchall()
+    return con.execute(q, [*params, NO_REPLY_KIND, NO_REPLY_IMPORTANCE, me.host, *own, sid, sid]).fetchall()
 
 
 def wake_budget(con: sqlite3.Connection, sid: str, now: int) -> tuple[str, int]:

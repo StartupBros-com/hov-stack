@@ -59,7 +59,7 @@ its ask gate.
    step 1. An addressed cluster disappears; one that persists was
    mis-bucketed — escalate it from proposal to investigation.
 
-Guard denials (git-guard, runner-guard, codex-quota, and historical codex-doghouse)
+Guard denials (git-guard, runner-guard, peer-loop-guard, codex-quota, and historical codex-doghouse)
 are papercut's lane and excluded by default — `papercut rollup` already ranks them;
 `--include-papercut-covered`
 shows the merged picture when the split itself is the question.
