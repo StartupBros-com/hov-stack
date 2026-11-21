@@ -1,5 +1,5 @@
 #!/usr/bin/bash
-# sync.sh — Claude Code harness ⇄ dotfiles backup.
+# sync.sh — Claude Code harness ⇄ this repo (hov-stack): settings apply and backup.
 #
 # Canonical harness home is WSL ~/.claude (see memory: cc-two-homes-decommission).
 # This directory backs up its durable parts so a new PC (or a rebuilt one) can
