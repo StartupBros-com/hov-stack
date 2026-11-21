@@ -30,7 +30,7 @@ tags: [thinking-display, ccflare, meaningful-progress-timeout, thinking-delta, s
 
 Claude Code headless (`claude -p`) sessions default `thinking.display` to "omitted", and interactive sessions do the same unless `showThinkingSummaries` is set, so the upstream API streams `thinking_delta` frames with an empty `thinking` string during long reasoning phases. better-ccflare's SSE classifier treats an empty-text `thinking_delta` as "structural", not "meaningful" progress, so any step that thinks past the gateway's meaningful-progress deadline is aborted, retried on the next pooled account from zero, and, amplified by `CLAUDE_CODE_MAX_RETRIES=20`, can hang silently for hours with no error output.
 
-Paths under `packages/proxy/src/` and `scripts/deploy-ccflare.sh` below live in the better-ccflare repository (StartupBros/hov-router); every other path is in dotfiles.
+Paths under `packages/proxy/src/` and `scripts/deploy-ccflare.sh` below live in the better-ccflare repository (StartupBros-com/hov-router); every other path is in dotfiles.
 
 ## Symptoms
 

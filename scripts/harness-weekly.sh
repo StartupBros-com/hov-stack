@@ -619,18 +619,6 @@ for _pass_dir in "$LOGDIR/memory-dream/passes" "$LOGDIR/dream-pass"; do
     find "$_pass_dir" -mindepth 1 -maxdepth 1 -type d -mtime +90 -exec rm -rf {} + 2>/dev/null || true
   fi
 done
-# Bound the append-only ledgers. compaction-ledger.jsonl had no bound anywhere,
-# so it takes the 5MB policy the retired memory-access hook used (dotfiles#1429)
-# rather than a second one (~53KB/day measured
-# 2026-08-11, so this is prevention, not a live problem). One generation is kept:
-# a plain rename, never a delete, so a rotation cannot lose the current window.
-# Rotated .1 segments age out on the same 90-day clock as everything above.
-COMPACT_LEDGER=$LOGDIR/compaction-ledger.jsonl
-if [ -f "$COMPACT_LEDGER" ] &&
-   [ "$(stat -c%s "$COMPACT_LEDGER" 2>/dev/null || echo 0)" -gt 5242880 ]; then
-  mv -f "$COMPACT_LEDGER" "$COMPACT_LEDGER.1" 2>/dev/null || true
-fi
-find "$LOGDIR" -maxdepth 1 -name '*.jsonl.1' -mtime +90 -delete 2>/dev/null || true
 
 WARNS=$(grep -c '^WARN' "$REPORT" 2>/dev/null || true)
 SWEEPABLE=$(grep -oE 'removed:[0-9]+' "$REPORT" | head -1 | cut -d: -f2)

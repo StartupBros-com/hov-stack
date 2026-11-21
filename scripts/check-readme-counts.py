@@ -51,7 +51,7 @@ OWNER = "StartupBros-com"
 REPO_NAME = "hov-stack"
 # Public tools the README's "Related" line links to. Each is on .public-safety-repos too; a
 # private repository is never added here.
-RELATED = ("StartupBros/hov-router", "StartupBros-com/synthetic-panel")
+RELATED = ("StartupBros-com/hov-router", "StartupBros-com/synthetic-panel")
 # The public owner and the private one; the docs may name only OWNER/REPO_NAME under either.
 OWNERS = r"(?i)\b(startupbros(?:-com)?)/([A-Za-z0-9._-]+)"
 PACK = "hov-stack"
