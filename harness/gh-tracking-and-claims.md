@@ -160,7 +160,10 @@ a draft on the branch's first content push, along with the `branch.<name>.wt-*`
 git config keys wt-new.sh wrote for them. The printed body is `Closes #N`, or
 `Refs #N` under `--refs-only`. For a caller-supplied issue wt-new.sh also
 prints the closing-keyword advisory: write `Refs #N` for an umbrella issue
-that outlives the task. `--no-pr` is accepted as a no-op; `--json` always
+that outlives the task. Prose written into the body later is checked when the
+PR lands: GitHub also closes an issue after a lower-case "fix" or "closed"
+mid-sentence, so `pr-land.sh` refuses to merge while an issue GitHub lists to
+close is not on a closing line (#821). `--no-pr` is accepted as a no-op; `--json` always
 reports `pr_url: null`. `--new-issue "Title"` files a skeleton work-spec issue
 first (checked by `work-spec-check.sh`).
 
