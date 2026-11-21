@@ -116,6 +116,15 @@ failed_unit_sweep() {
   while IFS= read -r line; do
     unit=${line%% *}
     [ -n "$unit" ] || continue
+    # A transient scope (`systemd-run --scope`, a launcher's per-process group)
+    # has no unit file and a generated name, so no register can ever declare
+    # it, and the caller that started it owns its exit status. Reported, never
+    # warned: three failed checker scopes read as "nothing declares" 2026-11-20.
+    case "$unit" in
+      *.scope)
+        printf 'TRANSIENT\t%s\t%s\n' "$unit" "transient scope; the process that started it owns its exit status"
+        continue ;;
+    esac
     # A template INSTANCE (foo@bar.service) is shipped as its template
     # (foo@.service); looking up the instance name would miss the file and
     # misreport a declared unit as unowned.
@@ -778,13 +787,43 @@ _hookreg_note=
 
 echo "== 8b. History-mining and skill-update maintenance =="
 w0=$WARNS
+cass_ok="cass healthy"
 if command -v cass >/dev/null 2>&1; then
   cass_health=$(timeout 30 cass status --json 2>/dev/null || true)
+  # ROUTINE STALENESS IS NOT A FAULT. cass calls the index stale as soon as one
+  # new session lands after the last lexical checkpoint (reason "database
+  # fingerprint changed ...") or the index passes its 30 min threshold, and the
+  # daily cass-index run is what catches it up, so `.healthy` was false about
+  # 23 h a day and this warn fired on every doctor run (measured 2026-11-20).
+  # Tolerated only when everything else in cass's own healthy AND still holds
+  # (run_status: db present and openable, index present and not empty, no
+  # rebuild, no critical quarantine, no integrity warning): index.status
+  # "stale" already outranks stalled, rebuilding, missing, legacy-engine and
+  # hollow, and the reason list keeps out the four stale reasons that ARE faults
+  # (corrupt manifest, checkpoint for another DB, contract mismatch, incomplete
+  # checkpoint). 48 h covers the longest run seen (7h20m) on a 24 h cycle, and is
+  # the only guard here if the timer stops firing. An unknown reason string from
+  # a future cass warns, the safe direction.
+  cass_routine_stale='
+    .healthy != true and .health_level == "unhealthy"
+    and .index.status == "stale"
+    and (.index.reason == "database fingerprint changed since the last lexical checkpoint"
+         or .index.reason == "lexical index is older than the stale threshold")
+    and (.index.age_seconds // 1e18) < 172800
+    and .index.exists == true and .index.empty_with_messages != true
+    and .database.exists == true
+    and (.database.opened == true or .database.open_retryable == true)
+    and ((.warnings // []) | length) == 0'
   if [ -z "$cass_health" ]; then
     warn "cass status timed out or returned no JSON"
+  elif printf '%s' "$cass_health" | jq -e "$cass_routine_stale" >/dev/null 2>&1; then
+    age_h=$(printf '%s' "$cass_health" | jq -r '(.index.age_seconds / 3600) | floor' 2>/dev/null)
+    cass_ok="cass index ${age_h}h behind new sessions (routine; the daily cass-index run catches it up)"
   elif ! printf '%s' "$cass_health" | jq -e '.healthy == true' >/dev/null 2>&1; then
     level=$(printf '%s' "$cass_health" | jq -r '.health_level // "unknown"' 2>/dev/null)
-    partial=$(printf '%s' "$cass_health" | jq -r '.index.partial // false' 2>/dev/null)
+    istatus=$(printf '%s' "$cass_health" | jq -r '.index.status // "unknown"' 2>/dev/null)
+    ireason=$(printf '%s' "$cass_health" | jq -r '.index.reason // "none given"' 2>/dev/null)
+    age_h=$(printf '%s' "$cass_health" | jq -r 'if .index.age_seconds then (.index.age_seconds / 3600 | floor | tostring) + "h" else "unknown" end' 2>/dev/null)
     # Backticks stay ESCAPED here. Unescaped inside "..." bash command-substitutes
     # them, so this advisory RAN `cass status --json` and `cass index --full`
     # instead of quoting them: a read-only doctor silently launching a 20+ minute
@@ -792,7 +831,7 @@ if command -v cass >/dev/null 2>&1; then
     # cass is ALREADY unhealthy. Observed 2026-08-11 — a doctor run wedged for
     # 23+ minutes on a `cass index --full` child, and the operator's warn text
     # would have carried those commands' OUTPUT rather than their names.
-    warn "cass index unhealthy (level=$level partial=$partial) — inspect \`cass status --json\`; repair interrupted full builds with \`cass index --full\`"
+    warn "cass index unhealthy (level=$level index=$istatus age=$age_h: $ireason) — inspect \`cass status --json\` and \`systemctl --user status cass-index.service\`; rebuild a damaged index with a detached \`scripts/cass-index-rebuild.sh\`"
   fi
   # Independent of .healthy, on purpose. cass's run_status/run_health EXCLUDE
   # index.partial and index.hollow from their aggregate, so a checkpoint-
@@ -830,7 +869,7 @@ if command -v systemctl >/dev/null 2>&1; then
     *) warn "jsm-auto-update.service last Result='$jsm_result' — inspect journalctl --user -u jsm-auto-update.service" ;;
   esac
 fi
-[ "$WARNS" -eq "$w0" ] && ok "cass healthy + jsm auto-update timer green"
+[ "$WARNS" -eq "$w0" ] && ok "$cass_ok + jsm auto-update timer green"
 
 echo "== 8c. Live hooks/scripts resolve through a default-branch checkout (parked = unmerged code live) =="
 # PR #419 incident (2026-08-21, issue #424): an agent worked directly in the
@@ -2035,10 +2074,15 @@ if [ -f "$CP_HOOK" ]; then
       warn "compact-preserve: stdout->instructions contract string ABSENT from $CP_REAL — hook may be a silent no-op; re-run the marker test"
     CP_VERIFIED=$(grep -oE 'verified-at[^0-9]*[0-9]+\.[0-9]+\.[0-9]+' "$CP_HOOK" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
     CP_LIVE=$("$CP_BIN" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+    # Major.minor, not the exact patch. Claude Code ships a patch most days, so
+    # an exact compare asked for the manual marker test near-daily (2.1.329 vs
+    # 2.1.328 on 2026-11-20), while the contract-string grep above already runs
+    # against every patch. The hook header asks for the marker test after
+    # major CC bumps; this fires when the minor moves.
     if [ -z "$CP_VERIFIED" ]; then
       warn "compact-preserve: no verified-at stamp in hook header"
-    elif [ -n "$CP_LIVE" ] && [ "$CP_VERIFIED" != "$CP_LIVE" ]; then
-      warn "compact-preserve: CC $CP_LIVE != verified-at $CP_VERIFIED — re-run the marker test, update the stamp"
+    elif [ -n "$CP_LIVE" ] && [ "${CP_VERIFIED%.*}" != "${CP_LIVE%.*}" ]; then
+      warn "compact-preserve: CC $CP_LIVE is past the ${CP_VERIFIED%.*} line verified-at $CP_VERIFIED covers — re-run the marker test, update the stamp"
     fi
   else
     warn "compact-preserve canary: no claude binary on PATH"
@@ -2046,89 +2090,9 @@ if [ -f "$CP_HOOK" ]; then
 fi
 [ "$WARNS" -eq "$w0" ] && ok "compact-preserve contract verified against installed binary"
 
-echo "== 25. compact-preserve EFFECT (compaction ledger) =="
-# Check 24 proves the contract STRING is still present in the binary. It cannot
-# prove the steering still WORKS: the documented failure mode of an undocumented
-# contract is a silently ignored instruction, which leaves check 24 green. This
-# check reads the outcome instead — the same "count outcomes, not intentions"
-# rule the ast-grep outage (43 sessions failed, 0 reported) forced into doctrine.
-#
-# The threshold keys on file_line because it is the ONLY fingerprint measured to
-# move: 33.3% [30.0,36.8] across 726 UNSTEERED summaries vs 74.9% [68.1,80.6]
-# across 183 STEERED (snapshot 2026-08-11T22:10Z, session transcripts, split at
-# f268f93; z=+10.2). A sustained drop back toward the unsteered baseline means
-# the instruction is no longer landing. The other five either sit at 94-99%
-# BEFORE any steering or move inside noise, so they would stay green through a
-# total steering failure — reported for context, never gated on.
-#
-# 50%, not 60%: it must clear the unsteered CI ceiling (36.8%) with room, and
-# sit well under the steered CI floor (68.1%) so ordinary variation does not
-# cry wolf. file_line is volatile day to day (two pre-hook days reached 75-81%
-# unsteered), and a nag that fires on a quiet week trains the operator to
-# ignore it. The n>=20 floor and the 14-day pooling window are the other half
-# of that defence.
-w0=$WARNS
-CLEDGER="$HOME/.claude/logs/compaction-ledger.jsonl"
-if [ ! -f "$CLEDGER" ]; then
-  ok "compaction ledger absent (PostCompact counter not yet active — skipped)"
-elif ! command -v python3 >/dev/null 2>&1; then
-  ok "compaction ledger present (no python3 to summarize — skipped)"
-else
-  CLEDGER_OUT=$(python3 - "$CLEDGER" <<'PY'
-import json, sys, datetime
-
-path = sys.argv[1]
-# Rows predating the fp field were written under v1 regexes; averaging them with
-# v2 rows would silently blend two different definitions of the same name.
-cutoff = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=14)).isoformat()
-rows = []
-for line in open(path, errors="replace"):
-    line = line.strip()
-    if not line:
-        continue
-    try:
-        row = json.loads(line)
-    except ValueError:
-        continue
-    if str(row.get("ts", "")) >= cutoff:
-        rows.append(row)
-
-if not rows:
-    print("SKIP no ledger rows in the last 14 days")
-    raise SystemExit(0)
-
-v2 = [r for r in rows if r.get("fp") == 2]
-keys = ["file_line", "verification_ledger", "user_directive",
-        "work_ref", "branch_or_worktree", "next_action"]
-scope = v2 or rows
-rate = {k: 100.0 * sum(1 for r in scope if r.get(k)) / len(scope) for k in keys}
-summary = " ".join(f"{k}={rate[k]:.0f}%" for k in keys if k in scope[0] or rate[k])
-print(f"INFO n={len(scope)} (v2={len(v2)}/{len(rows)}) {summary}")
-
-# Gate only on the discriminating fingerprint, and only with enough rows for the
-# rate to mean anything. See the threshold rationale in this check's header.
-if len(scope) >= 20 and rate["file_line"] < 50.0:
-    projects = len({r.get("cwd") for r in scope if r.get("cwd")})
-    print(f"WARN file_line at {rate['file_line']:.0f}% over {len(scope)} compactions "
-          f"across {projects or 'unknown'} project(s) (steered baseline 75%, "
-          f"unsteered 33%) — PreCompact steering may have stopped landing; re-run "
-          f"the marker test in check 24's header. CHECK TASK MIX FIRST: file_line "
-          f"is a property of the WORK, not just the hook — a window dominated by "
-          f"discussion/ideation or non-repo batch sessions scores low with the hook "
-          f"working perfectly (measured: 59 non-coding sessions dropped it to 1.7%)")
-PY
-) || CLEDGER_OUT="WARN ledger unreadable"
-  while IFS= read -r cl; do
-    case "$cl" in
-      WARN*) warn "compaction ledger: ${cl#WARN }" ;;
-      INFO*|SKIP*) ok "compaction ledger: ${cl#* }" ;;
-    esac
-  done <<EOF
-$CLEDGER_OUT
-EOF
-fi
-[ "$WARNS" -eq "$w0" ] && ok "compaction steering effect within measured bounds"
-
+# Check 25 (the compaction-ledger effect rate) was retired 2026-11-20. Its writer,
+# the PostCompact counter, was retired 2026-10-18 (dotfiles#1913), and the
+# check had read an absent ledger and printed "skipped" ever since.
 # Check 26 (the hand-back metric) was retired 2026-11-03 with the shadow-only
 # hand-back gate it measured.
 
@@ -2208,6 +2172,8 @@ else
           warn "failed unit: $_fus_unit — $_fus_detail; inspect journalctl --user -u $_fus_unit" ;;
         EXPECTED_FINDING)
           ok "failed by design: $_fus_unit — $_fus_detail" ;;
+        TRANSIENT)
+          ok "failed transient scope: $_fus_unit — $_fus_detail; clear with systemctl --user reset-failed $_fus_unit" ;;
       esac
     done <<EOF
 $_fus_out

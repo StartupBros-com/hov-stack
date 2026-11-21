@@ -181,6 +181,28 @@ out29=$(run29 "$TMP/overlay29")
 case "$out29" in *"cannot read the unit register"*) ok ;;
   *) bad "a missing lib/foreign-units.sh did not fail closed: $out29" ;; esac
 
+# ---- 10: a failed transient scope is reported, never warned; a service is not
+# A `systemd-run --scope` group has a generated name no register can hold, so it
+# classifies TRANSIENT, and section 29 reports it in an ok line. The planted
+# negative is the same box carrying an unowned SERVICE: the scope rule must not
+# swallow it (case 5 again, beside a scope), so the sweep still names it.
+# Measured planted negative: delete the *.scope case from failed_unit_sweep and
+# 10a and 10c fail (19 -> 17/19); 10b and 10d hold either way, by design.
+stub_systemctl 0 run-p123-i456.scope mystery.service
+[ "$(class_of run-p123-i456.scope)" = TRANSIENT ] && ok \
+  || bad "10a: a failed transient scope classified as $(class_of run-p123-i456.scope), not TRANSIENT"
+[ "$(class_of mystery.service)" = UNOWNED ] && ok \
+  || bad "10b: an unowned service beside a scope classified as $(class_of mystery.service) — the scope rule swallowed it"
+# Restore the helper the case-9 fail-closed probe removed, then run section 29.
+ln -sf "$REPO/lib/foreign-units.sh" "$ROOT29/lib/foreign-units.sh"
+out29=$(run29 "$TMP/overlay29")
+case "$out29" in *"WARN: failed unit nothing declares: run-p123-i456.scope"*)
+  bad "10c: section 29 warned about a transient scope: $out29" ;;
+  *"  ok: failed transient scope: run-p123-i456.scope"*) ok ;;
+  *) bad "10c: section 29 did not report the transient scope in an ok line: $out29" ;; esac
+case "$out29" in *"WARN: failed unit nothing declares: mystery.service"*) ok ;;
+  *) bad "10d: section 29 stopped warning about an unowned service beside a scope: $out29" ;; esac
+
 if [ "$fail" -eq 0 ]; then
   echo "ok — failed-unit sweep: $pass/$((pass + fail)) assertions passed"
 else
