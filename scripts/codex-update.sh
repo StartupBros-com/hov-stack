@@ -133,10 +133,26 @@ trap 'rm -rf "$WORK"' EXIT
 
 # The layout and exception form above are pnpm 11's. pnpm 10 still sits in
 # ~/.local/share/pnpm, and a PATH that puts it first would run every step wrong.
-PNPM_VERSION=$(cd "$WORK" && timeout 60 "$PNPM" --version 2>/dev/null | tail -n 1)
+#
+# The probe goes through mise's shim and corepack, and has answered nothing (7 pages in
+# 4 days, 2026-11-18..21, with pnpm 11.28.12 installed). No answer is not a wrong version:
+# retry once, keep the probe's stderr, and say which of the two it was.
+PROBE_ERR=$WORK/pnpm-version.err
+probe_pnpm() {
+  PNPM_VERSION=$(cd "$WORK" && timeout 60 "$PNPM" --version 2>"$PROBE_ERR" | tail -n 1)
+}
+probe_pnpm
+if [ -z "$PNPM_VERSION" ]; then
+  sleep "${CODEX_UPDATE_PROBE_RETRY_DELAY:-3}"
+  probe_pnpm
+fi
+if [ -z "$PNPM_VERSION" ]; then
+  echo "codex-update: $PNPM --version gave no answer twice (timeout or empty), so pnpm 11 is unchecked: $(head -c 400 "$PROBE_ERR" | tr '\n' ' ')"
+  exit 1
+fi
 case "$PNPM_VERSION" in
   11.*) ;;
-  *) echo "codex-update: needs pnpm 11; $PNPM reports '${PNPM_VERSION:-nothing}'"; exit 1 ;;
+  *) echo "codex-update: needs pnpm 11; $PNPM reports '$PNPM_VERSION'"; exit 1 ;;
 esac
 
 # The one exact cooldown exception a pnpm_g call carries, set per call:
