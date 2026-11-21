@@ -124,7 +124,7 @@ There is a second cost that compounds. Those anchors encoded a real invariant th
   the trigger and the sweep discipline differ — that doc is about auditing an
   assertion's failure condition, this one is about a coupling that a rename
   breaks from outside the test. If a third instance turns up, the two are a
-  consolidation candidate for `ce-compound-refresh`.
+  consolidation candidate for `/ce-compound` refresh mode.
 - [verify-a-pagination-sentinel-is-not-a-corpus-count-before-diagnosing](verify-a-pagination-sentinel-is-not-a-corpus-count-before-diagnosing.md) —
   a structural cousin in a different domain: diagnose the instrument before
   trusting its output. There a pagination sentinel was read as a corpus count;
