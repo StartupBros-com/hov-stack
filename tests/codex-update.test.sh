@@ -33,7 +33,13 @@ cat >"$TMP/stub/pnpm" <<'FAKE'
 # Fake pnpm 11: global add/root/bin/ls against --config.global-dir/--config.global-bin-dir.
 F=${FAKE_DIR:?}
 # FAKE_PNPM_VERSION set but empty: a pnpm that prints no version.
-[ "${1:-}" = --version ] && { echo "${FAKE_PNPM_VERSION-11.10.0}"; exit 0; }
+# FAKE_PNPM_EMPTY_FIRST=1: the first --version prints nothing (one stderr line), later ones answer.
+if [ "${1:-}" = --version ]; then
+  if [ -n "${FAKE_PNPM_EMPTY_FIRST:-}" ] && [ ! -e "$F/probed" ]; then
+    : >"$F/probed"; echo "fake pnpm: shim hiccup" >&2; exit 0
+  fi
+  echo "${FAKE_PNPM_VERSION-11.10.0}"; exit 0
+fi
 gdir="" bdir="" offline=0 spec=""
 for a in "$@"; do
   case "$a" in
@@ -604,9 +610,15 @@ new_case 29; reg_latest 0.157.1; reg_publish 0.157.1
 out=$(FAKE_PNPM_VERSION=10.33.2 run); rc=$?
 [ "$rc" -eq 1 ] && has "$out" "needs pnpm 11" && has "$out" "'10.33.2'" && [ ! -s "$C/fake/log" ] && ok \
   || bad "29: pnpm 10 was not refused up front ($rc): $out"
-out=$(FAKE_PNPM_VERSION='' run); rc=$?
-[ "$rc" -eq 1 ] && has "$out" "reports 'nothing'" && [ ! -s "$C/fake/log" ] && ok \
-  || bad "29: a pnpm with no version was not refused ($rc): $out"
+out=$(FAKE_PNPM_VERSION='' CODEX_UPDATE_PROBE_RETRY_DELAY=0 run); rc=$?
+[ "$rc" -eq 1 ] && has "$out" "gave no answer twice" && ! has "$out" "needs pnpm 11" && [ ! -s "$C/fake/log" ] && ok \
+  || bad "29: a pnpm with no version was not refused as no-answer ($rc): $out"
+# An empty first answer retries and, when the second is pnpm 11, the run goes on.
+rm -f "$C/fake/probed"
+out=$(DRY=1 FAKE_PNPM_EMPTY_FIRST=1 CODEX_UPDATE_PROBE_RETRY_DELAY=0 run); rc=$?
+! has "$out" "needs pnpm 11" && ! has "$out" "gave no answer" && [ -e "$C/fake/probed" ] && ok \
+  || bad "29: an empty first probe was not retried to a pass ($rc): $out"
+# A real pnpm 11 passes the probe (case 1 and the rest run on the default 11.10.0).
 [ "$(live_ver)" = "codex-cli 0.156.0" ] && ok || bad "29: live install changed under a refused pnpm"
 
 # ── 30. a copy retained under pnpm 10 still rolls back, online, with its exclude converted ─
