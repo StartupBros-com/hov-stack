@@ -70,7 +70,9 @@ Rules that apply to every row:
   code-mode gate every code call. Claude Code's Firecrawl MCP was retired on
   2026-09-13 (#1178), so no ungated Firecrawl tool surface remains in sessions.
 - **Budget and code consent:** the session credit budget refuses with exit 3;
-  use `--raise-budget <credits> --reason "<reason>"` for a bounded raise.
+  use `--raise-budget <credits> --reason "<reason>"` for a bounded raise. With
+  Firecrawl Local installed, a refused bare `fetch` returns the page's
+  markdown instead (exit 0, a `local: summary not run` note).
   Code mode requires `--allow-code-exec --reason "<reason>"` on each call,
   otherwise exit 5. Flags, costs, and ledger details:
   `harness/data-source-clis.md` → "firecrawl-cli".

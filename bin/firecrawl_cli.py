@@ -568,18 +568,22 @@ class Budget:
                     next_action = (
                         f"rerun keyless, which spends no account credits: {keyless_rerun}; or {next_action}"
                     )
-                raise CliError(
+                error = CliError(
                     f"vendor balance refused: Firecrawl account has {self.remaining:g} credits; "
                     f"pending reservations {pending:g}; reservation {amount:g}; floor {floor:g}; "
                     "a session --raise-budget cannot lift the account balance",
                     next_action, 3,
                 )
+                error.refusal = "account_floor"
+                raise error
             if remaining < amount:
-                raise CliError(
+                error = CliError(
                     f"session budget refused: {remaining:g} credits remaining; reservation {amount:g}; "
                     f"vendor credits remaining {self.remaining}; floor {self.constants['floor']:g}; use --raise-budget <n> --reason <text>",
                     "firecrawl-cli budget --raise-budget <n> --reason <text> --json", 3,
                 )
+                error.refusal = "session_budget"
+                raise error
             key = uuid.uuid4().hex
             host["reservations"][key] = {
                 "amount": amount, "created": time.time(), "state": "active",
@@ -1133,7 +1137,8 @@ def local_invoke(args, command):
 
 def budgeted_invoke(args, surface, command):
     """Firecrawl Local first for an eligible fetch (#807), then the cloud ladder,
-    carrying the local tier's fall-through note either way."""
+    carrying the local tier's fall-through note either way. A summary the budget
+    refuses comes back as the page's markdown from Firecrawl Local when it can."""
     local_notes = []
     if local_ready(args, surface, command):
         payload, local_notes = local_invoke(args, command)
@@ -1144,8 +1149,56 @@ def budgeted_invoke(args, surface, command):
     except CliError as exc:
         if local_notes:
             exc.degraded = [*local_notes, *(exc.degraded or [])]
+        rescued = summary_rescue(args, surface, command, exc)
+        if rescued is not None:
+            return rescued
         raise
     return payload, [*local_notes, *notes]
+
+
+# reserve's two refusals, raised before anything is spent. Firecrawl Local writes no
+# summary, but the page itself is what a refused bare fetch was after.
+RESCUED_REFUSALS = frozenset({"account_floor", "session_budget"})
+
+
+def summary_rescue(args, surface, command, exc):
+    """(payload, notes) with markdown in place of the summary when exc is a budget
+    refusal and Firecrawl Local serves the page; None leaves exc to be raised, with
+    a note added when Firecrawl Local was tried and could not serve it."""
+    options = command[2:]
+    if getattr(exc, "refusal", None) not in RESCUED_REFUSALS or "--format" not in options:
+        return None
+    at = 2 + options.index("--format") + 1
+    formats = command[at].split(",")
+    if "summary" not in formats:
+        return None
+    swapped = dict.fromkeys("markdown" if name == "summary" else name for name in formats)
+    local_command = [*command[:at], ",".join(swapped), *command[at + 1:]]
+    if not local_ready(args, surface, local_command):
+        return None
+    try:
+        payload, notes = local_invoke(args, local_command)
+    except CliError as error:
+        payload, notes = None, [str(error).splitlines()[0]]
+    if payload is None:
+        if notes:
+            # Fall-through notes end "; ran on Firecrawl", which is not what happens here.
+            reason = "; ".join(
+                note.removeprefix(LOCAL_PREFIX).removesuffix("; ran on Firecrawl") for note in notes
+            )
+            exc.degraded = [
+                *(exc.degraded or []), f"{LOCAL_PREFIX}could not return the page instead: {reason}"
+            ]
+        return None
+    refused = str(exc).splitlines()[0]
+    return payload, [
+        *(exc.degraded or []),
+        (
+            f"{LOCAL_PREFIX}summary not run ({refused}); returned the page's markdown in its "
+            f"place; for the summary: {exc.next_action}"
+        ),
+        *notes,
+    ]
 
 
 def cloud_invoke(args, surface, command):
@@ -1749,7 +1802,9 @@ def build_parser():
                 "to markdown, html, rawHtml or links (--full) with no schema or "
                 "question runs on this machine first and spends nothing; a private "
                 "target is refused, never sent to the cloud; --cloud skips it and "
-                "FIRECRAWL_CLI_LOCAL=0 turns it off."
+                "FIRECRAWL_CLI_LOCAL=0 turns it off. When the session budget or the "
+                "account floor refuses a summary, the page's markdown comes back from "
+                "it instead."
                 if name == "fetch" else ""
             )
         )

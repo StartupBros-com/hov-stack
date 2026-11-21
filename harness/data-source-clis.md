@@ -197,7 +197,14 @@ exit dictionary; it makes no vendor request.
   credits, no reservation, and a `degraded` note `local: served by Firecrawl
   Local 0.1.1 (<engine>); no credits spent` (plain output stays bare). The
   default `fetch` asks for a server-side summary, which only the cloud makes,
-  so it never runs locally. The scraper runs with `--public-only`, `-c 1` and
+  so it runs on the cloud. When the session budget or the account floor
+  refuses that summary (both refuse before any spend), the wrapper asks the
+  tier for the page's `markdown` in its place: exit 0, a first note `local:
+  summary not run (<refusal>); returned the page's markdown in its place; for
+  the summary: <remedy>`, and the body bounded like any fetch without
+  `--full`. Every other summary failure, `--cloud`, and a page the tier cannot
+  serve keep the refusal as it was, the last with a `local: could not return
+  the page instead: <why>` note. The scraper runs with `--public-only`, `-c 1` and
   an environment built from nothing (`PATH`, a scratch `HOME`/`TMPDIR`/
   `FIRECRAWL_LOCAL_HOME`, `FIRECRAWL_CLOUD=off`): no key, API URL or proxy
   variable reaches it. A private, loopback or metadata target is refused (exit
@@ -235,8 +242,11 @@ exit dictionary; it makes no vendor request.
   binary reporting another version is skipped with a note on every call, and
   `harness-doctor` check 32 warns. `firecrawl-cli capabilities --json` reports
   the tier under `local`. Out of scope: `map` (Firecrawl Local's `map` has no
-  `--public-only`), `crawl`, `serve`, `mcp`, `init`, `login`. Re-run the vet's
-  fixture, egress check and SSRF table before moving the pin
+  `--public-only`), `crawl`, `serve`, `mcp`, `init`, `login`. Before moving
+  the pin, run `FIRECRAWL_LOCAL_LIVE_TEST=1 bash
+  tests/firecrawl-local-live.test.sh` (zero cloud connections, the browser
+  and redirect guard, peak memory) and redo the vet's 39-page coverage
+  comparison by hand, the one check with no committed runner
   (`docs/vets/2026-11-19-firecrawl-local-harness-vet.md`).
 - **API URL and redaction (hov-stack #805):** every verb honors
   `FIRECRAWL_API_URL` only over https or plain http to a loopback host, with no
@@ -1244,17 +1254,18 @@ Rules that bite on the first call:
   preset (the ADMIN scope), all models, no expiry. Rotation is dashboard-only
   (fal.ai/dashboard/keys): mint the new key, replace the bws value, delete
   the old key there.
-- Firecrawl has TWO live credentials and neither is in bws yet:
-  `FIRECRAWL_API_KEY` in `~/.secrets` (the official `firecrawl` CLI reads it
-  from the environment; `firecrawl --status` prints the auth source,
-  concurrency, and remaining credits without the key), and a second key
-  embedded in the hosted MCP URL inside `~/.claude.json`, which the
-  2026-09-04 vet found differs from the `~/.secrets` one and which is never
-  copied into dotfiles. `~/.secrets` uses `export`-style lines, so a
-  line-anchored `^FIRECRAWL_API_KEY=` grep reads the present key as absent —
-  the same false negative that once made a working DataForSEO pair look
-  dead. bws consolidation of the CLI-side key is open (ideation 2026-09-04,
-  idea 1); the MCP-URL key stays where it is by design.
+- Firecrawl has one live credential, `FIRECRAWL_API_KEY` in `~/.secrets`, not
+  in bws (the official `firecrawl` CLI reads it from the environment;
+  `firecrawl --status` prints the auth source, concurrency, and remaining
+  credits without the key). The second key the 2026-09-04 vet found, embedded
+  in the retired hosted MCP URL, is no longer in `~/.claude.json`; if the
+  Firecrawl dashboard still lists it, revoke it there. `~/.secrets` uses
+  `export`-style lines, so a line-anchored `^FIRECRAWL_API_KEY=` grep reads
+  the present key as absent — the same false negative that once made a
+  working DataForSEO pair look dead. `firecrawl-cli` reads the key from its
+  environment only, and its keyless and Firecrawl Local legs branch on that,
+  so moving the key into bws (the 2026-09-04 ideation's idea 1) is not
+  planned: nothing has failed for want of it.
 
 ### GCP: use the headless service account, never ask for a login
 
