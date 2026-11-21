@@ -116,7 +116,7 @@ UNCHARGED_REASONS = frozenset(("refunded-unsubmitted", "pre-dispatch"))
 DEFAULT_REPOS = (
     "StartupBros-com/hov-stack",
     "acme-org/trading-app",
-    "StartupBros/hov-router",
+    "StartupBros-com/hov-router",
     "StartupBros-com/pro-gate",
     "acme-org/announce-bot",
 )
