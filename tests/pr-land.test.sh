@@ -54,6 +54,9 @@ case "$*" in
     n=$(count checks); f="$FIX/checks.json"; [ -f "$FIX/checks.$n.json" ] && f="$FIX/checks.$n.json"
     h=$(head_now); [ "${STUB_HEAD_MOVED:-0}" = 0 ] || h=$H2
     jq --arg h "$h" '.headRefOid = $h' "$f" >"$FIX/checks.now.json"; serve "$FIX/checks.now.json" ;;
+  "pr view 7 --repo $R --json body,closingIssuesReferences")
+    [ "${STUB_CLOSES_FAIL:-0}" = 0 ] || { echo 'gh: Bad Gateway (HTTP 502)' >&2; exit 1; }
+    n=$(count closes); f="$FIX/closes.json"; [ -f "$FIX/closes.$n.json" ] && f="$FIX/closes.$n.json"; serve "$f" ;;
   "api repos/$R/actions/runs?head_sha="*"&per_page=100")
     n=$(count runs); f="$FIX/runs.json"; [ -f "$FIX/runs.$n.json" ] && f="$FIX/runs.$n.json"; serve "$f" ;;
   "pr merge 7 --repo $R --squash --match-head-commit "*)
@@ -138,7 +141,7 @@ green() {
 reset_case() {
   rm -rf "$FIX"; mkdir -p "$FIX"; : >"$GH_LOG"; : >"$GIT_LOG"; : >"$WT_LOG"
   unset STUB_CLASSIC STUB_HEAD_MOVED STUB_MERGE_RC STUB_MERGE_LANDED STUB_MERGE_STATE STUB_QUEUE_READS STUB_QUEUE_THEN
-  unset STUB_GIT_BRANCH STUB_GIT_TIP STUB_GIT_FF_RC STUB_WTDONE_RC CLAUDE_LOOP_GUARD
+  unset STUB_GIT_BRANCH STUB_GIT_TIP STUB_GIT_FF_RC STUB_WTDONE_RC STUB_CLOSES_FAIL CLAUDE_LOOP_GUARD
   export PR_LAND_POLL_SECONDS=0 PR_LAND_WT_DONE="$TMP/bin/wt-done" PRO_GATE_ROUNDS_DIR="$FIX/rounds"
   mkdir -p "$FIX/rounds"
   echo "$H" >"$FIX/head"
@@ -149,7 +152,17 @@ reset_case() {
     required_status_checks: [{context: "Trusted syntax and policy"}, {context: "Pinned sources"}]}}]' >"$FIX/rules.json"
   green >"$FIX/checks.json"
   runs_done >"$FIX/runs.json"
+  closes 'Adds a guard.' >"$FIX/closes.json"
 }
+closes() {   # body [owner/name#N ...]: the PR body, and each issue GitHub lists as closing
+  local body=$1; shift
+  printf '%s\n' "$@" | jq -R -s --arg b "$body" '{body: $b, closingIssuesReferences: [split("\n")[]
+    | select(length > 0) | capture("^(?<o>[^/]+)/(?<n>[^#]+)#(?<k>[0-9]+)$")
+    | {number: (.k | tonumber), repository: {name: .n, owner: {login: .o}},
+       url: "https://github.com/\(.o)/\(.n)/issues/\(.k)"}]}'
+}
+# The first body line of #821's first incident, with the other repo renamed.
+PROSE_1382='Adds step 8 to the return path. This is the fix example-org/widgets#1459 asks for now that ai-bench is parked.'
 run() { OUT=$(PATH="$TMP/bin" bash "$SCRIPT" "$@" 2>"$TMP/err"); RC=$?; ERR=$(cat "$TMP/err"); }
 merges() { grep -c -F -- 'pr merge' "$GH_LOG" || true; }
 merges_at() { grep -c -F -- "--match-head-commit $1" "$GH_LOG" || true; }
@@ -294,6 +307,34 @@ run 7 --repo "$R" --pro-fixed
 landed 'Pro P1 fixed and pushed, --pro-fixed'
 check '--pro-fixed: verdict says not a Pro pass' has "$OUT" 'not a Pro pass'
 
+# Closing references (#821): read right before the merge, printed, and passed only when a
+# body line starting with a closing keyword names each one.
+read_before_merge() { [[ "$(grep -B1 -F -- 'pr merge' "$GH_LOG" | head -1)" == *body,closingIssuesReferences* ]]; }
+reset_case; closes $'Adds a guard.\n\nCloses #12' "$R#12" >"$FIX/closes.json"
+run 7 --repo "$R"
+landed 'Closes #12 on its own line'
+check 'Closes #12: prints what the merge closes' has "$ERR" "will close: $R#12"
+check 'Closes #12: read right before the merge' read_before_merge
+reset_case; closes 'closes example-org/widgets#1459' 'example-org/widgets#1459' >"$FIX/closes.json"
+run 7 --repo "$R"
+landed 'explicit cross-repo closing line, lower-case keyword'
+reset_case
+closes $'Summary.\n\n- Fixes https://github.com/example-org/widgets/issues/1459\n2. Resolves: #12' \
+  'example-org/widgets#1459' "$R#12" >"$FIX/closes.json"
+run 7 --repo "$R"
+landed 'list-marker lines, an issues URL and a colon'
+# Deliberate closes written mid-line, as merged PRs in the fleet write them (#821).
+reset_case; closes $'Operator go 2026-11-15. Closes #12.\n\n## papercut: no false failure (Closes #13)' "$R#12" "$R#13" >"$FIX/closes.json"
+run 7 --repo "$R"
+landed 'capitalized Closes mid-line, after a sentence and in a heading'
+reset_case; closes $'Resolves #12, resolves example-org/widgets#1459' "$R#12" 'example-org/widgets#1459' >"$FIX/closes.json"
+run 7 --repo "$R"
+landed 'one closing line, two keywords'
+reset_case; closes "$PROSE_1382" 'example-org/widgets#1459' >"$FIX/closes.json"
+run 7 --repo "$R" --allow-prose-closes
+landed 'prose close with --allow-prose-closes'
+check '--allow-prose-closes: says it closed anyway' has "$ERR" 'example-org/widgets#1459 though no closing-keyword line names it'
+
 # --- Planted negatives: no merge call in any of them.
 reset_case
 { check_run 'Trusted syntax and policy' COMPLETED SUCCESS; check_run 'Pinned sources' COMPLETED SUCCESS
@@ -367,6 +408,33 @@ reset_case
 run 7 --repo "$R" --wait soon
 check 'usage error: exit 64' test "$RC" -eq 64
 check 'usage error: no gh calls' test "$(gh_calls)" = 0
+reset_case; closes "$PROSE_1382" 'example-org/widgets#1459' >"$FIX/closes.json"
+refused 'prose close (#821, first incident)' 1 'would close example-org/widgets#1459, which' 7 --repo "$R"
+check 'prose close: names the override' has "$OUT" '--allow-prose-closes'
+reset_case; closes $'Outcome.\n\nStill not closed: #439, #63 item 1, and the rest.' "$R#439" "$R#63" >"$FIX/closes.json"
+refused 'closing word mid-sentence (#821, second incident)' 1 "would close $R#439, $R#63, which" 7 --repo "$R"
+reset_case; closes 'Closes #1459' 'example-org/widgets#1459' >"$FIX/closes.json"
+refused 'same number, other repo' 1 'would close example-org/widgets#1459, which' 7 --repo "$R"
+# Accidental closes written as merged PRs in the fleet wrote them (#821).
+reset_case; closes $'Refs #12\n\n- After the deploy I will close #12 by hand.' "$R#12" >"$FIX/closes.json"
+refused 'lower-case close mid-sentence beside a Refs line' 1 "would close $R#12, which" 7 --repo "$R"
+reset_case; closes 'Fixes the timeout; the fix example-org/widgets#1459 asked for comes later.' 'example-org/widgets#1459' >"$FIX/closes.json"
+refused 'line starts with Fixes but no reference follows it' 1 'would close example-org/widgets#1459, which' 7 --repo "$R"
+reset_case
+closes $'Closes #12\n\nand the fix example-org/widgets#1459 wants' "$R#12" 'example-org/widgets#1459' >"$FIX/closes.json"
+refused 'one named, one in prose' 1 'would close example-org/widgets#1459, which' 7 --repo "$R"
+check 'one named, one in prose: names only the prose one' bash -c '[[ "$1" != *"hov-stack#12"* ]]' _ "$OUT"
+reset_case; export STUB_CLOSES_FAIL=1
+refused 'closing issues unreadable' 2 'closing issues unreadable' 7 --repo "$R"
+# The body is re-read before every merge attempt: here it gains a prose close between the
+# first attempt (refused as behind) and the second.
+reset_case; touch "$FIX/behind"; closes "$PROSE_1382" 'example-org/widgets#1459' >"$FIX/closes.2.json"
+run 7 --repo "$R"
+check 'prose added before the second attempt: exit 1' test "$RC" -eq 1
+check 'prose added before the second attempt: refused on the re-read' has "$OUT" 'would close example-org/widgets#1459'
+check 'prose added before the second attempt: new head never merged' test "$(merges_at "$H2")" = 0
+check 'prose added before the second attempt: one read per attempt' test "$(reads closes)" = 2
+
 reset_case; export STUB_MERGE_RC=1 STUB_MERGE_STATE=BLOCKED
 run 7 --repo "$R"
 check 'GitHub refused the merge: exit 1' test "$RC" -eq 1

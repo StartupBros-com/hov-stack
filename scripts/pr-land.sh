@@ -32,8 +32,17 @@
 # It also refuses under CLAUDE_LOOP_GUARD=1: loop-guard fences `gh pr merge` by its command
 # text, which it cannot see inside this script.
 #
+# Right before each merge attempt it reads the PR body and the issues GitHub will close
+# (closingIssuesReferences), prints them, and refuses when one of them is not named on a
+# closing line: a body line that starts with close, fix or resolve (or a variant, in any case,
+# after an optional list marker) followed by a reference, or that has a capitalized Closes,
+# Fixes or Resolves right before one ("Operator go. Closes #12."). GitHub also reads the
+# lower-case words mid-sentence: "the fix owner/repo#N asks for" and "still not closed: #439"
+# each closed an issue nobody meant to close (#821). A failed read refuses too.
+#
 # Usage: pr-land.sh [<pr>] [--repo OWNER/NAME] [--pro] [--pro-fixed] [--wait SECONDS]
 #                   [--queue-wait SECONDS] [--updates N] [--no-closeout] [--allow-no-checks]
+#                   [--allow-prose-closes]
 #   <pr>               PR number (default: the open, else merged, PR of the current branch)
 #   --repo             default: the current checkout's GitHub repo
 #   --pro              a Pro round is due for a reason the paths cannot show
@@ -43,6 +52,8 @@
 #   --updates N        branch updates allowed when the base requires up-to-date branches (default 2)
 #   --no-closeout      do not run wt-done after the merge
 #   --allow-no-checks  merge even when no check reports and the base requires none
+#   --allow-prose-closes  merge even when an issue it closes is not on a closing-keyword line
+#                      (a deliberate close written mid-sentence, or one linked in the sidebar)
 # Exit: 0 merged; 1 red or blocked; 2 pending; 3 unconfirmed; 4 merged but wt-done failed;
 # 64 usage
 set -euo pipefail
@@ -55,11 +66,11 @@ refuse() { finish 1 "blocked: $1"; }
 retry() { finish 2 "pending: $1"; }
 unconfirmed() { finish 3 "unconfirmed: $1"; }
 usage() {
-  say 'usage: pr-land.sh [<pr>] [--repo OWNER/NAME] [--pro] [--pro-fixed] [--wait S] [--queue-wait S] [--updates N] [--no-closeout] [--allow-no-checks]'
+  say 'usage: pr-land.sh [<pr>] [--repo OWNER/NAME] [--pro] [--pro-fixed] [--wait S] [--queue-wait S] [--updates N] [--no-closeout] [--allow-no-checks] [--allow-prose-closes]'
   exit 64
 }
 
-PR="" REPO="" PRO=0 PRO_FIXED=0 WAIT=3600 QUEUE_WAIT=3600 MAX_UPDATES=2 CLOSEOUT=1 ALLOW_NO_CHECKS=0
+PR="" REPO="" PRO=0 PRO_FIXED=0 WAIT=3600 QUEUE_WAIT=3600 MAX_UPDATES=2 CLOSEOUT=1 ALLOW_NO_CHECKS=0 ALLOW_PROSE=0
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --repo) [[ "${2:-}" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || usage; REPO=$2; shift 2 ;;
@@ -70,6 +81,7 @@ while [ "$#" -gt 0 ]; do
     --updates) [[ "${2:-}" =~ ^[0-9]+$ ]] || usage; MAX_UPDATES=$2; shift 2 ;;
     --no-closeout) CLOSEOUT=0; shift ;;
     --allow-no-checks) ALLOW_NO_CHECKS=1; shift ;;
+    --allow-prose-closes) ALLOW_PROSE=1; shift ;;
     -h|--help) usage ;;
     *) [[ "$1" =~ ^[1-9][0-9]*$ ]] && [ -z "$PR" ] || usage; PR=$1; shift ;;
   esac
@@ -257,12 +269,42 @@ update_branch() {
   HEAD=$new
 }
 
+# The issues a merge will close, each as owner/name#N, and those no closing line (header
+# comment) names. A closing line names an issue as #N (this repo), owner/name#N or an issues
+# URL, matched without case.
+CLOSES='
+  ($self | ascii_downcase) as $me
+  | ":?\\s*(?:#[0-9]|[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+#[0-9]|https?://github\\.com/)" as $ref
+  | [ (.body // "") | split("\n")[] | rtrimstr("\r")
+      | select(test("^\\s*(?:[-*+]\\s+|[0-9]+[.)]\\s+)?(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)" + $ref; "i")
+          or test("\\b(?:Close[sd]?|Fix(?:e[sd])?|Resolve[sd]?)" + $ref))
+      | ( (scan("github\\.com/([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)/issues/([0-9]+)"; "i") | "\(.[0])#\(.[1])"),
+          (scan("([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)#([0-9]+)") | "\(.[0])#\(.[1])"),
+          (scan("(?<![A-Za-z0-9_./-])#([0-9]+)") | "\($me)#\(.[0])") )
+      | ascii_downcase ] as $named
+  | [ .closingIssuesReferences[] | "\(.repository.owner.login)/\(.repository.name)#\(.number)" ] as $all
+  | {all: $all, prose: [ $all[] | select(ascii_downcase | IN($named[]) | not) ]}'
+
+check_closes() {
+  gh pr view "$PR" --repo "$REPO" --json body,closingIssuesReferences >"$S/closes.json" \
+    || retry "PR #$PR's body and closing issues unreadable; nothing merged"
+  jq -c --arg self "$REPO" "$CLOSES" "$S/closes.json" >"$S/closes.verdict.json" || retry 'closing issues unparseable'
+  local all prose
+  all=$(jq -r '.all | join(", ")' "$S/closes.verdict.json")
+  prose=$(jq -r '.prose | join(", ")' "$S/closes.verdict.json")
+  [ -z "$all" ] || say "PR #$PR will close: $all"
+  [ -n "$prose" ] || return 0
+  if [ "$ALLOW_PROSE" = 1 ]; then say "closing $prose though no closing-keyword line names it (--allow-prose-closes)"; return 0; fi
+  refuse "PR #$PR would close $prose, which the body names only in prose (a lower-case close, fix or resolve mid-sentence) or not at all (a sidebar link); reword it (Refs #N) or write the close as its own Closes #N line and re-run, or re-run with --allow-prose-closes if the close is meant"
+}
+
 # 4. Wait, merge the exact head; on a strict base with no queue, update a behind branch first.
 if [ "$STRICT" = true ] && [ "$QUEUE" = false ] && [ "$(jq -r .mergeStateStatus "$S/pr.json")" = BEHIND ]; then
   update_branch
 fi
 while :; do
   wait_checks
+  check_closes
   if gh pr merge "$PR" --repo "$REPO" --squash --match-head-commit "$HEAD" >"$S/merge.out" 2>&1; then break; fi
   # The command can fail after GitHub merged (a client timeout): read the state before deciding.
   POST=$(gh pr view "$PR" --repo "$REPO" --json state,mergeStateStatus --jq '"\(.state) \(.mergeStateStatus)"') \
