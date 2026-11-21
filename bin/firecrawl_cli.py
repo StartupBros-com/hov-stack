@@ -3205,8 +3205,9 @@ RESULT_BUCKETS = ("items", "data", "web", "news", "images", "research", "links",
 
 
 def empty_payload(payload):
-    # Empty only when every bucket present is empty: search with --sources web,news,
-    # or --categories research from 2026-11-16, fills one bucket and leaves web=[] (#2108).
+    # Empty only when every bucket present is empty: search with --sources web,news fills
+    # one bucket and can leave the other [], as would the data.research bucket Firecrawl
+    # announced for --categories research (not seen live by 2026-11-20) beside web=[] (#2108).
     if payload == []:
         return True
     if isinstance(payload, dict):
