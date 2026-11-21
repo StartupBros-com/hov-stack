@@ -132,7 +132,7 @@ config.launch_menu = {
   {
     label = 'SSH helpers',
     domain = { DomainName = wsl_domain_name },
-    args = { 'bash', '-lc', 'command -v pishosts >/dev/null && pishosts; printf "\nRun: pissh <alias>[:/remote/path]\n\n"; exec bash -l' },
+    args = { 'bash', '-lc', 'command -v pishosts >/dev/null && pishosts; printf "\nRun: ssh <alias>\n\n"; exec bash -l' },
   },
   {
     label = 'PowerShell',

@@ -18,7 +18,7 @@ TimeoutStartSec=3h
 # Promoted RECLAIM_SWEEP_APPLY=0 -> 1 (2026-08-16). The promotion
 # blocker was liveness decided by /proc/*/fd alone, blind to the
 # cwd/environ/cmdline holders an idle background job actually has — since fixed
-# (shared 4-signal lib/proc_liveness.py, fail-closed: an answerless scan
+# (shared 4-signal scripts/lib/proc_liveness.py, fail-closed: an answerless scan
 # aborts plan AND apply). Every candidate must still independently clear the
 # 9-rule allowlist (age floors 14-30d, MIN_DEPTH_BELOW_HOME=2, 4-signal
 # holder check) before removal. Terminal stage.

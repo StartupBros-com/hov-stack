@@ -101,7 +101,6 @@ DOTFILES_LINKS=(
   # Live hand-made links found undeclared by the #210 audit — the exact class
   # §10c(c) exists to catch. Declared here so a fresh machine gets them.
   "ssh/bin/pishosts|.local/bin/pishosts"
-  "ssh/bin/pissh|.local/bin/pissh"
   # python -> python3 shim (papercut dotfiles#577): agents keep generating
   # `python ...` in non-interactive shells and this box ships only python3 —
   # 50 failed calls / 19 sessions in the 7d triage window. NOTE removal of this

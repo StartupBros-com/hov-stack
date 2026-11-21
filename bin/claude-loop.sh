@@ -510,10 +510,10 @@ rm -f "$CLAUDE_LOOP_STOP_MARKER" "$STOP_MARKER_FALLBACK" 2>/dev/null || true
 # default so it only catches a true runaway; override per-run with CLAUDE_LOOP_MAX_USD.
 # Default $20 -> $60 (issue #562 amendment, operator decision 2026-08-28): the
 # first feature-sized dispatched run died ~90% done near $20 — as shipped, the
-# fence was killing legitimate work. Durable config lives in
-# config/dispatcher.env's MAX_USD key, which dispatcher-tick.sh
-# validates and exports as CLAUDE_LOOP_MAX_USD at launch; keep this
-# compiled-in default and that key's default in sync.
+# fence was killing legitimate work. Until the dispatcher retired
+# (2026-10-17, dotfiles#1872), dispatcher-tick.sh exported
+# config/dispatcher.env's MAX_USD key as CLAUDE_LOOP_MAX_USD at launch.
+# Nothing reads that key now: this default and CLAUDE_LOOP_MAX_USD decide.
 MAX_USD="${CLAUDE_LOOP_MAX_USD:-60}"
 
 # Background-task wait ceiling (issue #583): in -p mode the SDK waits for

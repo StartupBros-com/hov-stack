@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# dispatcher-common.sh: shared helpers for the always-on work dispatcher
-# (issue #444). Lift-and-share ONLY -- every function here is byte-
+# dispatcher-common.sh: shared helpers first written for the always-on work
+# dispatcher (issue #444; retired 2026-10-17, dotfiles#1872). Lift-and-share ONLY -- every function here is byte-
 # equivalent to the local definition it replaces at each call site, so
 # sourcing this file changes NOTHING about behavior; it only stops five
 # independent copies of the same ledger-path default / config-grep /
@@ -9,9 +9,10 @@
 # `set -uo pipefail` of its own -- each caller already sets its own shell
 # options, and sourcing this must not silently change them.
 #
-# Consumers: dispatcher-ledger.sh, dispatcher-tick.sh, dispatcher-status.sh,
-# harness-doctor.sh (check 28), harness-weekly.sh (dispatcher keep-rate
-# section).
+# Consumers today: scripts/dispatcher-ledger.sh, scripts/harness-weekly.sh
+# (dispatcher keep-rate section) and scripts/lib/wt-roots.sh (cfg_get only).
+# dispatcher-tick.sh, dispatcher-status.sh and harness-doctor check 28 were
+# the other consumers until the dispatcher retired.
 
 # dispatcher_ledger_file(): echoes the ledger path -- DISPATCHER_LEDGER_FILE
 # if set, else the compiled-in default. Every caller that used to inline
@@ -25,7 +26,7 @@ dispatcher_ledger_file() {
 # cfg_get KEY DEFAULT: grep a literal "^KEY=" line out of $CONFIG_FILE --
 # deliberately never `source`d, since a config file is operator-owned but
 # still external input (parse, don't eval). Lifted verbatim from
-# dispatcher-tick.sh; relies on the caller's own $CONFIG_FILE variable,
+# dispatcher-tick.sh (since deleted); relies on the caller's own $CONFIG_FILE variable,
 # exactly as before.
 cfg_get() {
   local key="$1" dflt="$2" val=""

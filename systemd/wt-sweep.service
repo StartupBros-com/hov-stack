@@ -25,7 +25,7 @@ TimeoutStartSec=45m
 # under this timer), and remember wt-sweep has no PR/claim awareness: a
 # claimed wt-new placeholder with an open draft PR reads like junk.
 # The 2026-08-06 incident's liveness check lives in the shared
-# lib/proc_liveness.py (4 signals, fail-closed), in the script,
+# scripts/lib/proc_liveness.py (4 signals, fail-closed), in the script,
 # not in this unit.
 # Shipped plan-only. To delete: DRY_RUN=0 (see README).
 Environment=DRY_RUN=1
