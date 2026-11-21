@@ -19,6 +19,7 @@
 #   tolerance branch removed             -> cases 1, 2 fail (routine stale warns again)
 #   age bound removed from the predicate -> case 4 fails (a dead timer reads as ok)
 #   reason list removed                  -> case 5 fails (a fault reason reads as ok)
+#   repair-deferral guard removed        -> case 12 fails (a deferral streak reads as ok)
 set -uo pipefail
 
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
@@ -119,6 +120,12 @@ expect "10 healthy" '.healthy = true | .health_level = "healthy" | .index.status
   quiet "ok: cass healthy + jsm auto-update timer green"
 # 11. No JSON at all still warns.
 expect "11 no JSON" EMPTY warn "cass status timed out or returned no JSON"
+# 12. Daily runs that defer the lexical repair: each resets last_indexed_at, so
+#     the age bound stays green while the index falls behind for good. cass
+#     publishes the streak as index.lexical_repair_deferred; it must warn.
+expect "12 repair deferral streak" \
+  '.index.lexical_repair_deferred = {"consecutive_runs": 3, "reason": "db over the deferred-repair size gate"}' \
+  warn "cass index unhealthy"
 
 total=$((pass + fail))
 if [ "$fail" -eq 0 ]; then

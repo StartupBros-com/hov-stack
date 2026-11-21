@@ -802,14 +802,18 @@ if command -v cass >/dev/null 2>&1; then
   # hollow, and the reason list keeps out the four stale reasons that ARE faults
   # (corrupt manifest, checkpoint for another DB, contract mismatch, incomplete
   # checkpoint). 48 h covers the longest run seen (7h20m) on a 24 h cycle, and is
-  # the only guard here if the timer stops firing. An unknown reason string from
-  # a future cass warns, the safe direction.
+  # the only guard here if the timer stops firing. It cannot see a run that
+  # DEFERS the lexical repair (the 2026-09 rot below): cass resets last_indexed_at
+  # on every run, so that streak is read from index.lexical_repair_deferred,
+  # which cass adds only while it lasts. An unknown reason string from a future
+  # cass warns, the safe direction.
   cass_routine_stale='
     .healthy != true and .health_level == "unhealthy"
     and .index.status == "stale"
     and (.index.reason == "database fingerprint changed since the last lexical checkpoint"
          or .index.reason == "lexical index is older than the stale threshold")
     and (.index.age_seconds // 1e18) < 172800
+    and .index.lexical_repair_deferred == null
     and .index.exists == true and .index.empty_with_messages != true
     and .database.exists == true
     and (.database.opened == true or .database.open_retryable == true)
