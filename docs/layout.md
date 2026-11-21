@@ -97,8 +97,8 @@ the mapping, for anyone reading an older commit or a path in the history docs:
 | `claude/README.md`                 | `docs/layout.md` (this file)              |
 | `claude/config/*`                  | `config/`                                 |
 | `claude/tests/setup.test.sh`, `claude/tests/run-claude-tests.test.sh` | `tests/repo/`          |
-| `codex/`, `fx/`, `pi/`, `pi-lens/` | owner’s private `$DOTFILES_REPO/<name>/`                       |
-| `systemd/user/` (the tunnel unit)  | owner’s private `$DOTFILES_REPO/pi/systemd/user/`              |
+| `codex/`, `fx/`, `pi/`, `pi-lens/` | owner’s private `$DOTFILES_REPO/<name>/` (`pi/` and `pi-lens/` since deleted with pi’s retirement, dotfiles#2348 and #2399) |
+| `systemd/user/` (the tunnel unit)  | owner’s private `$DOTFILES_REPO/pi/systemd/user/` (since deleted, dotfiles#2340) |
 | `claude/plugins/harness-optimizer` | gone; `harness-optimizer@hov`             |
 
 ## Cron-ownership-gated reliability timers
