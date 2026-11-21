@@ -105,7 +105,7 @@ def report_ccflare() -> int:
 
 
 def report_ccusage() -> None:
-    # Supplementary cross-tool view (claude + codex + hermes + ...): ccusage
+    # Supplementary cross-tool view (claude + codex + ...): ccusage
     # reads local transcripts, including ~/.codex/sessions, which the ccflare
     # ledger cannot see. Nicety, not a guard: failure is reported in-body but
     # never WARNs — a flaky npx fetch on an offline Monday should not page.
