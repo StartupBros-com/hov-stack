@@ -2576,6 +2576,48 @@ for case in default summary cloud schema query userinfo off; do
   jcheck "ineligible $case carries no local note" "$OUT" "assert not any(n.startswith('local: ') for n in d['degraded'] or []), d['degraded']"
 done
 
+# A summary the budget refuses before any spend comes back as the page's markdown
+# from Firecrawl Local; anything else keeps the refusal as it was.
+export FIRECRAWL_CLI_FLOOR=3000
+fixture scrape
+local_control '{"first":"plain"}'
+run_cli fetch https://example.com/page --json
+status_is 0 'floor-refused summary served locally'
+jcheck 'floor-refused summary returns the page markdown' "$OUT" "x=d['data']; assert 'PLAINMARKER' in x['markdown'] and 'summary' not in x, x; assert d['credits_spent']==0, d; g=d['degraded']; assert g[0].startswith('local: summary not run (vendor balance refused: ') and 'for the summary: operator action: top up' in g[0], g; assert g[1]=='$SERVED', g"
+[[ "$(paid_calls)" == 0 ]] && ok || bad 'floor-refused summary made a paid call'
+local_check 'the summary is swapped for markdown' "assert r[1]['argv'][4]=='markdown', r[1]['argv']"
+local_control '{"first":"plain"}'
+run_cli fetch https://example.com/page --format markdown,summary --json
+status_is 0 'mixed summary format served locally'
+local_check 'markdown is asked for once' "assert r[1]['argv'][4]=='markdown', r[1]['argv']"
+local_control '{"first":"plain"}'
+run_cli fetch https://example.com/page --cloud --json
+status_is 3 '--cloud keeps the floor refusal'
+local_none '--cloud floor refusal'
+local_control '{"first":"blocked-403"}'
+run_cli fetch https://example.com/page --json
+status_is 3 'a local fall-through keeps the floor refusal'
+jcheck 'the floor refusal stands with the local reason' "$(error_json)" "assert d['error']['code']==3 and d['error']['message'].startswith('vendor balance refused'), d['error']; assert d['degraded'][-1]=='local: could not return the page instead: the site did not serve the page to this machine (HTTP 403)', d['degraded']"
+unset FIRECRAWL_CLI_LOCAL_BIN
+local_control '{"first":"plain"}'
+run_cli fetch https://example.com/page --json
+status_is 3 'no firecrawl-local keeps the floor refusal'
+local_none 'not installed floor refusal'
+jcheck 'not installed adds nothing to the refusal' "$(error_json)" "assert not any(n.startswith('local: ') for n in d['degraded'] or []), d['degraded']"
+export FIRECRAWL_CLI_LOCAL_BIN="$LOCAL/firecrawl-local"
+unset FIRECRAWL_CLI_FLOOR
+fixture scrape
+export CLAUDE_CODE_SESSION_ID=summary-rescue
+run_cli fetch https://example.com/page --cloud --json
+ledger_edit "h['sessions']['summary-rescue']['spent']=300"
+: >"$FIRECRAWL_TEST_LOG"
+local_control '{"first":"plain"}'
+run_cli fetch https://example.com/page --json
+unset CLAUDE_CODE_SESSION_ID
+status_is 0 'budget-refused summary served locally'
+jcheck 'budget-refused summary names the raise' "$OUT" "g=d['degraded']; assert g[0].startswith('local: summary not run (session budget refused: ') and g[0].endswith('for the summary: firecrawl-cli budget --raise-budget <n> --reason <text> --json'), g; assert 'PLAINMARKER' in d['data']['markdown'] and d['credits_spent']==0, d"
+[[ "$(paid_calls)" == 0 ]] && ok || bad 'budget-refused summary made a paid call'
+
 # A script-built page reruns in Chrome while a slot is free.
 fixture scrape
 local_control '{"first":"script-first","chrome":"script-chrome"}'

@@ -50,13 +50,14 @@ CLI result-count flag is `--limit`, never `--k`: `--k` silently binds to
 
 Ids work in `arxiv:`, `pmid:`, `pmcid:`, and `doi:` forms interchangeably.
 
-Not this index until 2026-11-16: `firecrawl-cli search "<q>" --categories research --json`
-is a website filter on ordinary web search. Its results are pages (each research-site
-hit carries `category: "research"`; plain web results carry no `category`
-field — key on that when merging). From 2026-11-16 Firecrawl points that category
-at this index and returns paper records under `data.research` instead of `data.web`;
-whether the pinned vendor CLI passes them through is unverified (dotfiles #2108).
-For paper-finding, use the tools above either way.
+Not this index: `firecrawl-cli search "<q>" --categories research --json`
+is a website filter on ordinary web search. Its results are pages under `data.web`
+(each research-site hit carries `category: "research"`; plain web results carry no
+`category` field — key on that when merging). Firecrawl's docs announced a move of
+that category to this index, with a `data.research` bucket, from 2026-11-16, but the
+vendor CLI's help (1.30.0) still says it is not the paper index, and a live search on
+2026-11-20 returned pages under `data.web`. The wrapper reads either bucket
+(dotfiles #2108). For paper-finding, use the tools above either way.
 Sibling indexes: US law goes to `firecrawl-gov-index`; library docs, issues,
 and merged PRs go to `firecrawl-developer-index`.
 
