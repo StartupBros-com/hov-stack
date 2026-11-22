@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # Hermetic tests for scripts/spend-report.py's ccusage rollup.
 #
-# The ccusage version is the CCUSAGE_PIN module constant (an exact npm
-# version). A flaky npx fetch stays an informational line by design (an
-# offline Monday must not page). Runs the REAL script under a PATH-stubbed
-# npx and a scratch HOME (so the ccflare ledger is absent).
+# The ccusage package spec is the CCUSAGE_SPEC module constant, which
+# follows the latest release. A flaky npx fetch stays an informational
+# line by design (an offline Monday must not page). Runs the REAL script
+# under a PATH-stubbed npx and a scratch HOME (so the ccflare ledger is
+# absent).
 set -uo pipefail
 
 ROOT=$(git rev-parse --show-toplevel)
@@ -40,16 +41,16 @@ run_report() {
   return $rc
 }
 
-PIN=$(grep -E '^CCUSAGE_PIN = "' "$SCRIPT" | head -1 | cut -d'"' -f2)
-echo "== 0: CCUSAGE_PIN is an exact npm version, not a mutable selector =="
-grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$' <<<"$PIN" && ok || bad "CCUSAGE_PIN is not an exact version (got: '$PIN')"
+SPEC=$(grep -E '^CCUSAGE_SPEC = "' "$SCRIPT" | head -1 | cut -d'"' -f2)
+echo "== 0: CCUSAGE_SPEC follows the latest ccusage release =="
+[ "$SPEC" = ccusage@latest ] && ok || bad "CCUSAGE_SPEC is not ccusage@latest (got: '$SPEC')"
 
-echo "== 4: the pin reaches npx and produces the rollup line =="
+echo "== 4: the spec reaches npx and produces the rollup line =="
 run_report good; RC=$?
-[ "$RC" = 0 ] && ok || bad "good pin: exit $RC, want 0"
-grep -qF "ccusage@$PIN daily --json" "$TMP/npx-good.log" && ok || bad "good pin: npx not invoked with ccusage@$PIN: $(cat "$TMP/npx-good.log")"
-grep -qF 'cross-tool 8d plan-equivalent' "$TMP/out-good.log" && ok || bad "good pin: rollup line missing: $(cat "$TMP/out-good.log")"
-grep -qF 'spend-flagged:' "$TMP/out-good.log" && ok || bad "good pin: the spend-flagged trailer is missing, so the report did not finish: $(cat "$TMP/out-good.log")"
+[ "$RC" = 0 ] && ok || bad "good run: exit $RC, want 0"
+grep -qF "$SPEC daily --json" "$TMP/npx-good.log" && ok || bad "good run: npx not invoked with $SPEC: $(cat "$TMP/npx-good.log")"
+grep -qF 'cross-tool 8d plan-equivalent' "$TMP/out-good.log" && ok || bad "good run: rollup line missing: $(cat "$TMP/out-good.log")"
+grep -qF 'spend-flagged:' "$TMP/out-good.log" && ok || bad "good run: the spend-flagged trailer is missing, so the report did not finish: $(cat "$TMP/out-good.log")"
 
 echo "== 5: a failing npx fetch stays informational (documented: an offline Monday must not page) =="
 run_report flaky 7; RC=$?
