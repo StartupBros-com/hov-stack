@@ -98,11 +98,26 @@ swap_used_gb=$(awk "BEGIN {printf \"%.1f\", ($swap_total - $swap_free) / 1048576
 echo "$(ts) WARN: psi_full60=${psi_full}% mem_avail=${avail_pct}% ram_used=${mem_used_gb}GB swap_used=${swap_used_gb}GB" >> "$LOG"
 
 # === FORENSICS: dump top 15 processes by RSS ===
+# Sort on the raw RSS column: sorting the formatted line with -t= keyed on "<pid>  rss", so this
+# list came out in pid order and named no hog through the 2026-11-21 freezes.
 echo "$(ts) TOP-PROCS:" >> "$LOG"
 ps -eo pid,rss,comm --no-headers 2>/dev/null \
+    | sort -k2,2 -rn \
     | awk '$2 > 51200 {printf "  pid=%-8s rss=%dMB cmd=%s\n", $1, $2/1024, $3}' \
-    | sort -t= -k2 -rn \
     | head -15 >> "$LOG"
+
+# RSS leaves out swapped-out pages, which is where a fill sits by the time this runs. The cgroup
+# view counts RAM and swap together and names the unit or tree holding them. Builtin reads only.
+echo "$(ts) TOP-CGROUPS (ram+swap):" >> "$LOG"
+for d in /sys/fs/cgroup/*/ /sys/fs/cgroup/*/*/ /sys/fs/cgroup/user.slice/user-*.slice/user@*.service/*/ \
+    /sys/fs/cgroup/user.slice/user-*.slice/user@*.service/*/*/; do
+    [ -r "${d}memory.current" ] || continue
+    cg_ram=0 cg_swap=0
+    read -r cg_ram < "${d}memory.current" 2>/dev/null || continue
+    [ -r "${d}memory.swap.current" ] && read -r cg_swap < "${d}memory.swap.current" 2>/dev/null
+    printf '%s %s %s\n' "$cg_ram" "${cg_swap:-0}" "${d#/sys/fs/cgroup}"
+done | awk '{t = $1 + $2; if (t > 1073741824) printf "%.0f\t  ram=%.1fGB swap=%.1fGB cg=%s\n", t, $1 / 1073741824, $2 / 1073741824, $3}' \
+    | sort -t "$(printf '\t')" -k1,1 -rn | cut -f2- | head -12 >> "$LOG"
 
 # === TIER 1 (memory pressure): Kill leaky processes >4GB ===
 ps -eo pid,rss,args --no-headers 2>/dev/null \

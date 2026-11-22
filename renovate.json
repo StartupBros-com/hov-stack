@@ -4,7 +4,14 @@
     "Repo-level additions to the fleet's central Renovate config.",
     "harness/vet-fixtures/** holds frozen evidence from harness vets: seed projects and run outputs that are recorded as they were run, and no CI job installs them. Renovate kept opening PRs against their package.json files (#486, #637, #727); bumping them rewrites the evidence, so Renovate does not manage them.",
     "plugins/** is not ignored: plugins/product-video and the other real plugins stay managed.",
-    "ignorePaths replaces the config:recommended list rather than adding to it, so that list is repeated here."
+    "ignorePaths replaces the config:recommended list rather than adding to it, so that list is repeated here.",
+    "plugins/product-video's remotion-versions test requires every Remotion package at one version (#674). Separate PRs each moved one package and failed it, holding all three PR slots from 2026-11-19 (#786, #787, #790), so Remotion updates come as one PR."
+  ],
+  "packageRules": [
+    {
+      "matchPackageNames": ["remotion", "@remotion/**"],
+      "groupName": "remotion"
+    }
   ],
   "ignorePaths": [
     "**/node_modules/**",

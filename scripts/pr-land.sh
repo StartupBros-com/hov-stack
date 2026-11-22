@@ -188,11 +188,21 @@ if [ -n "$WHY" ]; then
 fi
 
 # 3. What the base branch requires: rulesets and classic protection, unioned (either alone
-# undercounts). A 404 from classic protection means none; anything else is not a "none".
-gh api "repos/$REPO/rules/branches/$BASE" >"$S/rules.json" || retry "rules for $BASE unreadable"
+# undercounts). A 404 from classic protection means none; anything else is not a "none",
+# with one exception. A private repo on a plan without branch protection (a free personal
+# account) cannot carry rulesets or protection at all, and GitHub answers both reads with a
+# 403 naming the plan. That exact message is a determinate "none". Any other 403 (rate
+# limit, SSO, missing scope) stays unreadable.
+plan_gated() { grep -q -F 'Upgrade to GitHub Pro or make this repository public' "$1" && grep -q -F 'HTTP 403' "$1"; }
+GATED=0
+if gh api "repos/$REPO/rules/branches/$BASE" >"$S/rules.json" 2>"$S/rules.err"; then :
+elif plan_gated "$S/rules.err"; then echo '[]' >"$S/rules.json"; GATED=1
+else retry "rules for $BASE unreadable: $(tr '\n' ' ' <"$S/rules.err" | cut -c1-200)"; fi
 if gh api "repos/$REPO/branches/$BASE/protection/required_status_checks" >"$S/classic.json" 2>"$S/classic.err"; then :
 elif grep -q -F 'HTTP 404' "$S/classic.err"; then echo '{}' >"$S/classic.json"
+elif plan_gated "$S/classic.err"; then echo '{}' >"$S/classic.json"; GATED=1
 else retry "classic protection for $BASE unreadable: $(tr '\n' ' ' <"$S/classic.err" | cut -c1-200)"; fi
+[ "$GATED" = 0 ] || say "$BASE cannot carry rulesets or branch protection on this repo's plan (GitHub's plan-gated 403), so it requires no checks"
 REQUIRED=$(jq -cn --slurpfile r "$S/rules.json" --slurpfile c "$S/classic.json" \
   '([$r[0][] | select(.type == "required_status_checks") | .parameters.required_status_checks[].context]
     + ($c[0].contexts // []) + [($c[0].checks // [])[].context]) | unique')
