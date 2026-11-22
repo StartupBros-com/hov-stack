@@ -28,9 +28,10 @@ import subprocess
 import sys
 import time
 
-# The only ccusage version string in the repo: an exact npm version, never a
-# mutable selector ('latest', '^20') that npx would resolve afresh every run.
-CCUSAGE_PIN = "20.0.19"
+# The ccusage package spec: npx resolves the newest release on each run.
+# This rollup is an informational cross-tool view, so it follows upstream
+# rather than holding a pin; a fetch or parse failure stays an in-body line.
+CCUSAGE_SPEC = "ccusage@latest"
 
 DB = os.path.expanduser("~/.config/better-ccflare/better-ccflare.db")
 DAY_MS = 86_400_000
@@ -112,7 +113,7 @@ def report_ccusage() -> None:
     since = time.strftime("%Y%m%d", time.localtime(time.time() - 8 * 86400))
     try:
         out = subprocess.run(
-            ["npx", "--yes", f"ccusage@{CCUSAGE_PIN}", "daily", "--json", "--since", since],
+            ["npx", "--yes", CCUSAGE_SPEC, "daily", "--json", "--since", since],
             stdout=subprocess.PIPE,
             text=True,
             timeout=CCUSAGE_TIMEOUT_S,
