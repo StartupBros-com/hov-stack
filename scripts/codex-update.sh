@@ -136,18 +136,24 @@ trap 'rm -rf "$WORK"' EXIT
 #
 # The probe goes through mise's shim and corepack, and has answered nothing (7 pages in
 # 4 days, 2026-11-18..21, with pnpm 11.28.12 installed). No answer is not a wrong version:
-# retry once, keep the probe's stderr, and say which of the two it was.
+# retry once, then report each attempt's metadata. The failure pager forwards
+# this line, so never put arbitrary probe stderr in it.
 PROBE_ERR=$WORK/pnpm-version.err
 probe_pnpm() {
   PNPM_VERSION=$(cd "$WORK" && timeout 60 "$PNPM" --version 2>"$PROBE_ERR" | tail -n 1)
+  PROBE_STATUS=$?
+  if [ -s "$PROBE_ERR" ]; then PROBE_STDERR=present; else PROBE_STDERR=empty; fi
 }
 probe_pnpm
 if [ -z "$PNPM_VERSION" ]; then
+  FIRST_PROBE_STATUS=$PROBE_STATUS
+  FIRST_PROBE_STDERR=$PROBE_STDERR
   sleep "${CODEX_UPDATE_PROBE_RETRY_DELAY:-3}"
   probe_pnpm
 fi
 if [ -z "$PNPM_VERSION" ]; then
-  echo "codex-update: $PNPM --version gave no answer twice (timeout or empty), so pnpm 11 is unchecked: $(head -c 400 "$PROBE_ERR" | tr '\n' ' ')"
+  printf 'codex-update: pnpm --version gave no answer twice (timeout or empty), so pnpm 11 is unchecked (attempt 1: status=%d stderr=%s; attempt 2: status=%d stderr=%s)\n' \
+    "$FIRST_PROBE_STATUS" "$FIRST_PROBE_STDERR" "$PROBE_STATUS" "$PROBE_STDERR"
   exit 1
 fi
 case "$PNPM_VERSION" in
