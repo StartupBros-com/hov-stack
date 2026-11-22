@@ -62,7 +62,9 @@ out=$(HOME=$TMP/emptyhome bash "$TMP/run.sh" "$TMP/helper.sh"); rc=$?
 # The doctor uses the list everywhere it used to glob SITES.
 if grep -qF 'mapfile -t SITES_REPOS < <(sites_repos)' "$DOCTOR"; then ok_; else bad "doctor does not compute SITES_REPOS once"; fi
 n=$(grep -cF 'for repo in "${SITES_REPOS[@]}"; do' "$DOCTOR")
-[ "$n" -eq 5 ] && ok_ || bad "expected 5 SITES_REPOS repo loops, got $n"
+# Check 5's four loops read check5_repos (SITES plus home-level own repos); the
+# worktree-count section is the one loop left on SITES_REPOS.
+[ "$n" -eq 1 ] && ok_ || bad "expected 1 SITES_REPOS repo loop, got $n"
 if grep -F 'for repo in "$HOME"/SITES/' "$DOCTOR" >/dev/null; then bad "a repo loop still globs SITES directly"; else ok_; fi
 if grep -F '"$HOME"/SITES/*/.' "$DOCTOR" | grep -v '^ *#' >/dev/null; then bad "a file glob still reads SITES directly"; else ok_; fi
 

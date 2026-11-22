@@ -1,0 +1,14 @@
+# Nested instruction-named files that are not directory instructions, one per line as
+# <repo-name>:<glob>. repo-name is the repository directory's basename; glob is a bash
+# case pattern matched against the repo-relative path, so * crosses /. harness-doctor
+# check 5 skips a matching nested CLAUDE.md (not an '@AGENTS.md' stub) or nested
+# AGENTS.md (no sibling pointer). A # after optional leading whitespace starts a comment;
+# blank lines are ignored; a malformed line is reported on stderr and ignored.
+# Copy to <overlay>/instruction-file-exempt and edit.
+#
+# A host overlay file imported by absolute path:
+example-repo:docs/overlay/CLAUDE.md
+# Archived or frozen release text:
+example-repo:archive/*
+# Captured evidence copies, anywhere in the tree:
+example-other-repo:*/evidence/*
