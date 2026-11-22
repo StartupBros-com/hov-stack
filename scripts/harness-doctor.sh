@@ -96,7 +96,7 @@ home_repos() {
   done
 }
 
-# check5_repos: SITES_REPOS plus home_repos, each real directory once (readlink -f),
+# check5_repos: SITES_REPOS plus home_repos, each real directory once (readlink -f).
 # Real directories come before symlinks, SITES before $HOME, so a home entry that
 # resolves to a SITES repo is not visited again and a repo is audited under its real name.
 check5_repos() {
