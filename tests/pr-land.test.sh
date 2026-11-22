@@ -43,11 +43,20 @@ case "$*" in
     jq --arg h "$(head_now)" '.headRefOid = $h' "$FIX/pr.json" >"$FIX/pr.now.json"; serve "$FIX/pr.now.json" ;;
   "api --paginate repos/$R/pulls/7/files?per_page=100") serve "$FIX/files.json" ;;
   "api --paginate repos/$R/pulls/7/commits?per_page=100") serve "$FIX/commits.json" ;;
-  "api repos/$R/rules/branches/main") serve "$FIX/rules.json" ;;
+  "api repos/$R/rules/branches/main")
+    case "${STUB_RULES:-file}" in
+      gated) echo '{"message":"Upgrade to GitHub Pro or make this repository public to enable this feature.","status":"403"}'
+        echo 'gh: Upgrade to GitHub Pro or make this repository public to enable this feature. (HTTP 403)' >&2; exit 1 ;;
+      403) echo 'gh: Resource not accessible by integration (HTTP 403)' >&2; exit 1 ;;
+      file) serve "$FIX/rules.json" ;;
+    esac ;;
   "api repos/$R/branches/main/protection/required_status_checks")
     case "${STUB_CLASSIC:-404}" in
       404) echo 'gh: Branch not protected (HTTP 404)' >&2; exit 1 ;;
       502) echo 'gh: Bad Gateway (HTTP 502)' >&2; exit 1 ;;
+      gated) echo '{"message":"Upgrade to GitHub Pro or make this repository public to enable this feature.","status":"403"}'
+        echo 'gh: Upgrade to GitHub Pro or make this repository public to enable this feature. (HTTP 403)' >&2; exit 1 ;;
+      403) echo 'gh: Must have admin rights to Repository. (HTTP 403)' >&2; exit 1 ;;
       file) serve "$FIX/classic.json" ;;
     esac ;;
   "pr view 7 --repo $R --json headRefOid,mergeable,statusCheckRollup")
@@ -145,7 +154,7 @@ green() {
 
 reset_case() {
   rm -rf "$FIX"; mkdir -p "$FIX"; : >"$GH_LOG"; : >"$GIT_LOG"; : >"$WT_LOG"
-  unset STUB_CLASSIC STUB_HEAD_MOVED STUB_MERGE_RC STUB_MERGE_LANDED STUB_MERGE_STATE STUB_QUEUE_READS STUB_QUEUE_THEN
+  unset STUB_RULES STUB_CLASSIC STUB_HEAD_MOVED STUB_MERGE_RC STUB_MERGE_LANDED STUB_MERGE_STATE STUB_QUEUE_READS STUB_QUEUE_THEN
   unset STUB_GIT_BRANCH STUB_GIT_TIP STUB_GIT_FF_RC STUB_WTDONE_RC STUB_CLOSES_FAIL CLAUDE_LOOP_GUARD STUB_THAW_AFTER
   export PR_LAND_POLL_SECONDS=0 PR_LAND_WT_DONE="$TMP/bin/wt-done" PRO_GATE_ROUNDS_DIR="$FIX/rounds"
   # Merge freezes live under the case's own folder, never the operator's, and this run is one session.
@@ -362,6 +371,23 @@ echo '{"strict": false, "contexts": ["contract"]}' >"$FIX/classic.json"
 refused 'classic-only required check missing' 2 'contract' 7 --repo "$R" --wait 0
 reset_case; export STUB_CLASSIC=502
 refused 'classic protection unreadable (502)' 2 'classic protection for main unreadable' 7 --repo "$R"
+# A private repo on a free personal account: GitHub refuses both reads with a 403 naming the
+# plan. That is a determinate "no rules"; every other 403 stays unreadable.
+reset_case; export STUB_RULES=gated STUB_CLASSIC=gated
+run 7 --repo "$R"
+landed 'plan-gated 403 on both reads means no required checks'
+check 'plan-gated: says why it requires none' has "$ERR" "plan-gated 403"
+reset_case; export STUB_RULES=403
+refused 'rules 403 without the plan message stays unreadable' 2 'rules for main unreadable' 7 --repo "$R"
+check 'rules 403: quotes the error' has "$OUT" 'Resource not accessible by integration'
+reset_case; export STUB_CLASSIC=403
+refused 'classic 403 without the plan message stays unreadable' 2 'classic protection for main unreadable' 7 --repo "$R"
+reset_case; export STUB_RULES=gated STUB_CLASSIC=gated
+check_run 'Trusted syntax and policy' COMPLETED FAILURE | rollup >"$FIX/checks.json"
+refused 'plan-gated repo: a red check still blocks' 1 'red: Trusted syntax and policy' 7 --repo "$R"
+reset_case; export STUB_RULES=gated STUB_CLASSIC=gated
+rollup </dev/null >"$FIX/checks.json"; echo '{"workflow_runs":[]}' >"$FIX/runs.json"
+refused 'plan-gated repo: no checks still needs --allow-no-checks' 2 'no checks reported' 7 --repo "$R" --wait 0
 reset_case
 { check_run 'Trusted syntax and policy' COMPLETED SUCCESS CI 2026-11-19T09:00:00Z
   check_run 'Trusted syntax and policy' QUEUED '' CI
