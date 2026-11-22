@@ -175,6 +175,31 @@ rm -f "$TMP/overlay/instruction-file-exempt"
 out7=$(run5)
 hasfrag "$out7" "active repo(s) missing AGENTS.md" "home-level repo without AGENTS.md is noted"
 hasfrag "$out7" "noagents" "the note names the home-level repo"
+hasfrag "$out7" "or list '<name>:AGENTS.md' in <overlay>/instruction-file-exempt" "the note says how to record a repo that needs none"
+
+# 8. "<name>:AGENTS.md" in the overlay means the repo needs none; nothing else exempts it.
+printf '%s\n' 'noagents:other/*' 'otherrepo:AGENTS.md' > "$TMP/overlay/instruction-file-exempt"
+out8=$(run5)
+hasfrag "$out8" "noagents" "a nested glob or another repo's root entry does not exempt the root"
+printf '%s\n' 'noagents:AGENTS.md' > "$TMP/overlay/instruction-file-exempt"
+out8=$(run5)
+lacksfrag "$out8" "missing AGENTS.md" "a root entry stops the missing-AGENTS note for that repo"
+rm -f "$TMP/overlay/instruction-file-exempt"
+
+# 9. The repo whose root CLAUDE.md is the live global file is skipped; a repo with an
+# ordinary root CLAUDE.md, or a global file that points elsewhere, is not.
+printf '%s\n' '# real content' > "$home/noagents/CLAUDE.md"
+mkdir -p "$home/.claude"
+out9=$(CLAUDE_CONFIG_DIR=$home/.claude run5)
+hasfrag "$out9" "noagents" "an ordinary root CLAUDE.md does not exempt the repo"
+ln -s "$home/ownhome/CLAUDE.md" "$home/.claude/CLAUDE.md"
+out9=$(CLAUDE_CONFIG_DIR=$home/.claude run5)
+hasfrag "$out9" "noagents" "a global file in another repo does not exempt this one"
+rm -f "$home/.claude/CLAUDE.md"
+ln -s "$home/noagents/CLAUDE.md" "$home/.claude/CLAUDE.md"
+out9=$(CLAUDE_CONFIG_DIR=$home/.claude run5)
+lacksfrag "$out9" "missing AGENTS.md" "the repo holding the live global CLAUDE.md is skipped"
+rm -f "$home/.claude/CLAUDE.md" "$home/noagents/CLAUDE.md"
 
 # Static: all four check-5 loops read the widened list, and both nested loops consult the exemption list.
 n=$(grep -cF 'for repo in "${CHECK5_REPOS[@]}"; do' "$DOCTOR")

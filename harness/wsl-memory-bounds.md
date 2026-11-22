@@ -192,8 +192,10 @@ in a `claude-code-bash` cgroup beside its own, with that `memory.max`. It has
 two gaps. It bounds RAM only: on 2.1.322, `rg -a -c -F memory.swap` over the
 binary counts 0, against 6 for `memory.max` and 2 for `claude-code-bash`. And
 it needs a parent the user can write to. A session launched from a WSL
-terminal runs in `/init.scope`, so its pool would sit at the cgroup root,
-which a user cannot create, and every command runs uncapped with no warning.
+terminal runs outside systemd's tree, in `/init.scope` or, since the
+2026-11-20 reboot onto kernel 6.18.58.1, in `/non-systemd`. Its pool would
+sit at the cgroup root, which a user cannot create, so every command runs
+uncapped with no warning.
 
 The RAM-only gap is the expensive one. At 23:41:12Z on 2026-11-09 the
 kernel's OOM report for a pool read `memory: usage 4194304kB, limit
@@ -208,8 +210,8 @@ with unbounded swap does not stop a runaway; it moves the runaway into swap.
 Code captures the file's text once per process, so a session that was already
 running when the file changed keeps the old text until it restarts:
 
-- **In `/init.scope`**, when `CLAUDE_CODE_TOOL_MEMORY_LIMIT` is a size,
-  `init.scope`'s own `memory.max` is `max`, and the user bus socket and
+- **In `/init.scope` or `/non-systemd`**, when `CLAUDE_CODE_TOOL_MEMORY_LIMIT`
+  is a size, that cgroup's own `memory.max` is `max`, and the user bus socket and
   `busctl` exist, the shell asks the user manager (`StartTransientUnit`,
   2 s timeout) to move its own PID into `hov-tool-<pid>-<n>.scope` with
   `MemoryMax=` the cap, `MemorySwapMax=` the swap bound, `TasksMax=infinity`,
@@ -229,8 +231,8 @@ The swap bound defaults to the RAM cap, so a command can hold at most twice
 its cap before the OOM killer ends it with exit 137.
 `HOV_STACK_TOOL_SWAP_LIMIT` takes the same size syntax for a different bound,
 or `0`/`false`/`no`/`off`/`none` for none; in a pool an off word leaves the
-current bound alone. `HOV_STACK_TOOL_RESCOPE=off` skips the `/init.scope`
-move and nothing else. A heavy command that `heavy-job-admission-run.sh`
+current bound alone. `HOV_STACK_TOOL_RESCOPE=off` skips the move and the
+notice below, and nothing else. A heavy command that `heavy-job-admission-run.sh`
 admits still moves into its own scope, now with the same swap bound. One that
 a Bash deny or ask rule in a settings file could match skips admission, so
 Claude Code can still apply the rule, and runs under the per-command bound
@@ -247,8 +249,20 @@ The prelude fails open and never writes to stdout. Without cgroup v2, a bus,
 malformed limit, a failed `busctl` call (its first error line is quoted) or a
 move that did not land in 250 ms each print one `hov-stack:` line to stderr.
 Bash only; dash and other shells skip it. It covers Bash tool commands
-only: Claude Code itself, and MCP servers in an `/init.scope` session, stay
-where they are.
+only: Claude Code itself, and MCP servers in an `/init.scope` or
+`/non-systemd` session, stay where they are.
+
+The prelude matched `/init.scope` only until 2026-11-22. From the
+2026-11-20 reboot onward, every WSL shell started in `/non-systemd`, fell
+through, and ran uncapped without a word. The user journal shows 361
+`hov-tool` scopes on the boot before and none on any boot after. On 11-21 the
+host froze four times for 6 to 8 minutes, and that boot's `/non-systemd`
+`memory.swap.peak` read 68.5 GiB, the highest of any cgroup on the host.
+A silent fallthrough is the failure to guard against here: a
+shell in any other top-level cgroup that is not a slice, with a size limit set,
+now gets one `hov-stack:` stderr line per boot saying its commands run uncapped.
+A marker named `hov-stack-uncapped-cgroup-<name>` in the runtime directory
+keeps the notice to once per boot.
 
 `tests/claude-env-tool-scope.test.sh` checks the logic through a fake
 `busctl` and test-only path overrides. Those cases prove the decision and the
@@ -258,7 +272,9 @@ allocation under a 64 MB cap killed with exit 137 while the swap-off control
 survives, and a native pool emulated in a `Delegate=yes` user service, where
 a command that enters it by writing `0` to its `cgroup.procs` is killed with
 `memory.swap.peak` at or under the bound. On the author's WSL host on
-2026-11-09 every live case ran and passed, with 0 skipped.
+2026-11-09 every live case ran and passed, with 0 skipped, and again on
+2026-11-22 from a `/non-systemd` shell, where the same live cases fail
+against the previous prelude.
 
 ## What this does not fix
 

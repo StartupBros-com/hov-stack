@@ -638,20 +638,26 @@ for repo in "${CHECK5_REPOS[@]}"; do
   [ "$dead" -gt 0 ] &&
     note "$name: $dead nested AGENTS.md with no sibling CLAUDE.md pointer — never loaded while the repo root carries a CLAUDE.md (add '@AGENTS.md' stubs)"
 done
-# Active own repos (commit in last 30d) should have an AGENTS.md at all
+# Active own repos (commit in last 30d) should have an AGENTS.md at all. Two skips: a
+# repo the overlay lists as "<name>:AGENTS.md" (decided it needs none, so the note stops
+# asking), and the repo whose root CLAUDE.md is the live global instruction file. That
+# file loads for every project and is read by name, so it stays CLAUDE.md.
 now=$(date +%s)
+global_claude=$(readlink -e -- "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/CLAUDE.md" 2>/dev/null) || global_claude=
 missing_agents=""
 for repo in "${CHECK5_REPOS[@]}"; do
   name=$(basename "$repo")
   git -C "$repo" rev-parse --git-dir >/dev/null 2>&1 || continue
   [ -f "$repo/AGENTS.md" ] && continue
+  instruction_exempt "$name" AGENTS.md && continue
+  [ -n "$global_claude" ] && [ "$(readlink -e -- "$repo/CLAUDE.md" 2>/dev/null)" = "$global_claude" ] && continue
   origin=$(git -C "$repo" remote get-url origin 2>/dev/null || true)
   [ -z "$origin" ] || check5_own_origin "$origin" || continue
   last=$(git -C "$repo" log -1 --format=%ct 2>/dev/null || echo 0)
   [ $((now - last)) -lt $((30 * 86400)) ] && missing_agents="$missing_agents $name"
 done
 [ -n "$missing_agents" ] &&
-  note "$(echo "$missing_agents" | wc -w) active repo(s) missing AGENTS.md — run /scaffold-agents-md in each:$missing_agents"
+  note "$(echo "$missing_agents" | wc -w) active repo(s) missing AGENTS.md — run /scaffold-agents-md in each, or list '<name>:AGENTS.md' in <overlay>/instruction-file-exempt for one that needs none:$missing_agents"
 [ "$WARNS" -eq "$w0" ] && [ "$NOTES" -eq "$n5" ] && ok "instruction files present + no drifting twins (own repos)"
 
 echo "== 6. Worktree accumulation (>8 → run wt-sweep.sh) =="
