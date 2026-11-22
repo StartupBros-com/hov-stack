@@ -64,6 +64,53 @@ class PapercutBase(unittest.TestCase):
         return base
 
 
+class TestJsonlReaderParity(PapercutBase):
+    def test_torn_lines_do_not_hide_later_records_and_last_line_needs_no_newline(self):
+        ts = iso()
+        self.store.joinpath("state").mkdir()
+        rows = (
+            (PC.FILINGS, {"repo": "a/b", "kind": "issue", "number": 1},
+             {"repo": "a/b", "kind": "issue", "number": 2}, PC.read_filings),
+            (PC.FAMILIES, {"schema_version": PC.FAMILY_SCHEMA_VERSION, "ts": ts,
+                           "family": "first", "action": "create"},
+             {"schema_version": PC.FAMILY_SCHEMA_VERSION, "ts": ts,
+              "family": "second", "action": "create"}, PC.read_family_events),
+            (PC.RESOLVED, {"sig": "first", "ts": ts},
+             {"sig": "second", "ts": ts}, lambda: list(PC.read_resolutions().values())),
+            (self.store / "project.jsonl", {"sig": "first", "ts": ts, "_project": "project"},
+             {"sig": "second", "ts": ts, "_project": "project"},
+             lambda: list(PC.read_records(7))),
+        )
+        for path, first, second, read in rows:
+            with self.subTest(path=path.name):
+                path.write_text(f" {json.dumps(first)}  \r\n\n {{torn \r\n "
+                                f"{json.dumps(second)}", encoding="utf-8")
+                self.assertEqual(read(), [first, second])
+                with path.open("a", encoding="utf-8") as stream:
+                    stream.write("\n{torn-last")
+                self.assertEqual(read(), [first, second])
+
+    def test_unreadable_sources_keep_their_distinct_failure_policies(self):
+        from unittest.mock import patch
+
+        PC.FAMILIES.parent.mkdir()
+        for path in (PC.FILINGS, PC.FAMILIES, PC.RESOLVED, self.store / "project.jsonl"):
+            path.touch()
+        with patch.object(Path, "read_text", side_effect=PermissionError("fixture failure")):
+            for read, status, diagnostic in (
+                (PC.read_filings, 1, "cannot read filing registry"),
+                (PC.read_family_events, 2, "cannot read family state"),
+            ):
+                with self.subTest(read=read.__name__):
+                    stderr = io.StringIO()
+                    with contextlib.redirect_stderr(stderr), self.assertRaises(SystemExit) as exc:
+                        read()
+                    self.assertEqual(exc.exception.code, status)
+                    self.assertIn(diagnostic, stderr.getvalue())
+            self.assertEqual(PC.read_resolutions(), {})
+            self.assertEqual(list(PC.read_records(7)), [])
+
+
 class TestReadRecords(PapercutBase):
     def test_window_excludes_older_records(self):
         self.write("-p", [self.rec(days_ago=1), self.rec(days_ago=30)])

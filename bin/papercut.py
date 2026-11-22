@@ -409,6 +409,22 @@ def record_filing(repo: str, kind: str, number: int, url: str) -> None:
               file=sys.stderr)
 
 
+def _jsonl_values(text: str):
+    """Decode whole JSONL values in order, skipping blank or torn lines.
+
+    Reading the file and validating the decoded values stay with each store.
+    """
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            value = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        yield value
+
+
 def read_filings() -> list[dict]:
     """Read recorded filing locators, skipping torn or malformed lines."""
     if not FILINGS.exists():
@@ -422,14 +438,7 @@ def read_filings() -> list[dict]:
         # not read as "nothing was ever filed" and quietly widen the cap.
         die(f"cannot read filing registry at {FILINGS}: {exc}")
     filings = []
-    for line in text.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            record = json.loads(line)
-        except json.JSONDecodeError:
-            continue
+    for record in _jsonl_values(text):
         if not isinstance(record, dict):
             continue
         if locator_fields(record) is not None:
@@ -575,14 +584,7 @@ def read_family_events() -> list[dict]:
         family_error(f"cannot read family state at {FAMILIES}: {exc}", 2)
 
     events = []
-    for line in text.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            event = json.loads(line)
-        except json.JSONDecodeError:
-            continue
+    for event in _jsonl_values(text):
         if (not isinstance(event, dict) or event.get("schema_version") != FAMILY_SCHEMA_VERSION
                 or not event.get("family") or event.get("action") not in FAMILY_ACTIONS
                 or parse_ts(event.get("ts")) is None):
@@ -980,14 +982,7 @@ def read_resolutions() -> dict[str, dict]:
         text = RESOLVED.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return latest
-    for line in text.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            ev = json.loads(line)
-        except json.JSONDecodeError:
-            continue
+    for ev in _jsonl_values(text):
         sig = ev.get("sig")
         if not sig or not ev.get("ts"):
             continue
@@ -1228,14 +1223,7 @@ def read_records(days: int, project: str | None = None, *,
             text = fp.read_text(encoding="utf-8", errors="replace")
         except OSError:
             continue
-        for line in text.splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                rec = json.loads(line)
-            except json.JSONDecodeError:
-                continue
+        for rec in _jsonl_values(text):
             if not isinstance(rec, dict) or "sig" not in rec:
                 continue
             try:
