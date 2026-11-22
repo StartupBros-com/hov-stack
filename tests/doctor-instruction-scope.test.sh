@@ -15,8 +15,8 @@ trap 'rm -rf "$TMP" 2>/dev/null || true' EXIT
 pass=0 fail=0
 ok_() { pass=$((pass + 1)); }
 bad() { fail=$((fail + 1)); echo "FAIL: $*" >&2; }
-has() { printf '%s\n' "$1" | grep -qxF -- "$2" && ok_ || bad "$3: expected line '$2' in: $1"; }
-lacks() { printf '%s\n' "$1" | grep -qxF -- "$2" && bad "$3: '$2' should be absent in: $1" || ok_; }
+has() { grep -qxF -- "$2" <<<"$1" && ok_ || bad "$3: expected line '$2' in: $1"; }
+lacks() { grep -qxF -- "$2" <<<"$1" && bad "$3: '$2' should be absent in: $1" || ok_; }
 hasfrag() { case $1 in *"$2"*) ok_ ;; *) bad "$3: expected '$2' in: $1" ;; esac; }
 lacksfrag() { case $1 in *"$2"*) bad "$3: '$2' should be absent in: $1" ;; *) ok_ ;; esac; }
 
