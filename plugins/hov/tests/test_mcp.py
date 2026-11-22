@@ -325,6 +325,15 @@ class McpCase(HovFixture):
         self.assertIn("testhost:omp", text)
         self.assertRegex(text, r"testhost:omp\s+-\s+unread=1")
 
+    def test_ls_tool_repo_keeps_only_sessions_in_that_repository(self):
+        self.hov("send", "--as", "alpha", "--to", "omp", "x")
+        # the fixture sessions sit in directories outside any repository, so no session works in this one
+        r, _ = self.results(call(2, "ls", {"repo": "widgets"}), call(3, "ls", {"repo": 5}))
+        err, text = self.text(r[2])
+        self.assertFalse(err)
+        self.assertEqual(text, "(no session works in that repository)")
+        self.assertEqual(r[3]["error"]["code"], -32602)  # a repo that is not a string is refused by the schema
+
     def test_inbox_and_thread_tools_show_a_hostile_stored_identity_defanged(self):
         """Defence in depth: a name an older version let in cannot plant a frame or a fake header line in tool output."""
         self.insert_hostile_row("omp")

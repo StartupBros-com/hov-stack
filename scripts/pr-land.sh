@@ -40,6 +40,12 @@
 # lower-case words mid-sentence: "the fix owner/repo#N asks for" and "still not closed: #439"
 # each closed an issue nobody meant to close (#821). A failed read refuses too.
 #
+# Then it asks merge-freeze.sh whether another session holds a merge freeze on the repository
+# (a deploy or a release that needs the base to stand still). While one is active it waits for
+# the freeze to end, up to --wait, and re-reads the checks before merging; past that it exits
+# pending, naming the holder, the end time and the reason. A PR the freeze allows, or one run by
+# the freeze's own holder, merges through it. A freeze file that does not parse holds the merge.
+#
 # Usage: pr-land.sh [<pr>] [--repo OWNER/NAME] [--pro] [--pro-fixed] [--wait SECONDS]
 #                   [--queue-wait SECONDS] [--updates N] [--no-closeout] [--allow-no-checks]
 #                   [--allow-prose-closes]
@@ -60,6 +66,7 @@ set -euo pipefail
 POLL=${PR_LAND_POLL_SECONDS:-30}
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 WT_DONE=${PR_LAND_WT_DONE:-$HERE/wt-done.sh}
+FREEZE=${PR_LAND_MERGE_FREEZE:-$HERE/merge-freeze.sh}
 say() { printf 'pr-land: %s\n' "$1" >&2; }
 finish() { local rc=$1; shift; printf '%s\n' "$*"; exit "$rc"; }
 refuse() { finish 1 "blocked: $1"; }
@@ -298,6 +305,28 @@ check_closes() {
   refuse "PR #$PR would close $prose, which the body names only in prose (a lower-case close, fix or resolve mid-sentence) or not at all (a sidebar link); reword it (Refs #N) or write the close as its own Closes #N line and re-run, or re-run with --allow-prose-closes if the close is meant"
 }
 
+# A merge freeze another session holds (merge-freeze.sh). Returns 0 once a freeze that held the
+# merge has ended, so the caller re-reads the checks (the head may have moved meanwhile), and 1
+# when none held it. All the freezes one run meets share one --wait.
+FREEZE_DEADLINE=""
+wait_freeze() {
+  local line rc held=0
+  while :; do
+    rc=0
+    line=$(bash "$FREEZE" check --repo "$REPO" --pr "$PR") || rc=$?
+    case "$rc" in
+      0) [ "$held" = 0 ] || return 0; return 1 ;;
+      1) ;;
+      *) retry "${line:-the merge-freeze check failed (exit $rc)}; nothing merged" ;;
+    esac
+    [ -n "$FREEZE_DEADLINE" ] || FREEZE_DEADLINE=$((SECONDS + WAIT))
+    [ "$SECONDS" -lt "$FREEZE_DEADLINE" ] || retry "$line; nothing merged, re-run once it ends"
+    [ "$held" = 1 ] || say "waiting up to ${WAIT}s for a merge freeze to end: $line"
+    held=1
+    sleep "$POLL"
+  done
+}
+
 # 4. Wait, merge the exact head; on a strict base with no queue, update a behind branch first.
 if [ "$STRICT" = true ] && [ "$QUEUE" = false ] && [ "$(jq -r .mergeStateStatus "$S/pr.json")" = BEHIND ]; then
   update_branch
@@ -305,6 +334,7 @@ fi
 while :; do
   wait_checks
   check_closes
+  if wait_freeze; then continue; fi
   if gh pr merge "$PR" --repo "$REPO" --squash --match-head-commit "$HEAD" >"$S/merge.out" 2>&1; then break; fi
   # The command can fail after GitHub merged (a client timeout): read the state before deciding.
   POST=$(gh pr view "$PR" --repo "$REPO" --json state,mergeStateStatus --jq '"\(.state) \(.mergeStateStatus)"') \

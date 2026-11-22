@@ -767,31 +767,146 @@ def cmd_search(a: argparse.Namespace) -> int:
     return 0
 
 
-def ls_rows(con: sqlite3.Connection) -> tuple[list[dict], list[dict]]:
-    """Sessions and mailboxes on this host, then the links: what `hov ls` and the MCP `ls` tool show."""
+# ---------------------------------------------------------------- where a session works
+
+SESSION_ID_RE = re.compile(r"^[0-9A-Za-z-]{8,64}$")
+# Bytes read from the end of a transcript, smallest first; one long tool result can push the last `cwd` past the first.
+TRANSCRIPT_TAILS = (256 * 1024, 4 * 1024 * 1024)
+GITHUB_REMOTE = re.compile(r"github\.com[:/]+([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+?)(?:\.git)?/*$")
+NO_LOCATION = {"dir": None, "dir_from": None, "repo": None, "branch": None, "worktree": None, "checkout": None}
+
+
+def transcript_cwd(session_id: str | None) -> str | None:
+    """The working directory a Claude Code session's transcript recorded last, or None.
+
+    `claude agents --json` and /proc both report the directory a session was launched in, so a session that moved
+    into a worktree after launch (EnterWorktree) still shows its main checkout there. Its transcript stamps every
+    entry with the directory it ran in; the newest stamp is where it works now. Measured 2026-11-21 on 26 live
+    sessions: the transcript was right for all 5 that had moved, and hov's own hook-recorded cwd was wrong for 3
+    and missing for 2 (hov-stack#840). The transcript format is Claude Code's and undocumented, so this reads only
+    the tail and any surprise returns None. Delete it once Claude Code reports a session's current directory.
+    """
+    if not session_id or not SESSION_ID_RE.match(session_id):
+        return None
+    base = Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude") / "projects"
+    try:
+        hits = sorted(base.glob(f"*/{session_id}.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True)
+    except OSError:
+        return None
+    if not hits:
+        return None
+    for cap in TRANSCRIPT_TAILS:
+        try:
+            with open(hits[0], "rb") as f:
+                size = f.seek(0, os.SEEK_END)
+                start = max(0, size - cap)
+                f.seek(start)
+                lines = f.read().split(b"\n")
+        except OSError:
+            return None
+        if start > 0:
+            lines = lines[1:]  # the first line was cut by the seek
+        for raw in reversed(lines):
+            if b'"cwd"' not in raw:
+                continue
+            try:
+                entry = json.loads(raw)
+            except ValueError:
+                continue
+            cwd = entry.get("cwd") if isinstance(entry, dict) else None
+            if isinstance(cwd, str) and cwd.startswith("/"):
+                return cwd
+        if start == 0:
+            return None
+    return None
+
+
+def git_lines(cwd: str, *args: str) -> list[str] | None:
+    env = dict(os.environ, GIT_OPTIONAL_LOCKS="0", GIT_TERMINAL_PROMPT="0")
+    try:
+        res = subprocess.run(["git", "-C", cwd, *args], capture_output=True, text=True, timeout=3, check=False, env=env)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return res.stdout.splitlines() if res.returncode == 0 else None
+
+
+def session_location(launch_cwd: object, session_id: str | None) -> dict:
+    """Where a session on this host works: its directory (`dir_from`: transcript or launch), the repository as
+    GitHub owner/name (else the main checkout's folder name), the branch, the worktree and the main checkout.
+
+    A transcript directory that no longer exists (a worktree removed after its merge) is reported as it is, with
+    `dir_from` "gone" and no repository, so the session matches no `--repo`: falling back to the launch directory
+    would show a finished session as working on its main checkout."""
+    loc = dict(NO_LOCATION)
+    d, src = transcript_cwd(session_id), "transcript"
+    if d and not os.path.isdir(d):
+        loc.update(dir=d, dir_from="gone")
+        return loc
+    if not d:
+        d, src = launch_cwd, "launch"
+    if not isinstance(d, str) or not d.startswith("/") or not os.path.isdir(d):
+        return loc
+    loc.update(dir=d, dir_from=src)
+    out = git_lines(d, "rev-parse", "--abbrev-ref", "HEAD", "--path-format=absolute", "--show-toplevel", "--git-common-dir")
+    if not out or len(out) != 3:
+        return loc
+    branch, top, common = out
+    checkout = os.path.dirname(common) if os.path.basename(common) == ".git" else common
+    loc.update(branch=branch, worktree=top, checkout=checkout)
+    url = git_lines(top, "config", "--get", "remote.origin.url")
+    m = GITHUB_REMOTE.search(url[0].strip()) if url else None
+    loc["repo"] = f"{m.group(1)}/{m.group(2)}" if m else os.path.basename(checkout)
+    return loc
+
+
+def in_repo(row: dict, want: str) -> bool:
+    """Whether a session row works in repository `want`: its owner/name, its name, or its main checkout's folder
+    name, compared whole and without case, so `hov-stack` never matches `hov-stack-extra`."""
+    names = set()
+    if row.get("repo"):
+        names |= {row["repo"].lower(), row["repo"].lower().rsplit("/", 1)[-1]}
+    if row.get("checkout"):
+        names.add(os.path.basename(row["checkout"]).lower())
+    return want.strip().lower() in names
+
+
+def ls_rows(con: sqlite3.Connection, repo: str | None = None) -> tuple[list[dict], list[dict]]:
+    """Sessions and mailboxes on this host, then the links: what `hov ls` and the MCP `ls` tool show. With `repo`,
+    only the sessions working in that repository (in_repo), and no mailboxes or links."""
     host = local_host()
+    agents = agents_rows()
+    # SAFETY (#767): the git and transcript reads below can take seconds; never hold the mailbox write lock over them.
+    if con.in_transaction:
+        con.commit()
     out = []
     seen = set()
-    for r in agents_rows():
+    for r in agents:
         sid = r.get("sessionId") or ""
         title = r.get("name")
         # the same rule as whoami: a title the identity rules refuse is not this session's mail name
         name = title if title and ident_error(title, "name") is None else sid[:8]
         seen.add(name)
+        row = {"kind": "session", "session_id": r.get("sessionId"), "state": r.get("state"), "status": r.get("status"), "cwd": r.get("cwd"),
+               **session_location(r.get("cwd"), sid)}
+        if repo is not None and not in_repo(row, repo):
+            continue
         me = Me(host, name, sid or None, "agents")
-        out.append({"kind": "session", "addr": me.addr, "session_id": r.get("sessionId"), "state": r.get("state"), "status": r.get("status"), "cwd": r.get("cwd"), "unread": len(unread_for(con, me))})
+        out.append({"addr": me.addr, **row, "unread": len(unread_for(con, me))})
+    if repo is not None:
+        return out, []
     for r in con.execute("SELECT DISTINCT to_host AS h, to_name AS n FROM messages UNION SELECT DISTINCT from_host, from_name FROM messages"):
         if r["n"] in ("*",) or (r["h"] == host and r["n"] in seen):
             continue
         me = Me(r["h"], r["n"], None, "mailbox")
-        out.append({"kind": "mailbox", "addr": me.addr, "session_id": None, "state": None, "status": None, "cwd": None, "unread": len(unread_for(con, me)) if r["h"] == host else None})
+        out.append({"kind": "mailbox", "addr": me.addr, "session_id": None, "state": None, "status": None, "cwd": None, **NO_LOCATION,
+                    "unread": len(unread_for(con, me)) if r["h"] == host else None})
     links = []
     for r in con.execute("SELECT * FROM peers ORDER BY host"):
         links.append({
             "kind": "link", "addr": f"{r['host']}:*", "host": r["host"], "role": r["role"], "via": r["via"], "state": r["state"],
             "last_hello": iso(r["last_hello"]), "last_seen": iso(r["last_seen"]),
             "last_ack": iso(r["last_ack"]) if r["last_ack"] else None, "last_in": iso(r["last_in"]) if r["last_in"] else None,
-            "session_id": None, "status": None, "cwd": None, "unread": None,
+            "session_id": None, "status": None, "cwd": None, **NO_LOCATION, "unread": None,
         })
     return out, links
 
@@ -803,7 +918,8 @@ def fmt_ls(out: list[dict], links: list[dict]) -> list[str]:
         st = f"{shown(o['state'], 32)}/{shown(o['status'], 32)}" if o["state"] else "-"
         un = "-" if o["unread"] is None else str(o["unread"])
         sid8 = f"  id={shown(o['session_id'][:8], 8)}" if o["session_id"] else ""
-        lines.append(f"{shown(o['addr'], 300):40} {st:18} unread={un}{sid8}")
+        at = f"  at={shown(o['repo'], 200)}:{shown(o['branch'] or '-', 200)}" if o.get("repo") else ""
+        lines.append(f"{shown(o['addr'], 300):40} {st:18} unread={un}{sid8}{at}")
     for o in links:
         lines.append(f"link {shown(o['host'], 64):35} {shown(o['role'], 16)}/{shown(o['state'], 16):13}"
                      f" hello={shown(o['last_hello'], 40)} ack={shown(o['last_ack'] or '-', 40)} in={shown(o['last_in'] or '-', 40)}")
@@ -812,7 +928,7 @@ def fmt_ls(out: list[dict], links: list[dict]) -> list[str]:
 def cmd_ls(a: argparse.Namespace) -> int:
     con = db()
     whoami(con)  # as in cmd_thread
-    out, links = ls_rows(con)
+    out, links = ls_rows(con, a.repo)
     if a.json:
         print(json.dumps(out + links))
     else:
@@ -1491,8 +1607,8 @@ MCP_TOOLS = [
      "description": "Full-text search over subjects and bodies (SQLite FTS5 query syntax), best match first.",
      "inputSchema": _obj({"query": _s(1000), "limit": {"type": "integer", "minimum": 1, "maximum": 100}}, ["query"])},
     {"name": "ls", "title": "Who is reachable",
-     "description": "Sessions and mailboxes on this host with their unread counts, and the state of each link to another host.",
-     "inputSchema": _obj({})},
+     "description": "Sessions and mailboxes on this host with their unread counts and, for a session, the repository and branch it works on (at=repo:branch), and the state of each link to another host. With repo, only the sessions working in that repository.",
+     "inputSchema": _obj({"repo": _s(200)})},
 ]
 
 
@@ -1672,9 +1788,9 @@ class McpServer:
                 return "no matches"
             return "\n".join([FRAMING, *(fmt_row(r, full=False) for r in rows)])
         if name == "ls":
-            out, links = ls_rows(con)
+            out, links = ls_rows(con, args.get("repo"))
             lines = fmt_ls(out, links)
-            return "\n".join(lines) if lines else "(nothing reachable yet)"
+            return "\n".join(lines) if lines else ("(no session works in that repository)" if args.get("repo") else "(nothing reachable yet)")
         raise McpError(-32602, f"unknown tool: {shown(name, 64)}")
 
 
@@ -2300,6 +2416,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     l = sub.add_parser("ls", help="list reachable sessions and mailboxes on this host, and the state of each link")
     l.add_argument("--json", action="store_true")
+    l.add_argument("--repo", default=None, help="only sessions working in this repository: owner/name, its name, or the main checkout's folder name (whole name, any case)")
     l.set_defaults(fn=cmd_ls)
 
     k = sub.add_parser("link", help="keep one outbound link to HOST up and carry mail both ways (store-and-forward)")

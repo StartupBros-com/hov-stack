@@ -38,6 +38,8 @@ class HovFixture(unittest.TestCase):
             "HOV_STATE_DIR": str(self.state),
             "HOV_HOST": "testhost",
             "HOV_AGENTS_CMD": f"{shutil.which('cat')} {fixture}",
+            # transcripts are read from here (hov ls), never from the real ~/.claude
+            "CLAUDE_CONFIG_DIR": str(Path(self.tmp.name) / "claude"),
         }
 
     def tearDown(self):
@@ -111,6 +113,81 @@ class HovCase(HovFixture):
         by = {r["addr"]: r for r in rows}
         self.assertEqual(by["testhost:alpha"]["unread"], 1)
         self.assertEqual(by["testhost:beta"]["unread"], 0)
+
+    # ------------------------------------------------------------ where a session works (hov ls)
+
+    def git(self, cwd, *args):
+        subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", *args], cwd=cwd, check=True, capture_output=True)
+
+    def located(self):
+        """Two repositories, a worktree and five sessions on them; returns (env, paths)."""
+        root = Path(self.tmp.name)
+        main, extra, plain = root / "widgets", root / "widgets-extra", root / "plain"
+        for repo, url in ((main, "git@github.com:acme/widgets.git"), (extra, "https://github.com/acme/widgets-extra")):
+            repo.mkdir()
+            self.git(repo, "init", "-q", "-b", "main")
+            self.git(repo, "commit", "-q", "--allow-empty", "-m", "x")
+            self.git(repo, "remote", "add", "origin", url)
+        plain.mkdir()
+        wt = main / ".claude" / "worktrees" / "feature"
+        self.git(main, "worktree", "add", "-q", "-b", "feature", str(wt))
+        gone = main / ".claude" / "worktrees" / "merged-and-removed"
+        projects = root / "claude" / "projects" / "-widgets"
+        projects.mkdir(parents=True)
+
+        def transcript(sid, cwds, tail=()):
+            lines = [json.dumps({"type": "user", "sessionId": sid, "cwd": str(c)}) for c in cwds] + list(tail)
+            (projects / f"{sid}.jsonl").write_text("\n".join(lines) + "\n")
+
+        sid_d, sid_e = "dddddddd-1111-2222-3333-444444444444", "eeeeeeee-1111-2222-3333-444444444444"
+        # alpha moved into the worktree after launch; its newest cwd sits behind a line longer than the first tail read
+        transcript(SID_A, [main, wt], tail=[json.dumps({"type": "tool_result", "content": "x" * 300_000})])
+        # gamma entered the worktree and came back: the newest cwd, not the newest worktree, is where it works
+        transcript(SID_C, [main, wt, main])
+        # delta's worktree was removed after its merge
+        transcript(sid_d, [main, gone])
+        agents = Path(self.tmp.name) / "located.json"
+        agents.write_text(json.dumps([
+            {"sessionId": SID_A, "name": "alpha", "cwd": str(main), "state": "working", "status": "busy"},
+            {"sessionId": SID_B, "name": "beta", "cwd": str(extra), "state": "working", "status": "busy"},  # no transcript
+            {"sessionId": SID_C, "name": "gamma", "cwd": str(main), "state": "working", "status": "idle"},
+            {"sessionId": sid_d, "name": "delta", "cwd": str(main), "state": "blocked", "status": "idle"},
+            {"sessionId": sid_e, "name": "eps", "cwd": str(plain), "state": "working", "status": "busy"},
+        ]))
+        env = {"HOV_AGENTS_CMD": f"{shutil.which('cat')} {agents}", "HOME": str(root)}
+        real = {k: os.path.realpath(v) for k, v in {"main": main, "extra": extra, "wt": wt, "plain": plain}.items()}
+        return env, real, str(gone)
+
+    def ls_by_addr(self, *args, env_extra=None):
+        return {r["addr"]: r for r in json.loads(self.hov("ls", "--json", *args, env_extra=env_extra).stdout)}
+
+    def test_ls_reports_repo_branch_and_worktree(self):
+        env, p, gone = self.located()
+        by = self.ls_by_addr(env_extra=env)
+        a = by["testhost:alpha"]
+        self.assertEqual((a["repo"], a["branch"], a["dir_from"]), ("acme/widgets", "feature", "transcript"))
+        self.assertEqual((os.path.realpath(a["worktree"]), os.path.realpath(a["checkout"])), (p["wt"], p["main"]))
+        self.assertEqual(os.path.realpath(a["cwd"]), p["main"])  # the launch directory is still reported as cwd
+        b = by["testhost:beta"]
+        self.assertEqual((b["repo"], b["branch"], b["dir_from"]), ("acme/widgets-extra", "main", "launch"))
+        # planted negative: the newest worktree in the transcript would put gamma on `feature`
+        g = by["testhost:gamma"]
+        self.assertEqual((g["branch"], os.path.realpath(g["worktree"])), ("main", p["main"]))
+        d = by["testhost:delta"]
+        self.assertEqual((d["dir"], d["dir_from"], d["repo"], d["branch"]), (gone, "gone", None, None))
+        e = by["testhost:eps"]
+        self.assertEqual((os.path.realpath(e["dir"]), e["dir_from"], e["repo"], e["worktree"]), (p["plain"], "launch", None, None))
+        text = self.hov("ls", env_extra=env).stdout
+        self.assertIn("at=acme/widgets:feature", next(line for line in text.splitlines() if "testhost:alpha" in line))
+
+    def test_ls_repo_keeps_only_sessions_in_that_repository(self):
+        env, _, _ = self.located()
+        self.hov("send", "--as", "ceo", "--to", "alpha", "x", env_extra=env)  # a mailbox row ls would otherwise list
+        for want in ("widgets", "acme/widgets", "ACME/Widgets"):
+            # planted negatives: widgets-extra (a longer name) and delta (a removed worktree) are not in it
+            self.assertEqual(set(self.ls_by_addr("--repo", want, env_extra=env)), {"testhost:alpha", "testhost:gamma"}, want)
+        self.assertEqual(set(self.ls_by_addr("--repo", "widgets-extra", env_extra=env)), {"testhost:beta"})
+        self.assertEqual(self.ls_by_addr("--repo", "idgets", env_extra=env), {})
 
     def test_unknown_recipient_reaches_nobody(self):
         # planted negative: a wrong implementation that delivers host-wide would fail this

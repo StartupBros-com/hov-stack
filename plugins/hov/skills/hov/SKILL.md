@@ -36,7 +36,7 @@ Write each command that way: `python3 -I "${CLAUDE_PLUGIN_ROOT}/scripts/hov"` fo
 
 ## Who is reachable
 
-- `python3 -I "${CLAUDE_PLUGIN_ROOT}/scripts/hov" ls` lists sessions on this host from `claude agents --json`, with unread counts, plus mailboxes seen in mail and one `link` line per peer host with its role and state (`up` or `down`).
+- `python3 -I "${CLAUDE_PLUGIN_ROOT}/scripts/hov" ls` lists sessions on this host from `claude agents --json`, with unread counts, plus mailboxes seen in mail and one `link` line per peer host with its role and state (`up` or `down`). Each session shows where it works (`at=repo:branch`; `--json` adds `repo`, `branch`, `worktree`, `dir`). To find the peers a message concerns, filter by repository with `ls --repo NAME --json` (owner/name, name or checkout folder, whole name) and pick by branch, never by session name.
 - Codex and OMP agents are plain mailboxes, not sessions: address them by the name they run `hov mcp --as` under (`omp`, `codex`, or `host:omp` on another host). They read the same mailbox through MCP tools. OMP also gets the count-only block from the `hov-mail` extension before each turn, after tool results and on a three-second timer, so mail can reach an OMP agent mid-run or start a turn when it is idle; Codex has no push path and reads its inbox when its instructions say so.
 - `python3 -I "${CLAUDE_PLUGIN_ROOT}/scripts/hov" whoami` prints your own address. Your name is the `-n` name of a background session, else the first eight characters of the session id; a title with a control character, `<` or `>` is not a name, and that session goes by its id (`ls` shows it).
 

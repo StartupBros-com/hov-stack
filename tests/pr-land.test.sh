@@ -116,12 +116,17 @@ printf 'DRY_RUN=%s\n' "${DRY_RUN:-unset}" >>"$WT_LOG"
 echo "      activation: settings applied"
 exit "${STUB_WTDONE_RC:-0}"
 STUB
-chmod +x "$TMP/bin/gh" "$TMP/bin/git" "$TMP/bin/wt-done"
+# sleep sleeps as usual; with STUB_THAW_AFTER=N it first removes every merge freeze once the
+# checks have been read N times, so a case can end a freeze while pr-land waits on it.
+printf '#!/usr/bin/env bash\nif [ -n "${STUB_THAW_AFTER:-}" ] && [ "$(cat "$FIX/checks.count" 2>/dev/null || echo 0)" -ge "$STUB_THAW_AFTER" ]; then rm -f "$MERGE_FREEZE_DIR"/*.json; fi\nexec %q "$@"\n' \
+  "$(command -v sleep)" >"$TMP/bin/sleep"
+chmod +x "$TMP/bin/gh" "$TMP/bin/git" "$TMP/bin/wt-done" "$TMP/bin/sleep"
 # Closed PATH: only the tools the script and the stubs use.
-for name in bash jq mktemp rm cat sleep touch grep tr cut dirname date; do
+for name in bash jq mktemp rm cat touch grep tr cut dirname date; do
   ln -s "$(command -v "$name")" "$TMP/bin/$name"
 done
 cp "$SCRIPT_SRC" "$TMP/pr-land.sh"
+cp "$ROOT/scripts/merge-freeze.sh" "$TMP/merge-freeze.sh"
 SCRIPT="$TMP/pr-land.sh"
 
 check_run() {   # name status conclusion [workflow] [completedAt]
@@ -141,8 +146,10 @@ green() {
 reset_case() {
   rm -rf "$FIX"; mkdir -p "$FIX"; : >"$GH_LOG"; : >"$GIT_LOG"; : >"$WT_LOG"
   unset STUB_CLASSIC STUB_HEAD_MOVED STUB_MERGE_RC STUB_MERGE_LANDED STUB_MERGE_STATE STUB_QUEUE_READS STUB_QUEUE_THEN
-  unset STUB_GIT_BRANCH STUB_GIT_TIP STUB_GIT_FF_RC STUB_WTDONE_RC STUB_CLOSES_FAIL CLAUDE_LOOP_GUARD
+  unset STUB_GIT_BRANCH STUB_GIT_TIP STUB_GIT_FF_RC STUB_WTDONE_RC STUB_CLOSES_FAIL CLAUDE_LOOP_GUARD STUB_THAW_AFTER
   export PR_LAND_POLL_SECONDS=0 PR_LAND_WT_DONE="$TMP/bin/wt-done" PRO_GATE_ROUNDS_DIR="$FIX/rounds"
+  # Merge freezes live under the case's own folder, never the operator's, and this run is one session.
+  export MERGE_FREEZE_DIR="$FIX/freeze" CLAUDE_CODE_SESSION_ID=pr-land-test-self
   mkdir -p "$FIX/rounds"
   echo "$H" >"$FIX/head"
   jq -n '{state: "OPEN", isDraft: false, baseRefName: "main", headRefName: "pr-land", headRefOid: "x",
@@ -440,6 +447,42 @@ run 7 --repo "$R"
 check 'GitHub refused the merge: exit 1' test "$RC" -eq 1
 check 'GitHub refused the merge: says so' has "$OUT" 'blocked: GitHub refused the merge'
 check 'GitHub refused the merge: one attempt' test "$(merges)" = 1
+
+# --- Merge freezes (merge-freeze.sh). Another session holds them unless a case says otherwise.
+freeze() {   # repo [hold args...]: a freeze held by another session, made with the real script
+  CLAUDE_CODE_SESSION_ID=${FREEZE_AS:-other-session} bash "$TMP/merge-freeze.sh" hold --repo "$1" \
+    --minutes 30 --reason 'deploying the router' "${@:2}" >/dev/null 2>&1 || bad "freeze: hold on $1 failed"
+}
+frozen_file() { printf '%s/%s.json' "$FIX/freeze" "$(printf '%s' "$1" | tr 'A-Z/' 'a-z_')"; }
+reset_case; freeze startupbros-com/HOV-STACK
+refused 'another session holds a freeze' 2 'frozen until' 7 --repo "$R" --wait 0
+check 'freeze: names the holder' has "$OUT" 'by other-session'
+check 'freeze: names the reason' has "$OUT" 'deploying the router'
+check 'freeze: says it is pending' has "$OUT" 'pending: '
+reset_case; freeze example-org/hov-stack
+run 7 --repo "$R"
+landed 'a freeze on another repository does not hold this one'
+reset_case; freeze "$R"
+jq '.until = (now | floor) - 60' "$(frozen_file "$R")" >"$FIX/f.json" && mv "$FIX/f.json" "$(frozen_file "$R")"
+run 7 --repo "$R"
+landed 'an ended freeze does not hold'
+check 'ended freeze: says it ignored it' has "$ERR" 'ignoring the freeze'
+reset_case; freeze "$R" --allow-pr 7
+run 7 --repo "$R"
+landed 'the freeze allows this PR'
+reset_case; freeze "$R" --allow-pr 8
+refused 'the freeze allows another PR, not this one' 2 'frozen until' 7 --repo "$R" --wait 0
+reset_case; FREEZE_AS=pr-land-test-self freeze "$R"
+run 7 --repo "$R"
+landed "the holder's own merge goes through its freeze"
+reset_case; freeze "$R"; export STUB_THAW_AFTER=2
+run 7 --repo "$R"
+landed 'a freeze that ends inside --wait'
+check 'freeze ended: said it was waiting' has "$ERR" 'waiting up to 3600s for a merge freeze to end'
+check 'freeze ended: checks re-read after the wait' test "$(reads checks)" = 4
+reset_case; mkdir -p "$FIX/freeze"; echo 'not json' >"$(frozen_file "$R")"
+refused 'a freeze file that does not parse holds the merge' 2 'does not parse' 7 --repo "$R"
+check 'unparseable freeze: says how to clear it' has "$OUT" 'release --repo startupbros-com/hov-stack --force'
 
 printf 'pr-land: %s passed, %s failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
