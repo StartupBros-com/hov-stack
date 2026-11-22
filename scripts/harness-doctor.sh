@@ -81,6 +81,82 @@ sites_repos() {
 }
 mapfile -t SITES_REPOS < <(sites_repos)
 
+# home_repos: list own repositories cloned directly under $HOME, as "$HOME/<name>/".
+# An entry counts when it carries a .git directory or file AND its origin is in the
+# own org. Unlike a SITES repo, one with no remote is not taken as own: $HOME holds
+# plenty of directories that are not projects. Check 5 only.
+home_repos() {
+  local entry origin
+  for entry in "$HOME"/*/; do
+    [ -e "${entry%/}/.git" ] || continue
+    origin=$(git -C "$entry" remote get-url origin 2>/dev/null || true)
+    case "$origin" in
+      *github.com[:/]StartupBros*) printf '%s\n' "$entry" ;;
+    esac
+  done
+}
+
+# check5_repos: SITES_REPOS plus home_repos, each real directory once (readlink -f),
+# Real directories come before symlinks, SITES before $HOME, so a home entry that
+# resolves to a SITES repo is not visited again and a repo is audited under its real name.
+check5_repos() {
+  local repo real pass
+  local -a all=()
+  local -A seen=()
+  mapfile -t all < <(printf '%s\n' "${SITES_REPOS[@]}"; home_repos)
+  for pass in real link; do
+    for repo in "${all[@]}"; do
+      [ -n "$repo" ] || continue
+      if [ -L "${repo%/}" ]; then [ "$pass" = link ] || continue
+      else [ "$pass" = real ] || continue; fi
+      real=$(readlink -f -- "$repo" 2>/dev/null) || real=$repo
+      [ -n "${seen[$real]:-}" ] && continue
+      seen[$real]=1
+      printf '%s\n' "$repo"
+    done
+  done
+}
+
+# instruction_exempt_load: read <overlay>/instruction-file-exempt into INSTRUCTION_EXEMPT.
+# One "<repo-name>:<glob>" per line: repo-name is the repo directory's basename, glob a
+# bash case pattern matched against the repo-relative path (so * crosses /). A # after
+# optional leading whitespace starts a comment; blank lines are skipped; a malformed line
+# is reported on stderr and ignored. A missing file, or a relative overlay, exempts nothing.
+INSTRUCTION_EXEMPT=()
+instruction_exempt_load() {
+  local dir line content name glob
+  INSTRUCTION_EXEMPT=()
+  dir=$(overlay_dir) || return 0
+  [ -f "$dir/instruction-file-exempt" ] || return 0
+  while IFS= read -r line || [ -n "$line" ]; do
+    content=${line#"${line%%[![:space:]]*}"}
+    content=${content%"${content##*[![:space:]]}"}
+    case $content in
+      ''|'#'*) continue ;;
+    esac
+    name=${content%%:*}
+    glob=${content#*:}
+    if [ "$name" = "$content" ] || [ -z "$name" ] || [ -z "$glob" ] ||
+       [ -n "${name//[A-Za-z0-9._-]/}" ]; then
+      printf 'instruction-file-exempt: malformed line: %s\n' "$line" >&2
+      continue
+    fi
+    INSTRUCTION_EXEMPT+=("$name:$glob")
+  done < "$dir/instruction-file-exempt"
+}
+
+# instruction_exempt NAME RELPATH: true when the overlay list exempts RELPATH in repo NAME.
+instruction_exempt() {
+  local entry
+  [ "${#INSTRUCTION_EXEMPT[@]}" -gt 0 ] || return 1
+  for entry in "${INSTRUCTION_EXEMPT[@]}"; do
+    [ "${entry%%:*}" = "$1" ] || continue
+    # shellcheck disable=SC2254  # the glob is data: a case pattern from the overlay
+    case $2 in ${entry#*:}) return 0 ;; esac
+  done
+  return 1
+}
+
 # failed_unit_sweep <systemd-dir> <foreign-list>
 #   prints one "<class>\t<unit>\t<detail>" row per FAILED --user unit
 #   returns 0 on a completed sweep, 1 if the box could not be asked
@@ -467,7 +543,15 @@ n5=$NOTES
 w0=$WARNS
 # Repos where the twin convention is upstream's, not ours (upstream-synced content):
 TWIN_EXCEPTIONS="pi-compound-engineering"
-for repo in "${SITES_REPOS[@]}"; do
+# Own repos cloned directly under $HOME are audited too; the host's exemption list
+# (<overlay>/instruction-file-exempt) skips nested files that are not directory instructions.
+if [ -f "$HD_ROOT/lib/overlay.sh" ]; then
+  # shellcheck source=SCRIPTDIR/../lib/overlay.sh
+  . "$HD_ROOT/lib/overlay.sh"
+  instruction_exempt_load
+fi
+mapfile -t CHECK5_REPOS < <(check5_repos)
+for repo in "${CHECK5_REPOS[@]}"; do
   name=$(basename "$repo")
   case " $TWIN_EXCEPTIONS " in *" $name "*) continue ;; esac
   a="$repo/AGENTS.md" c="$repo/CLAUDE.md"
@@ -484,7 +568,7 @@ done
 # are the same drift hazard (use '@AGENTS.md' stubs at every level).
 # Flag own-repos whose tracked non-root CLAUDE.md files aren't stubs. Skips .claude/
 # bundles + worktree copies and test fixtures.
-for repo in "${SITES_REPOS[@]}"; do
+for repo in "${CHECK5_REPOS[@]}"; do
   name=$(basename "$repo")
   case " $TWIN_EXCEPTIONS " in *" $name "*) continue ;; esac
   git -C "$repo" rev-parse --git-dir >/dev/null 2>&1 || continue
@@ -500,6 +584,7 @@ for repo in "${SITES_REPOS[@]}"; do
       */.claude/*) continue ;;      # skill bundles / nested worktree copies
       */fixtures/*) continue ;;     # deliberate test data (e.g. check-policy-docs/pointer-drift)
     esac
+    instruction_exempt "$name" "$c" && continue
     head -c 200 "$repo/$c" 2>/dev/null | grep -q '@AGENTS.md' && continue
     nested=$((nested + 1))
   done < <(git -C "$repo" ls-files '*CLAUDE.md' 2>/dev/null)
@@ -514,7 +599,7 @@ done
 # real instructions no Claude session ever loaded). A repo with NO root CLAUDE.md
 # is left alone: there the 2.1.277 fallback attaches nested AGENTS.md on Read.
 # Same skips as the loop above.
-for repo in "${SITES_REPOS[@]}"; do
+for repo in "${CHECK5_REPOS[@]}"; do
   name=$(basename "$repo")
   case " $TWIN_EXCEPTIONS " in *" $name "*) continue ;; esac
   git -C "$repo" rev-parse --git-dir >/dev/null 2>&1 || continue
@@ -535,6 +620,7 @@ for repo in "${SITES_REPOS[@]}"; do
       */.claude/*) continue ;;      # skill bundles / nested worktree copies
       */fixtures/*) continue ;;     # deliberate test data
     esac
+    instruction_exempt "$name" "$a" && continue
     # A sibling pointer may live at CLAUDE.md or .claude/CLAUDE.md: a headless
     # probe (2026-09-18, two Read calls, sentinel from pkg/.claude/CLAUDE.md
     # present) showed the engine attaches the nested .claude/ spelling on Read
@@ -548,7 +634,7 @@ done
 # Active own repos (commit in last 30d) should have an AGENTS.md at all
 now=$(date +%s)
 missing_agents=""
-for repo in "${SITES_REPOS[@]}"; do
+for repo in "${CHECK5_REPOS[@]}"; do
   name=$(basename "$repo")
   git -C "$repo" rev-parse --git-dir >/dev/null 2>&1 || continue
   [ -f "$repo/AGENTS.md" ] && continue
