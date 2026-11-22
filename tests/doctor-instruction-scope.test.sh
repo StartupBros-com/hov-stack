@@ -58,11 +58,11 @@ mkdir -p "$home/SITES" "$TMP/overlay"
 mkrepo "$home/SITES/sitesrepo" "git@github.com:StartupBros-com/hov-stack.git"
 mkrepo "$home/ownhome" "git@github.com:StartupBros-com/hov-stack.git"
 mkrepo "$home/foreignhome" "https://github.com/someone-else/foreignhome.git"
-mkrepo "$home/legacy-owner" "https://GitHub.COM/StartupBros/project.git"
+mkrepo "$home/legacy-owner" "https://GitHub.COM/StartupBros/ccusage.git"
 mkrepo "$home/ssh-url" "ssh://git@github.com:22/startupbros-com/project.git"
 mkrepo "$home/prefixhome" "https://github.com/StartupBrosExample/project.git"
 mkrepo "$home/SITES/prefixsite" "git@github.com:StartupBros-com-example/project.git"
-mkrepo "$home/foreignhost" "https://not-github.com/StartupBros/project.git"
+mkrepo "$home/foreignhost" "https://not-github.com/StartupBros/ccusage.git"
 mkrepo "$home/noremote"
 mkdir -p "$home/plaindir"                              # not a repo
 ln -s "$home/SITES/sitesrepo" "$home/sitesalias"       # home entry resolving to a SITES repo
