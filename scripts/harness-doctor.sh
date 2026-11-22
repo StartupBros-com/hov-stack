@@ -81,6 +81,17 @@ sites_repos() {
 }
 mapfile -t SITES_REPOS < <(sites_repos)
 
+# Check 5 classifies Git remote URLs, not arbitrary strings containing a
+# GitHub-looking suffix. Match the host and whole owner segment in both URL
+# and scp-like forms. GitHub host and owner names are case-insensitive.
+check5_own_origin() {
+  local origin=${1,,}
+  local uri='^(https?|git|ssh|git\+ssh|ssh\+git)://([^/@[:space:]]+@)?github\.com(:[0-9]+)?/'
+  local scp='^([^/@:[:space:]]+@)?github\.com:'
+  local own='(startupbros|startupbros-com)/[^/[:space:]]'
+  [[ $origin =~ $uri$own || $origin =~ $scp$own ]]
+}
+
 # home_repos: list own repositories cloned directly under $HOME, as "$HOME/<name>/".
 # An entry counts when it carries a .git directory or file AND its origin is in the
 # own org. Unlike a SITES repo, one with no remote is not taken as own: $HOME holds
@@ -90,9 +101,7 @@ home_repos() {
   for entry in "$HOME"/*/; do
     [ -e "${entry%/}/.git" ] || continue
     origin=$(git -C "$entry" remote get-url origin 2>/dev/null || true)
-    case "$origin" in
-      *github.com[:/]StartupBros*) printf '%s\n' "$entry" ;;
-    esac
+    if check5_own_origin "$origin"; then printf '%s\n' "$entry"; fi
   done
 }
 
@@ -557,10 +566,8 @@ for repo in "${CHECK5_REPOS[@]}"; do
   a="$repo/AGENTS.md" c="$repo/CLAUDE.md"
   { [ -f "$a" ] && [ -f "$c" ]; } || continue
   origin=$(git -C "$repo" remote get-url origin 2>/dev/null || true)
-  case "$origin" in
-    *github.com[:/]StartupBros*|"") ;;  # own repos (or no remote): enforce
-    *) continue ;;                       # foreign upstream (e.g. hevy-mcp-debug): their convention
-  esac
+  # Own repos (or SITES repos with no remote): enforce. Keep foreign conventions.
+  [ -z "$origin" ] || check5_own_origin "$origin" || continue
   head -c 200 "$c" | grep -q '@AGENTS.md' && continue
   warn "dual instruction files in $name — make CLAUDE.md a one-line '@AGENTS.md'"
 done
@@ -573,7 +580,7 @@ for repo in "${CHECK5_REPOS[@]}"; do
   case " $TWIN_EXCEPTIONS " in *" $name "*) continue ;; esac
   git -C "$repo" rev-parse --git-dir >/dev/null 2>&1 || continue
   origin=$(git -C "$repo" remote get-url origin 2>/dev/null || true)
-  case "$origin" in *github.com[:/]StartupBros*|"") ;; *) continue ;; esac
+  [ -z "$origin" ] || check5_own_origin "$origin" || continue
   nested=0
   while IFS= read -r c; do
     case "$c" in CLAUDE.md) continue ;; esac   # root pair handled above
@@ -608,7 +615,7 @@ for repo in "${CHECK5_REPOS[@]}"; do
   # the index, so a per-machine local file is visible to it).
   { [ -f "$repo/CLAUDE.md" ] || [ -f "$repo/.claude/CLAUDE.md" ] || [ -f "$repo/CLAUDE.local.md" ]; } || continue
   origin=$(git -C "$repo" remote get-url origin 2>/dev/null || true)
-  case "$origin" in *github.com[:/]StartupBros*|"") ;; *) continue ;; esac
+  [ -z "$origin" ] || check5_own_origin "$origin" || continue
   dead=0
   while IFS= read -r a; do
     case "$a" in
@@ -639,7 +646,7 @@ for repo in "${CHECK5_REPOS[@]}"; do
   git -C "$repo" rev-parse --git-dir >/dev/null 2>&1 || continue
   [ -f "$repo/AGENTS.md" ] && continue
   origin=$(git -C "$repo" remote get-url origin 2>/dev/null || true)
-  case "$origin" in *github.com[:/]StartupBros*|"") ;; *) continue ;; esac
+  [ -z "$origin" ] || check5_own_origin "$origin" || continue
   last=$(git -C "$repo" log -1 --format=%ct 2>/dev/null || echo 0)
   [ $((now - last)) -lt $((30 * 86400)) ] && missing_agents="$missing_agents $name"
 done

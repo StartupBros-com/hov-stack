@@ -20,7 +20,7 @@ lacks() { grep -qxF -- "$2" <<<"$1" && bad "$3: '$2' should be absent in: $1" ||
 hasfrag() { case $1 in *"$2"*) ok_ ;; *) bad "$3: expected '$2' in: $1" ;; esac; }
 lacksfrag() { case $1 in *"$2"*) bad "$3: '$2' should be absent in: $1" ;; *) ok_ ;; esac; }
 
-for fn in sites_repos home_repos check5_repos instruction_exempt_load instruction_exempt; do
+for fn in sites_repos check5_own_origin home_repos check5_repos instruction_exempt_load instruction_exempt; do
   sed -n "/^$fn() {/,/^}/p" "$DOCTOR" >> "$TMP/helpers.sh"
   grep -q "^$fn() {" "$TMP/helpers.sh" || { echo "FAIL: $fn not found in $DOCTOR" >&2; exit 1; }
 done
@@ -58,6 +58,11 @@ mkdir -p "$home/SITES" "$TMP/overlay"
 mkrepo "$home/SITES/sitesrepo" "git@github.com:StartupBros-com/hov-stack.git"
 mkrepo "$home/ownhome" "git@github.com:StartupBros-com/hov-stack.git"
 mkrepo "$home/foreignhome" "https://github.com/someone-else/foreignhome.git"
+mkrepo "$home/legacy-owner" "https://GitHub.COM/StartupBros/project.git"
+mkrepo "$home/ssh-url" "ssh://git@github.com:22/startupbros-com/project.git"
+mkrepo "$home/prefixhome" "https://github.com/StartupBrosExample/project.git"
+mkrepo "$home/SITES/prefixsite" "git@github.com:StartupBros-com-example/project.git"
+mkrepo "$home/foreignhost" "https://not-github.com/StartupBros/project.git"
 mkrepo "$home/noremote"
 mkdir -p "$home/plaindir"                              # not a repo
 ln -s "$home/SITES/sitesrepo" "$home/sitesalias"       # home entry resolving to a SITES repo
@@ -72,6 +77,10 @@ n=$(printf '%s\n' "$list" | grep -c 'ownhome')
 [ "$n" -eq 1 ] && ok_ || bad "own home repo and its alias should be visited once, got $n: $list"
 hasfrag "$list" "$home/ownhome/" "home-level own-origin repo is included"
 lacksfrag "$list" "foreignhome" "home-level foreign-origin repo is excluded"
+has "$list" "$home/legacy-owner/" "HTTPS URL under the previous exact owner is included"
+has "$list" "$home/ssh-url/" "SSH URL with a port and the current exact owner is included"
+lacksfrag "$list" "prefixhome" "owner prefix alone must not include a home clone"
+lacksfrag "$list" "foreignhost" "host suffix alone must not include a home clone"
 lacksfrag "$list" "noremote" "home-level repo with no remote is excluded"
 lacksfrag "$list" "plaindir" "non-repo home dir is excluded"
 
@@ -94,6 +103,12 @@ fx() { # fx <repo-dir>: root pointer plus two non-stub nested CLAUDE.md and one 
   git -C "$r" add -A
 }
 fx "$home/ownhome"
+# Give each origin variant visible drift if it reaches the real Check 5 body.
+# The no-origin distinction applies to the origin filter as well as discovery.
+for fixture in legacy-owner prefixhome SITES/prefixsite foreignhost noremote SITES/siteslocal; do
+  fx "$home/$fixture"
+  printf '%s\n' '# not a pointer' > "$home/$fixture/CLAUDE.md"
+done
 mkdir -p "$home/foreignhome/pkg"
 printf '%s\n' '# real content' > "$home/foreignhome/pkg/CLAUDE.md"
 printf '%s\n' '# root' > "$home/foreignhome/AGENTS.md"
@@ -107,6 +122,12 @@ out=$(run5)
 hasfrag "$out" "  note: ownhome: 2 nested CLAUDE.md not '@AGENTS.md' stubs" "absent list exempts nothing (CLAUDE.md)"
 hasfrag "$out" "  note: ownhome: 2 nested AGENTS.md with no sibling CLAUDE.md pointer" "absent list exempts nothing (AGENTS.md)"
 lacksfrag "$out" "foreignhome" "foreign home repo is never audited"
+hasfrag "$out" "WARN: dual instruction files in legacy-owner" "the previous exact owner reaches Check 5"
+hasfrag "$out" "WARN: dual instruction files in siteslocal" "a SITES repository without a remote is still audited"
+lacksfrag "$out" "noremote" "a home repository without a remote is not audited"
+lacksfrag "$out" "prefixhome" "foreign prefix owner under HOME does not warn"
+lacksfrag "$out" "prefixsite" "foreign prefix owner under SITES does not warn or produce notes"
+lacksfrag "$out" "foreignhost" "lookalike host does not reach Check 5"
 [ ! -s "$TMP/stderr" ] && ok_ || bad "absent list wrote to stderr: $(cat "$TMP/stderr")"
 
 # 2. Empty list behaves like an absent one.
