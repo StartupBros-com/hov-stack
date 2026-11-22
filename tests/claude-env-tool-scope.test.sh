@@ -6,10 +6,11 @@
 # "moves" the shell by rewriting the fake proc file. They prove what the prelude decides and
 # what it asks systemd for, not that systemd honours it. The live cases do that, and each one
 # prints a skip line naming what this host lacks:
-#   - re-scope: a real move out of /init.scope, a real OOM kill under the cap, and the heavy
-#     wrapper's own scope started from inside the moved shell. It needs an uncapped
-#     /init.scope shell and a user bus, so it runs from a WSL session's Bash tool only until
-#     this prelude is live there (after that the session's shells are already in a scope).
+#   - re-scope: a real move out of /init.scope or /non-systemd, a real OOM kill under the cap,
+#     and the heavy wrapper's own scope started from inside the moved shell. It needs an
+#     uncapped shell in one of those and a user bus, so it runs from a WSL session's Bash tool
+#     only until this prelude is live there (after that the session's shells are already in a
+#     scope).
 #   - pool: a delegated cgroup named claude-code-bash, entered the way Claude Code's MCP spawn
 #     path enters its pool. The swap bound turns a RAM-cap overflow into a kill, and an
 #     off-word control survives the same allocation. It needs a user manager that delegates
@@ -223,6 +224,49 @@ is_eq "$(called):$(out)" "no:after" "no move: a malformed CLAUDE_CODE_TOOL_MEMOR
 is_eq "$(wc -l <"$ERR" | tr -d ' ')" 1 "a malformed CLAUDE_CODE_TOOL_MEMORY_LIMIT prints one stderr line"
 has "$(err)" "CLAUDE_CODE_TOOL_MEMORY_LIMIT is not a size" "the line names the malformed variable"
 
+# -- /non-systemd: where WSL has put terminal shells since 2026-11-20 -----------------------
+# fresh_ns: the shell in an unbounded /non-systemd, as on a WSL kernel 6.18 boot.
+fresh_ns() {
+  fresh /non-systemd
+  mkdir -p "$ROOT/non-systemd"
+  printf 'max\n' >"$ROOT/non-systemd/memory.max"
+}
+fresh_ns
+src bash : 'echo "$$"' "$LIMIT4G"
+is_eq "$RC:$(err)" "0:" "non-systemd: the command runs and nothing reaches stderr"
+is_eq "$(props)" \
+  "fail|7|PIDs|au|1|$(out)|MemoryMax|t|4294967296|TasksMax|t|18446744073709551615|CollectMode|s|inactive-or-failed|OOMPolicy|s|continue|Description|s|hov-stack capped tool command|MemorySwapMax|t|4294967296|0" \
+  "non-systemd: the same capped scope as /init.scope"
+printf '8589934592\n' >"$ROOT/non-systemd/memory.max"
+noop "no move: /non-systemd already has a finite memory.max" "$LIMIT4G"
+fresh_ns
+noop "no move: /non-systemd with HOV_STACK_TOOL_RESCOPE=off" "$LIMIT4G" HOV_STACK_TOOL_RESCOPE=off
+noop "no move: /non-systemd without a limit"
+
+# -- any other top-level cgroup: a configured cap that cannot apply is said once per boot -----
+rm -f "$RT"/hov-stack-uncapped-cgroup*
+fresh /wsl-shells
+src bash : 'echo after' "$LIMIT4G"
+is_eq "$RC:$(called):$(out)" "0:no:after" "unknown top-level cgroup: no move, the command runs"
+is_eq "$(wc -l <"$ERR" | tr -d ' ')" 1 "unknown top-level cgroup: one stderr line"
+has "$(err)" "cgroup /wsl-shells is not one this env file moves" "unknown top-level cgroup: the line names the cgroup"
+src bash : 'echo after' "$LIMIT4G"
+is_eq "$RC:$(out):$(err)" "0:after:" "unknown top-level cgroup: said once per boot, not on every command"
+rm -f "$RT"/hov-stack-uncapped-cgroup*
+src bash 'set -euo pipefail -o noclobber' 'echo after' "$LIMIT4G"
+is_eq "$RC:$(out)" "0:after" "unknown top-level cgroup: set -euo pipefail and noclobber still reach the command"
+has "$(err)" "without the CLAUDE_CODE_TOOL_MEMORY_LIMIT cap" "unknown top-level cgroup: the notice survives noclobber"
+rm -f "$RT"/hov-stack-uncapped-cgroup*
+noop "unknown top-level cgroup: silent without a limit"
+noop "unknown top-level cgroup: silent with an off limit" CLAUDE_CODE_TOOL_MEMORY_LIMIT=off
+noop "unknown top-level cgroup: silent with a malformed limit" CLAUDE_CODE_TOOL_MEMORY_LIMIT=lots
+noop "unknown top-level cgroup: silent with HOV_STACK_TOOL_RESCOPE=off" "$LIMIT4G" HOV_STACK_TOOL_RESCOPE=off
+for cg in / /docker.slice /user.slice; do
+  fresh "$cg"
+  noop "silent: a shell in $cg is left alone" "$LIMIT4G"
+done
+rm -f "$RT"/hov-stack-uncapped-cgroup*
+
 # -- the native claude-code-bash pool: its swap bound ---------------------------------------
 pool 4294967296 max
 src bash : 'echo after'
@@ -356,10 +400,10 @@ live_env() {
     timeout 120 bash -c '. "$1"; eval "$2"' _ "$ENVFILE" "$cmd"
 }
 ALLOC='python3 -c "b = bytearray(b\"\\x01\") * (200 << 20)"'
-if [ "$live_cg" != 0::/init.scope ]; then
-  skip "live re-scope: this shell is in ${live_cg#0::}, not /init.scope"
-elif [ "$(cat /sys/fs/cgroup/init.scope/memory.max 2>/dev/null)" != max ]; then
-  skip "live re-scope: init.scope already has a memory cap"
+if [ "$live_cg" != 0::/init.scope ] && [ "$live_cg" != 0::/non-systemd ]; then
+  skip "live re-scope: this shell is in ${live_cg#0::}, not /init.scope or /non-systemd"
+elif [ "$(cat "/sys/fs/cgroup${live_cg#0::}/memory.max" 2>/dev/null)" != max ]; then
+  skip "live re-scope: ${live_cg#0::} already has a memory cap"
 elif [ ! -S "$LIVE_RT/bus" ] || ! command -v busctl >/dev/null 2>&1; then
   skip "live re-scope: no user bus or no busctl"
 else

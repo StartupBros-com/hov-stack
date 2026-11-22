@@ -38,17 +38,21 @@ esac
 unset _hov_stack_env
 
 # Per-command memory scope (harness/wsl-memory-bounds.md, "Agent tool commands"). Claude Code's
-# native cap (CLAUDE_CODE_TOOL_MEMORY_LIMIT) misses a session that starts in /init.scope, as every
-# WSL terminal does: its pool would sit at the cgroup root, which a user cannot create, so each
+# native cap (CLAUDE_CODE_TOOL_MEMORY_LIMIT) misses a session that starts outside systemd's tree,
+# as every WSL terminal does: in /init.scope, or in /non-systemd where WSL has put those shells
+# since 2026-11-20. Its pool would sit at the cgroup root, which a user cannot create, so each
 # command runs uncapped. Where the pool does exist it bounds RAM only: on 2026-11-09 the kernel's OOM
 # report showed one at its 4 GiB cap with 68 GiB in swap, nearly all one process, while a service on
 # the same host stalled 14-21 s.
 # This file runs inline in the very shell that then runs the command, so:
-#   - in /init.scope, with CLAUDE_CODE_TOOL_MEMORY_LIMIT set to a size, the shell asks the user
-#     manager to move it into its own transient scope with that MemoryMax plus a swap bound;
-#   - in the native pool (a cgroup named claude-code-bash), it writes the pool's swap bound.
+#   - in /init.scope or /non-systemd, with CLAUDE_CODE_TOOL_MEMORY_LIMIT set to a size, the shell
+#     asks the user manager to move it into its own transient scope with that MemoryMax plus a
+#     swap bound;
+#   - in the native pool (a cgroup named claude-code-bash), it writes the pool's swap bound;
+#   - in any other top-level cgroup that is not a slice, it says once per boot that commands there
+#     run uncapped, so the next place WSL puts shells is not missed for days as /non-systemd was.
 # The swap bound defaults to the RAM cap; HOV_STACK_TOOL_SWAP_LIMIT overrides it (same size syntax,
-# 0/false/no/off/none for no bound). HOV_STACK_TOOL_RESCOPE=off skips the /init.scope move.
+# 0/false/no/off/none for no bound). HOV_STACK_TOOL_RESCOPE=off skips the move and that notice.
 # It fails open: any missing piece leaves the command where it was, it never prints to stdout,
 # and a failed move prints one stderr line. Background processes a command leaves behind stay in
 # that command's scope, under its cap. Bash only; other shells skip it.
@@ -95,6 +99,7 @@ _hov_tool_scope() {
   local _ht_root=/sys/fs/cgroup _ht_proc=/proc/self/cgroup _ht_busctl=busctl
   local _ht_line='' _ht_cg='' _ht_n=0 _ht_bytes='' _ht_mem='' _ht_swap='' _ht_raw='' _ht_rc=0
   local _ht_dir='' _ht_cur='' _ht_rt='' _ht_pid='' _ht_unit='' _ht_err='' _ht_t0='' _ht_now='' _ht_i=0
+  local _ht_mark=''
   if [ "${HOV_STACK_TOOL_SCOPE_TEST_MODE-}" = 1 ]; then
     _ht_root=${HOV_STACK_TOOL_SCOPE_TEST_CGROUP_ROOT-$_ht_root}
     _ht_proc=${HOV_STACK_TOOL_SCOPE_TEST_PROC_CGROUP-$_ht_proc}
@@ -116,7 +121,7 @@ _hov_tool_scope() {
       IFS= read -r _ht_mem <"$_ht_dir/memory.max" || :
       case $_ht_mem in '' | *[!0-9]*) return 0 ;; esac
       ;;
-    /init.scope)
+    /init.scope | /non-systemd)
       case ${HOV_STACK_TOOL_RESCOPE-} in
         0 | [fF][aA][lL][sS][eE] | [nN][oO] | [oO][fF][fF] | [nN][oO][nN][eE]) return 0 ;;
       esac
@@ -131,12 +136,27 @@ _hov_tool_scope() {
       fi
       _ht_mem=$_ht_bytes
       # Nothing above may already bound it.
-      if [ -r "$_ht_root/init.scope/memory.max" ]; then
-        IFS= read -r _ht_cur <"$_ht_root/init.scope/memory.max" || :
+      if [ -r "$_ht_root$_ht_cg/memory.max" ]; then
+        IFS= read -r _ht_cur <"$_ht_root$_ht_cg/memory.max" || :
         [ "$_ht_cur" = max ] || return 0
       fi
       ;;
-    *) return 0 ;;
+    / | /*/* | /*.slice) return 0 ;;
+    *)
+      # A top-level cgroup this file does not know: where WSL might put shells next. Say once per
+      # boot (the marker lives in the runtime directory) that a configured cap does not apply.
+      case ${HOV_STACK_TOOL_RESCOPE-} in
+        0 | [fF][aA][lL][sS][eE] | [nN][oO] | [oO][fF][fF] | [nN][oO][nN][eE]) return 0 ;;
+      esac
+      _hov_tool_size "${CLAUDE_CODE_TOOL_MEMORY_LIMIT-}" || return 0
+      _ht_rt=${XDG_RUNTIME_DIR-}
+      case $_ht_rt in /*) ;; *) _ht_rt=/run/user/$UID ;; esac
+      _ht_mark=$_ht_rt/hov-stack-uncapped-cgroup${_ht_cg//\//-}
+      [ ! -e "$_ht_mark" ] || return 0
+      { : >|"$_ht_mark"; } 2>/dev/null || :
+      echo "hov-stack: this shell's cgroup $_ht_cg is not one this env file moves into a capped scope, so commands here run without the CLAUDE_CODE_TOOL_MEMORY_LIMIT cap (said once per boot; see harness/wsl-memory-bounds.md, \"Agent tool commands\")" >&2
+      return 0
+      ;;
   esac
 
   _ht_swap=$_ht_mem
