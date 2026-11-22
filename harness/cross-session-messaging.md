@@ -7,6 +7,48 @@ addressable names. A message is plain text only — never history or files. Each
 session binds a per-session unix inbox socket (`/status` → "Peer address" row),
 restricted to the OS user. Docs: https://code.claude.com/docs/en/cross-session-messaging
 
+## Decision 2026-11-21: messages are for conversation, not news (hov-stack#840)
+
+A peer message to an idle session starts a turn there. A 30-day study of this
+host's transcripts (2,433 peer wakes, 199 labelled) found 16% of wakes needed
+the receiver at once, 50% could have waited for the operator's next prompt
+and 34% should not have been sent. Merge notices were 33% of wakes (6 of 59
+labelled needed) and deploy or shared-unit holds 22% (4 of 37 needed).
+Senders picked recipients by session name, since `ListAgents` shows no
+directory, and 25 of 48 sampled fan-outs reached sessions working elsewhere.
+Most fan-outs came from the CLAUDE.md rule "after landing a merge, message
+any live session holding a worktree in that repo". Prior art points the same
+way: Gas Town routes by the recipient's state, MCP Agent Mail has no
+broadcast, and the worktree managers have no agent-to-agent messages at all.
+
+So the rule now sends conversation only: a question, an answer or something
+a peer is waiting on, a handoff, or a concrete collision with the peer's own
+work or with a shared unit it is using. What git, PR state or a lock already
+holds is not sent:
+
+- A branch picks up main when it lands: `pr-land.sh` refuses a conflicting
+  PR on every poll.
+- A session that needs main to stand still runs `scripts/merge-freeze.sh
+  hold --minutes N --reason TEXT` (`show`, `release`). `pr-land.sh` waits
+  for the freeze to end, up
+  to its check wait, and exits pending naming the holder. A direct
+  `gh pr merge`, or an auto-merge armed before the freeze, is not held.
+- A deploy lock refuses a second deploy.
+- Recipients are found by repository and branch with
+  `hov ls --repo <name> --json`, never by name. Claude Code's listing keeps
+  a session's launch directory, so hov reads the newest directory from its
+  transcript.
+- News that can wait goes on the PR or issue it concerns, and
+  `notify_when_idle` answers "is that session done yet".
+
+Re-measure due on or after 2026-12-08 (`harness/deferral-watchlist.tsv`,
+row `peer-wake-remeasure`). If merge and hold notices are still above 10% of
+wakes, propose a no-broadcast refusal in `peer-loop-guard` (the same message
+to 3 or more sessions in one turn). If FYIs and acks are still above 10%,
+propose a sender-side refusal for those kinds. Countermetric: PRs left
+conflicting or blocked for more than 24 hours while their session was live.
+Both hook changes need the operator's go.
+
 ## Decision 2026-08-08: removed `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`
 
 The flag sat in `settings.json` env with **zero recorded rationale** — it
@@ -101,11 +143,14 @@ from 2.1.283, unless the organization requires Trusted Devices.
   a peer message preceded an unintended action, judged from the session
   transcript, sends this back to the default, and workers that must not
   take unattended messages get `refuse` via `--settings` (`hold` on a
-  headless worker is a silent drop). Precedence: managed, then
+  `claude -p` worker is a silent drop: it never reaches a prompt to show
+  the message; an unattached `claude --bg` session keeps an explicit hold
+  and shows it on attach). Precedence: managed, then
   `--settings`, then user, first found wins; project and local settings can
   only tighten (`accept` < `hold` < `refuse`), so a repo can set `refuse`
   in its own `.claude/settings.json` for sessions started in that repo
-  (read at session start; sessions in other repos still inherit `accept`).
+  (read live, so a change reaches running sessions; sessions in other repos
+  still inherit `accept`).
 - `isolatePeerMachines: true` set explicitly in `settings.json`: any send
   beyond this machine (transits Anthropic servers, Remote Control path) prompts
   first, even in bypass mode. Codifies CLAUDE.md's "pause before external
@@ -195,6 +240,9 @@ content rule).
 - Nothing detects two sessions on the same issue any more (the
   `worktree-claim-advisory.js` hook retired 2026-10-17, move 7). Messaging
   the *other* live session now exists, through `SendMessage` on the same
-  host and the hov mailbox across hosts; detection is the missing half,
-  planned as advisory hov claims (hov-stack#529, PR 6) (motivating
-  incident: 2026-08-07 dup work, issue 553 / PRs 552+550).
+  host and the hov mailbox across hosts; detection is the missing half
+  (motivating incident: 2026-08-07 dup work, issue 553 / PRs 552+550).
+  Advisory hov claims (hov-stack#529, PR 6) were dropped 2026-11-13
+  because nothing would read one. Since hov 0.1.11, `hov ls --repo <name>
+  --json` names each session's branch, so a session can see whether a
+  peer is already on its branch before it starts.
