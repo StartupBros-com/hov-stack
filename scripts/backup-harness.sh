@@ -75,11 +75,21 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-git fetch -q origin "+refs/heads/main:refs/remotes/origin/main"
+# A short-lived Git process can leave stderr without the invocation ID used by OnFailure.
+# Log a fixed stage in this shell, without replaying Git output or replacing its status.
+run_git_setup() {
+  local stage=$1 rc
+  shift
+  if git "$@"; then return 0; else rc=$?; fi
+  log "git setup $stage failed (exit $rc)" >&2 || true
+  return "$rc"
+}
+
+run_git_setup fetch-main fetch -q origin "+refs/heads/main:refs/remotes/origin/main"
 if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
-  git fetch -q origin "+refs/heads/$BRANCH:refs/remotes/origin/$BRANCH"
+  run_git_setup fetch-backup-branch fetch -q origin "+refs/heads/$BRANCH:refs/remotes/origin/$BRANCH"
 fi
-git worktree add --detach "$WORKTREE" origin/main >/dev/null
+run_git_setup add-worktree worktree add --detach "$WORKTREE" origin/main >/dev/null
 
 # memory-push copies only live memory into the temporary worktree's mirror. Volatile settings never
 # enter the backup commit.
