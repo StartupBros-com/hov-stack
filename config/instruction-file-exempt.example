@@ -2,8 +2,10 @@
 # <repo-name>:<glob>. repo-name is the repository directory's basename; glob is a bash
 # case pattern matched against the repo-relative path, so * crosses /. harness-doctor
 # check 5 skips a matching nested CLAUDE.md (not an '@AGENTS.md' stub) or nested
-# AGENTS.md (no sibling pointer). A # after optional leading whitespace starts a comment;
-# blank lines are ignored; a malformed line is reported on stderr and ignored.
+# AGENTS.md (no sibling pointer). The root path AGENTS.md marks a repo that needs no
+# instruction file at all, so the "active repo(s) missing AGENTS.md" note stops naming
+# it. A bare * matches the root path too. A # after optional leading whitespace starts
+# a comment; blank lines are ignored; a malformed line is reported on stderr and ignored.
 # Copy to <overlay>/instruction-file-exempt and edit.
 #
 # A host overlay file imported by absolute path:
@@ -12,3 +14,5 @@ example-repo:docs/overlay/CLAUDE.md
 example-repo:archive/*
 # Captured evidence copies, anywhere in the tree:
 example-other-repo:*/evidence/*
+# A small repo, or a fork that follows its upstream's convention, that needs no AGENTS.md:
+example-fork:AGENTS.md
