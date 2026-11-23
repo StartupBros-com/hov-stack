@@ -37,10 +37,10 @@ Deleting a row removes its unit at the next `./setup --enable-units`, the same r
   - a systemd user manager answers;
   - it is not a template, and it is disabled or static and inactive;
   - no loaded unit triggers it while enabled or active, or names it in `Wants=`, `Requires=`, `OnFailure=` and the like;
-  - no unit file still in the unit directory names it in such a line, and no timer, socket or path of the same name is installed to trigger it. systemd tracks those links for loaded units only, and a disabled timer is not loaded.
+  - no unit file still in the unit directory names it in such a line, in a socket's `Service=`, in `Sockets=` or in `Slice=`, and no timer, socket or path of the same name is installed to trigger it. A value continued onto the next line after a backslash counts, as systemd reads it. systemd tracks those links for loaded units only, and a disabled timer is not loaded.
 
   A drop-in skips the state checks, since removing one is the same change a refresh makes when it rewrites one. It still needs the rest. Timers, sockets and paths are removed before services, so a timer and its service delisted together go in one run.
-- **Before removal.** The copy goes into `~/.claude/backups/unit-prune-*` first. An emptied drop-in directory goes too, and the user manager is reloaded.
+- **Before removal.** The copy goes into `~/.claude/backups/unit-prune-*` first, and the pending-reload record a refresh keeps is written before the first file goes; if it cannot be written, nothing is removed. An emptied drop-in directory goes too, and the user manager is reloaded. A reload that fails, or a run stopped before it, leaves the record, so `./setup --check` reports the reload pending and the next `./setup` makes it.
 - **What is left in place.** Any other copy is left installed, with the reason and what clears it: `systemctl --user disable --now -- <unit>` for an enabled unit, `stop` for an active one, `unmask` for a masked one, and so on.
 - **Copies from another units file.** A copy another units file recorded, for example under a different `HOV_STACK_OVERLAY`, is never removed. It is reported until it is removed by hand or its row is deleted from the record.
 - **When it is dropped from the record instead.** The file stays and nothing is reported when:

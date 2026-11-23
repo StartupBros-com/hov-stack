@@ -2195,6 +2195,8 @@ install_daemon_reload() {
       echo "  systemd user manager is reachable but daemon-reload failed; refusing install success" >&2
       return 1
     fi
+    # This reload covers every write and removal marked pending before it (#860).
+    rm -f -- "$H/.hov-stack/units-reload-pending" || echo "  WARN could not clear the pending user-unit reload mark; the next ./setup reloads again" >&2
   else
     echo "  WARN systemd user manager unavailable; units copied but daemon-reload deferred" >&2
   fi
@@ -2512,13 +2514,23 @@ overlay_unit_named_on_disk() {
     [ -f "$file" ] || continue
     name=${file#"$SYS"/}
     [ "${name%%.d/*}" != "$unit" ] && [ -z "${skip[$name]:-}" ] || continue
+    # systemd joins a line ending in a backslash to the next one and skips comment lines
+    # inside the join, so a value can sit on any line of a directive (pro-gate on #860).
     if awk -v u="$unit" '
-        /^[[:space:]]*(Wants|Requires|Requisite|BindsTo|PartOf|Upholds|OnFailure|OnSuccess|Unit|PropagatesReloadTo|ReloadPropagatedFrom)[[:space:]]*=/ {
-          sub(/^[^=]*=/, "")
-          n = split($0, word, /[[:space:]]+/)
+        function check(line,  n, i, word) {
+          if (line !~ /^[[:space:]]*(Wants|Requires|Requisite|BindsTo|PartOf|Upholds|OnFailure|OnSuccess|Unit|Service|Sockets|Slice|PropagatesReloadTo|ReloadPropagatedFrom)[[:space:]]*=/) return
+          sub(/^[^=]*=/, "", line)
+          n = split(line, word, /[[:space:]]+/)
           for (i = 1; i <= n; i++) if (word[i] == u) found = 1
         }
-        END { exit !found }' "$file"; then
+        /^[[:space:]]*[#;]/ { next }
+        {
+          line = joined $0
+          if (line ~ /\\$/) { sub(/\\$/, " ", line); joined = line; next }
+          joined = ""
+          check(line)
+        }
+        END { if (joined != "") check(joined); exit !found }' "$file"; then
       echo "$name"
       return 0
     fi
@@ -2581,7 +2593,8 @@ overlay_elsewhere_reason() {
 # directory it leaves empty goes too. The daemon-reload after it is install_daemon_reload's.
 # Sets OVERLAY_REMOVAL_TEXT for the role summary; fails when a removal or the record failed.
 overlay_units_remove_unlisted() {
-  local path blocker dir backup='' removed=0 left=0 failed=0
+  local path blocker dir backup='' removed=0 left=0 failed=0 marked=0
+  local pending="$H/.hov-stack/units-reload-pending"
   OVERLAY_REMOVAL_TEXT=
   overlay_record_review
   if [ -n "$OVERLAY_REVIEW_SKIPPED" ]; then
@@ -2620,6 +2633,17 @@ overlay_units_remove_unlisted() {
       echo "  failed to back up $path; leaving it in place" >&2
       failed=$((failed + 1))
       continue
+    fi
+    # The mark goes down before the first unlink, as role_unit_files' does before its first
+    # write: a reload that fails, or a run killed before it, is retried by the next refresh
+    # instead of leaving the manager on a unit or drop-in that is gone.
+    if [ "$marked" -eq 0 ]; then
+      if ! mkdir -p "$(dirname "$pending")" || ! touch -- "$pending" || [ ! -f "$pending" ]; then
+        echo "  failed to record the pending user-unit reload at $pending; leaving the overlay units no longer listed in place" >&2
+        failed=$((failed + 1))
+        break
+      fi
+      marked=1
     fi
     if ! rm -f -- "$SYS/$path"; then
       echo "  failed to remove $path" >&2

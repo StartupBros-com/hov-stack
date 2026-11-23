@@ -549,4 +549,62 @@ cp "$WORK/sync.sh.orig" "$REPO/sync.sh"
 [ -f "$SYS/example-adopted.timer" ] || fail 'enable removed a unit UNITS now names'
 recorded example-adopted.timer && fail 'record kept a unit UNITS now names'
 ok 'a unit UNITS now names is forgotten by the record, not removed'
+
+# A unit file names its dependency in a socket's Service= too, under any name, and a value
+# may continue onto the next line after a backslash (pro-gate round 1 on #860). A comment
+# inside the continuation is skipped, and a word that only contains the name is no match.
+fresh
+printf '[Socket]\nListenStream=127.0.0.1:9\nService=example-served.service\n' | write "$HOV_STACK_OVERLAY/socket"
+printf '[Unit]\nRequires=example-other.service \\\n# example-nowhere.service\n  example-continued.service\n[Service]\nExecStart=/bin/true\n' \
+  | write "$HOV_STACK_OVERLAY/continued"
+printf '[Unit]\n# Requires=example-commented.service\nWants=example-commented.service.d\n[Service]\nExecStart=/bin/true\n' \
+  | write "$HOV_STACK_OVERLAY/commented"
+printf '%s\n' $'example-served.service\tservice' $'example-listener.socket\tsocket' \
+  $'example-continued.service\tservice' $'example-joiner.service\tcontinued' \
+  $'example-nowhere.service\tservice' $'example-commented.service\tservice' \
+  $'example-noter.service\tcommented' | write "$HOV_STACK_OVERLAY/units"
+run 0 role enable
+drop_rows example-served.service example-continued.service example-nowhere.service example-commented.service
+run 0 role check
+contains 'overlay unit example-served.service is installed but no longer listed (./setup --enable-units leaves it: example-listener.socket, still installed, names it or triggers it)'
+run 0 role enable
+contains 'left in place, no longer listed: example-served.service (example-listener.socket, still installed, names it or triggers it)'
+contains 'left in place, no longer listed: example-continued.service (example-joiner.service, still installed, names it or triggers it)'
+contains 'removed overlay unit no longer listed: example-nowhere.service'
+contains 'removed overlay unit no longer listed: example-commented.service'
+[ -f "$SYS/example-served.service" ] && [ -f "$SYS/example-continued.service" ] \
+  || fail 'enable removed a service a retained socket or a continued Requires= still names'
+ok 'a socket of another name naming it in Service=, and a continued Requires= value, keep a service installed'
+
+# Removal marks the pending reload before its first unlink. A failed reload keeps the mark,
+# --check reports it, and the next refresh reloads and clears it; a reload that succeeds
+# clears it in the same run. With no mark written, nothing is removed.
+fresh
+printf '%s\n' $'example-gone.service\tservice' $'example-later.service\tservice' \
+  $'example-last.service\tservice' $'example-stays.service\tservice' | write "$HOV_STACK_OVERLAY/units"
+run 0 role enable
+pending=$CLAUDE_HOME/.hov-stack/units-reload-pending
+[ ! -e "$pending" ] || fail 'an enable that removed nothing left a pending-reload mark'
+drop_rows example-gone.service
+RELOAD_EXIT=1 run 1 role enable
+contains 'removed overlay unit no longer listed: example-gone.service'
+contains 'daemon-reload failed'
+[ -f "$pending" ] || fail 'a removal whose reload failed left no pending-reload mark'
+run 0 role check
+contains 'user unit reload pending'
+printf '' | write "$HOME/systemctl.log"
+run 0 role refresh
+[ "$(grep -c -- '--user daemon-reload' "$HOME/systemctl.log")" = 1 ] || fail 'refresh did not retry the reload a removal left pending'
+[ ! -e "$pending" ] || fail 'refresh kept the mark after its reload'
+drop_rows example-later.service
+run 0 role enable
+contains 'removed overlay unit no longer listed: example-later.service'
+[ ! -e "$pending" ] || fail 'a removal whose reload succeeded kept the mark'
+ln -s "$WORK/no-such-dir/units-reload-pending" "$pending"
+drop_rows example-last.service
+run 1 role enable
+contains 'failed to record the pending user-unit reload'
+[ -f "$SYS/example-last.service" ] || fail 'enable removed a unit with no pending-reload mark written'
+rm -f "$pending"
+ok 'removal marks the reload pending first; a failed reload is retried by refresh, and an unwritable mark stops removal'
 printf 'passed: %s; failed: 0\n' "$pass"
