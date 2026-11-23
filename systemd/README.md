@@ -24,7 +24,27 @@ example-report.timer<TAB>systemd/example-report.timer<TAB>on
 - A bad row is reported with its line number and skipped, and the other rows still apply. These are bad: a missing field, a name that breaks the rules above, a missing source, a name listed twice, a name this repository already ships, a name another installer owns, and `on` on anything but a plain timer. The names other installers own are the units `lib/manifest.sh` links into the unit directory (each is a symlink to a file in this repository) and the `50-hygiene-posture.conf` drop-ins that the hygiene posture writes. A drop-in for one of this repository's units is allowed, and so is any other drop-in for a hygiene unit.
 - `./setup --enable-units` does not write a name that resolves outside `~/.config/systemd/user/`, such as a symlink to another file or a drop-in directory linked elsewhere. It reports the name and fails, the way the refresh already refuses one.
 
-Plain `./setup` refreshes the installed copies the way it refreshes this repository's units, with the same backup and pending-reload record; it installs no new ones. `./setup --check` and `sync.sh check` report a missing or differing copy, each refused row, and an `on` timer that is not enabled. `sync.sh push` never copies these units into this repository. Each listed unit file (drop-ins aside) also counts as foreign, so `sync.sh check`, `unit-health` and `harness-doctor` do not report it as unowned and it need not be repeated in `foreign-units`. A template, listed as `example@.service` here or as `example@` in `foreign-units`, also covers its instances, such as `example@daily.service`.
+Plain `./setup` refreshes the installed copies the way it refreshes this repository's units, with the same backup and pending-reload record; it installs no new ones. `./setup --check` and `sync.sh check` report a missing or differing copy, each refused row, and an `on` timer that is not enabled.
+
+### Deleting a row
+
+Deleting a row removes its unit at the next `./setup --enable-units`, the same run that installs a new row.
+
+- **The install record.** Each copy `--enable-units` installs is noted in `~/.claude/.hov-stack/overlay-units-installed`: its name, the sha256 of its bytes, and the units file that listed it. Plain `./setup` adds a copy that already matches its source, so units installed before the record existed are covered too.
+- **What gets removed.** A recorded copy that its units file no longer lists is removed when all of these hold:
+  - the units file was read with no refused rows;
+  - the copy's bytes are still the recorded ones;
+  - it is not a symlink;
+  - it is disabled or static and inactive;
+  - no loaded unit triggers it while enabled or active, or names it in `Wants=`, `Requires=`, `OnFailure=` and the like.
+
+  A drop-in is removed whatever its unit's state, since removing one is the same change a refresh makes when it rewrites one.
+- **Before removal.** The copy goes into `~/.claude/backups/unit-prune-*` first. An emptied drop-in directory goes too, and the user manager is reloaded.
+- **What is left in place.** Any other copy is left installed, with the reason and the command that clears it, such as `systemctl --user disable --now -- <unit>`. So is a template unit.
+- **Copies from another units file.** A copy another units file recorded, for example under a different `HOV_STACK_OVERLAY`, is never removed.
+- **When it is dropped from the record instead.** A name `UNITS` or the foreign-unit register now claims is dropped from the record, and the file stays.
+- **Everywhere else, it is only reported.** Plain `./setup`, and so the `--sync` run at session start, reports each recorded copy nothing lists any more, as do `./setup --check` (exit 1) and `sync.sh check` (a `DRIFT:` line). None of them removes anything.
+- **Not covered.** A unit installed before the record existed and delisted since then has no record, so nothing finds it. Remove such a unit by hand. `sync.sh push` never copies these units into this repository. Each listed unit file (drop-ins aside) also counts as foreign, so `sync.sh check`, `unit-health` and `harness-doctor` do not report it as unowned and it need not be repeated in `foreign-units`. A template, listed as `example@.service` here or as `example@` in `foreign-units`, also covers its instances, such as `example@daily.service`.
 
 ## Kept units
 

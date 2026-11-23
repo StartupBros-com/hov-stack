@@ -295,11 +295,18 @@ UNITS_FOREIGN="check-fleet-drift voxtype"
 # all three share says how.
 # shellcheck source=lib/foreign-units.sh
 . "$HERE/lib/foreign-units.sh"
-UNITS_FOREIGN=$(foreign_units_with_overlay "$UNITS_FOREIGN" "$UNITS")
+# UNITS_FOREIGN_OWNED leaves out the units the overlay's units file lists: a unit it no
+# longer lists that is named there belongs to another repository now (#859).
+UNITS_FOREIGN_OWNED=$(foreign_units_with_file "$UNITS_FOREIGN")
+UNITS_FOREIGN=$(foreign_units_add_overlay_units "$UNITS_FOREIGN_OWNED" "$UNITS")
 # shellcheck source=lib/overlay-units.sh
 . "$HERE/lib/overlay-units.sh"
 OVERLAY_UNIT_PATHS=() OVERLAY_UNIT_SOURCES=() OVERLAY_UNIT_FLAGS=() OVERLAY_UNIT_ERRORS=()
+OVERLAY_UNITS_FILE=
 if declare -F overlay_units_load >/dev/null; then overlay_units_load "$UNITS"; fi
+declare -A OVERLAY_RECORD_SUM=() OVERLAY_RECORD_FROM=()
+OVERLAY_RECORD_DIRTY=0
+if declare -F overlay_record_load >/dev/null; then overlay_record_load; fi
 # A host's hygiene-timer posture (deletion on, schedule, which timers run) comes from
 # <overlay>/hygiene-posture; install applies it as drop-ins and check reports drift.
 # shellcheck source=lib/hygiene-posture.sh
@@ -2101,7 +2108,7 @@ install_memory_seed() {
 }
 
 install_user_units() {
-  local index error
+  local index error sum
   # Copy each declared user unit into the user unit directory. The standalone
   # and root installers share this path.
   for u in $UNITS; do
@@ -2124,7 +2131,16 @@ install_user_units() {
       *) echo "  refusing overlay unit outside user unit directory: $u" >&2; return 1 ;;
     esac
     install_user_unit "$u" "${OVERLAY_UNIT_SOURCES[$index]}" || return 1
+    if ! sum=$(overlay_unit_sum "$SYS/$u"); then
+      echo "  failed to read back overlay unit $u for the install record" >&2
+      return 1
+    fi
+    overlay_record_set "$u" "$sum"
   done
+  if ! overlay_record_save; then
+    echo "  failed to write the overlay unit install record $(overlay_record_file)" >&2
+    return 1
+  fi
 }
 
 install_user_unit() {
@@ -2367,8 +2383,211 @@ overlay_unit_timers_check() {
   return "$result"
 }
 
+# Overlay units no longer listed (#859). A row deleted from the units file used to leave
+# its installed copy behind for good, and a disabled leftover was invisible to every
+# check. The install record (lib/overlay-units.sh) names each copy sync.sh installed;
+# overlay_record_review sorts the recorded paths the units file does not list now.
+# OVERLAY_UNLISTED holds the ones still installed that the current units file recorded,
+# which --enable-units removes when overlay_unit_removal_blocker finds nothing in the way.
+# OVERLAY_ELSEWHERE holds the ones a different units file recorded (HOV_STACK_OVERLAY
+# pointed elsewhere, or an overlay since replaced), which no run removes. A recorded path
+# that is gone, is a symlink now, or that UNITS or another repository's register claims is
+# forgotten, never removed. With a refused row the file cannot say what it stopped
+# listing, so nothing is sorted and OVERLAY_REVIEW_SKIPPED says why.
+OVERLAY_UNLISTED=() OVERLAY_ELSEWHERE=() OVERLAY_REVIEW_SKIPPED=
+overlay_record_review() {
+  local path
+  local -a recorded=()
+  local -A listed=()
+  OVERLAY_UNLISTED=() OVERLAY_ELSEWHERE=() OVERLAY_REVIEW_SKIPPED=
+  if [ "${#OVERLAY_UNIT_ERRORS[@]}" -gt 0 ]; then
+    OVERLAY_REVIEW_SKIPPED="the overlay units file has refused rows, so what it no longer lists is not known"
+    return 0
+  fi
+  for path in "${OVERLAY_UNIT_PATHS[@]}"; do listed[$path]=1; done
+  mapfile -t recorded < <(printf '%s\n' "${!OVERLAY_RECORD_SUM[@]}" | LC_ALL=C sort)
+  for path in "${recorded[@]}"; do
+    [ -n "$path" ] || continue
+    [ -z "${listed[$path]:-}" ] || continue
+    if [ -L "$SYS/$path" ] || [ ! -e "$SYS/$path" ]; then overlay_record_drop "$path"; continue; fi
+    case " $UNITS " in *" $path "*) overlay_record_drop "$path"; continue ;; esac
+    case $path in
+      */*) ;;
+      *) if foreign_unit_listed "${path%.*}" "$UNITS_FOREIGN_OWNED"; then overlay_record_drop "$path"; continue; fi ;;
+    esac
+    if [ -n "$OVERLAY_UNITS_FILE" ] && [ "${OVERLAY_RECORD_FROM[$path]}" = "$OVERLAY_UNITS_FILE" ]; then
+      OVERLAY_UNLISTED+=("$path")
+    else
+      OVERLAY_ELSEWHERE+=("$path")
+    fi
+  done
+}
+
+# overlay_unit_state_blocker UNIT: print why UNIT is still in use, or nothing. A drop-in
+# has no state of its own: removing one is the refresh's rewrite of it, taken to nothing.
+# A unit file must be disabled or static and inactive, and no loaded unit may trigger it
+# while enabled or active, or name it in Wants=, Requires=, OnFailure= and the like.
+# is-enabled's exit status cannot say this: a timer's static service exits 0 from it.
+overlay_unit_state_blocker() {
+  local unit=$1 props key value state='' active='' triggers='' refs='' trigger t_props t_state t_active
+  case $unit in
+    */*) return 0 ;;
+    *@.*) echo "it is a template: remove it and any instances yourself"; return 0 ;;
+  esac
+  if ! props=$(systemctl --user show -p UnitFileState -p ActiveState -p TriggeredBy -p WantedBy \
+      -p RequiredBy -p RequisiteOf -p BoundBy -p UpheldBy -p OnFailureOf -p OnSuccessOf \
+      -p ConsistsOf -- "$unit"); then
+    echo "systemctl could not report its state"
+    return 0
+  fi
+  while IFS='=' read -r key value; do
+    case $key in
+      UnitFileState) state=$value ;;
+      ActiveState) active=$value ;;
+      TriggeredBy) triggers=$value ;;
+      WantedBy|RequiredBy|RequisiteOf|BoundBy|UpheldBy|OnFailureOf|OnSuccessOf|ConsistsOf)
+        [ -z "$value" ] || refs="$refs $value" ;;
+    esac
+  done <<<"$props"
+  case $state in
+    disabled|static) ;;
+    *) echo "it is ${state:-in no known unit file state}: systemctl --user disable --now -- $unit, then ./setup --enable-units"; return 0 ;;
+  esac
+  case $active in
+    inactive) ;;
+    failed) echo "it is failed: systemctl --user reset-failed -- $unit, then ./setup --enable-units"; return 0 ;;
+    *) echo "it is ${active:-in no known state}: systemctl --user stop -- $unit, then ./setup --enable-units"; return 0 ;;
+  esac
+  if [ -n "$refs" ]; then
+    echo "it is still named by ${refs# }, in Wants=, Requires=, OnFailure= or the like"
+    return 0
+  fi
+  for trigger in $triggers; do
+    if ! t_props=$(systemctl --user show -p UnitFileState -p ActiveState -- "$trigger"); then
+      echo "systemctl could not report the state of $trigger, which triggers it"
+      return 0
+    fi
+    t_state=$(sed -n 's/^UnitFileState=//p' <<<"$t_props")
+    t_active=$(sed -n 's/^ActiveState=//p' <<<"$t_props")
+    case $t_state in
+      disabled|static|'') ;;
+      *) echo "$trigger triggers it and is $t_state"; return 0 ;;
+    esac
+    if [ "$t_active" != inactive ]; then echo "$trigger triggers it and is ${t_active:-in no known state}"; return 0; fi
+  done
+}
+
+# overlay_unit_removal_blocker PATH: print why --enable-units must leave the unlisted
+# PATH installed, or nothing when it may remove it.
+overlay_unit_removal_blocker() {
+  local path=$1 sum
+  case "$(readlink -f -- "$SYS/$path")" in
+    "$(readlink -f -- "$SYS")"/*) ;;
+    *) echo "it resolves outside the user unit directory"; return 0 ;;
+  esac
+  if ! sum=$(overlay_unit_sum "$SYS/$path"); then echo "it could not be read"; return 0; fi
+  if [ "$sum" != "${OVERLAY_RECORD_SUM[$path]}" ]; then
+    echo "it changed after hov-stack installed it: remove it yourself, or list it again"
+    return 0
+  fi
+  if ! systemctl --user show-environment >/dev/null 2>&1; then
+    echo "no systemd user manager is reachable to say whether it is in use"
+    return 0
+  fi
+  overlay_unit_state_blocker "$path"
+}
+
+# overlay_unlisted_report PREFIX SKIPS: print one PREFIX line per installed overlay unit
+# nothing lists now, with what --enable-units will do about it, and count them in
+# OVERLAY_UNLISTED_COUNT. SKIPS=1 also prints why the review was skipped.
+overlay_unlisted_report() {
+  local prefix=$1 path blocker
+  OVERLAY_UNLISTED_COUNT=0
+  overlay_record_review
+  if [ "$2" = 1 ] && [ -n "$OVERLAY_REVIEW_SKIPPED" ] && [ "${#OVERLAY_RECORD_SUM[@]}" -gt 0 ]; then
+    echo "${prefix}removal of overlay units no longer listed skipped: $OVERLAY_REVIEW_SKIPPED"
+  fi
+  for path in "${OVERLAY_UNLISTED[@]}"; do
+    blocker=$(overlay_unit_removal_blocker "$path")
+    if [ -n "$blocker" ]; then
+      echo "${prefix}overlay unit $path is installed but no longer listed (./setup --enable-units leaves it: $blocker)"
+    else
+      echo "${prefix}overlay unit $path is installed but no longer listed (./setup --enable-units removes it)"
+    fi
+    OVERLAY_UNLISTED_COUNT=$((OVERLAY_UNLISTED_COUNT + 1))
+  done
+  for path in "${OVERLAY_ELSEWHERE[@]}"; do
+    echo "${prefix}overlay unit $path is installed but no longer listed (installed from ${OVERLAY_RECORD_FROM[$path]}, not this host's units file now: remove it yourself)"
+    OVERLAY_UNLISTED_COUNT=$((OVERLAY_UNLISTED_COUNT + 1))
+  done
+}
+
+# overlay_units_remove_unlisted: --enable-units installs what the units file lists and,
+# here, removes what it stopped listing: each OVERLAY_UNLISTED unit with no blocker is
+# copied into one backup directory first, then removed with its record, and a drop-in
+# directory it leaves empty goes too. The daemon-reload after it is install_daemon_reload's.
+# Sets OVERLAY_REMOVAL_TEXT for the role summary; fails when a removal or the record failed.
+overlay_units_remove_unlisted() {
+  local path blocker dir backup='' removed=0 left=0 failed=0
+  OVERLAY_REMOVAL_TEXT=
+  overlay_record_review
+  if [ -n "$OVERLAY_REVIEW_SKIPPED" ]; then
+    [ "${#OVERLAY_RECORD_SUM[@]}" -eq 0 ] || echo "  removal of overlay units no longer listed skipped: $OVERLAY_REVIEW_SKIPPED"
+    return 0
+  fi
+  for path in "${OVERLAY_ELSEWHERE[@]}"; do
+    echo "  left in place, no longer listed: $path (installed from ${OVERLAY_RECORD_FROM[$path]}, not this host's units file now: remove it yourself)"
+    left=$((left + 1))
+  done
+  for path in "${OVERLAY_UNLISTED[@]}"; do
+    blocker=$(overlay_unit_removal_blocker "$path")
+    if [ -n "$blocker" ]; then
+      echo "  left in place, no longer listed: $path ($blocker)"
+      left=$((left + 1))
+      continue
+    fi
+    if [ -z "$backup" ]; then
+      if ! mkdir -p "$H/backups" || ! backup=$(mktemp -d "$H/backups/unit-prune-$(date +%Y%m%d-%H%M%S)-XXXXXX"); then
+        echo "  failed to create a backup for the overlay units no longer listed; leaving them in place" >&2
+        failed=$((failed + 1))
+        break
+      fi
+      echo "  unit removal backup: $backup"
+    fi
+    if ! (cd "$backup" && mkdir -p "./$(dirname "$path")" && cp -p -- "$SYS/$path" "./$path"); then
+      echo "  failed to back up $path; leaving it in place" >&2
+      failed=$((failed + 1))
+      continue
+    fi
+    if ! rm -f -- "$SYS/$path"; then
+      echo "  failed to remove $path" >&2
+      failed=$((failed + 1))
+      continue
+    fi
+    case $path in
+      */*)
+        dir=$SYS/${path%/*}
+        if [ -z "$(ls -A -- "$dir")" ] && ! rmdir -- "$dir"; then
+          echo "  removed $path but not its empty directory ${path%/*}" >&2
+        fi ;;
+    esac
+    overlay_record_drop "$path"
+    echo "  removed overlay unit no longer listed: $path"
+    removed=$((removed + 1))
+  done
+  if ! overlay_record_save; then
+    echo "  failed to write the overlay unit install record $(overlay_record_file)" >&2
+    failed=$((failed + 1))
+  fi
+  [ "$removed" -eq 0 ] || OVERLAY_REMOVAL_TEXT="$removed overlay unit(s) no longer listed removed"
+  [ "$left" -eq 0 ] || OVERLAY_REMOVAL_TEXT="${OVERLAY_REMOVAL_TEXT:+$OVERLAY_REMOVAL_TEXT; }$left no longer listed left in place (see above)"
+  [ "$failed" -eq 0 ] || OVERLAY_REMOVAL_TEXT="${OVERLAY_REMOVAL_TEXT:+$OVERLAY_REMOVAL_TEXT; }$failed removal step(s) failed"
+  [ "$failed" -eq 0 ]
+}
+
 role_unit_files() {
   local phase=$1 unit index error changed=0 new=0 refused=0 failed=0 reload_failed=0 refresh_backup="" marked=0
+  local path sum unlisted=0
   local pending="$H/.hov-stack/units-reload-pending"
   for unit in $UNITS; do
     [ -f "$HERE/systemd/$unit" ] || continue
@@ -2379,8 +2598,21 @@ role_unit_files() {
     refused=$((refused + 1))
   done
   for index in "${!OVERLAY_UNIT_PATHS[@]}"; do
-    role_unit_file "$phase" "${OVERLAY_UNIT_PATHS[$index]}" "${OVERLAY_UNIT_SOURCES[$index]}"
+    path=${OVERLAY_UNIT_PATHS[$index]}
+    role_unit_file "$phase" "$path" "${OVERLAY_UNIT_SOURCES[$index]}"
+    # The refresh records each installed copy that matches its source, so a host that
+    # installed its units before the record existed is covered without a reinstall.
+    if [ "$phase" = refresh ] && [ ! -L "$SYS/$path" ] && cmp -s "${OVERLAY_UNIT_SOURCES[$index]}" "$SYS/$path" \
+        && sum=$(overlay_unit_sum "$SYS/$path"); then
+      overlay_record_set "$path" "$sum"
+    fi
   done
+  overlay_unlisted_report '  ' 1
+  unlisted=$OVERLAY_UNLISTED_COUNT
+  if [ "$phase" = refresh ] && ! overlay_record_save; then
+    echo "  failed to write the overlay unit install record $(overlay_record_file)" >&2
+    failed=$((failed + 1))
+  fi
   if [ "$phase" = check ]; then overlay_unit_timers_check '  ' || failed=$((failed + 1)); fi
   if [ "$phase" = refresh ]; then
     HYGIENE_POSTURE_PENDING=$pending
@@ -2418,6 +2650,7 @@ role_unit_files() {
     role_summary="${role_summary:+$role_summary; }user unit reload pending"
   fi
   [ "$new" -eq 0 ] || role_summary="${role_summary:+$role_summary; }$new new unit(s): ./setup --enable-units"
+  [ "$unlisted" -eq 0 ] || role_summary="${role_summary:+$role_summary; }$unlisted installed unit(s) no longer listed (see above)"
   if [ -f "$MANAGED_REF" ] && ! cmp -s "$MANAGED_REF" "$MANAGED_LOCK"; then
     echo "  managed lock differs: ./setup --root"
     role_summary="${role_summary:+$role_summary; }managed lock differs: ./setup --root"
@@ -2458,6 +2691,8 @@ role_steps() {
       ;;
     enable)
       install_user_units || return 1
+      # Before the reload, so the manager forgets the units removed here (#859).
+      overlay_units_remove_unlisted || removal_failed=1
       install_hygiene_posture
       install_daemon_reload || return 1
       install_role_selection || return 1
@@ -2465,6 +2700,8 @@ role_steps() {
       install_role_timers || return 1
       [ "$posture_failed" = 0 ] || return 1
       role_summary="role timers reconciled"
+      [ -z "$OVERLAY_REMOVAL_TEXT" ] || role_summary="$role_summary; $OVERLAY_REMOVAL_TEXT"
+      [ "$removal_failed" = 0 ] || return 1
       ;;
     root)
       docker_init_policy reconcile || return 1
@@ -2477,7 +2714,8 @@ role_steps() {
 }
 
 role_phase() {
-  local role_summary="" papercut_failed=0 posture_failed=0 posture_ok=0 rc=0
+  local role_summary="" papercut_failed=0 posture_failed=0 posture_ok=0 removal_failed=0 rc=0
+  local OVERLAY_REMOVAL_TEXT=
   case "${1:-}" in
     refresh|owner|enable|root|check) [ "$#" -eq 1 ] || rc=2 ;;
     *) rc=2 ;;
@@ -2919,6 +3157,10 @@ check() {
       echo "DRIFT: overlay unit $overlay_path differs (./setup)"; drift=1
     fi
   done
+  # An installed copy of a row the units file no longer lists (#859). A refused row above
+  # already drifts, and it is why the comparison would not run, so no second line for it.
+  overlay_unlisted_report 'DRIFT: ' 0
+  [ "$OVERLAY_UNLISTED_COUNT" -eq 0 ] || drift=1
   overlay_unit_timers_check 'DRIFT: ' || drift=1
 
   # Host-declared hygiene posture (lib/hygiene-posture.sh): the overlay's declaration

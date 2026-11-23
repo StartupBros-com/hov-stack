@@ -21,9 +21,17 @@
 # shellcheck source=lib/overlay-units.sh
 . "$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")/overlay-units.sh"
 
-# foreign_units_with_overlay LIST: print LIST with the overlay's unit names appended.
+# foreign_units_with_overlay LIST [UNITS]: print LIST with the overlay's unit names
+# appended, those in its foreign-units file and those its units file installs.
 foreign_units_with_overlay() {
-  local list=$1 dir line content path
+  foreign_units_add_overlay_units "$(foreign_units_with_file "$1")" "${2:-}"
+}
+
+# foreign_units_with_file LIST: print LIST with the names in the overlay's foreign-units
+# file appended: the units another repository installs, not the ones the overlay's units
+# file does.
+foreign_units_with_file() {
+  local list=$1 dir line content
   if dir=$(overlay_dir) && [ -f "$dir/foreign-units" ]; then
     while IFS= read -r line || [ -n "$line" ]; do
       content=${line#"${line%%[![:space:]]*}"}
@@ -36,6 +44,13 @@ foreign_units_with_overlay() {
       esac
     done < "$dir/foreign-units"
   fi
+  printf '%s\n' "$list"
+}
+
+# foreign_units_add_overlay_units LIST [UNITS]: print LIST with the unit files (drop-ins
+# aside) the overlay's units file lists appended, without their type suffix.
+foreign_units_add_overlay_units() {
+  local list=$1 path
   overlay_units_load "${2:-}"
   for path in "${OVERLAY_UNIT_PATHS[@]}"; do
     case $path in */*) continue ;; esac

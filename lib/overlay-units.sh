@@ -12,6 +12,13 @@
 # sync.sh's own list: a row naming one of those paths is refused, a drop-in on one is
 # not. A row naming a path another installer owns (overlay_units_reserved) is refused
 # the same way. No overlay, or no units file, leaves all four empty.
+# OVERLAY_UNITS_FILE is the units file it read, through the overlay's real directory,
+# or empty when there is none.
+#
+# The install record (overlay_record_*) keeps one path<TAB>sha256<TAB>units-file row per
+# overlay unit file sync.sh installed, in $CLAUDE_HOME/.hov-stack/overlay-units-installed.
+# A row deleted from the units file leaves its record behind, which is how sync.sh finds
+# the installed copy that nothing lists any more (#859).
 #
 # Readers: sync.sh (install, refresh, check) and lib/foreign-units.sh (the register).
 
@@ -47,15 +54,24 @@ overlay_units_reserved() {
   done
 }
 
+# overlay_unit_path_valid PATH: true when PATH is a name a units row may install, a unit
+# file or a <unit>.d/<file>.conf drop-in, with no "..".
+overlay_unit_path_valid() {
+  local unit_pattern='[A-Za-z0-9@._-]+\.(service|timer|path|socket|target|mount|automount|swap|slice|scope|device)'
+  local path_pattern="^${unit_pattern}(\.d/[A-Za-z0-9@._-]+\.conf)?$"
+  [[ "$1" =~ $path_pattern ]] && [[ "$1" != *..* ]]
+}
+
 overlay_units_load() {
   local units=${1:-} directory line content path source flag rest reason number=0
-  local unit_pattern='[A-Za-z0-9@._-]+\.(service|timer|path|socket|target|mount|automount|swap|slice|scope|device)'
-  local path_pattern reserved_rows reserved_path owner
+  local reserved_rows reserved_path owner
   local -A accepted=() reserved=()
   OVERLAY_UNIT_PATHS=() OVERLAY_UNIT_SOURCES=() OVERLAY_UNIT_FLAGS=() OVERLAY_UNIT_ERRORS=()
+  OVERLAY_UNITS_FILE=
   directory=$(overlay_dir) || return 0
   [ -f "$directory/units" ] || return 0
   directory=$(readlink -f -- "$directory") || return 0
+  OVERLAY_UNITS_FILE=$directory/units
   if ! reserved_rows=$(overlay_units_reserved); then
     OVERLAY_UNIT_ERRORS+=("overlay units: cannot read lib/manifest.sh, so no row can be checked against the unit paths it owns; every row refused")
     return 0
@@ -63,7 +79,6 @@ overlay_units_load() {
   while IFS=$'\t' read -r reserved_path owner; do
     [ -z "$reserved_path" ] || reserved[$reserved_path]=$owner
   done <<<"$reserved_rows"
-  path_pattern="^${unit_pattern}(\.d/[A-Za-z0-9@._-]+\.conf)?$"
   while IFS= read -r line || [ -n "$line" ]; do
     number=$((number + 1))
     line=${line%$'\r'}
@@ -75,7 +90,7 @@ overlay_units_load() {
     source=${rest%%$'\t'*}
     if [[ "$line" != *$'\t'* ]] || [ -z "$source" ]; then
       reason='expected path<TAB>source[<TAB>on]'
-    elif [[ ! "$path" =~ $path_pattern ]] || [[ "$path" == *..* ]]; then
+    elif ! overlay_unit_path_valid "$path"; then
       reason='invalid unit path'
     elif [[ "$rest" == *$'\t'* ]]; then
       flag=${rest#*$'\t'}
@@ -105,4 +120,67 @@ overlay_units_load() {
     OVERLAY_UNIT_SOURCES+=("$source")
     OVERLAY_UNIT_FLAGS+=("$flag")
   done < "$directory/units"
+}
+
+# overlay_record_file: where the install record lives.
+overlay_record_file() {
+  printf '%s\n' "${CLAUDE_HOME:-$HOME/.claude}/.hov-stack/overlay-units-installed"
+}
+
+# overlay_unit_sum FILE: FILE's sha256, the form the record keeps.
+overlay_unit_sum() {
+  local sum
+  sum=$(sha256sum < "$1") || return 1
+  printf '%s\n' "${sum%% *}"
+}
+
+# overlay_record_load: read the record into OVERLAY_RECORD_SUM and OVERLAY_RECORD_FROM,
+# keyed by unit path. A row that is not three fields, or whose path a units row could not
+# name, is dropped: forgetting a row can only leave a unit installed, never remove one.
+overlay_record_load() {
+  local file path sum from extra
+  declare -gA OVERLAY_RECORD_SUM=() OVERLAY_RECORD_FROM=()
+  OVERLAY_RECORD_DIRTY=0
+  file=$(overlay_record_file)
+  [ -f "$file" ] || return 0
+  while IFS=$'\t' read -r path sum from extra || [ -n "$path" ]; do
+    if [ -z "$sum" ] || [ -z "$from" ] || [ -n "$extra" ] || ! overlay_unit_path_valid "$path"; then
+      OVERLAY_RECORD_DIRTY=1
+      continue
+    fi
+    OVERLAY_RECORD_SUM[$path]=$sum
+    OVERLAY_RECORD_FROM[$path]=$from
+  done < "$file"
+}
+
+# overlay_record_set PATH SUM: record PATH as installed with SUM from the current units file.
+overlay_record_set() {
+  [ "${OVERLAY_RECORD_SUM[$1]:-}" = "$2" ] && [ "${OVERLAY_RECORD_FROM[$1]:-}" = "$OVERLAY_UNITS_FILE" ] && return 0
+  OVERLAY_RECORD_SUM[$1]=$2
+  OVERLAY_RECORD_FROM[$1]=$OVERLAY_UNITS_FILE
+  OVERLAY_RECORD_DIRTY=1
+}
+
+# overlay_record_drop PATH: forget PATH.
+overlay_record_drop() {
+  [ -n "${OVERLAY_RECORD_SUM[$1]+set}" ] || return 0
+  unset 'OVERLAY_RECORD_SUM[$1]' 'OVERLAY_RECORD_FROM[$1]'
+  OVERLAY_RECORD_DIRTY=1
+}
+
+# overlay_record_save: write the record when it changed, through a temporary file renamed
+# over the old one, so a reader never sees half of it.
+overlay_record_save() {
+  local file tmp path
+  [ "${OVERLAY_RECORD_DIRTY:-0}" = 1 ] || return 0
+  file=$(overlay_record_file)
+  mkdir -p -- "$(dirname -- "$file")" || return 1
+  tmp=$(mktemp "$file.XXXXXX") || return 1
+  if ! for path in "${!OVERLAY_RECORD_SUM[@]}"; do
+      printf '%s\t%s\t%s\n' "$path" "${OVERLAY_RECORD_SUM[$path]}" "${OVERLAY_RECORD_FROM[$path]}"
+    done | LC_ALL=C sort > "$tmp" || ! mv -f -- "$tmp" "$file"; then
+    rm -f -- "$tmp"
+    return 1
+  fi
+  OVERLAY_RECORD_DIRTY=0
 }
