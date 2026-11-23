@@ -42,6 +42,11 @@ case "$action" in
     case " $* " in
       *" -p UnitFileState "*)
         unit=${!#}
+        # Real show refuses a template name (exit 1) and answers an unknown unit with an
+        # empty UnitFileState=.
+        case $unit in
+          *@.*) echo "Failed to get properties: Unit name $unit is neither a valid invocation ID nor unit name." >&2; exit 1 ;;
+        esac
         if [ -f "$HOME/unit-state/$unit" ]; then
           cat "$HOME/unit-state/$unit"
         else

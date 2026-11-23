@@ -2393,16 +2393,21 @@ overlay_unit_timers_check() {
 # pointed elsewhere, or an overlay since replaced), which no run removes. A recorded path
 # that is gone, is a symlink now, or that UNITS or another repository's register claims is
 # forgotten, never removed. With a refused row the file cannot say what it stopped
-# listing, so nothing is sorted and OVERLAY_REVIEW_SKIPPED says why.
-OVERLAY_UNLISTED=() OVERLAY_ELSEWHERE=() OVERLAY_REVIEW_SKIPPED=
+# listing, so nothing is sorted and OVERLAY_REVIEW_SKIPPED says why. A units file that
+# lists nothing looks the same as one an editor or a checkout left empty, so its units
+# are sorted and reported but OVERLAY_REMOVAL_HELD keeps every one installed.
+OVERLAY_UNLISTED=() OVERLAY_ELSEWHERE=() OVERLAY_REVIEW_SKIPPED='' OVERLAY_REMOVAL_HELD=''
 overlay_record_review() {
   local path
   local -a recorded=()
   local -A listed=()
-  OVERLAY_UNLISTED=() OVERLAY_ELSEWHERE=() OVERLAY_REVIEW_SKIPPED=
+  OVERLAY_UNLISTED=() OVERLAY_ELSEWHERE=() OVERLAY_REVIEW_SKIPPED='' OVERLAY_REMOVAL_HELD=''
   if [ "${#OVERLAY_UNIT_ERRORS[@]}" -gt 0 ]; then
     OVERLAY_REVIEW_SKIPPED="the overlay units file has refused rows, so what it no longer lists is not known"
     return 0
+  fi
+  if [ "${#OVERLAY_UNIT_PATHS[@]}" -eq 0 ]; then
+    OVERLAY_REMOVAL_HELD="the units file lists no units, as an emptied or truncated one would: list a row again, or remove the units yourself"
   fi
   for path in "${OVERLAY_UNIT_PATHS[@]}"; do listed[$path]=1; done
   mapfile -t recorded < <(printf '%s\n' "${!OVERLAY_RECORD_SUM[@]}" | LC_ALL=C sort)
@@ -2428,8 +2433,10 @@ overlay_record_review() {
 # A unit file must be disabled or static and inactive, and no loaded unit may trigger it
 # while enabled or active, or name it in Wants=, Requires=, OnFailure= and the like.
 # is-enabled's exit status cannot say this: a timer's static service exits 0 from it.
+# systemd keeps those reverse dependencies for loaded units only, and a disabled timer is
+# not loaded, so the unit files on disk are read for them too (overlay_unit_named_on_disk).
 overlay_unit_state_blocker() {
-  local unit=$1 props key value state='' active='' triggers='' refs='' trigger t_props t_state t_active
+  local unit=$1 props key value state='' active='' triggers='' refs='' trigger t_props t_state t_active named
   case $unit in
     */*) return 0 ;;
     *@.*) echo "it is a template: remove it and any instances yourself"; return 0 ;;
@@ -2451,7 +2458,12 @@ overlay_unit_state_blocker() {
   done <<<"$props"
   case $state in
     disabled|static) ;;
-    *) echo "it is ${state:-in no known unit file state}: systemctl --user disable --now -- $unit, then ./setup --enable-units"; return 0 ;;
+    enabled|linked) echo "it is $state: systemctl --user disable --now -- $unit, then ./setup --enable-units"; return 0 ;;
+    enabled-runtime|linked-runtime)
+      echo "it is $state: systemctl --user disable --runtime --now -- $unit, then ./setup --enable-units"; return 0 ;;
+    masked|masked-runtime) echo "it is $state: systemctl --user unmask -- $unit, then ./setup --enable-units"; return 0 ;;
+    '') echo "systemd reports no unit file state for it: systemctl --user daemon-reload, then ./setup --enable-units"; return 0 ;;
+    *) echo "it is $state, which systemctl --user disable does not change: remove it yourself"; return 0 ;;
   esac
   case $active in
     inactive) ;;
@@ -2475,12 +2487,49 @@ overlay_unit_state_blocker() {
     esac
     if [ "$t_active" != inactive ]; then echo "$trigger triggers it and is ${t_active:-in no known state}"; return 0; fi
   done
+  named=$(overlay_unit_named_on_disk "$unit")
+  [ -z "$named" ] || echo "$named, still installed, names it or triggers it"
+}
+
+# overlay_unit_named_on_disk UNIT: print the first unit file in SYS, other than UNIT and its
+# drop-ins, that names UNIT in a dependency line, or the timer, socket or path that shares a
+# service's name and so triggers it. A unit OVERLAY_UNLISTED also holds is skipped while
+# OVERLAY_DISK_SKIP_UNLISTED=1: the report says what one --enable-units run does, and that
+# run removes timers, sockets and paths before the services they trigger.
+OVERLAY_DISK_SKIP_UNLISTED=0
+overlay_unit_named_on_disk() {
+  local unit=$1 file name other
+  local -A skip=()
+  if [ "$OVERLAY_DISK_SKIP_UNLISTED" = 1 ]; then
+    for other in "${OVERLAY_UNLISTED[@]}"; do skip[$other]=1; done
+  fi
+  if [ "${unit##*.}" = service ]; then
+    for name in "${unit%.*}.timer" "${unit%.*}.socket" "${unit%.*}.path"; do
+      if [ -e "$SYS/$name" ] && [ -z "${skip[$name]:-}" ]; then echo "$name"; return 0; fi
+    done
+  fi
+  for file in "$SYS"/*.* "$SYS"/*.d/*.conf; do
+    [ -f "$file" ] || continue
+    name=${file#"$SYS"/}
+    [ "${name%%.d/*}" != "$unit" ] && [ -z "${skip[$name]:-}" ] || continue
+    if awk -v u="$unit" '
+        /^[[:space:]]*(Wants|Requires|Requisite|BindsTo|PartOf|Upholds|OnFailure|OnSuccess|Unit|PropagatesReloadTo|ReloadPropagatedFrom)[[:space:]]*=/ {
+          sub(/^[^=]*=/, "")
+          n = split($0, word, /[[:space:]]+/)
+          for (i = 1; i <= n; i++) if (word[i] == u) found = 1
+        }
+        END { exit !found }' "$file"; then
+      echo "$name"
+      return 0
+    fi
+  done
 }
 
 # overlay_unit_removal_blocker PATH: print why --enable-units must leave the unlisted
 # PATH installed, or nothing when it may remove it.
 overlay_unit_removal_blocker() {
   local path=$1 sum
+  if [ -n "$OVERLAY_REMOVAL_HELD" ]; then echo "$OVERLAY_REMOVAL_HELD"; return 0; fi
   case "$(readlink -f -- "$SYS/$path")" in
     "$(readlink -f -- "$SYS")"/*) ;;
     *) echo "it resolves outside the user unit directory"; return 0 ;;
@@ -2508,7 +2557,7 @@ overlay_unlisted_report() {
     echo "${prefix}removal of overlay units no longer listed skipped: $OVERLAY_REVIEW_SKIPPED"
   fi
   for path in "${OVERLAY_UNLISTED[@]}"; do
-    blocker=$(overlay_unit_removal_blocker "$path")
+    blocker=$(OVERLAY_DISK_SKIP_UNLISTED=1 overlay_unit_removal_blocker "$path")
     if [ -n "$blocker" ]; then
       echo "${prefix}overlay unit $path is installed but no longer listed (./setup --enable-units leaves it: $blocker)"
     else
@@ -2517,9 +2566,13 @@ overlay_unlisted_report() {
     OVERLAY_UNLISTED_COUNT=$((OVERLAY_UNLISTED_COUNT + 1))
   done
   for path in "${OVERLAY_ELSEWHERE[@]}"; do
-    echo "${prefix}overlay unit $path is installed but no longer listed (installed from ${OVERLAY_RECORD_FROM[$path]}, not this host's units file now: remove it yourself)"
+    echo "${prefix}overlay unit $path is installed but no longer listed ($(overlay_elsewhere_reason "$path"))"
     OVERLAY_UNLISTED_COUNT=$((OVERLAY_UNLISTED_COUNT + 1))
   done
+}
+
+overlay_elsewhere_reason() {
+  echo "installed from ${OVERLAY_RECORD_FROM[$1]}, not this host's units file now: remove it yourself, or delete its row in $(overlay_record_file) to keep it"
 }
 
 # overlay_units_remove_unlisted: --enable-units installs what the units file lists and,
@@ -2536,10 +2589,19 @@ overlay_units_remove_unlisted() {
     return 0
   fi
   for path in "${OVERLAY_ELSEWHERE[@]}"; do
-    echo "  left in place, no longer listed: $path (installed from ${OVERLAY_RECORD_FROM[$path]}, not this host's units file now: remove it yourself)"
+    echo "  left in place, no longer listed: $path ($(overlay_elsewhere_reason "$path"))"
     left=$((left + 1))
   done
+  # Timers, sockets and paths go first, so a service whose trigger goes in the same run
+  # finds it gone (overlay_unit_named_on_disk).
+  local -a order=()
   for path in "${OVERLAY_UNLISTED[@]}"; do
+    case $path in */*|*.service) ;; *) order+=("$path") ;; esac
+  done
+  for path in "${OVERLAY_UNLISTED[@]}"; do
+    case $path in */*|*.service) order+=("$path") ;; esac
+  done
+  for path in "${order[@]}"; do
     blocker=$(overlay_unit_removal_blocker "$path")
     if [ -n "$blocker" ]; then
       echo "  left in place, no longer listed: $path ($blocker)"
