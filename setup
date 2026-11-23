@@ -6,7 +6,9 @@
 #   ./setup --no-dcg   the same, without downloading or installing dcg
 #   ./setup --check    change nothing: print each step's state, exit 1 if any is not in place
 #                      (add --no-dcg to leave dcg out of the check)
-#   ./setup --enable-units  install user units and reconcile this host role's timers
+#   ./setup --enable-units  install user units, remove the overlay units its units file no
+#                      longer lists (systemd/README.md, "Deleting a row"), and reconcile this
+#                      host role's timers
 #   ./setup --root    reconcile Docker policy, managed lock and workstation system units
 #   ./setup --update   bring hov-stack and what it installed up to date, then run every step
 #                      below. Not with --check (exit 2). In order:

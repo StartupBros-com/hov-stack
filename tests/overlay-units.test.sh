@@ -310,4 +310,301 @@ for phase in enable refresh check; do
   rm "$HOV_STACK_OVERLAY/units"
 done
 ok 'no units file and empty units file produce identical enable, refresh and check output and calls'
+
+# Rows deleted from the units file (#859): what --enable-units installed is recorded, and
+# a copy nothing lists any more is reported everywhere and removed only by --enable-units.
+record() { printf '%s\n' "$CLAUDE_HOME/.hov-stack/overlay-units-installed"; }
+sum_of() { sha256sum < "$1" | cut -d' ' -f1; }
+drop_rows() {  # drop_rows PATH...: delete those paths' rows from the units file
+  local path pattern=''
+  for path in "$@"; do pattern="$pattern${pattern:+|}$(printf '%s' "$path" | sed 's/[.]/\\./g')"; done
+  grep -v -E "^($pattern)"$'\t' "$HOV_STACK_OVERLAY/units" | write "$WORK/units.new" || :
+  cp "$WORK/units.new" "$HOV_STACK_OVERLAY/units"
+}
+recorded() { cut -f1 "$(record)" | grep -Fxq -- "$1"; }
+
+fresh
+declare_units
+run 0 role enable
+units_file=$(readlink -f "$HOV_STACK_OVERLAY")/units
+for path in example-backup.service example-report.timer example-enabled.timer example-disabled.timer \
+    example@.service.d/override.conf dcg-auto-update.service.d/example.conf; do
+  grep -Fxq -- "$path"$'\t'"$(sum_of "$SYS/$path")"$'\t'"$units_file" "$(record)" || fail "record lacks $path"
+done
+[ "$(wc -l < "$(record)")" = 6 ] || fail 'record holds rows enable did not install'
+ok 'enable records each overlay unit it installs with its sha256 and units file'
+
+drop_rows example-disabled.timer example@.service.d/override.conf example-report.timer
+printf 'example-gone.timer\t%s\t%s\n' "$(sum_of "$HOV_STACK_OVERLAY/timer")" "$units_file" >> "$(record)"
+for mode in role sync; do
+  snapshot | write "$WORK/before"
+  printf '' | write "$HOME/systemctl.log"
+  # role check's status counts failures; its summary is what makes ./setup --check exit 1.
+  if [ "$mode" = role ]; then run 0 role check; else run 1 check; fi
+  [ "$mode" = role ] && prefix='  ' || prefix='DRIFT: '
+  contains "${prefix}overlay unit example-disabled.timer is installed but no longer listed (./setup --enable-units removes it)"
+  contains "${prefix}overlay unit example@.service.d/override.conf is installed but no longer listed (./setup --enable-units removes it)"
+  contains "${prefix}overlay unit example-report.timer is installed but no longer listed (./setup --enable-units leaves it: it is enabled: systemctl --user disable --now -- example-report.timer, then ./setup --enable-units)"
+  [[ "$output" != *example-gone.timer* ]] || fail "$mode check reported a recorded unit that is not installed"
+  [ "$mode" = sync ] || contains '3 installed unit(s) no longer listed (see above)'
+  snapshot | write "$WORK/after"
+  cmp -s "$WORK/before" "$WORK/after" || fail "$mode check changed disk, the record included"
+  ! grep -Eq -- '--user (enable|disable|start|stop|daemon-reload)' "$HOME/systemctl.log" || fail "$mode check mutated manager"
+done
+ok 'role check and sync.sh check report each unlisted copy with what --enable-units will do, read-only'
+
+printf '' | write "$HOME/systemctl.log"
+run 0 role refresh
+contains 'overlay unit example-disabled.timer is installed but no longer listed'
+contains '3 installed unit(s) no longer listed (see above)'
+for path in example-disabled.timer example@.service.d/override.conf example-report.timer; do
+  [ -f "$SYS/$path" ] || fail "refresh removed $path"
+done
+recorded example-gone.timer && fail 'refresh kept the record of a unit that is not installed'
+ok 'refresh reports unlisted copies, removes none, and forgets a recorded unit that is gone'
+
+disabled_bytes=$(cat "$SYS/example-disabled.timer")
+printf '' | write "$HOME/systemctl.log"
+run 0 role enable
+contains 'removed overlay unit no longer listed: example-disabled.timer'
+contains 'removed overlay unit no longer listed: example@.service.d/override.conf'
+contains 'left in place, no longer listed: example-report.timer (it is enabled: systemctl --user disable --now -- example-report.timer, then ./setup --enable-units)'
+contains 'role: role timers reconciled; 2 overlay unit(s) no longer listed removed; 1 no longer listed left in place (see above)'
+[ ! -e "$SYS/example-disabled.timer" ] || fail 'enable left a removable unlisted timer'
+[ ! -e "$SYS/example@.service.d" ] || fail 'enable left the emptied drop-in directory'
+[ -f "$SYS/example-report.timer" ] || fail 'enable removed an enabled timer'
+backups=("$CLAUDE_HOME"/backups/unit-prune-*)
+[ "${#backups[@]}" = 1 ] || fail 'removal backup count'
+[ "$(cat "${backups[0]}/example-disabled.timer")" = "$disabled_bytes" ] || fail 'backup timer bytes'
+cmp -s "${backups[0]}/example@.service.d/override.conf" "$HOV_STACK_OVERLAY/dropin" || fail 'backup drop-in bytes'
+recorded example-disabled.timer && fail 'record kept a removed unit'
+recorded example@.service.d/override.conf && fail 'record kept a removed drop-in'
+recorded example-report.timer || fail 'record lost a unit left in place'
+awk '/^--user show -p UnitFileState/ {checked = NR} /^--user daemon-reload$/ && checked {reload = NR} END {exit !reload}' \
+  "$HOME/systemctl.log" || fail 'enable did not reload after its removal checks'
+rm "$HOME/enabled/example-report.timer"
+run 0 role enable
+contains 'removed overlay unit no longer listed: example-report.timer'
+[ ! -e "$SYS/example-report.timer" ] || fail 'a disabled timer stayed after its row went'
+run 0 role check
+[[ "$output" != *'no longer listed'* ]] || fail 'check still reports removed units'
+ok 'enable backs up and removes disabled unlisted copies and emptied drop-in directories, and leaves an enabled one until it is disabled'
+
+# The planted negative: a timer's static service exits 0 from is-enabled; its timer, still
+# listed and enabled, keeps it installed.
+fresh
+printf '%s\n' $'example-backup.service\tservice' $'example-backup.timer\ttimer\ton' \
+  $'example-active.service\tservice' $'example-alerted.service\tservice' $'example-stays.service\tservice' \
+  | write "$HOV_STACK_OVERLAY/units"
+run 0 role enable
+mkdir -p "$HOME/unit-state"
+printf 'UnitFileState=static\nActiveState=inactive\nTriggeredBy=example-backup.timer\n' | write "$HOME/unit-state/example-backup.service"
+printf 'UnitFileState=static\nActiveState=active\nTriggeredBy=\n' | write "$HOME/unit-state/example-active.service"
+printf 'UnitFileState=static\nActiveState=inactive\nOnFailureOf=example-watched.service\nTriggeredBy=\n' | write "$HOME/unit-state/example-alerted.service"
+drop_rows example-backup.service example-active.service example-alerted.service
+run 0 role enable
+contains 'left in place, no longer listed: example-backup.service (example-backup.timer triggers it and is enabled)'
+contains 'left in place, no longer listed: example-active.service (it is active: systemctl --user stop -- example-active.service, then ./setup --enable-units)'
+contains 'left in place, no longer listed: example-alerted.service (it is still named by example-watched.service, in Wants=, Requires=, OnFailure= or the like)'
+for path in example-backup.service example-active.service example-alerted.service; do
+  [ -f "$SYS/$path" ] || fail "enable removed $path while it was in use"
+done
+ok 'a service its enabled timer triggers, an active one and one another unit names in OnFailure= stay installed'
+rm "$HOME/enabled/example-backup.timer"
+drop_rows example-backup.timer
+run 0 role check
+contains 'overlay unit example-backup.service is installed but no longer listed (./setup --enable-units removes it)'
+run 0 role enable
+contains 'removed overlay unit no longer listed: example-backup.service'
+contains 'removed overlay unit no longer listed: example-backup.timer'
+[ ! -e "$SYS/example-backup.service" ] && [ ! -e "$SYS/example-backup.timer" ] || fail 'a static service and its disabled timer stayed after both rows went'
+ok 'a static service, which exits 0 from is-enabled, goes once the timer that triggers it is disabled and unlisted, in one run'
+
+# systemd keeps reverse dependencies for loaded units only: a disabled timer still listed,
+# or a listed unit whose file requires the candidate, is read from disk.
+fresh
+printf '[Unit]\nRequires=example-needed.service\n[Service]\nExecStart=/bin/true\n' | write "$HOV_STACK_OVERLAY/requirer"
+printf '%s\n' $'example-kept.service\tservice' $'example-kept.timer\ttimer' $'example-needed.service\tservice' \
+  $'example-requirer.service\trequirer' $'example@.service\tservice' | write "$HOV_STACK_OVERLAY/units"
+run 0 role enable
+drop_rows example-kept.service example-needed.service example@.service
+run 0 role enable
+contains 'left in place, no longer listed: example-kept.service (example-kept.timer, still installed, names it or triggers it)'
+contains 'left in place, no longer listed: example-needed.service (example-requirer.service, still installed, names it or triggers it)'
+contains 'left in place, no longer listed: example@.service (it is a template: remove it and any instances yourself)'
+for path in example-kept.service example-needed.service example@.service; do
+  [ -f "$SYS/$path" ] || fail "enable removed $path while an installed unit file still needs it"
+done
+ok 'a service a disabled listed timer triggers, one a listed unit file requires, and a template stay installed'
+
+# Every reverse-dependency key blocks removal, and each unit file state gets its own advice.
+mkdir -p "$HOME/unit-state"
+for key in WantedBy RequiredBy RequisiteOf BoundBy UpheldBy OnSuccessOf ConsistsOf; do
+  printf 'UnitFileState=static\nActiveState=inactive\n%s=example-other.service\nTriggeredBy=\n' "$key" \
+    | write "$HOME/unit-state/example-kept.service"
+  run 0 role check
+  contains 'overlay unit example-kept.service is installed but no longer listed (./setup --enable-units leaves it: it is still named by example-other.service, in Wants=, Requires=, OnFailure= or the like)'
+done
+states=(
+  'enabled-runtime|it is enabled-runtime: systemctl --user disable --runtime --now -- example-kept.service, then ./setup --enable-units'
+  'masked|it is masked: systemctl --user unmask -- example-kept.service, then ./setup --enable-units'
+  '|systemd reports no unit file state for it: systemctl --user daemon-reload, then ./setup --enable-units'
+  'indirect|it is indirect, which systemctl --user disable does not change: remove it yourself'
+)
+for entry in "${states[@]}"; do
+  printf 'UnitFileState=%s\nActiveState=inactive\nTriggeredBy=\n' "${entry%%|*}" | write "$HOME/unit-state/example-kept.service"
+  run 0 role check
+  contains "overlay unit example-kept.service is installed but no longer listed (./setup --enable-units leaves it: ${entry#*|})"
+done
+ok 'each reverse-dependency key keeps a unit, and each unit file state names what clears it'
+
+# A units file that lists nothing reads the same as one an editor or a checkout emptied.
+fresh
+printf '%s\n' $'example-gone.timer\ttimer' $'example-gone.service\tservice' | write "$HOV_STACK_OVERLAY/units"
+run 0 role enable
+printf '# every row deleted, or a truncated save\n' | write "$HOV_STACK_OVERLAY/units"
+run 0 role check
+contains 'overlay unit example-gone.timer is installed but no longer listed (./setup --enable-units leaves it: the units file lists no units, as an emptied or truncated one would: list a row again, or remove the units yourself)'
+run 0 role enable
+contains 'left in place, no longer listed: example-gone.service (the units file lists no units'
+[ -f "$SYS/example-gone.timer" ] && [ -f "$SYS/example-gone.service" ] || fail 'enable removed units while the units file listed none'
+ok 'a units file that lists nothing removes nothing and says so'
+
+fresh
+printf '%s\n' $'example-edited.service\tservice' $'example-linked.timer\ttimer' $'example-moved.timer\ttimer' \
+  $'example-kept.service\tservice' | write "$HOV_STACK_OVERLAY/units"
+run 0 role enable
+printf 'edited\n' | write "$SYS/example-edited.service"
+rm "$SYS/example-linked.timer"
+ln -s "$HOV_STACK_OVERLAY/timer" "$SYS/example-linked.timer"
+printf 'example-moved\n' | write "$HOV_STACK_OVERLAY/foreign-units"
+drop_rows example-edited.service example-linked.timer example-moved.timer
+run 0 role enable
+contains 'left in place, no longer listed: example-edited.service (it changed after hov-stack installed it: remove it yourself, or list it again)'
+[ "$(cat "$SYS/example-edited.service")" = edited ] || fail 'enable removed an edited copy'
+[ -L "$SYS/example-linked.timer" ] || fail 'enable removed a symlink'
+[ -f "$SYS/example-moved.timer" ] || fail 'enable removed a unit another repository now owns'
+[[ "$output" != *'example-linked.timer'* ]] || fail 'a symlink at a recorded path was reported'
+[[ "$output" != *'example-moved.timer'* ]] || fail 'a unit the foreign register names was reported'
+recorded example-linked.timer && fail 'record kept a path that is a symlink now'
+recorded example-moved.timer && fail 'record kept a unit the foreign register names'
+recorded example-edited.service || fail 'record lost an edited copy left in place'
+ok 'an edited copy stays and is reported; a symlink or a unit the foreign register names is forgotten, not removed'
+
+fresh
+printf '%s\n' $'example-backup.service\tservice' $'example-disabled.timer\ttimer' | write "$HOV_STACK_OVERLAY/units"
+run 0 role enable
+printf '%s\n' $'example-backup.service\tservice' malformed | write "$HOV_STACK_OVERLAY/units"
+run 0 role enable
+contains 'removal of overlay units no longer listed skipped: the overlay units file has refused rows'
+[ -f "$SYS/example-disabled.timer" ] || fail 'enable removed a unit while the units file had a refused row'
+printf '%s\n' $'example-backup.service\tservice' | write "$HOV_STACK_OVERLAY/units"
+MANAGER_EXIT=1 run 0 role enable
+contains 'left in place, no longer listed: example-disabled.timer (no systemd user manager is reachable to say whether it is in use)'
+[ -f "$SYS/example-disabled.timer" ] || fail 'enable removed a unit with no manager to ask'
+first_overlay=$HOV_STACK_OVERLAY
+HOV_STACK_OVERLAY=$(mktemp -d "$WORK/overlay-XXXXXX") || exit 1
+cp "$first_overlay/hosts.tsv" "$first_overlay/service" "$HOV_STACK_OVERLAY/"
+for units in absent empty; do
+  [ "$units" = absent ] || printf '' | write "$HOV_STACK_OVERLAY/units"
+  run 0 role enable
+  contains "left in place, no longer listed: example-backup.service (installed from $(readlink -f "$first_overlay")/units, not this host's units file now: remove it yourself, or delete its row in $(record) to keep it)"
+  [ -f "$SYS/example-backup.service" ] && [ -f "$SYS/example-disabled.timer" ] || fail "enable with the units file $units removed what another units file installed"
+  run 0 role check
+  contains 'overlay unit example-disabled.timer is installed but no longer listed (installed from'
+  contains 'installed unit(s) no longer listed (see above)'
+done
+HOV_STACK_OVERLAY=$first_overlay
+ok 'nothing is removed with a refused row, without a manager, or for a record another units file made'
+
+fresh
+declare_units
+run 0 role enable
+rm "$(record)"
+run 0 role check
+[ ! -e "$(record)" ] || fail 'check wrote the record'
+run 0 role refresh
+[ "$(wc -l < "$(record)")" = 6 ] || fail 'refresh did not seed the record from matching copies'
+rm "$(record)"
+printf '%s\n' $'../../escape.service\tdeadbeef\t/x/units' $'example-disabled.timer\tonly-two' | write "$(record)"
+printf 'outside\n' | write "$HOME/.config/escape.service"
+drop_rows example-disabled.timer
+run 0 role enable
+[ "$(cat "$HOME/.config/escape.service")" = outside ] || fail 'a record row naming a path outside the unit directory reached removal'
+[ -f "$SYS/example-disabled.timer" ] || fail 'a malformed record row removed a unit'
+! grep -Fq 'escape.service' "$(record)" || fail 'the record kept a row naming a path outside the unit directory'
+ok 'check never writes the record, refresh seeds it from matching copies, and malformed record rows are dropped, never acted on'
+
+# A unit that moves from the overlay into this repository's UNITS is hov-stack's to keep.
+fresh
+printf '%s\n' $'example-adopted.timer\ttimer' | write "$HOV_STACK_OVERLAY/units"
+run 0 role enable
+cp "$REPO/sync.sh" "$WORK/sync.sh.orig"
+sed -i 's/^UNITS="/UNITS="example-adopted.timer /' "$REPO/sync.sh"
+printf '' | write "$HOV_STACK_OVERLAY/units"
+run 0 role check
+[[ "$output" != *'example-adopted.timer is installed but no longer listed'* ]] || fail 'a unit UNITS now names was reported as unlisted'
+run 0 role enable
+cp "$WORK/sync.sh.orig" "$REPO/sync.sh"
+[ -f "$SYS/example-adopted.timer" ] || fail 'enable removed a unit UNITS now names'
+recorded example-adopted.timer && fail 'record kept a unit UNITS now names'
+ok 'a unit UNITS now names is forgotten by the record, not removed'
+
+# A unit file names its dependency in a socket's Service= too, under any name, and a value
+# may continue onto the next line after a backslash (pro-gate round 1 on #860). A comment
+# inside the continuation is skipped, and a word that only contains the name is no match.
+fresh
+printf '[Socket]\nListenStream=127.0.0.1:9\nService=example-served.service\n' | write "$HOV_STACK_OVERLAY/socket"
+printf '[Unit]\nRequires=example-other.service \\\n# example-nowhere.service\n  example-continued.service\n[Service]\nExecStart=/bin/true\n' \
+  | write "$HOV_STACK_OVERLAY/continued"
+printf '[Unit]\n# Requires=example-commented.service\nWants=example-commented.service.d\n[Service]\nExecStart=/bin/true\n' \
+  | write "$HOV_STACK_OVERLAY/commented"
+printf '%s\n' $'example-served.service\tservice' $'example-listener.socket\tsocket' \
+  $'example-continued.service\tservice' $'example-joiner.service\tcontinued' \
+  $'example-nowhere.service\tservice' $'example-commented.service\tservice' \
+  $'example-noter.service\tcommented' | write "$HOV_STACK_OVERLAY/units"
+run 0 role enable
+drop_rows example-served.service example-continued.service example-nowhere.service example-commented.service
+run 0 role check
+contains 'overlay unit example-served.service is installed but no longer listed (./setup --enable-units leaves it: example-listener.socket, still installed, names it or triggers it)'
+run 0 role enable
+contains 'left in place, no longer listed: example-served.service (example-listener.socket, still installed, names it or triggers it)'
+contains 'left in place, no longer listed: example-continued.service (example-joiner.service, still installed, names it or triggers it)'
+contains 'removed overlay unit no longer listed: example-nowhere.service'
+contains 'removed overlay unit no longer listed: example-commented.service'
+[ -f "$SYS/example-served.service" ] && [ -f "$SYS/example-continued.service" ] \
+  || fail 'enable removed a service a retained socket or a continued Requires= still names'
+ok 'a socket of another name naming it in Service=, and a continued Requires= value, keep a service installed'
+
+# Removal marks the pending reload before its first unlink. A failed reload keeps the mark,
+# --check reports it, and the next refresh reloads and clears it; a reload that succeeds
+# clears it in the same run. With no mark written, nothing is removed.
+fresh
+printf '%s\n' $'example-gone.service\tservice' $'example-later.service\tservice' \
+  $'example-last.service\tservice' $'example-stays.service\tservice' | write "$HOV_STACK_OVERLAY/units"
+run 0 role enable
+pending=$CLAUDE_HOME/.hov-stack/units-reload-pending
+[ ! -e "$pending" ] || fail 'an enable that removed nothing left a pending-reload mark'
+drop_rows example-gone.service
+RELOAD_EXIT=1 run 1 role enable
+contains 'removed overlay unit no longer listed: example-gone.service'
+contains 'daemon-reload failed'
+[ -f "$pending" ] || fail 'a removal whose reload failed left no pending-reload mark'
+run 0 role check
+contains 'user unit reload pending'
+printf '' | write "$HOME/systemctl.log"
+run 0 role refresh
+[ "$(grep -c -- '--user daemon-reload' "$HOME/systemctl.log")" = 1 ] || fail 'refresh did not retry the reload a removal left pending'
+[ ! -e "$pending" ] || fail 'refresh kept the mark after its reload'
+drop_rows example-later.service
+run 0 role enable
+contains 'removed overlay unit no longer listed: example-later.service'
+[ ! -e "$pending" ] || fail 'a removal whose reload succeeded kept the mark'
+ln -s "$WORK/no-such-dir/units-reload-pending" "$pending"
+drop_rows example-last.service
+run 1 role enable
+contains 'failed to record the pending user-unit reload'
+[ -f "$SYS/example-last.service" ] || fail 'enable removed a unit with no pending-reload mark written'
+rm -f "$pending"
+ok 'removal marks the reload pending first; a failed reload is retried by refresh, and an unwritable mark stops removal'
 printf 'passed: %s; failed: 0\n' "$pass"
