@@ -2,7 +2,7 @@
 # Replace before enabling:
 #   lines 30, 42: ExecStart=/ExecStop= name $HOME/.claude/scripts/zram-swap.sh; ./setup --root renders
 #   that prefix to your harness home (%h is /root in a system unit); by hand, substitute the absolute path.
-#   line 49: Environment=ZRAM_SIZE=4G, sized for a 39 GiB budget; set it to about 10% of your RAM.
+#   line 49: Environment=ZRAM_SIZE=4G, about 10% of a 39 GiB budget; raise it in a drop-in where zram is the only swap.
 # See systemd/README.md.
 
 [Unit]
@@ -16,7 +16,7 @@
 # per-user `systemd --user` manager, which only runs during (or after enabling
 # lingering for) an active session. Absolute ExecStart/ExecStop paths for a
 # related reason: %h would resolve to /root here, not the login user's home.
-Description=zram compressed-RAM swap — bounded-size fast tier ABOVE the disk swapfile (see HARNESS.md Automation; design rationale in the introducing PR)
+Description=zram compressed-RAM swap — bounded size, the only swap or a tier above disk swap (see HARNESS.md Automation)
 Documentation=https://docs.kernel.org/admin-guide/blockdev/zram.html
 After=systemd-modules-load.service
 
@@ -26,7 +26,7 @@ RemainAfterExit=yes
 # zram-swap.sh degrades to a clean exit-0 no-op at every failure point (module
 # missing after a WSL kernel update, sysfs races, mkswap/swapon rejecting the
 # device) — see the script for the exact skip conditions. This unit must never
-# fail the boot over an optional performance tier.
+# fail the boot; where zram is the only swap, check the swap after boot instead.
 ExecStart=$HOME/.claude/scripts/zram-swap.sh start
 # stop(), unlike start(), CAN exit non-zero (see the script): a real teardown
 # failure — swapoff unable to page the device back into RAM under memory
@@ -51,7 +51,7 @@ Environment=ZRAM_SIZE=4G
 # are not compiled into this kernel at all (CONFIG_CRYPTO_ZSTD/LZ4/LZ4HC/842 are
 # all unset), so lzo-rle is the sole compression backend available.
 Environment=ZRAM_ALGO=lzo-rle
-# Must beat the disk swap's auto-assigned -2 (confirmed via `swapon --show`) so
+# Must beat a disk swap's auto-assigned -2 (confirmed via `swapon --show`) so
 # the kernel drains to the fast compressed tier first. 100 matches systemd
 # zram-generator's own convention for "clearly highest, no ambiguity".
 Environment=ZRAM_PRIORITY=100
