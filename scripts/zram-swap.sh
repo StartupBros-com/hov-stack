@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# zram-swap.sh — bring up a bounded-size zram compressed-RAM swap device as a
-# fast tier ABOVE the existing 16 GB disk swapfile (WSL2 `.wslconfig` swap=16GB,
-# shows up as a `partition`-type swap entry at priority -2).
+# zram-swap.sh — bring up a bounded-size zram compressed-RAM swap device. It can be
+# a box's only swap (WSL2 `.wslconfig` swap=0) or a fast tier above a disk swap
+# (WSL2's disk swap shows up as a `partition`-type swap entry at priority -2).
 #
 # Invoked by zram-swap.service (system unit, root) as: zram-swap.sh {start|stop}
 #
@@ -14,7 +14,9 @@
 # and zram.ko is present on disk under
 # /lib/modules/6.6.114.1-microsoft-standard-WSL2/kernel/drivers/block/zram/.
 # So "you need a custom kernel for zram, use zswap instead" — the standard
-# WSL2 forum answer — is backwards on this box specifically.
+# WSL2 forum answer — is backwards on this box specifically. Rechecked on
+# 6.18.58.1-microsoft-standard-WSL2 (2026-11-23): still no zswap, zram still a
+# module, and lzo/lzo-rle now built in (CONFIG_CRYPTO_LZO=y); lz4 and zstd still unset.
 #
 # COMPRESSION ALGORITHM: lzo-rle is not just the kernel's compiled-in default,
 # it is close to the ONLY option. The same config read shows
@@ -31,16 +33,18 @@
 # and the honest ceiling: zram buys headroom, it does not fix the underlying
 # ratio (Committed_AS exceeding CommitLimit).
 #
-# SWAP PRIORITY: must be higher than the disk swap's auto-assigned -2 so the
-# kernel drains to zram first. ZRAM_PRIORITY defaults to 100 (systemd
+# SWAP PRIORITY: where a disk swap exists, must be higher than its auto-assigned
+# -2 so the kernel drains to zram first. ZRAM_PRIORITY defaults to 100 (systemd
 # zram-generator's own convention), comfortably above any negative auto-priority
 # WSL2 assigns its disk swap.
 #
 # IDEMPOTENCY / BOOT SAFETY (required by the unit): every failure path below —
 # module missing after a WSL kernel update, sysfs races, mkswap/swapon
-# rejecting the device — logs and exits 0, never 1. A boot-time dependency for
-# an OPTIONAL performance tier must never fail the boot. Re-running `start`
-# after the device is already active as swap is a fast no-op (checked first).
+# rejecting the device — logs and exits 0, never 1. A swap setup step must never
+# fail the boot. That makes a failure silent: a box that uses zram as its only
+# swap boots with no swap at all, so such a box needs its own check after boot
+# (every active swap is zram, at the size it set). Re-running `start` after the
+# device is already active as swap is a fast no-op (checked first).
 set -uo pipefail
 
 DEVICE=/dev/zram0
