@@ -71,6 +71,7 @@
       "Bash(wsl-cdp text:*)",
       "Bash(wsl-cdp tabs:*)",
       "Bash(wsl-cdp url)",
+      "Bash(hov ls:*)",
       "mcp__x__search_posts_all",
       "mcp__x__get_posts_by_ids",
       "WebSearch",
