@@ -53,7 +53,6 @@ DOTFILES_ROOT_FILES=(
 DOTFILES_LINKS=(
   "config/starship.toml|.config/starship.toml"
   "config/bat|.config/bat"
-  "config/mise/config.toml|.config/mise/config.toml"
   # pnpm global rc. Adopted 2026-08-07 after its build-script allowlist sat silently
   # malformed for months in an unmanaged config layer — variant 3 of the defects above:
   # not a degraded link and not uninstalled repo content, but live config nothing owned.
