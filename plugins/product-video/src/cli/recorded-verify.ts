@@ -31,9 +31,10 @@ import {
   assertRecordedSamplePlanWithinBounds,
   buildRecordedSamplePlan,
   measureFrameMatches,
+  frameMatchBlurSigma,
   frameMatchNeighbourMargin,
   recordedFrameMatchThreshold,
-  staticSourceSsim,
+  sourceChangeLevel,
   summarizeSceneTiming,
   validateRecordedRenderProbe,
 } from '../recorded-verification';
@@ -50,9 +51,10 @@ Usage:
 Outputs are fixed to the same run's out/recorded directory: VERIFY.md, snapshots/, and a
 contact sheet. The verifier checks provenance, the normalized sources, H264/yuv420p, the
 48kHz audio stream, the decoded frame count and duration, and then compares the pixels of
-every clip against the exact source frame the plan says it shows (SSIM at 20, 50 and 80
-percent of each clip). A mismatch fails. Footage that is static at a probe point cannot
-prove timing and is reported as "timing not proven" (timingProven: false), never as a pass.
+every clip against the exact source frame the plan says it shows (SSIM of the blurred gray
+images at 20, 50 and 80 percent of each clip). A mismatch fails. Footage that is static at a
+probe point cannot prove timing and is reported as "timing not proven" (timingProven: false),
+never as a pass.
 `;
 
 const recordedFilePrefix = 'recorded-tour';
@@ -145,7 +147,7 @@ function buildReport({
     if (!best) return 'none';
     const repeat = result.sourceNeighbours.some(
       (neighbour) =>
-        neighbour.offset === best.offset && neighbour.ssim >= staticSourceSsim,
+        neighbour.offset === best.offset && neighbour.changedPixels === 0,
     );
     return `n${best.offset > 0 ? '+' : ''}${best.offset}: ${formatSsim(best.ssim)}${repeat ? ' (repeat of n)' : ''}`;
   };
@@ -217,9 +219,11 @@ ${sceneRows}
 ## Frame match
 
 Each probe point compares the render's video rectangle with the normalized source frame the plan
-says is shown there (SSIM threshold ${recordedFrameMatchThreshold}). A source frame next to it scoring more than ${frameMatchNeighbourMargin} higher
-is a mismatch. One that looks different in the source but scores within ${frameMatchNeighbourMargin} of it means the render
-cannot separate the two, so that point is "not discriminating"; a repeated frame that is the same picture may tie.
+says is shown there, as SSIM of the two gray images after a ${frameMatchBlurSigma} px blur (floor ${recordedFrameMatchThreshold}). A neighbouring
+source frame is the same picture as n when no gray pixel differs from it by more than ${sourceChangeLevel} levels; such a
+frame may tie or edge past n on codec noise. A neighbour that differs in the source and scores more than ${frameMatchNeighbourMargin}
+higher is a mismatch; one scoring within ${frameMatchNeighbourMargin} of n means the render cannot separate the two, so that point is
+"not discriminating". When every neighbour is the same picture the point cannot prove timing either.
 Regions drawn over the video (captions, a heading chip in full layout) are blacked out in both images.
 
 | Scene | Point | Output frame F | Source frame n | S(n) | Best neighbour | Outcome |
