@@ -50,3 +50,35 @@ test('Studio isolates global CLI props between compositions', async () => {
     getNarratedDurationInFrames(defaultNarratedManifest),
   );
 });
+
+test('Studio falls back for props that belong to a third composition', async () => {
+  const productTourManifest = parseTourManifest(productTourFixture);
+  const foreign = { compositionId: 'RecordedTour' };
+  const productMetadata = await calculateProductTourMetadata({
+    props: { manifest: foreign },
+  } as unknown as Parameters<typeof calculateProductTourMetadata>[0]);
+  assert.equal(
+    productMetadata.durationInFrames,
+    getTourDuration(productTourManifest),
+  );
+  const narratedMetadata = await calculateNarratedMetadata({
+    props: { manifest: foreign },
+  } as unknown as Parameters<typeof calculateNarratedMetadata>[0]);
+  assert.equal(
+    narratedMetadata.durationInFrames,
+    getNarratedDurationInFrames(defaultNarratedManifest),
+  );
+});
+
+test('A manifest naming no known composition still fails to parse', async () => {
+  await assert.rejects(async () =>
+    calculateProductTourMetadata({
+      props: { manifest: { compositionId: 'SomethingElse' } },
+    } as unknown as Parameters<typeof calculateProductTourMetadata>[0]),
+  );
+  await assert.rejects(async () =>
+    calculateNarratedMetadata({
+      props: { manifest: {} },
+    } as unknown as Parameters<typeof calculateNarratedMetadata>[0]),
+  );
+});

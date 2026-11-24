@@ -2,9 +2,16 @@ import { lstat, readdir, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 
-import { runNarratedCommand as run } from '../narrated-command';
-import { isCommandAvailable } from '../command-availability';
 import { readJsonFile } from '../files';
+import {
+  type FrameBand,
+  type OcrMode,
+  type OcrResult,
+  escapeMarkdownCell,
+  extractLabeledSamples,
+  probeMediaStreams,
+  runOcr,
+} from '../media-evidence';
 import {
   assertRenderableNarratedCapture,
   parseNarratedCaptureBundle,
@@ -19,7 +26,6 @@ import {
   getNarratedRenderPaths,
   getNarratedRunPaths,
   prepareNarratedVerificationOutput,
-  secureNarratedGeneratedFile,
   writeNarratedTextAtomically,
 } from '../narrated-files';
 import {
@@ -29,7 +35,6 @@ import {
 } from '../narrated-resolved-contracts';
 import { assertTelemetryMatchesCapture } from '../narrated-telemetry';
 import {
-  type NarratedProbeResult,
   assertCaptionMidpointOcr,
   assertNarratedDurationMatches,
   assertNarratedManifestMatchesCapture,
@@ -53,37 +58,23 @@ Outputs are fixed to the same run's out/narrated directory: VERIFY.md, labeled s
 The verifier checks capture/telemetry/captions/marker provenance, H264/yuv420p, audio, duration, and bounded evidence samples.
 `;
 
-type OcrMode = 'auto' | 'off' | 'required';
+const narratedFilePrefix = 'narrated-browser-tour';
 
-function probe(filePath: string, countFrames: boolean) {
-  const arguments_ = [
-    '-v',
-    'error',
-    ...(countFrames ? ['-count_frames'] : []),
-    '-show_entries',
-    'stream=codec_type,codec_name,width,height,pix_fmt,nb_read_frames,sample_rate',
-    '-show_entries',
-    'format=duration,size',
-    '-of',
-    'json',
-    filePath,
-  ];
-  return JSON.parse(run('ffprobe', arguments_)) as NarratedProbeResult;
-}
+/**
+ * Captions are capped at 1000 design px, centred, so at any scale they span
+ * roughly 11%-89% of the frame. Crop to 10%-90%: wide enough to keep the
+ * caption's own edges, tight enough to exclude page chrome that would otherwise
+ * land on the caption's OCR line.
+ */
+const narratedCaptionBand: FrameBand = {
+  x: 0.1,
+  y: 0.66,
+  width: 0.8,
+  height: 0.32,
+};
 
-function snapshotPath(
-  outputDirectory: string,
-  sample: ReturnType<typeof buildNarratedSamplePlan>[number],
-  index: number,
-) {
-  return path.join(
-    outputDirectory,
-    `narrated-browser-tour-${String(index).padStart(3, '0')}-${sample.label}.png`,
-  );
-}
-
-function contactSheetPath(outputDirectory: string) {
-  return path.join(outputDirectory, 'narrated-browser-tour-contact-sheet.png');
+function narratedOcrBand(image: string) {
+  return image.includes('-caption-') ? narratedCaptionBand : undefined;
 }
 
 async function prepareOutputs(
@@ -118,125 +109,6 @@ async function prepareOutputs(
   if (force) {
     await Promise.all(generatedPaths.map((entry) => rm(entry)));
   }
-}
-
-async function extractSamples({
-  inputPath,
-  outputDirectory,
-  samples,
-}: {
-  inputPath: string;
-  outputDirectory: string;
-  samples: ReturnType<typeof buildNarratedSamplePlan>;
-}) {
-  const images = samples.map((sample, index) => {
-    const outputPath = snapshotPath(outputDirectory, sample, index);
-    run('ffmpeg', [
-      '-hide_banner',
-      '-loglevel',
-      'error',
-      '-n',
-      '-ss',
-      String(sample.milliseconds / 1_000),
-      '-i',
-      inputPath,
-      '-frames:v',
-      '1',
-      '-vf',
-      `scale=640:-2,drawbox=x=0:y=0:w=iw:h=42:color=black@0.75:t=fill,drawtext=font='DejaVu Sans':text='${sample.label}':fontcolor=white:fontsize=22:x=12:y=9`,
-      outputPath,
-    ]);
-    return outputPath;
-  });
-  const contactSheet = contactSheetPath(outputDirectory);
-  run('ffmpeg', [
-    '-hide_banner',
-    '-loglevel',
-    'error',
-    '-n',
-    '-pattern_type',
-    'glob',
-    '-i',
-    path.join(outputDirectory, 'narrated-browser-tour-[0-9][0-9][0-9]-*.png'),
-    '-vf',
-    `tile=3x${Math.ceil(images.length / 3)}:padding=8:margin=8:color=#07111f`,
-    '-frames:v',
-    '1',
-    contactSheet,
-  ]);
-  await Promise.all(
-    [...images, contactSheet].map((filePath) =>
-      secureNarratedGeneratedFile(filePath),
-    ),
-  );
-  return { contactSheet, images };
-}
-
-type OcrResult = {
-  status: 'off' | 'ran' | 'unavailable';
-  reason: string;
-  texts: string[];
-};
-
-/**
- * Captions are capped at 1000 design px, centred, so at any scale they span
- * roughly 11%-89% of the frame. Crop to 10%-90%: wide enough to keep the
- * caption's own edges, tight enough to exclude page chrome that would otherwise
- * land on the caption's OCR line. Upscaled 2x because Tesseract misreads caption
- * text at its native size ("together in" came back as "togethe!").
- */
-function cropToCaptionBand(image: string) {
-  const output = image.replace(/\.png$/, '.caption-band.png');
-  try {
-    run('ffmpeg', [
-      '-v',
-      'error',
-      '-i',
-      image,
-      '-vf',
-      'crop=iw*0.80:ih*0.32:iw*0.10:ih*0.66,scale=iw*2:ih*2:flags=lanczos',
-      '-y',
-      output,
-    ]);
-    return output;
-  } catch {
-    return image;
-  }
-}
-
-function runOcr(images: string[], mode: OcrMode): OcrResult {
-  if (mode === 'off') {
-    return { reason: 'OCR disabled by --ocr off', status: 'off', texts: [] };
-  }
-  if (!isCommandAvailable('tesseract', ['--version'])) {
-    if (mode === 'required') {
-      throw new Error('OCR is required but tesseract is not available');
-    }
-    return {
-      reason: 'Tesseract is not available on this host',
-      status: 'unavailable',
-      texts: [],
-    };
-  }
-  // Tesseract reads a frame line by line, so UI sitting either side of a caption
-  // lands on the caption's own line and breaks a contiguous match. Captions are
-  // drawn in a known band, so crop to it before reading: a stricter check than
-  // loosening the assertion, because surrounding chrome can no longer contribute.
-  const texts = images.map((image) => {
-    const cropped = image.includes('-caption-')
-      ? cropToCaptionBand(image)
-      : image;
-    return run('tesseract', [cropped, 'stdout']).trim();
-  });
-  return {
-    reason: 'Tesseract ran on the labeled evidence samples',
-    status: 'ran',
-    texts,
-  };
-}
-
-function escapeMarkdownCell(value: string) {
-  return value.replaceAll('|', '\\|').replaceAll('\n', '<br>');
 }
 
 function buildReport({
@@ -390,7 +262,7 @@ async function main() {
   }
 
   const source = validateNarratedSourceProbe(
-    probe(captureVideoPath, false),
+    probeMediaStreams(captureVideoPath, false),
     manifest,
   );
   assertCaptureSourceDuration({
@@ -399,7 +271,7 @@ async function main() {
     observedDurationMs: source.durationMs,
   });
   const verified = validateNarratedRenderProbe(
-    probe(inputPath, true),
+    probeMediaStreams(inputPath, true),
     manifest,
   );
   assertTimelineMatches(
@@ -420,12 +292,13 @@ async function main() {
     renderPaths.snapshotDirectory,
     values.force,
   );
-  const extracted = await extractSamples({
+  const extracted = await extractLabeledSamples({
+    filePrefix: narratedFilePrefix,
     inputPath,
     outputDirectory: renderPaths.snapshotDirectory,
     samples,
   });
-  const ocr = runOcr(extracted.images, values.ocr as OcrMode);
+  const ocr = runOcr(extracted.images, values.ocr as OcrMode, narratedOcrBand);
   if (values.ocr === 'required') {
     assertCaptionMidpointOcr(samples, ocr.texts, manifest.captions);
   }

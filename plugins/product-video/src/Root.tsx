@@ -30,13 +30,31 @@ function getManifestCompositionId(value: unknown) {
   return (value as { compositionId?: unknown }).compositionId;
 }
 
+/**
+ * Studio passes one set of CLI props to every composition. A manifest that names
+ * another known composition belongs to that composition, so each one falls back to
+ * its own default; a manifest naming no known composition still fails to parse.
+ */
+const knownCompositionIds = [
+  'ProductTour',
+  'NarratedBrowserTour',
+  'RecordedTour',
+] as const;
+
+export function belongsToAnotherComposition(
+  value: unknown,
+  ownId: (typeof knownCompositionIds)[number],
+) {
+  const id = getManifestCompositionId(value);
+  return id !== ownId && knownCompositionIds.some((knownId) => knownId === id);
+}
+
 export const calculateProductTourMetadata: CalculateMetadataFunction<
   ProductTourProps
 > = ({ props }) => {
-  const manifest =
-    getManifestCompositionId(props.manifest) === 'NarratedBrowserTour'
-      ? defaultProductTourManifest
-      : parseTourManifest(props.manifest);
+  const manifest = belongsToAnotherComposition(props.manifest, 'ProductTour')
+    ? defaultProductTourManifest
+    : parseTourManifest(props.manifest);
   return {
     durationInFrames: getTourDuration(manifest),
     fps: manifest.fps,
@@ -49,10 +67,12 @@ export const calculateProductTourMetadata: CalculateMetadataFunction<
 export const calculateNarratedMetadata: CalculateMetadataFunction<
   NarratedBrowserTourProps
 > = ({ props }) => {
-  const manifest =
-    getManifestCompositionId(props.manifest) === 'ProductTour'
-      ? defaultNarratedManifest
-      : parseNarratedResolvedManifest(props.manifest);
+  const manifest = belongsToAnotherComposition(
+    props.manifest,
+    'NarratedBrowserTour',
+  )
+    ? defaultNarratedManifest
+    : parseNarratedResolvedManifest(props.manifest);
   return {
     durationInFrames: getNarratedDurationInFrames(manifest),
     fps: manifest.project.fps,
