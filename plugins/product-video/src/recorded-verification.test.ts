@@ -222,17 +222,21 @@ test('frame match: a neighbour that beats the expected frame is a mismatch', () 
   assert.equal(wrongFrame.bestNeighbour?.offset, 1);
 });
 
-test('frame match: a tie proves timing only against a repeated source frame', () => {
-  // Offset -1 is the same picture as n in the source (a frame repeated by the
-  // 25 to 30 fps conversion); offsets -2, 1 and 2 differ from it.
+test('frame match: repeated frames do not fail the point but can prevent proof', () => {
   const base = {
     matchSsim: 0.97,
-    sourceNeighbours: [
-      { offset: -2, changedPixels: MOVED },
-      { offset: -1, changedPixels: 0 },
-      { offset: 1, changedPixels: MOVED },
-      { offset: 2, changedPixels: MOVED },
-    ],
+    sourceNeighbours: [-2, -1, 1, 2].map((offset) => ({
+      offset,
+      changedPixels: MOVED,
+    })),
+  };
+  // A 25 to 30 fps conversion can repeat the picture immediately before n even
+  // when both more distant pictures and the frame immediately after n differ.
+  const repeatedPrevious = {
+    ...base,
+    sourceNeighbours: base.sourceNeighbours.map((neighbour) =>
+      neighbour.offset === -1 ? { ...neighbour, changedPixels: 0 } : neighbour,
+    ),
   };
   const clearlyWorse = [
     { offset: -2, ssim: 0.88 },
@@ -241,22 +245,22 @@ test('frame match: a tie proves timing only against a repeated source frame', ()
   ];
   assert.equal(
     classifyFrameMatch({
-      ...base,
+      ...repeatedPrevious,
       neighbours: [{ offset: -1, ssim: 0.9701 }, ...clearlyWorse],
     }).outcome,
-    'match',
-    'a repeated frame may tie: showing it looks identical',
+    'not-discriminating',
+    'a repeated immediate frame looks identical at a different time',
   );
   assert.equal(
     classifyFrameMatch({
-      ...base,
+      ...repeatedPrevious,
       neighbours: [
         { offset: -1, ssim: 0.97 + frameMatchNeighbourMargin },
         ...clearlyWorse,
       ],
     }).outcome,
-    'match',
-    'a repeated frame exactly 0.002 better is still within the margin',
+    'not-discriminating',
+    'a repeated immediate frame exactly 0.002 better is not a mismatch',
   );
   assert.equal(
     classifyFrameMatch({
@@ -352,25 +356,81 @@ test('frame match: static footage cannot prove timing', () => {
     }).outcome,
     'not-discriminating',
   );
-  // Scored neighbours that differ on both sides prove it, and a same-picture
-  // neighbour may still edge past n.
-  assert.equal(
-    classifyFrameMatch({
-      matchSsim: 0.99,
-      neighbours: [
-        { offset: -2, ssim: 0.9 },
-        { offset: 1, ssim: 0.995 },
-        { offset: 2, ssim: 0.9 },
-      ],
-      sourceNeighbours: [
-        { offset: -2, changedPixels: 300 },
-        { offset: -1, changedPixels: 0 },
-        { offset: 1, changedPixels: 0 },
-        { offset: 2, changedPixels: 300 },
-      ],
-    }).outcome,
-    'match',
-  );
+});
+
+test('frame match: a repeated run between distinct outer frames cannot prove exact timing', () => {
+  // [A, B, B, B, C]: showing any of the three B frames yields these scores,
+  // so beating both more distant frames does not establish which B is shown.
+  const measurements = {
+    matchSsim: 0.99,
+    neighbours: [
+      { offset: -2, ssim: 0.9 },
+      { offset: -1, ssim: 0.99 },
+      { offset: 1, ssim: 0.99 },
+      { offset: 2, ssim: 0.9 },
+    ],
+    sourceNeighbours: [
+      { offset: -2, changedPixels: MOVED },
+      { offset: -1, changedPixels: 0 },
+      { offset: 1, changedPixels: 0 },
+      { offset: 2, changedPixels: MOVED },
+    ],
+  };
+  const classification = classifyFrameMatch(measurements);
+  const [summary] = summarizeSceneTiming([
+    { ...result('plateau', 'match'), ...measurements, classification },
+  ]);
+  assert.equal(classification.outcome, 'not-discriminating');
+  assert.equal(classification.discriminating, true);
+  assert.equal(summary?.timingProven, false);
+});
+
+test('frame match: an immediate neighbour needs both observed change and a score', () => {
+  const offsets = [-2, -1, 1, 2];
+  const neighbours = offsets.map((offset) => ({ offset, ssim: 0.9 }));
+  const sourceNeighbours = offsets.map((offset) => ({
+    offset,
+    changedPixels: MOVED,
+  }));
+  for (const immediate of [-1, 1]) {
+    assert.equal(
+      classifyFrameMatch({
+        matchSsim: 0.99,
+        neighbours: neighbours.filter(({ offset }) => offset !== immediate),
+        sourceNeighbours,
+      }).outcome,
+      'not-discriminating',
+      `missing score at ${immediate}`,
+    );
+    assert.equal(
+      classifyFrameMatch({
+        matchSsim: 0.99,
+        neighbours,
+        sourceNeighbours: sourceNeighbours.filter(
+          ({ offset }) => offset !== immediate,
+        ),
+      }).outcome,
+      'not-discriminating',
+      `missing source measurement at ${immediate}`,
+    );
+  }
+});
+
+test('frame match: an ambiguous outer frame remains unresolved with decisive adjacent scores', () => {
+  const verdict = classifyFrameMatch({
+    matchSsim: 0.97,
+    neighbours: [
+      { offset: -2, ssim: 0.97 - frameMatchNeighbourMargin },
+      { offset: -1, ssim: 0.9 },
+      { offset: 1, ssim: 0.9 },
+      { offset: 2, ssim: 0.9 },
+    ],
+    sourceNeighbours: [-2, -1, 1, 2].map((offset) => ({
+      offset,
+      changedPixels: MOVED,
+    })),
+  });
+  assert.equal(verdict.outcome, 'not-discriminating');
 });
 
 test('frame match: a same-picture neighbour edging past n on codec noise is not a mismatch', () => {

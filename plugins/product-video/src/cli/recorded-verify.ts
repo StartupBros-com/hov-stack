@@ -52,9 +52,9 @@ Outputs are fixed to the same run's out/recorded directory: VERIFY.md, snapshots
 contact sheet. The verifier checks provenance, the normalized sources, H264/yuv420p, the
 48kHz audio stream, the decoded frame count and duration, and then compares the pixels of
 every clip against the exact source frame the plan says it shows (SSIM of the blurred gray
-images at 20, 50 and 80 percent of each clip). A mismatch fails. Footage that is static at a
-probe point cannot prove timing and is reported as "timing not proven" (timingProven: false),
-never as a pass.
+images at 20, 50 and 80 percent of each clip). A mismatch fails. A probe proves timing only
+when it beats distinct source frames immediately before and after the expected frame.
+Otherwise timing is reported as "timing not proven" (timingProven: false).
 `;
 
 const recordedFilePrefix = 'recorded-tour';
@@ -223,7 +223,8 @@ says is shown there, as SSIM of the two gray images after a ${frameMatchBlurSigm
 source frame is the same picture as n when no gray pixel differs from it by more than ${sourceChangeLevel} levels; such a
 frame may tie or edge past n on codec noise. A neighbour that differs in the source and scores more than ${frameMatchNeighbourMargin}
 higher is a mismatch; one scoring within ${frameMatchNeighbourMargin} of n means the render cannot separate the two, so that point is
-"not discriminating". When every neighbour is the same picture the point cannot prove timing either.
+"not discriminating". To prove exact timing, both immediate source frames (n-1 and n+1) must differ from n
+and score more than ${frameMatchNeighbourMargin} lower. More distant frames cannot supply missing timing proof.
 Regions drawn over the video (captions, a heading chip in full layout) are blacked out in both images.
 
 | Scene | Point | Output frame F | Source frame n | S(n) | Best neighbour | Outcome |
@@ -232,7 +233,7 @@ ${matchRows || '| - | - | - | - | - | - | - |'}
 
 ${
   notProven.length > 0
-    ? `Timing not proven (the footage is static at these points, so no frame can be told from its neighbours): ${[
+    ? `Timing not proven (the available source neighbours do not establish the exact frame): ${[
         ...new Set(
           notProven.map(
             (result) => `${result.sceneId} at frame ${result.outputFrame}`,
