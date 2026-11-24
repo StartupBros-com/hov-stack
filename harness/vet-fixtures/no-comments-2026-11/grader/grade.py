@@ -291,7 +291,54 @@ def summarize(g):
             "sep": {k: v["score"] for k, v in it.items() if v["class"] == "sep"}}
 
 
+# A launcher reservation survives a timeout or kill, even before any output.
+# For older runs the runner's existing output files are the attempt evidence.
+ATTEMPT_ARTIFACTS = (
+    ".launch-attempt", "result.json", "stderr.txt", "tools.txt", "env-names.txt",
+    "config/projects",
+)
+
+
+def attempted(run):
+    return any(os.path.lexists(run / name) for name in ATTEMPT_ARTIFACTS)
+
+
+def completed_result(run, *, verifying=False):
+    attempt = run / ".launch-attempt"
+    if not verifying and os.path.lexists(attempt) and not (attempt / "complete").is_dir():
+        raise ValueError("launch did not complete")
+    stderr, result = run / "stderr.txt", run / "result.json"
+    try:
+        if not stderr.is_file() or not result.is_file():
+            raise ValueError("missing result or exit receipt")
+        exit_receipt = stderr.read_text(encoding="utf-8", errors="replace").splitlines()[-1:]
+        if exit_receipt != ["EXIT_CODE=0"]:
+            raise ValueError("missing or nonzero final exit receipt")
+        data = json.loads(result.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        raise ValueError("unreadable or invalid result record") from None
+    if not isinstance(data, dict) or data.get("is_error") is not False:
+        raise ValueError("result is not a success envelope")
+    response = data.get("result")
+    if not isinstance(response, str) or not response.strip():
+        raise ValueError("result has no response text")
+    return data
+
+
 def main():
+    if sys.argv[1] in ("--inspect-run", "--verify-result"):
+        run = Path(sys.argv[2])
+        verifying = sys.argv[1] == "--verify-result"
+        if not verifying and not attempted(run):
+            print("new")
+            return
+        try:
+            completed_result(run, verifying=verifying)
+        except ValueError as exc:
+            sys.exit(f"launch: {run}: not-run: {exc}")
+        if not verifying:
+            print("complete")
+        return
     if sys.argv[1] == "--repo":
         g = grade_repo(Path(sys.argv[2]))
         print(json.dumps({"summary": summarize(g), "grade": g}, indent=1))
@@ -299,15 +346,23 @@ def main():
     root, out = Path(sys.argv[1]), Path(sys.argv[2])
     ids = sys.argv[3:] or sorted(p.name for p in (root / "runs").iterdir() if p.is_dir())
     results = json.loads(out.read_text()) if out.exists() else {}
-    for rid in ids:
-        rd = root / "runs" / rid
-        if not (rd / "result.json").exists():
-            continue
-        g = grade_repo(rd / "repo")
+    eligible = {}
+    requested = set(ids)
+    # Recheck cached scores under this root even for an explicit subset; never
+    # regrade a valid unselected slot or retain an invalid one for the analyzer.
+    for rid in dict.fromkeys([*ids, *results]):
         try:
-            res = json.loads((rd / "result.json").read_text())
-        except ValueError:
-            res = {}
+            record = completed_result(root / "runs" / rid)
+        except ValueError as exc:
+            results.pop(rid, None)
+            print(f"{rid}: not-run: {exc}", file=sys.stderr)
+        else:
+            if rid in requested:
+                eligible[rid] = record
+    out.write_text(json.dumps(results, indent=1))
+    for rid, res in eligible.items():
+        rd = root / "runs" / rid
+        g = grade_repo(rd / "repo")
         g["cost_usd"] = res.get("total_cost_usd")
         g["num_turns"] = res.get("num_turns")
         g["is_error"] = res.get("is_error")

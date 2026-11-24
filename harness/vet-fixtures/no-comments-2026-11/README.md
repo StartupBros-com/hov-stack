@@ -71,10 +71,17 @@ slash command and pstack's `comment-sicko` agent resolve, before any arm ran.
 F=harness/vet-fixtures/no-comments-2026-11
 bash $F/build-base.sh /tmp/<root>                     # prints the base commit, checks it is 802397d6
 bash $F/make-runs.sh /tmp/<root> /tmp/<map>.tsv a1-bare 3 comments
-bash $F/launch.sh /tmp/<root> 3                       # every run without a result.json
+bash $F/launch.sh /tmp/<root> 3                       # only unattempted run directories
 python3 $F/grader/grade.py /tmp/<root> /tmp/<grade>.json <run-id>...
 python3 $F/tools/analyze_arms.py /tmp/<map>.tsv /tmp/<grade>.json /tmp/<root>
 ```
+
+The launcher skips validated completed runs. A failed or interrupted attempt
+makes the launch fail and is never retried in the same run directory. Keep its
+artifacts and create a new run directory only when intentionally running again.
+The grader accepts only a non-error response with the runner's standalone
+final `EXIT_CODE=0` receipt; historical runs with that receipt remain eligible.
+Saved scores for incomplete runs are removed even when grading a subset.
 
 `run_arm.sh` empties the environment except `PATH` and the model-route variables (passed by
 name, never written into argv), and points `HOME`, `TMPDIR`, `XDG_CONFIG_HOME`,
