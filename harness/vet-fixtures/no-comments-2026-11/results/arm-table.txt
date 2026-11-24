@@ -1,0 +1,70 @@
+== validity (decided before scores)
+a1-bare      63df0a49 valid=True cmds=[] subs=[]
+a1-bare      95bd35f8 valid=True cmds=[] subs=[]
+a1-bare      677331d6 valid=True cmds=[] subs=[]
+a2-pstack    2807ba5c valid=True cmd=ok sicko=ok subs=['pstack:comment-sicko']
+a2-pstack    e6ba9969 valid=True cmd=ok sicko=ok subs=['pstack:comment-sicko']
+a2-pstack    1bcc7be9 valid=True cmd=ok sicko=ok subs=['pstack:comment-sicko']
+a3-ce        ae083cdb valid=False cmd=ok persona=MISSING subs=0
+a3-ce        021a6281 valid=False cmd=ok persona=MISSING subs=0
+a3-ce        3f3a8f27 valid=False cmd=ok persona=MISSING subs=0
+a4-codeslop  1bfba6d9 valid=True cmd=ok
+a4-codeslop  4e5666cb valid=True cmd=ok
+a4-codeslop  350e335b valid=True cmd=ok
+a5-ratchet   f386752f valid=True cmd=ok
+a5-ratchet   f99d1c50 valid=True cmd=ok
+a5-ratchet   1ad8252d valid=True cmd=ok
+a6-audit     fe4ae779 valid=True cmd=ok
+a6-audit     826da3ac valid=True cmd=ok
+a6-audit     bd556c0b valid=True cmd=ok
+a7-routing   4ad62f0b valid=True cmd=ok
+a7-routing   b7160700 valid=True cmd=ok
+a7-routing   de3369e1 valid=True cmd=ok
+a8-extract   546c7eef valid=True cmds=[] subs=[]
+a8-extract   330336dc valid=True cmds=[] subs=[]
+a8-extract   f4eaa003 valid=True cmds=[] subs=[]
+
+== per run
+a1-bare      63df0a49 valid=True checks=True sep=8 {'P1': 1, 'P2': 1, 'P3': 1, 'W1': 2, 'W2': 2, 'W3': 1} clutter=12/13 lost=0 (D0 K0) D_strict_gone=0 enf/dis=0 unk=0 cost=0.1109211 turns=6
+a1-bare      95bd35f8 valid=True checks=True sep=8 {'P1': 1, 'P2': 2, 'P3': 2, 'W1': 1, 'W2': 1, 'W3': 1} clutter=12/13 lost=0 (D0 K0) D_strict_gone=0 enf/dis=0 unk=0 cost=0.09788479999999998 turns=5
+a1-bare      677331d6 valid=True checks=True sep=8 {'P1': 1, 'P2': 2, 'P3': 2, 'W1': 1, 'W2': 1, 'W3': 1} clutter=13/13 lost=0 (D0 K0) D_strict_gone=0 enf/dis=0 unk=0 cost=0.1103771 turns=6
+a2-pstack    2807ba5c valid=True checks=True sep=8 {'P1': 2, 'P2': 2, 'P3': 2, 'W1': 2, 'W2': 0, 'W3': 0} clutter=13/13 lost=14 (D14 K0) D_strict_gone=14 enf/dis=0 unk=0 cost=0.2023719 turns=4
+a2-pstack    e6ba9969 valid=True checks=True sep=12 {'P1': 2, 'P2': 2, 'P3': 2, 'W1': 2, 'W2': 2, 'W3': 2} clutter=13/13 lost=14 (D14 K0) D_strict_gone=14 enf/dis=0 unk=0 cost=0.187286 turns=4
+a2-pstack    1bcc7be9 valid=True checks=True sep=10 {'P1': 0, 'P2': 2, 'P3': 2, 'W1': 2, 'W2': 2, 'W3': 2} clutter=12/13 lost=13 (D13 K0) D_strict_gone=14 enf/dis=1 unk=0 cost=0.1855255 turns=4
+a3-ce        ae083cdb valid=False checks=True sep=5 {'P1': 1, 'P2': 1, 'P3': 1, 'W1': 1, 'W2': 0, 'W3': 1} clutter=12/13 lost=8 (D8 K0) D_strict_gone=13 enf/dis=5 unk=0 cost=0.1694036 turns=6
+a3-ce        021a6281 valid=False checks=True sep=3 {'P1': 1, 'P2': 1, 'P3': 1, 'W1': 0, 'W2': 0, 'W3': 0} clutter=12/13 lost=9 (D9 K0) D_strict_gone=13 enf/dis=4 unk=0 cost=0.146675 turns=6
+a3-ce        3f3a8f27 valid=False checks=True sep=4 {'P1': 1, 'P2': 1, 'P3': 1, 'W1': 0, 'W2': 0, 'W3': 1} clutter=13/13 lost=10 (D10 K0) D_strict_gone=13 enf/dis=3 unk=0 cost=0.1227925 turns=4
+a4-codeslop  1bfba6d9 valid=True checks=True sep=6 {'P1': 1, 'P2': 1, 'P3': 1, 'W1': 1, 'W2': 1, 'W3': 1} clutter=12/13 lost=0 (D0 K0) D_strict_gone=0 enf/dis=0 unk=0 cost=0.0775342 turns=5
+a4-codeslop  4e5666cb valid=True checks=True sep=6 {'P1': 1, 'P2': 1, 'P3': 1, 'W1': 1, 'W2': 1, 'W3': 1} clutter=12/13 lost=0 (D0 K0) D_strict_gone=0 enf/dis=0 unk=0 cost=0.08394940000000001 turns=5
+a4-codeslop  350e335b valid=True checks=True sep=8 {'P1': 1, 'P2': 1, 'P3': 1, 'W1': 2, 'W2': 2, 'W3': 1} clutter=12/13 lost=0 (D0 K0) D_strict_gone=0 enf/dis=0 unk=0 cost=0.0928252 turns=6
+a5-ratchet   f386752f valid=True checks=True sep=7 {'P1': 1, 'P2': 1, 'P3': 1, 'W1': 2, 'W2': 2, 'W3': 0} clutter=12/13 lost=0 (D0 K0) D_strict_gone=14 enf/dis=0 unk=0 cost=0.1516443 turns=8
+a5-ratchet   f99d1c50 valid=True checks=True sep=7 {'P1': 1, 'P2': 1, 'P3': 1, 'W1': 2, 'W2': 2, 'W3': 0} clutter=12/13 lost=0 (D0 K0) D_strict_gone=14 enf/dis=0 unk=0 cost=0.13381189999999998 turns=8
+a5-ratchet   1ad8252d valid=True checks=True sep=3 {'P1': 1, 'P2': 1, 'P3': 1, 'W1': 0, 'W2': 0, 'W3': 0} clutter=12/13 lost=0 (D0 K0) D_strict_gone=14 enf/dis=0 unk=0 cost=0.12386860000000002 turns=8
+a6-audit     fe4ae779 valid=True checks=True sep=8 {'P1': 1, 'P2': 2, 'P3': 1, 'W1': 2, 'W2': 1, 'W3': 1} clutter=13/13 lost=0 (D0 K0) D_strict_gone=0 enf/dis=0 unk=0 cost=0.086005 turns=7
+a6-audit     826da3ac valid=True checks=True sep=7 {'P1': 1, 'P2': 2, 'P3': 1, 'W1': 1, 'W2': 1, 'W3': 1} clutter=12/13 lost=0 (D0 K0) D_strict_gone=0 enf/dis=0 unk=0 cost=0.0862716 turns=7
+a6-audit     bd556c0b valid=True checks=True sep=7 {'P1': 1, 'P2': 1, 'P3': 1, 'W1': 2, 'W2': 1, 'W3': 1} clutter=12/13 lost=0 (D0 K0) D_strict_gone=0 enf/dis=0 unk=0 cost=0.0889914 turns=7
+a7-routing   4ad62f0b valid=True checks=True sep=9 {'P1': 1, 'P2': 2, 'P3': 2, 'W1': 2, 'W2': 2, 'W3': 0} clutter=13/13 lost=3 (D2 K1) D_strict_gone=14 enf/dis=3 unk=0 cost=0.15946609999999997 turns=7
+a7-routing   b7160700 valid=True checks=True sep=7 {'P1': 1, 'P2': 1, 'P3': 1, 'W1': 2, 'W2': 2, 'W3': 0} clutter=12/13 lost=10 (D8 K2) D_strict_gone=14 enf/dis=5 unk=0 cost=0.137241 turns=7
+a7-routing   de3369e1 valid=True checks=True sep=7 {'P1': 1, 'P2': 1, 'P3': 1, 'W1': 2, 'W2': 2, 'W3': 0} clutter=12/13 lost=1 (D1 K0) D_strict_gone=14 enf/dis=4 unk=0 cost=0.1478158 turns=8
+a8-extract   546c7eef valid=True checks=True sep=10 {'P1': 0, 'P2': 2, 'P3': 2, 'W1': 2, 'W2': 2, 'W3': 2} clutter=12/13 lost=1 (D0 K1) D_strict_gone=0 enf/dis=0 unk=0 cost=0.1161558 turns=6
+a8-extract   330336dc valid=True checks=True sep=10 {'P1': 0, 'P2': 2, 'P3': 2, 'W1': 2, 'W2': 2, 'W3': 2} clutter=11/13 lost=0 (D0 K0) D_strict_gone=0 enf/dis=0 unk=0 cost=0.1227961 turns=6
+a8-extract   f4eaa003 valid=True checks=True sep=10 {'P1': 0, 'P2': 2, 'P3': 2, 'W1': 2, 'W2': 2, 'W3': 2} clutter=12/13 lost=0 (D0 K0) D_strict_gone=0 enf/dis=0 unk=0 cost=0.124279 turns=6
+
+== per arm (valid runs only)
+a1-bare      n=3 sep=[8, 8, 8] med=8 | lost=[0, 0, 0] med=0 | clutter=[12, 12, 13] | D_strict_gone=[0, 0, 0] | cost med=0.1103771 ['0.11', '0.10', '0.11'] | turns med=6
+a2-pstack    n=3 sep=[8, 12, 10] med=10 | lost=[14, 14, 13] med=14 | clutter=[13, 13, 12] | D_strict_gone=[14, 14, 14] | cost med=0.187286 ['0.20', '0.19', '0.19'] | turns med=4
+a3-ce        n=0 sep=[] med=None | lost=[] med=None | clutter=[] | D_strict_gone=[] | cost med=None [] | turns med=None
+a4-codeslop  n=3 sep=[6, 6, 8] med=6 | lost=[0, 0, 0] med=0 | clutter=[12, 12, 12] | D_strict_gone=[0, 0, 0] | cost med=0.08394940000000001 ['0.08', '0.08', '0.09'] | turns med=5
+a5-ratchet   n=3 sep=[7, 7, 3] med=7 | lost=[0, 0, 0] med=0 | clutter=[12, 12, 12] | D_strict_gone=[14, 14, 14] | cost med=0.13381189999999998 ['0.15', '0.13', '0.12'] | turns med=8
+a6-audit     n=3 sep=[8, 7, 7] med=7 | lost=[0, 0, 0] med=0 | clutter=[13, 12, 12] | D_strict_gone=[0, 0, 0] | cost med=0.0862716 ['0.09', '0.09', '0.09'] | turns med=7
+a7-routing   n=3 sep=[9, 7, 7] med=7 | lost=[3, 10, 1] med=3 | clutter=[13, 12, 12] | D_strict_gone=[14, 14, 14] | cost med=0.1478158 ['0.16', '0.14', '0.15'] | turns med=7
+a8-extract   n=3 sep=[10, 10, 10] med=10 | lost=[1, 0, 0] med=0 | clutter=[12, 11, 12] | D_strict_gone=[0, 0, 0] | cost med=0.1227961 ['0.12', '0.12', '0.12'] | turns med=6
+
+== rule (prereg + Amendment A; Amendment C for a8-extract)
+a2-pstack    sep_med=10 vs bare 8 (norm gain 0.5) | beats-incumbent rule: not evaluable (incumbent not-run) | line (b) median-lost finding: True
+a4-codeslop  sep_med=6 vs bare 8 (norm gain -0.5) | beats-incumbent rule: not evaluable (incumbent not-run) | line (b) median-lost finding: False
+a5-ratchet   sep_med=7 vs bare 8 (norm gain -0.25) | beats-incumbent rule: not evaluable (incumbent not-run) | line (b) median-lost finding: False
+a6-audit     sep_med=7 vs bare 8 (norm gain -0.25) | beats-incumbent rule: not evaluable (incumbent not-run) | line (b) median-lost finding: False
+a7-routing   sep_med=7 vs bare 8 (norm gain -0.25) | beats-incumbent rule: not evaluable (incumbent not-run) | line (b) median-lost finding: True
+a8-extract   sep_med=10 vs bare 8 (norm gain 0.5) | beats-incumbent rule: not evaluable (incumbent not-run) | line (b) median-lost finding: False
+             Amendment C (per run): (1) sep_med 10 > bare max 8: True | (2) lost 0 in every run [1, 0, 0]: False | (3) checks every run: True | rule met: False
