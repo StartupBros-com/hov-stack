@@ -87,6 +87,8 @@ Use this when the footage already exists. Nothing is captured, no browser is att
 
    Prepare re-encodes each source to constant frame rate H264 so frame numbers are exact, converts audio to 48kHz WAV, and refuses a plan whose source window, audio or captions do not fit.
 
+   Render opens half the machine's cores as browser tabs, at most 4, and every tab decodes every source clip. If the render is killed for memory, pass a lower `--concurrency` (for example `--concurrency 2`).
+
 4. `pnpm recorded:smoke` builds neutral synthetic media (burned-in frame numbers, a tone) and runs the whole path; `--silent` omits audio.
 
 Not supported in V1: picture-in-picture, a studio command, custom font files, music, sound effects, transitions beyond a hard cut.
