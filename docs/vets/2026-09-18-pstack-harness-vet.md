@@ -295,5 +295,5 @@ task: fixture `harness/vet-fixtures/no-comments-2026-11/`, sonnet, 3 runs each.
 
 - The SKIP stands, but for a different reason. It is a countermetric finding (facts lost),
   not "covered by code-slop".
-- `code-slop` is not a full cover either. On the same fixture it scored below the bare model
-  on fixing the bugs behind suppressions (median 6 against 8).
+- `code-slop` is not shown to be a full cover either. On the same fixture it did not beat the
+  bare model on fixing the bugs behind suppressions (median 6 against 8).

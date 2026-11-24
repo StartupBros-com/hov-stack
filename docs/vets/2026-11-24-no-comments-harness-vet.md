@@ -32,9 +32,14 @@ dotfiles `docs/vets/`; here they are R1 to R12.
   - It scored 8, 12 and 10 on the separating items (bare: 8, 8, 8).
   - It lost 14, 14 and 13 of the 20 decision and keep-list facts (bare: 0, 0, 0), which is a
     finding against it under the pre-registered countermetric.
-  - Its only exception keeps a comment that itself says "do not remove" or "talk to X". That
-    wording appears in 1 of 834 labelled comments from the real repos, and that one is a false
-    match, so the loss would carry over to them.
+  - It kept every keep-list item and deleted the decision comments: 14, 14 and 13 of 14.
+    Comment Sicko's keep-list covers licence headers, behaviour forced by an outside
+    dependency, justified suppressions, API contract docs and issue links. A decision about our
+    own code is not on it.
+  - Its step that encodes a constraint before deleting it fires on comments that say "do not
+    remove" or "talk to X". That wording appears in 1 of 834 labelled comments from the real
+    repos, and that one is a false match. Decisions are 472 of the 831 comment units those
+    repos added, so the loss would carry over.
   - The 09-18 SKIP stands, but its reason changes from "covered" to this loss.
 - **No skill beat bare without losing facts.**
 
@@ -48,11 +53,11 @@ dotfiles `docs/vets/`; here they are R1 to R12.
 
 - **CE's `ce-simplify-code`, the incumbent, did not run as designed.** In 3 of 3 runs it
   skipped its reviewer subagents; two reports cite the repo's small size. It is reported as
-  not-run,
-  with no verdict on its Comment Reviewer. Its inline path lost 8 to 10 facts per run.
+  not-run, with no verdict on its Comment Reviewer. Its inline path lost 8 to 10 facts per
+  run.
 - **The one pattern that beat bare is fixing the bug behind a suppression, and it is not
   landed.**
-  - The candidate's whole gain came from this pattern.
+  - The candidate's gain on the separating items came from this pattern.
   - A one-line rule extracting it (arm `a8-extract`) scored 10, 10 and 10, with no decision
     fact lost.
   - It failed its pre-registered pass rule: a keep-list fact was lost in 1 run.
@@ -161,7 +166,9 @@ never the candidate's name. The GitHub alternatives lane ran with the name withh
   posts, none linking a tool. It admitted nothing.
 - A reply by tonanywhere in Pocock's thread linked `code-comments`, which was slated.
 - Stop: the X spend budget ($0.66 of the $1.00 daily cap used at that point). This is
-  incomplete search. Not searched: later reply pages, and a name-withheld X query.
+  incomplete search. The topic query names no candidate, so it was the name-withheld
+  alternatives cell. Not searched: the X implementation and experience cells, any X pass, and
+  later reply pages.
 
 **Slate**, three deep-vetted contenders. Each is a substitute that covers the whole job:
 cleanup, routing debt somewhere, and stopping regrowth.
@@ -404,18 +411,21 @@ pstack and a8, -0.5 for `code-slop`, and -0.25 for the three contenders.
   - Run 1bcc7be9 claims it fixed P1. It moved the mutable default into a module-level dict,
     which keeps the shared-state bug. By hand, that run's lost count is 12, not 13, because a
     rename to `RULES_BY_PRIORITY` carries one decision.
-  - All three reports say nothing in the repo asked to be kept, so the skill's only exception
-    never fired.
+  - It lost no keep-list item (`K0` in every run). All three reports say the repo held no
+    "do not remove" or constraint comment, so the step that encodes a constraint before
+    deleting it never fired.
 - **CE.**
   - No run dispatched a subagent. Run ae083cdb's report: "I read the five source files and the
     tests myself rather than dispatching the reviewer subagents, because the repo is only 345
     lines." Run 3f3a8f27: "I did the review inline instead of dispatching subagents, because
     the scope is only about 320 lines." Run 021a6281 gives no reason.
   - Its inline path enforced or dissolved 12 decision facts across its runs and lost 27 of 42.
-  - A small pull-request diff would probably take the same path, so "route to
-    `ce-simplify-code`" is not a fix for routing.
-- **`code-slop`.** It kept every suppression and workaround as it was (mostly 1s), so it scored
-  below bare on root fixes. It lost nothing.
+  - In real sessions it did dispatch its reviewer: 7 of the 11 `ce-simplify-code` sessions in
+    2.2 ran the Comment Reviewer. So the skip may be specific to this small fixture. Its
+    reviewer is unmeasured here, which is why 4.2 proposes a plain routing line rather than
+    "route to `ce-simplify-code`".
+- **`code-slop`.** It kept every suppression and workaround as it was (mostly 1s), so it did
+  not beat bare on root fixes (median 6 against 8). It lost nothing.
 - **comment-ratchet.**
   - It moved every decision into ADR files: 42 relocations, 0 lost.
   - W3 scored 0 in all 3 runs because the date workaround's excuse moved into an ADR or task
@@ -423,8 +433,7 @@ pstack and a8, -0.5 for `code-slop`, and -0.25 for the three contenders.
   - A labelled post hoc re-reading counts a relocated W excuse as 1. That moves ratchet's runs
     to 8, 7 and 5, and code-comments' runs to 10, 8 and 8. Neither median passes bare's max.
 - **code-comments.** 12 facts enforced or dissolved and 19 relocated across its runs, but 14
-  lost. W3 went
-  to a `tasks/*.md` file in 3 of 3.
+  lost. W3 went to a `tasks/*.md` file in 3 of 3.
 - **a8-extract** (post hoc in origin; Amendment C was written before it ran).
   - Pass rule: median 10 is above bare's max of 8, which passes. Lost 1, 0, 0 fails "0 in every
     run". Checks passed. So the rule was **not met**.
@@ -472,9 +481,14 @@ the private copy of this note; none was filed.
   (`--list`, `--init`, `--update`).
 - That fetched and executed the contender's CLI inside the arm's environment, which held the
   model-route variables. The third run found no `uvx` entry point to run.
-- `comment_ratchet.py` at that tag was read in full beforehand. It makes no network call, reads
-  no environment variable, and its only subprocess is `git ls-files`. No leak is expected, but
-  the exposure is real.
+- `comment_ratchet.py` and `pyproject.toml` at that tag were read in full beforehand. The
+  module makes no network call, reads no environment variable, and its only subprocess is
+  `git ls-files`. The package declares no runtime dependencies.
+- What was not read: uvx cloned the whole tag and built it with `setuptools>=69` fetched from
+  PyPI. The build backend and the rest of the tag's tree also ran or were available in that
+  environment.
+- No leak is expected, but the exposure is real. Whether to rotate the key is the operator's
+  call.
 - Fix for later runs: Claude Code 2.1.331's `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB`, which strips
   credentials from the environment of commands an agent runs. It needs `bwrap`, which this
   host has. Not attempted in this vet.
@@ -498,59 +512,25 @@ the private copy of this note; none was filed.
 
 ## 3. Verdicts
 
-Each row covers one component and one target: placement, activation and evidence.
+One row per component and target. Placement "none" means no installation.
 
-1. **pstack `no-comments` plus Comment Sicko (content)**
-   - T1 product repos: **SKIP** on countermetric (b): 14 of 20 facts lost against bare's 0.
-     No installation. Measured, 3 runs. Not adopted.
-   - T2 hov-stack skills: **SKIP**, for the same reason. Nothing to wire. Measured. Not
-     adopted.
-2. **pstack delivery (the Cursor plugin under `--plugin-dir`)** — T1 and T2: **SKIP**.
-   - It loads in Claude Code 2.1.331 as is, but its content is SKIP.
-   - Evidence: load smoke check. Not installed.
-3. **comment-ratchet v1.0.0, skill plus pre-commit CLI** — T1: **SKIP**.
-   - Below bare on root fixes (7 against 8), with 0 lost.
-   - Its move-decisions-to-ADRs habit is the only 0-loss way any arm removed decision comments
-     from code.
-   - Measured, 3 runs. Its CLI was fetched at runtime in 2 of 3 runs (2.6).
-4. **comment-audit-skill `86e2ebdf`** — T1: **SKIP**. Below bare (7 against 8), 0 lost.
-   Measured, 3 runs.
-5. **code-comments `a235d39d`, `seek-and-destroy`** — T1: **SKIP**. Below bare (7 against 8),
-   with a median of 3 facts lost, a countermetric finding. Measured, 3 runs.
-6. **CE `ce-simplify-code`, the incumbent** — T1: **PARTIAL, not-run**.
-   - It skipped its persona in 3 of 3 runs.
-   - Its inline path lost 8 to 10 facts (observed, not scored).
-   - It stays installed and unchanged.
-7. **hov-stack `code-slop`, the incumbent** — T2: keep as is; no change proposed by this vet.
-   - Finding: below bare on root fixes (6 against 8), 0 lost.
-   - Measured, 3 runs. The 09-18 C031 correction is appended there.
-8. **Root-fix rule, the extracted line (a8)** — T1 and T2: **EXTRACT, proposed**, with an
-   unverified-value marker.
-   - Placement and activation are not decided: it would go in the operator's `CLAUDE.md` or
-     in `code-slop` (4.2).
-   - Pre-registered rule not met. Hand-check: 3 of 3 runs broke an interface and 3 of 3
-     dropped a marker while keeping its bug.
-   - Not landed.
-9. **Pocock taxonomy (T, H, S, X, E, D, K)** — T1: **EXTRACT as a measurement instrument**.
-   - It lives in this fixture's grader and in section 2.1.
-   - Inter-rater kappa 0.652 binary and 0.737 on seven classes.
-   - Landed here, as fixture and note.
-10. **Debt mining (BowTiedDevil)** — T1: **EXTRACT, proposed**.
-    - Proposed as an on-demand workflow, not a skill body.
-    - Pilot: 20 of 26 confirmed (77%).
-    - No skill text and no issues filed.
-11. **Blanket "no new comments" lint or ratchet (poteto)** — T1: **SKIP**.
-    - D+K is 49% to 79% of what each need repo adds, above the 25% bar.
-    - X was 0 of 831, so ERA001 has nothing to catch.
-    - No installation. Measured.
-12. **harness-optimizer wiring** — T2: **SKIP**. Its lanes (friction, memory, instructions,
-    context, permissions, tooling) hold no product-code lane (pre-registered wiring rule). No
-    installation. Read.
-13. **Routing line: ask for a comment pass before a pull request** — T1: **proposed for the
-    operator, unmeasured**. It would go in the operator's `CLAUDE.md`, always on. Need and
-    coverage are measured; the lever is not.
-14. **The 41 hits triaged but not deep-vetted, and the 5 dropped (1.1)** — T1: no verdict.
-    No installation. Triaged only.
+| # | Component | Target | Verdict | Placement | Activation | Evidence | State |
+|---|---|---|---|---|---|---|---|
+| 1 | pstack `no-comments` + Comment Sicko, content | T1 product repos | SKIP: countermetric (b), 14 of 20 facts lost against bare's 0 | none | none | measured, 3 runs (2.4) | not adopted |
+| 2 | pstack `no-comments` + Comment Sicko, content | T2 hov-stack skills | SKIP, same reason; nothing to wire | none | none | measured, 3 runs (2.4) | not adopted |
+| 3 | pstack delivery: the Cursor plugin under `--plugin-dir` | T1, T2 | SKIP: loads in Claude Code 2.1.331 as is, but its content is SKIP | none | none | load smoke check | not installed |
+| 4 | comment-ratchet `15bf5460` (v1.0.0), skill plus pre-commit CLI | T1 | SKIP: did not beat bare (median 7 against 8), 0 lost | none | none | measured, 3 runs; GitHub implementation lane | not adopted |
+| 5 | comment-audit-skill `86e2ebdf` | T1 | SKIP: did not beat bare (7 against 8), 0 lost | none | none | measured, 3 runs; GitHub alternatives lane | not adopted |
+| 6 | code-comments `a235d39d`, `seek-and-destroy` | T1 | SKIP: did not beat bare (7 against 8); median 3 facts lost, a countermetric finding | none | none | measured, 3 runs; X thread replies | not adopted |
+| 7 | CE `ce-simplify-code`, the incumbent | T1 | PARTIAL, not-run. Deciding run: a fixture on which it dispatches its Comment Reviewer | CE 3.38.3 as installed, unchanged | on demand | observed, not scored | unchanged |
+| 8 | hov-stack `code-slop`, the incumbent | T2 | keep as is: did not beat bare (6 against 8), 0 lost | `plugins/hov-stack/skills/code-slop/`, unchanged | on demand | measured, 3 runs | unchanged |
+| 9 | Root-fix rule, the extracted line | T1, T2 | EXTRACT with an unverified-value marker: pre-registered rule not met | undecided (4.2) | undecided | measured, 3 runs (a8), plus hand-check | proposed |
+| 10 | Pocock's taxonomy (T, H, S, X, E, D, K) | T1 | EXTRACT as a measurement instrument; kappa 0.652 binary, 0.737 on seven classes | this fixture's grader and section 2.1 | used by vets only | measured | landed in this PR |
+| 11 | Debt mining (BowTiedDevil) | T1 | EXTRACT: 20 of 26 confirmed (77%) against a bar of 60% and at least 5 | an on-demand workflow, location undecided (4.2) | explicit invocation | measured, one repo (2.5) | proposed |
+| 12 | Blanket "no new comments" lint or ratchet (poteto) | T1 | SKIP: D+K is 49% to 79% per need repo, against a 25% bar; commented-out code 0 of 831 | none | none | measured (2.1) | not adopted |
+| 13 | harness-optimizer wiring | T2 | SKIP: its six lanes (friction, memory, instructions, context, permissions, tooling) include no product-code lane | none | none | read | not adopted |
+| 14 | Routing line: ask for a comment pass before `gh pr create` | T1 | proposed with an unverified-value marker: need and coverage are measured, the lever is not | this repo's `CLAUDE.md` (4.2) | always on | inferred from 2.2 and 2.4 | proposed to the operator |
+| 15 | The 41 triaged and 5 dropped hits, each with its lane and pass (1.1) | T1 | no verdict | none | none | triaged only | not adopted |
 
 **Rollup.**
 
@@ -565,8 +545,8 @@ T2's `code-slop` stays as is.
 ### Do-not-retry unless
 
 - **pstack `no-comments` and Comment Sicko:** retry only if a pinned revision keeps decision
-  and keep-list comments without needing the comment to say "do not remove". Test: a re-run of
-  this fixture loses at most bare's median.
+  comments about our own code, or moves them into a name, test or doc, instead of deleting
+  them. Test: a re-run of this fixture loses at most bare's median.
 - **comment-ratchet, comment-audit-skill, code-comments:** retry only if a revision changes
   how it treats suppressions or workarounds. Test: its median on this fixture's separating
   items exceeds bare's max, with 0 lost.
@@ -592,20 +572,23 @@ T2's `code-slop` stays as is.
 
 ### 4.2 Proposed, not landed
 
-**Routing line, for the operator's `CLAUDE.md`, unmeasured.**
+**Routing line (row 14), unmeasured.**
 
 > Before `gh pr create`, reread the comments your diff adds: delete narration, history and
 > banners; keep a comment only for a reason the code cannot show.
 
+- File: this repo's `CLAUDE.md`, which is the operator's global `~/.claude/CLAUDE.md`.
 - Why: bare models already do this well when asked (2.4), and at least 88.5% of
   pull-request sessions never ask (2.2).
+- Provenance: this vet's bare arm. No upstream, no pin, no local adaptation.
+- Update owner: the operator.
+- Rollback: delete the line.
 - Deciding measurement: a feature task on this fixture (not a cleanup task), run with and
   without the line, 3 runs each. Count the T, H and S units each arm adds and the facts it
   loses.
-- Rollback: delete the line.
-- Edits to `CLAUDE.md` need the operator's go, so the edit is the operator's.
+- Edits to `CLAUDE.md` need the operator's go, so this is left for the operator.
 
-**Root-fix rule, reworded after the a8 hand-check, unmeasured.**
+**Root-fix rule (row 9), reworded after the a8 hand-check, unmeasured.**
 
 > When you clean up comments, a suppression that hides a correctness rule (an unused result, a
 > mutable default, an ignored type error) is a bug report: fix the cause and remove the
@@ -613,20 +596,29 @@ T2's `code-slop` stays as is.
 > Keep comments that give a reason the code cannot show; delete narration, history and
 > banners.
 
+- Provenance: pstack `no-comments` step 4 and Comment Sicko's suppression rule at `ca782ed8`,
+  and Pocock's "excuse" class.
+- Local adaptation: the a8 wording (`arms/a8-extract/CLAUDE.md`), reworded as quoted above
+  after it broke a documented command and dropped a marker.
+- Files, if it passes: a comment rule under `plugins/hov-stack/skills/code-slop/rules/` with
+  its `SKILL.md` index line, or this repo's `CLAUDE.md`.
+- Update owner: hov-stack.
+- Rollback: revert that PR.
 - Deciding measurement: run it alone on a fixture with suppression and workaround items it
   was not written against. That fixture should include more legitimate suppressions and a test
   that runs any script entry point. Run 3 times.
   - Pass: median above bare's max, 0 lost in every run, and every documented command still
     works.
-- Placement if it passes: `code-slop`'s comment section, as a hov-stack PR with its own arm.
-  Or the operator's `CLAUDE.md`.
 
-**Debt mining, an on-demand workflow.**
+**Debt mining (row 11), an on-demand workflow.**
 
 - Method: a miner lists excuse comments; a refute-by-default verifier keeps those that are
-  real, live, fixable by us and untracked.
-- This is the method that scored 77%. It belongs as an explicit invocation, not always-on
-  text.
+  real, live, fixable by us and untracked. This is the method that scored 77%.
+- Provenance: BowTiedDevil's post of 2026-11-18. No upstream code, no pin.
+- Files: undecided. It belongs with hov-stack's other explicitly invoked workflows, not in
+  always-on text.
+- Update owner: hov-stack.
+- Rollback: delete the workflow.
 - The 20 confirmed items from the pilot are in the private note. Filing them is the operator's
   call.
 
@@ -635,7 +627,7 @@ T2's `code-slop` stays as is.
 **Shared findings,** true of the artifact whatever the target:
 
 - pstack loses decision facts.
-- The three contenders sit below bare on root fixes.
+- None of the three contenders beat bare on root fixes (medians 7 against 8).
 - comment-ratchet's CLI is fetched at runtime.
 - CE skips its persona on a small repo.
 
@@ -665,8 +657,9 @@ vetting index.
      use either.
    - Bare models clean up well when asked, so a line that asks may beat any skill. Section 4.2
      names its measurement.
-2. **`ce-simplify-code` skips its own reviewers on small repos.**
-   - The pull-request diffs it would see are small too.
+2. **`ce-simplify-code` skipped its own reviewers on this small fixture.**
+   - In real sessions it dispatched the Comment Reviewer in 7 of 11, so the skip is not shown
+     to carry over.
    - Its inline path deleted 27 of 42 decision facts on this fixture.
    - Worth an issue upstream with compound-engineering. Not filed: an outbound write this vet
      was not asked for.

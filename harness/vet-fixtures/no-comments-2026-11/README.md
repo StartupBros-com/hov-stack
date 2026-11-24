@@ -54,7 +54,13 @@ into the run's `CLAUDE_CONFIG_DIR`. Model: `sonnet` for every arm, 3 runs each.
 
 Contender texts are not committed; a pin is enough to rebuild them. To rebuild the plugin
 dirs, fetch each source at its pin, then run `tools/build_plugins.py` (its docstring gives the
-arguments). The contenders get a minimal `.claude-plugin/plugin.json` wrapper; pstack's own
+arguments). Each `arms/*/plugin.txt` names an absolute path, `/tmp/nc-vet-0f9d/plugins/<name>`:
+build the plugins there, or edit those files to point at your build.
+
+`arms/a8-extract/CLAUDE.md` holds a rule this vet did not adopt. It is named `CLAUDE.md`
+because `make-runs.sh` copies it into the run's config dir as user memory, the same
+convention as `pstack-2026-11/arms/`. A session that reads files in that folder may load it
+as a nested instruction file. The contenders get a minimal `.claude-plugin/plugin.json` wrapper; pstack's own
 root `plugin.json` loads unchanged under `--plugin-dir` (Claude Code 2.1.331).
 `tools/smoke-load.sh <scratch> <plugin-dir>` is the one-turn load check that confirmed every
 slash command and pstack's `comment-sicko` agent resolve, before any arm ran.
