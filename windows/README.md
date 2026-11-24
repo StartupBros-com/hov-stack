@@ -153,6 +153,19 @@ Set-MpPreference -DisableIOAVProtection $false
 Add-MpPreference -AttackSurfaceReductionRules_Ids '01443614-CD74-433A-B99E-2ECDC07BFC25' -AttackSurfaceReductionRules_Actions AuditMode
 ```
 
+The check and these commands were run as printed on the author's machine on
+2026-11-24, with Tamper Protection on, apart from the scan CPU limit line. The
+two removal lines took off every exclusion they name that was present (three
+programs and two folders). The last two lines ran without error and changed
+nothing, because the settings already held those values.
+
+A program that was already running while its name was excluded keeps the
+exemption after the removal. On that machine a browser and a small test
+program, both started before the removal, still opened an antivirus test file
+unseen afterwards (the longest check was almost five minutes later), while the
+same programs started after the removal were stopped within seconds. Close and
+reopen the programs on the list once their exclusions are gone.
+
 The other 13 rules are worth keeping. If one of them blocks something you need,
 event 1121 in the `Microsoft-Windows-Windows Defender/Operational` log names
 the rule and the program, and
