@@ -76,7 +76,7 @@ On an install whose `settings.json` setup has a record of creating, hov-stack ke
 - `plugins/hov-stack/skills/` (also reachable as `skills/`): 48 skills, 32 of them slash-command only so they never cost tokens until called, plus patches to 3 third-party skills in `skills-patches/` (papers, de-slopify's fact-check scripts, and security-audit-for-saas's lockfile-history, worm-sweep and EOL-check scripts), each with a note of its upstream
 - `skills-stack/`: 2 more slash-command skills (memory-mine, review-adversarial-first) that run this repo's scripts, so `./setup` links them and the plugin does not include them
 - `harnesses/codex/skills/`: Codex-only skills, installed by `scripts/skills-localize.sh`.
-- `windows/`: the Windows side of a WSL2 machine (the WezTerm config, the Windows Terminal config in `windows-terminal.json`, the vast.ai hops for native Windows shells, and the disk and Defender scripts)
+- `windows/`: the Windows side of a WSL2 machine (the WezTerm config, the Windows Terminal config in `windows-terminal.json`, the vast.ai hops for native Windows shells, and the disk-layout scripts)
 - `sync.sh` deploys role-specific systemd units and the managed deny floor; `./setup` runs it during its role phase. Standalone systemd units are documented, with copy-and-enable commands, in `systemd/README.md`.
 
 ## The plugins
