@@ -1,20 +1,22 @@
-# Windows storage layout and WSL hops
+# Windows side of a WSL2 machine
 
-Reproducible config for this machine's storage layout, plus the Windows-side
-hops into WSL tools. Nothing here configures antivirus: the Defender script
-was removed on 2026-11-23 (see [Defender script removed](#defender-script-removed-2026-11-23)).
+Terminal configs, the Windows-side hops into WSL tools, an OpenSSH template and
+the bridge that shows the WSL Claude workflows to the Windows Codex app.
+Nothing here configures antivirus or disks: the Defender script was removed on
+2026-11-23 (see [Defender script removed](#defender-script-removed-2026-11-23))
+and the disk-layout scripts on 2026-11-24 (see
+[Disk-layout scripts removed](#disk-layout-scripts-removed-2026-11-24)).
 
 ## Layout
 
 ```
-bootstrap.ps1                    # entry point — runs the phase scripts you name
-lib/Common.ps1                   # shared helpers: Assert-Admin, Invoke-Idempotent, snapshots
-scripts/
-  Set-DiskLayout.ps1             # scratch partition, junctions (opt-in)
-  Assert-FreeSpace.ps1           # Free-space check, toast below 20%; written for a
-                                 # scheduled task, which nothing here installs
-snapshots/                       # Pre-change state captures, timestamped
+wezterm.lua                      # WezTerm config, deployed to %USERPROFILE%\.wezterm.lua
+windows-terminal.json            # Windows Terminal config
+ssh-config                       # Shared OpenSSH template
 bin/                             # Hops into WSL tools, deployed to %USERPROFILE%\.local\bin
+sync-claude-skills-to-codex.sh   # Shows the curated WSL Claude workflows to the
+sync-claude-skills-to-codex.ps1  # Windows Codex app
+tests/                           # The bridge's test
 ```
 
 ## bin/ — Windows-side hops into WSL tools
@@ -48,35 +50,31 @@ a commented server example. Private hosts extend it through the first per-user
 Include file listed in the template; the next Include supports a directory of
 host snippets. Both load before the shared defaults.
 
-## Run
+## Disk-layout scripts removed (2026-11-24)
 
-```powershell
-# Nothing runs unless you name a phase. The disk layout adds a partition,
-# so dry-run it first
-.\bootstrap.ps1 -Phases DiskLayout -DryRun
+Until 2026-11-24 this directory shipped `bootstrap.ps1`, `lib/Common.ps1`,
+`scripts/Set-DiskLayout.ps1` and `scripts/Assert-FreeSpace.ps1`. They are
+gone. `Set-DiskLayout.ps1` added a scratch partition (`S:` unless told
+otherwise) in the unallocated space of one disk, which is a decision about one
+machine. The copy here was a template kept apart from the one its author runs,
+and two of the four files had already drifted from it. When they were removed,
+nothing in `./setup`, the deploy manifest or CI referred to any of them, and
+nothing here installed the scheduled task `Assert-FreeSpace.ps1` was written
+for.
 
-# Apply
-.\bootstrap.ps1 -Phases DiskLayout
-```
-
-For disk changes, verify `TargetDiskNumber` and pass `ExpectedDiskSerial` to
-`Set-DiskLayout.ps1`; the template stores no machine-specific serial. An empty
-serial skips that optional check.
-
-All scripts are idempotent — re-running is safe and is in fact the design.
-
-## Rollback
-
-`Set-DiskLayout.ps1` saves JSON captures of the pre-change state to a
-timestamped folder under `snapshots/`. It has no revert; its disk, partition
-and volume captures are the record to undo it by hand. No System Restore point
-is created.
+If you never ran `bootstrap.ps1` on Windows, none of this applies to you. If
+you ran `bootstrap.ps1 -Phases DiskLayout`, the partition it added is still
+there and removing the script changes nothing on your disk. The script had no
+revert. The JSON captures it saved to a timestamped folder under
+`windows\snapshots\` in your checkout record the disk, partition and volume
+state from before the change, so keep that folder if you may want to undo the
+change by hand. The last version of each file is in this repository's history,
+for example `git show a745451:windows/scripts/Set-DiskLayout.ps1`.
 
 ## Defender script removed (2026-11-23)
 
 Until 2026-11-23 this directory shipped `scripts/Set-Defender.ps1`, and
-`bootstrap.ps1` ran it by default. It is gone, and `bootstrap.ps1 -Phases
-Defender` now prints a notice and changes nothing. Which programs a machine
+`bootstrap.ps1` ran it by default. Both are gone. Which programs a machine
 exempts from antivirus is a decision about that one machine, and the copy here
 had fallen behind the one its author runs: it still set a rule to Block that
 the author had moved to Audit, and on the author's machine its last version
@@ -164,13 +162,3 @@ one rule back to not configured.
 Removing an exclusion can slow down the program it covered. If one does, bring
 back the narrowest thing that fixes it: the full path of one program, or one
 folder, in place of a bare program name.
-
-## Disk roles
-
-| Disk role         | Drive | Use                                               |
-|-------------------|-------|---------------------------------------------------|
-| System storage    | C:    | OS + apps                                         |
-| Scratch partition | S:    | Temporary workspace                               |
-| Active workspace  | F:    | Downloads + browser caches + projects             |
-| Project archive   | D:    | Cold projects + VM images                         |
-| Cold archive      | A:    | Infrequently accessed files; monitor drive health |
