@@ -144,4 +144,4 @@ pnpm recorded:verify --manifest public/generated/recorded/<run-id>/resolved.v1.j
 pnpm recorded:smoke   # neutral synthetic media end to end; --silent for no audio
 ```
 
-Verification proves, by pixels, that each clip shows the source frame the plan says it does (SSIM at three points per clip, with a neighbour check), and reports static footage as "timing not proven". Nothing is captured, uploaded or published. Not in V1: picture-in-picture, a studio command, custom font files, music, sound effects, transitions beyond a hard cut. See `skills/product-video/references/workflow.md`.
+Verification proves, by pixels, that each clip shows the source frame the plan says it does (SSIM at three points per clip, with a neighbour check), and reports static footage as "timing not proven". Render runs at most 4 browser tabs and keeps a bounded frame cache; lower `--concurrency` if it is still killed for memory. Nothing is captured, uploaded or published. Not in V1: picture-in-picture, a studio command, custom font files, music, sound effects, transitions beyond a hard cut. See `skills/product-video/references/workflow.md`.

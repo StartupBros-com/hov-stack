@@ -14,6 +14,7 @@ import {
   prepareRecordedRenderOutput,
 } from '../recorded-files';
 import { loadValidatedRecordedManifest } from '../recorded-manifest';
+import { resolveRecordedRenderLimits } from '../recorded-render-limits';
 import { firstAvailableBrowser } from '../rendering';
 
 const HELP = `Render a resolved RecordedTour v1 manifest to its owned local H264 output.
@@ -21,17 +22,21 @@ const HELP = `Render a resolved RecordedTour v1 manifest to its owned local H264
 Usage:
   pnpm recorded:render \\
     --manifest <public/generated/recorded/<run-id>/resolved.v1.json> \\
-    [--browser-executable <path>] [--force]
+    [--browser-executable <path>] [--concurrency <n>] [--force]
 
 Output is fixed to out/recorded/<run-id>/recorded-tour.mp4 under the plugin root.
 The file always carries a 48kHz audio stream, silent when the plan has no audio.
 --force replaces only a prior output proven to be owned by this renderer.
+--concurrency sets how many browser tabs render at once (default: half the cores,
+at most 4). Every tab decodes every source clip, so lower it if the render runs
+out of memory.
 `;
 
 async function main() {
   const { values } = parseArgs({
     options: {
       'browser-executable': { type: 'string' },
+      concurrency: { type: 'string' },
       force: { type: 'boolean', default: false },
       help: { type: 'boolean', default: false, short: 'h' },
       manifest: { type: 'string' },
@@ -47,6 +52,7 @@ async function main() {
     throw new Error('--manifest is required');
   }
 
+  const limits = resolveRecordedRenderLimits(values.concurrency);
   const manifestPath = path.resolve(values.manifest);
   const manifest = await loadValidatedRecordedManifest(manifestPath);
   const renderPaths = await prepareRecordedRenderOutput(
@@ -77,11 +83,13 @@ async function main() {
       chromiumOptions: { enableMultiProcessOnLinux: true },
       codec: 'h264',
       composition,
+      concurrency: limits.concurrency,
       crf: 18,
       enforceAudioTrack: true,
       imageFormat: 'png',
       inputProps,
       logLevel: 'warn',
+      offthreadVideoCacheSizeInBytes: limits.offthreadVideoCacheSizeInBytes,
       outputLocation: temporaryOutputPath,
       overwrite: false,
       pixelFormat: 'yuv420p',
