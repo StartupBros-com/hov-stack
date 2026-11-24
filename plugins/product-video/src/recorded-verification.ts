@@ -238,29 +238,56 @@ export function assertCardTitleOcr(
 export type FrameMatchOutcome = 'match' | 'mismatch' | 'not-discriminating';
 
 /**
- * SSIM floor for "this render crop shows this source frame".
+ * Floor of the blurred-gray SSIM (see ssimOf) for "this render crop shows this
+ * source frame". It is a gross-content check: timing comes from the neighbour rule.
  *
- * Measured on the synthetic smoke fixture (render at crf 18, source 640x360 and
- * 480x480, 9 probe points, 2026-11-24). The render goes through a bezel-fitted
- * rescale and H264, so a correct frame scores well below 1:
- *   correct frame S(n):       0.8885 to 0.9503 (min 0.8885)
- *   n+-1, n+-2 (wrong):       0.7439 to 0.8863 (the neighbour rule, not T, rejects these)
- *   n+-5:                     0.6035 to 0.8191
- *   n+-15, n+-40, n+-100:     0.5930 to 0.7874
- * 0.85 sits 0.039 under the lowest correct score and above every wrong frame
- * five or more frames away (max 0.8191).
+ * Measured 2026-11-24 on the smoke fixture (12 points) and on a real 69 s cut of two
+ * screen recordings, mostly static, thin text on black (48 points):
+ *   correct frame, smoke:            0.9972 to 0.9986
+ *   correct frame, real cut:         0.9813 to 0.9991 (min 0.9813)
+ *   plan off by 1 to 15 frames, smoke primary (every frame differs): 0.8011 to 0.9429
+ *   plan off by 1 to 15 frames, smoke secondary: 0.9521 to 0.9972 (0.9972 is a
+ *     frame the frame-rate conversion repeated, the same picture as the expected one)
+ *   a source frame that really differs from n, real cut: up to 0.9947
+ * 0.95 sits 0.031 under the lowest correct score and rejects every mis-timed smoke
+ * primary frame. It cannot reject a wrong frame of mostly static or mostly black
+ * footage, which scores as high as a correct one; those points are judged by their
+ * neighbours, or reported as not proven.
  */
-export const recordedFrameMatchThreshold = 0.85;
+export const recordedFrameMatchThreshold = 0.95;
 /**
  * A neighbouring source frame scoring more than this above the expected one is a
  * mismatch. A different-looking neighbour scoring within this of it is "timing
  * not proven": the render cannot separate the two frames.
  */
 export const frameMatchNeighbourMargin = 0.002;
-/** Source frames at least this similar to their neighbours carry no timing signal. */
-export const staticSourceSsim = 0.999;
+/**
+ * Gaussian blur (sigma, in pixels) applied to the gray images before SSIM.
+ *
+ * Plain RGB SSIM fails on real screen recordings in two ways. H264's 4:2:0 chroma
+ * cannot carry thin coloured text, so one pass of the source through the codec
+ * scored 0.80 to 0.89 against itself (green text on black, 2026-11-24). And codec
+ * noise of one or two levels between two copies of the same picture moved the score
+ * by up to 0.0026, more than the neighbour margin. Luma removes the chroma loss;
+ * the blur removes the noise: on the same footage, a neighbour that is the same
+ * picture scored at most 0.0001 above the expected frame.
+ */
+export const frameMatchBlurSigma = 1.5;
+/**
+ * Two source frames are the same picture when no gray pixel differs by more than
+ * this many levels (of 255). On the 2026-11-24 recordings, copies of one picture
+ * differed by at most 6 levels in one recording; in the other, some copies moved 1
+ * to 31 pixels past 8 levels. Those copies count as differing, the safe direction:
+ * they scored at most 0.0001 above the expected frame, far inside the neighbour
+ * margin, so they can leave a point unproven but not fail it. Real UI changes on
+ * the smoke fixture moved 1,590 pixels or more. A change under 9 levels per pixel,
+ * such as one step of a slow fade, counts as no change.
+ */
+export const sourceChangeLevel = 8;
 
 export type OffsetSsim = { offset: number; ssim: number };
+/** How many gray pixels of source frame n+offset differ from n by more than sourceChangeLevel. */
+export type OffsetChange = { offset: number; changedPixels: number };
 
 export type FrameMatchClassification = {
   outcome: FrameMatchOutcome;
@@ -270,6 +297,14 @@ export type FrameMatchClassification = {
 
 function microRound(value: number) {
   return Math.round(value * 1_000_000) / 1_000_000;
+}
+
+function best(candidates: readonly OffsetSsim[]) {
+  return candidates.reduce<OffsetSsim | undefined>(
+    (found, candidate) =>
+      !found || candidate.ssim > found.ssim ? candidate : found,
+    undefined,
+  );
 }
 
 export function classifyFrameMatch({
@@ -282,18 +317,14 @@ export function classifyFrameMatch({
   matchSsim: number;
   /** SSIM of the render crop against source frames n+offset, offset != 0. */
   neighbours: readonly OffsetSsim[];
-  /** SSIM of source frame n against source frames n+offset. */
-  sourceNeighbours: readonly OffsetSsim[];
+  /** Pixel change between source frame n and source frames n+offset. */
+  sourceNeighbours: readonly OffsetChange[];
   threshold?: number;
 }): FrameMatchClassification {
   const discriminating = sourceNeighbours.some(
-    (neighbour) => neighbour.ssim < staticSourceSsim,
+    (neighbour) => neighbour.changedPixels > 0,
   );
-  const bestNeighbour = neighbours.reduce<OffsetSsim | undefined>(
-    (best, candidate) =>
-      !best || candidate.ssim > best.ssim ? candidate : best,
-    undefined,
-  );
+  const bestNeighbour = best(neighbours);
   const base = { discriminating, ...(bestNeighbour ? { bestNeighbour } : {}) };
   if (matchSsim < threshold) {
     return { ...base, outcome: 'mismatch' };
@@ -301,27 +332,41 @@ export function classifyFrameMatch({
   if (!discriminating) {
     return { ...base, outcome: 'not-discriminating' };
   }
+  // A neighbour that is the same picture as n in the source (a frame repeated by
+  // the frame-rate conversion, or a static screen) carries no timing signal: it
+  // may tie or edge past n on codec noise alone. Only a neighbour that differs in
+  // the source can fail the point, by scoring more than the margin above n, or
+  // leave it unproven, by scoring within the margin of n.
+  const sameAsExpected = new Set(
+    sourceNeighbours
+      .filter((neighbour) => neighbour.changedPixels === 0)
+      .map((neighbour) => neighbour.offset),
+  );
+  const differing = neighbours.filter(
+    (neighbour) => !sameAsExpected.has(neighbour.offset),
+  );
+  const bestDiffering = best(differing);
   if (
-    bestNeighbour &&
-    microRound(bestNeighbour.ssim - matchSsim) > frameMatchNeighbourMargin
+    bestDiffering &&
+    microRound(bestDiffering.ssim - matchSsim) > frameMatchNeighbourMargin
   ) {
     return { ...base, outcome: 'mismatch' };
   }
-  // A neighbour that is the same picture as n in the source (a frame repeated by
-  // the frame-rate conversion) may tie: showing it looks identical. A neighbour
-  // that differs in the source but scores within the margin of n means the
-  // render's pixels cannot tell the two apart, so the point proves nothing.
-  const sameAsExpected = new Set(
-    sourceNeighbours
-      .filter((neighbour) => neighbour.ssim >= staticSourceSsim)
-      .map((neighbour) => neighbour.offset),
-  );
-  const unresolved = neighbours.some(
+  const unresolved = differing.some(
     (neighbour) =>
-      !sameAsExpected.has(neighbour.offset) &&
       microRound(matchSsim - neighbour.ssim) <= frameMatchNeighbourMargin,
   );
   if (unresolved) {
+    return { ...base, outcome: 'not-discriminating' };
+  }
+  // Beating a differing neighbour on one side bounds the timing in that direction
+  // only: when the source is static on the other side, a render that is early (or
+  // late) by any amount within that static run shows the same picture. Proof needs
+  // a differing neighbour on both sides of n.
+  const bothSides =
+    differing.some((neighbour) => neighbour.offset < 0) &&
+    differing.some((neighbour) => neighbour.offset > 0);
+  if (!bothSides) {
     return { ...base, outcome: 'not-discriminating' };
   }
   return { ...base, outcome: 'match' };
@@ -337,7 +382,7 @@ export type FrameMatchResult = {
   sourceFrame: number;
   matchSsim: number;
   neighbours: OffsetSsim[];
-  sourceNeighbours: OffsetSsim[];
+  sourceNeighbours: OffsetChange[];
   classification: FrameMatchClassification;
 };
 
@@ -480,7 +525,9 @@ export function extractFrameRange({
   ]);
 }
 
+/** SSIM of two same-size images, compared as gray after a frameMatchBlurSigma blur. */
 export function ssimOf(imageA: string, imageB: string) {
+  const prepare = `format=gray,gblur=sigma=${frameMatchBlurSigma}`;
   const result = spawnSync(
     'ffmpeg',
     [
@@ -491,7 +538,7 @@ export function ssimOf(imageA: string, imageB: string) {
       '-i',
       imageB,
       '-lavfi',
-      'ssim',
+      `[0:v]${prepare}[a];[1:v]${prepare}[b];[a][b]ssim`,
       '-f',
       'null',
       '-',
@@ -506,6 +553,52 @@ export function ssimOf(imageA: string, imageB: string) {
     throw new Error(`ffmpeg ssim printed no score: ${result.stderr.trim()}`);
   }
   return Number(match[1]);
+}
+
+/** Count the positions where two gray images differ by more than `level`. */
+export function countChangedPixels(
+  pixelsA: Uint8Array,
+  pixelsB: Uint8Array,
+  level = sourceChangeLevel,
+) {
+  if (pixelsA.length !== pixelsB.length) {
+    throw new Error(
+      `Cannot compare gray images of ${pixelsA.length} and ${pixelsB.length} pixels`,
+    );
+  }
+  let changed = 0;
+  for (let index = 0; index < pixelsA.length; index += 1) {
+    if (Math.abs(pixelsA[index]! - pixelsB[index]!) > level) changed += 1;
+  }
+  return changed;
+}
+
+/** Decode an image to 8-bit gray pixels, one byte per pixel. */
+function readGrayPixels(image: string) {
+  const result = spawnSync(
+    'ffmpeg',
+    [
+      '-hide_banner',
+      '-loglevel',
+      'error',
+      '-i',
+      image,
+      '-vf',
+      'format=gray',
+      '-f',
+      'rawvideo',
+      '-pix_fmt',
+      'gray',
+      '-',
+    ],
+    { maxBuffer: 64 * 1024 * 1024, timeout: 120_000 },
+  );
+  if (result.status !== 0) {
+    throw new Error(
+      `ffmpeg gray decode failed: ${result.stderr.toString().trim()}`,
+    );
+  }
+  return new Uint8Array(result.stdout);
 }
 
 function prepareComparisonImage({
@@ -660,9 +753,13 @@ export async function measureFrameMatches({
           offset,
           ssim: ssimOf(comparedRender, compared.get(offset)!),
         }));
+        const expectedPixels = readGrayPixels(expected);
         const sourceNeighbours = offsets.map((offset) => ({
           offset,
-          ssim: ssimOf(expected, compared.get(offset)!),
+          changedPixels: countChangedPixels(
+            expectedPixels,
+            readGrayPixels(compared.get(offset)!),
+          ),
         }));
         results.push({
           sceneId: scene.id,

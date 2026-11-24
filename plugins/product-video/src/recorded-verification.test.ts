@@ -14,13 +14,14 @@ import {
   assertRecordedSamplePlanWithinBounds,
   buildRecordedSamplePlan,
   classifyFrameMatch,
+  countChangedPixels,
   frameMatchNeighbourMargin,
   frameSeekMs,
   getCaptionFrameRange,
   getComparisonExclusions,
   getNeighbourOffsets,
   recordedFrameMatchThreshold,
-  staticSourceSsim,
+  sourceChangeLevel,
   summarizeSceneTiming,
   validateRecordedRenderProbe,
 } from './recorded-verification';
@@ -161,6 +162,9 @@ test('sample plan cap: 180 samples are allowed, 181 are refused', () => {
   );
 });
 
+/** Source pixel change for a neighbour that differs from n (a real UI change). */
+const MOVED = 5_000;
+
 test('frame match: an exact match with a discriminating source passes', () => {
   const result = classifyFrameMatch({
     matchSsim: 0.985,
@@ -171,8 +175,8 @@ test('frame match: an exact match with a discriminating source passes', () => {
       { offset: 2, ssim: 0.91 },
     ],
     sourceNeighbours: [
-      { offset: -1, ssim: 0.95 },
-      { offset: 1, ssim: 0.95 },
+      { offset: -1, changedPixels: MOVED },
+      { offset: 1, changedPixels: MOVED },
     ],
   });
   assert.equal(result.outcome, 'match');
@@ -184,22 +188,28 @@ test('frame match: content below the threshold is a mismatch', () => {
   const result = classifyFrameMatch({
     matchSsim: T - 0.001,
     neighbours: [{ offset: 1, ssim: 0.5 }],
-    sourceNeighbours: [{ offset: 1, ssim: 0.5 }],
+    sourceNeighbours: [{ offset: 1, changedPixels: MOVED }],
   });
   assert.equal(result.outcome, 'mismatch');
   // The threshold itself is a pass.
   assert.equal(
     classifyFrameMatch({
       matchSsim: T,
-      neighbours: [{ offset: 1, ssim: 0.5 }],
-      sourceNeighbours: [{ offset: 1, ssim: 0.5 }],
+      neighbours: [
+        { offset: -1, ssim: 0.5 },
+        { offset: 1, ssim: 0.5 },
+      ],
+      sourceNeighbours: [
+        { offset: -1, changedPixels: MOVED },
+        { offset: 1, changedPixels: MOVED },
+      ],
     }).outcome,
     'match',
   );
 });
 
 test('frame match: a neighbour that beats the expected frame is a mismatch', () => {
-  const sourceNeighbours = [{ offset: 1, ssim: 0.9 }];
+  const sourceNeighbours = [{ offset: 1, changedPixels: MOVED }];
   const wrongFrame = classifyFrameMatch({
     matchSsim: 0.96,
     neighbours: [
@@ -214,16 +224,18 @@ test('frame match: a neighbour that beats the expected frame is a mismatch', () 
 
 test('frame match: a tie proves timing only against a repeated source frame', () => {
   // Offset -1 is the same picture as n in the source (a frame repeated by the
-  // 25 to 30 fps conversion); offsets 1 and 2 differ from it.
+  // 25 to 30 fps conversion); offsets -2, 1 and 2 differ from it.
   const base = {
     matchSsim: 0.97,
     sourceNeighbours: [
-      { offset: -1, ssim: 0.9996 },
-      { offset: 1, ssim: 0.9 },
-      { offset: 2, ssim: 0.85 },
+      { offset: -2, changedPixels: MOVED },
+      { offset: -1, changedPixels: 0 },
+      { offset: 1, changedPixels: MOVED },
+      { offset: 2, changedPixels: MOVED },
     ],
   };
   const clearlyWorse = [
+    { offset: -2, ssim: 0.88 },
     { offset: 1, ssim: 0.9 },
     { offset: 2, ssim: 0.88 },
   ];
@@ -274,6 +286,7 @@ test('frame match: a tie proves timing only against a repeated source frame', ()
     classifyFrameMatch({
       ...base,
       neighbours: [
+        { offset: -2, ssim: 0.88 },
         { offset: -1, ssim: 0.5 },
         { offset: 1, ssim: 0.97 - frameMatchNeighbourMargin - 0.000_001 },
         { offset: 2, ssim: 0.88 },
@@ -307,9 +320,9 @@ test('frame match: a tie proves timing only against a repeated source frame', ()
 
 test('frame match: static footage cannot prove timing', () => {
   const staticSource = [
-    { offset: -1, ssim: 1 },
-    { offset: 1, ssim: staticSourceSsim },
-    { offset: 2, ssim: 0.9995 },
+    { offset: -1, changedPixels: 0 },
+    { offset: 1, changedPixels: 0 },
+    { offset: 2, changedPixels: 0 },
   ];
   const result = classifyFrameMatch({
     matchSsim: 0.99,
@@ -329,14 +342,97 @@ test('frame match: static footage cannot prove timing', () => {
     }).outcome,
     'mismatch',
   );
-  // One differing neighbour makes the point discriminating again.
+  // One differing neighbour that was not scored makes the source discriminating, but
+  // the only scored neighbour is the same picture, so nothing is proven.
   assert.equal(
     classifyFrameMatch({
       matchSsim: 0.99,
       neighbours: [{ offset: 1, ssim: 0.9 }],
-      sourceNeighbours: [...staticSource, { offset: -2, ssim: 0.998 }],
+      sourceNeighbours: [...staticSource, { offset: -2, changedPixels: 300 }],
+    }).outcome,
+    'not-discriminating',
+  );
+  // Scored neighbours that differ on both sides prove it, and a same-picture
+  // neighbour may still edge past n.
+  assert.equal(
+    classifyFrameMatch({
+      matchSsim: 0.99,
+      neighbours: [
+        { offset: -2, ssim: 0.9 },
+        { offset: 1, ssim: 0.995 },
+        { offset: 2, ssim: 0.9 },
+      ],
+      sourceNeighbours: [
+        { offset: -2, changedPixels: 300 },
+        { offset: -1, changedPixels: 0 },
+        { offset: 1, changedPixels: 0 },
+        { offset: 2, changedPixels: 300 },
+      ],
     }).outcome,
     'match',
+  );
+});
+
+test('frame match: a same-picture neighbour edging past n on codec noise is not a mismatch', () => {
+  // A real cut (thin text on black): n-2 was the same picture as n but scored
+  // 0.0024 above it, and the old rule failed the point.
+  const result = classifyFrameMatch({
+    matchSsim: 0.97,
+    neighbours: [
+      { offset: -2, ssim: 0.9724 },
+      { offset: -1, ssim: 0.9 },
+      { offset: 1, ssim: 0.9 },
+      { offset: 2, ssim: 0.9 },
+    ],
+    sourceNeighbours: [
+      { offset: -2, changedPixels: 0 },
+      { offset: -1, changedPixels: MOVED },
+      { offset: 1, changedPixels: MOVED },
+      { offset: 2, changedPixels: MOVED },
+    ],
+  });
+  assert.equal(result.outcome, 'match');
+  assert.equal(result.bestNeighbour?.offset, -2);
+});
+
+test('frame match: beating differing neighbours on one side only bounds timing one way', () => {
+  // A real cut with its plan 15 frames late: the source is static from n-15 to n
+  // and changes at n+1, so the render (showing n-15) looks exactly like n.
+  const result = classifyFrameMatch({
+    matchSsim: 0.9926,
+    neighbours: [
+      { offset: -2, ssim: 0.9931 },
+      { offset: -1, ssim: 0.9926 },
+      { offset: 1, ssim: 0.8361 },
+      { offset: 2, ssim: 0.8361 },
+    ],
+    sourceNeighbours: [
+      { offset: -2, changedPixels: 0 },
+      { offset: -1, changedPixels: 0 },
+      { offset: 1, changedPixels: 11_361 },
+      { offset: 2, changedPixels: 11_360 },
+    ],
+  });
+  assert.equal(result.outcome, 'not-discriminating');
+  assert.equal(result.discriminating, true);
+});
+
+test('frame match: a correct frame of thin coloured text clears the floor', () => {
+  // The same real cut: the correct frame scored 0.8145 in RGB SSIM (H264 4:2:0
+  // loses the text's colour) and 0.9813 as blurred gray. Its source is static.
+  assert.equal(
+    classifyFrameMatch({
+      matchSsim: 0.9813,
+      neighbours: [
+        { offset: -1, ssim: 0.9813 },
+        { offset: 1, ssim: 0.9813 },
+      ],
+      sourceNeighbours: [
+        { offset: -1, changedPixels: 0 },
+        { offset: 1, changedPixels: 0 },
+      ],
+    }).outcome,
+    'not-discriminating',
   );
 });
 
@@ -348,6 +444,20 @@ test('frame match: a source with no neighbours proves nothing', () => {
       sourceNeighbours: [],
     }).outcome,
     'not-discriminating',
+  );
+});
+
+test('changed pixels count only differences larger than the change level', () => {
+  const a = Uint8Array.from([0, 10, 20, 255, 100]);
+  const b = Uint8Array.from([8, 1, 29, 0, 100]);
+  // Differences 8, 9, 9, 255, 0: 8 is codec-noise sized, the rest exceed it.
+  assert.equal(sourceChangeLevel, 8);
+  assert.equal(countChangedPixels(a, b), 3);
+  assert.equal(countChangedPixels(a, b, 9), 1);
+  assert.equal(countChangedPixels(a, a), 0);
+  assert.throws(
+    () => countChangedPixels(a, b.subarray(0, 4)),
+    /Cannot compare gray images of 5 and 4 pixels/,
   );
 });
 
