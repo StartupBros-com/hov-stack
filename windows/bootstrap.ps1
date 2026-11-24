@@ -3,39 +3,56 @@
     Idempotent Windows configuration bootstrapper.
 
 .DESCRIPTION
-    Run on a fresh machine, after a Windows feature update, or any time you
-    suspect drift. Each phase script is itself idempotent and supports
-    -DryRun. Phases are intentionally separate so a failure in one does not
-    prevent re-running the others.
+    Runs the phase scripts you name. Each phase script is itself idempotent
+    and supports -DryRun. Phases are intentionally separate so a failure in
+    one does not prevent re-running the others.
 
 .PARAMETER Phases
-    Subset of phase names to run: Defender, DiskLayout. Default: Defender.
-    DiskLayout is opt-in because it adds a partition.
+    Phase names to run: DiskLayout. Nothing runs unless you name it, because
+    DiskLayout adds a partition.
+
+    Defender is no longer a phase: the Defender script was removed on
+    2026-11-23. Naming it prints a notice and changes nothing. README.md in
+    this directory says what that script set and how to undo it.
 
 .PARAMETER DryRun
     Pass through to all phase scripts.
 
 .EXAMPLE
-    .\bootstrap.ps1 -DryRun
-    .\bootstrap.ps1 -Phases Defender,DiskLayout -DryRun
-    .\bootstrap.ps1
+    .\bootstrap.ps1 -Phases DiskLayout -DryRun
+    .\bootstrap.ps1 -Phases DiskLayout
 #>
 [CmdletBinding()]
 param(
-    [string[]] $Phases = @('Defender'),
+    [string[]] $Phases = @(),
     [switch]   $DryRun
 )
 
 . "$PSScriptRoot\lib\Common.ps1"
-Assert-Admin
 
 $map = @{
-    Defender   = "$PSScriptRoot\scripts\Set-Defender.ps1"
     DiskLayout = "$PSScriptRoot\scripts\Set-DiskLayout.ps1"
 }
+# Phases this script used to run. Naming one says where it went, not "unknown".
+$removed = @{
+    Defender = 'removed on 2026-11-23, so nothing was changed. See "Defender script removed" in README.md in this directory'
+}
 
-foreach ($name in $Phases) {
+$toRun = @()
+# "powershell -File bootstrap.ps1 -Phases A,B" hands over one string, "A,B".
+$named = @($Phases | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+foreach ($name in $named) {
+    if ($removed.ContainsKey($name)) { Write-Step "Phase ${name}: $($removed[$name])" 'WARN'; continue }
     if (-not $map.ContainsKey($name)) { Write-Step "Unknown phase: $name" 'WARN'; continue }
+    $toRun += $name
+}
+if ($toRun.Count -eq 0) {
+    Write-Step "No phase to run. Name one with -Phases: $(($map.Keys | Sort-Object) -join ', ')" 'SKIP'
+    return
+}
+
+Assert-Admin
+foreach ($name in $toRun) {
     $path = $map[$name]
     if (-not (Test-Path $path)) { Write-Step "Phase script missing: $path (skipping)" 'SKIP'; continue }
     Write-Step "==== Phase: $name ====" 'STEP'
