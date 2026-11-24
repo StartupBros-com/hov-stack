@@ -91,7 +91,7 @@ The doctrine improved completeness and honesty, not correctness: both arms fabri
 - "No de-escalation policy for repeated bot comments exists". REFUTED: `ce-resolve-pr-feedback/references/pipeline-mode.md:19-20`.
 - "No incumbent classifies or dedupes an incoming bug report". REFUTED: `user-support-triage-for-saas-and-open-source-projects/SKILL.md:58,219`.
 - "We already have a typed local ledger" was REFUTED in the other direction only for the dispatcher's own domain: `dispatcher-ledger.sh` is a typed, tested (T1-T17 invariants), first-terminal-wins ledger. It is single-purpose; the general store gap stands, see architectural issues.
-- "code-slop and Comment Sicko produce different outcomes on the same diff". REFUTED on the invoice fixture's comment lines: both rule sets flag the same lines.
+- "code-slop and Comment Sicko produce different outcomes on the same diff". REFUTED on the invoice fixture's comment lines: both rule sets flag the same lines. (Corrected 2026-11-24: same flags, different cleanup outcomes; see "Correction, 2026-11-24" below.)
 - "Our tdd skill lacks the falsifiability check" was PARTIAL: the tautological anti-pattern overlaps; only the "five shapes that still pass when every import returns undefined" list is new.
 - Our `thermo-nuclear-code-quality-review` (added 2026-09-01) shares near-verbatim wording with pstack's `interrogate/references/code-quality-review.md` (pstack's first commit: 2026-05-23). Our incumbent is descended from pstack material, so "ours independently covers this" is not a clean claim for that lens.
 
@@ -202,7 +202,7 @@ Rollup over 57 content rows: ADOPT 0, ADAPT 0, EXTRACT 17 (one of them, `create-
 | `technical-writing` | SKIP | none | C026 REFUTED: DIATAXIS.md exists | covered |
 | `typescript-best-practices` | SKIP content, EXTRACT `paths:` finding | item 6 | C027 REFUTED (paths supported), C028 PARTIAL (TYPE-SHRINKS covers), C103 CONFIRMED | proposed |
 | `bro` | SKIP | none | C029 CONFIRMED collision, different skill | covered |
-| `no-comments`, Comment Sicko | SKIP | none | code-slop; C031 REFUTED (same outcomes) | covered |
+| `no-comments`, Comment Sicko | SKIP | none | code-slop; C031 REFUTED (same outcomes); reason corrected 2026-11-24, see below | covered |
 | `interrogate` | SKIP rubric text, EXTRACT panel mechanism | item 10 | fixture R: 13.5/18 vs thermo 13.25 vs code-slop 16.0; C032 CONFIRMED shared lineage with thermo-nuclear, C033 CONFIRMED single peer today | proposed |
 | `reflect` | EXTRACT | item 18 | C034 CONFIRMED, C104 CONFIRMED | proposed |
 | `arena` | SKIP | none | ce-bakeoff (C035 CONFIRMED no default panel table, minor) | covered |
@@ -278,3 +278,22 @@ Spin-off streams the vet produced:
 - Row 7's drift triage classified the 20 MOVED overlays (6 no change, 10 cosmetic, 3 upstream gone, 1 substantive) and re-pinned kill-ai-slop to upstream f6e2ae3 (PR #1231, issue #1230).
 - Row 24's refresh: #894's first finalist, petergyang/no-ai-slop, measured SKIP on the prose fixture (PR #1240; incumbent 18.5 and 18.5 of 21 against 15.5 and 16.0, no false accusations on either). #894 closed with its items 7-19 deferred on trigger.
 - Hazard found while running row 24's arms: the Workflow tool hands every arm the triggering user message verbatim, and an imperative message makes general-purpose arms act on it instead of the stage prompt (memory `workflow-arms-execute-the-relayed-user-request`). Measurement arms ran through the Agent tool instead.
+
+## Correction, 2026-11-24
+
+C031 and the `no-comments`/Comment Sicko row above are corrected by
+`docs/vets/2026-11-24-no-comments-harness-vet.md`, which ran both on a full comment-cleanup
+task: fixture `harness/vet-fixtures/no-comments-2026-11/`, sonnet, 3 runs each.
+
+- The 09-18 finding still holds for flagging: both rule sets flag the same comment lines.
+- It does not hold for cleanup outcomes:
+
+  | Arm | Separating items (of 12) | Decision and keep-list facts lost (of 20) |
+  |---|---|---|
+  | `code-slop` | 6, 6, 8 | 0 |
+  | pstack `no-comments` with Comment Sicko | 8, 12, 10 | 14, 14, 13 |
+
+- The SKIP stands, but for a different reason. It is a countermetric finding (facts lost),
+  not "covered by code-slop".
+- `code-slop` is not a full cover either. On the same fixture it scored below the bare model
+  on fixing the bugs behind suppressions (median 6 against 8).

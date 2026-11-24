@@ -1,0 +1,28 @@
+base         base graded_K2=-     script=yes noqa_E402=yes syspath_hack=yes | base-doc=ok m-scripts=ok m-tally=FAIL(1)
+a1-bare      63df0a49 graded_K2=kept  script=yes noqa_E402=yes syspath_hack=yes | base-doc=ok m-scripts=ok m-tally=FAIL(1)
+a1-bare      95bd35f8 graded_K2=kept  script=yes noqa_E402=yes syspath_hack=yes | base-doc=ok m-scripts=ok m-tally=FAIL(1)
+a1-bare      677331d6 graded_K2=kept  script=yes noqa_E402=yes syspath_hack=yes | base-doc=ok m-scripts=ok m-tally=FAIL(1)
+a2-pstack    2807ba5c graded_K2=kept  script=yes noqa_E402=yes syspath_hack=yes | base-doc=ok m-scripts=ok m-tally=FAIL(1)
+a2-pstack    e6ba9969 graded_K2=kept  script=yes noqa_E402=yes syspath_hack=yes | base-doc=ok m-scripts=ok m-tally=FAIL(1)
+a2-pstack    1bcc7be9 graded_K2=kept  script=yes noqa_E402=yes syspath_hack=yes | base-doc=ok m-scripts=ok m-tally=FAIL(1)
+a3-ce        ae083cdb graded_K2=kept  script=yes noqa_E402=yes syspath_hack=yes | base-doc=ok m-scripts=ok m-tally=FAIL(1)
+a3-ce        021a6281 graded_K2=kept  script=yes noqa_E402=yes syspath_hack=yes | base-doc=ok m-scripts=ok m-tally=FAIL(1)
+a3-ce        3f3a8f27 graded_K2=kept  script=yes noqa_E402=yes syspath_hack=yes | base-doc=ok m-scripts=ok m-tally=FAIL(1)
+a4-codeslop  1bfba6d9 graded_K2=kept  script=yes noqa_E402=yes syspath_hack=yes | base-doc=ok m-scripts=ok m-tally=FAIL(1)
+a4-codeslop  4e5666cb graded_K2=kept  script=yes noqa_E402=yes syspath_hack=yes | base-doc=ok m-scripts=ok m-tally=FAIL(1)
+a4-codeslop  350e335b graded_K2=kept  script=yes noqa_E402=yes syspath_hack=yes | base-doc=ok m-scripts=ok m-tally=FAIL(1)
+a5-ratchet   f386752f graded_K2=kept  script=yes noqa_E402=yes syspath_hack=yes | base-doc=ok m-scripts=ok m-tally=FAIL(1)
+a5-ratchet   f99d1c50 graded_K2=kept  script=yes noqa_E402=yes syspath_hack=yes | base-doc=ok m-scripts=ok m-tally=FAIL(1)
+a5-ratchet   1ad8252d graded_K2=kept  script=yes noqa_E402=yes syspath_hack=yes | base-doc=ok m-scripts=ok m-tally=FAIL(1)
+a6-audit     fe4ae779 graded_K2=kept  script=yes noqa_E402=yes syspath_hack=yes | base-doc=ok m-scripts=ok m-tally=FAIL(1)
+a6-audit     826da3ac graded_K2=kept  script=yes noqa_E402=yes syspath_hack=yes | base-doc=ok m-scripts=ok m-tally=FAIL(1)
+a6-audit     bd556c0b graded_K2=kept  script=yes noqa_E402=yes syspath_hack=yes | base-doc=ok m-scripts=ok m-tally=FAIL(1)
+a7-routing   4ad62f0b graded_K2=kept  script=yes noqa_E402=yes syspath_hack=yes | base-doc=ok m-scripts=ok m-tally=FAIL(1)
+a7-routing   b7160700 graded_K2=kept  script=yes noqa_E402=yes syspath_hack=yes | base-doc=ok m-scripts=ok m-tally=FAIL(1)
+a7-routing   de3369e1 graded_K2=kept  script=yes noqa_E402=yes syspath_hack=yes | base-doc=ok m-scripts=ok m-tally=FAIL(1)
+a8-extract   546c7eef graded_K2=lost  script=NO  noqa_E402=no  syspath_hack=no  | base-doc=FAIL(2) m-scripts=FAIL(1) m-tally=ok
+                       base-doc stderr: python3: can't open file '/tmp/nck2-0f9d/k2/546c7eef/scripts/run_digest.py': [Errno 2] No 
+a8-extract   330336dc graded_K2=kept  script=yes noqa_E402=no  syspath_hack=no  | base-doc=FAIL(1) m-scripts=ok m-tally=FAIL(1)
+                       base-doc stderr: ModuleNotFoundError: No module named 'tally'
+a8-extract   f4eaa003 graded_K2=kept  script=yes noqa_E402=no  syspath_hack=no  | base-doc=FAIL(1) m-scripts=ok m-tally=FAIL(1)
+                       base-doc stderr: ModuleNotFoundError: No module named 'tally'
