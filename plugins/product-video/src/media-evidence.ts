@@ -146,6 +146,13 @@ export function cropImageToBand(image: string, band: FrameBand) {
 }
 
 /**
+ * One OpenMP thread per Tesseract call. On a busy host its default thread pool
+ * spins against other work: one evidence still ran past the 5-minute command
+ * timeout with two renders running, and passed in seconds with one thread.
+ */
+export const tesseractEnvironment = { OMP_THREAD_LIMIT: '1' } as const;
+
+/**
  * Tesseract reads a frame line by line, so text beside a caption lands on the
  * caption's own line and breaks a contiguous match. `bandFor` names the region
  * each image's text is drawn in; images without a band are read whole.
@@ -171,7 +178,7 @@ export function runOcr(
   const texts = images.map((image, index) => {
     const band = bandFor(image, index);
     const target = band ? cropImageToBand(image, band) : image;
-    return run('tesseract', [target, 'stdout']).trim();
+    return run('tesseract', [target, 'stdout'], tesseractEnvironment).trim();
   });
   return {
     reason: 'Tesseract ran on the labeled evidence samples',

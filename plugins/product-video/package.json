@@ -1,6 +1,6 @@
 {
   "name": "@startupbros/product-video",
-  "version": "0.2.4",
+  "version": "0.3.0",
   "description": "Agent-native product walkthrough videos: safe authenticated browser capture, telemetry-driven cursor and click overlays, Remotion composition, and verified H.264 render.",
   "license": "MIT",
   "type": "module",
@@ -20,6 +20,10 @@
     "narrated:studio": "tsx src/cli/narrated-studio.ts",
     "narrated:verify": "tsx src/cli/narrated-verify.ts",
     "narrated:voice": "tsx src/cli/narrated-voice.ts",
+    "recorded:prepare": "tsx src/cli/recorded-prepare.ts",
+    "recorded:render": "tsx src/cli/recorded-render.ts",
+    "recorded:smoke": "tsx src/cli/recorded-smoke.ts",
+    "recorded:verify": "tsx src/cli/recorded-verify.ts",
     "render": "tsx src/cli/render.ts",
     "studio": "remotion studio src/index.ts --no-open",
     "test": "tsx --test \"src/**/*.test.ts\"",

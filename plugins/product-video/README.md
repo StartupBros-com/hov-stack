@@ -131,3 +131,17 @@ Both commands write only ignored local artifacts. They do not attach to CDP, cap
 The fixture preparation command copies existing committed PRBot assets into the ignored `public/generated/` directory, so the repository does not carry duplicate image blobs.
 
 Narration can be operator-recorded or synthesized with `narrated:voice`, which needs `ELEVENLABS_API_KEY` and writes one local WAV. There is no publishing or upload path, and nothing clones a real person's voice.
+
+## RecordedTour
+
+`RecordedTour` cuts footage you already have (screen recordings, phone clips) into one MP4 with title cards, `device`, `full` and `split` layouts, plain-text captions and optional audio. Run from this directory:
+
+```bash
+pnpm recorded:prepare --plan /safe/local/plan.json
+pnpm recorded:render --manifest public/generated/recorded/<run-id>/resolved.v1.json
+pnpm recorded:verify --manifest public/generated/recorded/<run-id>/resolved.v1.json \
+  --input out/recorded/<run-id>/recorded-tour.mp4 --ocr required
+pnpm recorded:smoke   # neutral synthetic media end to end; --silent for no audio
+```
+
+Verification proves, by pixels, that each clip shows the source frame the plan says it does (SSIM at three points per clip, with a neighbour check), and reports static footage as "timing not proven". Nothing is captured, uploaded or published. Not in V1: picture-in-picture, a studio command, custom font files, music, sound effects, transitions beyond a hard cut. See `skills/product-video/references/workflow.md`.

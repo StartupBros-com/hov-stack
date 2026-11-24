@@ -2,12 +2,14 @@ import type { CalculateMetadataFunction } from 'remotion';
 import { Composition } from 'remotion';
 
 import narratedFixture from '../fixtures/narrated-browser-tour.json';
+import recordedFixture from '../fixtures/recorded-tour.json';
 import productTourFixture from '../fixtures/prbot-product-tour.json';
 import {
   NarratedBrowserTour,
   type NarratedBrowserTourProps,
 } from './NarratedBrowserTour';
 import { ProductTour, type ProductTourProps } from './ProductTour';
+import { RecordedTour, type RecordedTourProps } from './RecordedTour';
 import {
   type TourManifest,
   getTourDuration,
@@ -18,10 +20,16 @@ import {
   getNarratedDurationInFrames,
   parseNarratedResolvedManifest,
 } from './narrated-resolved-contracts';
+import {
+  type RecordedResolvedManifest,
+  parseRecordedResolvedManifest,
+} from './recorded-contracts';
 
 const defaultProductTourManifest = parseTourManifest(productTourFixture);
 export const defaultNarratedManifest =
   parseNarratedResolvedManifest(narratedFixture);
+export const defaultRecordedManifest =
+  parseRecordedResolvedManifest(recordedFixture);
 
 function getManifestCompositionId(value: unknown) {
   if (typeof value !== 'object' || value === null) {
@@ -82,6 +90,21 @@ export const calculateNarratedMetadata: CalculateMetadataFunction<
   };
 };
 
+export const calculateRecordedMetadata: CalculateMetadataFunction<
+  RecordedTourProps
+> = ({ props }) => {
+  const manifest = belongsToAnotherComposition(props.manifest, 'RecordedTour')
+    ? defaultRecordedManifest
+    : parseRecordedResolvedManifest(props.manifest);
+  return {
+    durationInFrames: manifest.durationFrames,
+    fps: manifest.canvas.fps,
+    height: manifest.canvas.height,
+    props: { manifest },
+    width: manifest.canvas.width,
+  };
+};
+
 export function RemotionRoot() {
   return (
     <>
@@ -106,6 +129,18 @@ export function RemotionRoot() {
         width={defaultNarratedManifest.project.viewport.width}
         height={defaultNarratedManifest.project.viewport.height}
         calculateMetadata={calculateNarratedMetadata}
+      />
+      <Composition
+        id={defaultRecordedManifest.compositionId}
+        component={RecordedTour}
+        defaultProps={{
+          manifest: defaultRecordedManifest as RecordedResolvedManifest,
+        }}
+        durationInFrames={defaultRecordedManifest.durationFrames}
+        fps={defaultRecordedManifest.canvas.fps}
+        width={defaultRecordedManifest.canvas.width}
+        height={defaultRecordedManifest.canvas.height}
+        calculateMetadata={calculateRecordedMetadata}
       />
     </>
   );
