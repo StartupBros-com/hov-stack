@@ -159,12 +159,14 @@ two removal lines took off every exclusion they name that was present (three
 programs and two folders). The last two lines ran without error and changed
 nothing, because the settings already held those values.
 
-A program that was already running while its name was excluded keeps the
-exemption after the removal. On that machine a browser and a small test
-program, both started before the removal, still opened an antivirus test file
-unseen afterwards (the longest check was almost five minutes later), while the
-same programs started after the removal were stopped within seconds. Close and
-reopen the programs on the list once their exclusions are gone.
+On that machine a program that was already running while its name was excluded
+stayed exempt after the removal. A browser and a small unsigned test program
+with the same file name, both started while `brave.exe` was excluded, still
+opened an antivirus test file unseen afterwards, the test program almost five
+minutes later. The same two programs started after the removal were stopped
+each time. Each case was seen between one and three times, with that one name,
+and longer waits were not tried. Close and reopen the programs on the list once
+their exclusions are gone.
 
 The other 13 rules are worth keeping. If one of them blocks something you need,
 event 1121 in the `Microsoft-Windows-Windows Defender/Operational` log names
