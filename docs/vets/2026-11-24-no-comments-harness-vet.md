@@ -32,14 +32,16 @@ dotfiles `docs/vets/`; here they are R1 to R12.
   - It scored 8, 12 and 10 on the separating items (bare: 8, 8, 8).
   - It lost 14, 14 and 13 of the 20 decision and keep-list facts (bare: 0, 0, 0), which is a
     finding against it under the pre-registered countermetric.
-  - It kept every keep-list item and deleted the decision comments: 14, 14 and 13 of 14.
+  - It kept every keep-list item and removed all 14 decision comments in every run. In one run
+    the code enforced or dissolved one of those facts, so 14, 14 and 13 were lost.
     Comment Sicko's keep-list covers licence headers, behaviour forced by an outside
     dependency, justified suppressions, API contract docs and issue links. A decision about our
     own code is not on it.
   - Its step that encodes a constraint before deleting it fires on comments that say "do not
     remove" or "talk to X". That wording appears in 1 of 834 labelled comments from the real
-    repos, and that one is a false match. Decisions are 472 of the 831 comment units those
-    repos added, so the loss would carry over.
+    repos, and that one is a false match. The 834 are the 831 units of the pooled table in 2.1
+    plus three narration (T) units that table leaves out. Decisions are 472 of the 831 comment
+    units those repos added, so the loss would carry over.
   - The 09-18 SKIP stands, but its reason changes from "covered" to this loss.
 - **No skill beat bare without losing facts.**
 
@@ -621,6 +623,24 @@ T2's `code-slop` stays as is.
 - Rollback: delete the workflow.
 - The 20 confirmed items from the pilot are in the private note. Filing them is the operator's
   call.
+
+**Vet-runner credential scrub (audit dividend 4), not attempted.**
+
+- Change: the `claude` call in each vet runner sets `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB`. That
+  strips credentials from the environment of the commands an arm runs, while the arm's own
+  model calls keep their route. It needs `bwrap`, which this host has.
+- Why: in 2 of 3 comment-ratchet runs, a CLI fetched by `uvx` at run time ran with
+  `ANTHROPIC_API_KEY` in its environment (2.6). The `pstack-2026-11`, `build-design-2026-11`
+  and `learn-taste-2026-11` runners keep the same variables.
+- Files: `run_arm.sh` in `harness/vet-fixtures/no-comments-2026-11/` and in those three
+  fixtures.
+- Provenance: a Claude Code 2.1.331 setting. No upstream code, no pin.
+- Update owner: hov-stack.
+- Rollback: revert that PR.
+- Deciding check: an arm command that reports whether `ANTHROPIC_API_KEY` is set must report
+  it unset under the changed runner, and the arm must still complete a model turn.
+- It changes how vet runs are isolated, so it waits for the operator's go. Rotating the key
+  that was exposed is a separate decision, also the operator's.
 
 ## 5. Shared versus target findings, prior notes, dropped hits
 
