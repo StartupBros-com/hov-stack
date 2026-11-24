@@ -50,3 +50,14 @@ OCR is a hook, not proof of editorial correctness. Read the contact sheet too.
 ## Final report
 
 A green report names every observed command and result. A skipped check is explicit. Do not infer that a video is correct from a green TypeScript build or a successful renderer exit.
+
+## RecordedTour checks
+
+`recorded:verify` checks the render against the resolved manifest and the normalized sources in `public/generated/recorded/<run-id>/`:
+
+- provenance: source and audio digests match the manifest;
+- H264, `yuv420p`, manifest dimensions, decoded frames equal to the manifest frame count, duration within tolerance, and a 48kHz audio stream;
+- frame match: at 20, 50 and 80 percent of every clip, the render's video rectangle must score at least the SSIM threshold against the source frame the plan says is shown there, and no neighbouring source frame (n-2 to n+2) may score more than 0.002 higher. Captions and a full-layout heading chip are blacked out in both images before comparing. Two cases cannot prove timing and are reported "timing not proven", with the scene not marked proven: the source itself barely changes between neighbours, or a neighbour that looks different in the source scores within 0.002 of the expected frame, so the render cannot tell them apart. A neighbour that is the same picture, such as a frame repeated by the frame-rate conversion, may tie;
+- required OCR (`--ocr required`) for every caption (read from the caption band crop) and every card title, with characters OCR cannot read, such as emoji, dropped from the expectation.
+
+A frame mismatch fails the run, and `VERIFY.md` is still written first so the numbers are readable. Existing evidence needs `--force`. Read the contact sheet as well: SSIM and OCR do not judge layout taste.

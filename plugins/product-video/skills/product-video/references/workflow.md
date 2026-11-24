@@ -67,3 +67,26 @@ Studio is an interactive local preview process only. Rendering writes only the r
 Run the package verification command and inspect its generated contact sheet before delivery. Follow [qa.md](qa.md). When the result is user-facing, run a fresh-context visual review of only the contact sheet, storyboard, and checklist so the reviewer is not biased by implementation history.
 
 For narrated runs, invoke `narrated:verify` with the same resolved manifest and its fixed owned MP4 path. Treat missing prerequisites, failed OCR, mismatched provenance, or a skipped required check as non-delivery.
+
+## RecordedTour (existing recordings)
+
+Use this when the footage already exists. Nothing is captured, no browser is attached and no narration is synthesized. All commands run from the plugin root (`plugins/product-video`).
+
+1. Author a plan JSON (`kind: recorded-plan`, `schemaVersion: 1`): a unique kebab-case `runId`, a `canvas` (even `width`/`height`, `fps` 24 to 60), `sources` (local `.mp4`, `.mov`, `.webm` or `.mkv`; a relative path resolves from the plan file's folder, an absolute one is used as is), optional `audio` tracks placed at `atMs`, `scenes`, and `captions`. A scene is either a `card` (title, optional eyebrow and lines) or a `clip` with a `layout` of `device`, `full` or `split`, a `primary` reference (`source`, `startMs`, integer `playbackRate` 1 to 8), a `secondary` reference only for `split`, and an optional heading. Total length is at most 10 minutes.
+2. Captions belong to clip scenes and use the primary source's clock, so a caption keeps its place when `startMs` or `playbackRate` changes. They must lie inside the scene's source window and must not overlap within a scene.
+3. Prepare, render and verify:
+
+   ```bash
+   pnpm recorded:prepare --plan /safe/local/plan.json
+   pnpm recorded:render --manifest public/generated/recorded/<run-id>/resolved.v1.json
+   pnpm recorded:verify \
+     --manifest public/generated/recorded/<run-id>/resolved.v1.json \
+     --input out/recorded/<run-id>/recorded-tour.mp4 \
+     --ocr required
+   ```
+
+   Prepare re-encodes each source to constant frame rate H264 so frame numbers are exact, converts audio to 48kHz WAV, and refuses a plan whose source window, audio or captions do not fit.
+
+4. `pnpm recorded:smoke` builds neutral synthetic media (burned-in frame numbers, a tone) and runs the whole path; `--silent` omits audio.
+
+Not supported in V1: picture-in-picture, a studio command, custom font files, music, sound effects, transitions beyond a hard cut.

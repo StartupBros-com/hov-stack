@@ -14,8 +14,9 @@ Produce product videos from source-traceable product material. A polished render
 2. **Narrated browser tour:** read [workflow.md](references/workflow.md), [capture.md](references/capture.md), and [qa.md](references/qa.md). Use `NarratedBrowserTour` V1 rather than modifying the legacy `ProductTour` composition.
 3. **Authenticated browser capture:** read [capture.md](references/capture.md) before opening or attaching to a browser.
 4. **Existing-video timing or composition edit:** preserve the accepted story and edit only the requested layer; then use [qa.md](references/qa.md).
-5. **Render or verification only:** use [qa.md](references/qa.md).
-6. **Music, external publishing, or third-party generation:** stop at the boundary in [effects.md](references/effects.md). Do not improvise credentials or publish. Narration is in scope — synthesize it with `narrated:voice` using the operator's own provider key, never by cloning a real person's voice without consent.
+5. **Recorded footage you already have (screen recordings, phone clips) cut into one video with title cards, captions and optional audio:** read the RecordedTour section of [workflow.md](references/workflow.md) and [qa.md](references/qa.md). Use `RecordedTour` V1; it never captures anything and never touches a browser.
+6. **Render or verification only:** use [qa.md](references/qa.md).
+7. **Music, external publishing, or third-party generation:** stop at the boundary in [effects.md](references/effects.md). Do not improvise credentials or publish. Narration is in scope — synthesize it with `narrated:voice` using the operator's own provider key, never by cloning a real person's voice without consent.
 
 ## Non-negotiable boundaries
 
@@ -41,6 +42,10 @@ pnpm narrated:prepare --help
 pnpm narrated:studio --help
 pnpm narrated:render --help
 pnpm narrated:verify --help
+pnpm recorded:prepare --help
+pnpm recorded:render --help
+pnpm recorded:verify --help
+pnpm recorded:smoke --help
 ```
 
 Scripts are black boxes: use `--help` before reading their source. The legacy fixture smoke path is `test:render`. The narrated local-only synthetic smoke path is:
@@ -65,3 +70,18 @@ A delivered narrated render includes:
 - confirmation that no upload or publishing occurred unless it was explicitly requested and separately authorized.
 
 `public/generated/narrated/<run-id>/` and `out/narrated/<run-id>/` are local, ignored, run-owned artifact roots. Do not repoint a run to a different capture or overwrite outputs outside those roots.
+
+## RecordedTour completion contract
+
+`RecordedTour` V1 cuts local recordings into one MP4 with title and closing cards, three clip layouts (`device`, `full`, `split`), plain-text captions and optional audio tracks. Run `recorded:prepare --plan <plan.json>`, then `recorded:render --manifest <resolved.v1.json>`, then `recorded:verify --manifest ... --input ... --ocr required`, all from the plugin root (`plugins/product-video`). `recorded:smoke` runs the whole path on generated neutral media.
+
+A delivered recorded render includes:
+
+- the run ID, MP4 path, actual duration, and resolved manifest path;
+- FFprobe evidence for H264, dimensions, `yuv420p`, decoded frame count, duration and a 48kHz audio stream (silent when the plan has no audio);
+- the frame-match table: for every clip, SSIM against the exact source frame the plan says is shown at 20, 50 and 80 percent, and whether timing is proven for that scene. Static footage is reported as "timing not proven", never as a pass;
+- required OCR status for every caption and card title, plus the contact sheet;
+- any skipped or non-pass check and its concrete reason;
+- confirmation that no upload or publishing occurred.
+
+Out of scope for V1, so do not promise them: picture-in-picture, a studio command, custom font files, music, sound effects, and transitions beyond a hard cut. `public/generated/recorded/<run-id>/` and `out/recorded/<run-id>/` are local, ignored, run-owned roots.

@@ -4,9 +4,13 @@ export function runCommand(
   command: string,
   arguments_: string[],
   timeoutMs: number,
+  extraEnvironment: Readonly<Record<string, string>> = {},
 ) {
   const result = spawnSync(command, arguments_, {
     encoding: 'utf8',
+    ...(Object.keys(extraEnvironment).length > 0
+      ? { env: { ...process.env, ...extraEnvironment } }
+      : {}),
     maxBuffer: 20 * 1024 * 1024,
     timeout: timeoutMs,
   });

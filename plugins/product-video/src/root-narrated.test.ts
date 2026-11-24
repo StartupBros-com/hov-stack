@@ -50,3 +50,82 @@ test('Studio isolates global CLI props between compositions', async () => {
     getNarratedDurationInFrames(defaultNarratedManifest),
   );
 });
+
+test('Studio falls back for props that belong to a third composition', async () => {
+  const productTourManifest = parseTourManifest(productTourFixture);
+  const foreign = { compositionId: 'RecordedTour' };
+  const productMetadata = await calculateProductTourMetadata({
+    props: { manifest: foreign },
+  } as unknown as Parameters<typeof calculateProductTourMetadata>[0]);
+  assert.equal(
+    productMetadata.durationInFrames,
+    getTourDuration(productTourManifest),
+  );
+  const narratedMetadata = await calculateNarratedMetadata({
+    props: { manifest: foreign },
+  } as unknown as Parameters<typeof calculateNarratedMetadata>[0]);
+  assert.equal(
+    narratedMetadata.durationInFrames,
+    getNarratedDurationInFrames(defaultNarratedManifest),
+  );
+});
+
+test('A manifest naming no known composition still fails to parse', async () => {
+  await assert.rejects(async () =>
+    calculateProductTourMetadata({
+      props: { manifest: { compositionId: 'SomethingElse' } },
+    } as unknown as Parameters<typeof calculateProductTourMetadata>[0]),
+  );
+  await assert.rejects(async () =>
+    calculateNarratedMetadata({
+      props: { manifest: {} },
+    } as unknown as Parameters<typeof calculateNarratedMetadata>[0]),
+  );
+});
+
+test('RecordedTour registers independently and isolates every pair of compositions', async () => {
+  const { calculateRecordedMetadata, defaultRecordedManifest } =
+    await import('./Root');
+  assert.equal(defaultRecordedManifest.compositionId, 'RecordedTour');
+  const productTourManifest = parseTourManifest(productTourFixture);
+  const recordedFrames = defaultRecordedManifest.durationFrames;
+  const run = async (manifest: unknown) =>
+    calculateRecordedMetadata({
+      props: { manifest },
+    } as unknown as Parameters<typeof calculateRecordedMetadata>[0]);
+
+  const own = await run(defaultRecordedManifest);
+  assert.equal(own.durationInFrames, recordedFrames);
+  assert.equal(own.fps, defaultRecordedManifest.canvas.fps);
+  assert.equal(own.width, defaultRecordedManifest.canvas.width);
+
+  // Props that belong to the other two compositions fall back to the recorded default.
+  assert.equal(
+    (await run(defaultNarratedManifest)).durationInFrames,
+    recordedFrames,
+  );
+  assert.equal(
+    (await run(productTourManifest)).durationInFrames,
+    recordedFrames,
+  );
+
+  // And the other two ignore recorded props.
+  const foreign = defaultRecordedManifest;
+  const productMetadata = await calculateProductTourMetadata({
+    props: { manifest: foreign },
+  } as unknown as Parameters<typeof calculateProductTourMetadata>[0]);
+  assert.equal(
+    productMetadata.durationInFrames,
+    getTourDuration(productTourManifest),
+  );
+  const narratedMetadata = await calculateNarratedMetadata({
+    props: { manifest: foreign },
+  } as unknown as Parameters<typeof calculateNarratedMetadata>[0]);
+  assert.equal(
+    narratedMetadata.durationInFrames,
+    getNarratedDurationInFrames(defaultNarratedManifest),
+  );
+
+  await assert.rejects(() => run({ compositionId: 'SomethingElse' }));
+  await assert.rejects(() => run({}));
+});

@@ -132,3 +132,72 @@ test('legacy verification retains its stdout wrapper and two-minute timeout', ()
     /return \{ stdout: runCommand\(command, arguments_, 2 \* 60 \* 1000\) \};/,
   );
 });
+
+test('extra environment variables reach the child on top of the inherited ones', (context) => {
+  const result: SpawnSyncReturns<string> = {
+    pid: 0,
+    output: [],
+    signal: null,
+    status: 0,
+    stdout: 'ok',
+    stderr: '',
+  };
+  const spawn = context.mock.method(childProcess, 'spawnSync', () => result);
+  syncBuiltinESMExports();
+  try {
+    assert.equal(
+      runNarratedCommand('fake', [], { OMP_THREAD_LIMIT: '1' }),
+      'ok',
+    );
+    const options = spawn.mock.calls[0]!.arguments[2] as {
+      env?: Record<string, string | undefined>;
+      timeout?: number;
+    };
+    // Compare single keys: a deepEqual failure would print the whole environment.
+    assert.equal(options.env?.OMP_THREAD_LIMIT, '1');
+    assert.equal(options.env?.PATH, process.env.PATH);
+    assert.equal(options.timeout, 300_000);
+  } finally {
+    spawn.mock.restore();
+    syncBuiltinESMExports();
+  }
+});
+
+test('runOcr runs Tesseract with one OpenMP thread', async (context) => {
+  const calls: { command: string; env?: Record<string, string | undefined> }[] =
+    [];
+  const spawn = context.mock.method(
+    childProcess,
+    'spawnSync',
+    (
+      command: string,
+      _arguments: string[],
+      options?: { env?: Record<string, string> },
+    ) => {
+      calls.push({ command, ...(options?.env ? { env: options.env } : {}) });
+      return {
+        pid: 0,
+        output: [],
+        signal: null,
+        status: 0,
+        stdout: command === 'tesseract' ? 'Caption text\n' : '',
+        stderr: '',
+      } satisfies SpawnSyncReturns<string>;
+    },
+  );
+  syncBuiltinESMExports();
+  try {
+    const { runOcr } = await import('./media-evidence');
+    const ocr = runOcr(['/nonexistent/frame.png'], 'required', () => undefined);
+    assert.equal(ocr.status, 'ran');
+    assert.deepEqual(ocr.texts, ['Caption text']);
+    const tesseract = calls.filter(
+      (call) => call.command === 'tesseract' && call.env,
+    );
+    assert.equal(tesseract.length, 1);
+    assert.equal(tesseract[0]!.env?.OMP_THREAD_LIMIT, '1');
+  } finally {
+    spawn.mock.restore();
+    syncBuiltinESMExports();
+  }
+});

@@ -1,0 +1,69 @@
+{
+  "schemaVersion": 1,
+  "compositionId": "RecordedTour",
+  "runId": "synthetic-recorded-demo",
+  "planSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+  "canvas": { "width": 1280, "height": 720, "fps": 30 },
+  "theme": {
+    "background": "#0b1020",
+    "surface": "#151c2e",
+    "foreground": "#f5f7fb",
+    "muted": "#9aa4b8",
+    "accent": "#7c9cff",
+    "captionBackground": "#0b1020",
+    "captionForeground": "#ffffff"
+  },
+  "durationFrames": 240,
+  "durationMs": 8000,
+  "sources": [
+    {
+      "id": "device",
+      "label": "Device",
+      "asset": "generated/recorded/synthetic-recorded-demo/source-device.mp4",
+      "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+      "originalSha256": "2222222222222222222222222222222222222222222222222222222222222222",
+      "width": 640,
+      "height": 360,
+      "frameCount": 360,
+      "durationMs": 12000
+    }
+  ],
+  "audio": [],
+  "scenes": [
+    {
+      "kind": "card",
+      "id": "title",
+      "fromFrame": 0,
+      "durationFrames": 60,
+      "eyebrow": "Synthetic demo",
+      "title": "Recorded tour",
+      "lines": ["Any local recording, framed and captioned."]
+    },
+    {
+      "kind": "clip",
+      "id": "clip",
+      "layout": "device",
+      "fromFrame": 60,
+      "durationFrames": 120,
+      "heading": "One recording",
+      "primary": { "source": "device", "startFrame": 0, "playbackRate": 1 }
+    },
+    {
+      "kind": "card",
+      "id": "close",
+      "fromFrame": 180,
+      "durationFrames": 60,
+      "title": "Closing",
+      "lines": ["Rendered and verified locally."]
+    }
+  ],
+  "captions": [
+    {
+      "id": "clip-caption",
+      "scene": "clip",
+      "startMs": 2500,
+      "endMs": 5500,
+      "text": "A caption on the recording."
+    }
+  ]
+}

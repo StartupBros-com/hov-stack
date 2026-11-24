@@ -285,7 +285,10 @@ async function assertMissingFile(filePath: string) {
   throw new Error(`Preparation output already exists: ${filePath}`);
 }
 
-async function normalizeNarrationAudio(inputPath: string, outputPath: string) {
+export async function normalizeNarrationAudio(
+  inputPath: string,
+  outputPath: string,
+) {
   await assertMissingFile(outputPath);
   const temporaryPath = path.join(
     path.dirname(outputPath),

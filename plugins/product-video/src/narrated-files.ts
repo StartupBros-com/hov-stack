@@ -48,7 +48,7 @@ export type NarratedRenderPaths = {
   snapshotDirectory: string;
 };
 
-function isPathWithin(root: string, candidate: string) {
+export function isPathWithin(root: string, candidate: string) {
   const relative = path.relative(root, candidate);
   return (
     relative === '' ||
@@ -90,7 +90,7 @@ async function assertNotSymbolicLink(targetPath: string) {
   return details;
 }
 
-async function assertNoSymlinkAncestors(root: string, target: string) {
+export async function assertNoSymlinkAncestors(root: string, target: string) {
   const resolvedRoot = path.resolve(root);
   const resolvedTarget = path.resolve(target);
   if (!isPathWithin(resolvedRoot, resolvedTarget)) {
@@ -117,7 +117,7 @@ async function assertNoSymlinkAncestors(root: string, target: string) {
   }
 }
 
-async function ensureSafeDirectory(
+export async function ensureSafeDirectory(
   directory: string,
   mode: number,
   enforceMode = false,
