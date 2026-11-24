@@ -365,7 +365,8 @@ export function classifyFrameMatch({
   const immediateProof = [-1, 1].every(
     (offset) =>
       sourceNeighbours.some(
-        (neighbour) => neighbour.offset === offset && neighbour.changedPixels > 0,
+        (neighbour) =>
+          neighbour.offset === offset && neighbour.changedPixels > 0,
       ) &&
       differing.some(
         (neighbour) =>
