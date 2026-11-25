@@ -168,14 +168,6 @@ case $_hn_arm in
       esac
     fi
     ;;
-  */PreToolUse/codex-quota-guard.js)
-    # Retired with its file (hov-stack#882). A session that started before the
-    # merge still runs the old registration; drain stdin and allow, as the
-    # loop-guard arm does, instead of failing on a missing module. Delete this
-    # arm once no session predating the merge can still be running.
-    command -v cat >/dev/null 2>&1 && command exec cat >/dev/null 2>&1
-    exit 0
-    ;;
   */PreToolUse/runner-guard.js)
     if _hn_read; then
       case $_hn_buf in

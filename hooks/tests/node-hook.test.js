@@ -188,22 +188,6 @@ test('gate: only the loop-guard script is gated; any other script starts node (c
   } finally { rmTmp(base); }
 });
 
-test('retired quota hook: a stale registration quietly allows a Bash payload', () => {
-  const base = mkTmp('node-hook-retired-');
-  try {
-    const preToolUse = path.join(base, 'PreToolUse');
-    fs.mkdirSync(preToolUse);
-    const hook = path.join(preToolUse, 'codex-quota-guard.js');
-    assert.strictEqual(fs.existsSync(hook), false);
-    const r = launch(`${path.dirname(process.execPath)}:/usr/bin:/bin`, [hook], {
-      input: JSON.stringify({ tool_name: 'Bash', tool_input: { command: 'echo "codex exec"' } }),
-    });
-    assert.strictEqual(r.status, 0, r.stderr);
-    assert.strictEqual(r.stdout, '');
-    assert.strictEqual(r.stderr, '');
-  } finally { rmTmp(base); }
-});
-
 test('the launcher never stats /mnt entries (a drvfs lookup is ~2 ms each)', () => {
   const src = fs.readFileSync(LAUNCHER, 'utf8');
   // The case arm that skips them must precede the only file test in the loop.
