@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """session_consult.py <claude-projects-dir> [--days N] [--sample N] - how often does a code-editing session
 look at a record of "why" before its first edit? Prints counts only, unless --sample is given.
+session_consult.py --self-test checks the classifier on the command shapes listed at the end of this file.
 
 Unit: one top-level Claude Code session transcript modified in the last N days (default 30) that made at
 least one Edit, Write or NotebookEdit to a file outside the agent's own config, job and temp directories.
@@ -19,6 +20,10 @@ Classes, per session, each "at least one such command":
                searches)
   docs_read    a Read of a file under one of those folders, or a cat, head, tail, sed, less or bat of one
 
+A Bash call is split into its simple commands (at ; && || | and newlines outside quotes) and each one is
+classified, so a second git command on the same line counts. A subagent's edit does not end the "before
+first edit" window; only the session's own edit does.
+
 A hit is a command that looked, not proof that the reason was found. --sample N prints up to N matched
 commands per class for a read by eye; that output can name private paths, so it is not for committing.
 """
@@ -31,21 +36,26 @@ import re
 import time
 
 ap = argparse.ArgumentParser()
-ap.add_argument("root")
+ap.add_argument("root", nargs="?")
 ap.add_argument("--days", type=int, default=30)
 ap.add_argument("--sample", type=int, default=0)
+ap.add_argument("--self-test", action="store_true")
 opt = ap.parse_args()
+if not opt.self_test and not opt.root:
+    ap.error("a projects directory or --self-test is required")
 
-now = time.time()
-files = sorted(p for p in glob.glob(os.path.join(opt.root, "*", "*.jsonl"))
-               if now - os.path.getmtime(p) < opt.days * 86400)
 SKIP_EDIT = ("/.claude/projects/", "/.claude/jobs/", "/tmp/", "/memory/", "/.claude/deliverables/")
-GIT = re.compile(r"\bgit\b(?:\s+-C\s+\S+|\s+--no-pager|\s+-c\s+\S+)*\s+(log|show|blame)\b([^\n]*)")
+# Where a command can start: the head of a simple command (after shell keywords, env assignments and a few
+# wrappers) or the head of a command substitution. "git log" inside an echo label or a commit message is not one.
+# Every prefix token ends in required whitespace, so the pattern cannot backtrack inside a token.
+HEAD = (r"(?:^\s*(?:(?:[A-Za-z_]\w*=\S*|timeout\s+\S+|xargs(?:\s+-\S+)*|if|elif|while|until|do|then|else|time|command)\s+"
+        r"|[!{(]\s*)*|\$\(\s*|`\s*)")
+GIT = re.compile(HEAD + r"git\b(?:\s+-C\s+\S+|\s+--no-pager|\s+-c\s+\S+)*\s+(log|show|blame)\b([^\n]*)")
 CUT = re.compile(r"\s(?:&&|\|\||;|\|)\s")
 FMT = re.compile(r"--(?:format|pretty)(?:=|\s+)(?:'([^']*)'|\"([^\"]*)\"|(\S*))")
-REVPATH = re.compile(r"\s(?!-)[^\s:'\"=]+:[^\s:]+")
-GH = re.compile(r"\bgh\s+(?:pr|issue)\s+view\b([^\n]*)")
-CASS = re.compile(r"(?:^|[\s;&|(])cass(?:-vec|-rerank-local)?\s+(?:search|view|pack)\b([^\n]{0,150})")
+REVPATH = re.compile(r"\s[\"']?(?!-)[^\s:'\"=]+:[^\s:]+")
+GH = re.compile(HEAD + r"gh\s+(?:pr|issue)\s+view\b([^\n]*)")
+CASS = re.compile(HEAD + r"cass(?:-vec|-rerank-local)?\s+(?:search|view|pack)\b([^\n]{0,150})")
 DOCS = ("docs/solutions", "docs/decisions", "docs/adr", "docs/ADR")
 DOCFILE = re.compile(r"docs/(?:solutions|decisions|adr|ADR)/\S*\.md")
 SHOWS = re.compile(r"\b(?:cat|head|tail|sed|less|bat)\b[^|;&\n]*docs/(?:solutions|decisions|adr|ADR)/\S*\.md")
@@ -53,10 +63,53 @@ CLASSES = ("git_any", "git_body", "git_titles", "pr_text", "cass", "docs_named",
 WHY = ("git_body", "pr_text", "cass", "docs_read")
 
 
+def simple_commands(cmd):
+    """Split a shell command at ; && || | and newlines that sit outside quotes."""
+    parts, buf, quote, i = [], [], None, 0
+    while i < len(cmd):
+        ch = cmd[i]
+        if quote:
+            buf.append(ch)
+            if ch == quote:
+                quote = None
+        elif ch in "'\"":
+            quote = ch
+            buf.append(ch)
+        elif ch == "\\" and i + 1 < len(cmd):
+            buf.append(cmd[i:i + 2])
+            i += 1
+        elif ch in ";|\n" or cmd.startswith("&&", i):
+            parts.append("".join(buf))
+            buf = []
+            if cmd.startswith(("&&", "||"), i):
+                i += 1
+        else:
+            buf.append(ch)
+        i += 1
+    parts.append("".join(buf))
+    return [part for part in parts if part.strip()]
+
+
 def classify(name, inp):
     """Return [(class, matched text)] for one tool call."""
     out = []
-    cmd = str(inp.get("command") or "") if name == "Bash" else ""
+    if name == "Bash":
+        whole = str(inp.get("command") or "")
+        if any(word in whole for word in ("git", "gh ", "cass", "docs/")):
+            for cmd in simple_commands(whole):
+                if any(word in cmd for word in ("git", "gh ", "cass", "docs/")):
+                    out.extend(classify_command(cmd))
+    blob = json.dumps(inp)
+    if any(d in blob for d in DOCS):
+        out.append(("docs_named", f"{name}: {blob[:160]}"))
+    if name == "Read" and DOCFILE.search(str(inp.get("file_path") or "")):
+        out.append(("docs_read", f"Read: {inp.get('file_path')}"))
+    return out
+
+
+def classify_command(cmd):
+    """Return [(class, matched text)] for one simple shell command."""
+    out = []
     for m in GIT.finditer(cmd):
         sub, rest = m.group(1), CUT.split(m.group(2), maxsplit=1)[0]
         text = f"git {sub}{rest}"
@@ -81,13 +134,8 @@ def classify(name, inp):
     for m in CASS.finditer(cmd):
         if "--help" not in m.group(1):
             out.append(("cass", "cass" + m.group(0).split("cass", 1)[1]))
-    if cmd and SHOWS.search(cmd):
+    if SHOWS.search(cmd):
         out.append(("docs_read", SHOWS.search(cmd).group(0)))
-    blob = json.dumps(inp)
-    if any(d in blob for d in DOCS):
-        out.append(("docs_named", f"{name}: {blob[:160]}"))
-    if name == "Read" and DOCFILE.search(str(inp.get("file_path") or "")):
-        out.append(("docs_read", f"Read: {inp.get('file_path')}"))
     return out
 
 
@@ -112,6 +160,46 @@ def tool_calls(path, sidechain):
                     yield str(rec.get("timestamp") or ""), block.get("name"), block.get("input") or {}
 
 
+SHAPES = [
+    ("git log --oneline -5 && git show --stat HEAD", {"git_any", "git_titles", "git_body"}),
+    ("git show --stat abc; git log --oneline -3", {"git_any", "git_titles", "git_body"}),
+    ("git log --format='%h | %s' -3", {"git_any", "git_titles"}),
+    ("git log --format='%h %s%n%b' -- a.json", {"git_any", "git_body"}),
+    ("git show main:docs/a.md", {"git_any"}),
+    ('git show "origin/main:$f"', {"git_any"}),
+    ("git log --oneline -1; gh pr view 12 --json body --jq .body", {"git_any", "git_titles", "pr_text"}),
+    ("cd x && git -C y log -3", {"git_any", "git_body"}),
+    ("git log --name-only --format= -3", {"git_any", "git_titles"}),
+    ('echo hi | cass search "foo bar" --limit 3', {"cass"}),
+    ("echo '--- git log NVDA ---'; git log --oneline -3 -- NVDA", {"git_any", "git_titles"}),
+    ('echo "git log since 10-25 touching stock path"', set()),
+    ('git commit -m "use git show to read it"', set()),
+    ('for c in $(git log --format=%h -5); do git show "$c"; done', {"git_any", "git_titles", "git_body"}),
+    ('echo "$(git log -1 --format=%B)"', {"git_any", "git_body"}),
+    ("GIT_PAGER=cat git log -3", {"git_any", "git_body"}),
+    ("if git show --stat HEAD > /dev/null; then echo y; fi", {"git_any", "git_body"}),
+    ("timeout 60 cass search 'x y' --limit 8 --robot", {"cass"}),
+    ("CASS_AUTO_REFRESH=0 timeout 120 cass search foo", {"cass"}),
+    ("URL=https://x.test/?" + "&".join(f"k{i}=v{i}" for i in range(60)) + " curl -s x", set()),
+    ("command -v cass && cass --help", set()),
+    ('papercut add -m "gh pr view picks the wrong remote"', set()),
+    ("gh issue view 12 --json title,state", set()),
+    ("gh pr view 12 --comments", {"pr_text"}),
+    ("sed -n 1,60p docs/decisions/010-policy.md", {"docs_named", "docs_read"}),
+    ("ls docs/solutions", {"docs_named"}),
+]
+if opt.self_test:
+    wrong = 0
+    for shape, want in SHAPES:
+        got = {cls for cls, _ in classify("Bash", {"command": shape})}
+        wrong += got != want
+        print("ok " if got == want else "BAD", shape, "->", sorted(got))
+    print(f"{len(SHAPES) - wrong} of {len(SHAPES)} shapes classified as expected")
+    raise SystemExit(1 if wrong else 0)
+
+now = time.time()
+files = sorted(p for p in glob.glob(os.path.join(opt.root, "*", "*.jsonl"))
+               if now - os.path.getmtime(p) < opt.days * 86400)
 tot = collections.Counter()
 samples = collections.defaultdict(list)
 for path in files:

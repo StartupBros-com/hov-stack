@@ -887,27 +887,33 @@ sessions in the last 30 days edited code. Before their first edit:
 
 | Looked at | The session itself | Counting its subagents |
 |---|---|---|
-| any `git log`, `git show` or `git blame` | 218 | 232 |
-| commit titles only (`--oneline`, or a format with no body) | 182 | 163 |
-| a commit message body | 33 | 67 |
-| the body or comments of a pull request or issue | 123 | 151 |
+| any `git log`, `git show` or `git blame` | 217 | 231 |
+| commit titles only (`--oneline`, or a format with no body) | 180 | 155 |
+| a commit message body | 34 | 73 |
+| the body or comments of a pull request or issue | 124 | 152 |
 | the session index (`cass`) | 46 | 82 |
 | a file under `docs/solutions`, `docs/decisions` or `docs/adr`, opened | 25 | 59 |
-| at least one of the last four | 168 | 203 |
+| at least one of the last four | 169 | 203 |
 
 (`placement/session_consult.py`, output in `results/session-consult.txt`.)
 
 - History commands are common here, but most print titles for orientation. A commit message
-  was printed before the first edit in 67 of 279 sessions (24%), about half of them by a
-  subagent, whose reading reaches the session only through its report. The bare result (0 of
-  27) is the floor, not the picture of this harness. Even so, a reason written only in a
+  was printed before the first edit in 73 of 279 sessions (26%), about half of them only by
+  a subagent, whose reading reaches the session only through its report. The bare result (0
+  of 27) is the floor, not the picture of this harness. Even so, a reason written only in a
   commit body is not read before about three edits in four.
-- Pull-request or issue text was read in 151. The count does not separate a session's own
+- Pull-request or issue text was read in 152. The count does not separate a session's own
   task issue from the history of the code it was about to change.
-- These count commands that looked, not reasons that were found. A sample of first hits per
-  class was read by eye, from the sessions' own commands: commit bodies 20 of 20 correct,
-  titles 15 of 15, `cass` 20 of 20, docs opened 20 of 20, pull-request text 33 of 35.
-- A session that changes code only through shell commands is not counted as editing.
+- These count commands that looked, not reasons that were found. Precision: 30 first hits per
+  class were read by eye, from the sessions' own commands. Commit bodies 30 of 30 correct,
+  titles 30 of 30, `cass` 30 of 30, docs opened 30 of 30, pull-request text 28 of 30.
+- Recall: every command on a line is classified, and the script's `--self-test` holds the
+  shapes that were checked (26 of 26). A git command run from inside a script file is not
+  seen, and worktree sessions here are told to put multi-step shell work in script files, so
+  the counts are lower bounds.
+- A session that changes code only through shell commands is not counted as editing. A
+  subagent's edit does not end the "before first edit" window, so for a session that delegates
+  the change itself the subagent column runs long.
 
 ### 7.4 Published evidence
 
@@ -972,7 +978,7 @@ Two things about how row 12 changed:
 | What the code does and how | the code | `none` kept 14 of 15 (7.2); restated descriptions add nothing (2609.31587) |
 | A rule that can be checked | a test or lint check, reason in its name or docstring | checks beat prose (2603.00822); 22 of 36 audited comments already have one |
 | A constraint the code cannot show and no test catches, at a line where the obvious edit is wrong | one short comment at that line | the 3-of-36 class in 7.1. It sits on the line being edited. `claudemd` and the pointed-to doc also reached the agent in 7.2, so the case for the comment is locality, not reach: a per-line constraint in a repo-wide file loads on every task |
-| Why a change was made, what was tried | commit and pull request text | where it already is for 26 of 36, fully or partly. An archive, not a guard: a commit message was read before the first edit in 67 of 279 sessions and pull-request or issue text in 151 (7.3) |
+| Why a change was made, what was tried | commit and pull request text | where it already is for 26 of 36, fully or partly. An archive, not a guard: a commit message was read before the first edit in 73 of 279 sessions and pull-request or issue text in 152, subagents counted (7.3) |
 | A repo-wide rule | a short instruction file, or a decisions doc with a pointer | followed when loaded (6 of 6), also when stale (2611.09802) |
 | Session transcripts | a search aid, not the record | local to one machine and deleted on a timer; 2609.23570 |
 
@@ -1012,7 +1018,8 @@ such as the diff a session produced. Only the lane table was read, not the whole
 - Conflict tasks ran on Sonnet only.
 - No arm tested session transcripts as the record. `history` was commit bodies.
 - The session counts in 7.3 match commands by pattern. A sample of each class was read by eye,
-  not every hit, and the subagents' commands were not sampled separately.
+  not every hit, and the subagents' commands were not sampled separately. Commands inside
+  script files are invisible to it.
 - A partial table (43 of 177 runs) was printed while the grader was being tested. The rules
   were frozen before launch and nothing was changed after that look.
 - The literature is mostly 2026 preprints on small benchmarks.

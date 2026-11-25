@@ -50,7 +50,7 @@ fixture's `run_arm.sh`: bare Claude Code, empty environment, no user `CLAUDE.md`
   sessions looked at commit titles, commit message bodies, pull-request or issue text, the
   session index or a decisions doc before their first edit. Each count is given for the
   session's own commands and with its subagents' commands added. It prints counts only,
-  unless `--sample` is given.
+  unless `--sample` is given. `--self-test` checks the classifier on 26 command shapes.
 
 ## Running it
 
