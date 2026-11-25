@@ -26,8 +26,16 @@ remedy is writing commands in verifiable shapes.
 
 ## Quick rules (full text; `CLAUDE.md` Global Rules carries the short form)
 
-The always-loaded file keeps one line ("put multi-step work in a script file and
-run `bash <file>`") and points here for the rest:
+The always-loaded file keeps one line ("write plain, separate commands; `bash <file>`
+for a refused shape") and points here for the rest:
+
+- Commit, push and open a PR as plain commands, one each, in another repo too. On CC
+  2.1.332 (2026-11-25), a hov-stack worktree session ran these against a dotfiles
+  worktree with no refusal: `git -C <that worktree> add <paths>`,
+  `git -C <that worktree> commit -F <file>`, `git -C <that worktree> push -u origin
+  <branch>`, and `gh pr create --repo <owner/name> --head <branch> --body-file <file>`.
+  The check guards the session's own repo's shared checkout (the `-C` and `cd`
+  refusals below).
 
 - Shell scratch lives in `/tmp/<unique-dir>/`: point redirects (`>`, `2>`) and
   scratch deletion there, and start a fresh uniquely-named dir instead of
@@ -942,8 +950,10 @@ What the official docs and issue tracker add on top of the probes:
    hold in any release (unresolved, non-`/tmp`, a loop over words read at run time,
    `$HOME` targets). The literal-word-loop and `2> file` refusals are 0.15.3 limits,
    left unpinned so a release that lifts them can still be promoted.
-6. **Anything genuinely multi-step → put it in a script file and run the file.** A script's
-   own loops, `$( )` and redirects are never parsed; only the invoking command is
+6. **Anything genuinely multi-step → put it in a script file and run the file.** Commit,
+   push and `gh pr create` stay plain commands, one each (Quick rules): in the week to
+   2026-11-25, 174 of 289 PR-opening script files had no refused command before them.
+   A script's own loops, `$( )` and redirects are never parsed; only the invoking command is
    (`bash /abs/path/runner.sh` — verified PASS, and how the 52-suite local test run in this
    PR was executed).
    Be honest about what that is: **the verifier does not inspect script contents**, so this

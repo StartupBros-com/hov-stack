@@ -9,7 +9,7 @@
 - Never write paired bounded regex spans; use `rg -F` with literal anchors.
 - Friction you just worked around (misleading error, undocumented step, silently wrong output): `papercut add -m "..."`, then carry on. Hard tool failures are auto-logged; duplicates are wanted.
 - Shell scratch, redirects and scratch deletion go in a fresh `/tmp/<unique-dir>/`; `$CLAUDE_JOB_DIR/tmp` takes Write-tool files only, since dcg guards `$HOME`.
-- Worktree sessions are shape-checked: put multi-step work in a script file and run `bash <file>`. Refused: `$( )` or backticks in argument position, `${VAR:-}` modifiers, loop variables, unquoted heredoc delimiters (use `<<'EOF'`), package-manager script operands (`pnpm typecheck`, `npx tsc`), a bare `hash` token anywhere in the argv, and a `bash -c` string. Table: `harness/worktree-command-shapes.md`.
+- Worktree sessions are shape-checked: write plain, separate commands; `bash <file>` for a refused shape. Refused: `$( )` or backticks in argument position, `${VAR:-}` modifiers, loop variables, unquoted heredoc delimiters (use `<<'EOF'`), package-manager script operands (`pnpm typecheck`, `npx tsc`), a bare `hash` token anywhere, and a `bash -c` string. Table: `harness/worktree-command-shapes.md`.
 - Memory frontmatter: double-quote a `description:` containing `#`, or YAML truncates it.
 - A file the operator reads (report, explainer) goes in `<repo>/.claude/deliverables/<skill>/` (`~/.claude/deliverables/<skill>/` for a background job that hasn't entered a worktree), shown with `open-deliverable <path>`; Artifact only on request or for a deck or doc for others. Tiers: `harness/deliverable-locations.md`.
 

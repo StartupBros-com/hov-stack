@@ -125,6 +125,21 @@ Fix sessions retain `CLAUDE_LOOP_GUARD=1`; its authority fence is a command-text
 - **State** (never committed): a host-local runner state directory (target status, budgets + high-water marks, locks, session dirs, seals). **Targets** are per host and live in that state directory, one worktree per target; none ship here.
 - Invariants: cycles end committed-or-reverted; selection never starves; measurement surface integrity-sealed out-of-band. Runner never pushes main / merges / marks PRs ready.
 
+## Where a check lives
+
+Decision 2026-11-25 (#911; evidence in `docs/vets/2026-11-24-no-comments-harness-vet.md`, 7.6). Put each check in the layer that owns its job, at the earliest point its input exists and acting on it is cheapest.
+
+| Layer | Owns | Why |
+|---|---|---|
+| Lifecycle scripts (`wt-new`, `pr-land`, `wt-done`, `wt-sweep`) | The branch's path from worktree to merge. Push and `gh pr create` stay plain commands. | Claude Code links a PR whatever route opened it. |
+| Claude Code hooks: the mechanism in `scripts/` or `hooks/`, the registration in the template or the overlay | Feedback the session should act on while it holds the context and acting is cheap | The one channel that always reaches the model. 769 of 1,001 pushes in the week to 11-25 piped output through `tail`, which cuts a git hook's message. |
+| CI (each repo's workflows) | Anything that must block, or must reach every author: the operator's terminal, Codex, off-host pushes | A local hook can be skipped. |
+| Git hooks (each repo's own, such as hov-stack's public-safety pre-push) | One repo's own checks | A global `core.hooksPath` silently turns off every repo's own hooks, and 38% of that week's PRs were in repos that set their own. |
+
+- **Deterministic checks run at write time,** through the edit-feedback seam planned in dotfiles#1516.
+- **Model-judged checks run once per branch, before its first push.** After the push every fix costs a CI run, and on the 5 live PRs the comment check flagged after `gh pr create`, no session acted on a flag.
+- **A check holds work only when its live harm rate is within a bar set before it ran,** and only with a kill rule written first. The comment check's push hold is that trial (#911); `python3 ~/.claude/scripts/comment-check.py --stops` prints its numbers.
+
 ## Standing decisions
 
 - Committed API keys in a private repository's `.mcp.json` stay unless the repository's trust boundary changes, such as publication or outside read access.
