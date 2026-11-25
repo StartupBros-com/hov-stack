@@ -84,6 +84,13 @@ FILES = {
 }
 
 
+def load_module():
+    spec = importlib.util.spec_from_file_location("cc", SCRIPT)
+    cc = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(cc)
+    return cc
+
+
 def git(cwd, *args):
     env = dict(os.environ, GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@example.invalid",
                GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@example.invalid")
@@ -147,10 +154,26 @@ class Extract(Base):
         self.assertIn("send()", unit["after"])
         self.assertIn("count = 0", unit["before"])
 
+    def test_shebang_is_not_a_comment_and_coding_line_is_a_directive(self):
+        cc = load_module()
+        diff = textwrap.dedent("""\
+            diff --git a/tool.py b/tool.py
+            new file mode 100644
+            --- /dev/null
+            +++ b/tool.py
+            @@ -0,0 +1,4 @@
+            +#!/usr/bin/env python3
+            +# -*- coding: utf-8 -*-
+            +x = 1
+            +# increment x
+            """)
+        units = cc.units_from_diff(diff)
+        self.assertEqual([(u["line"], u["text"]) for u in units],
+                         [(2, "# -*- coding: utf-8 -*-"), (4, "# increment x")])
+        self.assertEqual([cc.tool_directive(u) for u in units], [True, False])
+
     def test_directive_filter_spares_prose(self):
-        spec = importlib.util.spec_from_file_location("cc", SCRIPT)
-        cc = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(cc)
+        cc = load_module()
         directive = ["# noqa: E501", "# type: ignore[attr-defined]", "// @ts-expect-error untyped lib",
                      "# shellcheck disable=SC2086", "/* eslint-disable */", "// biome-ignore lint: x",
                      "//go:build linux", "# pragma: no cover", "# Copyright 2026 Example"]
