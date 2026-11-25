@@ -1,0 +1,38 @@
+[Unit]
+Description=session-archive: save what agent session transcripts gained since the last pass
+Documentation=https://github.com/StartupBros-com/hov-stack
+
+# A pass exits 1 when a transcript could not be read, a folder of them could not
+# be listed, a store file could not be written or no longer decodes, or the disk
+# is below the free-space floor with files still waiting. Each of those means
+# transcripts are not being saved, so each pages (once per hour at most, the
+# alert's per-unit cooldown).
+OnFailure=harness-unit-failure-alert@%n.service
+
+[Service]
+Type=oneshot
+# A pass walks the transcript folders by metadata, reads only the bytes each
+# file gained, and takes no new file after SESSION_ARCHIVE_MAX_BYTES (8 GiB as
+# shipped) or SESSION_ARCHIVE_MAX_SECONDS (15 minutes of storing), so the first
+# run over a long history finishes across several passes. The walk is not
+# counted in those 15 minutes: it is slow when the directory cache is cold on a
+# busy disk (a pass with nothing to store, over 1,618 files in 7,279 folders at
+# load 66: 48 s, of which 36 s walking the sources and 12 s checking the store
+# files' sizes), and a pass that spent its whole budget walking would store
+# nothing and say nothing. This timeout bounds the walk, the 15 minutes and the
+# last file taken, and a pass that hits it pages. A kill mid-pass loses nothing:
+# a store file is fsynced before its cursor moves, and the next pass reconciles
+# the two.
+TimeoutStartSec=45m
+# zstd does the compression; the script exits 3 when it is not on this PATH.
+Environment=PATH=%h/.local/bin:%h/.local/share/mise/shims:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/usr/bin/python3 %h/.claude/scripts/session-archive.py capture
+# The first passes read tens of GB of cold files. Page cache is charged to the
+# cgroup that first reads a page, so this bound makes the kernel drop this
+# unit's own cache as it goes instead of pushing other processes' memory out
+# (harness/wsl-memory-bounds.md, "Batch jobs that read a large corpus"). The
+# pass's own memory is far below it: zstd's 128 MiB window is the largest part.
+# No MemoryMax and no swap cap, as that note says.
+MemoryHigh=1G
+Nice=10
+IOSchedulingClass=idle

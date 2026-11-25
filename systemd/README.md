@@ -60,11 +60,14 @@ These need no edits. Copy them as they are.
 | `codex-auto-update` | `OnBootSec=10min`, `OnUnitActiveSec=15min` | `codex-update.sh`: verified Codex CLI update through pnpm | `pnpm` and a network connection to the npm registry |
 | `dcg-auto-update` | `OnCalendar=*-*-* 03:30:00` | `dcg-update.sh`: updates the destructive-command guard, and moves the live symlink only if the contract tests pass against the new binary | `dcg` installed; a network connection to GitHub |
 | `pkg-cache-prune` | `OnCalendar=Tue *-*-* 01:35:00` | `pkg-cache-prune.sh`: prunes the pnpm, npm and uv caches and stale Hugging Face partial downloads | whichever of those tools you have |
+| `session-archive` | `OnCalendar=hourly` | `session-archive.py capture`: appends what each agent session transcript gained since the last pass to a compressed, append-only store under `~/.local/share/session-archive`, so a session outlives the agent's own cleanup | the `zstd` command; turned on by hand, see below |
 | `skills-update` | `OnCalendar=Sun *-*-* 04:30:00` | `update-skills.sh`: weekly global skills update | a network connection to the npm registry |
 | `wt-sweep` | `OnCalendar=Thu *-*-* 01:15:00` | `wt-sweep.sh`: sweeps git worktrees that have merged or gone stale | shipped plan-only, see below |
 | `fstrim.service.d/10-wsl.conf`, `fstrim.timer.d/10-wsl.conf` | the distribution's own `fstrim.timer` | clears the inherited `ConditionVirtualization=` so TRIM runs under WSL2 | a WSL2 host; system scope |
 
 `skills-update` is one of two timers that `./setup --enable-units` admits only through its cron-ownership gate (the other is `mcp-servers-update`, below). Without that installer, enable it by hand like any other.
+
+`session-archive` is installed by `./setup --enable-units` and never enabled by it, because it starts a multi-GB copy of the host's transcripts. Turn it on with `systemctl --user enable --now session-archive.timer`. It follows `~/.claude/projects`, `~/.codex/sessions`, `~/.pi/agent/sessions` and `~/.factory/sessions`. The first run takes several passes (a pass takes no new file after 8 GiB read or 15 minutes), oldest files first; `systemctl --user start session-archive.service` runs the next pass without waiting for the hour. `~/.claude/scripts/session-archive.py status` shows the counts and the last pass, `verify` compares stored bytes with the live files, and `cat <transcript path>` prints a stored transcript, including one the agent has since deleted. Those three and `where` only read: they are safe to run while a pass is writing, and `cat` exits 1 when the store holds fewer bytes than were recorded. Every store file is plain zstd, so `zstd -dc <file>` reads it without the script. A pass exits 1, and pages, when a transcript cannot be read, a folder of transcripts cannot be listed, a store file cannot be written or no longer decodes, or the store's disk has under 10 GiB free with files still waiting (`SESSION_ARCHIVE_MIN_FREE_BYTES`). Nothing in the script deletes from the store.
 
 Copy and enable a user unit:
 
@@ -84,7 +87,7 @@ sudo systemctl daemon-reload
 
 ## The pager
 
-Eleven of the units, plus the `jsm-auto-update` drop-in `override.conf`, wire `OnFailure=harness-unit-failure-alert@%n.service` (`backup-harness`, `cass-release-promote`, `codex-auto-update`, `dcg-auto-update`, `docker-hygiene`, `mcp-servers-update`, `pkg-cache-prune`, `reclaim-sweep`, `skills-update`, `tools-auto-update`, `wt-sweep`). Copy `harness-unit-failure-alert@.service` into `~/.config/systemd/user/` alongside them. It runs `scripts/unit-failure-alert.sh`, which posts through `scripts/discord-notify.sh` and needs `DISCORD_WEBHOOK_URL`, either in the unit's environment or in `~/.secrets`. Without it the alert unit exits 3 and shows as failed. The original job's failure still shows in `systemctl --user list-timers` and the journal either way.
+Twelve of the units, plus the `jsm-auto-update` drop-in `override.conf`, wire `OnFailure=harness-unit-failure-alert@%n.service` (`backup-harness`, `cass-release-promote`, `codex-auto-update`, `dcg-auto-update`, `docker-hygiene`, `mcp-servers-update`, `pkg-cache-prune`, `reclaim-sweep`, `session-archive`, `skills-update`, `tools-auto-update`, `wt-sweep`). Copy `harness-unit-failure-alert@.service` into `~/.config/systemd/user/` alongside them. It runs `scripts/unit-failure-alert.sh`, which posts through `scripts/discord-notify.sh` and needs `DISCORD_WEBHOOK_URL`, either in the unit's environment or in `~/.secrets`. Without it the alert unit exits 3 and shows as failed. The original job's failure still shows in `systemctl --user list-timers` and the journal either way.
 
 `disk-watermark.service` has no `OnFailure=` on purpose; its comment says why.
 
@@ -179,8 +182,9 @@ bash tests/systemd-network-online.test.sh
 bash tests/unit-failure-alert.test.sh
 ```
 
-Per-unit suites: `cass-release-promote`, `cass-reap`, `cass-smoke-classification`, `cass-smoke-diagnostics`, `cass-search-health`, `docker-hygiene`, `disk-watermark`, `wt-sweep-alive`, `wt-sweep-reconcile`, `wt-sweep-idle-release`, `pkg-cache-prune-busy`, `pkg-cache-prune-hf`, `jsm-auto-update-wrapper` and `dcg-jsm-prune-guard`, each as `bash tests/<name>.test.sh`. `reclaim-sweep` has a Python suite:
+Per-unit suites: `cass-release-promote`, `cass-reap`, `cass-smoke-classification`, `cass-smoke-diagnostics`, `cass-search-health`, `docker-hygiene`, `disk-watermark`, `wt-sweep-alive`, `wt-sweep-reconcile`, `wt-sweep-idle-release`, `pkg-cache-prune-busy`, `pkg-cache-prune-hf`, `jsm-auto-update-wrapper` and `dcg-jsm-prune-guard`, each as `bash tests/<name>.test.sh`. `reclaim-sweep` and `session-archive` have Python suites (the second needs `zstd`, and fails without it):
 
 ```bash
 python3 -I tests/test_reclaim_sweep.py
+python3 -I tests/test_session_archive.py
 ```
