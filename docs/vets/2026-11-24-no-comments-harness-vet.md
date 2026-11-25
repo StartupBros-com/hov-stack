@@ -6,6 +6,9 @@ clutter in many codebases, so this is likely a useful skill to add throughout ou
 perhaps wire into our skills like /harness-optimizer:harness-optimizer etc", with six X posts
 and `cursor/plugins` `pstack/skills/no-comments/SKILL.md`.
 **Tracking:** the pull request that adds this note, branch `no-comments-vet`.
+**Corrected 2026-11-24, section 7:** rows 12 and 13 are withdrawn, row 14 is dropped, and the
+reason for rows 1 and 2 is narrowed. Sections 1 to 6 stand as written, with each changed line
+marked. The correction has its own pull request, branch `no-comments-vet-correction`.
 **Fixture:** `harness/vet-fixtures/no-comments-2026-11/`. The decision rule and its three
 amendments, each dated before the runs it governs, are that directory's `prereg.md`.
 **Prior vets:** `docs/vets/2026-09-18-pstack-harness-vet.md` recorded `no-comments` and Comment
@@ -43,6 +46,8 @@ dotfiles `docs/vets/`; here they are R1 to R12.
     plus three narration (T) units that table leaves out. Decisions are 472 of the 831 comment
     units those repos added, so the loss would carry over.
   - The 09-18 SKIP stands, but its reason changes from "covered" to this loss.
+  - Corrected 2026-11-24 (7.5): the SKIP stands and the reason is narrower. Most of what it
+    deletes is not load-bearing.
 - **No skill beat bare without losing facts.**
 
   | Arm | Separating score | Facts lost |
@@ -74,10 +79,15 @@ dotfiles `docs/vets/`; here they are R1 to R12.
   - Decision and keep-list comments are 49% to 79% of what each repo that needs cleanup adds;
     the bar was 25%.
   - Commented-out code was 0 of 831 units, so ruff ERA001 would have nothing to catch.
+  - Corrected 2026-11-24 (7.1, 7.5): withdrawn. The 49% to 79% counts comments by type, not by
+    value; measured, 6 of 36 decision comments are load-bearing.
 - **Wiring into harness-optimizer: SKIP.** It has no product-code lane.
+  - Corrected 2026-11-24 (7.5, 7.6): withdrawn. Comment control is an instructions and tooling
+    matter, which are two of its lanes.
 - **Landed by this PR:** this note, the fixture and a dated correction to the 09-18 note.
 - **Proposed for the operator:** one `CLAUDE.md` line asking for a comment pass before
   `gh pr create` (4.2). It is unmeasured, and `CLAUDE.md` is the operator's file.
+  - Corrected 2026-11-24 (7.6): dropped in favour of a check in the pull-request path.
 
 ## 1. Identity, targets and run choices
 
@@ -518,8 +528,8 @@ One row per component and target. Placement "none" means no installation.
 
 | # | Component | Target | Verdict | Placement | Activation | Evidence | State |
 |---|---|---|---|---|---|---|---|
-| 1 | pstack `no-comments` + Comment Sicko, content | T1 product repos | SKIP: countermetric (b), 14 of 20 facts lost against bare's 0 | none | none | measured, 3 runs (2.4) | not adopted |
-| 2 | pstack `no-comments` + Comment Sicko, content | T2 hov-stack skills | SKIP, same reason; nothing to wire | none | none | measured, 3 runs (2.4) | not adopted |
+| 1 | pstack `no-comments` + Comment Sicko, content | T1 product repos | SKIP: countermetric (b), 14 of 20 facts lost against bare's 0 | none | none | measured, 3 runs (2.4) | not adopted; reason narrowed 2026-11-24 (7.5) |
+| 2 | pstack `no-comments` + Comment Sicko, content | T2 hov-stack skills | SKIP, same reason; nothing to wire | none | none | measured, 3 runs (2.4) | not adopted; reason narrowed 2026-11-24 (7.5) |
 | 3 | pstack delivery: the Cursor plugin under `--plugin-dir` | T1, T2 | SKIP: loads in Claude Code 2.1.331 as is, but its content is SKIP | none | none | load smoke check | not installed |
 | 4 | comment-ratchet `15bf5460` (v1.0.0), skill plus pre-commit CLI | T1 | SKIP: did not beat bare (median 7 against 8), 0 lost | none | none | measured, 3 runs; GitHub implementation lane | not adopted |
 | 5 | comment-audit-skill `86e2ebdf` | T1 | SKIP: did not beat bare (7 against 8), 0 lost | none | none | measured, 3 runs; GitHub alternatives lane | not adopted |
@@ -529,9 +539,9 @@ One row per component and target. Placement "none" means no installation.
 | 9 | Root-fix rule, the extracted line | T1, T2 | EXTRACT with an unverified-value marker: pre-registered rule not met | undecided (4.2) | undecided | measured, 3 runs (a8), plus hand-check | proposed |
 | 10 | Pocock's taxonomy (T, H, S, X, E, D, K) | T1 | EXTRACT as a measurement instrument; kappa 0.652 binary, 0.737 on seven classes | this fixture's grader and section 2.1 | used by vets only | measured | landed in this PR |
 | 11 | Debt mining (BowTiedDevil) | T1 | EXTRACT: 20 of 26 confirmed (77%) against a bar of 60% and at least 5 | an on-demand workflow, location undecided (4.2) | explicit invocation | measured, one repo (2.5) | proposed |
-| 12 | Blanket "no new comments" lint or ratchet (poteto) | T1 | SKIP: D+K is 49% to 79% per need repo, against a 25% bar; commented-out code 0 of 831 | none | none | measured (2.1) | not adopted |
-| 13 | harness-optimizer wiring | T2 | SKIP: its six lanes (friction, memory, instructions, context, permissions, tooling) include no product-code lane | none | none | read | not adopted |
-| 14 | Routing line: ask for a comment pass before `gh pr create` | T1 | proposed with an unverified-value marker: need and coverage are measured, the lever is not | this repo's `CLAUDE.md` (4.2) | always on | inferred from 2.2 and 2.4 | proposed to the operator |
+| 12 | Blanket "no new comments" lint or ratchet (poteto) | T1 | SKIP: D+K is 49% to 79% per need repo, against a 25% bar; commented-out code 0 of 831 | none | none | measured (2.1) | withdrawn 2026-11-24 (7.5) |
+| 13 | harness-optimizer wiring | T2 | SKIP: its six lanes (friction, memory, instructions, context, permissions, tooling) include no product-code lane | none | none | read | withdrawn 2026-11-24 (7.5) |
+| 14 | Routing line: ask for a comment pass before `gh pr create` | T1 | proposed with an unverified-value marker: need and coverage are measured, the lever is not | this repo's `CLAUDE.md` (4.2) | always on | inferred from 2.2 and 2.4 | dropped 2026-11-24 (7.5) |
 | 15 | The 41 triaged and 5 dropped hits, each with its lane and pass (1.1) | T1 | no verdict | none | none | triaged only | not adopted |
 
 **Rollup.**
@@ -544,11 +554,17 @@ One row per component and target. Placement "none" means no installation.
 
 T2's `code-slop` stays as is.
 
+Corrected 2026-11-24 (7.5): the blanket lint and the harness-optimizer wiring leave the
+"Measured, not adopted" column, since both verdicts are withdrawn, and the routing line leaves
+"Proposed line".
+
 ### Do-not-retry unless
 
 - **pstack `no-comments` and Comment Sicko:** retry only if a pinned revision keeps decision
   comments about our own code, or moves them into a name, test or doc, instead of deleting
-  them. Test: a re-run of this fixture loses at most bare's median.
+  them. Test: a re-run of this fixture loses at most bare's median. (Narrowed 2026-11-24,
+  7.5: the test counts only the facts whose reason the code cannot show and no test enforces.
+  That subset of the fixture's facts is not marked yet, so a retry marks it before its runs.)
 - **comment-ratchet, comment-audit-skill, code-comments:** retry only if a revision changes
   how it treats suppressions or workarounds. Test: its median on this fixture's separating
   items exceeds bare's max, with 0 lost.
@@ -556,10 +572,13 @@ T2's `code-slop` stays as is.
   its Comment Reviewer, checked from the transcript before scoring.
 - **Blanket lint:** retry only if a re-measure of added comment units shows D+K at or below 25%
   in a given repo, which applies to that repo only. Or if commented-out code shows up in new
-  work.
-- **harness-optimizer:** retry only if it gains a product-code lane.
+  work. (Superseded 2026-11-24, 7.5: the verdict is withdrawn and the D+K share is replaced by
+  the load-bearing share.)
+- **harness-optimizer:** retry only if it gains a product-code lane. (Superseded 2026-11-24,
+  7.5: the verdict is withdrawn.)
 - **Root-fix rule:** landed only after a reworded line passes the deciding measurement in 4.2.
-- **Routing line:** only on the operator's go, with the measurement in 4.2 attached.
+- **Routing line:** only on the operator's go, with the measurement in 4.2 attached. (Dropped
+  2026-11-24, 7.5.)
 
 ## 4. Changes
 
@@ -574,7 +593,8 @@ T2's `code-slop` stays as is.
 
 ### 4.2 Proposed, not landed
 
-**Routing line (row 14), unmeasured.**
+**Routing line (row 14), unmeasured.** Dropped 2026-11-24 (7.6), replaced by the proposal for
+a check in the pull-request path.
 
 > Before `gh pr create`, reread the comments your diff adds: delete narration, history and
 > banners; keep a comment only for a reason the code cannot show.
@@ -721,3 +741,298 @@ vetting index.
 
 The session's own model use (discovery, classification, the debt pilot and verification
 workflows) is not itemised.
+
+---
+
+## 7. Correction, 2026-11-24: where the reason should live
+
+After this note merged, the operator challenged three things in it:
+
+- that the "decision plus keep-list" share in 2.1 shows those comments are worth keeping;
+- that a code comment is the right place to record a decision at all, against a test, a
+  decision doc, or code plus history;
+- the harness-optimizer SKIP (row 13), given that the note's own proposal in 4.2 was an edit to
+  an instruction file.
+
+All three hold, the first and third in full. This section reports what was measured in response
+and which verdicts change. Sections 1 to 6 are left as written, with each changed line marked.
+
+### 7.1 The share in 2.1 counted a type, not a value
+
+Section 2.1 sorted comment units by type, and row 12 then treated "states a reason" (D) as
+"worth keeping". That step was an assumption. A comment can state a reason and still be
+redundant: the reason may be plain from the code, enforced by a test, already in the pull
+request, or false.
+
+So it was measured: 72 comment units from the same product repos, labels withheld from the
+auditors. For each unit, one auditor read the file, the tests and the pull request and rated
+the comment. A separate reader got the same file with the comment removed and answered the
+question the comment answers. A judge scored whether that reader recovered it.
+
+| Stratum | n | Load-bearing | Helpful | Redundant | Narration | False |
+|---|---|---|---|---|---|---|
+| New pull-request comments labelled D in 2.1 | 36 | 6 | 22 | 7 | 0 | 1 |
+| New pull-request comments labelled clutter (control) | 12 | 0 | 6 | 6 | 0 | 0 |
+| Older D comments, code unchanged since | 12 | 0 | 5 | 6 | 1 | 0 |
+| Older D comments, code changed since | 12 | 3 | 7 | 2 | 0 | 0 |
+
+"Load-bearing" means the auditor named a specific wrong edit that the comment prevents.
+
+- 6 of 36 is 17%, with a 95% interval of 8% to 32% (Wilson). That is the measured share of D
+  comments that prevent a named wrong edit. It is not 49% to 79%.
+- "Helpful" does not discriminate: 6 of the 12 clutter controls earned it too. Either the label
+  is too easy to earn or the clutter labels were noisy. It is not counted as value.
+- The comment is rarely the only record. Of the 36: a test fails if the claim is broken in 22;
+  the reason is fully in the pull request or commit text in 13 and partly in 13 more; the blind
+  reader recovered the point from the code in 13 and partly in 14. The comment was the only
+  full record in 7.
+- Of the 6 load-bearing comments, 3 have a test that enforces the claim. The comments that are
+  the last line of defence are 3 of 36.
+- 1 of the 36 is false and 1 partly false. Their age was not measured, so this is an error rate
+  for new comments, not a rot rate.
+- Rubric check, set beforehand: at most 2 of the 12 clutter controls may come back
+  load-bearing. 0 did.
+- Each verdict is one rater's. Nobody re-scored them.
+
+The units, with repo, file and comment text, are private and stay out of this note.
+
+### 7.2 Placement test: same code, seven places to write the decision
+
+No published study compares placements head to head (7.4), so one was run on this fixture.
+Seven copies of the clean `tally` repo hold the same code and the same 14 decisions. They
+differ only in where the decisions are recorded: `comment`, `none`, `tests` (a test per
+decision, reason in its docstring), `doc` (`docs/decisions/*.md`, one pointer line in the
+README), `claudemd`, `history` (commit bodies only) and `stale` (three comments false).
+
+- 177 runs, 0 errors, $12.51: 135 on `claude-sonnet-5-5` and 42 on `claude-opus-5-5`.
+- Runner: this fixture's `run_arm.sh`, so bare Claude Code with no user instructions or plugins.
+- Every run delivered its request and kept `make check` green. No run broke a decision other
+  than the one its task targets.
+- Rules, scripts and per-run results: `harness/vet-fixtures/no-comments-2026-11/placement/`.
+  The rules (`prereg.md`) were written before the first run.
+
+**Trap tasks** (the obvious implementation breaks a decision the shipped tests do not catch).
+Runs in which the hidden check for the decision still passes:
+
+| Arm | Sonnet `fileorder` | Sonnet `always` | Sonnet `addrule` | Sonnet pooled | Opus pooled |
+|---|---|---|---|---|---|
+| `comment` | 3/3 | 3/3 | 3/3 | 9/9 | 6/6 |
+| `none` | 2/3 | 3/3 | 3/3 | 8/9 | 6/6 |
+| `tests` | 3/3 | 3/3 | 3/3 | 9/9 | 6/6 |
+| `doc` | 3/3 | 3/3 | 3/3 | 9/9 | 6/6 |
+| `claudemd` | 3/3 | 3/3 | 3/3 | 9/9 | 6/6 |
+| `history` | 3/3 | 3/3 | 3/3 | 9/9 | 6/6 |
+| `stale` | 1/3 | 0/3 | 3/3 | 4/9 | 4/6 |
+
+Read against the rules in `prereg.md`:
+
+- **Ceiling clause fires on both models.** `none` kept the decision in 8 of 9 and 6 of 6, so
+  R1 to R4 are untestable on the kept measure. This fixture cannot show whether a true record
+  helps an agent keep a decision. Two readings fit: these models recover this kind of decision
+  from the code, or the three trap tasks were too easy. On real code the blind reader in 7.1
+  fully recovered 13 of 36, so the first reading is not assumed to hold everywhere.
+- **R5 holds: a false comment was worse than no comment.** `stale` kept 4 of 9 against 8 of 9
+  on Sonnet (gap 4, rule 3) and 4 of 6 against 6 of 6 on Opus (gap 2, scaled rule 2).
+  - All 8 failed checks were read. The 5 on `always` (0 of 3 Sonnet, 0 of 2 Opus) printed a
+    zero digest for an empty month. Each told the owner and cited the false comment as the
+    reason.
+  - The false comment on rule order did no harm (5 of 5 kept): the code shows first match wins.
+  - `fileorder` is a weak trap. The function that needs sorted rows is called only from the
+    test suite, so its 3 failures (1 `none`, 2 `stale`) are arguably correct changes. Without
+    that task `stale` still loses: 3 of 6 against 6 of 6 on Sonnet, 2 of 4 against 4 of 4 on
+    Opus.
+  - This is an upper bound on harm. The fixture's false comments state the opposite of the
+    truth; the false comment found in 7.1 was merely out of date.
+- **R3, read half:** `doc` runs opened the decision docs in 15 of 15 trap runs.
+- **R4, read half:** no `history` run read a commit body, on any task (0 of 27). One of the
+  27 ran `git log --oneline`, which prints titles.
+- **Countermetric passes.** Median cost on the control tasks was 0.89 to 1.03 times `none` for
+  every arm, inside the 1.25 band.
+
+**Conflict tasks** (the request reverses a decision; Sonnet only, 6 runs per arm). All 36 runs
+did what was asked. Counted: runs whose final message gave the owner the project's own reason
+for the old behaviour. Two blind judges agreed on all 36.
+
+| Arm | `pending` | `negative` | Pooled |
+|---|---|---|---|
+| `comment` | 2/3 | 3/3 | 5/6 |
+| `none` | 0/3 | 0/3 | 0/6 |
+| `tests` | 0/3 | 3/3 | 3/6 |
+| `doc` | 3/3 | 3/3 | 6/6 |
+| `claudemd` | 3/3 | 3/3 | 6/6 |
+| `history` | 0/3 | 0/3 | 0/6 |
+
+- This measures "the agent found the record and passed it on", not a better outcome. For
+  `negative` the reason cannot be known unless it is written somewhere, so 0 of 6 in `none` is
+  partly by construction.
+- A comment, a pointed-to doc and `CLAUDE.md` all carried the reason to the owner (5 or 6 of
+  6). Commit bodies did not (0 of 6), because they were never read.
+- R2 fails by its letter on this half (`tests` 3 of 6 against `comment` 5 of 6, a gap of 2
+  where the rule allows 1). In the 3 `pending` runs the agent read the docstring, rewrote the
+  test and its docstring to the new behaviour, and did not mention the old reason. Two runs of
+  six is too small a gap to hold against tests.
+
+**Post hoc, not in `prereg.md`:**
+
+- Record upkeep. In the `doc`, `claudemd` and `tests` arms, all 33 runs whose change altered a
+  recorded decision edited the record in the same change (`results/record-upkeep.txt`). In the
+  `comment` arm the old sentence was gone in 11 of 11. The agent had just read the record in a
+  300-line repo, so this is the easy case.
+- Trap-task cost. `comment` cost 1.28 times `none` on Sonnet (9 turns against 6).
+
+### 7.3 A configured harness reads more, but mostly not commit messages
+
+The placement runner is bare Claude Code. On the operator's workstation, 279 top-level
+sessions in the last 30 days edited code. Before their first edit:
+
+| Looked at | The session itself | Counting its subagents |
+|---|---|---|
+| any `git log`, `git show` or `git blame` | 217 | 231 |
+| commit titles only (`--oneline`, or a format with no body) | 180 | 155 |
+| a commit message body | 34 | 73 |
+| the body or comments of a pull request or issue | 124 | 152 |
+| the session index (`cass`) | 46 | 82 |
+| a file under `docs/solutions`, `docs/decisions` or `docs/adr`, opened | 25 | 59 |
+| at least one of the last four | 169 | 203 |
+
+(`placement/session_consult.py`, output in `results/session-consult.txt`.)
+
+- History commands are common here, but most print titles for orientation. A commit message
+  was printed before the first edit in 73 of 279 sessions (26%), about half of them only by
+  a subagent, whose reading reaches the session only through its report. The bare result (0
+  of 27) is the floor, not the picture of this harness. Even so, a reason written only in a
+  commit body is not read before about three edits in four.
+- Pull-request or issue text was read in 152. The count does not separate a session's own
+  task issue from the history of the code it was about to change.
+- These count commands that looked, not reasons that were found. 30 matched commands per
+  class were read by eye: commit bodies 30 of 30 correct, titles 30 of 30, `cass` 30 of 30,
+  docs opened 30 of 30, pull-request text 28 of 30 (the two misses asked for comments and
+  printed only their count). Each is a session's first match before any code edit, from its
+  own commands, taken at a fixed stride through the sessions in path order (for commit
+  bodies and opened docs, the first 30 of 43 and 42). Sessions that never edited code are
+  included, so this checks the patterns and is not a random draw from the counted sessions.
+- The counts are inexact in both directions. Too high: 15 of the 30 sampled commit-body
+  commands are a bare `git show --stat`, which prints the message above a file list the
+  session may have been after; the sample shows each command cut at its pipe, so a `| tail`
+  or `| grep` that drops the message was not seen; and six sampled commands sent their
+  output to a file, one of them to `/dev/null`. Too low: a git command run from inside a
+  script file is not seen, and worktree sessions here are told to put multi-step shell work
+  in script files; and the splitter ends a double-quoted string at a backslash-escaped
+  quote, so a command after one on the same line can be missed. The script's `--self-test`
+  holds the shapes that were checked (26 of 26); that shape is not among them.
+- A session that changes code only through shell commands is not counted as editing. A
+  subagent's edit does not end the "before first edit" window, so for a session that delegates
+  the change itself the subagent column runs long.
+
+### 7.4 Published evidence
+
+Searched: arXiv, through the `papers` skill and the Firecrawl research index; 44 papers read.
+Not searched: the software-engineering literature on comment rot and architecture decision
+records that is not on arXiv. "Peer-reviewed" below means the paper's own text names the venue;
+everything else is a preprint. No paper found runs the comparison in 7.2.
+
+| Finding | arXiv id | Tier |
+|---|---|---|
+| A description helps an agent only when it carries a contract the code does not show: 0 of 3 tasks solved without it, 3 of 3 with it; where the contract is visible in code, 3 of 3 either way. With the source present, descriptions did not beat the issue text alone (33 solved against 29 and 30 of 58) | 2609.31587 | preprint |
+| Wrong comments cut the share of passing generated tests from 44.7% to 22.1% (GPT-3.5) and from 78.5% to 68.1% (GPT-4); correct comments made no significant difference | 2404.03114 | preprint |
+| Defective commented-out code in context raised defects in Copilot and Cursor completions by more than 20% on average per tool, up to 58%; an instruction not to use it cut defects by 5% to 22% | 2512.20334 | peer-reviewed (FSE) |
+| Claude Code honoured 100% of seeded decisions visible in the codebase, comments included, and 0% to 33% of those needing outside context | 2605.08112 | preprint; authors built the tool; 8 tasks |
+| 71.1% of agent runs never tried to open the repo's policy documents; with a rules file in context, compliance was 64% to 67% | 2610.06193 | preprint |
+| Repo context files gave no significant change in task success and added 20% to 23% cost | 2602.11988 | preprint |
+| Claude Code followed a stale instruction-file command in 78 of 80 runs; no instruction file was edited in any of 732 runs | 2611.09802 | preprint; 3 cases |
+| A check that runs, with its feedback in the loop: 88.3% clean patches against 67.0% with the same rules as text | 2603.00822 | preprint; tool authors |
+| Memory built from raw past sessions: 11 of 12 solver and memory-system pairings did no better than no memory. A short verified record anchored to a directory or identifier helped a solver that had failed without it in 55% of 58 cases and hurt in none; with only failed solvers counted, "hurt in none" is a floor, not a finding | 2609.23570 | preprint; no Claude model tested |
+| In 63 human commits, some rationale was in 97% of commit messages, 86% of pull requests and 4% of inline comments. An LLM asked to reconstruct the alternatives considered wrote some for 9 of the 14 commits that had none | 2604.10345 | preprint |
+| 44% of commit messages in 5 Java projects lacked the "why" or the "what" | 2202.02974 | peer-reviewed (ICSE 2022) |
+| 4,316 mined ADRs often omit alternatives and drivers; no study found measures whether an ADR helps a person or an agent | 2609.07375 | preprint |
+| 1.0% of function-name mentions in Linux kernel comments were stale | 2608.03734 | peer-reviewed (ASE 2026) |
+
+Reading, as a synthesis and not an established standard:
+
+- A true comment that says what the code cannot show helps.
+- A comment that restates readable code does nothing.
+- A false comment or dead code hurts, and an instruction to ignore it does not undo that.
+- Text an agent must go and find is mostly not found.
+- Text that is always loaded is followed, including when it is stale.
+- A check that fails beats both.
+- Raw session transcripts are a poor record.
+
+### 7.5 Verdicts changed
+
+| Row | Was | Now | Why |
+|---|---|---|---|
+| 12, blanket "no new comments" lint | SKIP: D+K is 49% to 79% | **Withdrawn, open** | The share counted a type. Measured value is 6 of 36 D comments load-bearing (7.1) |
+| 13, harness-optimizer wiring | SKIP: no product-code lane | **Withdrawn; proposal in 7.6** | Agents write the clutter under harness instructions, and every fix is an instruction or tooling change. Those are two of its six lanes |
+| 1 and 2, pstack `no-comments` | SKIP: deletes the comments that matter | **SKIP stands, reason narrowed** | Most of what it deletes is not load-bearing (7.1). What it wrongly deletes is the small class whose reason the code cannot show. Bare already removes the clutter without losing that class (2.4), so pstack adds nothing |
+| 14, routing line in `CLAUDE.md` | proposed | **Dropped** | The weakest lever of those considered; replaced by the check in 7.6 |
+
+Two things about how row 12 changed:
+
+- `prereg.md` said the 49% to 79% premise falls only if R1 fails and the audit rates under 25%
+  of the sampled decision comments load-bearing. The audit half is met: 6 of 36 is 17%. R1
+  came back untestable (ceiling), and the ceiling clause says the conclusion then does not
+  fire. That clause was added in the second sitting, after the audit count was known, as
+  `prereg.md` records, so it was not a guard set blind. The withdrawal rests on 7.1 alone: the
+  figure behind the SKIP measured the wrong thing. That is a judgment made after seeing the
+  data, not a pre-registered result.
+- This note's retry condition for row 12 was "D+K at or below 25%". That share has not moved,
+  because it is still a count by type. The condition is replaced by the load-bearing share.
+
+### 7.6 Proposed, not landed
+
+**Where each kind of knowledge goes.**
+
+| What to keep | Where | Basis |
+|---|---|---|
+| What the code does and how | the code | `none` kept 14 of 15 (7.2); restated descriptions add nothing (2609.31587) |
+| A rule that can be checked | a test or lint check, reason in its name or docstring | checks beat prose (2603.00822); 22 of 36 audited comments already have one |
+| A constraint the code cannot show and no test catches, at a line where the obvious edit is wrong | one short comment at that line | the 3-of-36 class in 7.1. It sits on the line being edited. `claudemd` and the pointed-to doc also reached the agent in 7.2, so the case for the comment is locality, not reach: a per-line constraint in a repo-wide file loads on every task |
+| Why a change was made, what was tried | commit and pull request text | where it already is for 26 of 36, fully or partly. An archive, not a guard: a commit message was read before the first edit in 73 of 279 sessions and pull-request or issue text in 152, subagents counted (7.3) |
+| A repo-wide rule | a short instruction file, or a decisions doc with a pointer | followed when loaded (6 of 6), also when stale (2611.09802) |
+| Session transcripts | a search aid, not the record | local to one machine and deleted on a timer; 2609.23570 |
+
+With one rule beside it: a change to code under a comment fixes or deletes that comment in the
+same change. A false comment was the worst state measured (R5).
+
+**A comment check in the pull-request path (replaces row 14).** Classify the comment lines a
+diff adds, with the taxonomy of row 10, and flag the clutter classes (T, H, S, X, and E with no
+ticket).
+
+- Why a check: need and routing are measured (2.1, 2.2), bare already cleans clutter when asked
+  (2.4), and a check beats a written rule in 7.4.
+- Risk: 0 of 12 clutter-labelled comments in 7.1 were load-bearing. With 12 samples the true
+  rate could be as high as 24%.
+- State: not built, not measured. As a hook or CI step it changes how sessions are gated, so it
+  waits for the operator's go.
+- Deciding measurement: run it over the 72 audited units of 7.1 and count its flags per audit
+  verdict. Of the 9 units rated load-bearing it should flag none. The type labels of 2.1 are
+  not the yardstick, since 7.1 found they may be noisy. Nine units bound the miss rate only
+  loosely (0 of 9 still allows about 30%), so a pass licenses a trial on new pull requests,
+  not a blocking gate.
+
+**harness-optimizer (replaces row 13).** Its lane table (0.2.1) lists `instructions` with
+"supplied task/routing evidence" as a source, and `tooling`. No listed source is agent output,
+such as the diff a session produced. Only the lane table was read, not the whole plugin.
+
+- Proposal: a collector that reports comment units added, by class, over a repo's recent
+  merged pull requests. The classifier behind 2.1 already produces that table.
+- harness-optimizer takes the report as evidence for its `instructions` lane. No new lane.
+- State: not built, not measured.
+
+### 7.7 Limits of the correction
+
+- The audit is one rater per unit, 72 units.
+- The placement fixture, its decisions, probes and task intents have one author, who also ran
+  the test. It is 300 lines of Python. Its main result on true records is a ceiling.
+- Conflict tasks ran on Sonnet only.
+- No arm tested session transcripts as the record. `history` was commit bodies.
+- The session counts in 7.3 match commands by pattern. A sample of each class was read by eye,
+  not every hit, and the subagents' commands were not sampled separately. Commands inside
+  script files are invisible to it.
+- A partial table (43 of 177 runs) was printed while the grader was being tested. The rules
+  were frozen before launch and nothing was changed after that look.
+- The literature is mostly 2026 preprints on small benchmarks.
+- Nothing in 7.6 is built.
+
+Spend for this section: $12.51 on the 177 placement runs. The session's own model use (the
+audit, the literature read, the judges) is not itemised.
