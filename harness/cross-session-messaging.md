@@ -39,15 +39,14 @@ holds is not sent:
   Code's listing keeps a session's launch directory, so hov reads the newest
   directory from its transcript. The chosen row is then addressed by name:
   its `send_to` is what `SendMessage` takes (hov 0.1.12).
-- A row with no `send_to` is a session that is not running, and
-  `ListAgents` does not show it. No message reaches it; `SendMessage` has no
-  way to look it up. A session that has finished is listed only by
-  `hov ls --all` (hov 0.1.13), as a `finished` row with no `addr` or
-  `send_to`: when it last ran, its repository and branch, the pull requests
-  linked from its output, its transcript and the files it wrote into a deliverables
-  folder. What either kind knew is in those. Check for the row before
-  planning to ask a session anything. When a task names a session to talk to
-  and it is not there, say so in the report.
+- A row with no `send_to` is a session with no running process, and
+  `ListAgents` does not show it: `SendMessage` has no way to look it up. A
+  session that has finished is listed only by `hov ls --all` (hov 0.1.13), as
+  a `finished` row: when it last ran, its repository and branch, the pull
+  requests linked from its output, its transcript and the files it wrote into
+  a deliverables folder. Since hov 0.1.14 the row also carries `addr`, and a
+  finished session can be reached (next section). When a task names a session
+  to talk to and no row matches it, say so in the report.
 - News that can wait goes on the PR or issue it concerns, and
   `notify_when_idle` answers "is that session done yet".
 
@@ -67,6 +66,42 @@ either hook change needs the operator's go.
   from the rest without a model call.
 - PRs left conflicting or stuck did not rise: 1 and 0 in 204 merged.
 - `merge-freeze.sh hold` had not been run once.
+
+## Decision 2026-11-25: a finished session can be reached (hov-stack#902)
+
+Claude Code's messaging stops at the process: a background session that
+finished keeps an idle process for about an hour, and after that `SendMessage`
+answers "No agent named ... is reachable". hov 0.1.14 covers the rest, and
+says so where the gap is met.
+
+| The session is | Reached by |
+| --- | --- |
+| running, mid-turn | `SendMessage` (read at its next tool round), or `hov send` (handed over by its hook at its next tool call) |
+| running, idle | `SendMessage` (starts a turn), or `hov send` (the idle wake starts a turn) |
+| finished, no process | `hov send --to <addr>`: hov restarts it with `claude --bg --resume` on a fixed sentence and it reads the mail. `hov ask <name-or-id> "question"`: a read-only copy answers, nothing is restarted |
+| no process, not `done`, or its launch folder is gone | `hov ask` only; `hov send` leaves mail that waits, and says so |
+
+- Cheapest first: read what the row points at, then `hov ask`, then
+  `hov send`. An ask or a restart loads the whole conversation, which for a
+  long session is minutes and hundreds of thousands of input tokens.
+- A restarted session reads the mail as peer text. It carries out a request
+  that fits its own task and declines one that does not, under its own
+  permission mode; one that asks for permission waits at the prompt in the
+  agents view.
+- `hov send` typed as a command is what `peer-loop-guard` counts, so a
+  restart is counted as a send. A `hov send` inside a script file is not
+  seen by the guard; hov's own per-session limits (one wake or restart per
+  30 s, 12 an hour, 48 a day) still hold there.
+- hov's PostToolUse hook adds one line after `ListAgents` (finished sessions
+  are not in that list) and after a `SendMessage` that reached nobody because
+  the session it named has no process, each with the two commands above.
+- This reverses decision 4 of 2026-11-25 on hov-stack#844 ("no resuming a
+  finished session"). `HOV_RESTART=0` turns restarts off.
+
+Observed on throwaway sessions on 2026-11-25 (Claude Code 2.1.332): a
+restart took under a second and a reply came back in 35 to 52 s; a request
+inside the session's own task was carried out, one outside it was declined;
+a session that asks for permission waited 57 s at its prompt until approved.
 
 ## Decision 2026-08-08: removed `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`
 
