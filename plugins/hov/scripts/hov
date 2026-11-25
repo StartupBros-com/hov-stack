@@ -53,6 +53,7 @@ IMPORTANCE = ("low", "normal", "high", "urgent")
 NO_REPLY_KIND, NO_REPLY_IMPORTANCE = "status", "low"
 BODY_CAP = 4000
 AGENTS_CMD_DEFAULT = "claude agents --json"
+AGENTS_ALL_CMD_DEFAULT = "claude agents --json --all"
 LOOKUP_INTERVAL_MS = 30_000
 TAG = "hov-mail"
 
@@ -478,8 +479,14 @@ def mail_where(con: sqlite3.Connection, me: Me, include_read: bool = False) -> t
     return q, params
 
 
-def agents_rows() -> list[dict]:
-    cmd = os.environ.get("HOV_AGENTS_CMD", AGENTS_CMD_DEFAULT)
+def agents_rows(finished: bool = False) -> list[dict]:
+    """`claude agents --json`, or with `finished` its `--all` form, which also lists sessions that have finished."""
+    if finished:
+        # A listing overridden without an `--all` counterpart (the tests, a wrapper) has no finished sessions, so
+        # the real host's are never read in its place.
+        cmd = os.environ.get("HOV_AGENTS_ALL_CMD", "" if "HOV_AGENTS_CMD" in os.environ else AGENTS_ALL_CMD_DEFAULT)
+    else:
+        cmd = os.environ.get("HOV_AGENTS_CMD", AGENTS_CMD_DEFAULT)
     if not cmd:
         return []
     try:
@@ -776,6 +783,21 @@ GITHUB_REMOTE = re.compile(r"github\.com[:/]+([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+?
 NO_LOCATION = {"dir": None, "dir_from": None, "repo": None, "branch": None, "worktree": None, "checkout": None}
 
 
+def claude_home() -> Path:
+    return Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude")
+
+
+def transcript_file(session_id: str | None) -> Path | None:
+    """The newest transcript Claude Code saved for a session id, or None."""
+    if not session_id or not SESSION_ID_RE.match(session_id):
+        return None
+    try:
+        hits = sorted((claude_home() / "projects").glob(f"*/{session_id}.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True)
+    except OSError:
+        return None
+    return hits[0] if hits else None
+
+
 def transcript_cwd(session_id: str | None) -> str | None:
     """The working directory a Claude Code session's transcript recorded last, or None.
 
@@ -786,18 +808,12 @@ def transcript_cwd(session_id: str | None) -> str | None:
     and missing for 2 (hov-stack#840). The transcript format is Claude Code's and undocumented, so this reads only
     the tail and any surprise returns None. Delete it once Claude Code reports a session's current directory.
     """
-    if not session_id or not SESSION_ID_RE.match(session_id):
-        return None
-    base = Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude") / "projects"
-    try:
-        hits = sorted(base.glob(f"*/{session_id}.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True)
-    except OSError:
-        return None
-    if not hits:
+    path = transcript_file(session_id)
+    if path is None:
         return None
     for cap in TRANSCRIPT_TAILS:
         try:
-            with open(hits[0], "rb") as f:
+            with open(path, "rb") as f:
                 size = f.seek(0, os.SEEK_END)
                 start = max(0, size - cap)
                 f.seek(start)
@@ -837,13 +853,15 @@ def session_location(launch_cwd: object, session_id: str | None) -> dict:
     A transcript directory that no longer exists (a worktree removed after its merge) is reported as it is, with
     `dir_from` "gone" and no repository, so the session matches no `--repo`: falling back to the launch directory
     would show a finished session as working on its main checkout."""
-    loc = dict(NO_LOCATION)
-    d, src = transcript_cwd(session_id), "transcript"
+    d = transcript_cwd(session_id)
     if d and not os.path.isdir(d):
-        loc.update(dir=d, dir_from="gone")
-        return loc
-    if not d:
-        d, src = launch_cwd, "launch"
+        return dict(NO_LOCATION, dir=d, dir_from="gone")
+    return dir_location(d, "transcript") if d else dir_location(launch_cwd, "launch")
+
+
+def dir_location(d: object, src: str) -> dict:
+    """The location fields of session_location for a directory that `src` says where it came from."""
+    loc = dict(NO_LOCATION)
     if not isinstance(d, str) or not d.startswith("/") or not os.path.isdir(d):
         return loc
     loc.update(dir=d, dir_from=src)
@@ -870,9 +888,309 @@ def in_repo(row: dict, want: str) -> bool:
     return want.strip().lower() in names
 
 
-def ls_rows(con: sqlite3.Connection, repo: str | None = None) -> tuple[list[dict], list[dict]]:
+# ---------------------------------------------------------------- finished sessions (hov ls --all)
+#
+# A finished background session has no row in `claude agents --json`, so a session told to reach one could not tell
+# it had ended, and took a running session with a similar name for it or hunted through saved conversations for
+# what it left (hov-stack#844, #894). `ls --all` lists each one as facts and pointers only. Nothing a session or the
+# operator wrote as prose reaches a row: of the job record only the pull request links are read, never its prompt,
+# step, result or link titles, and of the transcript only timestamps, directories, branches and the paths of write
+# tool calls. The transcript format is Claude Code's and undocumented, so every read is of the tail and any surprise
+# leaves a field null.
+
+# Bytes read from the end of a finished transcript for the files it wrote. Measured 2026-11-25 on the 44 finished
+# sessions of one host with a transcript (7.25 GiB in all): of the 19 whose transcript holds a write into a
+# deliverables folder still on disk, a 32 MiB tail held the newest such write for 17, 8 MiB for 14, 128 MiB for 18.
+FINISHED_TAIL = 32 * 1024 * 1024
+# Seconds one call spends reading uncached transcripts for that, newest session first; past it a row's files read
+# null until a later call, which finds the rows already read in the cache. A byte budget would not fit both cases
+# measured on the host above: a first listing that read up to 256 MiB of uncached transcripts took 26 s, while cached
+# ones read at hundreds of MB/s. HOV_FINISHED_READ_SECONDS overrides it; one read may run past it by one tail.
+FINISHED_READ_SECONDS = 2.0
+FINISHED_SHOWN = 5  # newest pull requests and files a finished row lists
+FINISHED_KEPT = 50  # files remembered per transcript in the cache, before the still-on-disk check
+FINISHED_CACHE = "finished.json"
+JOB_RECORD_CAP = 1024 * 1024
+WRITE_TOOLS = ("Write", "Edit", "MultiEdit", "NotebookEdit")
+WRITE_TOOL_BYTES = tuple(f'"{n}"'.encode() for n in WRITE_TOOLS)
+DELIVERABLES_PART = "/.claude/deliverables/"
+WORKTREES_PART = "/.claude/worktrees/"
+TS_RE = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]{1,9})?Z$")
+BRANCH_RE = re.compile(r"^[A-Za-z0-9._/+-]{1,200}$")
+PR_HREF = re.compile(r"^https://github\.com/([A-Za-z0-9_.-]{1,100})/([A-Za-z0-9_.-]{1,100})/pull/([0-9]{1,9})$")
+
+
+def tail_lines(path: Path, cap: int) -> tuple[list[bytes], int] | None:
+    """The whole lines in the last `cap` bytes of `path` and the offset they start at, or None when unreadable."""
+    try:
+        with open(path, "rb") as f:
+            size = f.seek(0, os.SEEK_END)
+            start = max(0, size - cap)
+            f.seek(start)
+            lines = f.read().split(b"\n")
+    except OSError:
+        return None
+    return (lines[1:] if start > 0 else lines), start  # the first line was cut by the seek
+
+
+def last_stamp(lines: list[bytes]) -> tuple[str | None, str | None, str | None]:
+    """The newest directory in transcript lines with the branch stamped on the same entry, and the newest timestamp."""
+    cwd = branch = ts = None
+    for raw in reversed(lines):
+        if cwd is not None and ts is not None:
+            break
+        if b'"cwd"' not in raw and b'"timestamp"' not in raw:
+            continue
+        try:
+            e = json.loads(raw)
+        except ValueError:
+            continue
+        if not isinstance(e, dict):
+            continue
+        if ts is None and isinstance(e.get("timestamp"), str) and TS_RE.match(e["timestamp"]):
+            ts = e["timestamp"]
+        if cwd is None and isinstance(e.get("cwd"), str) and e["cwd"].startswith("/"):
+            cwd = e["cwd"]
+            b = e.get("gitBranch")
+            branch = b if isinstance(b, str) and BRANCH_RE.match(b) and b != "HEAD" else None
+    return cwd, branch, ts
+
+
+def shallow_stamp(path: Path | None) -> tuple[str | None, str | None, str | None]:
+    """last_stamp over the shortest tail that holds a directory (TRANSCRIPT_TAILS, as transcript_cwd reads)."""
+    found = (None, None, None)
+    for cap in TRANSCRIPT_TAILS if path else ():
+        got = tail_lines(path, cap)
+        if got is None:
+            break
+        found = last_stamp(got[0])
+        if found[0] is not None or got[1] == 0:
+            break
+    return found
+
+
+def deliverable_path(v: object) -> str | None:
+    """`v` when it is an absolute path inside a deliverables folder with nothing the hook frame refuses, else None."""
+    if not isinstance(v, str) or not v.startswith("/") or len(v) > 1024 or any(c < " " or c == "\x7f" or c in "<>" for c in v):
+        return None
+    v = os.path.normpath(v)  # a `..` cannot climb out of the folder and still count
+    return v if DELIVERABLES_PART in v else None
+
+
+def files_written(lines: list[bytes]) -> list[str]:
+    """Files in a deliverables folder that the session wrote with a write tool, newest first, leaving out a call whose
+    result was an error. Only tool calls in its own assistant entries count, so a file it read, or a write call quoted
+    in a tool result or in text, is not one."""
+    calls, failed = [], set()
+    for raw in lines:
+        want_call = b'"tool_use"' in raw and any(n in raw for n in WRITE_TOOL_BYTES)
+        if not want_call and b'"is_error"' not in raw:
+            continue
+        try:
+            e = json.loads(raw)
+        except ValueError:
+            continue
+        msg = e.get("message") if isinstance(e, dict) else None
+        content = msg.get("content") if isinstance(msg, dict) else None
+        if not isinstance(content, list):
+            continue
+        for c in content:
+            if not isinstance(c, dict):
+                continue
+            if e.get("type") == "assistant" and c.get("type") == "tool_use" and c.get("name") in WRITE_TOOLS:
+                inp = c.get("input") if isinstance(c.get("input"), dict) else {}
+                fp = deliverable_path(inp.get("file_path") or inp.get("notebook_path"))
+                if fp:
+                    calls.append((c.get("id"), fp))
+            elif e.get("type") == "user" and c.get("type") == "tool_result" and c.get("is_error") is True:
+                failed.add(c.get("tool_use_id"))
+    out = []
+    for cid, fp in reversed(calls):
+        if (cid is not None and cid in failed) or fp in out:
+            continue
+        out.append(fp)
+    return out[:FINISHED_KEPT]
+
+
+def transcript_index(want: set) -> dict[str, Path]:
+    """transcript_file for many session ids in one pass over the projects folder (it globs the folder once per id,
+    27 ms each on a host with 72 sessions): the newest transcript of each id in `want`."""
+    best: dict[str, tuple[float, Path]] = {}
+    try:
+        dirs = [e.path for e in os.scandir(claude_home() / "projects") if e.is_dir()]
+    except OSError:
+        return {}
+    for d in dirs:
+        try:
+            with os.scandir(d) as it:
+                for e in it:
+                    sid = e.name[:-6] if e.name.endswith(".jsonl") else None
+                    if sid in want and e.is_file():
+                        m = e.stat().st_mtime
+                        if sid not in best or m > best[sid][0]:
+                            best[sid] = (m, Path(e.path))
+        except OSError:
+            continue
+    return {k: v[1] for k, v in best.items()}
+
+
+def job_pr_links() -> dict[str, list[str]]:
+    """The pull requests Claude Code linked to each background job, by session id, newest first, as owner/repo#N.
+    Only `children` entries of kind `pr` whose link is a GitHub pull request are read from a job record."""
+    out: dict[str, list[str]] = {}
+    try:
+        paths = list((claude_home() / "jobs").glob("*/state.json"))
+    except OSError:
+        return out
+    for p in paths:
+        try:
+            if p.stat().st_size > JOB_RECORD_CAP:
+                continue
+            d = json.loads(p.read_bytes())
+        except (OSError, ValueError):
+            continue
+        if not isinstance(d, dict):
+            continue
+        links: list[str] = []
+        children = d.get("children")
+        for c in reversed(children) if isinstance(children, list) else ():  # Claude Code appends, so newest last
+            m = PR_HREF.match(c["href"]) if isinstance(c, dict) and c.get("kind") == "pr" and isinstance(c.get("href"), str) else None
+            ref = f"{m.group(1)}/{m.group(2)}#{int(m.group(3))}" if m else None
+            if ref and ref not in links:
+                links.append(ref)
+        for k in ("sessionId", "resumeSessionId"):
+            v = d.get(k)
+            if isinstance(v, str) and (k == "sessionId" or v not in out):
+                out[v] = links
+    return out
+
+
+def finished_location(cwd: str | None, branch: str | None, launch_cwd: object, seen: dict) -> dict:
+    """dir_location for a finished session, from the newest directory and branch its transcript recorded. The branch
+    is that one, the branch it was on when it last ran. Where that directory is gone (a worktree removed after its
+    merge), the repository and main checkout come from the checkout the worktree sat in, so `--repo` still finds it.
+    `seen` keeps each directory's answer for the rest of the call: many finished sessions share a checkout."""
+    def at(d: object, src: str) -> dict:
+        key = (d if isinstance(d, str) else None, src)
+        if key not in seen:
+            seen[key] = dir_location(d, src)
+        return dict(seen[key])
+
+    if cwd and not os.path.isdir(cwd):
+        loc = dict(NO_LOCATION, dir=cwd, dir_from="gone", branch=branch)
+        main = cwd.split(WORKTREES_PART, 1)[0] if WORKTREES_PART in cwd else None
+        if main and os.path.isdir(main):
+            top = at(main, "launch")
+            loc.update(repo=top["repo"], checkout=top["checkout"])
+        return loc
+    loc = at(cwd, "transcript") if cwd else at(launch_cwd, "launch")
+    if cwd and branch and loc["dir"] == cwd:
+        loc["branch"] = branch
+    return loc
+
+
+def finished_cache_load() -> dict:
+    try:
+        d = json.loads((state_dir() / FINISHED_CACHE).read_bytes())
+    except (OSError, ValueError):
+        return {}
+    ok = isinstance(d, dict) and d.get("v") == 1 and d.get("tail") == FINISHED_TAIL and isinstance(d.get("rows"), dict)
+    return d["rows"] if ok else {}
+
+
+def finished_cache_save(rows: dict) -> None:
+    """Replace the cache file whole (written aside, then renamed), so a reader never sees half of one. Never raises."""
+    p = state_dir() / FINISHED_CACHE
+    tmp = p.with_name(f"{FINISHED_CACHE}.{os.getpid()}.tmp")
+    try:
+        with os.fdopen(open_private(tmp, os.O_WRONLY | os.O_TRUNC), "w") as f:
+            json.dump({"v": 1, "tail": FINISHED_TAIL, "rows": rows}, f)
+        os.replace(tmp, p)
+    except OSError:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+
+
+def cached_facts(c: object, st: os.stat_result) -> dict | None:
+    """A cache entry still true of a transcript of this size and modification time, its fields checked, or None."""
+    if not isinstance(c, dict) or c.get("size") != st.st_size or c.get("mtime_ns") != st.st_mtime_ns:
+        return None
+    cwd, branch, ts, wrote = c.get("cwd"), c.get("branch"), c.get("ts"), c.get("wrote")
+    if not (cwd is None or (isinstance(cwd, str) and cwd.startswith("/"))) or not isinstance(wrote, list):
+        return None
+    return {"size": st.st_size, "mtime_ns": st.st_mtime_ns, "cwd": cwd,
+            "branch": branch if isinstance(branch, str) and BRANCH_RE.match(branch) else None,
+            "ts": ts if isinstance(ts, str) and TS_RE.match(ts) else None,
+            "wrote": [w for w in map(deliverable_path, wrote[:FINISHED_KEPT]) if w]}
+
+
+def finished_rows(live_ids: set, repo: str | None) -> list[dict]:
+    """One row per finished background session on this host, newest first: `claude agents --json --all` rows in
+    state `done` that the default listing leaves out. With `repo`, only those that worked in that repository."""
+    agents = [r for r in agents_rows(finished=True)
+              if isinstance(r, dict) and r.get("state") == "done" and isinstance(r.get("sessionId"), str)
+              and SESSION_ID_RE.match(r["sessionId"]) and r["sessionId"] not in live_ids]
+    if not agents:
+        return []
+    prs, cache, keep, rows, seen = job_pr_links(), finished_cache_load(), {}, [], {}
+    paths = transcript_index({r["sessionId"] for r in agents})
+    for r in agents:
+        sid = r["sessionId"]
+        path, st, facts = paths.get(sid), None, None
+        try:
+            st = path.stat() if path else None
+        except OSError:
+            path = None
+        if path and st:
+            facts = cached_facts(cache.get(str(path)), st)
+            if facts:
+                keep[str(path)] = facts
+        cwd, branch, ts = (facts["cwd"], facts["branch"], facts["ts"]) if facts else shallow_stamp(path)
+        title = r.get("name")
+        links = prs.get(sid, [])
+        row = {"kind": "finished", "addr": None, "name": title if title and ident_error(title, "name") is None else None,
+               "session_id": sid, "send_to": None, "state": "done", "status": None,
+               "cwd": r.get("cwd") if isinstance(r.get("cwd"), str) else None, **finished_location(cwd, branch, r.get("cwd"), seen),
+               "last_active": ts, "transcript": str(path) if path else None,
+               "pr_links": links[:FINISHED_SHOWN], "pr_links_total": len(links), "deliverables_written": None, "unread": None}
+        if repo is not None and not in_repo(row, repo):
+            continue
+        rows.append((row, path, st, facts, cwd))
+    rows.sort(key=lambda x: x[0]["last_active"] or "", reverse=True)
+    try:
+        seconds = max(0.0, float(os.environ.get("HOV_FINISHED_READ_SECONDS", FINISHED_READ_SECONDS)))
+    except ValueError:
+        seconds = FINISHED_READ_SECONDS
+    deadline = time.monotonic() + seconds
+    out = []
+    for row, path, st, facts, cwd in rows:
+        if facts is None and path and st and time.monotonic() < deadline:
+            got = tail_lines(path, FINISHED_TAIL)
+            if got is not None:
+                deep_cwd, deep_branch, deep_ts = last_stamp(got[0])
+                facts = {"size": st.st_size, "mtime_ns": st.st_mtime_ns, "cwd": deep_cwd, "branch": deep_branch,
+                         "ts": deep_ts, "wrote": files_written(got[0])}
+                keep[str(path)] = facts
+                if deep_cwd != cwd:  # only when the shorter tail held no directory
+                    row.update(finished_location(deep_cwd, deep_branch, row["cwd"], seen), last_active=deep_ts)
+                    if repo is not None and not in_repo(row, repo):
+                        continue
+        if facts is not None:
+            row["deliverables_written"] = [w for w in facts["wrote"] if os.path.isfile(w)][:FINISHED_SHOWN]
+        out.append(row)
+    if repo is None and keep != cache:
+        finished_cache_save(keep)  # only this listing's sessions, so the file never outgrows the host's jobs
+    elif repo is not None and any(cache.get(k) != v for k, v in keep.items()):
+        finished_cache_save({**cache, **keep})
+    return out
+
+
+def ls_rows(con: sqlite3.Connection, repo: str | None = None, finished: bool = False) -> tuple[list[dict], list[dict]]:
     """Sessions and mailboxes on this host, then the links: what `hov ls` and the MCP `ls` tool show. With `repo`,
-    only the sessions working in that repository (in_repo), and no mailboxes or links."""
+    only the sessions working in that repository (in_repo), and no mailboxes or links. With `finished`, the sessions
+    that have finished follow the mailboxes (finished_rows)."""
     host = local_host()
     agents = agents_rows()
     # SAFETY (#767): the git and transcript reads below can take seconds; never hold the mailbox write lock over them.
@@ -897,14 +1215,16 @@ def ls_rows(con: sqlite3.Connection, repo: str | None = None) -> tuple[list[dict
             continue
         me = Me(host, name, sid or None, "agents")
         out.append({"addr": me.addr, **row, "unread": len(unread_for(con, me))})
+    ended = finished_rows({r.get("sessionId") for r in agents}, repo) if finished else []
     if repo is not None:
-        return out, []
+        return out + ended, []
     for r in con.execute("SELECT DISTINCT to_host AS h, to_name AS n FROM messages UNION SELECT DISTINCT from_host, from_name FROM messages"):
         if r["n"] in ("*",) or (r["h"] == host and r["n"] in seen):
             continue
         me = Me(r["h"], r["n"], None, "mailbox")
         out.append({"kind": "mailbox", "addr": me.addr, "session_id": None, "send_to": None, "state": None, "status": None, "cwd": None, **NO_LOCATION,
                     "unread": len(unread_for(con, me)) if r["h"] == host else None})
+    out += ended
     links = []
     for r in con.execute("SELECT * FROM peers ORDER BY host"):
         links.append({
@@ -920,6 +1240,12 @@ def fmt_ls(out: list[dict], links: list[dict]) -> list[str]:
     # every field comes from a row or a peer, so each passes the same filter the hook frame uses
     lines = []
     for o in out:
+        if o["kind"] == "finished":  # no address: a finished session cannot be messaged
+            at = f"  at={shown(o['repo'], 200)}:{shown(o['branch'] or '-', 200)}" if o.get("repo") else ""
+            wrote = "?" if o["deliverables_written"] is None else str(len(o["deliverables_written"]))
+            lines.append(f"finished {shown(o['name'] or '-', 200):31} last={shown(o['last_active'] or '-', 40)}"
+                         f"  id={shown(o['session_id'][:8], 8)}{at}  prs={o['pr_links_total']}  wrote={wrote}")
+            continue
         st = f"{shown(o['state'], 32)}/{shown(o['status'], 32)}" if o["state"] else "-"
         un = "-" if o["unread"] is None else str(o["unread"])
         sid8 = f"  id={shown(o['session_id'][:8], 8)}" if o["session_id"] else ""
@@ -928,12 +1254,15 @@ def fmt_ls(out: list[dict], links: list[dict]) -> list[str]:
     for o in links:
         lines.append(f"link {shown(o['host'], 64):35} {shown(o['role'], 16)}/{shown(o['state'], 16):13}"
                      f" hello={shown(o['last_hello'], 40)} ack={shown(o['last_ack'] or '-', 40)} in={shown(o['last_in'] or '-', 40)}")
+    unread = sum(1 for o in out if o["kind"] == "finished" and o["transcript"] and o["deliverables_written"] is None)
+    if unread:
+        lines.append(f"({unread} finished session(s) show wrote=? because their transcripts were not read in time; run again for them)")
     return lines
 
 def cmd_ls(a: argparse.Namespace) -> int:
     con = db()
     whoami(con)  # as in cmd_thread
-    out, links = ls_rows(con, a.repo)
+    out, links = ls_rows(con, a.repo, finished=a.all)
     if a.json:
         print(json.dumps(out + links))
     else:
@@ -1612,8 +1941,8 @@ MCP_TOOLS = [
      "description": "Full-text search over subjects and bodies (SQLite FTS5 query syntax), best match first.",
      "inputSchema": _obj({"query": _s(1000), "limit": {"type": "integer", "minimum": 1, "maximum": 100}}, ["query"])},
     {"name": "ls", "title": "Who is reachable",
-     "description": "Sessions and mailboxes on this host with their unread counts and, for a session, the repository and branch it works on (at=repo:branch), and the state of each link to another host. With repo, only the sessions working in that repository. A session shown with a status (busy, idle) is running; one shown without is not, and mail sent to it waits until it next runs.",
-     "inputSchema": _obj({"repo": _s(200)})},
+     "description": "Sessions and mailboxes on this host with their unread counts and, for a session, the repository and branch it works on (at=repo:branch), and the state of each link to another host. With repo, only the sessions working in that repository. A session shown with a status (busy, idle) is running; one shown without is not, and mail sent to it waits until it next runs. With all, also the sessions that have finished, as `finished` lines with no address: they cannot be messaged, so read what each left (its pull requests, saved conversation and the files it wrote).",
+     "inputSchema": _obj({"repo": _s(200), "all": {"type": "boolean"}})},
 ]
 
 
@@ -1793,7 +2122,7 @@ class McpServer:
                 return "no matches"
             return "\n".join([FRAMING, *(fmt_row(r, full=False) for r in rows)])
         if name == "ls":
-            out, links = ls_rows(con, args.get("repo"))
+            out, links = ls_rows(con, args.get("repo"), finished=args.get("all") is True)
             lines = fmt_ls(out, links)
             return "\n".join(lines) if lines else ("(no session works in that repository)" if args.get("repo") else "(nothing reachable yet)")
         raise McpError(-32602, f"unknown tool: {shown(name, 64)}")
@@ -2421,8 +2750,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     l = sub.add_parser("ls", help="list reachable sessions and mailboxes on this host, and the state of each link",
                        epilog="--json gives each session a `send_to`: the name Claude Code's own SendMessage takes for it, "
-                              "or null when the session is not running or has no usable title.")
+                              "or null when the session is not running or has no usable title. --all adds the sessions "
+                              "that have finished, as `finished` rows with no addr or send_to.")
     l.add_argument("--json", action="store_true")
+    l.add_argument("--all", action="store_true", help="also list sessions that have finished, as facts and pointers only: when it last "
+                   "ran, repository, branch, linked pull requests, saved conversation, files it wrote under a deliverables folder")
     l.add_argument("--repo", default=None, help="only sessions working in this repository: owner/name, its name, or the main checkout's folder name (whole name, any case)")
     l.set_defaults(fn=cmd_ls)
 

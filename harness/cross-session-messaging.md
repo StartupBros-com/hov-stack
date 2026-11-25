@@ -41,11 +41,13 @@ holds is not sent:
   its `send_to` is what `SendMessage` takes (hov 0.1.12).
 - A row with no `send_to` is a session that is not running, and
   `ListAgents` does not show it. No message reaches it; `SendMessage` has no
-  way to look it up. A session that has finished has no row at all: it
-  appears only in `claude agents --json --all`, with `state: done`. What
-  either kind knew is in its PRs, issues and transcript. Check for the row
-  before planning to ask a session anything. When a task names a session to
-  talk to and it is not there, say so in the report.
+  way to look it up. A session that has finished is listed only by
+  `hov ls --all` (hov 0.1.13), as a `finished` row with no `addr` or
+  `send_to`: when it last ran, its repository and branch, the pull requests
+  linked to it, its transcript and the files it wrote into a deliverables
+  folder. What either kind knew is in those. Check for the row before
+  planning to ask a session anything. When a task names a session to talk to
+  and it is not there, say so in the report.
 - News that can wait goes on the PR or issue it concerns, and
   `notify_when_idle` answers "is that session done yet".
 
