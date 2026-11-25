@@ -21,11 +21,16 @@ Classes, per session, each "at least one such command":
   docs_read    a Read of a file under one of those folders, or a cat, head, tail, sed, less or bat of one
 
 A Bash call is split into its simple commands (at ; && || | and newlines outside quotes) and each one is
-classified, so a second git command on the same line counts. A subagent's edit does not end the "before
-first edit" window; only the session's own edit does.
+classified, so a second git command on the same line counts. Known gap: the splitter ends a double-quoted
+string at a backslash-escaped quote, so a command after one on the same line can be missed. A git command
+run from inside a script file is never seen. A subagent's edit does not end the "before first edit"
+window; only the session's own edit does.
 
 A hit is a command that looked, not proof that the reason was found. --sample N prints up to N matched
-commands per class for a read by eye; that output can name private paths, so it is not for committing.
+commands per class for a read by eye: each session's first match before any code edit, at a fixed stride
+through the sessions in path order, sessions with no code edit included. Each is printed cut at its pipe.
+It checks the patterns; it is not a random draw from the counted sessions. That output can name private
+paths, so it is not for committing.
 """
 import argparse
 import collections
@@ -245,6 +250,7 @@ if opt.sample:
     for cls in CLASSES[1:]:
         got = samples[cls]
         step = max(1, len(got) // opt.sample)
-        print(f"== sample, {cls} (first pre-edit hit of every {step}th session with one; {len(got)} sessions)")
+        print(f"== sample, {cls} (first match before any code edit, every {step}th of {len(got)} sessions with one,"
+              " sessions with no code edit included)")
         for text in got[::step][: opt.sample]:
             print("   ", re.sub(r"/home/\w+", "~", text)[:190])

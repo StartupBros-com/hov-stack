@@ -904,13 +904,22 @@ sessions in the last 30 days edited code. Before their first edit:
   commit body is not read before about three edits in four.
 - Pull-request or issue text was read in 152. The count does not separate a session's own
   task issue from the history of the code it was about to change.
-- These count commands that looked, not reasons that were found. Precision: 30 first hits per
-  class were read by eye, from the sessions' own commands. Commit bodies 30 of 30 correct,
-  titles 30 of 30, `cass` 30 of 30, docs opened 30 of 30, pull-request text 28 of 30.
-- Recall: every command on a line is classified, and the script's `--self-test` holds the
-  shapes that were checked (26 of 26). A git command run from inside a script file is not
-  seen, and worktree sessions here are told to put multi-step shell work in script files, so
-  the counts are lower bounds.
+- These count commands that looked, not reasons that were found. 30 matched commands per
+  class were read by eye: commit bodies 30 of 30 correct, titles 30 of 30, `cass` 30 of 30,
+  docs opened 30 of 30, pull-request text 28 of 30 (the two misses asked for comments and
+  printed only their count). Each is a session's first match before any code edit, from its
+  own commands, taken at a fixed stride through the sessions in path order (for commit
+  bodies and opened docs, the first 30 of 43 and 42). Sessions that never edited code are
+  included, so this checks the patterns and is not a random draw from the counted sessions.
+- The counts are inexact in both directions. Too high: 15 of the 30 sampled commit-body
+  commands are a bare `git show --stat`, which prints the message above a file list the
+  session may have been after; the sample shows each command cut at its pipe, so a `| tail`
+  or `| grep` that drops the message was not seen; and six sampled commands sent their
+  output to a file, one of them to `/dev/null`. Too low: a git command run from inside a
+  script file is not seen, and worktree sessions here are told to put multi-step shell work
+  in script files; and the splitter ends a double-quoted string at a backslash-escaped
+  quote, so a command after one on the same line can be missed. The script's `--self-test`
+  holds the shapes that were checked (26 of 26); that shape is not among them.
 - A session that changes code only through shell commands is not counted as editing. A
   subagent's edit does not end the "before first edit" window, so for a session that delegates
   the change itself the subagent column runs long.
