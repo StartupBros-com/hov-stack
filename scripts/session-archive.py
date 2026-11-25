@@ -23,8 +23,8 @@ Rules the code keeps:
     its stream, and for a file whose path the quick check does not cover that
     is another name of a recorded file (a "move", counted as `moved`; the
     path may be new, or have a stale record of its own, which counts for
-    nothing). That is: a recorded other path on the same device and inode,
-    under the same key, is gone; its stream
+    nothing). That is: the newest record of the file's device and inode is
+    another path, under the same key, and is gone; its stream
     is whole, not cut this pass, with its cursor at the size recorded for that
     path; no other recorded path of the stream still exists; the file is
     unchanged (same size and mtime, any kind of file) or, for `.jsonl` only,
@@ -754,31 +754,32 @@ class Archive:
         file's, and nothing else holds the stream, so only the bytes after the
         cursor can be new. Any doubt returns None and the caller compares in full.
         """
-        rows = self.db.execute(
-            "SELECT path, stream, size, mtime_ns FROM sources WHERE ino=? AND dev=? AND path!=? "
-            "ORDER BY seen_ns DESC",
-            (snap.st_ino, snap.st_dev, path)).fetchall()
-        for old, stream_id, size, mtime_ns in rows:
-            if not self.gone(old):
-                continue
-            stream = self.stream_by_id(stream_id)
-            if stream is None or (stream.agent, stream.key) != (agent, key):
-                continue
-            stream = self.reconcile(stream)
-            if stream.broken or stream.id in self.cut or stream.content_bytes != size:
-                continue
-            if snap.st_size == size:
-                if snap.st_mtime_ns != mtime_ns:
-                    continue
-            elif snap.st_size < size or not key.endswith(".jsonl"):
-                continue
-            if not all(self.gone(other) for (other,) in self.db.execute(
-                    "SELECT path FROM sources WHERE stream=? AND path NOT IN (?, ?)", (stream.id, old, path))):
-                continue
-            window = self.continues(fd, snap.st_size, stream)
-            if window is not None:
-                return stream, window
-        return None
+        # Only the newest record of this inode counts: an older one may describe a
+        # state this file has since left (shortened and regrown, say).
+        row = self.db.execute(
+            "SELECT path, stream, size, mtime_ns, dev FROM sources WHERE ino=? ORDER BY seen_ns DESC LIMIT 1",
+            (snap.st_ino,)).fetchone()
+        if row is None:
+            return None
+        old, stream_id, size, mtime_ns, dev = row
+        if old == path or dev != snap.st_dev or not self.gone(old):
+            return None
+        stream = self.stream_by_id(stream_id)
+        if stream is None or (stream.agent, stream.key) != (agent, key):
+            return None
+        stream = self.reconcile(stream)
+        if stream.broken or stream.id in self.cut or stream.content_bytes != size:
+            return None
+        if snap.st_size == size:
+            if snap.st_mtime_ns != mtime_ns:
+                return None
+        elif snap.st_size < size or not key.endswith(".jsonl"):
+            return None
+        if not all(self.gone(other) for (other,) in self.db.execute(
+                "SELECT path FROM sources WHERE stream=? AND path NOT IN (?, ?)", (stream.id, old, path))):
+            return None
+        window = self.continues(fd, snap.st_size, stream)
+        return (stream, window) if window is not None else None
 
     def capture_one(self, agent: str, key: str, path: str, seen: Optional[tuple]) -> None:
         try:

@@ -562,6 +562,25 @@ class MovedFolderTests(Case):
         self.assertEqual((summary["moved"], summary["versions"]), (0, 1))
         self.assertEqual(self.versions_on_disk("claude", "s1.jsonl"), {1: first, 2: rewritten})
 
+    def test_stale_record_of_the_inode_does_not_outrank_a_newer_one(self):
+        first = text(1, 9096)
+        self.put("proj-a/s1.jsonl", first)
+        self.run_pass()
+        self.move()
+        self.assertEqual(self.run_pass()["moved"], 1)
+        path = os.path.join(self.claude, "proj-b/s1.jsonl")
+        os.truncate(path, 1000)
+        self.stamp(path)
+        self.assertEqual(self.run_pass()["covered"], 1)
+        # Regrown over the old length with a changed middle and the same 4 KiB before the old cursor.
+        regrown = first[:1000] + b"Z" * 4000 + first[5000:] + text(9, 1000)
+        self.assertEqual(regrown[len(first) - A.TAIL:len(first)], first[-A.TAIL:])
+        self.put("proj-b/s1.jsonl", regrown)
+        summary = self.run_pass()
+        self.assertEqual(summary["moved"], 0)
+        self.assertIn(regrown, self.versions_on_disk("claude", "s1.jsonl").values())
+        self.assertEqual(self.versions_on_disk("claude", "s1.jsonl")[1], first)
+
     def test_moved_file_touched_without_growing_is_compared_in_full(self):
         self.put("proj-a/s1.jsonl", text(1, 9000))
         self.run_pass()
