@@ -24,6 +24,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -912,6 +913,556 @@ class TimeBudgetTests(Case):
         self.assertEqual((summary["appended"], summary["deferred"]), (2, 1))
 
 
+class Listing:
+    """What os.scandir returns, from a list of entries; `broken` fails the listing before its first entry."""
+
+    def __init__(self, items, broken=False):
+        self.items = iter(items)
+        self.broken = broken
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        if self.broken:
+            raise OSError(errno.EIO, "Input/output error")
+        return next(self.items)
+
+
+class Entry:
+    """An os.DirEntry whose stat() fails with EIO when `blocked`."""
+
+    def __init__(self, entry, blocked):
+        self.entry, self.blocked = entry, blocked
+        self.path, self.name = entry.path, entry.name
+
+    def is_dir(self, **how):
+        return self.entry.is_dir(**how)
+
+    def is_file(self, **how):
+        return self.entry.is_file(**how)
+
+    def inode(self):
+        return self.entry.inode()
+
+    def stat(self, **how):
+        if self.blocked:
+            raise OSError(errno.EIO, "Input/output error", self.path)
+        return self.entry.stat(**how)
+
+
+class LightPassTests(Case):
+    """Light passes find what changed by looking at little; full passes stay the net under them.
+
+    Files dated `old` are cold: a light pass reaches them only through a folder
+    whose mtime moved, or through the pending list. `age()` dates every folder
+    `old` too, so a folder counts as changed only when something happens in it
+    after the pass that listed it.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.clock = time.time_ns() - 3600 * 10 ** 9        # put() and add() write files dated an hour ago
+        self.old = time.time_ns() - 5 * 24 * 3600 * 10 ** 9
+
+    def cold(self, rel, data, root=None):
+        path = self.put(rel, data, root)
+        os.utime(path, ns=(self.old, self.old))
+        return path
+
+    def age(self):
+        for top in (self.claude, self.codex):
+            for directory, _, _ in os.walk(top):
+                os.utime(directory, ns=(self.old, self.old))
+
+    def run_light(self, **kwargs):
+        archive = self.archive(**kwargs)
+        try:
+            return archive.capture(False)
+        finally:
+            archive.close()
+
+    def run_full(self, **kwargs):
+        archive = self.archive(**kwargs)
+        try:
+            return archive.capture(True)
+        finally:
+            archive.close()
+
+    def pending(self):
+        archive = self.archive()
+        try:
+            return archive.status()["pending"]
+        finally:
+            archive.close()
+
+    def state(self, sql, *args):
+        db = sqlite3.connect(os.path.join(self.store, "state.sqlite3"), isolation_level=None)
+        try:
+            return db.execute(sql, args).fetchall()
+        finally:
+            db.close()
+
+    def test_growth_of_a_recent_session_is_stored_without_listing_a_folder(self):
+        self.put("proj-a/s1.jsonl", text(1, 900))
+        self.cold("proj-b/s2.jsonl", text(2, 900))
+        self.age()
+        self.assertEqual(self.run_full()["full_walks"], 2)
+        self.add("proj-a/s1.jsonl", text(3, 400))
+        summary = self.run_light()
+        self.assertEqual((summary["full_walks"], summary["appended"], summary["folders_read"]), (0, 1, 0))
+        self.assertEqual(self.stored("claude", "s1.jsonl"), text(1, 900) + text(3, 400))
+        summary = self.run_light()
+        self.assertEqual((summary["changed"], summary["appended"], summary["folders_read"]), (0, 0, 0))
+
+    def test_new_session_in_a_cold_project_folder(self):
+        self.cold("proj-b/s2.jsonl", text(2, 900))
+        self.age()
+        self.run_full()
+        self.cold("proj-b/s9.jsonl", text(9, 700))          # copied in with its old date kept
+        summary = self.run_light()
+        self.assertEqual((summary["appended"], summary["folders_read"]), (1, 1))
+        self.assertEqual(self.stored("claude", "s9.jsonl"), text(9, 700))
+
+    def test_new_project_folder(self):
+        self.cold("proj-b/s2.jsonl", text(2, 900))
+        self.age()
+        self.run_full()
+        self.cold("proj-new/s5.jsonl", text(5, 700))
+        self.cold("proj-new/s5/subagents/agent-q.jsonl", text(6, 300))
+        summary = self.run_light()
+        self.assertEqual(summary["appended"], 2)
+        self.assertEqual(self.stored("claude", "s5.jsonl"), text(5, 700))
+        self.assertEqual(self.stored("claude", "s5/subagents/agent-q.jsonl"), text(6, 300))
+
+    def test_new_subagent_file_in_a_recent_sessions_folder(self):
+        self.put("proj-a/s1.jsonl", text(1, 900))
+        self.cold("proj-a/s1/subagents/agent-a.jsonl", text(2, 300))
+        self.age()
+        self.run_full()
+        self.cold("proj-a/s1/subagents/agent-b.jsonl", text(3, 300))
+        summary = self.run_light()
+        self.assertEqual(summary["appended"], 1)
+        self.assertEqual(self.stored("claude", "s1/subagents/agent-b.jsonl"), text(3, 300))
+
+    def test_new_month_folder_under_a_dated_root(self):
+        self.put("2026/11/24/rollout-1.jsonl", text(1, 900), root=self.codex)
+        self.age()
+        self.run_full()
+        self.cold("2026/12/01/rollout-2.jsonl", text(2, 500), root=self.codex)
+        summary = self.run_light()
+        self.assertEqual(summary["appended"], 1)
+        self.assertEqual(self.stored("codex", "2026/12/01/rollout-2.jsonl"), text(2, 500))
+
+    def test_file_replaced_under_its_name_is_stored(self):
+        self.cold("proj-a/s1.jsonl", text(1, 900))
+        self.age()
+        self.run_full()
+        swap = os.path.join(self.tmp, "swap")
+        Path(swap).write_bytes(text(7, 600))
+        os.utime(swap, ns=(self.old, self.old))
+        os.replace(swap, os.path.join(self.claude, "proj-a/s1.jsonl"))
+        summary = self.run_light()
+        self.assertEqual((summary["appended"], summary["versions"]), (1, 1))
+        self.assertEqual(self.versions_on_disk("claude", "s1.jsonl"), {1: text(1, 900), 2: text(7, 600)})
+
+    def test_folder_that_changed_just_before_its_listing_is_listed_again(self):
+        self.cold("proj-a/s1.jsonl", text(1, 900))
+        self.age()
+        folder = os.path.join(self.claude, "proj-a")
+        listed = time.time_ns() - 60 * 10 ** 9
+        os.utime(folder, ns=(listed, listed))
+        # The full pass lists the folder one second after it changed: inside the racy window.
+        with mock.patch.object(A.time, "time_ns", lambda: listed + 10 ** 9):
+            self.run_full()
+        self.assertEqual(self.state("SELECT mtime_ns FROM folders WHERE path=?", folder), [(0,)])
+        # A file added within the same timestamp tick leaves the folder's mtime where it was.
+        self.cold("proj-a/s2.jsonl", text(2, 500))
+        os.utime(folder, ns=(listed, listed))
+        summary = self.run_light()
+        self.assertEqual(summary["appended"], 1)
+        self.assertEqual(self.stored("claude", "s2.jsonl"), text(2, 500))
+
+    def test_files_a_budget_cut_left_are_stored_by_the_next_light_pass(self):
+        for index, name in enumerate(("a", "b", "c")):
+            path = self.cold(f"proj-a/{name}.jsonl", text(index, 800))
+            os.utime(path, ns=(self.old + index, self.old + index))
+        self.age()
+        summary = self.run_full(max_bytes=1)
+        self.assertEqual((summary["appended"], summary["deferred"]), (1, 2))
+        self.assertEqual(self.pending(), 2)
+        summary = self.run_light()
+        self.assertEqual((summary["appended"], summary["folders_read"]), (2, 0))
+        self.assertEqual(self.pending(), 0)
+        self.assertEqual(self.stored("claude", "c.jsonl"), text(2, 800))
+        self.assertEqual(self.run_light()["changed"], 0)
+
+    def test_waiting_file_that_cannot_be_read_stays_waiting(self):
+        for index, name in enumerate(("a", "b")):
+            path = self.cold(f"proj-a/{name}.jsonl", text(index, 800))
+            os.utime(path, ns=(self.old + index, self.old + index))
+        self.age()
+        self.run_full(max_bytes=1)
+        blocked = os.path.join(self.claude, "proj-a/b.jsonl")
+        real_stat = os.stat
+
+        def guarded(path, *rest, **how):
+            if path == blocked:
+                raise PermissionError(errno.EACCES, "Permission denied", path)
+            return real_stat(path, *rest, **how)
+        said = io.StringIO()
+        with mock.patch.object(A.os, "stat", guarded), contextlib.redirect_stderr(said):
+            summary = self.run_light()
+        self.assertEqual((summary["source_errors"], summary["appended"]), (1, 0))
+        self.assertIn(blocked, said.getvalue())
+        self.assertEqual(self.pending(), 1)
+        summary = self.run_light()
+        self.assertEqual((summary["source_errors"], summary["appended"]), (0, 1))
+        self.assertEqual(self.stored("claude", "b.jsonl"), text(1, 800))
+
+    def test_waiting_file_that_is_gone_stops_waiting(self):
+        for index, name in enumerate(("a", "b")):
+            path = self.cold(f"proj-a/{name}.jsonl", text(index, 800))
+            os.utime(path, ns=(self.old + index, self.old + index))
+        self.age()
+        self.run_full(max_bytes=1)
+        os.unlink(os.path.join(self.claude, "proj-a/b.jsonl"))
+        summary = self.run_light()
+        self.assertEqual((summary["source_errors"], summary["appended"]), (0, 0))
+        self.assertEqual(self.pending(), 0)
+
+    def test_waiting_file_found_stored_stops_waiting(self):
+        # The state is a cache and can come back inconsistent: here it lists as
+        # waiting a file it also records as stored, unchanged since.
+        path = self.cold("proj-a/s1.jsonl", text(1, 900))
+        self.age()
+        self.run_full()
+        self.state("INSERT INTO pending(path) VALUES (?)", path)
+        summary = self.run_light()
+        self.assertEqual((summary["changed"], summary["source_errors"]), (0, 0))
+        self.assertEqual(self.pending(), 0)
+
+    def test_folder_that_cannot_be_listed_in_a_light_pass_is_counted(self):
+        self.cold("proj-a/s1.jsonl", text(1, 900))
+        self.age()
+        self.run_full()
+        self.cold("proj-a/s2.jsonl", text(2, 500))
+        blocked = os.path.join(self.claude, "proj-a")
+        real_scandir = os.scandir
+
+        def scandir(path):
+            if path == blocked:
+                raise OSError(errno.EIO, "Input/output error", path)
+            return real_scandir(path)
+        said = io.StringIO()
+        with mock.patch.object(A.os, "scandir", scandir), contextlib.redirect_stderr(said):
+            summary = self.run_light()
+        self.assertEqual((summary["source_errors"], summary["appended"]), (1, 0))
+        self.assertIn(blocked, said.getvalue())
+        summary = self.run_light()
+        self.assertEqual((summary["source_errors"], summary["appended"]), (0, 1))
+
+    def test_file_gone_before_its_turn_stops_waiting(self):
+        for index, name in enumerate(("a", "b", "c")):
+            path = self.cold(f"proj-a/{name}.jsonl", text(index, 800))
+            os.utime(path, ns=(self.old + index, self.old + index))
+        self.age()
+        self.run_full(max_bytes=1)
+        archive = self.archive()
+        archive.after_store_write = lambda: os.path.exists(gone) and os.unlink(gone)
+        gone = os.path.join(self.claude, "proj-a/c.jsonl")
+        try:
+            summary = archive.capture(False)
+        finally:
+            archive.close()
+        self.assertEqual((summary["appended"], summary["skipped"]), (1, 1))
+        self.assertEqual(self.pending(), 0)
+
+    def test_root_made_after_the_full_pass(self):
+        shutil.rmtree(self.codex)
+        self.cold("proj-a/s1.jsonl", text(1, 900))
+        self.age()
+        self.run_full()
+        self.cold("2026/11/25/rollout-1.jsonl", text(2, 500), root=self.codex)
+        summary = self.run_light()
+        self.assertEqual(summary["appended"], 1)
+        self.assertEqual(self.stored("codex", "2026/11/25/rollout-1.jsonl"), text(2, 500))
+
+    def test_source_recorded_longer_than_its_stream_is_stored_by_a_light_pass(self):
+        # As test_binding_longer_than_its_stream_is_never_taken_as_stored, on a light pass.
+        first, more = text(1, 5000), text(2, 4000)
+        self.put("proj-a/s1.jsonl", first)
+        self.run_full()
+        path = self.store_path("claude", "s1.jsonl")
+        one_frame = os.path.getsize(path)
+        self.add("proj-a/s1.jsonl", more)
+        self.run_light()
+        os.truncate(path, one_frame)
+        self.state("UPDATE streams SET content_bytes=?, store_bytes=?, tail=?",
+                   len(first), one_frame, A.tail_hash(first))
+        summary = self.run_light()
+        self.assertEqual((summary["changed"], summary["bytes_read"], summary["store_errors"]), (1, len(more), 0))
+        self.assertEqual(self.versions_on_disk("claude", "s1.jsonl"), {1: first + more})
+
+    def test_unchanged_source_of_a_broken_stream_is_stored_again_by_a_light_pass(self):
+        self.put("proj-a/s1.jsonl", text(1, 900))
+        self.run_full()
+        self.state("UPDATE streams SET broken=1")
+        summary = self.run_light()
+        self.assertEqual((summary["changed"], summary["versions"], summary["appended"]), (1, 1, 1))
+        self.assertEqual(self.stored("claude", "s1.jsonl", 2), text(1, 900))
+        self.assertEqual(self.run_light()["changed"], 0)
+
+    def listing_that_gains(self, folder, rel, data, mtime):
+        """os.scandir that, the first time it lists `folder`, adds a cold file there after reading the entries.
+
+        The folder's new mtime is set outside the racy window, so only the order
+        of the mtime read and the listing decides whether the file is found.
+        """
+        real = os.scandir
+        armed = [True]
+
+        def scandir(path):
+            if path != folder or not armed[0]:
+                return real(path)
+            armed[0] = False
+            with real(path) as entries:
+                items = list(entries)
+            self.cold(rel, data)
+            os.utime(folder, ns=(mtime, mtime))
+            return Listing(items)
+        return mock.patch.object(A.os, "scandir", scandir)
+
+    @staticmethod
+    def listing_of(folder, blocked=None, broken=False):
+        """os.scandir that lists `folder` with `blocked`'s metadata unreadable, or fails it (`broken`)."""
+        real = os.scandir
+
+        def scandir(path):
+            if path != folder:
+                return real(path)
+            with real(path) as entries:
+                items = [Entry(entry, entry.path == blocked) for entry in entries]
+            return Listing(items, broken)
+        return mock.patch.object(A.os, "scandir", scandir)
+
+    def test_folder_replaced_by_a_symlink_is_not_followed(self):
+        # A full pass does not go through a symlink below a root, and neither may
+        # a light pass: not to a recent source's folder, nor to a folder it listed.
+        self.put("proj-a/s1.jsonl", text(1, 900))
+        self.cold("proj-b/s2.jsonl", text(2, 900))
+        self.put("proj-c/s3.jsonl", text(5, 900))
+        self.put("proj-c/s3/subagents/agent-a.jsonl", text(6, 300))
+        self.age()
+        self.run_full()
+        # A project folder, and a session's folder one level further down.
+        for name, files in (("proj-a", {"s1.jsonl": text(1, 900) + text(3, 400)}),
+                            ("proj-b", {"private.jsonl": text(4, 500)}),
+                            ("proj-c/s3", {"subagents/agent-a.jsonl": text(6, 300) + text(7, 200),
+                                           "subagents/agent-z.jsonl": text(8, 200)})):
+            outside = os.path.join(self.tmp, "outside-" + name.replace("/", "-"))
+            for file, data in files.items():
+                os.makedirs(os.path.dirname(os.path.join(outside, file)), exist_ok=True)
+                Path(outside, file).write_bytes(data)
+            shutil.rmtree(os.path.join(self.claude, name))
+            os.symlink(outside, os.path.join(self.claude, name))
+        summary = self.run_light()
+        self.assertEqual((summary["changed"], summary["appended"], summary["source_errors"]), (0, 0, 0))
+        self.assertEqual(self.run_full()["changed"], 0)
+        self.assertEqual(self.versions_on_disk("claude", "s1.jsonl"), {1: text(1, 900)})
+        self.assertEqual(self.versions_on_disk("claude", "private.jsonl"), {})
+        self.assertEqual(self.versions_on_disk("claude", "s3/subagents/agent-a.jsonl"), {1: text(6, 300)})
+        self.assertEqual(self.versions_on_disk("claude", "s3/subagents/agent-z.jsonl"), {})
+
+    def test_waiting_file_a_full_pass_could_not_read_keeps_waiting(self):
+        for index, name in enumerate(("a", "b")):
+            path = self.cold(f"proj-a/{name}.jsonl", text(index, 800))
+            os.utime(path, ns=(self.old + index, self.old + index))
+        self.age()
+        self.run_full(max_bytes=1)
+        self.assertEqual(self.pending(), 1)
+        folder = os.path.join(self.claude, "proj-a")
+        with self.listing_of(folder, blocked=os.path.join(folder, "b.jsonl")), \
+                contextlib.redirect_stderr(io.StringIO()):
+            summary = self.run_full()
+        self.assertEqual((summary["source_errors"], summary["appended"]), (1, 0))
+        self.assertEqual(self.pending(), 1)
+        summary = self.run_light()
+        self.assertEqual((summary["source_errors"], summary["appended"]), (0, 1))
+        self.assertEqual(self.stored("claude", "b.jsonl"), text(1, 800))
+        self.assertEqual(self.pending(), 0)
+
+    def test_folder_a_full_pass_could_not_list_is_listed_again(self):
+        for index, name in enumerate(("a", "b")):
+            path = self.cold(f"proj-a/{name}.jsonl", text(index, 800))
+            os.utime(path, ns=(self.old + index, self.old + index))
+        self.age()
+        self.run_full(max_bytes=1)                  # a is stored, b waits
+        self.cold("proj-a/c.jsonl", text(2, 800))
+        self.age()
+        folder = os.path.join(self.claude, "proj-a")
+        with self.listing_of(folder, broken=True), contextlib.redirect_stderr(io.StringIO()):
+            summary = self.run_full()
+        self.assertEqual((summary["source_errors"], summary["appended"]), (1, 0))
+        self.assertEqual(self.pending(), 1)         # b, below the folder the walk could not list
+        self.assertEqual(self.state("SELECT mtime_ns FROM folders WHERE path=?", folder), [(0,)])
+        summary = self.run_light()
+        self.assertEqual((summary["appended"], summary["folders_read"], summary["source_errors"]), (2, 1, 0))
+        self.assertEqual(self.stored("claude", "c.jsonl"), text(2, 800))
+        self.assertEqual(self.pending(), 0)
+
+    def test_waiting_file_that_is_gone_stops_waiting_on_a_full_pass(self):
+        for index, name in enumerate(("a", "b")):
+            path = self.cold(f"proj-a/{name}.jsonl", text(index, 800))
+            os.utime(path, ns=(self.old + index, self.old + index))
+        self.age()
+        self.run_full(max_bytes=1)
+        os.unlink(os.path.join(self.claude, "proj-a/b.jsonl"))
+        self.assertEqual(self.run_full()["source_errors"], 0)
+        self.assertEqual(self.pending(), 0)
+
+    def test_folder_a_full_pass_could_not_open_is_listed_again(self):
+        self.cold("proj-a/s1.jsonl", text(1, 900))
+        self.age()
+        self.run_full()
+        self.cold("proj-a/s2.jsonl", text(2, 500))
+        self.age()
+        folder = os.path.join(self.claude, "proj-a")
+        real_scandir = os.scandir
+
+        def scandir(path):
+            if path == folder:
+                raise OSError(errno.EIO, "Input/output error", path)
+            return real_scandir(path)
+        with mock.patch.object(A.os, "scandir", scandir), contextlib.redirect_stderr(io.StringIO()):
+            summary = self.run_full()
+        self.assertEqual((summary["source_errors"], summary["appended"]), (1, 0))
+        self.assertEqual(self.state("SELECT mtime_ns FROM folders WHERE path=?", folder), [(0,)])
+        summary = self.run_light()
+        self.assertEqual((summary["appended"], summary["source_errors"]), (1, 0))
+        self.assertEqual(self.stored("claude", "s2.jsonl"), text(2, 500))
+
+    def test_folder_a_light_pass_could_not_list_whole_is_listed_again(self):
+        self.cold("proj-a/s1.jsonl", text(1, 900))
+        self.age()
+        self.run_full()
+        self.cold("proj-a/s2.jsonl", text(2, 500))
+        folder = os.path.join(self.claude, "proj-a")
+        os.utime(folder, ns=(self.old + 10 ** 9, self.old + 10 ** 9))
+        with self.listing_of(folder, broken=True), contextlib.redirect_stderr(io.StringIO()):
+            summary = self.run_light()
+        self.assertEqual((summary["source_errors"], summary["appended"]), (1, 0))
+        summary = self.run_light()
+        self.assertEqual((summary["source_errors"], summary["appended"]), (0, 1))
+        self.assertEqual(self.stored("claude", "s2.jsonl"), text(2, 500))
+
+    def test_file_a_light_pass_could_not_read_is_looked_at_again(self):
+        self.cold("proj-a/s1.jsonl", text(1, 900))
+        self.age()
+        self.run_full()
+        self.cold("proj-a/s2.jsonl", text(2, 500))
+        folder = os.path.join(self.claude, "proj-a")
+        os.utime(folder, ns=(self.old + 10 ** 9, self.old + 10 ** 9))
+        with self.listing_of(folder, blocked=os.path.join(folder, "s2.jsonl")), \
+                contextlib.redirect_stderr(io.StringIO()):
+            summary = self.run_light()
+        self.assertEqual((summary["source_errors"], summary["appended"]), (1, 0))
+        summary = self.run_light()
+        self.assertEqual((summary["source_errors"], summary["appended"]), (0, 1))
+        self.assertEqual(self.stored("claude", "s2.jsonl"), text(2, 500))
+
+    def test_file_added_while_a_full_pass_lists_its_folder(self):
+        self.cold("proj-a/s1.jsonl", text(1, 900))
+        self.age()
+        folder = os.path.join(self.claude, "proj-a")
+        with self.listing_that_gains(folder, "proj-a/s2.jsonl", text(2, 500), self.old + 10 ** 9):
+            self.assertEqual(self.run_full()["appended"], 1)
+        summary = self.run_light()
+        self.assertEqual((summary["appended"], summary["folders_read"]), (1, 1))
+        self.assertEqual(self.stored("claude", "s2.jsonl"), text(2, 500))
+
+    def test_file_added_while_a_light_pass_lists_its_folder(self):
+        self.cold("proj-a/s1.jsonl", text(1, 900))
+        self.age()
+        self.run_full()
+        folder = os.path.join(self.claude, "proj-a")
+        self.cold("proj-a/s2.jsonl", text(2, 500))
+        os.utime(folder, ns=(self.old + 10 ** 9, self.old + 10 ** 9))
+        with self.listing_that_gains(folder, "proj-a/s3.jsonl", text(3, 500), self.old + 2 * 10 ** 9):
+            self.assertEqual(self.run_light()["appended"], 1)
+        self.assertEqual(self.run_light()["appended"], 1)
+        self.assertEqual(self.stored("claude", "s3.jsonl"), text(3, 500))
+
+    def test_folder_removed_and_made_again_after_a_full_pass(self):
+        self.cold("proj-a/s1/subagents/agent-a.jsonl", text(1, 300))
+        self.age()
+        self.run_full()
+        shutil.rmtree(os.path.join(self.claude, "proj-a/s1"))
+        self.age()
+        self.run_full()
+        self.cold("proj-a/s1/subagents/agent-b.jsonl", text(2, 300))
+        self.assertEqual(self.run_light()["appended"], 1)
+        self.assertEqual(self.stored("claude", "s1/subagents/agent-b.jsonl"), text(2, 300))
+
+    def test_what_a_light_pass_leaves_to_the_full_pass(self):
+        self.cold("proj-b/s2.jsonl", text(2, 900))
+        self.cold("proj-b/s2/tool-results/a.txt", text(3, 300))
+        self.age()
+        self.run_full()
+        self.add("proj-b/s2.jsonl", text(4, 200))           # an old session resumed: it grows in place
+        self.cold("proj-b/s2/tool-results/b.txt", text(5, 300))     # a new file in a cold folder
+        self.assertEqual(self.run_light()["changed"], 0)
+        summary = self.run_full()
+        self.assertEqual(summary["appended"], 2)
+        self.assertEqual(self.stored("claude", "s2.jsonl"), text(2, 900) + text(4, 200))
+        self.assertEqual(self.stored("claude", "s2/tool-results/b.txt"), text(5, 300))
+
+    def test_light_plan_is_a_subset_of_the_full_plan(self):
+        self.put("proj-a/s1.jsonl", text(1, 900))
+        self.cold("proj-a/s1/subagents/agent-a.jsonl", text(2, 300))
+        self.cold("proj-b/s2.jsonl", text(3, 900))
+        self.cold("proj-b/s2/tool-results/a.txt", text(4, 300))
+        self.put("2026/11/24/rollout-1.jsonl", text(5, 900), root=self.codex)
+        self.age()
+        self.run_full()
+        self.add("proj-a/s1.jsonl", text(6, 100))
+        self.cold("proj-a/s1/subagents/agent-b.jsonl", text(7, 300))
+        self.cold("proj-b/s8.jsonl", text(8, 300))
+        self.cold("proj-c/s9.jsonl", text(9, 300))
+        self.cold("2026/12/01/rollout-2.jsonl", text(10, 300), root=self.codex)
+        grown = self.add("proj-b/s2.jsonl", text(11, 100))
+        deep = self.cold("proj-b/s2/tool-results/b.txt", text(12, 300))
+        archive = self.archive()
+        try:
+            light, full = set(archive.plan(False)[0]), set(archive.plan(True)[0])
+        finally:
+            archive.close()
+        self.assertLessEqual(light, full)
+        self.assertEqual(full - light, {grown, deep})
+        self.assertEqual(len(light), 5)
+
+    def test_full_pass_comes_once_the_last_one_is_full_every_old(self):
+        self.put("proj-a/s1.jsonl", text(1, 900))
+        every = A.DEFAULT_FULL_EVERY
+        self.assertEqual(self.run_pass(full_every=every)["full_walks"], 2)      # no full pass yet
+        self.assertEqual(self.run_pass(full_every=every)["full_walks"], 0)
+        now = time.time_ns()
+        for ago, walks in ((every - 30, 0), (every + 1, 2), (-600, 2)):        # -600: the clock moved back
+            self.state("UPDATE meta SET v=? WHERE k LIKE 'full_walk%'", str(now - ago * 10 ** 9))
+            self.assertEqual(self.run_pass(full_every=every)["full_walks"], walks, ago)
+
+    def test_full_every_is_under_an_hour(self):
+        # The timer this replaced fired hourly with up to two minutes of jitter;
+        # on that timer every pass must stay full.
+        self.assertLessEqual(A.DEFAULT_FULL_EVERY, 3600 - 300)
+
+
 class FreeSpaceFloorTests(Case):
     def test_below_the_floor_nothing_is_stored_and_the_pass_says_so(self):
         self.put("proj-a/s1.jsonl", text(1, 900))
@@ -1032,11 +1583,19 @@ class RandomOperationsTest(Case):
                 self.assertIn(zstd_decode(path), observed.get((agent, key), set()),
                               "%s: %s holds bytes no pass ever saw as one file" % (label, path))
 
-    def run_seed(self, seed):
+    def run_seed(self, seed, light=False):
+        """With `light`, each pass is light or full at random and the run ends with a full pass.
+
+        A light pass may leave a change to the next full pass (the module
+        docstring says which), so the check that every live source is stored runs
+        after full passes only. That no stored version is a state no pass saw is
+        checked after every pass, light or full.
+        """
         rng = random.Random(seed)
         observed, must_keep = {}, set()
         saved_state = None
-        for step in range(45):
+        for step in range(46 if light else 45):
+            last = light and step == 45
             label = "seed %d step %d" % (seed, step)
             for index in range(rng.randrange(1, 4)):
                 self.mutate(rng, seed * 100_000 + step * 10 + index)
@@ -1054,7 +1613,10 @@ class RandomOperationsTest(Case):
             for identity, content in live.values():
                 observed.setdefault(identity, set()).add(content)
             archive = self.archive()
-            crashed = rng.random() < 0.2
+            full = True
+            if light:
+                full = last or rng.random() < 0.35
+            crashed = not last and rng.random() < 0.2
             if crashed:
                 countdown = [rng.randrange(1, 4)]
 
@@ -1064,7 +1626,7 @@ class RandomOperationsTest(Case):
                         raise Crash()
                 archive.after_store_write = hook
             try:
-                summary = archive.capture()
+                summary = archive.capture(full if light else None)
                 self.assertEqual(summary["store_errors"] + summary["source_errors"], 0, label)
                 crashed = False
             except Crash:
@@ -1072,7 +1634,7 @@ class RandomOperationsTest(Case):
             finally:
                 archive.close()
             self.check_versions(observed, label)
-            if crashed:
+            if crashed or not full:
                 continue
             archive = self.archive()
             try:
@@ -1094,14 +1656,28 @@ class RandomOperationsTest(Case):
                                 "seed %d: a %d-byte state of %s/%s is in no stored version"
                                 % (seed, len(content), agent, key))
 
+    def fresh(self):
+        shutil.rmtree(self.store, ignore_errors=True)
+        for root in (self.claude, self.codex):
+            shutil.rmtree(root)
+            os.makedirs(root)
+
     def test_random_operations(self):
         for seed in (1, 2, 3, 4, 5, 6):
             with self.subTest(seed=seed):
-                shutil.rmtree(self.store, ignore_errors=True)
-                for root in (self.claude, self.codex):
-                    shutil.rmtree(root)
-                    os.makedirs(root)
+                self.fresh()
                 self.run_seed(seed)
+
+    def test_random_operations_with_light_passes_between_full_ones(self):
+        for seed in (11, 12, 13, 14, 15, 16):
+            with self.subTest(seed=seed):
+                self.fresh()
+                # Odd seeds write files dated an hour ago, which light passes
+                # follow as recent sources; even seeds keep the 2023 dates, which
+                # light passes reach only through the folders and the pending list.
+                if seed % 2:
+                    self.clock = time.time_ns() - 3600 * 10 ** 9
+                self.run_seed(seed, light=True)
 
 
 class CommandLineTests(Case):
@@ -1110,7 +1686,10 @@ class CommandLineTests(Case):
                    "--root", "claude=%s:1" % self.claude, "--root", "codex=%s" % self.codex, *args]
         if env is None:
             # A CI runner can have less free disk than the shipped 10 GiB floor.
-            env = dict(os.environ, SESSION_ARCHIVE_MIN_FREE_BYTES="0")
+            # These files carry 2023 timestamps, which a light pass rightly
+            # leaves to the full one, so every pass here is full; LightPassTests
+            # drive the command line's light passes themselves.
+            env = dict(os.environ, SESSION_ARCHIVE_MIN_FREE_BYTES="0", SESSION_ARCHIVE_FULL_EVERY="0")
         done = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
         if check:
             self.assertEqual(done.returncode, 0, done.stderr.decode())
@@ -1181,6 +1760,46 @@ class CommandLineTests(Case):
         self.assertEqual(self.versions_on_disk("claude", "s1.jsonl"), {})
         self.cli("capture")
         self.assertEqual(self.stored("claude", "s1.jsonl"), text(1, 900))
+
+    def test_capture_is_light_between_full_passes_and_full_on_request(self):
+        self.put("proj-a/s1.jsonl", text(1, 900))
+        env = dict(os.environ, SESSION_ARCHIVE_MIN_FREE_BYTES="0")
+        env.pop("SESSION_ARCHIVE_FULL_EVERY", None)
+
+        def walks(*args):
+            return json.loads(self.cli("capture", "--json", *args, env=env).stdout)["full_walks"]
+        self.assertEqual([walks(), walks(), walks("--full"), walks("--full-every", "0"), walks()], [2, 0, 2, 2, 0])
+
+    def test_status_reads_a_state_file_written_before_light_passes(self):
+        os.makedirs(self.store)
+        state = os.path.join(self.store, "state.sqlite3")
+        db = sqlite3.connect(state, isolation_level=None)
+        db.execute("PRAGMA journal_mode=WAL")
+        db.executescript("""
+            CREATE TABLE streams(
+              id INTEGER PRIMARY KEY, agent TEXT NOT NULL, key TEXT NOT NULL, version INTEGER NOT NULL,
+              content_bytes INTEGER NOT NULL, store_bytes INTEGER NOT NULL, tail BLOB NOT NULL,
+              broken INTEGER NOT NULL DEFAULT 0, UNIQUE(agent, key, version));
+            CREATE TABLE sources(
+              path TEXT PRIMARY KEY, stream INTEGER NOT NULL, size INTEGER NOT NULL,
+              mtime_ns INTEGER NOT NULL, ino INTEGER NOT NULL, seen_ns INTEGER NOT NULL);
+            CREATE TABLE meta(k TEXT PRIMARY KEY, v TEXT NOT NULL);
+        """)
+        db.close()
+
+        def tables():
+            check = sqlite3.connect(f"file:{state}?mode=ro", uri=True)
+            try:
+                return sorted(row[0] for row in check.execute("SELECT name FROM sqlite_master WHERE type='table'"))
+            finally:
+                check.close()
+        status = json.loads(self.cli("status", "--json").stdout)
+        self.assertEqual((status["streams"], status["pending"]), (0, 0))
+        self.assertEqual(tables(), ["meta", "sources", "streams"])
+        self.put("proj-a/s1.jsonl", text(1, 900))
+        self.assertEqual(json.loads(self.cli("capture", "--json").stdout)["appended"], 1)
+        self.assertEqual(tables(), ["folders", "meta", "pending", "sources", "streams"])
+        self.assertEqual(json.loads(self.cli("status", "--json").stdout)["pending"], 0)
 
     def test_root_option_takes_a_home_relative_folder_and_a_depth(self):
         home = os.path.expanduser("~")
