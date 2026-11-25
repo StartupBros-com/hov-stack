@@ -88,6 +88,7 @@ dotfiles `docs/vets/`; here they are R1 to R12.
 - **Proposed for the operator:** one `CLAUDE.md` line asking for a comment pass before
   `gh pr create` (4.2). It is unmeasured, and `CLAUDE.md` is the operator's file.
   - Corrected 2026-11-24 (7.6): dropped in favour of a check in the pull-request path.
+  - 2026-11-25 (7.6): that check is built, audited and registered on the operator's hosts only.
 
 ## 1. Identity, targets and run choices
 
@@ -978,7 +979,7 @@ Two things about how row 12 changed:
 - This note's retry condition for row 12 was "D+K at or below 25%". That share has not moved,
   because it is still a count by type. The condition is replaced by the load-bearing share.
 
-### 7.6 Proposed, not landed
+### 7.6 Proposals, and the comment check built from one
 
 **Where each kind of knowledge goes.**
 
@@ -994,28 +995,78 @@ Two things about how row 12 changed:
 With one rule beside it: a change to code under a comment fixes or deletes that comment in the
 same change. A false comment was the worst state measured (R5).
 
-**A comment check in the pull-request path (replaces row 14).** Classify the comment lines a
-diff adds, with the taxonomy of row 10, and flag the clutter classes (T, H, S, X, and E with no
-ticket).
+**A comment check in the pull-request path (replaces row 14).** Built 2026-11-25 for issue
+#895: `scripts/comment-check.py` and its hook entry `scripts/comment-check-hook.sh`.
 
-- Why a check: need and routing are measured (2.1, 2.2), bare already cleans clutter when asked
-  (2.4), and a check beats a written rule in 7.4.
-- Risk: 0 of 12 clutter-labelled comments in 7.1 were load-bearing. With 12 samples the true
-  rate could be as high as 24%.
-- State: not built, not measured. As a hook or CI step it changes how sessions are gated, so it
-  waits for the operator's go.
-- Deciding measurement: run it over the 72 audited units of 7.1 and count its flags per audit
-  verdict. Of the 9 units rated load-bearing it should flag none. The type labels of 2.1 are
-  not the yardstick, since 7.1 found they may be noisy. Nine units bound the miss rate only
-  loosely (0 of 9 still allows about 30%), so a pass licenses a trial on new pull requests,
-  not a blocking gate.
+- What it does: it reads `git diff <base>...HEAD` and cuts the added comments into units: a
+  block of consecutive comment lines, or a trailing comment. It drops tool directives (lint
+  suppressions, type-checker pragmas, licence and generated-file markers) by pattern. It labels
+  the rest with the taxonomy of row 10 on Haiku, in a headless call with no tools, MCP servers,
+  settings, hooks or instruction files. It flags T, S and X. H and E are labelled but not
+  flagged (run B below).
+- Where it runs: a PostToolUse hook on Bash. It fires after a `gh pr create` that printed a
+  pull request URL for the checkout's own repository, and it hands the flags to the session as
+  added context. It is advisory: it never blocks or edits, and any failure prints nothing. The
+  flags arrive just after the pull request opens, so acting on one costs a follow-up commit.
+  It is registered on the operator's hosts only, through the overlay settings. The repo's
+  settings template does not register it.
+- Cost and size: about $0.01 for 70 comments, in about 30 s. One call per 40 comments, up to 4
+  calls at once, at most 200 comments per check.
+- Delivery, verified: a nested Haiku session ran with the real gate planted as a hook and a
+  stand-in `gh`. Its environment held only HOME and a PATH carrying the live Claude Code
+  process's entries for `claude` and `python3`. The session quoted back both flags and left the
+  reason comment alone.
+
+The decision rules for each run were written before it ran.
+
+- The 2026-11-24 deciding measurement was circular. The 9 load-bearing units of 7.1 were
+  sampled from units the 2.1 labeller called D, so a labeller of the same family passes them
+  almost by construction. It ran as run A, and runs B and C audit fresh flags.
+- Run A: the 72 audited units, three runs of the built tool.
+  - Load-bearing flagged: 0, 0, 0 of 9 (bar: at most 1).
+  - Clutter controls flagged: 8, 9, 8 of 12 (bar: a median of at least 6).
+  - Helpful flagged: 4, 4, 5 of 40.
+  - The same decision in every run: 68 of 72. The 4 dropped as tool directives were all rated
+    redundant.
+- Run B, a fail.
+  - The tool labelled 758 of the 834 units of 2.1 not in the audit, dropping 28 as directives.
+    It flagged 235 under the first rule: T, H, S, X, and E with no ticket.
+  - A blind audit drew 50 of those flags and added 10 unflagged controls. The 9 known
+    load-bearing units were planted to test the auditor. It used the audit prompt of 7.1 and
+    one Sonnet auditor.
+  - Planted units re-found: 5 of 9 (bar: 5).
+  - Flags rated load-bearing: 3 of 50 (bar: at most 2), a fail.
+  - All three were H or E: 3 of 19 such flags, against 0 of 31 for T, S and X. One was a
+    threshold whose comment gives the measurements behind it, which reads as history.
+- The fix, and run C.
+  - The rule now flags T, S and X only. Run B's 50 became development data, so run C audited
+    50 fresh T, S and X flags, drawn from the 113 outside run B's sample.
+  - The audit also held the same 9 planted units and 10 fresh controls. Two auditors rated
+    every unit, and a unit counted as load-bearing if either said so.
+  - Planted units re-found: 8 of 9 (bar: 7).
+  - Flags rated load-bearing: 1 of 50 (bar: at most 2), a pass. One auditor rated it so, and
+    that auditor also called the comment partly true.
+  - Of the 50, 35 to 37 were rated redundant and 11 to 14 helpful, depending on the auditor.
+    The flag text tells the session to keep any comment that states what the code does not
+    show.
+  - Controls: 1 of 10 rated load-bearing. The two auditors agreed on 56 of 69 units.
+- What narrowing gave up: H and E were 91 of run B's 235 flags.
+- Spend: under $0.15 of Haiku for runs A and B. The audits ran as subagents and are not
+  itemised.
+- Not measured: whether a session acts well on a flag. One auditor finds 5 or 6 of the 9 known
+  load-bearing units, so 1 of 50 is a floor, not a rate. The audited units are private comments
+  and are kept outside this repository.
 
 **harness-optimizer (replaces row 13).** Its lane table (0.2.1) lists `instructions` with
 "supplied task/routing evidence" as a source, and `tooling`. No listed source is agent output,
 such as the diff a session produced. Only the lane table was read, not the whole plugin.
 
 - Proposal: a collector that reports comment units added, by class, over a repo's recent
-  merged pull requests. The classifier behind 2.1 already produces that table.
+  merged pull requests. It would run `scripts/comment-check.py --json --base <ref>` once per
+  pull request.
+  - Corrected 2026-11-25: this line said the classifier behind 2.1 already produced that table.
+    No such tool existed. The 2.1 table came from a one-off workflow prompt and a scratch
+    extraction script, and neither is in a repository.
 - harness-optimizer takes the report as evidence for its `instructions` lane. No new lane.
 - State: not built, not measured.
 
@@ -1032,7 +1083,7 @@ such as the diff a session produced. Only the lane table was read, not the whole
 - A partial table (43 of 177 runs) was printed while the grader was being tested. The rules
   were frozen before launch and nothing was changed after that look.
 - The literature is mostly 2026 preprints on small benchmarks.
-- Nothing in 7.6 is built.
+- Of 7.6, only the comment check is built. The harness-optimizer collector is not.
 
 Spend for this section: $12.51 on the 177 placement runs. The session's own model use (the
 audit, the literature read, the judges) is not itemised.
