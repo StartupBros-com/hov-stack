@@ -267,7 +267,7 @@ class HovCase(HovFixture):
     def ls_finished(self, *args, env_extra=None):
         return [r for r in json.loads(self.hov("ls", "--all", "--json", *args, env_extra=env_extra).stdout) if r["kind"] == "finished"]
 
-    def test_ls_all_lists_finished_sessions_as_pointers_only(self):
+    def test_ls_all_lists_finished_sessions_with_what_they_left_and_an_address(self):
         env, x = self.finished()
         d = x["d"]
         plain = self.hov("ls", "--json", env_extra=env).stdout
@@ -277,7 +277,9 @@ class HovCase(HovFixture):
         # newest first; delta is in the default listing and just-started is not done, so neither is a finished row
         self.assertEqual([r["session_id"] for r in rows], [x["f2"], x["f1"]])
         f2, f1 = rows
-        self.assertEqual((f1["addr"], f1["send_to"], f1["name"], f1["state"], f1["status"], f1["unread"]), (None, None, "fin-gone", "done", None, None))
+        # an address `hov send` reaches it at (#902); never a name for Claude Code's own SendMessage
+        self.assertEqual((f1["addr"], f1["send_to"], f1["name"], f1["state"], f1["status"], f1["unread"], f1["restart"]),
+                         ("testhost:fin-gone", None, "fin-gone", "done", None, 0, True))
         # its worktree was removed after the merge: the repository still comes from the checkout it sat in
         self.assertEqual((f1["dir"], f1["dir_from"], f1["repo"], f1["branch"], f1["worktree"]), (x["gone"], "gone", "acme/widgets", "feature-x", None))
         self.assertEqual(os.path.realpath(f1["checkout"]), x["main"])
@@ -287,13 +289,14 @@ class HovCase(HovFixture):
         self.assertEqual(f1["deliverables_read"], "whole")
         # a title the identity rules refuse is not shown; the newest five of seven pull requests and files
         self.assertEqual((f2["name"], f2["repo"], f2["dir_from"], f2["branch"], f2["last_active"]), (None, None, "transcript", None, x["ts2"]))
+        self.assertEqual(f2["addr"], f"testhost:{x['f2'][:8]}")  # a refused title is no address: its 8-character id is
         self.assertEqual((f2["pr_links"], f2["pr_links_total"]), ([f"acme/plain#{i}" for i in range(7, 2, -1)], 7))
         self.assertEqual(f2["deliverables_written"], [str(d / f"g{i}.md") for i in range(7, 2, -1)])
         text = self.hov("ls", "--all", env_extra=env).stdout
         line = next(ln for ln in text.splitlines() if ln.startswith("finished fin-gone"))
         for part in ("at=acme/widgets:feature-x", "prs=2", f"last={x['ts1']}", "id=ffffffff"):
             self.assertIn(part, line)
-        self.assertTrue(line.endswith("wrote=3"), line)
+        self.assertTrue(line.endswith("wrote=3  unread=0"), line)
         # planted negatives: prose from the job record and the listing, and the refused title, reach no output
         mcp = self.mcp_ls({"all": True}, env)
         for out in (json.dumps(rows), text, mcp, self.hov("ls", "--all", "--repo", "widgets", env_extra=env).stdout):
@@ -312,8 +315,8 @@ class HovCase(HovFixture):
     def test_ls_all_repo_keeps_finished_sessions_in_that_repository(self):
         env, x = self.finished()
         by = json.loads(self.hov("ls", "--all", "--repo", "widgets", "--json", env_extra=env).stdout)
-        self.assertEqual(sorted((r["kind"], r["addr"] or r["session_id"]) for r in by),
-                         [("finished", x["f1"]), ("session", "testhost:alpha"), ("session", "testhost:gamma")])
+        self.assertEqual(sorted((r["kind"], r["addr"]) for r in by),
+                         [("finished", "testhost:fin-gone"), ("session", "testhost:alpha"), ("session", "testhost:gamma")])
         self.assertEqual(self.ls_finished("--repo", "plain", env_extra=env), [])
 
     def fake_claude(self):
@@ -348,7 +351,7 @@ class HovCase(HovFixture):
         # the shorter tails read before it still give where it worked and when, now and from the cache
         self.assertEqual((f1["repo"], f1["branch"], f1["dir_from"], f1["last_active"]), ("acme/widgets", "feature-x", "gone", x["ts1"]))
         line = next(ln for ln in self.hov("ls", "--all", env_extra=short).stdout.splitlines() if ln.startswith("finished fin-gone"))
-        self.assertTrue(line.endswith("wrote=0+"), line)
+        self.assertTrue(line.endswith("wrote=0+  unread=0"), line)
         cached = next(r for r in self.ls_finished(env_extra=dict(short, HOV_FINISHED_READ_SECONDS="0")) if r["session_id"] == x["f1"])
         self.assertEqual(cached, f1)
 
