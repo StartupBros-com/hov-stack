@@ -1,0 +1,13 @@
+transcripts scanned (top-level, modified in the last 30 days): 1061
+  any time: cass: 146
+  any time: docs: 219
+  any time: git_any: 259
+  any time: git_body: 232
+  any time: git_body or cass or docs: 260
+  before first edit: cass: 79
+  before first edit: docs: 90
+  before first edit: git_any: 201
+  before first edit: git_body: 131
+  before first edit: git_body or cass or docs: 196
+  code-editing sessions: 278
+  sessions with no code edit: 783

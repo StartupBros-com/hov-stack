@@ -95,3 +95,9 @@ later run (`CLAUDE_CODE_SUBPROCESS_ENV_SCRUB`).
   (expected 3, 17 lost); `tools/reference_variants.py` rebuilds the last two.
 
 The run dirs themselves (transcripts, diffs) were kept in scratch and are not committed.
+
+## Placement test
+
+`placement/` holds a second experiment on the same repo, run for the note's section 7: the same
+code in seven copies that differ only in where the 14 decisions are written down. It has its
+own `README.md`, `prereg.md` and `results/`.
