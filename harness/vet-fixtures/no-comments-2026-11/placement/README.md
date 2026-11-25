@@ -47,8 +47,10 @@ fixture's `run_arm.sh`: bare Claude Code, empty environment, no user `CLAUDE.md`
 - `record_upkeep.py`: post hoc, not in `prereg.md`. Whether the record was updated when the
   change altered a decision.
 - `session_consult.py`: counts, in the Claude Code transcripts on a host, how many code-editing
-  sessions looked at git history, the session index or a decisions doc before their first edit.
-  It prints counts only.
+  sessions looked at commit titles, commit message bodies, pull-request or issue text, the
+  session index or a decisions doc before their first edit. Each count is given for the
+  session's own commands and with its subagents' commands added. It prints counts only,
+  unless `--sample` is given.
 
 ## Running it
 
@@ -85,13 +87,15 @@ and `grade.py` regraded the 177 runs with no field different from the grades beh
 - `results/record-upkeep.txt`: `record_upkeep.py` output. The eight rows it lists for a read
   by eye were read: each is a rewritten sentence that is true of the new code, or a line about
   a different decision.
-- `results/session-consult.txt`: `session_consult.py` output on the operator's workstation.
+- `results/session-consult.txt`: `session_consult.py` output on the operator's workstation. A
+  sample of each class's matches was read by eye before the counts were used (section 7.3 of
+  the note).
 - `results/launch.stamp`: launch time and the hashes of `prereg.md` (as `PREREG.md`),
   `tasks.json` and `probes.py` at launch.
 
 Known over-count in `runs.tsv`: `asked_history` is true for any `git log`, `git show` or
-`git blame`. The three runs it marks (`25aa560a`, `5928d301` and one Opus `tests` run) ran
-`git log --oneline`, which prints titles only. `shown_history`, which looks for decision text
+`git blame`. The two runs it marks (`25aa560a`, a Sonnet `history` run, and `5928d301`, an Opus
+`tests` run) ran `git log --oneline`, which prints titles only. `shown_history`, which looks for decision text
 in a tool result, is false for every run. No `history`-arm run read a commit body.
 
 The run dirs (transcripts, diffs) were kept in scratch and are not committed. The real-comment

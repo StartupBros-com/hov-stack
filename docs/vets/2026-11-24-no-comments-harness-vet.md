@@ -562,7 +562,9 @@ Corrected 2026-11-24 (7.5): the blanket lint and the harness-optimizer wiring le
 
 - **pstack `no-comments` and Comment Sicko:** retry only if a pinned revision keeps decision
   comments about our own code, or moves them into a name, test or doc, instead of deleting
-  them. Test: a re-run of this fixture loses at most bare's median.
+  them. Test: a re-run of this fixture loses at most bare's median. (Narrowed 2026-11-24,
+  7.5: the test counts only the facts whose reason the code cannot show and no test enforces.
+  That subset of the fixture's facts is not marked yet, so a retry marks it before its runs.)
 - **comment-ratchet, comment-audit-skill, code-comments:** retry only if a revision changes
   how it treats suppressions or workarounds. Test: its median on this fixture's separating
   items exceeds bare's max, with 0 lost.
@@ -842,7 +844,8 @@ Read against the rules in `prereg.md`:
   - This is an upper bound on harm. The fixture's false comments state the opposite of the
     truth; the false comment found in 7.1 was merely out of date.
 - **R3, read half:** `doc` runs opened the decision docs in 15 of 15 trap runs.
-- **R4, read half:** no `history` run read a commit body, on any task (0 of 27).
+- **R4, read half:** no `history` run read a commit body, on any task (0 of 27). One of the
+  27 ran `git log --oneline`, which prints titles.
 - **Countermetric passes.** Median cost on the control tasks was 0.89 to 1.03 times `none` for
   every arm, inside the 1.25 band.
 
@@ -877,22 +880,34 @@ for the old behaviour. Two blind judges agreed on all 36.
   300-line repo, so this is the easy case.
 - Trap-task cost. `comment` cost 1.28 times `none` on Sonnet (9 turns against 6).
 
-### 7.3 The bare result on history does not carry over to a configured harness
+### 7.3 A configured harness reads more, but mostly not commit messages
 
-The placement runner is bare Claude Code. On the operator's workstation, of 278 top-level
-sessions in the last 30 days that edited code, before their first edit:
+The placement runner is bare Claude Code. On the operator's workstation, 279 top-level
+sessions in the last 30 days edited code. Before their first edit:
 
-| Looked at | Sessions |
-|---|---|
-| `git show`, `git blame`, or a `git log` that prints bodies or follows a path | 131 |
-| the session index (`cass`) | 79 |
-| `docs/solutions`, `docs/decisions` or `docs/adr` | 90 |
-| at least one of the three | 196 |
+| Looked at | The session itself | Counting its subagents |
+|---|---|---|
+| any `git log`, `git show` or `git blame` | 218 | 232 |
+| commit titles only (`--oneline`, or a format with no body) | 182 | 163 |
+| a commit message body | 33 | 67 |
+| the body or comments of a pull request or issue | 123 | 151 |
+| the session index (`cass`) | 46 | 82 |
+| a file under `docs/solutions`, `docs/decisions` or `docs/adr`, opened | 25 | 59 |
+| at least one of the last four | 168 | 203 |
 
-(`placement/session_consult.py`, output in `results/session-consult.txt`.) These count
-commands that looked, not reasons that were found, and the matching patterns were not
-hand-checked. They do show that commit history and decision docs are consulted here in a way
-they were not in the bare runs.
+(`placement/session_consult.py`, output in `results/session-consult.txt`.)
+
+- History commands are common here, but most print titles for orientation. A commit message
+  was printed before the first edit in 67 of 279 sessions (24%), about half of them by a
+  subagent, whose reading reaches the session only through its report. The bare result (0 of
+  27) is the floor, not the picture of this harness. Even so, a reason written only in a
+  commit body is not read before about three edits in four.
+- Pull-request or issue text was read in 151. The count does not separate a session's own
+  task issue from the history of the code it was about to change.
+- These count commands that looked, not reasons that were found. A sample of first hits per
+  class was read by eye, from the sessions' own commands: commit bodies 20 of 20 correct,
+  titles 15 of 15, `cass` 20 of 20, docs opened 20 of 20, pull-request text 33 of 35.
+- A session that changes code only through shell commands is not counted as editing.
 
 ### 7.4 Published evidence
 
@@ -911,7 +926,7 @@ everything else is a preprint. No paper found runs the comparison in 7.2.
 | Repo context files gave no significant change in task success and added 20% to 23% cost | 2602.11988 | preprint |
 | Claude Code followed a stale instruction-file command in 78 of 80 runs; no instruction file was edited in any of 732 runs | 2611.09802 | preprint; 3 cases |
 | A check that runs, with its feedback in the loop: 88.3% clean patches against 67.0% with the same rules as text | 2603.00822 | preprint; tool authors |
-| Memory built from raw past sessions: 11 of 12 solver and memory-system pairings did no better than no memory. A short verified record anchored to a directory or identifier raised the result on 55% of 58 pairings and lowered none | 2609.23570 | preprint; no Claude model tested |
+| Memory built from raw past sessions: 11 of 12 solver and memory-system pairings did no better than no memory. A short verified record anchored to a directory or identifier helped a solver that had failed without it in 55% of 58 cases and hurt in none; with only failed solvers counted, "hurt in none" is a floor, not a finding | 2609.23570 | preprint; no Claude model tested |
 | In 63 human commits, some rationale was in 97% of commit messages, 86% of pull requests and 4% of inline comments. An LLM asked to reconstruct the alternatives considered wrote some for 9 of the 14 commits that had none | 2604.10345 | preprint |
 | 44% of commit messages in 5 Java projects lacked the "why" or the "what" | 2202.02974 | peer-reviewed (ICSE 2022) |
 | 4,316 mined ADRs often omit alternatives and drivers; no study found measures whether an ADR helps a person or an agent | 2609.07375 | preprint |
@@ -938,11 +953,13 @@ Reading, as a synthesis and not an established standard:
 
 Two things about how row 12 changed:
 
-- `prereg.md` said the 49% to 79% premise falls only if R1 fails and the audit comes in under
-  25%. R1 came back untestable (ceiling), and the audit's interval of 8% to 32% straddles 25%.
-  So that rule did not fire. The withdrawal rests on 7.1 alone: the figure behind the SKIP
-  measured the wrong thing. That is a judgment made after seeing the data, not a
-  pre-registered result.
+- `prereg.md` said the 49% to 79% premise falls only if R1 fails and the audit rates under 25%
+  of the sampled decision comments load-bearing. The audit half is met: 6 of 36 is 17%. R1
+  came back untestable (ceiling), and the ceiling clause says the conclusion then does not
+  fire. That clause was added in the second sitting, after the audit count was known, as
+  `prereg.md` records, so it was not a guard set blind. The withdrawal rests on 7.1 alone: the
+  figure behind the SKIP measured the wrong thing. That is a judgment made after seeing the
+  data, not a pre-registered result.
 - This note's retry condition for row 12 was "D+K at or below 25%". That share has not moved,
   because it is still a count by type. The condition is replaced by the load-bearing share.
 
@@ -954,8 +971,8 @@ Two things about how row 12 changed:
 |---|---|---|
 | What the code does and how | the code | `none` kept 14 of 15 (7.2); restated descriptions add nothing (2609.31587) |
 | A rule that can be checked | a test or lint check, reason in its name or docstring | checks beat prose (2603.00822); 22 of 36 audited comments already have one |
-| A constraint the code cannot show and no test catches, at a line where the obvious edit is wrong | one short comment at that line | the 3-of-36 class in 7.1; the only place a bare agent sees without looking |
-| Why a change was made, what was tried | commit and pull request text | where it already is for 26 of 36, fully or partly; read by 131 of 278 sessions (7.3) |
+| A constraint the code cannot show and no test catches, at a line where the obvious edit is wrong | one short comment at that line | the 3-of-36 class in 7.1. It sits on the line being edited. `claudemd` and the pointed-to doc also reached the agent in 7.2, so the case for the comment is locality, not reach: a per-line constraint in a repo-wide file loads on every task |
+| Why a change was made, what was tried | commit and pull request text | where it already is for 26 of 36, fully or partly. An archive, not a guard: a commit message was read before the first edit in 67 of 279 sessions and pull-request or issue text in 151 (7.3) |
 | A repo-wide rule | a short instruction file, or a decisions doc with a pointer | followed when loaded (6 of 6), also when stale (2611.09802) |
 | Session transcripts | a search aid, not the record | local to one machine and deleted on a timer; 2609.23570 |
 
@@ -972,8 +989,11 @@ ticket).
   rate could be as high as 24%.
 - State: not built, not measured. As a hook or CI step it changes how sessions are gated, so it
   waits for the operator's go.
-- Deciding measurement: run it over the merged pull requests behind 2.1. Count flags per class
-  and the D or K units it flags, against the labels already on file.
+- Deciding measurement: run it over the 72 audited units of 7.1 and count its flags per audit
+  verdict. Of the 9 units rated load-bearing it should flag none. The type labels of 2.1 are
+  not the yardstick, since 7.1 found they may be noisy. Nine units bound the miss rate only
+  loosely (0 of 9 still allows about 30%), so a pass licenses a trial on new pull requests,
+  not a blocking gate.
 
 **harness-optimizer (replaces row 13).** Its lane table (0.2.1) lists `instructions` with
 "supplied task/routing evidence" as a source, and `tooling`. No listed source is agent output,
@@ -991,6 +1011,8 @@ such as the diff a session produced. Only the lane table was read, not the whole
   the test. It is 300 lines of Python. Its main result on true records is a ceiling.
 - Conflict tasks ran on Sonnet only.
 - No arm tested session transcripts as the record. `history` was commit bodies.
+- The session counts in 7.3 match commands by pattern. A sample of each class was read by eye,
+  not every hit, and the subagents' commands were not sampled separately.
 - A partial table (43 of 177 runs) was printed while the grader was being tested. The rules
   were frozen before launch and nothing was changed after that look.
 - The literature is mostly 2026 preprints on small benchmarks.

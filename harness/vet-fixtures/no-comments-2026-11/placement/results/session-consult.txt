@@ -1,13 +1,31 @@
 transcripts scanned (top-level, modified in the last 30 days): 1061
-  any time: cass: 146
-  any time: docs: 219
-  any time: git_any: 259
-  any time: git_body: 232
-  any time: git_body or cass or docs: 260
-  before first edit: cass: 79
-  before first edit: docs: 90
-  before first edit: git_any: 201
-  before first edit: git_body: 131
-  before first edit: git_body or cass or docs: 196
-  code-editing sessions: 278
-  sessions with no code edit: 783
+  any time, own commands: cass: 110
+  any time, own commands: docs_named: 219
+  any time, own commands: docs_read: 135
+  any time, own commands: git_any: 265
+  any time, own commands: git_body: 179
+  any time, own commands: git_titles: 264
+  any time, own commands: pr_text: 240
+  before first edit, own commands: cass: 46
+  before first edit, own commands: docs_named: 90
+  before first edit, own commands: docs_read: 25
+  before first edit, own commands: git_any: 218
+  before first edit, own commands: git_body: 33
+  before first edit, own commands: git_body or pr_text: 135
+  before first edit, own commands: git_body or pr_text or cass or docs_read: 168
+  before first edit, own commands: git_titles: 213
+  before first edit, own commands: git_titles and no git_body: 182
+  before first edit, own commands: pr_text: 123
+  before first edit, with subagents: cass: 82
+  before first edit, with subagents: docs_named: 106
+  before first edit, with subagents: docs_read: 59
+  before first edit, with subagents: git_any: 232
+  before first edit, with subagents: git_body: 67
+  before first edit, with subagents: git_body or pr_text: 165
+  before first edit, with subagents: git_body or pr_text or cass or docs_read: 203
+  before first edit, with subagents: git_titles: 227
+  before first edit, with subagents: git_titles and no git_body: 163
+  before first edit, with subagents: pr_text: 151
+  code-editing sessions: 279
+  code-editing sessions with at least one subagent transcript: 261
+  sessions with no code edit: 782
