@@ -26,9 +26,8 @@ remedy is writing commands in verifiable shapes.
 
 ## Quick rules (full text; `CLAUDE.md` Global Rules carries the short form)
 
-The always-loaded file keeps one line (plain, separate commands first, with a long
-message passed as a file; a script file for work that needs a refused shape or is too
-long for one command) and points here for the rest:
+The always-loaded file keeps one line ("write plain, separate commands; `bash <file>`
+for a refused shape") and points here for the rest:
 
 - Commit, push and open a PR as plain commands, one each, in another repo too. On CC
   2.1.332 (2026-11-25), a hov-stack worktree session ran these against a dotfiles
