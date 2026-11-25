@@ -8,13 +8,18 @@ is mocked. Stored bytes are read back with a plain `zstd -dc`, not with the
 tool's own reader.
 """
 
+import contextlib
+import errno
 import fcntl
+import hashlib
 import importlib.util
+import io
 import json
 import os
 import random
 import re
 import shutil
+import sqlite3
 import stat
 import subprocess
 import sys
@@ -586,6 +591,97 @@ class RecoveryTests(Case):
         self.assertEqual(self.stored("claude", "s1.jsonl", 2), whole + more)
         self.assertEqual(self.run_pass()["changed"], 0)
 
+    def all_the_same(self, count):
+        archive = self.archive()
+        try:
+            report = archive.verify([], 1 << 30)
+        finally:
+            archive.close()
+        self.assertEqual((report["same"], report["different"]), (count, 0))
+
+    def test_deleted_store_file_half_restored_by_a_cut_pass_is_finished_by_the_next(self):
+        whole = text(1, 9000)
+        self.put("proj-a/s1.jsonl", whole[:5000])       # the shorter copy is older, so it is taken first
+        self.put("proj-b/s1.jsonl", whole)
+        self.run_pass()
+        os.unlink(self.store_path("claude", "s1.jsonl"))
+        summary = self.run_pass(max_bytes=1)            # the budget ends the pass after one file
+        self.assertEqual((summary["appended"], summary["deferred"]), (1, 1))
+        self.assertEqual(self.stored("claude", "s1.jsonl"), whole[:5000])
+        # Nothing under the roots changed and the store file is as the last pass
+        # left it, yet 4,000 bytes of the longer copy are still missing.
+        summary = self.run_pass()
+        self.assertEqual((summary["changed"], summary["store_errors"]), (1, 0))
+        self.assertEqual(self.versions_on_disk("claude", "s1.jsonl"), {1: whole})
+        self.all_the_same(2)
+        self.assertEqual(self.run_pass()["changed"], 0)
+
+    def test_source_whose_emptied_stream_another_file_took_over_is_stored_again(self):
+        mine, other = text(1, 5000), text(2, 7000)
+        path = self.put("proj-a/s1.jsonl", mine)
+        self.run_pass()
+        os.unlink(self.store_path("claude", "s1.jsonl"))
+        # A file of the same name and other content turns up in another folder,
+        # older than the stored one, so a cut pass takes it first and puts it in
+        # the emptied store file. It is at least as long as the stored one was.
+        newcomer = self.put("proj-b/s1.jsonl", other)
+        older = os.stat(path).st_mtime_ns - 1
+        os.utime(newcomer, ns=(older, older))
+        summary = self.run_pass(max_bytes=1)
+        self.assertEqual((summary["appended"], summary["deferred"]), (1, 1))
+        self.assertEqual(self.stored("claude", "s1.jsonl"), other)
+        self.run_pass()
+        self.assertEqual(self.versions_on_disk("claude", "s1.jsonl"), {1: other, 2: mine})
+        archive = self.archive()
+        self.addCleanup(archive.close)
+        stream, size = archive.bound(path)
+        self.assertEqual((stream.version, size), (2, 5000))
+        self.assertEqual(b"".join(archive.read(stream, size)), mine)
+        self.all_the_same(2)
+
+    def test_binding_longer_than_its_stream_is_never_taken_as_stored(self):
+        # The state is a cache and can come back inconsistent: here an older copy
+        # of the store file and of its cursor, beside a newer record of the source.
+        # A source recorded as 9,000 bytes against a stream that holds 5,000 is
+        # not stored, whatever the file sizes say.
+        first, more = text(1, 5000), text(2, 4000)
+        self.put("proj-a/s1.jsonl", first)
+        self.run_pass()
+        path = self.store_path("claude", "s1.jsonl")
+        one_frame = os.path.getsize(path)
+        self.add("proj-a/s1.jsonl", more)
+        self.run_pass()
+        os.truncate(path, one_frame)
+        db = sqlite3.connect(os.path.join(self.store, "state.sqlite3"))
+        try:
+            db.execute("UPDATE streams SET content_bytes=?, store_bytes=?, tail=?",
+                       (len(first), one_frame, A.tail_hash(first)))
+            db.commit()
+        finally:
+            db.close()
+        summary = self.run_pass()
+        self.assertEqual((summary["changed"], summary["bytes_read"], summary["store_errors"]), (1, len(more), 0))
+        self.assertEqual(self.versions_on_disk("claude", "s1.jsonl"), {1: first + more})
+        self.assertEqual(self.run_pass()["changed"], 0)
+
+    def test_growth_is_not_added_to_another_files_bytes_in_a_stream_that_was_emptied(self):
+        # The quick check looks only at the 4 KiB before the cursor. Here the
+        # store file was lost, and a file of the same name refills it in the same
+        # pass to the very length the grown file was stored at, ending in the same
+        # 4 KiB. The growth must not land on the other file's bytes.
+        ending = text(9, A.TAIL)
+        mine, other, more = text(1, 6000) + ending, text(2, 6000) + ending, text(3, 2500)
+        path = self.put("proj-a/s1.jsonl", mine)
+        self.run_pass()
+        os.unlink(self.store_path("claude", "s1.jsonl"))
+        self.add("proj-a/s1.jsonl", more)
+        newcomer = self.put("proj-b/s1.jsonl", other)
+        older = os.stat(path).st_mtime_ns - 1           # the newcomer is taken first
+        os.utime(newcomer, ns=(older, older))
+        self.run_pass()
+        self.assertEqual(self.versions_on_disk("claude", "s1.jsonl"), {1: other, 2: mine + more})
+        self.all_the_same(2)
+
 
 class FailureTests(Case):
     def fake_zstd(self, body):
@@ -640,6 +736,97 @@ class FailureTests(Case):
         summary = self.run_pass()
         self.assertEqual((summary["source_errors"], summary["appended"]), (0, 1))
         self.assertEqual(self.stored("claude", "s1.jsonl"), text(1, 900))
+
+    def test_failed_repair_of_a_deleted_store_file_is_tried_again(self):
+        content = text(1, 9000)
+        self.put("proj-a/s1.jsonl", content)
+        self.run_pass()
+        os.unlink(self.store_path("claude", "s1.jsonl"))
+        with mock.patch.object(A, "ZSTD", self.fake_zstd("exit 70")):
+            summary = self.run_pass()
+        self.assertEqual((summary["appended"], summary["store_errors"]), (0, 2))    # the loss, and the failed repair
+        summary = self.run_pass()                       # nothing under the roots changed
+        self.assertEqual((summary["changed"], summary["appended"], summary["store_errors"]), (1, 1, 0))
+        self.assertEqual(self.stored("claude", "s1.jsonl"), content)
+
+    def pass_with_scandir(self, scandir):
+        """One pass with os.scandir replaced; returns (summary, what the pass wrote to stderr)."""
+        said = io.StringIO()
+        with mock.patch.object(A.os, "scandir", scandir), contextlib.redirect_stderr(said):
+            summary = self.run_pass()
+        return summary, said.getvalue()
+
+    def test_folder_that_cannot_be_listed_is_counted_and_the_rest_of_the_pass_runs(self):
+        self.put("proj-a/s1.jsonl", text(1, 900))
+        self.put("proj-b/s2.jsonl", text(2, 900))
+        blocked = os.path.join(self.claude, "proj-a")
+        real_scandir = os.scandir
+
+        def scandir(path):
+            if path == blocked:
+                raise OSError(errno.EIO, "Input/output error", path)
+            return real_scandir(path)
+        summary, said = self.pass_with_scandir(scandir)
+        self.assertEqual((summary["source_errors"], summary["appended"]), (1, 1))
+        self.assertIn(blocked, said)
+        self.assertEqual(self.stored("claude", "s2.jsonl"), text(2, 900))
+        summary = self.run_pass()
+        self.assertEqual((summary["source_errors"], summary["appended"]), (0, 1))
+        self.assertEqual(self.stored("claude", "s1.jsonl"), text(1, 900))
+
+    def test_file_whose_metadata_cannot_be_read_is_counted_and_the_rest_of_the_pass_runs(self):
+        blocked = self.put("proj-a/s1.jsonl", text(1, 900))
+        self.put("proj-a/s2.jsonl", text(2, 900))
+        real_scandir = os.scandir
+
+        class Entry:
+            def __init__(self, entry):
+                self.entry, self.name, self.path = entry, entry.name, entry.path
+
+            def is_dir(self, **how):
+                return self.entry.is_dir(**how)
+
+            def is_file(self, **how):
+                return self.entry.is_file(**how)
+
+            def stat(self, **how):
+                if self.path == blocked:
+                    raise OSError(errno.EIO, "Input/output error", self.path)
+                return self.entry.stat(**how)
+
+        class Listing:
+            def __init__(self, path):
+                self.real = real_scandir(path)
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                self.real.close()
+
+            def __iter__(self):
+                return self
+
+            def __next__(self):
+                return Entry(next(self.real))
+        summary, said = self.pass_with_scandir(Listing)
+        self.assertEqual((summary["source_errors"], summary["appended"]), (1, 1))
+        self.assertIn(blocked, said)
+        self.assertEqual(self.stored("claude", "s2.jsonl"), text(2, 900))
+
+    def test_folder_that_went_away_and_a_root_that_is_not_there_are_not_errors(self):
+        self.put("proj-a/s1.jsonl", text(1, 900))
+        self.put("proj-b/s2.jsonl", text(2, 900))
+        self.roots.append(A.Root("pi", os.path.join(self.tmp, "never-made"), 1))
+        gone = os.path.join(self.claude, "proj-a")
+        real_scandir = os.scandir
+
+        def scandir(path):
+            if path == gone:                            # removed between its listing and its own read
+                raise FileNotFoundError(errno.ENOENT, "No such file or directory", path)
+            return real_scandir(path)
+        summary, said = self.pass_with_scandir(scandir)
+        self.assertEqual((summary["source_errors"], summary["appended"], said), (0, 1, ""))
 
     def read_hook(self, path, action):
         """Run `action` once, just before the tool reads the file's second megabyte."""
@@ -716,9 +903,9 @@ class TimeBudgetTests(Case):
             now["t"] += 10
             return now["t"]
 
-        def slow_walk(root):
+        def slow_walk(root, *rest):
             now["t"] += 1000                                    # far past the budget
-            yield from real_walk(root)
+            yield from real_walk(root, *rest)
 
         with mock.patch.object(A.time, "monotonic", tick), mock.patch.object(A, "walk", slow_walk):
             summary = self.run_pass(max_seconds=25)
@@ -1021,6 +1208,103 @@ class CommandLineTests(Case):
         done = self.cli("capture", check=False)
         self.assertEqual(done.returncode, 1)
         self.assertIn("store file does not decode", done.stderr.decode())
+
+    # ---- status, verify, where and cat only read -------------------------------
+
+    def fingerprint(self):
+        """Every store file and every state row, as digests: a failed comparison must not print megabytes."""
+        files = sorted((name, len(data), hashlib.sha256(data).hexdigest())
+                       for name, data in self.store_files().items())
+        db = sqlite3.connect("file:%s?mode=ro" % os.path.join(self.store, "state.sqlite3"), uri=True)
+        try:
+            rows = repr((db.execute("SELECT * FROM streams ORDER BY id").fetchall(),
+                         db.execute("SELECT * FROM sources ORDER BY path").fetchall()))
+        finally:
+            db.close()
+        return files, hashlib.sha256(rows.encode()).hexdigest()
+
+    def test_read_commands_change_neither_the_store_nor_the_state(self):
+        first, more = text(1, 9000), text(2, 3000)
+        path = self.put("proj-a/s1.jsonl", first)
+        self.cli("capture")
+        self.add("proj-a/s1.jsonl", more)
+        self.cli("capture")
+        store_file = self.store_path("claude", "s1.jsonl")
+        # What a capture that is writing this very moment, or one that was killed,
+        # leaves after the last frame the state knows: part of a frame.
+        with open(store_file, "ab") as fh:
+            fh.write(zstd_frame(noise(5, 300_000))[:150_000])
+        # And a version file the state has no row for.
+        stray = self.store_path("claude", "s1.jsonl", 2)
+        Path(stray).write_bytes(zstd_frame(text(7, 500)))
+        before = self.fingerprint()
+        self.cli("status")
+        self.assertEqual(json.loads(self.cli("verify").stdout)["same"], 1)
+        where = self.cli("where", path).stdout.decode()
+        self.assertTrue(self.cli("cat", path).stdout == first + more)
+        self.assertTrue(self.cli("cat", "--version", "1", path).stdout == first + more)
+        self.assertTrue(self.cli("cat", "--version", "2", path).stdout == text(7, 500))
+        self.assertEqual(self.fingerprint(), before)
+        self.assertFalse(os.path.exists(store_file + ".partial"))
+        self.assertIn("* v1 12000 bytes " + store_file, where)
+        self.assertRegex(where, r"(?m)^  v2 not in the state yet %s$" % re.escape(stray))
+
+    def test_read_commands_run_beside_a_capture_that_is_writing(self):
+        first, more = text(1, 9000), text(2, 3000)
+        path = self.put("proj-a/s1.jsonl", first)
+        self.run_pass()
+        self.add("proj-a/s1.jsonl", more)
+        store_file = self.store_path("claude", "s1.jsonl")
+        seen = {}
+
+        def beside():
+            # The new frame is on disk, its cursor is not saved, and the pass's
+            # transaction is open. Readers see the last committed state.
+            during = Path(store_file).read_bytes()
+            seen["where"] = self.cli("where", path).stdout.decode()
+            seen["cat"] = self.cli("cat", path).stdout
+            seen["version"] = self.cli("cat", "--version", "1", path).stdout
+            seen["status"] = json.loads(self.cli("status", "--json").stdout)["content_bytes"]
+            seen["verify"] = json.loads(self.cli("verify").stdout)["changed_since_capture"]
+            seen["untouched"] = Path(store_file).read_bytes() == during
+        archive = self.archive()
+        archive.after_store_write = beside
+        try:
+            summary = archive.capture()
+        finally:
+            archive.close()
+        self.assertEqual((seen["cat"], seen["version"], seen["status"], seen["verify"], seen["untouched"]),
+                         (first, first, 9000, 1, True))
+        self.assertIn("* v1 9000 bytes " + store_file, seen["where"])
+        self.assertEqual((summary["appended"], summary["store_errors"]), (1, 0))
+        self.assertEqual(self.stored("claude", "s1.jsonl"), first + more)
+        self.assertEqual(self.cli("cat", path).stdout, first + more)
+
+    def test_read_commands_create_nothing_where_no_archive_exists(self):
+        path = self.put("proj-a/s1.jsonl", text(1, 900))
+        status = json.loads(self.cli("status", "--json").stdout)
+        self.assertEqual((status["streams"], status["sources"], status["last_pass"]), (0, 0, None))
+        self.assertEqual(json.loads(self.cli("verify").stdout)["same"], 0)
+        for command in ("where", "cat"):
+            done = self.cli(command, path, check=False)
+            self.assertEqual(done.returncode, 1, command)
+            self.assertIn("no stored stream", done.stderr.decode())
+        self.assertFalse(os.path.exists(self.store))
+
+    def test_cat_fails_when_the_store_holds_less_than_was_recorded(self):
+        first, more = text(1, 9000), text(2, 17000)
+        path = self.put("proj-a/s1.jsonl", first)
+        self.cli("capture")
+        store_file = self.store_path("claude", "s1.jsonl")
+        one_frame = os.path.getsize(store_file)
+        self.add("proj-a/s1.jsonl", more)
+        self.cli("capture")
+        os.unlink(path)                                 # the transcript is gone: the store is the only copy
+        os.truncate(store_file, one_frame)
+        for args in (("cat", path), ("cat", "--version", "1", path)):
+            done = self.cli(*args, check=False)
+            self.assertEqual(done.returncode, 1, args)
+            self.assertIn("holds 9000 of the 26000 bytes recorded", done.stderr.decode())
 
 
 if __name__ == "__main__":

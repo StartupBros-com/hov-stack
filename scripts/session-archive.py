@@ -30,6 +30,16 @@ Rules the code keeps:
   * Each pass also checks that every live source's store file still has the
     size the state recorded. A store file that was deleted, cut or damaged is
     reported once, and its sources are stored again while they still exist.
+  * A cursor that moves back (its store file lost bytes) unbinds every source
+    recorded as longer than what is left. Such a source is compared in full and
+    stored again; it is never skipped as unchanged, and never continued on the
+    strength of its last 4 KiB.
+  * status, verify, where and cat only read. They open the state read-only and
+    repair, adopt and cut nothing: that is the capture pass's work, done under
+    its lock. `cat` exits 1 when the store gives fewer bytes than were recorded.
+  * A folder that cannot be listed, or a file whose metadata cannot be read, is
+    counted as a source error and the pass goes on. One that went away is not
+    an error.
   * Below the free-space floor a pass stores nothing more and exits 1, so the
     archive is never what fills the disk and a stalled archive is not silent.
 
@@ -70,6 +80,7 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.parse
 from dataclasses import dataclass, replace
 from typing import Callable, Iterator, Optional
 
@@ -96,6 +107,17 @@ DEFAULT_ROOTS = (
 COUNTERS = ("scanned", "changed", "appended", "streams", "versions", "proved", "covered", "adopted",
             "reconciled", "partial_frames_set_aside", "deferred", "skipped", "source_errors",
             "store_errors", "low_disk", "bytes_read", "bytes_stored")
+
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS streams(
+  id INTEGER PRIMARY KEY, agent TEXT NOT NULL, key TEXT NOT NULL, version INTEGER NOT NULL,
+  content_bytes INTEGER NOT NULL, store_bytes INTEGER NOT NULL, tail BLOB NOT NULL,
+  broken INTEGER NOT NULL DEFAULT 0, UNIQUE(agent, key, version));
+CREATE TABLE IF NOT EXISTS sources(
+  path TEXT PRIMARY KEY, stream INTEGER NOT NULL, size INTEGER NOT NULL,
+  mtime_ns INTEGER NOT NULL, ino INTEGER NOT NULL, seen_ns INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS meta(k TEXT PRIMARY KEY, v TEXT NOT NULL);
+"""
 
 
 class StoreError(Exception):
@@ -152,17 +174,34 @@ def followed(agent: str, parts: tuple) -> bool:
     return parent == "tool-results" or (parent == "workflows" and name.endswith(".json"))
 
 
-def walk(root: Root) -> Iterator[tuple]:
-    """Yield (key, path, stat) for each followed regular file. Metadata only; symlinks are not followed."""
+def walk(root: Root, problem: Optional[Callable[[str, OSError], None]] = None) -> Iterator[tuple]:
+    """Yield (key, path, stat) for each followed regular file. Metadata only; symlinks are not followed.
+
+    A folder or file that went away (or a root that was never there) is passed
+    over. Any other failure to list a folder or to read an entry's metadata goes
+    to `problem`, and the walk carries on with the rest.
+    """
+    def report(path: str, error: OSError) -> None:
+        if problem is not None and not isinstance(error, (FileNotFoundError, NotADirectoryError)):
+            problem(path, error)
+
     stack = [(root.path, ())]
     while stack:
         directory, parts = stack.pop()
         try:
             entries = os.scandir(directory)
-        except OSError:
+        except OSError as error:
+            report(directory, error)
             continue
         with entries:
-            for entry in entries:
+            while True:
+                try:
+                    entry = next(entries)
+                except StopIteration:
+                    break
+                except OSError as error:        # the listing itself failed part-way
+                    report(directory, error)
+                    break
                 try:
                     if entry.is_dir(follow_symlinks=False):
                         stack.append((entry.path, parts + (entry.name,)))
@@ -170,8 +209,8 @@ def walk(root: Root) -> Iterator[tuple]:
                         rel = parts + (entry.name,)
                         if len(rel) > root.depth and followed(root.agent, rel):
                             yield "/".join(rel[root.depth:]), entry.path, entry.stat(follow_symlinks=False)
-                except OSError:
-                    continue
+                except OSError as error:
+                    report(entry.path, error)
 
 
 def frame_scan(path: str, size: int) -> int:
@@ -309,7 +348,7 @@ def range_hash(fd: int, start: int, end: int) -> Optional[bytes]:
 
 class Archive:
     def __init__(self, store: str, roots: list, max_bytes: int = DEFAULT_MAX_BYTES, min_free: int = 0,
-                 max_seconds: int = 0):
+                 max_seconds: int = 0, readonly: bool = False):
         self.store = store
         self.data = os.path.join(store, "data")
         self.roots = roots
@@ -318,23 +357,26 @@ class Archive:
         self.max_seconds = max_seconds    # 0: no limit
         self.spent = 0
         self.n: collections.Counter = collections.Counter()
+        self.cut: set = set()             # streams whose cursor moved back during this pass
         # Test seam: runs after a frame is durable and before its cursor is saved.
         self.after_store_write: Callable[[], None] = lambda: None
+        state = os.path.join(store, "state.sqlite3")
+        if readonly:
+            # status, verify, where and cat. SQLite refuses a write on this handle,
+            # and nothing is created: with no state file yet, they read an empty
+            # one held in memory.
+            if os.path.exists(state):
+                self.db = sqlite3.connect("file:" + urllib.parse.quote(os.path.abspath(state)) + "?mode=ro",
+                                          uri=True, isolation_level=None)
+            else:
+                self.db = sqlite3.connect(":memory:", isolation_level=None)
+                self.db.executescript(SCHEMA)
+            return
         os.makedirs(self.data, mode=0o700, exist_ok=True)
-        self.db = sqlite3.connect(os.path.join(store, "state.sqlite3"), isolation_level=None)
+        self.db = sqlite3.connect(state, isolation_level=None)
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.execute("PRAGMA synchronous=FULL")
-        self.db.executescript(
-            """
-            CREATE TABLE IF NOT EXISTS streams(
-              id INTEGER PRIMARY KEY, agent TEXT NOT NULL, key TEXT NOT NULL, version INTEGER NOT NULL,
-              content_bytes INTEGER NOT NULL, store_bytes INTEGER NOT NULL, tail BLOB NOT NULL,
-              broken INTEGER NOT NULL DEFAULT 0, UNIQUE(agent, key, version));
-            CREATE TABLE IF NOT EXISTS sources(
-              path TEXT PRIMARY KEY, stream INTEGER NOT NULL, size INTEGER NOT NULL,
-              mtime_ns INTEGER NOT NULL, ino INTEGER NOT NULL, seen_ns INTEGER NOT NULL);
-            CREATE TABLE IF NOT EXISTS meta(k TEXT PRIMARY KEY, v TEXT NOT NULL);
-            """)
+        self.db.executescript(SCHEMA)
 
     def close(self) -> None:
         self.db.close()
@@ -357,6 +399,13 @@ class Archive:
     def save(self, stream: Stream, content_bytes: int, store_bytes: int, tail: bytes, broken: int = 0) -> Stream:
         self.db.execute("UPDATE streams SET content_bytes=?, store_bytes=?, tail=?, broken=? WHERE id=?",
                         (content_bytes, store_bytes, tail, broken, stream.id))
+        if content_bytes < stream.content_bytes:
+            # The store file lost bytes. A source recorded as longer than what is
+            # left is no longer stored, so its record goes: the next look at it,
+            # in this pass or a later one, is a full comparison. Without this a
+            # half-finished repair would leave it skipped as unchanged for good.
+            self.cut.add(stream.id)
+            self.db.execute("DELETE FROM sources WHERE stream=? AND size>?", (stream.id, content_bytes))
         return replace(stream, content_bytes=content_bytes, store_bytes=store_bytes, tail=tail, broken=broken)
 
     def mark_broken(self, stream: Stream) -> Stream:
@@ -372,8 +421,28 @@ class Archive:
             (agent, key, version, empty))
         return Stream(cursor.lastrowid, agent, key, version, 0, 0, empty, 0)
 
+    def listed(self, agent: str, key: str) -> list:
+        """(version, Stream or None, store file) for every version of a key, exactly as it is now.
+
+        For the read commands: nothing is reconciled, adopted or written. The
+        Stream is None for a store file the state has no row for yet.
+        """
+        rows = {stream.version: stream for stream in (Stream(*row) for row in self.db.execute(
+            f"SELECT {self._COLUMNS} FROM streams WHERE agent=? AND key=?", (agent, key)))}
+        found = []
+        version = 1
+        while version <= max(rows, default=0) or os.path.exists(self.path_for(agent, key, version)):
+            path = self.path_for(agent, key, version)
+            if version in rows or os.path.exists(path):
+                found.append((version, rows.get(version), path))
+            version += 1
+        return found
+
     def versions(self, agent: str, key: str) -> list:
-        """Every version of a key, reconciled with the store, including store files the state has no row for."""
+        """Every version of a key, reconciled with the store, including store files the state has no row for.
+
+        Capture only: this writes the state and can cut a store file's partial tail.
+        """
         rows = [Stream(*row) for row in self.db.execute(
             f"SELECT {self._COLUMNS} FROM streams WHERE agent=? AND key=?", (agent, key))]
         have = {stream.version for stream in rows}
@@ -599,9 +668,12 @@ class Archive:
                 stream = self.reconcile(stream)
                 # The quick check is enough only for an append-only file that grew in
                 # place while no other path moved its stream. `seen` is
-                # (stream, size, mtime_ns, ino) from this path's last pass.
+                # (stream, size, mtime_ns, ino) from this path's last pass, read
+                # before the pass began: it says nothing about a stream whose
+                # cursor moved back since, which another file may have refilled.
                 if (key.endswith(".jsonl") and snap.st_size > stream.content_bytes
-                        and stream.content_bytes == seen[1] and snap.st_ino == seen[3]):
+                        and stream.content_bytes == seen[1] and snap.st_ino == seen[3]
+                        and stream.id not in self.cut):
                     window = self.continues(fd, snap.st_size, stream)
             if window is None:
                 stream, window = self.find_or_create(agent, key, fd, snap.st_size)
@@ -630,24 +702,31 @@ class Archive:
     def low_disk(self) -> bool:
         return bool(self.min_free) and shutil.disk_usage(self.store).free < self.min_free
 
+    def unreadable(self, path: str, error: OSError) -> None:
+        self.n["source_errors"] += 1
+        log(f"cannot read {path}: {error.strerror or error}")
+
     def capture(self) -> dict:
         started = time.time()
         known = {row[0]: row[1:] for row in self.db.execute(
             "SELECT path, stream, size, mtime_ns, ino FROM sources")}
         streams = {row[0]: row[1:] for row in self.db.execute(
-            "SELECT id, agent, key, version, store_bytes, broken FROM streams")}
+            "SELECT id, agent, key, version, store_bytes, broken, content_bytes FROM streams")}
         checked: dict = {}
         work = []
         for root in self.roots:
-            for key, path, st in walk(root):
+            for key, path, st in walk(root, self.unreadable):
                 self.n["scanned"] += 1
                 seen = known.get(path)
                 # A file is left alone when it is as the last pass saw it AND its
-                # store file is as the last pass left it. A store file that is
-                # gone, cut, damaged or marked broken sends its sources back
-                # through capture_one, which stores them again.
+                # store file is as the last pass left it AND its stream holds at
+                # least the bytes recorded for it. A store file that is gone,
+                # cut, damaged or marked broken sends its sources back through
+                # capture_one, which stores them again. The last test is per
+                # source, not per stream: two sources of one stream differ in size.
                 if (seen and seen[1:] == (st.st_size, st.st_mtime_ns, st.st_ino)
-                        and self.store_agrees(seen[0], streams, checked)):
+                        and self.store_agrees(seen[0], streams, checked)
+                        and streams[seen[0]][5] >= seen[1]):
                     continue
                 work.append((st.st_mtime_ns, path, root.agent, key))
         work.sort()          # oldest first: the files nearest deletion are saved first
@@ -716,16 +795,26 @@ class Archive:
         return (stream, row[1]) if stream else None
 
     def read(self, stream: Stream, length: Optional[int] = None) -> Iterator[bytes]:
-        """The stream's content, or its first `length` bytes."""
-        left = stream.content_bytes if length is None else min(length, stream.content_bytes)
-        if left <= 0:
-            return
-        for chunk in decode(self.stream_path(stream)):
-            chunk = chunk[:left]
-            yield chunk
-            left -= len(chunk)
-            if left <= 0:
-                break
+        """The stream's content, or its first `length` bytes.
+
+        Raises StoreError when fewer bytes can be given than were asked for: a
+        short answer from the only copy of a transcript must not look whole.
+        Nothing past the stream's cursor is read; that may be an append in flight.
+        """
+        want = stream.content_bytes if length is None else length
+        path = self.stream_path(stream)
+        if want > stream.content_bytes:
+            raise StoreError(f"{path} holds {stream.content_bytes} of the {want} bytes recorded for this source")
+        left = want
+        if left > 0:
+            for chunk in decode(path):
+                chunk = chunk[:left]
+                yield chunk
+                left -= len(chunk)
+                if left <= 0:
+                    break
+        if left > 0:
+            raise StoreError(f"{path} holds {want - left} of the {want} bytes recorded for it")
 
     def verify(self, paths: list, max_bytes: int) -> dict:
         """Compare stored content with the live source, byte for byte, newest captures first."""
@@ -839,9 +928,11 @@ def main(argv: Optional[list] = None) -> int:
         return 3
     os.umask(0o077)            # transcripts hold secrets; the archive is private to its owner
     store = args.store or default_store()
-    os.makedirs(store, mode=0o700, exist_ok=True)
+    readonly = args.command != "capture"
+    if not readonly:
+        os.makedirs(store, mode=0o700, exist_ok=True)
     archive = Archive(store, parse_roots(args.root), getattr(args, "max_bytes", DEFAULT_MAX_BYTES),
-                      getattr(args, "min_free_bytes", 0), getattr(args, "max_seconds", 0))
+                      getattr(args, "min_free_bytes", 0), getattr(args, "max_seconds", 0), readonly=readonly)
     try:
         if args.command == "capture":
             lock = os.open(os.path.join(store, "lock"),
@@ -874,19 +965,25 @@ def main(argv: Optional[list] = None) -> int:
             log(f"no stored stream for {args.path}")
             return 1
         stream, size = found
+        listing = archive.listed(stream.agent, stream.key)
         if args.command == "where":
-            for item in sorted(archive.versions(stream.agent, stream.key), key=lambda one: one.version):
-                mark = "*" if item.id == stream.id else " "
-                print(f"{mark} v{item.version} {item.content_bytes} bytes {archive.stream_path(item)}")
+            for version, item, path in listing:
+                if item is None:
+                    print(f"  v{version} not in the state yet {path}")
+                else:
+                    mark = "*" if item.id == stream.id else " "
+                    print(f"{mark} v{version} {item.content_bytes} bytes {path}")
             return 0
-        length: Optional[int] = size
+        chunks = archive.read(stream, size)
         if args.version is not None:
-            match = [item for item in archive.versions(stream.agent, stream.key) if item.version == args.version]
+            match = [one for one in listing if one[0] == args.version]
             if not match:
                 log(f"no version {args.version} for {args.path}")
                 return 1
-            stream, length = match[0], None
-        for chunk in archive.read(stream, length):
+            _, item, path = match[0]
+            # A store file the state has no row for yet has no cursor: all of it is printed.
+            chunks = archive.read(item) if item is not None else decode(path)
+        for chunk in chunks:
             sys.stdout.buffer.write(chunk)
         return 0
     except StoreError as error:

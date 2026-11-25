@@ -2,10 +2,11 @@
 Description=session-archive: save what agent session transcripts gained since the last pass
 Documentation=https://github.com/StartupBros-com/hov-stack
 
-# A pass exits 1 when a transcript could not be read, a store file could not be
-# written or no longer decodes, or the disk is below the free-space floor with
-# files still waiting. Each of those means transcripts are not being saved, so
-# each pages (once per hour at most, the alert's per-unit cooldown).
+# A pass exits 1 when a transcript could not be read, a folder of them could not
+# be listed, a store file could not be written or no longer decodes, or the disk
+# is below the free-space floor with files still waiting. Each of those means
+# transcripts are not being saved, so each pages (once per hour at most, the
+# alert's per-unit cooldown).
 OnFailure=harness-unit-failure-alert@%n.service
 
 [Service]
