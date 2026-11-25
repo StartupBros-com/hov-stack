@@ -23,7 +23,7 @@ skills do not restate it.
 |---|---|---|---|---|
 | Ephemeral | `/tmp/<unique-dir>/`, or `$CLAUDE_JOB_DIR/tmp` in a background job | no | dies with the session or job | the agent itself |
 | Reviewable | `<repo>/.claude/deliverables/<skill>/<date>-<slug>.<ext>` | no (`~/.gitignore_global`, beside `.claude/scratch/`) | the operator deletes it once read; a worktree's copies move to the main checkout's `.claude/deliverables/from-worktrees/<worktree>/` when `wt-sweep` or `wt-done` removes the worktree | the operator, this week |
-| External workspace | `<project>__<skill>_workspace/` beside the repo; de-monolithize is the one current example (`<project>__demonolith_workspace/`), and a new skill that emits a sibling bundle uses the same shape | no, outside the repo | the skill that made it bundles it into an archive directory at the end of its run, records its original absolute path, and asks before deleting; `wt-sweep.sh` warns past 14 days as a backstop | the operator, until the skill archives it |
+| External workspace | `<project>__<skill>_workspace/` beside the repo: de-monolithize's `<project>__demonolith_workspace/`, and a campaign skill's workspace, whose sub-folders are git checkouts on `campaign/<name>` branches of the project's remote; a new skill that emits a sibling bundle uses the same shape | no, outside the repo (a campaign checkout's history is on its remote) | the skill that made it bundles it into an archive directory at the end of its run (a campaign workspace, when the campaign ends), records its original absolute path, and asks before deleting; `wt-sweep.sh` warns past 14 days as a backstop | the operator, until the skill archives it |
 | Durable | `docs/<sub>/` (plans, solutions, reality-checks), `design/` (design-rails) | yes | normal repo governance | anyone reading the repo |
 
 Ceremony Test answers for the one new tier, Reviewable: consumer = the operator in the
@@ -51,7 +51,10 @@ If it exists so a future reader of the repo finds it, it is Durable and goes thr
 If only the agent reads it, it is Ephemeral. A skill that emits a whole sibling directory
 of many files is the External workspace case. That skill must, at the end of its run, bundle the
 workspace into an archive directory, record the workspace's original absolute path (tools may
-hard-code it, so a restore must return there), and ask the user before deleting it. `wt-sweep.sh`
+hard-code it, so a restore must return there), and ask the user before deleting it. A workspace
+whose sub-folders are git checkouts pushed to the project's remote is archived when its campaign
+ends, not at the end of each run, and the archive keeps the files those checkouts leave out of
+git, which exist nowhere else. Such checkouts push only to a remote confirmed private. `wt-sweep.sh`
 warns past 14 days, the abandoned-worktree threshold, as a backstop only.
 
 Under a worktree the Reviewable tier is per worktree, which is the point: two sessions never
