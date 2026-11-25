@@ -118,6 +118,11 @@ class Hermetic(unittest.TestCase):
                 // eslint-disable-next-line no-console
                 console.log(z);
             """,
+            "web/z.tsx": """
+                {/* The demo panel logs on purpose */}
+                {/* eslint-disable-next-line no-console */}
+                {/* eslint-disable-next-line no-alert -- the confirm dialog is the feature */}
+            """,
             "run.sh": "# shellcheck disable=SC2086,SC2034\necho $x\n",
             "c.py": "print(undefined_thing)\nprint(undefined_thing)\nprint(undefined_thing)\n",
             "web/d.ts": "debugger;\n",
@@ -168,6 +173,10 @@ class Hermetic(unittest.TestCase):
         self.assertEqual(above["reason_text"], "The vendored module path must load first")
         self.assertEqual(self.site("web/y.ts", 1, "no-console")["reason"], "same-line")
         self.assertEqual(self.site("web/y.ts", 4, "no-console")["reason"], "none")
+        jsx_above = self.site("web/z.tsx", 2, "no-console")
+        self.assertEqual((jsx_above["reason"], jsx_above["reason_text"]), ("line-above", "The demo panel logs on purpose"))
+        jsx_same = self.site("web/z.tsx", 3, "no-alert")
+        self.assertEqual((jsx_same["reason"], jsx_same["reason_text"]), ("same-line", "the confirm dialog is the feature"))
         for f in ("web/x1.ts", "web/x2.ts", "web/x3.ts"):
             s = self.site(f, 2, "no-console")
             self.assertEqual((s["reason"], s["state"]), ("stamp", "not-measured"))
@@ -175,9 +184,9 @@ class Hermetic(unittest.TestCase):
     def test_rule_rollup(self):
         rows = {r["rule"]: r for r in self.data["rules"]}
         nc = rows["eslint:no-console"]
-        self.assertEqual(nc["sites"], 5)
+        self.assertEqual(nc["sites"], 6)
         self.assertEqual(nc["open_reasonless"], 1)
-        self.assertEqual(nc["reasons"], {"stamp": 3, "same-line": 1, "none": 1})
+        self.assertEqual(nc["reasons"], {"stamp": 3, "same-line": 1, "line-above": 1, "none": 1})
         self.assertEqual(rows["ruff:E402"]["states"], {"dead": 3})
         self.assertEqual(rows["ruff:E402"]["open_reasonless"], 0)
         self.assertEqual(rows["shellcheck:SC2086"]["sites"], 1)

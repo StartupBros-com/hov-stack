@@ -73,7 +73,7 @@ PATTERNS = [
 PREFILTER = re.compile(r"disable|ignore|noqa|@ts-", re.IGNORECASE)
 DIRECTIVE = re.compile(r"noqa|type:\s*ignore|pyright:|eslint-disable|oxlint-disable|biome-ignore|@ts-|"
                        r"shellcheck\s+disable", re.IGNORECASE)
-COMMENT_LEADER = re.compile(r"^\s*(#|//|/\*+|\*|<!--)")
+COMMENT_LEADER = re.compile(r"^\s*(#|//|\{?/\*+|\*)")
 ALL_RULES = "(all rules)"
 RUF100_PART = re.compile(r"(unused|non-enabled|disabled|unknown|duplicated):\s*([^;)]*)")
 CHUNK = 400
@@ -118,7 +118,7 @@ def read_lines(path):
 
 
 def clean_reason(text):
-    t = re.sub(r"(\*/|-->)\s*$", "", text.strip()).strip()
+    t = re.sub(r"\*/\}?\s*$", "", text.strip()).strip()
     t = t.lstrip("-–—:;,#/* \t").strip()
     if not t or DIRECTIVE.search(t) or not re.search(r"[A-Za-z]{3,}", t):
         return ""
