@@ -1029,18 +1029,21 @@ The decision rules for each run were written before it ran.
   - The same decision in every run: 68 of 72. The 4 dropped as tool directives were all rated
     redundant.
 - Run B, a fail.
-  - The tool labelled 758 of the 834 units of 2.1 not in the audit, dropping 28 as directives.
-    It flagged 235 under the first rule: T, H, S, X, and E with no ticket.
+  - Of the 786 units of 2.1 outside the audit, the tool dropped 28 as directives and labelled
+    758. It flagged 235 under the first rule: T, H, S, X, and E with no ticket.
   - A blind audit drew 50 of those flags and added 10 unflagged controls. The 9 known
     load-bearing units were planted to test the auditor. It used the audit prompt of 7.1 and
     one Sonnet auditor.
+  - One sampled flag was skipped because its comment is no longer in the file, so the 50 are
+    the first 50 in sample order whose comment is still there.
   - Planted units re-found: 5 of 9 (bar: 5).
   - Flags rated load-bearing: 3 of 50 (bar: at most 2), a fail.
   - All three were H or E: 3 of 19 such flags, against 0 of 31 for T, S and X. One was a
     threshold whose comment gives the measurements behind it, which reads as history.
 - The fix, and run C.
   - The rule now flags T, S and X only. Run B's 50 became development data, so run C audited
-    50 fresh T, S and X flags, drawn from the 113 outside run B's sample.
+    50 fresh T, S and X flags, drawn from the 113 outside run B's sample. Here too, one
+    sampled flag whose comment is gone was skipped.
   - The audit also held the same 9 planted units and 10 fresh controls. Two auditors rated
     every unit, and a unit counted as load-bearing if either said so.
   - Planted units re-found: 8 of 9 (bar: 7).
