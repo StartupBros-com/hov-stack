@@ -89,6 +89,7 @@ dotfiles `docs/vets/`; here they are R1 to R12.
   `gh pr create` (4.2). It is unmeasured, and `CLAUDE.md` is the operator's file.
   - Corrected 2026-11-24 (7.6): dropped in favour of a check in the pull-request path.
   - 2026-11-25 (7.6): that check is built, audited and registered on the operator's hosts only.
+    Two of the rules written before its runs said not to wire it; 7.6 says why it was wired.
 
 ## 1. Identity, targets and run choices
 
@@ -1006,18 +1007,34 @@ same change. A false comment was the worst state measured (R5).
   flagged (run B below).
 - Where it runs: a PostToolUse hook on Bash. It fires after a `gh pr create` that printed a
   pull request URL for the checkout's own repository, and it hands the flags to the session as
-  added context. It is advisory: it never blocks or edits, and any failure prints nothing. The
+  added context. It diffs the pull request's own base and head, read with `gh pr view`. The
+  hook payload names the session's folder, which a `cd` out of that folder does not change, so
+  the first version diffed that folder's branch: in a test, the branch of another checkout of
+  the same repository. It is advisory: it never blocks or edits, and any failure prints nothing. The
   flags arrive just after the pull request opens, so acting on one costs a follow-up commit.
   It is registered on the operator's hosts only, through the overlay settings. The repo's
   settings template does not register it.
-- Cost and size: about $0.01 for 70 comments, in about 30 s. One call per 40 comments, up to 4
+- Cost and size: about $0.01 for 70 comments, in about 30 s. The session waits for the check,
+  at most 150 s, before it sees the `gh pr create` result. One call per 40 comments, up to 4
   calls at once, at most 200 comments per check.
 - Delivery, verified: a nested Haiku session ran with the real gate planted as a hook and a
   stand-in `gh`. Its environment held only HOME and a PATH carrying the live Claude Code
   process's entries for `claude` and `python3`. The session quoted back both flags and left the
-  reason comment alone.
+  reason comment alone. After the overlay registered it, a fresh session that loaded the real
+  user settings got the flags too. With `cd <repo> &&` in front of the command, they arrived
+  when the repository was inside the session's folder and not when it was outside.
 
-The decision rules for each run were written before it ran.
+The decision rules for each run were written before it ran. Two of them said not to wire the
+hook, and it was wired anyway.
+
+- Run B's rule said a fail means the CLI ships alone. The hook was wired after one confirmatory
+  round, run C, on a narrower rule whose own bars were written before it ran.
+- Run A's bar on the clutter controls was not re-checked for the narrower rule before the hook
+  was wired. Re-scored from the stored labels, it fails (run A below). Its rule said a fail
+  means the hook is not wired.
+- So the hook is on by judgment, not because the rules written in advance passed. To undo it,
+  delete the overlay's `hooks.PostToolUse` key, or set `HOOK_DISABLED=post:bash:comment-check`
+  for one session.
 
 - The 2026-11-24 deciding measurement was circular. The 9 load-bearing units of 7.1 were
   sampled from units the 2.1 labeller called D, so a labeller of the same family passes them
@@ -1028,6 +1045,15 @@ The decision rules for each run were written before it ran.
   - Helpful flagged: 4, 4, 5 of 40.
   - The same decision in every run: 68 of 72. The 4 dropped as tool directives were all rated
     redundant.
+  - Those counts are for the first rule. Under the rule that shipped (T, S and X), from the same
+    stored labels: load-bearing 0, 0, 0 of 9; clutter controls 5, 6, 5 of 12, a median of 5, so
+    the bar of 6 fails; helpful 1, 1, 2 of 40; redundant 6, 7, 5 of 21, as before; the same
+    decision in every run, 69 of 72.
+  - The 12 controls were picked because the 2.1 labeller called them clutter. The audit of 7.1
+    rated 6 of them helpful and 6 redundant. Under the shipped rule, none of the 6 helpful ones
+    is flagged (3 are labelled H, and 3 D), and 5 or 6 of the 6 redundant ones are flagged in
+    each run. That split was seen after the bar failed, so it explains the fail; it does not
+    pass the bar.
 - Run B, a fail.
   - Of the 786 units of 2.1 outside the audit, the tool dropped 28 as directives and labelled
     758. It flagged 235 under the first rule: T, H, S, X, and E with no ticket.
