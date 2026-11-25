@@ -372,7 +372,15 @@ class MovedFolderTests(Case):
         db = sqlite3.connect(os.path.join(self.store, "state.sqlite3"), isolation_level=None)
         try:
             db.execute("DROP INDEX IF EXISTS sources_ino")
+            db.execute("DROP INDEX IF EXISTS sources_stream")
             db.execute("ALTER TABLE sources DROP COLUMN dev")
+        finally:
+            db.close()
+
+    def schema(self):
+        db = sqlite3.connect("file:%s?mode=ro" % os.path.join(self.store, "state.sqlite3"), uri=True)
+        try:
+            return db.execute("SELECT type, name, sql FROM sqlite_master ORDER BY name").fetchall()
         finally:
             db.close()
 
@@ -505,6 +513,55 @@ class MovedFolderTests(Case):
         self.assertEqual((summary["moved"], summary["streams"]), (0, 1))
         self.assertEqual(self.versions_on_disk("claude", "s2.jsonl"), {1: first})
 
+    def back_and_forth(self):
+        """A file stored under proj-a, moved to proj-b and grown there; the folder is then moved back to proj-a."""
+        first, more = text(1, 20_000), text(2, 3000)
+        self.put("proj-a/s1.jsonl", first)
+        self.run_pass()
+        self.move("proj-a", "proj-b")
+        self.add("proj-b/s1.jsonl", more)
+        self.assertEqual(self.run_pass()["moved"], 1)
+        self.move("proj-b", "proj-a")
+        return first + more
+
+    def test_session_that_returns_to_a_folder_it_used_before_is_continued_without_a_full_comparison(self):
+        before, more = self.back_and_forth(), text(3, 2500)
+        self.add("proj-a/s1.jsonl", more)
+        with self.no_full_comparison():
+            summary = self.run_pass()
+        self.assertEqual((summary["moved"], summary["proved"], summary["bytes_read"]), (1, 0, len(more)))
+        self.assertEqual(self.versions_on_disk("claude", "s1.jsonl"), {1: before + more})
+
+    def test_session_that_returns_unchanged_is_adopted_without_reading_it(self):
+        before = self.back_and_forth()
+        with self.no_full_comparison():
+            summary = self.run_pass()
+        self.assertEqual((summary["moved"], summary["proved"], summary["appended"]), (1, 0, 0))
+        self.assertEqual(self.versions_on_disk("claude", "s1.jsonl"), {1: before})
+
+    def test_session_that_returns_rewritten_is_compared_in_full(self):
+        before = self.back_and_forth()
+        rewritten = text(8, len(before) + 500)
+        self.put("proj-a/s1.jsonl", rewritten)
+        summary = self.run_pass()
+        self.assertEqual((summary["moved"], summary["versions"]), (0, 1))
+        self.assertEqual(self.versions_on_disk("claude", "s1.jsonl"), {1: before, 2: rewritten})
+
+    def test_session_that_returns_touched_is_compared_in_full(self):
+        self.back_and_forth()
+        self.stamp(os.path.join(self.claude, "proj-a/s1.jsonl"))
+        summary = self.run_pass()
+        self.assertEqual((summary["moved"], summary["proved"]), (0, 1))
+
+    def test_file_rewritten_in_place_at_a_known_path_is_compared_in_full(self):
+        first, rewritten = text(1, 9000), text(5, 9500)
+        self.put("proj-a/s1.jsonl", first)
+        self.run_pass()
+        self.put("proj-a/s1.jsonl", rewritten)
+        summary = self.run_pass()
+        self.assertEqual((summary["moved"], summary["versions"]), (0, 1))
+        self.assertEqual(self.versions_on_disk("claude", "s1.jsonl"), {1: first, 2: rewritten})
+
     def test_moved_file_touched_without_growing_is_compared_in_full(self):
         self.put("proj-a/s1.jsonl", text(1, 9000))
         self.run_pass()
@@ -592,6 +649,26 @@ class MovedFolderTests(Case):
             summary = self.run_pass()
         self.assertEqual((summary["moved"], summary["proved"]), (1, 0))
         self.assertEqual(self.versions_on_disk("claude", "s1.jsonl"), {1: first + more + last})
+
+    def test_capture_that_finds_the_lock_taken_leaves_an_old_state_file_as_it_was(self):
+        self.put("proj-a/s1.jsonl", text(1, 900))
+        self.run_pass()
+        self.strip_device_column()
+        before = self.schema()
+        self.assertNotIn("dev", repr(before))
+        holder = os.open(os.path.join(self.store, "lock"), os.O_WRONLY | os.O_CREAT, 0o600)
+        self.addCleanup(os.close, holder)
+        fcntl.flock(holder, fcntl.LOCK_EX)
+        env = dict(os.environ, SESSION_ARCHIVE_MIN_FREE_BYTES="0")
+        command = [sys.executable, str(SCRIPT), "--store", self.store, "--root", "claude=%s:1" % self.claude,
+                   "capture"]
+        done = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
+        self.assertEqual(done.returncode, 0, done.stderr.decode())
+        self.assertIn("another capture holds the lock", done.stderr.decode())
+        self.assertEqual(self.schema(), before)
+        fcntl.flock(holder, fcntl.LOCK_UN)
+        self.assertEqual(subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env).returncode, 0)
+        self.assertIn("sources_stream", repr(self.schema()))
 
     def test_status_reads_a_state_file_without_the_device_column(self):
         self.put("proj-a/s1.jsonl", text(1, 900))

@@ -20,9 +20,11 @@ Rules the code keeps:
     is moved to `<store file>.partial`, never dropped.
   * The quick check (the last 4 KiB before the cursor) is trusted only for a
     `.jsonl` file that grew, on the same inode, when no other path has moved
-    its stream, and for a file at a path with no record that is another name
-    of a recorded file (a "move", counted as `moved`). That is: a recorded
-    path on the same device and inode, under the same key, is gone; its stream
+    its stream, and for a file whose path the quick check does not cover that
+    is another name of a recorded file (a "move", counted as `moved`; the
+    path may be new, or have a stale record of its own, which counts for
+    nothing). That is: a recorded other path on the same device and inode,
+    under the same key, is gone; its stream
     is whole, not cut this pass, with its cursor at the size recorded for that
     path; no other recorded path of the stream still exists; the file is
     unchanged (same size and mtime, any kind of file) or, for `.jsonl` only,
@@ -447,10 +449,12 @@ class Archive:
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.execute("PRAGMA synchronous=FULL")
         self.db.executescript(SCHEMA)
-        self.migrate()
 
     def migrate(self) -> None:
-        """State files written before `sources.dev` existed get the column; their rows keep NULL there."""
+        """Add the device column and the indexes the move check reads. Called by capture(), under its lock.
+
+        State files written before `sources.dev` existed get the column; their rows keep NULL there.
+        """
         if "dev" not in {row[1] for row in self.db.execute("PRAGMA table_info(sources)")}:
             try:
                 self.db.execute("ALTER TABLE sources ADD COLUMN dev INTEGER")
@@ -458,6 +462,7 @@ class Archive:
                 if "dev" not in {row[1] for row in self.db.execute("PRAGMA table_info(sources)")}:
                     raise
         self.db.execute("CREATE INDEX IF NOT EXISTS sources_ino ON sources(ino)")
+        self.db.execute("CREATE INDEX IF NOT EXISTS sources_stream ON sources(stream)")
 
     def close(self) -> None:
         self.db.close()
@@ -800,7 +805,7 @@ class Archive:
                         and stream.content_bytes == seen[1] and snap.st_ino == seen[3]
                         and stream.id not in self.cut):
                     window = self.continues(fd, snap.st_size, stream)
-            if window is None and seen is None:
+            if window is None:
                 found = self.moved(agent, key, path, fd, snap)
                 stream, window = found if found else (None, None)
                 renamed = window is not None
@@ -1090,6 +1095,7 @@ class Archive:
     def capture(self, full: Optional[bool] = None) -> dict:
         """One pass. `full`: True walks every root in full, False none, None each root that is due."""
         started = time.time()
+        self.migrate()
         walked_at = time.time_ns()
         work, folder_rows, walked, clear = self.plan(full)
         self.n["changed"] = len(work)
