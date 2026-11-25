@@ -298,7 +298,9 @@ CREATE TABLE IF NOT EXISTS wake_budget (
 # (`notify`, which the extension treats as no mail), inside the caller's budget. Waiting the 5 s default would
 # have the caller kill the process at its budget instead, with a warning in the session.
 HOOK_BUSY_MS = 2000
-HOOK_BUSY_MIN_MS = 250  # what is left of it after a slow listing, at least
+HOOK_LISTINGS_S = 3.5  # what the agents listings inside one PostToolUse hook may take between them (its timeout is 5 s)
+LISTING_MIN_S = 0.25
+_listings_until: float | None = None  # monotonic; set by the PostToolUse hook (cmd_hook), read by agents_rows
 
 
 def db(busy_ms: int = 5000) -> sqlite3.Connection:
@@ -490,6 +492,8 @@ def agents_rows(finished: bool = False, timeout: float = 5) -> list[dict]:
         cmd = os.environ.get("HOV_AGENTS_CMD", AGENTS_CMD_DEFAULT)
     if not cmd:
         return []
+    if _listings_until is not None:
+        timeout = max(LISTING_MIN_S, min(timeout, _listings_until - time.monotonic()))
     try:
         res = subprocess.run(shlex.split(cmd), capture_output=True, text=True, timeout=timeout, check=False)
         rows = json.loads(res.stdout or "[]")
@@ -1145,10 +1149,11 @@ def cached_facts(c: object, st: os.stat_result) -> dict | None:
             "wrote": [w for w in map(deliverable_path, wrote[:FINISHED_KEPT]) if w]}
 
 
-def finished_rows(live_ids: set, repo: str | None) -> list[dict]:
-    """One row per finished background session on this host, newest first: `claude agents --json --all` rows in
-    state `done` that the default listing leaves out. With `repo`, only those that worked in that repository."""
-    agents = [r for r in agents_rows(finished=True)
+def finished_rows(listing: list[dict], live_ids: set, repo: str | None) -> list[dict]:
+    """One row per finished background session on this host, newest first: the rows of `listing` (`claude agents
+    --json --all`) in state `done` that the default listing leaves out. With `repo`, only those that worked in that
+    repository."""
+    agents = [r for r in listing
               if isinstance(r, dict) and r.get("state") == "done" and not has_process(r) and isinstance(r.get("sessionId"), str)
               and SESSION_ID_RE.match(r["sessionId"]) and r["sessionId"] not in live_ids]
     if not agents:
@@ -1220,7 +1225,7 @@ def ls_rows(con: sqlite3.Connection, repo: str | None = None, finished: bool = F
     if con.in_transaction:
         con.commit()
     out = []
-    seen = set()
+    seen, live = set(), {}
     for r in agents:
         sid = r.get("sessionId") or ""
         title = r.get("name")
@@ -1228,6 +1233,7 @@ def ls_rows(con: sqlite3.Connection, repo: str | None = None, finished: bool = F
         titled = bool(title) and ident_error(title, "name") is None
         name = title if titled else sid[:8]
         seen.add(name)
+        live[sid] = name
         # send_to: the name Claude Code's own SendMessage takes for this session, so a row picked by repo and branch
         # carries its address. That is the title, and only for a session with a running process: the listing gives
         # those a `status`, and Claude Code's peer list shows no others. None otherwise (not running, or a title the
@@ -1238,8 +1244,12 @@ def ls_rows(con: sqlite3.Connection, repo: str | None = None, finished: bool = F
             continue
         me = Me(host, name, sid or None, "agents")
         out.append({"addr": me.addr, **row, "unread": len(unread_for(con, me))})
-    ended = finished_rows({r.get("sessionId") for r in agents}, repo) if finished else []
-    names = collections.Counter([*seen, *(r["name"] or r["session_id"][:8] for r in ended)])
+    listing = agents_rows(finished=True) if finished else []
+    ended = finished_rows(listing, set(live), repo) if finished else []
+    # Every listed session holds its name, whatever its state or repository: `hov send` and `hov ask` look a name up
+    # in the whole listing (sessions_named), so a title two of them share is an address for neither.
+    listed = {r["sessionId"]: listed_name(r) for r in listing if isinstance(r.get("sessionId"), str)}
+    names = collections.Counter([*listed.values(), *(n for sid, n in live.items() if sid not in listed)])
     for row in ended:
         # Mail reaches a finished session by its title or its 8-character id (Me.aliases) and `hov send` restarts it
         # to read that mail, so the row carries the address to send to: the title when no other listed session
@@ -1449,14 +1459,19 @@ def cmd_hook(a: argparse.Namespace) -> int:
         stand_down(sid)
     elif event == "SessionStart":
         retire_stale_watchers(sid)
-    # SAFETY: the note's listing can take seconds, so it runs before any delivery is claimed. A hook killed at its
-    # timeout after a claim would have recorded mail as handed over that the session never saw.
-    t0 = time.monotonic()
-    note = reach_note(payload) if event == "PostToolUse" else ""
+    note = ""
+    if event == "PostToolUse":
+        # hooks.json gives this hook 5 s, and it can list sessions twice: for the line (reach_note, NOTE_LIST_S) and,
+        # once LOOKUP_INTERVAL_MS has lapsed, for the session's own name (resolve_session, 5 s when run alone). Both
+        # end by one deadline, so two hung listings cost the line and the lookup, and the mail is still handed over.
+        global _listings_until
+        _listings_until = time.monotonic() + HOOK_LISTINGS_S
+        # SAFETY: the line's listing can take seconds, so it runs before any delivery is claimed. A hook killed at
+        # its timeout after a claim would have recorded mail as handed over that the session never saw.
+        note = reach_note(payload)
     # Every event writes once (`sessions.last_seen`, since 0.1.1) and a delivery claims rows, both under the
-    # write lock; a locked database is given up on quietly inside the hook's budget (HOOK_BUSY_MS). The listing's
-    # time comes out of that wait, so a hung listing and a locked database together still end inside the budget.
-    con = db(max(HOOK_BUSY_MIN_MS, HOOK_BUSY_MS - int((time.monotonic() - t0) * 1000)))
+    # write lock; a locked database is given up on quietly inside the hook's budget (HOOK_BUSY_MS).
+    con = db(HOOK_BUSY_MS)
     me = whoami(con, None, session_id=sid, cwd=payload.get("cwd"), force=(event == "SessionStart"))
     text = ""
     if "permission_mode" in payload:
@@ -1937,7 +1952,10 @@ def claude_cmd() -> list[str]:
     """The Claude Code command line, or [] when there is none to run. A host whose agents listing is overridden
     (the tests, a wrapper) has no real sessions to restart or copy, so only HOV_CLAUDE_CMD names one there."""
     fake = "HOV_AGENTS_CMD" in os.environ or "HOV_AGENTS_ALL_CMD" in os.environ
-    return shlex.split(os.environ.get("HOV_CLAUDE_CMD", "" if fake else CLAUDE_CMD_DEFAULT))
+    try:
+        return shlex.split(os.environ.get("HOV_CLAUDE_CMD", "" if fake else CLAUDE_CMD_DEFAULT))
+    except ValueError:  # an unbalanced quote: no command, and each caller says so
+        return []
 
 
 def installed_claude() -> tuple[int, ...] | None:
@@ -1946,7 +1964,8 @@ def installed_claude() -> tuple[int, ...] | None:
     if not cmd:
         return None
     try:
-        res = subprocess.run([*cmd, "--version"], stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=10, check=False)
+        res = subprocess.run([*cmd, "--version"], stdin=subprocess.DEVNULL, capture_output=True, text=True, errors="replace",
+                             timeout=10, check=False)
     except (OSError, subprocess.SubprocessError):
         return None
     m = re.match(r"\s*(\d+)\.(\d+)\.(\d+)", res.stdout or "")
@@ -1967,17 +1986,18 @@ def has_process(r: dict) -> bool:
     return bool(r.get("pid") or r.get("status"))
 
 
-def sessions_named(rows: list[dict], name: str) -> list[dict]:
-    """The listed sessions that answer to `name`: by mail name, 8-character id or whole session id."""
+def sessions_named(rows: list[dict], name: str, whole_id: bool = True) -> list[dict]:
+    """The listed sessions that answer to `name`: by mail name, 8-character id or whole session id. `whole_id` False
+    leaves the whole id out: a session reads mail under its name and its 8-character id only (Me.aliases)."""
     out = []
     for r in rows:
         sid = r.get("sessionId")
-        if isinstance(sid, str) and SESSION_ID_RE.match(sid) and name in (listed_name(r), sid[:8], sid):
+        if isinstance(sid, str) and SESSION_ID_RE.match(sid) and (name in (listed_name(r), sid[:8]) or (whole_id and name == sid)):
             out.append(r)
     return out
 
 
-def reach_of(rows: list[dict], name: str) -> tuple[str, dict | None]:
+def reach_of(rows: list[dict], name: str, whole_id: bool = True) -> tuple[str, dict | None]:
     """How mail for `name` on this host gets read, from a `claude agents --json --all` listing: (verdict, session).
 
     "mailbox": no listed session answers to the name. "running": a process holds one, and its own hooks or its
@@ -1986,7 +2006,7 @@ def reach_of(rows: list[dict], name: str) -> tuple[str, dict | None]:
     `done`. "gone": it is `done` and its launch folder no longer exists. "restart": it is `done` and can be
     restarted.
     """
-    hits = sessions_named(rows, name)
+    hits = sessions_named(rows, name, whole_id)
     if not hits:
         return "mailbox", None
     live = [r for r in hits if has_process(r)]
@@ -2040,7 +2060,7 @@ def restart_session(r: dict, mids: list[str]) -> tuple[bool, str]:
         return False, "another sender is restarting it"
     try:
         res = subprocess.run([*cmd, "--bg", "--resume", sid, restart_prompt()], cwd=cwd, stdin=subprocess.DEVNULL,
-                             capture_output=True, text=True, timeout=RESTART_TIMEOUT_S, check=False)
+                             capture_output=True, text=True, errors="replace", timeout=RESTART_TIMEOUT_S, check=False)
     except (OSError, subprocess.SubprocessError) as e:
         log(f"restart-failed session={sid} error={type(e).__name__}")
         return False, f"the restart did not run ({type(e).__name__})"
@@ -2053,7 +2073,7 @@ def restart_session(r: dict, mids: list[str]) -> tuple[bool, str]:
         # name and none of this mail, so it is stopped; its conversation stays on disk.
         copy = started.group(1)
         try:
-            subprocess.run([*cmd, "stop", copy], stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=RESTART_TIMEOUT_S, check=False)
+            subprocess.run([*cmd, "stop", copy], stdin=subprocess.DEVNULL, capture_output=True, timeout=RESTART_TIMEOUT_S, check=False)
         except (OSError, subprocess.SubprocessError):
             pass
         log(f"restart-copy session={sid} copy={copy}")
@@ -2084,42 +2104,66 @@ def reach_after_send(con: sqlite3.Connection, me: Me, to: list[str], ids: list[s
     rows = agents_rows(finished=True)
     out = []
     for name, (addr, mids) in wanted.items():
-        verdict, r = reach_of(rows, name)
-        if verdict in ("mailbox", "running"):
-            continue
-        sid = r.get("sessionId") if r else None
-        who, action = shown(addr, 300), "none"
-        if verdict == "idle" and con.execute(f"SELECT 1 FROM wakes WHERE session_id=? AND msg_id IN ({','.join('?' * len(mids))})",
-                                             (sid, *mids)).fetchone():
-            continue  # its watcher has no file because it fired for this very mail (seen live: within the same second)
-        if verdict == "idle":
-            title = r.get("name")
-            native = title if isinstance(title, str) and title and ident_error(title, "name") is None else None
-            note = f"{who} is running but idle with no hov watcher armed, so this mail waits for its next prompt."
-            note += (f" Claude Code's own SendMessage reaches it now, as {shown(native, 200)!r}." if native
-                     else " It has no name Claude Code's SendMessage takes.")
-        elif verdict == "ambiguous":
-            ids8 = ", ".join(sorted(x["sessionId"][:8] for x in sessions_named(rows, name)))
-            note = (f"several sessions with no running process answer to {shown(name, 200)!r} ({ids8}); none was restarted. "
-                    "Send to one by its 8-character id.")
-        elif verdict == "waiting":
-            note = (f"{who} has no running process and is in state {shown(r.get('state') or '-', 32)}, not done, so it was not "
-                    "restarted: hov restarts only a session that finished its turn (one restarted a moment ago shows as "
-                    "working for a few seconds). The mail waits for it.")
-        elif verdict == "gone":
-            note = (f"{who} had finished and its launch folder is gone, so it cannot be restarted; the mail waits. "
-                    f"`{hov_cmd()} ask {sid[:8]} \"question\"` still asks a read-only copy of it.")
-        elif os.environ.get("HOV_RESTART") == "0":
-            verdict, note = "off", f"{who} had finished and was not restarted (HOV_RESTART=0); the mail waits for its next start."
-        else:
-            ok, why = restart_session(r, mids)
-            if ok:
-                action = "restarted"
-                note = f"{who} had finished; restarted it (session {sid[:8]}) to read this mail. A reply comes to your inbox."
-            else:
-                verdict, note = "refused", f"{who} had finished and was not restarted: {why}. The mail waits for its next start."
-        out.append({"to": addr, "session_id": sid, "action": action, "why": verdict, "note": note})
+        try:
+            entry = reach_one(con, rows, name, addr, mids)
+        except Exception as e:
+            # SAFETY: the mail is stored by now. A locked mailbox or a Claude Code that misbehaves costs this
+            # recipient its restart, never the send its exit code and its ids, or the next recipient its turn.
+            log(f"reach-failed to={shown(name, 100)!r} error={type(e).__name__}")
+            entry = {"to": addr, "session_id": None, "action": "none", "why": "error",
+                     "note": (f"{shown(addr, 300)}: the mail is stored, but the look for a finished session failed "
+                              f"({type(e).__name__}), so it may not have been restarted.")}
+        if entry:
+            out.append(entry)
     return out
+
+
+def reach_one(con: sqlite3.Connection, rows: list[dict], name: str, addr: str, mids: list[str]) -> dict | None:
+    """reach_after_send for one recipient name: its entry, or None when the sender has nothing to hear."""
+    who, action = shown(addr, 300), "none"
+    verdict, r = reach_of(rows, name, whole_id=False)
+    if verdict == "mailbox":
+        whole = sessions_named(rows, name)
+        if not whole:
+            return None
+        # Planted negative: restarting it would spend its budget on a turn that finds no mail under its own names.
+        sid = whole[0]["sessionId"]
+        return {"to": addr, "session_id": sid, "action": "none", "why": "address",
+                "note": (f"{who} is a whole session id, and a session reads mail sent to its name or its 8-character id, so "
+                         f"nobody reads this and nothing was restarted. Send it to {sid[:8]}.")}
+    if verdict == "running":
+        return None
+    sid = r.get("sessionId") if r else None
+    if verdict == "idle" and con.execute(f"SELECT 1 FROM wakes WHERE session_id=? AND msg_id IN ({','.join('?' * len(mids))})",
+                                         (sid, *mids)).fetchone():
+        return None  # its watcher has no file because it fired for this very mail (seen live: within the same second)
+    if verdict == "idle":
+        title = r.get("name")
+        native = title if isinstance(title, str) and title and ident_error(title, "name") is None else None
+        note = f"{who} is running but idle with no hov watcher armed, so this mail waits for its next prompt."
+        note += (f" Claude Code's own SendMessage reaches it now, as {shown(native, 200)!r}." if native
+                 else " It has no name Claude Code's SendMessage takes.")
+    elif verdict == "ambiguous":
+        ids8 = ", ".join(sorted(x["sessionId"][:8] for x in sessions_named(rows, name, whole_id=False)))
+        note = (f"several sessions with no running process answer to {shown(name, 200)!r} ({ids8}); none was restarted. "
+                "Send to one by its 8-character id.")
+    elif verdict == "waiting":
+        note = (f"{who} has no running process and is in state {shown(r.get('state') or '-', 32)}, not done, so it was not "
+                "restarted: hov restarts only a session that finished its turn (one restarted a moment ago shows as "
+                "working for a few seconds). The mail waits for it.")
+    elif verdict == "gone":
+        note = (f"{who} had finished and its launch folder is gone, so it cannot be restarted; the mail waits. "
+                f"`{hov_cmd()} ask {sid[:8]} \"question\"` still asks a read-only copy of it.")
+    elif os.environ.get("HOV_RESTART") == "0":
+        verdict, note = "off", f"{who} had finished and was not restarted (HOV_RESTART=0); the mail waits for its next start."
+    else:
+        ok, why = restart_session(r, mids)
+        if ok:
+            action = "restarted"
+            note = f"{who} had finished; restarted it (session {sid[:8]}) to read this mail. A reply comes to your inbox."
+        else:
+            verdict, note = "refused", f"{who} had finished and was not restarted: {why}. The mail waits for its next start."
+    return {"to": addr, "session_id": sid, "action": action, "why": verdict, "note": note}
 
 
 def reach_note(payload: dict) -> str:
@@ -2145,6 +2189,8 @@ def reach_note(payload: dict) -> str:
             return ""
     if not isinstance(resp, dict) or resp.get("success") is not False or not isinstance(args, dict):
         return ""
+    if "reachable" not in f"{resp.get('message')} {resp.get('display')}".lower():
+        return ""  # it failed for another reason, which is not hov's to explain
     to = args.get("to")
     if not isinstance(to, str) or not to.strip() or to.strip() == "*" or args.get("recipient_kind") in ("agent", "main"):
         return ""
@@ -2185,9 +2231,13 @@ def cmd_ask(a: argparse.Namespace) -> int:
     con = db()
     me = whoami(con, a.as_name)
     con.close()
-    question = (sys.stdin.read() if a.question == "-" else a.question).strip()
-    if not question:
-        print("hov ask: empty question (give QUESTION, or '-' for stdin)", file=sys.stderr)
+    try:
+        question = (sys.stdin.read() if a.question == "-" else a.question).strip()
+        question.encode("utf-8")
+    except ValueError:  # bytes that are not UTF-8: an error here, or the escapes a C locale reads them into
+        question = "\0"
+    if not question or "\0" in question:  # a NUL cannot be a command-line argument
+        print("hov ask: the question is empty or not text (give QUESTION, or '-' for stdin)", file=sys.stderr)
         return 2
     host, name = parse_addr(a.session)
     if host != me.host or name == "*":
@@ -2213,7 +2263,8 @@ def cmd_ask(a: argparse.Namespace) -> int:
     t0 = time.monotonic()
     try:
         res = subprocess.run(argv, cwd=cwd if isinstance(cwd, str) and os.path.isdir(cwd) else None, stdin=subprocess.DEVNULL,
-                             capture_output=True, text=True, timeout=a.timeout, check=False, env={**os.environ, COPY_ENV: "0"})
+                             capture_output=True, text=True, errors="replace", timeout=a.timeout, check=False,
+                             env={**os.environ, COPY_ENV: "0"})
     except subprocess.TimeoutExpired:
         print(f"hov ask: the copy of {sid[:8]} gave no answer in {a.timeout:g} s (a long conversation takes minutes to load; raise --timeout)", file=sys.stderr)
         return 1
