@@ -13,6 +13,7 @@ StartupBros-com/.github   # the organization's default community health files (c
 StartupBros-com/compound-engineering-pi
 StartupBros-com/design-rails
 StartupBros-com/discord-leaver
+StartupBros-com/failure-class
 StartupBros-com/fitbod-hevy-migration
 StartupBros-com/harness-optimizer
 StartupBros-com/harness-vet
@@ -22,9 +23,11 @@ StartupBros-com/house-of-vibe
 StartupBros-com/hov-marketplace   # renamed to StartupBros-com/hov-stack; GitHub redirects the historical name
 StartupBros-com/hov-stack   # the public name this tree takes at the flip (R26)
 StartupBros-com/memory-dream
+StartupBros-com/oracle
 StartupBros-com/papercut
 StartupBros-com/pi-autoresearch
 StartupBros-com/pi-background-services
+StartupBros-com/pi-evals-evidence
 StartupBros-com/pi-research-fabric
 StartupBros-com/pro-gate
 StartupBros-com/product-video
@@ -41,13 +44,8 @@ StartupBros-com/terminal-notifications
 StartupBros-com/token-eater
 StartupBros-com/whoop-mcp
 StartupBros-com/wsl-cdp
-StartupBros/ccusage
-StartupBros/coding_agent_session_search
-StartupBros/failure-class
 StartupBros/hov-router
 StartupBros-com/hov-router
 StartupBros/mlx-embeddings
 StartupBros/omlx
-StartupBros/oracle
-StartupBros/pi-evals-evidence
 StartupBros/startupbros
