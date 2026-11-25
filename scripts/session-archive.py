@@ -38,9 +38,14 @@ Rules the code keeps:
     after a recent source and every folder under it, and folders that changed
     in the last 48 hours). It lists such a folder again only when the folder's
     own mtime moved, and there it takes files no pass has stored, files
-    replaced under the same name, and folders no pass has listed. A root gets a
+    replaced under the same name, and folders no pass has listed. Like a full
+    pass it never goes through a symlink below a root. A root gets a
     full pass once its last one is --full-every seconds old, so the light
     passes only add captures between full passes; they never stand in for one.
+  * A file an earlier pass found and did not store keeps waiting until a pass
+    stores it, finds it stored or finds it gone; a full pass that could not
+    read it, or a folder above it, leaves it waiting. A folder that could not
+    be listed whole is listed again by the next light pass.
   * A cursor that moves back (its store file lost bytes) unbinds every source
     recorded as longer than what is left. Such a source is compared in full and
     stored again; it is never skipped as unchanged, and never continued on the
@@ -114,6 +119,7 @@ DEFAULT_MIN_FREE = 10 << 30    # free bytes on the store's disk below which a pa
 DEFAULT_FULL_EVERY = 3000
 RECENT_NS = 48 * 3600 * 10 ** 9   # a light pass looks at sources and folders that changed this recently
 RACY_NS = 2 * 10 ** 9          # a folder listed this soon after it changed is listed again by the next light pass
+GONE = (FileNotFoundError, NotADirectoryError)   # a path that went away: passed over, not an error
 ZSTD_MAGIC = b"\x28\xb5\x2f\xfd"
 ZSTD = shutil.which("zstd")
 
@@ -141,9 +147,10 @@ CREATE TABLE IF NOT EXISTS sources(
   mtime_ns INTEGER NOT NULL, ino INTEGER NOT NULL, seen_ns INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS meta(k TEXT PRIMARY KEY, v TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS sources_mtime ON sources(mtime_ns);
--- What a light pass goes by. A full pass rebuilds both for its root, and
--- neither decides what is stored: a wrong row can only delay a capture until
--- the next full pass. folders.mtime_ns 0 means "list it again next pass".
+-- What a light pass goes by. A full pass rebuilds `folders` for its root and
+-- clears from `pending` what it could read; neither decides what is stored: a
+-- wrong row can only delay a capture until the next full pass.
+-- folders.mtime_ns 0 means "list it again next pass".
 CREATE TABLE IF NOT EXISTS folders(path TEXT PRIMARY KEY, depth INTEGER NOT NULL, mtime_ns INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS pending(path TEXT PRIMARY KEY);
 """
@@ -216,11 +223,16 @@ def walk(root: Root, problem: Optional[Callable[[str, OSError], None]] = None, f
     is passed over. Any other failure to list a folder or to read an entry's
     metadata goes to `problem`, and the walk carries on with the rest. Each
     folder listed is added to `folders` as (path, its depth below the root, its
-    mtime before the listing, the time the listing began).
+    mtime before the listing, the time the listing began); one that could not
+    be listed whole is added with mtime 0, so the next light pass lists it again.
     """
-    def report(path: str, error: OSError) -> None:
-        if problem is not None and not isinstance(error, (FileNotFoundError, NotADirectoryError)):
+    def report(path: str, error: OSError) -> bool:
+        """Pass a failure on; True when it is one (the path did not just go away)."""
+        if isinstance(error, GONE):
+            return False
+        if problem is not None:
             problem(path, error)
+        return True
 
     stack = [(start or root.path, below)]
     while stack:
@@ -232,10 +244,14 @@ def walk(root: Root, problem: Optional[Callable[[str, OSError], None]] = None, f
             read_at = time.time_ns()
             entries = os.scandir(directory)
         except OSError as error:
-            report(directory, error)
+            if report(directory, error) and folders is not None:
+                folders.append((directory, len(parts), 0, time.time_ns()))
             continue
+        row = None
         if folders is not None:
+            row = len(folders)
             folders.append((directory, len(parts), before, read_at))
+        whole = True
         with entries:
             while True:
                 try:
@@ -243,7 +259,7 @@ def walk(root: Root, problem: Optional[Callable[[str, OSError], None]] = None, f
                 except StopIteration:
                     break
                 except OSError as error:        # the listing itself failed part-way
-                    report(directory, error)
+                    whole = not report(directory, error) and whole
                     break
                 try:
                     if entry.is_dir(follow_symlinks=False):
@@ -253,7 +269,9 @@ def walk(root: Root, problem: Optional[Callable[[str, OSError], None]] = None, f
                         if len(rel) > root.depth and followed(root.agent, rel):
                             yield "/".join(rel[root.depth:]), entry.path, entry.stat(follow_symlinks=False)
                 except OSError as error:
-                    report(entry.path, error)
+                    whole = not report(entry.path, error) and whole
+        if not whole and row is not None:
+            folders[row] = (directory, len(parts), 0, read_at)
 
 
 def frame_scan(path: str, size: int) -> int:
@@ -752,7 +770,7 @@ class Archive:
 
     def problem(self, path: str, error: OSError) -> None:
         """Count a failure to read a path's metadata, as walk() does: one that went away is not an error."""
-        if not isinstance(error, (FileNotFoundError, NotADirectoryError)):
+        if not isinstance(error, GONE):
             self.unreadable(path, error)
 
     # ---- what a pass looks at ----------------------------------------------------
@@ -804,7 +822,7 @@ class Archive:
         folders: list = []
         clear: set = set()
         if walked:
-            self.full_plan(walked, work, folders)
+            self.full_plan(walked, work, folders, clear)
         if light:
             self.light_plan(light, now, work, folders, clear)
         # A folder that changed within RACY_NS of its listing can change again
@@ -813,14 +831,19 @@ class Archive:
                 for path, depth, mtime_ns, read_at in folders]
         return work, rows, walked, clear
 
-    def full_plan(self, roots: list, work: dict, folders: list) -> None:
+    def full_plan(self, roots: list, work: dict, folders: list, clear: set) -> None:
         known = {row[0]: row[1:] for row in self.db.execute(
             "SELECT path, stream, size, mtime_ns, ino FROM sources")}
         streams = {row[0]: row[1:] for row in self.db.execute(
             "SELECT id, agent, key, version, store_bytes, broken, content_bytes FROM streams")}
         checked: dict = {}
+        trouble: list = []
+
+        def unreadable(path: str, error: OSError) -> None:
+            trouble.append(path)
+            self.unreadable(path, error)
         for root in roots:
-            for key, path, st in walk(root, self.unreadable, folders):
+            for key, path, st in walk(root, unreadable, folders):
                 self.n["scanned"] += 1
                 seen = known.get(path)
                 # A file is left alone when it is as the last pass saw it AND its
@@ -834,11 +857,39 @@ class Archive:
                         and streams[seen[0]][5] >= seen[1]):
                     continue
                 work[path] = (st.st_mtime_ns, path, root.agent, key)
+        # A file that was waiting stops waiting: the walk found it (`work` puts
+        # it back if it is still to store) or it is gone. One the walk could not
+        # read, or that sits below a folder it could not list, keeps waiting.
+        for root in roots:
+            low, high = self.below(root.path)
+            for (path,) in self.db.execute("SELECT path FROM pending WHERE path >= ? AND path < ?", (low, high)):
+                if not any(path == bad or path.startswith(bad + os.sep) for bad in trouble):
+                    clear.add(path)
+
+    def plain(self, folder: str, root: Root, cache: dict) -> bool:
+        """Is `folder` a folder reached from its root through folders only, as walk() reaches it?
+
+        A folder a full pass listed may since have become a symlink, and a path
+        through it would lead outside the root. One lstat per folder per pass.
+        """
+        if folder == root.path or not folder.startswith(root.path + os.sep):
+            return folder == root.path
+        if folder not in cache:
+            plain = self.plain(os.path.dirname(folder), root, cache)
+            if plain:
+                try:
+                    plain = stat.S_ISDIR(os.lstat(folder).st_mode)
+                except OSError as error:
+                    self.problem(folder, error)
+                    plain = False
+            cache[folder] = plain
+        return cache[folder]
 
     def light_plan(self, roots: list, now: int, work: dict, folders: list, clear: set) -> None:
         """Look where a change can have happened in these roots since their last full pass (module docstring)."""
         cutoff = now - RECENT_NS
         looked: set = set()
+        plain: dict = {}
 
         def consider(root: Root, key: str, path: str, st: os.stat_result) -> None:
             looked.add(path)
@@ -872,10 +923,12 @@ class Archive:
             named.add(os.path.splitext(path)[0])      # a session's own folder: <id>.jsonl beside <id>/
             if path in looked or len(parts) <= root.depth or not followed(root.agent, parts):
                 continue
+            if not self.plain(os.path.dirname(path), root, plain):
+                continue        # below what is no longer a folder: the next full pass decides
             try:
                 st = os.stat(path, follow_symlinks=False)
             except OSError as error:
-                if isinstance(error, (FileNotFoundError, NotADirectoryError)):
+                if isinstance(error, GONE):
                     clear.add(path)
                 else:
                     self.unreadable(path, error)       # stays waiting: tried again next pass
@@ -908,6 +961,9 @@ class Archive:
             if where is None or directory in listed:
                 continue
             root, parts = where
+            # A root may itself be a symlink, as for walk(); nothing below it may.
+            if not self.plain(directory, root, plain):
+                continue
             try:
                 st = os.stat(directory)
                 if not stat.S_ISDIR(st.st_mode) or st.st_mtime_ns == check[directory]:
@@ -919,7 +975,9 @@ class Archive:
                 continue
             self.n["folders_read"] += 1
             listed.add(directory)
+            row = len(folders)
             folders.append((directory, len(parts), st.st_mtime_ns, read_at))
+            whole = True
             with entries:
                 while True:
                     try:
@@ -928,6 +986,7 @@ class Archive:
                         break
                     except OSError as error:        # the listing itself failed part-way
                         self.problem(directory, error)
+                        whole = whole and isinstance(error, GONE)
                         break
                     try:
                         if entry.is_dir(follow_symlinks=False):
@@ -953,6 +1012,9 @@ class Archive:
                                          entry.stat(follow_symlinks=False))
                     except OSError as error:
                         self.problem(entry.path, error)
+                        whole = whole and isinstance(error, GONE)
+            if not whole:
+                folders[row] = (directory, len(parts), 0, read_at)
 
     # ---- capture -------------------------------------------------------------
 
@@ -970,7 +1032,6 @@ class Archive:
         for root in walked:
             low, high = self.below(root.path)
             self.db.execute("DELETE FROM folders WHERE path=? OR (path >= ? AND path < ?)", (root.path, low, high))
-            self.db.execute("DELETE FROM pending WHERE path >= ? AND path < ?", (low, high))
             self.db.execute("INSERT OR REPLACE INTO meta(k, v) VALUES (?, ?)", (self.walk_key(root), str(walked_at)))
         self.db.executemany("INSERT OR REPLACE INTO folders(path, depth, mtime_ns) VALUES (?, ?, ?)", folder_rows)
         self.db.executemany("DELETE FROM pending WHERE path=?", ((path,) for path in clear))

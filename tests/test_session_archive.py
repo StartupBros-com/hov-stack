@@ -913,6 +913,50 @@ class TimeBudgetTests(Case):
         self.assertEqual((summary["appended"], summary["deferred"]), (2, 1))
 
 
+class Listing:
+    """What os.scandir returns, from a list of entries; `broken` fails the listing before its first entry."""
+
+    def __init__(self, items, broken=False):
+        self.items = iter(items)
+        self.broken = broken
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        if self.broken:
+            raise OSError(errno.EIO, "Input/output error")
+        return next(self.items)
+
+
+class Entry:
+    """An os.DirEntry whose stat() fails with EIO when `blocked`."""
+
+    def __init__(self, entry, blocked):
+        self.entry, self.blocked = entry, blocked
+        self.path, self.name = entry.path, entry.name
+
+    def is_dir(self, **how):
+        return self.entry.is_dir(**how)
+
+    def is_file(self, **how):
+        return self.entry.is_file(**how)
+
+    def inode(self):
+        return self.entry.inode()
+
+    def stat(self, **how):
+        if self.blocked:
+            raise OSError(errno.EIO, "Input/output error", self.path)
+        return self.entry.stat(**how)
+
+
 class LightPassTests(Case):
     """Light passes find what changed by looking at little; full passes stay the net under them.
 
@@ -1184,22 +1228,6 @@ class LightPassTests(Case):
         real = os.scandir
         armed = [True]
 
-        class Listing:
-            def __init__(self, items):
-                self.items = iter(items)
-
-            def __enter__(self):
-                return self
-
-            def __exit__(self, *exc):
-                return False
-
-            def __iter__(self):
-                return self
-
-            def __next__(self):
-                return next(self.items)
-
         def scandir(path):
             if path != folder or not armed[0]:
                 return real(path)
@@ -1210,6 +1238,144 @@ class LightPassTests(Case):
             os.utime(folder, ns=(mtime, mtime))
             return Listing(items)
         return mock.patch.object(A.os, "scandir", scandir)
+
+    @staticmethod
+    def listing_of(folder, blocked=None, broken=False):
+        """os.scandir that lists `folder` with `blocked`'s metadata unreadable, or fails it (`broken`)."""
+        real = os.scandir
+
+        def scandir(path):
+            if path != folder:
+                return real(path)
+            with real(path) as entries:
+                items = [Entry(entry, entry.path == blocked) for entry in entries]
+            return Listing(items, broken)
+        return mock.patch.object(A.os, "scandir", scandir)
+
+    def test_folder_replaced_by_a_symlink_is_not_followed(self):
+        # A full pass does not go through a symlink below a root, and neither may
+        # a light pass: not to a recent source's folder, nor to a folder it listed.
+        self.put("proj-a/s1.jsonl", text(1, 900))
+        self.cold("proj-b/s2.jsonl", text(2, 900))
+        self.put("proj-c/s3.jsonl", text(5, 900))
+        self.put("proj-c/s3/subagents/agent-a.jsonl", text(6, 300))
+        self.age()
+        self.run_full()
+        # A project folder, and a session's folder one level further down.
+        for name, files in (("proj-a", {"s1.jsonl": text(1, 900) + text(3, 400)}),
+                            ("proj-b", {"private.jsonl": text(4, 500)}),
+                            ("proj-c/s3", {"subagents/agent-a.jsonl": text(6, 300) + text(7, 200),
+                                           "subagents/agent-z.jsonl": text(8, 200)})):
+            outside = os.path.join(self.tmp, "outside-" + name.replace("/", "-"))
+            for file, data in files.items():
+                os.makedirs(os.path.dirname(os.path.join(outside, file)), exist_ok=True)
+                Path(outside, file).write_bytes(data)
+            shutil.rmtree(os.path.join(self.claude, name))
+            os.symlink(outside, os.path.join(self.claude, name))
+        summary = self.run_light()
+        self.assertEqual((summary["changed"], summary["appended"], summary["source_errors"]), (0, 0, 0))
+        self.assertEqual(self.run_full()["changed"], 0)
+        self.assertEqual(self.versions_on_disk("claude", "s1.jsonl"), {1: text(1, 900)})
+        self.assertEqual(self.versions_on_disk("claude", "private.jsonl"), {})
+        self.assertEqual(self.versions_on_disk("claude", "s3/subagents/agent-a.jsonl"), {1: text(6, 300)})
+        self.assertEqual(self.versions_on_disk("claude", "s3/subagents/agent-z.jsonl"), {})
+
+    def test_waiting_file_a_full_pass_could_not_read_keeps_waiting(self):
+        for index, name in enumerate(("a", "b")):
+            path = self.cold(f"proj-a/{name}.jsonl", text(index, 800))
+            os.utime(path, ns=(self.old + index, self.old + index))
+        self.age()
+        self.run_full(max_bytes=1)
+        self.assertEqual(self.pending(), 1)
+        folder = os.path.join(self.claude, "proj-a")
+        with self.listing_of(folder, blocked=os.path.join(folder, "b.jsonl")), \
+                contextlib.redirect_stderr(io.StringIO()):
+            summary = self.run_full()
+        self.assertEqual((summary["source_errors"], summary["appended"]), (1, 0))
+        self.assertEqual(self.pending(), 1)
+        summary = self.run_light()
+        self.assertEqual((summary["source_errors"], summary["appended"]), (0, 1))
+        self.assertEqual(self.stored("claude", "b.jsonl"), text(1, 800))
+        self.assertEqual(self.pending(), 0)
+
+    def test_folder_a_full_pass_could_not_list_is_listed_again(self):
+        for index, name in enumerate(("a", "b")):
+            path = self.cold(f"proj-a/{name}.jsonl", text(index, 800))
+            os.utime(path, ns=(self.old + index, self.old + index))
+        self.age()
+        self.run_full(max_bytes=1)                  # a is stored, b waits
+        self.cold("proj-a/c.jsonl", text(2, 800))
+        self.age()
+        folder = os.path.join(self.claude, "proj-a")
+        with self.listing_of(folder, broken=True), contextlib.redirect_stderr(io.StringIO()):
+            summary = self.run_full()
+        self.assertEqual((summary["source_errors"], summary["appended"]), (1, 0))
+        self.assertEqual(self.pending(), 1)         # b, below the folder the walk could not list
+        self.assertEqual(self.state("SELECT mtime_ns FROM folders WHERE path=?", folder), [(0,)])
+        summary = self.run_light()
+        self.assertEqual((summary["appended"], summary["folders_read"], summary["source_errors"]), (2, 1, 0))
+        self.assertEqual(self.stored("claude", "c.jsonl"), text(2, 800))
+        self.assertEqual(self.pending(), 0)
+
+    def test_waiting_file_that_is_gone_stops_waiting_on_a_full_pass(self):
+        for index, name in enumerate(("a", "b")):
+            path = self.cold(f"proj-a/{name}.jsonl", text(index, 800))
+            os.utime(path, ns=(self.old + index, self.old + index))
+        self.age()
+        self.run_full(max_bytes=1)
+        os.unlink(os.path.join(self.claude, "proj-a/b.jsonl"))
+        self.assertEqual(self.run_full()["source_errors"], 0)
+        self.assertEqual(self.pending(), 0)
+
+    def test_folder_a_full_pass_could_not_open_is_listed_again(self):
+        self.cold("proj-a/s1.jsonl", text(1, 900))
+        self.age()
+        self.run_full()
+        self.cold("proj-a/s2.jsonl", text(2, 500))
+        self.age()
+        folder = os.path.join(self.claude, "proj-a")
+        real_scandir = os.scandir
+
+        def scandir(path):
+            if path == folder:
+                raise OSError(errno.EIO, "Input/output error", path)
+            return real_scandir(path)
+        with mock.patch.object(A.os, "scandir", scandir), contextlib.redirect_stderr(io.StringIO()):
+            summary = self.run_full()
+        self.assertEqual((summary["source_errors"], summary["appended"]), (1, 0))
+        self.assertEqual(self.state("SELECT mtime_ns FROM folders WHERE path=?", folder), [(0,)])
+        summary = self.run_light()
+        self.assertEqual((summary["appended"], summary["source_errors"]), (1, 0))
+        self.assertEqual(self.stored("claude", "s2.jsonl"), text(2, 500))
+
+    def test_folder_a_light_pass_could_not_list_whole_is_listed_again(self):
+        self.cold("proj-a/s1.jsonl", text(1, 900))
+        self.age()
+        self.run_full()
+        self.cold("proj-a/s2.jsonl", text(2, 500))
+        folder = os.path.join(self.claude, "proj-a")
+        os.utime(folder, ns=(self.old + 10 ** 9, self.old + 10 ** 9))
+        with self.listing_of(folder, broken=True), contextlib.redirect_stderr(io.StringIO()):
+            summary = self.run_light()
+        self.assertEqual((summary["source_errors"], summary["appended"]), (1, 0))
+        summary = self.run_light()
+        self.assertEqual((summary["source_errors"], summary["appended"]), (0, 1))
+        self.assertEqual(self.stored("claude", "s2.jsonl"), text(2, 500))
+
+    def test_file_a_light_pass_could_not_read_is_looked_at_again(self):
+        self.cold("proj-a/s1.jsonl", text(1, 900))
+        self.age()
+        self.run_full()
+        self.cold("proj-a/s2.jsonl", text(2, 500))
+        folder = os.path.join(self.claude, "proj-a")
+        os.utime(folder, ns=(self.old + 10 ** 9, self.old + 10 ** 9))
+        with self.listing_of(folder, blocked=os.path.join(folder, "s2.jsonl")), \
+                contextlib.redirect_stderr(io.StringIO()):
+            summary = self.run_light()
+        self.assertEqual((summary["source_errors"], summary["appended"]), (1, 0))
+        summary = self.run_light()
+        self.assertEqual((summary["source_errors"], summary["appended"]), (0, 1))
+        self.assertEqual(self.stored("claude", "s2.jsonl"), text(2, 500))
 
     def test_file_added_while_a_full_pass_lists_its_folder(self):
         self.cold("proj-a/s1.jsonl", text(1, 900))
