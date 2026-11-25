@@ -1082,9 +1082,26 @@ hook, and it was wired anyway.
 - What narrowing gave up: H and E were 91 of run B's 235 flags.
 - Spend: under $0.15 of Haiku for runs A and B. The audits ran as subagents and are not
   itemised.
-- Not measured: whether a session acts well on a flag. One auditor finds 5 or 6 of the 9 known
-  load-bearing units, so 1 of 50 is a floor, not a rate. The audited units are private comments
-  and are kept outside this repository.
+- Not measured before wiring: whether a session acts well on a flag. One auditor finds 5 or 6
+  of the 9 known load-bearing units, so 1 of 50 is a floor, not a rate. The audited units are
+  private comments and are kept outside this repository.
+- Live record, 2026-11-25. The check ran after `gh pr create` on the operator's hosts.
+  - **Acted on: 0 of 5.** 5 pull requests in 2 private repos got 27 flags. No session acted on
+    any of them, and all 27 lines reached `main`. 4 of the 5 got no commit after they opened,
+    so acting would have cost another push and CI run.
+  - **Re-score set-up.** Two auditors scored all 27 with run C's audit prompt, given each file
+    at the pull request's head and nothing else: no repository search and no planted units.
+  - **Re-score results.**
+    - 19 of the 26 real comments rated redundant (73%, against run C's 70 to 74%).
+    - 1 of 26 is load-bearing by 7.1's definition: both auditors named the wrong edit it
+      prevents, then chose "helpful". That sits at run C's harm bar (at most 2 of 50), not
+      under it.
+    - 1 is partly false and needs a fix rather than a deletion.
+    - The remaining flag was a C pointer write, fixed in #905.
+    - The auditors agreed on 25 of 27. With nothing planted, treat this as one unchecked read.
+  - **What changed.** Because acting after the pull request opens costs a CI run, the check
+    moved to a one-time hold at a branch's first push (#913). It runs as a trial whose
+    keep-or-kill rule was written before it started (#911).
 
 **harness-optimizer (replaces row 13).** Its lane table (0.2.1) lists `instructions` with
 "supplied task/routing evidence" as a source, and `tooling`. No listed source is agent output,
