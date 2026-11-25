@@ -884,10 +884,15 @@ def ls_rows(con: sqlite3.Connection, repo: str | None = None) -> tuple[list[dict
         sid = r.get("sessionId") or ""
         title = r.get("name")
         # the same rule as whoami: a title the identity rules refuse is not this session's mail name
-        name = title if title and ident_error(title, "name") is None else sid[:8]
+        titled = bool(title) and ident_error(title, "name") is None
+        name = title if titled else sid[:8]
         seen.add(name)
-        row = {"kind": "session", "session_id": r.get("sessionId"), "state": r.get("state"), "status": r.get("status"), "cwd": r.get("cwd"),
-               **session_location(r.get("cwd"), sid)}
+        # send_to: the name Claude Code's own SendMessage takes for this session, so a row picked by repo and branch
+        # carries its address. That is the title, and only for a session with a running process: the listing gives
+        # those a `status`, and Claude Code's peer list shows no others. None otherwise (not running, or a title the
+        # identity rules refuse); `hov send` to the row's addr still leaves mail for it.
+        row = {"kind": "session", "session_id": r.get("sessionId"), "send_to": title if titled and r.get("status") else None,
+               "state": r.get("state"), "status": r.get("status"), "cwd": r.get("cwd"), **session_location(r.get("cwd"), sid)}
         if repo is not None and not in_repo(row, repo):
             continue
         me = Me(host, name, sid or None, "agents")
@@ -898,7 +903,7 @@ def ls_rows(con: sqlite3.Connection, repo: str | None = None) -> tuple[list[dict
         if r["n"] in ("*",) or (r["h"] == host and r["n"] in seen):
             continue
         me = Me(r["h"], r["n"], None, "mailbox")
-        out.append({"kind": "mailbox", "addr": me.addr, "session_id": None, "state": None, "status": None, "cwd": None, **NO_LOCATION,
+        out.append({"kind": "mailbox", "addr": me.addr, "session_id": None, "send_to": None, "state": None, "status": None, "cwd": None, **NO_LOCATION,
                     "unread": len(unread_for(con, me)) if r["h"] == host else None})
     links = []
     for r in con.execute("SELECT * FROM peers ORDER BY host"):
@@ -906,7 +911,7 @@ def ls_rows(con: sqlite3.Connection, repo: str | None = None) -> tuple[list[dict
             "kind": "link", "addr": f"{r['host']}:*", "host": r["host"], "role": r["role"], "via": r["via"], "state": r["state"],
             "last_hello": iso(r["last_hello"]), "last_seen": iso(r["last_seen"]),
             "last_ack": iso(r["last_ack"]) if r["last_ack"] else None, "last_in": iso(r["last_in"]) if r["last_in"] else None,
-            "session_id": None, "status": None, "cwd": None, **NO_LOCATION, "unread": None,
+            "session_id": None, "send_to": None, "status": None, "cwd": None, **NO_LOCATION, "unread": None,
         })
     return out, links
 
@@ -1607,7 +1612,7 @@ MCP_TOOLS = [
      "description": "Full-text search over subjects and bodies (SQLite FTS5 query syntax), best match first.",
      "inputSchema": _obj({"query": _s(1000), "limit": {"type": "integer", "minimum": 1, "maximum": 100}}, ["query"])},
     {"name": "ls", "title": "Who is reachable",
-     "description": "Sessions and mailboxes on this host with their unread counts and, for a session, the repository and branch it works on (at=repo:branch), and the state of each link to another host. With repo, only the sessions working in that repository.",
+     "description": "Sessions and mailboxes on this host with their unread counts and, for a session, the repository and branch it works on (at=repo:branch), and the state of each link to another host. With repo, only the sessions working in that repository. A session shown with a status (busy, idle) is running; one shown without is not, and mail sent to it waits until it next runs.",
      "inputSchema": _obj({"repo": _s(200)})},
 ]
 
@@ -2414,7 +2419,9 @@ def build_parser() -> argparse.ArgumentParser:
     q.add_argument("--json", action="store_true")
     q.set_defaults(fn=cmd_search)
 
-    l = sub.add_parser("ls", help="list reachable sessions and mailboxes on this host, and the state of each link")
+    l = sub.add_parser("ls", help="list reachable sessions and mailboxes on this host, and the state of each link",
+                       epilog="--json gives each session a `send_to`: the name Claude Code's own SendMessage takes for it, "
+                              "or null when the session is not running or has no usable title.")
     l.add_argument("--json", action="store_true")
     l.add_argument("--repo", default=None, help="only sessions working in this repository: owner/name, its name, or the main checkout's folder name (whole name, any case)")
     l.set_defaults(fn=cmd_ls)

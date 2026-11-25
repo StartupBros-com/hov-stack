@@ -34,10 +34,17 @@ holds is not sent:
   to its check wait, and exits pending naming the holder. A direct
   `gh pr merge`, or an auto-merge armed before the freeze, is not held.
 - A deploy lock refuses a second deploy.
-- Recipients are found by repository and branch with
-  `hov ls --repo <name> --json`, never by name. Claude Code's listing keeps
-  a session's launch directory, so hov reads the newest directory from its
-  transcript.
+- Recipients are chosen by repository and branch with
+  `hov ls --repo <name> --json`, not guessed from session names. Claude
+  Code's listing keeps a session's launch directory, so hov reads the newest
+  directory from its transcript. The chosen row is then addressed by name:
+  its `send_to` is what `SendMessage` takes (hov 0.1.12).
+- A row with no `send_to` is a session that is not running, and
+  `ListAgents` does not show it. No message reaches it; `SendMessage` has no
+  way to look it up. A finished background session still appears in
+  `claude agents --json --all` with `state: done`, and what it knew is in
+  its PRs, issues and transcript. Check that before planning to ask it
+  anything, and say so when the task named it as someone to talk to.
 - News that can wait goes on the PR or issue it concerns, and
   `notify_when_idle` answers "is that session done yet".
 
