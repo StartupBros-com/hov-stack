@@ -1471,18 +1471,25 @@ def cmd_hook(a: argparse.Namespace) -> int:
         note = reach_note(payload)
     # Every event writes once (`sessions.last_seen`, since 0.1.1) and a delivery claims rows, both under the
     # write lock; a locked database is given up on quietly inside the hook's budget (HOOK_BUSY_MS).
-    con = db(HOOK_BUSY_MS)
-    me = whoami(con, None, session_id=sid, cwd=payload.get("cwd"), force=(event == "SessionStart"))
     text = ""
-    if "permission_mode" in payload:
-        # Claude Code's SessionStart payload carries no permission_mode (2.1.322, seen 2026-11-11), so the mode
-        # is unknown there. Deliver nothing and record nothing; the first event that states the mode delivers in
-        # it. Treating "unknown" as full injected bodies into sessions that bypass permissions.
-        bypass = payload.get("permission_mode") == "bypassPermissions"
-        rows = pending_for(con, me, sid)
-        if rows:
-            # "" when another hook process of this session claimed every row first
-            text, _ = deliver(con, me, sid, event, rows, "count" if bypass else "full")
+    try:
+        con = db(HOOK_BUSY_MS)
+        me = whoami(con, None, session_id=sid, cwd=payload.get("cwd"), force=(event == "SessionStart"))
+        if "permission_mode" in payload:
+            # Claude Code's SessionStart payload carries no permission_mode (2.1.322, seen 2026-11-11), so the mode
+            # is unknown there. Deliver nothing and record nothing; the first event that states the mode delivers in
+            # it. Treating "unknown" as full injected bodies into sessions that bypass permissions.
+            bypass = payload.get("permission_mode") == "bypassPermissions"
+            rows = pending_for(con, me, sid)
+            if rows:
+                # "" when another hook process of this session claimed every row first
+                text, _ = deliver(con, me, sid, event, rows, "count" if bypass else "full")
+    except sqlite3.Error:
+        # The mail waits for the next hook. The line does not: it needs no mailbox, and the tool call it explains
+        # runs this hook once, so it is written before main() logs the error (0.1.15).
+        if note:
+            sys.stdout.write(json.dumps(hook_output(event, note)))
+        raise
     out = "\n".join(t for t in (text, note) if t)
     if out:
         sys.stdout.write(json.dumps(hook_output(event, out)))

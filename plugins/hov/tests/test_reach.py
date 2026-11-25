@@ -443,6 +443,30 @@ class ReachCase(HovFixture):
             self.assertIsNone(self.tool_hook("ListAgents", {}, {}, env_extra=broken), cmd)
             self.assertIsNone(self.tool_hook("SendMessage", {"to": "fin"}, self.NOT_REACHABLE, env_extra=broken), cmd)
 
+    def test_a_locked_mailbox_costs_the_mail_and_never_the_line(self):
+        # The line needs the agents listing and no mailbox. Another session holding the mailbox's write lock for
+        # longer than HOOK_BUSY_MS used to end the hook with no output, so the one tool call the line explains went
+        # without it (0.1.14; this host logged 451 such locked-mailbox hook errors on 2026-11-25).
+        self.hov("send", "--as", "ceo", "--to", "alpha", "--kind", "status", "note under lock")
+        lock = sqlite3.connect(self.state / "mail.db", isolation_level=None)
+        lock.execute("BEGIN IMMEDIATE")
+        try:
+            listed = self.tool_hook("ListAgents", {}, {"listing": "Peer sessions (2): ..."})
+            unreached = self.tool_hook("SendMessage", {"to": "fin"}, self.NOT_REACHABLE)
+            other = self.tool_hook("Bash", {"command": "x"}, {})
+        finally:
+            lock.execute("ROLLBACK")
+            lock.close()
+        self.assertTrue((listed or "").startswith("hov: 4 finished session(s) on this host are not in this list"), listed)
+        self.assertTrue((unreached or "").startswith("hov: 'fin' (session f1f1f1f1) finished and its process has exited"), unreached)
+        self.assertIsNone(other)  # a tool call with no line still says nothing under the lock
+        for said in (listed, unreached):
+            self.assertNotIn("note under lock", said)  # no mail was read under the lock
+        log = (self.state / "hov.log").read_text()
+        self.assertEqual(log.count("hook-error event=PostToolUse err=database is locked"), 3, log)
+        # planted negative: nothing was claimed under the lock, so the next hook hands the mail over
+        self.assertIn("note under lock", self.tool_hook("Bash", {}, {}))
+
     def test_two_hung_listings_still_hand_over_the_mail_inside_the_hooks_time(self):
         # hooks.json gives PostToolUse 5 s. For a session hov has not looked up lately the hook lists a second time,
         # for the session's own name, and that listing is allowed 5 s when it runs alone. Both end by one deadline.
