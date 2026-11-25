@@ -1,0 +1,18 @@
+[Unit]
+Description=session-archive every hour
+
+[Timer]
+# Every pass walks the whole of each transcript folder by metadata. With the
+# directory cache warm that is a third of a second for 87,000 files. On a host
+# short of memory the cache does not hold between passes and the walk reads from
+# disk: 1.4 GB in 24 s for the same files, measured 2026-11-24 with 34 of 40 GB
+# in use. Hourly keeps that cost small. A pass that looks only at recently
+# changed files, and so can run every few minutes, is the next change (issue
+# 885). A walk on a timer cannot miss a file the way a dropped file-watch event
+# can.
+OnCalendar=hourly
+RandomizedDelaySec=120
+Persistent=true
+
+[Install]
+WantedBy=timers.target
