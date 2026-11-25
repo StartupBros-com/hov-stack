@@ -247,6 +247,16 @@ class Extract(Base):
         self.assertTrue(cc.tool_directive(trailing))
         self.assertEqual(cc.comment_part(trailing), "# noqa: F401")
 
+    def test_comment_marker_inside_a_string_is_code(self):
+        cc = load_module()
+        inside = {"hash": ['    check("- a.py:2 restates the code: # increment x", reason)', "say 'use # for ids' now"],
+                  "c": ['    printf("a // b");', "  url = 'see // here';"]}
+        for lang, lines in inside.items():
+            for line in lines:
+                self.assertIsNone(cc.trailing_comment(line, lang), line)
+        self.assertEqual(cc.trailing_comment("x = 1  # one-based", "hash"), "# one-based")
+        self.assertEqual(cc.trailing_comment("n++;  // skip the header", "c"), "// skip the header")
+
 
 class Label(Base):
     def test_flags_follow_the_clutter_rule(self):

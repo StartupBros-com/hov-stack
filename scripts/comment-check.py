@@ -80,8 +80,8 @@ HASH = {"py", "sh", "bash", "zsh", "rb", "pyi"}
 SQL = {"sql"}
 SKIP_PATH = re.compile(r"(^|/)(vendor|node_modules|dist|build|third_party|\.venv|venv|__generated__|generated)(/|$)"
                        r"|\.min\.|\.lock$|_pb2\.py$|\.d\.ts$")
-TRAIL_C = re.compile(r"""^[^'"`]*?\S[^'"`]*?\s(//\s?\S.*)$""")
-TRAIL_H = re.compile(r"""^[^'"]*?\S[^'"]*?\s(#\s?\S.*)$""")
+TRAIL_C = re.compile(r"""^[^'"`]*?[^'"`\s][^'"`]*?\s(//\s?\S.*)$""")
+TRAIL_H = re.compile(r"""^[^'"]*?[^'"\s][^'"]*?\s(#\s?\S.*)$""")
 
 
 def lang_of(path):
