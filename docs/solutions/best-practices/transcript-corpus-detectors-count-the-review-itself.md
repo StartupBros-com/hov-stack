@@ -1,6 +1,7 @@
 ---
 title: "A shape detector run over the whole transcript corpus counts the review that measured it"
 date: "2026-09-23"
+last_updated: "2026-11-25"
 category: best-practices
 module: transcript-corpus-detector-validation
 problem_type: best_practice
@@ -11,6 +12,7 @@ applies_when:
   - "A detector passed its own synthetic positive/negative test fixtures and is about to be trusted on the real corpus"
   - "Citing a transcript-mined count as evidence a pattern is prevalent or rare, rather than as an unverified upper bound"
   - "The window being measured is the same window in which the measuring session itself ran and wrote its own transcripts"
+  - "Counting a harness event (a hook block, a hook's added context, a cancellation) by searching transcripts for the text the event carries"
 tags:
   - transcript-mining
   - self-referential-corpus
@@ -18,6 +20,7 @@ tags:
   - detector-validation
   - hand-read-sample
   - upper-bound
+  - record-type
 ---
 
 # A shape detector run over the whole transcript corpus counts the review that measured it
@@ -86,6 +89,18 @@ finding, a polling pattern, or anything else mined from
    (a gate, a build-order decision, a doc like this one) will treat an
    occurrence count as license to act.
 
+5. **Count a harness event by the record that carries it, not by its
+   text.** A hook's message is fixed text, so a text match feels exact, but
+   that text is copied into many other records. In one 7-day window, a Stop
+   hook's block message appeared on 142 transcript lines. Only 17 of them
+   were the blocks themselves: records with `"type": "attachment"` and
+   `attachment.type` set to `"hook_blocking_error"`. Each block also wrote a
+   meta user record and a system record that carry the same text. The rest
+   were request-body copies (`"type": "api-request-blob"`), the tool calls
+   and tool results of sessions that grepped transcripts for the message,
+   and thinking. Match the carrying record's type and sub-type, then
+   hand-read a few matches as item 3 says.
+
 ## Why This Matters
 
 A detector's own synthetic test suite passing is exactly the kind of
@@ -119,7 +134,9 @@ looks at shape.
 - Not needed for counts derived from structured, non-freeform fields (an
   exact `agentType` or `problem_type` value, a JSON key that is always
   present in the same shape) where there is no textual-shape ambiguity to
-  hand-read away.
+  hand-read away. A hook's fixed message text is not such a field, because it
+  recurs in other records. Count the record that carries the event instead
+  (item 5).
 
 ## Examples
 
@@ -138,6 +155,13 @@ for premature in-turn status polling was 50% false positive against a
 hand-read sample of 90 hits (26% premature checks, 11% redundant re-reads,
 12% legitimate, 50% false positive). The raw match count alone would have
 overstated the real behavior by roughly 2x.
+
+**Hook-block count (2026-11-25):** a text match for a Stop hook's block
+message reported 49 blocks in 13 sessions over 7 days. Matching only the
+`hook_blocking_error` attachment records gave 17 blocks in 6 sessions, and a
+second, independently written script reproduced that count. The text-match
+count had placed blocks in repositories where the gate never arms. The
+record-type count found none there.
 
 ## Related
 
