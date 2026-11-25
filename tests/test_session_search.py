@@ -11,6 +11,10 @@ a stand-in that keeps every doc it was given, refuses a doc id it already
 holds, and records each call. It is stricter than a search engine, which would
 hide a doc indexed twice behind one hit. Search, show and the backend's own
 contract run against the shipped session-index-backend.py.
+
+The ledger has no `check` command (it exits 1, as any backend without one
+does) until a test drops an `old-format` file into its folder; then `check`
+exits 4, the way the shipped backend answers for an index in another format.
 """
 
 import contextlib
@@ -113,6 +117,8 @@ elif cmd == "query":
             print(json.dumps({"session": doc["session"], "id": doc["id"], "preview": doc["text"][:200]}))
             if len(seen) >= limit:
                 break
+elif cmd == "check" and os.path.exists(os.path.join(sys.argv[2], "old-format")):
+    sys.exit(4)
 else:
     sys.exit("unknown command")
 '''
@@ -689,6 +695,92 @@ class RunTests(Case):
         self.assertEqual(json.loads(out)["recovered"], 1)
         self.assertEqual(self.ledger(), simple_docs(claude_file(key), first + more))
 
+    def test_an_index_the_backend_no_longer_reads_is_emptied_and_built_again(self):
+        key, other = U1 + ".jsonl", U2 + ".jsonl"
+        first, second = lines("first", 30), lines("second", 8)
+        self.put("proj/" + key, first)
+        self.put("proj/" + other, second)
+        self.capture()
+        self.assertEqual(self.run_index()["rebuilt"], 0)
+        Path(self.index_dir, "backend", "old-format").write_text("")
+        summary = self.run_index()
+        self.assertEqual((summary["rebuilt"], summary["new"], summary["docs"]), (1, 2, 38))
+        self.assertEqual(self.ledger(), {**simple_docs(claude_file(key), first),
+                                         **simple_docs(claude_file(other), second)})
+        # The ledger refuses a build into a folder that is not empty and a doc id it already holds.
+        self.assertEqual(self.calls(), [("build", 38), ("build", 38)])
+        again = self.run_index()
+        self.assertEqual((again["rebuilt"], again["waiting"]), (0, 0))
+
+    def test_a_kill_before_a_stale_index_is_emptied_leaves_it_stale_for_the_next_run(self):
+        key = U1 + ".jsonl"
+        data = lines("first", 25)
+        self.put("proj/" + key, data)
+        self.capture()
+        self.run_index()
+        Path(self.index_dir, "backend", "old-format").write_text("")
+        with mock.patch.object(S.Index, "reset_backend", side_effect=Crash()), self.assertRaises(Crash):
+            self.run_index()
+        self.assertIsNone(self.cursor(claude_file(key)), "the cursors go before the folder")
+        self.assertEqual(len(self.ledger()), 25, "and the old index is still there")
+        summary = self.run_index()
+        self.assertEqual((summary["rebuilt"], summary["new"]), (1, 1))
+        self.assertEqual(self.ledger(), simple_docs(claude_file(key), data))
+
+    def test_a_kill_right_after_a_stale_index_is_emptied_never_leaves_cursors_over_nothing(self):
+        key = U1 + ".jsonl"
+        data = lines("first", 25)
+        self.put("proj/" + key, data)
+        self.capture()
+        self.run_index()
+        Path(self.index_dir, "backend", "old-format").write_text("")
+        emptied = S.Index.reset_backend
+
+        def emptied_then_killed(index):
+            emptied(index)
+            raise Crash()
+        with mock.patch.object(S.Index, "reset_backend", emptied_then_killed), self.assertRaises(Crash):
+            self.run_index()
+        self.assertEqual(self.ledger(), {})
+        summary = self.run_index()
+        self.assertEqual((summary["new"], summary["docs"]), (1, 25))
+        self.assertEqual(self.ledger(), simple_docs(claude_file(key), data))
+
+    def test_a_half_applied_batch_on_a_stale_index_goes_with_it(self):
+        key = U1 + ".jsonl"
+        first, more = lines("first", 20), lines("more", 6)
+        self.put("proj/" + key, first)
+        self.capture()
+        self.run_index()
+        self.add("proj/" + key, more)
+        self.capture()
+
+        def kill():
+            raise Crash()
+        with self.assertRaises(Crash):
+            self.run_index(seams={"after_backend": kill})
+        self.assertTrue(os.path.exists(os.path.join(self.index_dir, "pending.json")))
+        Path(self.index_dir, "backend", "old-format").write_text("")
+        summary = self.run_index()
+        self.assertEqual((summary["rebuilt"], summary["recovered"], summary["new"]), (1, 0, 1))
+        self.assertFalse(os.path.exists(os.path.join(self.index_dir, "pending.json")))
+        self.assertEqual(self.ledger(), simple_docs(claude_file(key), first + more))
+
+    def test_a_backend_with_no_check_command_is_never_taken_for_stale(self):
+        key = U1 + ".jsonl"
+        self.put("proj/" + key, lines("first", 5))
+        self.capture()
+        self.run_index()
+        folder = os.path.join(self.index_dir, "backend")
+        asked = subprocess.run([sys.executable, "-I", self.backend, "check", folder], stderr=subprocess.PIPE,
+                               check=False)
+        self.assertEqual((asked.returncode, asked.stderr.decode().strip()), (1, "unknown command"))
+        self.add("proj/" + key, lines("more", 3))
+        self.capture()
+        summary = self.run_index()
+        self.assertEqual((summary["rebuilt"], summary["grown"]), (0, 1))
+        self.assertEqual(self.calls(), [("build", 5), ("update", 3)])
+
     def test_a_stream_that_does_not_decode_is_left_and_the_rest_is_indexed(self):
         bad, good = U1 + ".jsonl", U2 + ".jsonl"
         first, more = lines("first", 50), lines("more", 50)
@@ -873,8 +965,17 @@ def backend(*args):
         done.stderr.decode()
 
 
+def as_format_1(folder):
+    """Rewrite a manifest the way the format 1 engine wrote it: no format number, the list under "segs"."""
+    path = Path(folder, "manifest.json")
+    manifest = json.loads(path.read_text())
+    del manifest["fmt"]
+    manifest["segs"] = manifest.pop("segments")
+    path.write_text(json.dumps(manifest))
+
+
 class BackendTests(unittest.TestCase):
-    """The four commands the driver relies on, on the backend file that ships."""
+    """The five commands the driver relies on, on the backend file that ships."""
 
     def setUp(self):
         self.tmp = tempfile.mkdtemp(prefix="session-index-backend-test-")
@@ -934,6 +1035,30 @@ class BackendTests(unittest.TestCase):
         self.assertEqual(backend("remove", self.index, twice)[0], 0)
         self.assertEqual([hit["id"] for hit in backend("query", self.index, "10", "wagtail")[1]], ["codex/d.jsonl:1:0"])
         self.assertEqual([hit["session"] for hit in backend("query", self.index, "10", "kingfisher")[1]], ["sess-c"])
+
+    def test_an_index_in_another_format_stops_every_command_before_it_writes(self):
+        base = self.docs("base.jsonl", [("codex/a.jsonl", "sess-a", 1, "the heron waits")])
+        self.assertEqual(backend("check", self.index)[0], 0, "an empty folder is not an old index")
+        self.assertEqual(backend("build", base, self.index)[0], 0)
+        self.assertEqual(backend("check", self.index)[0], 0)
+        manifest = Path(self.index, "manifest.json")
+        current = manifest.read_text()
+        # The format 1 engine has no format check and reads "segs": without that key it stops on a
+        # format 2 folder, where it would otherwise add a format 1 segment.
+        self.assertNotIn("segs", json.loads(current))
+        newer = dict(json.loads(current), fmt=json.loads(current)["fmt"] + 1)
+        for label, rewrite in (("format 1", lambda: as_format_1(self.index)),
+                               ("a later format", lambda: manifest.write_text(json.dumps(newer)))):
+            manifest.write_text(current)
+            rewrite()
+            before = {name: Path(self.index, name).read_bytes() for name in os.listdir(self.index)}
+            for args in (("check", self.index), ("query", self.index, "5", "heron"), ("update", base, self.index),
+                         ("build", base, self.index), ("remove", self.index, self.names("codex/a.jsonl"))):
+                code, _hits, err = backend(*args)
+                self.assertEqual(code, 4, (label, args[0], err))
+                self.assertIn("built again", err)
+            after = {name: Path(self.index, name).read_bytes() for name in os.listdir(self.index)}
+            self.assertEqual(after, before, label)
 
     def test_one_session_is_printed_once_and_the_best_doc_names_it(self):
         rows = [("codex/a.jsonl", "sess-a", n, "filler line number %d about nothing" % n) for n in range(1, 30)]
@@ -1176,6 +1301,24 @@ class SearchTests(Case):
                          ("pi-runtime", "pi-runtime/%s:2" % key, "/work/fox"))
         self.assertEqual(self.find("bittern", "--agent", "claude"), [])
         self.assertIn("the bittern report", self.cli("show", hits[U4]["ref"])[1])
+
+    def test_an_older_format_is_named_by_search_and_status_and_built_again_by_the_next_index_run(self):
+        self.fill()
+        self.assertFalse(json.loads(self.cli("status", "--json")[1])["index_needs_rebuild"])
+        as_format_1(os.path.join(self.index_dir, "backend"))
+        code, out, err = self.cli("search", "heron")
+        self.assertEqual((code, out), (1, ""))
+        self.assertIn("`session-search.py index` builds it again", err)
+        self.assertTrue(json.loads(self.cli("status", "--json")[1])["index_needs_rebuild"])
+        code, out, err = self.cli("index", "--json")
+        self.assertEqual(code, 0, err)
+        summary = json.loads(out)
+        self.assertEqual((summary["rebuilt"], summary["indexed"], summary["docs"]), (1, 5, 7))
+        self.assertEqual({hit["session"] for hit in self.find("heron")}, {U1, U2, U3, "ab12cd", U4})
+        self.assertEqual([hit["session"] for hit in self.find("vault helper")], [U1])
+        self.assertFalse(json.loads(self.cli("status", "--json")[1])["index_needs_rebuild"])
+        again = json.loads(self.cli("index", "--json")[1])
+        self.assertEqual((again["rebuilt"], again["waiting"]), (0, 0))
 
     def test_status_counts_what_is_indexed_and_what_waits(self):
         self.assertEqual(self.cli("status")[0], 1, "no index yet")

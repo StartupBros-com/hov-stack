@@ -40,11 +40,18 @@ since everything in it came from that call. The backend's files are fsynced
 before the cursors are committed. A stream that cannot be decoded, or that the
 archive changed while it was being read, is left as it was for the next run.
 
-The backend is a separate file (session-index-backend.py) with four commands:
+The backend is a separate file (session-index-backend.py) with five commands:
 `build <docs.jsonl> <dir>`, `update <docs.jsonl> <dir>`, `remove <dir>
-<files.txt>` and `query <dir> <limit> <query>`. It is the index campaign's
-docseg-bm25 engine (issue 885), scored in the form that ships; its own header
-describes the file layout and its limits.
+<files.txt>`, `query <dir> <limit> <query>` and `check <dir>`. It is the index
+campaign's docseg-bm25 engine (issue 885), scored in the form that ships; its
+own header describes the file layout and its limits.
+
+When the backend's format changes. `check` exits 4 on an index written in a
+format the backend no longer reads. An index run asks first, and on that answer
+forgets its cursors, empties the backend's folder and indexes the archive
+again, newest capture first, within the same budgets as any run. Until that has
+finished, a search finds only what has been indexed again. A backend with no
+`check` command is never taken for stale.
 
 Index: $SESSION_SEARCH_DIR, else ${XDG_DATA_HOME:-~/.local/share}/session-search.
 Store: --store, else session-archive.py's own default.
@@ -85,6 +92,7 @@ DEFAULT_MAX_BYTES = 8 << 30     # decoded bytes per run before the rest waits
 DEFAULT_BATCH_BYTES = 256 << 20  # doc text handed to the backend in one call (a stream is never split)
 DEFAULT_MIN_FREE = 10 << 30     # free bytes on the index's disk below which a run indexes nothing more
 OVERFETCH = 10                  # sessions asked of the backend per session wanted, when a filter is set
+STALE_INDEX = 4                 # the backend's `check` exit status for an index in a format it does not read
 
 UUID_RE = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 
@@ -98,7 +106,7 @@ CREATE TABLE IF NOT EXISTS meta(k TEXT PRIMARY KEY, v TEXT NOT NULL);
 """
 
 COUNTERS = ("streams", "waiting", "indexed", "new", "grown", "restarted", "docs", "bad_lines", "removed",
-            "recovered", "deferred", "left_for_next_run", "store_errors", "low_disk", "bytes_decoded",
+            "recovered", "rebuilt", "deferred", "left_for_next_run", "store_errors", "low_disk", "bytes_decoded",
             "text_bytes", "backend_calls")
 
 
@@ -461,6 +469,15 @@ class Index:
     def backend_empty(self) -> bool:
         return not os.listdir(self.backend_dir)
 
+    def stale(self) -> bool:
+        """True when the backend says its folder holds an index in a format it does not read.
+        Only `check` exiting STALE_INDEX means that: a backend with no such command exits otherwise."""
+        if not os.path.isdir(self.backend_dir) or self.backend_empty():
+            return False
+        done = subprocess.run([sys.executable, "-I", self.backend_path, "check", self.backend_dir],
+                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+        return done.returncode == STALE_INDEX
+
     def run_backend(self, *args: str) -> str:
         done = subprocess.run([sys.executable, "-I", self.backend_path, *args], stdout=subprocess.PIPE,
                               stderr=subprocess.PIPE)
@@ -540,6 +557,20 @@ class Indexer:
         return rows[0] if rows else None
 
     # ---- recovery ----------------------------------------------------------------
+
+    def rebuild_stale(self) -> None:
+        """Start over when the backend no longer reads the index: every stream is indexed again.
+        The cursors go first. A kill after that leaves the old index with no cursors, and the next
+        run finds it stale again; the other order could leave cursors over an empty folder, and
+        those streams would never be indexed."""
+        if not self.index.stale():
+            return
+        self.index.db.execute("DELETE FROM streams")
+        self.index.reset_backend()
+        if os.path.exists(self.index.pending_path):
+            os.unlink(self.index.pending_path)
+        self.n["rebuilt"] = 1
+        log("the index is in a format this backend does not read; it is emptied and built again from the archive")
 
     def recover(self) -> None:
         """Undo a batch a killed run left half applied: its files leave the index and are indexed again."""
@@ -714,6 +745,7 @@ class Indexer:
 
     def run(self) -> dict:
         started = time.monotonic()
+        self.rebuild_stale()
         self.recover()
         known = self.index.offsets()
         todo = []
@@ -882,6 +914,7 @@ def status(archive, store: str, index: Index) -> dict:
             "content_bytes_waiting": behind, "streams_ending_in_an_unfinished_line": unfinished,
             "index_bytes_on_disk": size,
             "half_applied_batch": os.path.exists(index.pending_path),
+            "index_needs_rebuild": index.stale(),
             "last_run": json.loads(last[0]) if last else None}
 
 
@@ -956,7 +989,11 @@ def main(argv: Optional[list] = None) -> int:
                     print(f"{name}: {value}")
             return 0
         except BackendError as error:
-            log(str(error))
+            if index.stale():
+                log(f"the index at {folder} is in a format this version does not read; "
+                    "`session-search.py index` builds it again from the archive")
+            else:
+                log(str(error))
             return 1
         finally:
             index.close()
