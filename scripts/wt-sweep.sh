@@ -538,9 +538,29 @@ while IFS= read -r ws; do
   age=$(( (now - ${newest:-0}) / 86400 ))
   if (( age > AGE_ALIVE_DAYS )); then
     if (( ${#checkouts[@]} )); then
-      echo "  • external workspace ${ws} is ${age}d old (>${AGE_ALIVE_DAYS}d) and holds ${#checkouts[@]} git checkout(s) whose history is on their remote: check each is pushed (git -C <checkout> status, git -C <checkout> log @{u}..), keep the files they leave out of git (a campaign record lists them under off-git/), then ask before deleting"
-    else
+      echo "  • external workspace ${ws} is ${age}d old (>${AGE_ALIVE_DAYS}d) and holds ${#checkouts[@]} git checkout(s): push what is not pushed, keep the files they leave out of git (a campaign record lists them under off-git/), then ask before deleting"
+      # The state is computed here rather than left to a command for the reader: a campaign
+      # record pushes HEAD:refs/heads/<branch> and sets no upstream, so `git log @{u}..` fails
+      # in every one of them. --not --remotes counts against what the last fetch or push saw.
+      for co in "$ws"/*/; do
+        co=${co%/}
+        if [ ! -e "$co/.git" ]; then
+          echo "      $(basename "$co"): not in git, so it exists only here"
+          continue
+        fi
+        dirty=$(git -C "$co" status --porcelain 2>/dev/null | wc -l)
+        if git -C "$co" remote get-url origin >/dev/null 2>&1; then
+          ahead=$(git -C "$co" rev-list --count --branches --not --remotes 2>/dev/null || echo '?')
+          if [ "$ahead" = 0 ]; then where="origin has every commit"; else where="origin lacks ${ahead} commit(s)"; fi
+        else
+          where="no remote, so its $(git -C "$co" rev-list --count --branches 2>/dev/null || echo '?') commit(s) exist only here"
+        fi
+        echo "      $(basename "$co"): ${where}; ${dirty} uncommitted path(s)"
+      done
+    elif [ -e "$ws/.git" ]; then
       echo "  • external workspace ${ws} is ${age}d old (>${AGE_ALIVE_DAYS}d): bundle its history (git bundle create <archive>/<name>.bundle --all), verify it, then ask before deleting"
+    else
+      echo "  • external workspace ${ws} is ${age}d old (>${AGE_ALIVE_DAYS}d) and is not in git, so it exists only here: archive a copy (tar -czf <archive>/${wsb}.tgz -C $(dirname "$ws") ${wsb}), verify it, then ask before deleting"
     fi
     n_ws=$((n_ws+1))
   fi
