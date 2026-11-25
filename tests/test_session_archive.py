@@ -352,6 +352,258 @@ class SecondFolderTests(Case):
         self.assertEqual(self.versions_on_disk("claude", "s1.jsonl"), {1: base + grown, 2: diverged})
 
 
+class MovedFolderTests(Case):
+    """A session's folder renamed to another project folder: same files, same inodes, new paths."""
+
+    def no_full_comparison(self):
+        return mock.patch.object(A.Archive, "same_bytes", side_effect=AssertionError("full comparison"))
+
+    def move(self, old="proj-a", new="proj-b"):
+        os.rename(os.path.join(self.claude, old), os.path.join(self.claude, new))
+
+    def state_rows(self):
+        db = sqlite3.connect(os.path.join(self.store, "state.sqlite3"))
+        try:
+            return db.execute("SELECT path, stream, size, ino, dev FROM sources ORDER BY path").fetchall()
+        finally:
+            db.close()
+
+    def strip_device_column(self):
+        db = sqlite3.connect(os.path.join(self.store, "state.sqlite3"), isolation_level=None)
+        try:
+            db.execute("DROP INDEX IF EXISTS sources_ino")
+            db.execute("ALTER TABLE sources DROP COLUMN dev")
+        finally:
+            db.close()
+
+    def test_moved_growing_jsonl_is_continued_without_a_full_comparison(self):
+        first, more = text(1, 20_000), text(2, 3000)
+        self.put("proj-a/s1.jsonl", first)
+        self.run_pass()
+        self.move()
+        self.add("proj-b/s1.jsonl", more)
+        with self.no_full_comparison():
+            summary = self.run_pass()
+        self.assertEqual((summary["moved"], summary["proved"], summary["versions"], summary["bytes_read"]),
+                         (1, 0, 0, len(more)))
+        self.assertEqual(self.versions_on_disk("claude", "s1.jsonl"), {1: first + more})
+        self.assertEqual(self.stored("claude", "s1.jsonl"), Path(self.claude, "proj-b/s1.jsonl").read_bytes())
+
+    def test_moved_unchanged_files_of_every_kind_are_adopted_without_reading_them(self):
+        files = {"s1.jsonl": text(1, 9000), "s1/tool-results/out.txt": text(2, 700),
+                 "s1/workflows/w.json": text(3, 500)}
+        for rel, data in files.items():
+            self.put("proj-a/" + rel, data)
+        self.run_pass()
+        before = self.store_files()
+        self.move()
+        with self.no_full_comparison():
+            summary = self.run_pass()
+        self.assertEqual((summary["moved"], summary["proved"], summary["appended"], summary["bytes_read"]),
+                         (3, 0, 0, 0))
+        self.assertEqual(self.store_files(), before)
+        self.assertEqual(sorted(row[0] for row in self.state_rows() if "proj-b" in row[0]),
+                         sorted(os.path.join(self.claude, "proj-b", rel) for rel in files))
+
+    def test_grown_file_that_is_not_jsonl_is_compared_in_full(self):
+        first, more = text(1, 9000), text(2, 900)
+        self.put("proj-a/s1/workflows/w.json", first)
+        self.run_pass()
+        self.move()
+        self.add("proj-b/s1/workflows/w.json", more)
+        summary = self.run_pass()
+        self.assertEqual((summary["moved"], summary["proved"]), (0, 1))
+        self.assertEqual(self.versions_on_disk("claude", "s1/workflows/w.json"), {1: first + more})
+
+    def test_path_with_a_live_hard_link_is_compared_in_full(self):
+        first = text(1, 9000)
+        self.put("proj-a/s1.jsonl", first)
+        self.run_pass()
+        os.makedirs(os.path.join(self.claude, "proj-b"))
+        os.link(os.path.join(self.claude, "proj-a/s1.jsonl"), os.path.join(self.claude, "proj-b/s1.jsonl"))
+        summary = self.run_pass()
+        self.assertEqual((summary["moved"], summary["proved"]), (0, 1))
+
+    def test_another_live_holder_of_the_stream_forces_a_full_comparison(self):
+        first = text(1, 9000)
+        self.put("proj-a/s1.jsonl", first)
+        self.put("proj-b/s1.jsonl", first)
+        self.run_pass()
+        self.move("proj-b", "proj-c")
+        summary = self.run_pass()
+        self.assertEqual((summary["moved"], summary["proved"]), (0, 1))
+        self.assertEqual(self.versions_on_disk("claude", "s1.jsonl"), {1: first})
+
+    def forge_reuse(self, rel, path):
+        """What an inode reused after a delete looks like: the dead row's identity, now held by `path`."""
+        st = os.stat(path)
+        db = sqlite3.connect(os.path.join(self.store, "state.sqlite3"))
+        try:
+            db.execute("UPDATE sources SET ino=?, dev=? WHERE path=?",
+                       (st.st_ino, st.st_dev, os.path.join(self.claude, rel)))
+            db.commit()
+        finally:
+            db.close()
+
+    def test_inode_reused_by_a_different_file_is_not_adopted(self):
+        first = text(1, 9000)
+        self.put("proj-a/s1.jsonl", first)
+        self.run_pass()
+        name = os.path.relpath(self.store_path("claude", "s1.jsonl"), self.store)
+        stored = self.store_files()[name]
+        os.unlink(os.path.join(self.claude, "proj-a/s1.jsonl"))
+        other = text(7, 9500)
+        path = self.put("proj-b/s1.jsonl", other)
+        self.forge_reuse("proj-a/s1.jsonl", path)
+        summary = self.run_pass()
+        self.assertEqual((summary["moved"], summary["versions"]), (0, 1))
+        self.assertEqual(self.versions_on_disk("claude", "s1.jsonl"), {1: first, 2: other})
+        self.assertEqual(self.store_files()[name], stored)
+
+    def test_inode_reused_by_a_different_file_of_the_same_size_and_mtime_is_not_adopted(self):
+        first = text(1, 9000)
+        old = self.put("proj-a/s1.jsonl", first)
+        mtime = os.stat(old).st_mtime_ns
+        self.run_pass()
+        os.unlink(old)
+        other = text(7, 9000)
+        path = self.put("proj-b/s1.jsonl", other)
+        os.utime(path, ns=(mtime, mtime))
+        self.forge_reuse("proj-a/s1.jsonl", path)
+        summary = self.run_pass()
+        self.assertEqual((summary["moved"], summary["versions"]), (0, 1))
+        self.assertEqual(self.versions_on_disk("claude", "s1.jsonl"), {1: first, 2: other})
+
+    def test_row_from_another_device_is_not_adopted(self):
+        self.put("proj-a/s1.jsonl", text(1, 9000))
+        self.run_pass()
+        self.move()
+        db = sqlite3.connect(os.path.join(self.store, "state.sqlite3"))
+        db.execute("UPDATE sources SET dev=dev+1")
+        db.commit()
+        db.close()
+        summary = self.run_pass()
+        self.assertEqual((summary["moved"], summary["proved"]), (0, 1))
+
+    def test_moved_then_rewritten_file_is_compared_in_full(self):
+        first, rewritten = text(1, 9000), text(5, 9500)
+        self.put("proj-a/s1.jsonl", first)
+        self.run_pass()
+        self.move()
+        self.put("proj-b/s1.jsonl", rewritten)
+        summary = self.run_pass()
+        self.assertEqual((summary["moved"], summary["versions"]), (0, 1))
+        self.assertEqual(self.versions_on_disk("claude", "s1.jsonl"), {1: first, 2: rewritten})
+
+    def test_file_moved_under_another_name_is_not_added_to_the_old_name_stream(self):
+        first = text(1, 9000)
+        self.put("proj-a/s1.jsonl", first)
+        self.run_pass()
+        os.makedirs(os.path.join(self.claude, "proj-b"))
+        os.rename(os.path.join(self.claude, "proj-a/s1.jsonl"), os.path.join(self.claude, "proj-b/s2.jsonl"))
+        summary = self.run_pass()
+        self.assertEqual((summary["moved"], summary["streams"]), (0, 1))
+        self.assertEqual(self.versions_on_disk("claude", "s2.jsonl"), {1: first})
+
+    def test_moved_file_touched_without_growing_is_compared_in_full(self):
+        self.put("proj-a/s1.jsonl", text(1, 9000))
+        self.run_pass()
+        self.move()
+        self.stamp(os.path.join(self.claude, "proj-b/s1.jsonl"))
+        summary = self.run_pass()
+        self.assertEqual((summary["moved"], summary["proved"]), (0, 1))
+
+    def test_moved_file_cut_short_is_compared_in_full(self):
+        first = text(1, 9000)
+        self.put("proj-a/s1.jsonl", first)
+        self.run_pass()
+        self.move()
+        self.put("proj-b/s1.jsonl", first[:5000])
+        summary = self.run_pass()
+        self.assertEqual((summary["moved"], summary["covered"]), (0, 1))
+
+    def test_stream_another_path_advanced_is_compared_in_full(self):
+        base, more = text(1, 9000), text(2, 6000)
+        self.put("proj-a/s1.jsonl", base)
+        self.run_pass()
+        self.put("proj-b/s1.jsonl", base + more)       # another file, another inode, carries the stream on
+        self.run_pass()
+        os.unlink(os.path.join(self.claude, "proj-b/s1.jsonl"))
+        self.move("proj-a", "proj-c")
+        # proj-c now grows differently, but the 4 KiB before the stream's cursor still match it.
+        other = b"Y" + more[1:] + text(3, 100)
+        self.assertEqual((base + other)[len(base + more) - A.TAIL:len(base + more)], (base + more)[-A.TAIL:])
+        self.add("proj-c/s1.jsonl", other)
+        summary = self.run_pass()
+        self.assertEqual((summary["moved"], summary["versions"]), (0, 1))
+        self.assertEqual(self.versions_on_disk("claude", "s1.jsonl"), {1: base + more, 2: base + other})
+
+    def test_stream_cut_this_pass_is_not_adopted(self):
+        self.put("proj-a/s1.jsonl", text(1, 9000))
+        self.run_pass()
+        self.move()
+        archive = self.archive()
+        self.addCleanup(archive.close)
+        path = os.path.join(self.claude, "proj-b/s1.jsonl")
+        fd = os.open(path, os.O_RDONLY)
+        self.addCleanup(os.close, fd)
+        archive.cut.add(1)
+        self.assertIsNone(archive.moved("claude", "s1.jsonl", path, fd, os.fstat(fd)))
+        archive.cut.clear()
+        self.assertIsNotNone(archive.moved("claude", "s1.jsonl", path, fd, os.fstat(fd)))
+
+    def test_kill_between_the_append_and_the_row_write_duplicates_nothing(self):
+        first, more = text(1, 20_000), text(2, 3000)
+        self.put("proj-a/s1.jsonl", first)
+        self.run_pass()
+        self.move()
+        self.add("proj-b/s1.jsonl", more)
+
+        def hook():
+            raise Crash()
+        archive = self.archive()
+        archive.after_store_write = hook
+        try:
+            with self.assertRaises(Crash):
+                archive.capture()
+        finally:
+            archive.close()
+        # The frame is durable but the cursor and the row were not saved: the store is
+        # ahead of the old path's row, so the new path is proved in full, not adopted.
+        summary = self.run_pass()
+        self.assertEqual((summary["moved"], summary["proved"], summary["appended"]), (0, 1, 0))
+        self.assertEqual(self.versions_on_disk("claude", "s1.jsonl"), {1: first + more})
+        self.assertEqual(self.run_pass()["appended"], 0)
+        self.assertEqual(self.versions_on_disk("claude", "s1.jsonl"), {1: first + more})
+
+    def test_state_file_from_before_the_device_column_migrates(self):
+        first, more, last = text(1, 20_000), text(2, 3000), text(3, 2000)
+        self.put("proj-a/s1.jsonl", first)
+        self.run_pass()
+        self.strip_device_column()
+        self.move()
+        self.add("proj-b/s1.jsonl", more)
+        summary = self.run_pass()
+        self.assertEqual((summary["moved"], summary["proved"]), (0, 1))     # a row without a device never qualifies
+        self.assertTrue(all(row[4] is not None for row in self.state_rows() if "proj-b" in row[0]))
+        self.move("proj-b", "proj-c")
+        self.add("proj-c/s1.jsonl", last)
+        with self.no_full_comparison():
+            summary = self.run_pass()
+        self.assertEqual((summary["moved"], summary["proved"]), (1, 0))
+        self.assertEqual(self.versions_on_disk("claude", "s1.jsonl"), {1: first + more + last})
+
+    def test_status_reads_a_state_file_without_the_device_column(self):
+        self.put("proj-a/s1.jsonl", text(1, 900))
+        self.run_pass()
+        self.strip_device_column()
+        archive = A.Archive(self.store, self.roots, readonly=True)
+        try:
+            self.assertEqual(archive.status()["sources"], 1)
+        finally:
+            archive.close()
+
+
 class RecoveryTests(Case):
     def crash_after(self, count):
         calls = {"n": 0}
