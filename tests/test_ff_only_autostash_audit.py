@@ -201,7 +201,7 @@ class TextTests(unittest.TestCase):
         self.assertTrue(FF.is_test_path("tests/helper.sh"))
         self.assertTrue(FF.is_test_path("tools/y.test.sh"))
         self.assertFalse(FF.is_test_path("scripts/update-mcp-servers.sh"))
-        self.assertFalse(FF.is_test_path("bin/codex-pick"))
+        self.assertFalse(FF.is_test_path("bin/papercut.py"))
 
 
 class CorpusTests(unittest.TestCase):

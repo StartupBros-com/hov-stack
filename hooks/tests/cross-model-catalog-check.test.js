@@ -1,10 +1,9 @@
 'use strict';
 /**
  * cross-model-catalog-check: the standalone auditor behind harness-doctor's
- * check 33 (#1355 / #1356). Exercised in-process (pure functions, explicit
- * options — no env/HOME sandboxing needed beyond mkdtemp fixture dirs) the
- * same way codex-model-resolver.test.js covers its pure lib; the bash-level
- * fixtures cover the doctor's consumption of this script's JSON (WARN
+ * check 33 (#1355 / #1356). In-process tests use explicit options and temp
+ * fixtures to cover the catalog policy, including cache freshness, per-model
+ * meters, and ranking. The bash-level fixtures cover the doctor's JSON (WARN
  * wiring, floor accounting, the typed contract). This file pins the JSON
  * contract and the branches harness-doctor.sh cannot reach on its own
  * (schema shape, staleness and future boundaries, exclusive repo buckets
@@ -18,7 +17,6 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
 const C = require('../../scripts/cross-model-catalog-check.js');
-const resolver = require('../lib/codex-model-resolver.js');
 
 const SCRIPT_PATH = path.join(__dirname, '..', '..', 'scripts', 'cross-model-catalog-check.js');
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -78,6 +76,83 @@ function assertCountsReconcile(result) {
   const r = result.repos;
   assert.strictEqual(r.checked + r.skipped_other_peer + r.skipped_no_plugin + r.unreadable, r.discovered, `buckets must sum to discovered: ${JSON.stringify(r)}`);
 }
+
+// Catalog-policy fixtures include a planted unknown slug ranked first.
+const FIX = path.join(__dirname, 'fixtures', 'codex');
+const load = (name) => JSON.parse(fs.readFileSync(path.join(FIX, name), 'utf8'));
+const catalog = load('catalog.json').models;
+const planted = load('catalog-planted.json').models;
+const sparkOpen = load('usage-exhausted-spark-open.json');
+const allOut = load('usage-exhausted-all.json');
+const healthy = load('usage-healthy.json');
+
+const SPARK = 'gpt-5.3-codex-spark';
+const SOL = 'gpt-5.6-sol';
+const LUNA = 'gpt-5.6-luna';
+
+test('rate-limit state is explicit-only: ok / blocked / uncertain', () => {
+  assert.strictEqual(C.rateLimitState({ allowed: true, limit_reached: false }), 'ok');
+  assert.strictEqual(C.rateLimitState({ allowed: false }), 'blocked');
+  assert.strictEqual(C.rateLimitState({ limit_reached: true }), 'blocked');
+  assert.strictEqual(C.rateLimitState({ primary_window: { used_percent: 100 } }), 'uncertain');
+  assert.strictEqual(C.rateLimitState(null), 'uncertain');
+  assert.strictEqual(C.rateLimitState([]), 'uncertain');
+});
+
+test('a separately metered model reads its own meter; everything else reads the account meter', () => {
+  const spark = catalog.find((m) => m.slug === SPARK);
+  const luna = catalog.find((m) => m.slug === LUNA);
+  assert.deepStrictEqual(C.availability(spark, sparkOpen), { separate: true, state: 'ok' });
+  assert.deepStrictEqual(C.availability(luna, sparkOpen), { separate: false, state: 'blocked' });
+  assert.deepStrictEqual(C.availability(spark, allOut), { separate: true, state: 'blocked' });
+  assert.deepStrictEqual(C.availability(luna, healthy), { separate: false, state: 'ok' });
+  assert.deepStrictEqual(C.availability(luna, null), { separate: false, state: 'uncertain' });
+});
+
+test('candidates: hidden entries dropped, deprecations followed, sorted by priority', () => {
+  const slugs = C.candidates(catalog, healthy).map((m) => m.slug);
+  assert.deepStrictEqual(slugs, [SOL, 'gpt-5.6-terra', LUNA, 'gpt-daybreak-blue-latest', 'gpt-5.5', SPARK]);
+  assert.ok(!slugs.includes('gpt-reserve'), 'visibility:hide is never a candidate even at priority 3');
+  assert.ok(!slugs.includes('gpt-5.4-mini'), 'a deprecated entry is replaced by its upgrade target');
+});
+
+test('candidates on an exhausted account are exactly the separately metered open models', () => {
+  assert.deepStrictEqual(C.candidates(catalog, sparkOpen).map((m) => m.slug), [SPARK]);
+  assert.deepStrictEqual(C.candidates(catalog, allOut), []);
+});
+
+test('PLANTED NEGATIVE: an unknown top slug wins over a known slug that upgrades to it', () => {
+  const slugs = C.candidates(planted, healthy).map((m) => m.slug);
+  assert.strictEqual(slugs[0], 'gpt-zz-9-newname');
+  assert.ok(!slugs.includes('gpt-hidden-top'), 'priority 1 but hidden: not a candidate');
+  assert.ok(!slugs.includes(LUNA), 'the known slug collapses into its upgrade target');
+});
+
+test('readCatalogCache marks only fresh catalogs as fresh and never writes the cache', () => {
+  const dir = mktemp('codex-cat-');
+  try {
+    const cachePath = path.join(dir, 'models_cache.json');
+    const fetchedAt = '2026-09-04T08:52:18.707198406Z';
+    const fetchedAtMs = Date.parse(fetchedAt);
+    fs.writeFileSync(cachePath, JSON.stringify({ fetched_at: fetchedAt, client_version: '0.147.0', models: catalog }));
+    const before = fs.statSync(cachePath).mtimeMs;
+
+    const fresh = C.readCatalogCache(cachePath, fetchedAtMs + 60_000);
+    assert.strictEqual(fresh.fresh, true);
+    assert.deepStrictEqual(fresh.models, catalog);
+    assert.strictEqual(fresh.fetchedAt, new Date(fetchedAtMs).toISOString());
+    assert.strictEqual(fresh.clientVersion, '0.147.0');
+
+    assert.strictEqual(C.readCatalogCache(cachePath, fetchedAtMs + C.CATALOG_CACHE_MAX_AGE_MS - 1).fresh, true);
+    const stale = C.readCatalogCache(cachePath, fetchedAtMs + C.CATALOG_CACHE_MAX_AGE_MS);
+    assert.strictEqual(stale.fresh, false);
+    assert.deepStrictEqual(stale.models, catalog);
+    assert.strictEqual(fs.statSync(cachePath).mtimeMs, before, 'never written');
+    assert.strictEqual(C.readCatalogCache(path.join(dir, 'missing.json'), 0), null);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 // ---------------------------------------------------------------------------
 // parseArgs / resolveOptions
@@ -243,7 +318,7 @@ test('classifyCatalog: a fetched_at in the future is its own state with no age, 
     assert.strictEqual(r.findings[0].code, 'catalog-future-fetched-at');
     assert.match(r.findings[0].message, /is in the future/);
     // The resolver itself refuses to call such a cache fresh.
-    assert.strictEqual(resolver.readCatalogCache(future, NOW).fresh, false);
+    assert.strictEqual(C.readCatalogCache(future, NOW).fresh, false);
 
     const now = path.join(dir, 'now.json');
     writeCatalog(now, CATALOG_MODELS, new Date(NOW).toISOString());
@@ -257,22 +332,22 @@ test('classifyCatalog: a fetched_at in the future is its own state with no age, 
 
 test('classifyCatalog: when readCatalogCache\'s own re-read returns null (the file changed between reads), fetched_at comes from the payload parsed here', () => {
   const dir = mktemp('cm-cat-reread-');
-  const original = resolver.readCatalogCache;
+  const original = C.readCatalogCache;
   let calls = 0;
   try {
     const p = path.join(dir, 'models_cache.json');
     writeCatalog(p, CATALOG_MODELS, isoDaysAgo(3, NOW));
-    resolver.readCatalogCache = () => {
+    C.readCatalogCache = () => {
       calls += 1;
       return null;
     };
     const r = C.classifyCatalog(p, NOW);
-    assert.strictEqual(calls, 1, 'the auditor calls the shared resolver function (not a private copy)');
+    assert.strictEqual(calls, 1, 'the auditor calls the shared function (not a private copy)');
     assert.strictEqual(r.state, 'ok');
     assert.strictEqual(r.ageDays, 3);
     assert.deepStrictEqual(r.selectable, ['gpt-6-astra', 'gpt-5.6-luna', 'gpt-not-api', 'gpt-old']);
   } finally {
-    resolver.readCatalogCache = original;
+    C.readCatalogCache = original;
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
@@ -287,7 +362,7 @@ test('classifyCatalog: explicit pins use availableListed; recommendations stay r
     // Explicit gpt-old pins stay selectable despite their upgrade pointer.
     // gpt-hidden stays excluded; supported_in_api:false stays selectable.
     assert.deepStrictEqual(r.selectable, ['gpt-6-astra', 'gpt-5.6-luna', 'gpt-not-api', 'gpt-old']);
-    assert.deepStrictEqual(r.selectable, resolver.availableListed(CATALOG_MODELS, { rate_limit: { allowed: true } }).map((m) => m.slug));
+    assert.deepStrictEqual(r.selectable, C.availableListed(CATALOG_MODELS, { rate_limit: { allowed: true } }).map((m) => m.slug));
     assert.deepStrictEqual(r.selectableRanked.map((m) => m.slug), ['gpt-6-astra', 'gpt-5.6-luna', 'gpt-not-api']);
 
     // Catalog order and the old model's higher priority must not make it a
@@ -314,7 +389,7 @@ test('reasonNotSelectable: not-in-catalog, hidden (the resolver\'s own isListed)
     const catalog = C.classifyCatalog(p, NOW);
     assert.strictEqual(C.reasonNotSelectable('ghost-model', catalog), 'not in the catalog payload');
     assert.strictEqual(C.reasonNotSelectable('gpt-hidden', catalog), 'hidden');
-    assert.strictEqual(resolver.isListed(catalog.modelsBySlug.get('gpt-hidden')), false);
+    assert.strictEqual(C.isListed(catalog.modelsBySlug.get('gpt-hidden')), false);
     assert.strictEqual(C.reasonNotSelectable('gpt-old', catalog), null);
     assert.strictEqual(C.reasonNotSelectable('gpt-not-api', catalog), null);
     assert.strictEqual(C.reasonNotSelectable('gpt-6-astra', catalog), null);
@@ -896,15 +971,11 @@ test('audit(): an unserved or hidden effective model is flagged; a supported_in_
   }
 });
 
-test('audit(): an explicit deprecated pin kept by selectModel is accepted, while fallback recommendations still follow upgrades', () => {
+test('audit(): an explicit deprecated pin is accepted, while fallback recommendations still follow upgrades', () => {
   const { opts } = buildHomeWithPlugin('M_CODEX="gpt-6-astra"\n');
   try {
     const models = [...CATALOG_MODELS].reverse().map((m) => m.slug === 'gpt-old' ? { ...m, priority: 0 } : m);
     writeCatalog(opts.catalogPath, models, isoDaysAgo(0, NOW));
-    const picked = resolver.selectModel({ catalog: models, usage: { rate_limit: { allowed: true } }, requestedModel: 'gpt-old' });
-    assert.strictEqual(picked.model, 'gpt-old');
-    assert.strictEqual(picked.modelChanged, false);
-    assert.strictEqual(picked.reason, 'requested-available');
     writeConfig(opts.dotfilesRepo, 'config.yaml', 'cross_model_peer: codex\ncross_model_model: gpt-old\n');
     const accepted = C.audit(opts);
     assert.deepStrictEqual(accepted.findings, []);

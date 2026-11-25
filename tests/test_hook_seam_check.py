@@ -413,8 +413,7 @@ class UnknownStateTests(SeamCheckBase):
 class SeamCoverageTests(SeamCheckBase):
     """#369: the launcher no longer starts node for loop-guard (matcher `*`) unless
     CLAUDE_LOOP_GUARD=1, nor for settings-guard (Edit|Write|MultiEdit) unless stdin can name a
-    settings file, nor for the Bash guards codex-quota-guard (unless stdin can spell a Codex
-    spend), runner-guard (unless stdin holds `kill` or `systemctl`) and peer-loop-guard (unless
+    settings file, nor for runner-guard (unless stdin holds `kill` or `systemctl`) and peer-loop-guard (unless
     stdin holds `send` or `SendMessage`), so only tools a guard
     that always starts covers are paired against beats."""
 
@@ -435,25 +434,35 @@ class SeamCoverageTests(SeamCheckBase):
                 covered |= set(re.split(r"\|", matcher))
         return covered
 
-    def test_covered_set_is_exactly_what_other_node_guards_register_for(self):
+    @staticmethod
+    def registered_gates(settings, launcher):
+        """Only registered PreToolUse arms can affect current dispatch."""
         import re
 
+        arms = set(re.findall(r"^  \*/PreToolUse/([\w-]+\.js)\)$", launcher, re.M))
+        registered = {
+            script
+            for group in settings["hooks"]["PreToolUse"]
+            for h in group["hooks"]
+            if "node-hook" in h["command"]
+            for script in re.findall(r'/PreToolUse/([\w-]+\.js)"', h["command"])
+        }
+        return arms & registered
+
+    def test_covered_set_is_exactly_what_other_node_guards_register_for(self):
         settings = json.loads((CLAUDE / "settings.json").read_text(encoding="utf8"))
         launcher = (CLAUDE / "hooks" / "bin" / "node-hook").read_text(encoding="utf8")
-        # PreToolUse scripts the launcher can skip: one `*/PreToolUse/<name>.js)` case arm each.
-        gated = set(re.findall(r"^  \*/PreToolUse/([\w-]+\.js)\)$", launcher, re.M))
-        self.assertEqual(gated, {"loop-guard.js", "settings-guard.js", "codex-quota-guard.js", "runner-guard.js", "peer-loop-guard.js"})
+        gated = self.registered_gates(settings, launcher)
+        self.assertEqual(gated, {"loop-guard.js", "settings-guard.js", "runner-guard.js", "peer-loop-guard.js"})
         covered = self.covered_tools(settings, gated)
         self.assertEqual(set(HSC.BEAT_COVERED_TOOLS), covered)
 
     def test_bash_stays_covered_while_a_guard_that_always_starts_is_registered(self):
         """Bash must keep at least one node-hook guard the launcher never skips (grep-cost-guard,
         heavy-job-admission, whatsapp-guard, git-guard, shape-rewrite), else its beat disappears."""
-        import re
-
         settings = json.loads((CLAUDE / "settings.json").read_text(encoding="utf8"))
         launcher = (CLAUDE / "hooks" / "bin" / "node-hook").read_text(encoding="utf8")
-        gated = set(re.findall(r"^  \*/PreToolUse/([\w-]+\.js)\)$", launcher, re.M))
+        gated = self.registered_gates(settings, launcher)
         always = []
         for group in settings["hooks"]["PreToolUse"]:
             if "Bash" not in (group.get("matcher") or "").split("|"):
@@ -480,8 +489,10 @@ class SeamCoverageTests(SeamCheckBase):
                 if "node-hook" in h["command"] and m:
                     every.add(m.group(1))
         self.assertIn("grep-cost-guard.js", every)
-        self.assertNotIn("Bash", self.covered_tools(settings, every | {"loop-guard.js", "settings-guard.js", "codex-quota-guard.js", "runner-guard.js", "peer-loop-guard.js"}))
-        self.assertNotEqual(set(HSC.BEAT_COVERED_TOOLS), self.covered_tools(settings, every | {"loop-guard.js", "settings-guard.js", "codex-quota-guard.js", "runner-guard.js", "peer-loop-guard.js"}))
+        launcher = (CLAUDE / "hooks" / "bin" / "node-hook").read_text(encoding="utf8")
+        covered = self.covered_tools(settings, every | self.registered_gates(settings, launcher))
+        self.assertNotIn("Bash", covered)
+        self.assertNotEqual(set(HSC.BEAT_COVERED_TOOLS), covered)
 
     def test_planted_negative_stale_seam_still_flagged_on_covered_tool(self):
         now = time.time()
