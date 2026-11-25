@@ -6,7 +6,8 @@
     comment-check.py --hook                    PostToolUse payload on stdin (comment-check-hook.sh)
 
 Advisory only: it reads `git diff <base>...HEAD`, never edits, and in hook mode never fails the
-tool call. Labels are the vet's taxonomy (docs/vets/2026-11-24-no-comments-harness-vet.md,
+tool call. In hook mode the base and head are the pull request's own, from `gh pr view`, because
+Claude Code reports the session's folder, not the one a `cd` in the command moved to. Labels are the vet's taxonomy (docs/vets/2026-11-24-no-comments-harness-vet.md,
 sections 2.1 and 7). Only three are flagged: T restates the code, S banner or separator, X
 commented-out code. H (history) and E (excuse or workaround) are labelled but not flagged: in
 the first audit of this tool's flags, 3 of the 19 H and E flags were comments a later editor
@@ -47,6 +48,8 @@ from concurrent.futures import ThreadPoolExecutor
 
 MODEL = os.environ.get("COMMENT_CHECK_MODEL", "haiku")
 CLAUDE = os.environ.get("COMMENT_CHECK_CLAUDE", "claude")
+GH = os.environ.get("COMMENT_CHECK_GH", "gh")
+GH_TIMEOUT = 20
 CHUNK = 40
 PARALLEL = 4
 MAX_UNITS = 200
@@ -340,16 +343,16 @@ def resolve_base(cwd, base):
     return None
 
 
-def branch_units(cwd, base):
-    p = git(cwd, "diff", "--no-color", "--no-ext-diff", "--no-textconv", "--unified=3", f"{base}...HEAD")
+def branch_units(cwd, base, head="HEAD"):
+    p = git(cwd, "diff", "--no-color", "--no-ext-diff", "--no-textconv", "--unified=3", f"{base}...{head}")
     if p.returncode != 0:
-        raise RuntimeError(f"git diff {base}...HEAD failed: {p.stderr.strip()[:300]}")
+        raise RuntimeError(f"git diff {base}...{head} failed: {p.stderr.strip()[:300]}")
     return units_from_diff(p.stdout)
 
 
-def check(cwd, base, max_units=MAX_UNITS, deadline=None, extract_only=False):
+def check(cwd, base, max_units=MAX_UNITS, deadline=None, extract_only=False, head="HEAD"):
     """The whole check for one branch. Returns the report dict."""
-    units = branch_units(cwd, base)
+    units = branch_units(cwd, base, head)
     kept = [u for u in units if not tool_directive(u)]
     report = {"base": base, "units": len(units), "tool_directives": len(units) - len(kept),
               "checked": min(len(kept), max_units), "not_checked": max(0, len(kept) - max_units),
@@ -408,9 +411,20 @@ PR_URL = re.compile(r"https://github\.com/([^/\s]+/[^/\s]+)/pull/\d+")
 ORIGIN = re.compile(r"github\.com[:/]+([^/\s]+/[^/\s]+?)(?:\.git)?/?$")
 
 
-def option(cmd, short, long):
-    m = re.search(rf"(?:\s{re.escape(short)}\s+|\s{re.escape(long)}[=\s]+)(['\"]?)([^\s'\"]+)\1", cmd)
-    return m.group(2) if m else None
+def pr_refs(url, cwd):
+    """(head commit, base branch) of the pull request at `url`, or None when gh does not say."""
+    try:
+        p = subprocess.run([GH, "pr", "view", url, "--json", "headRefOid,baseRefName"], check=False,
+                           capture_output=True, text=True, cwd=cwd, timeout=GH_TIMEOUT)
+        d = json.loads(p.stdout) if p.returncode == 0 else None
+    except (OSError, subprocess.TimeoutExpired, ValueError):
+        return None
+    if not isinstance(d, dict):
+        return None
+    head, base = d.get("headRefOid"), d.get("baseRefName")
+    if not (isinstance(head, str) and re.fullmatch(r"[0-9a-f]{40}", head) and isinstance(base, str) and base):
+        return None
+    return head, base
 
 
 def hook_disabled():
@@ -421,6 +435,7 @@ def hook(raw):
     """PostToolUse on Bash. Returns the hook's stdout text ("" for no output)."""
     if hook_disabled():
         return ""
+    deadline = time.monotonic() + HOOK_DEADLINE
     try:
         payload = json.loads(raw)
     except ValueError:
@@ -440,20 +455,17 @@ def hook(raw):
     om = ORIGIN.search(origin.stdout.strip()) if origin.returncode == 0 else None
     if not om or om.group(1).lower() != m.group(1).lower():
         return ""
-    head = option(cmd, "-H", "--head")
-    if head:
-        cur = git(cwd, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
-        if head.split(":")[-1] != cur:
-            return ""
-    named = option(cmd, "-B", "--base")
-    base = resolve_base(cwd, f"origin/{named}") if named else resolve_base(cwd, None)
-    if named and not base:
-        base = resolve_base(cwd, named)
+    refs = pr_refs(m.group(0), cwd)
+    if not refs:
+        return ""
+    head, named = refs
+    if git(cwd, "cat-file", "-e", f"{head}^{{commit}}").returncode != 0:
+        return ""
+    base = resolve_base(cwd, f"origin/{named}") or resolve_base(cwd, named)
     if not base:
         return ""
-    deadline = time.monotonic() + HOOK_DEADLINE
     try:
-        report = check(cwd, base, deadline=deadline)
+        report = check(cwd, base, deadline=deadline, head=head)
     except RuntimeError:
         return ""
     text = render(report)
