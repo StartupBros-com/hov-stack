@@ -44,7 +44,7 @@ holds is not sent:
   way to look it up. A session that has finished is listed only by
   `hov ls --all` (hov 0.1.13), as a `finished` row with no `addr` or
   `send_to`: when it last ran, its repository and branch, the pull requests
-  linked to it, its transcript and the files it wrote into a deliverables
+  linked from its output, its transcript and the files it wrote into a deliverables
   folder. What either kind knew is in those. Check for the row before
   planning to ask a session anything. When a task names a session to talk to
   and it is not there, say so in the report.

@@ -901,7 +901,7 @@ def in_repo(row: dict, want: str) -> bool:
 # Bytes read from the end of a finished transcript for the files it wrote. Measured 2026-11-25 on the 44 finished
 # sessions of one host with a transcript (7.25 GiB in all): of the 19 whose transcript holds a write into a
 # deliverables folder still on disk, a 32 MiB tail held the newest such write for 17, 8 MiB for 14, 128 MiB for 18.
-FINISHED_TAIL = 32 * 1024 * 1024
+FINISHED_TAIL = 32 * 1024 * 1024  # HOV_FINISHED_TAIL overrides it (bytes)
 # Seconds one call spends reading uncached transcripts for that, newest session first; past it a row's files read
 # null until a later call, which finds the rows already read in the cache. A byte budget would not fit both cases
 # measured on the host above: a first listing that read up to 256 MiB of uncached transcripts took 26 s, while cached
@@ -1089,22 +1089,29 @@ def finished_location(cwd: str | None, branch: str | None, launch_cwd: object, s
     return loc
 
 
-def finished_cache_load() -> dict:
+def finished_tail() -> int:
+    try:
+        return max(1, int(os.environ.get("HOV_FINISHED_TAIL", FINISHED_TAIL)))
+    except ValueError:
+        return FINISHED_TAIL
+
+
+def finished_cache_load(tail: int) -> dict:
     try:
         d = json.loads((state_dir() / FINISHED_CACHE).read_bytes())
     except (OSError, ValueError):
         return {}
-    ok = isinstance(d, dict) and d.get("v") == 1 and d.get("tail") == FINISHED_TAIL and isinstance(d.get("rows"), dict)
+    ok = isinstance(d, dict) and d.get("v") == 1 and d.get("tail") == tail and isinstance(d.get("rows"), dict)
     return d["rows"] if ok else {}
 
 
-def finished_cache_save(rows: dict) -> None:
+def finished_cache_save(rows: dict, tail: int) -> None:
     """Replace the cache file whole (written aside, then renamed), so a reader never sees half of one. Never raises."""
     p = state_dir() / FINISHED_CACHE
     tmp = p.with_name(f"{FINISHED_CACHE}.{os.getpid()}.tmp")
     try:
         with os.fdopen(open_private(tmp, os.O_WRONLY | os.O_TRUNC), "w") as f:
-            json.dump({"v": 1, "tail": FINISHED_TAIL, "rows": rows}, f)
+            json.dump({"v": 1, "tail": tail, "rows": rows}, f)
         os.replace(tmp, p)
     except OSError:
         try:
@@ -1134,7 +1141,8 @@ def finished_rows(live_ids: set, repo: str | None) -> list[dict]:
               and SESSION_ID_RE.match(r["sessionId"]) and r["sessionId"] not in live_ids]
     if not agents:
         return []
-    prs, cache, keep, rows, seen = job_pr_links(), finished_cache_load(), {}, [], {}
+    tail = finished_tail()
+    prs, cache, keep, rows, seen = job_pr_links(), finished_cache_load(tail), {}, [], {}
     paths = transcript_index({r["sessionId"] for r in agents})
     for r in agents:
         sid = r["sessionId"]
@@ -1154,10 +1162,10 @@ def finished_rows(live_ids: set, repo: str | None) -> list[dict]:
                "session_id": sid, "send_to": None, "state": "done", "status": None,
                "cwd": r.get("cwd") if isinstance(r.get("cwd"), str) else None, **finished_location(cwd, branch, r.get("cwd"), seen),
                "last_active": ts, "transcript": str(path) if path else None,
-               "pr_links": links[:FINISHED_SHOWN], "pr_links_total": len(links), "deliverables_written": None, "unread": None}
+               "pr_links": links[:FINISHED_SHOWN], "pr_links_total": len(links), "deliverables_written": None, "deliverables_read": None, "unread": None}
         if repo is not None and not in_repo(row, repo):
             continue
-        rows.append((row, path, st, facts, cwd))
+        rows.append((row, path, st, facts, cwd, branch, ts))
     rows.sort(key=lambda x: x[0]["last_active"] or "", reverse=True)
     try:
         seconds = max(0.0, float(os.environ.get("HOV_FINISHED_READ_SECONDS", FINISHED_READ_SECONDS)))
@@ -1165,25 +1173,28 @@ def finished_rows(live_ids: set, repo: str | None) -> list[dict]:
         seconds = FINISHED_READ_SECONDS
     deadline = time.monotonic() + seconds
     out = []
-    for row, path, st, facts, cwd in rows:
+    for row, path, st, facts, cwd, branch, ts in rows:
         if facts is None and path and st and time.monotonic() < deadline:
-            got = tail_lines(path, FINISHED_TAIL)
+            got = tail_lines(path, tail)
             if got is not None:
                 deep_cwd, deep_branch, deep_ts = last_stamp(got[0])
-                facts = {"size": st.st_size, "mtime_ns": st.st_mtime_ns, "cwd": deep_cwd, "branch": deep_branch,
-                         "ts": deep_ts, "wrote": files_written(got[0])}
+                # the shorter tails above already found what they could; this one only adds to it
+                facts = {"size": st.st_size, "mtime_ns": st.st_mtime_ns, "cwd": deep_cwd or cwd,
+                         "branch": deep_branch if deep_cwd else branch, "ts": ts or deep_ts, "wrote": files_written(got[0])}
                 keep[str(path)] = facts
-                if deep_cwd != cwd:  # only when the shorter tail held no directory
-                    row.update(finished_location(deep_cwd, deep_branch, row["cwd"], seen), last_active=deep_ts)
+                if deep_cwd is not None and deep_cwd != cwd:  # only when the shorter tails held no directory
+                    row.update(finished_location(deep_cwd, deep_branch, row["cwd"], seen), last_active=facts["ts"])
                     if repo is not None and not in_repo(row, repo):
                         continue
         if facts is not None:
             row["deliverables_written"] = [w for w in facts["wrote"] if os.path.isfile(w)][:FINISHED_SHOWN]
+            # "tail": only the end of a longer transcript was read, so an empty or short list is not all it wrote
+            row["deliverables_read"] = "whole" if st.st_size <= tail else "tail"
         out.append(row)
     if repo is None and keep != cache:
-        finished_cache_save(keep)  # only this listing's sessions, so the file never outgrows the host's jobs
+        finished_cache_save(keep, tail)  # only this listing's sessions, so the file never outgrows the host's jobs
     elif repo is not None and any(cache.get(k) != v for k, v in keep.items()):
-        finished_cache_save({**cache, **keep})
+        finished_cache_save({**cache, **keep}, tail)
     return out
 
 
@@ -1243,6 +1254,7 @@ def fmt_ls(out: list[dict], links: list[dict]) -> list[str]:
         if o["kind"] == "finished":  # no address: a finished session cannot be messaged
             at = f"  at={shown(o['repo'], 200)}:{shown(o['branch'] or '-', 200)}" if o.get("repo") else ""
             wrote = "?" if o["deliverables_written"] is None else str(len(o["deliverables_written"]))
+            wrote += "+" if o.get("deliverables_read") == "tail" else ""
             lines.append(f"finished {shown(o['name'] or '-', 200):31} last={shown(o['last_active'] or '-', 40)}"
                          f"  id={shown(o['session_id'][:8], 8)}{at}  prs={o['pr_links_total']}  wrote={wrote}")
             continue
@@ -1941,7 +1953,7 @@ MCP_TOOLS = [
      "description": "Full-text search over subjects and bodies (SQLite FTS5 query syntax), best match first.",
      "inputSchema": _obj({"query": _s(1000), "limit": {"type": "integer", "minimum": 1, "maximum": 100}}, ["query"])},
     {"name": "ls", "title": "Who is reachable",
-     "description": "Sessions and mailboxes on this host with their unread counts and, for a session, the repository and branch it works on (at=repo:branch), and the state of each link to another host. With repo, only the sessions working in that repository. A session shown with a status (busy, idle) is running; one shown without is not, and mail sent to it waits until it next runs. With all, also the sessions that have finished, as `finished` lines with no address: they cannot be messaged, so read what each left (its pull requests, saved conversation and the files it wrote).",
+     "description": "Sessions and mailboxes on this host with their unread counts and, for a session, the repository and branch it works on (at=repo:branch), and the state of each link to another host. With repo, only the sessions working in that repository. A session shown with a status (busy, idle) is running; one shown without is not, and mail sent to it waits until it next runs. With all, also the sessions that have finished, as `finished` lines with no address: they cannot be messaged, so read what each left (the pull requests linked from its output, its saved conversation and the files it wrote).",
      "inputSchema": _obj({"repo": _s(200), "all": {"type": "boolean"}})},
 ]
 

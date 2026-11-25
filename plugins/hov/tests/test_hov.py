@@ -284,14 +284,16 @@ class HovCase(HovFixture):
         self.assertEqual((f1["last_active"], f1["transcript"]), (x["ts1"], x["f1_transcript"]))
         self.assertEqual((f1["pr_links"], f1["pr_links_total"]), (["acme/widgets#7", "acme/widgets#8"], 2))
         self.assertEqual(f1["deliverables_written"], [str(d / "a.md"), str(d / "f.md"), str(d / "b.md")])
+        self.assertEqual(f1["deliverables_read"], "whole")
         # a title the identity rules refuse is not shown; the newest five of seven pull requests and files
         self.assertEqual((f2["name"], f2["repo"], f2["dir_from"], f2["branch"], f2["last_active"]), (None, None, "transcript", None, x["ts2"]))
         self.assertEqual((f2["pr_links"], f2["pr_links_total"]), ([f"acme/plain#{i}" for i in range(7, 2, -1)], 7))
         self.assertEqual(f2["deliverables_written"], [str(d / f"g{i}.md") for i in range(7, 2, -1)])
         text = self.hov("ls", "--all", env_extra=env).stdout
         line = next(ln for ln in text.splitlines() if ln.startswith("finished fin-gone"))
-        for part in ("at=acme/widgets:feature-x", "prs=2", "wrote=3", f"last={x['ts1']}", "id=ffffffff"):
+        for part in ("at=acme/widgets:feature-x", "prs=2", f"last={x['ts1']}", "id=ffffffff"):
             self.assertIn(part, line)
+        self.assertTrue(line.endswith("wrote=3"), line)
         # planted negatives: prose from the job record and the listing, and the refused title, reach no output
         mcp = self.mcp_ls({"all": True}, env)
         for out in (json.dumps(rows), text, mcp, self.hov("ls", "--all", "--repo", "widgets", env_extra=env).stdout):
@@ -336,6 +338,19 @@ class HovCase(HovFixture):
         del self.env["HOV_AGENTS_CMD"]
         self.assertEqual([r["name"] for r in self.ls_finished(env_extra=path)], ["from-claude"])
         self.assertIn("agents --json --all", log.read_text().splitlines())
+
+    def test_ls_all_marks_files_read_from_the_end_of_a_longer_transcript(self):
+        env, x = self.finished()
+        short = dict(env, HOV_FINISHED_TAIL="60")  # past the last whole entry with a directory or a write
+        f1 = next(r for r in self.ls_finished(env_extra=short) if r["session_id"] == x["f1"])
+        # planted negative: an empty list from the end of a longer transcript must not read as "wrote nothing"
+        self.assertEqual((f1["deliverables_written"], f1["deliverables_read"]), ([], "tail"))
+        # the shorter tails read before it still give where it worked and when, now and from the cache
+        self.assertEqual((f1["repo"], f1["branch"], f1["dir_from"], f1["last_active"]), ("acme/widgets", "feature-x", "gone", x["ts1"]))
+        line = next(ln for ln in self.hov("ls", "--all", env_extra=short).stdout.splitlines() if ln.startswith("finished fin-gone"))
+        self.assertTrue(line.endswith("wrote=0+"), line)
+        cached = next(r for r in self.ls_finished(env_extra=dict(short, HOV_FINISHED_READ_SECONDS="0")) if r["session_id"] == x["f1"])
+        self.assertEqual(cached, f1)
 
     def test_ls_all_reads_transcripts_in_time_and_caches_them(self):
         env, x = self.finished()
