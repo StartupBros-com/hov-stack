@@ -293,13 +293,13 @@
         "source": "git-subdir",
         "url": "https://github.com/StartupBros-com/hov-stack.git",
         "path": "plugins/hov",
-        "sha": "ed82aa84c3d6ed5abdbf46f53f0c60dbe681d8b5"
+        "sha": "0a68b919d572b79bac1530be49a27e950e83054b"
       },
       "description": "Fleet mailbox for coding agents. A per-host SQLite mailbox with FTS5 search, a stdlib-only CLI (send, inbox, thread, search, ls), hooks that deliver mail into Claude Code sessions as hook context text at the next prompt or tool call and wake a session idle at its prompt when direct mail arrives, an outbound ssh link that carries mail between hosts store-and-forward, and an MCP server plus a count-only notifier for agents without a Claude Code hook (Codex, oh-my-pi). Mail changes what a session reads, never what it may do.",
       "metadata": {
-        "version": "0.1.13",
-        "releaseId": 457944677,
-        "releaseTag": "hov--v0.1.13"
+        "version": "0.1.14",
+        "releaseId": 458715914,
+        "releaseTag": "hov--v0.1.14"
       },
       "card": {
         "tagline": "Claude Code plugin \u00b7 macOS, Linux, WSL \u00b7 needs Python 3.9+ \u00b7 auto-updates",
