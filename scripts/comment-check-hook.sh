@@ -3,9 +3,11 @@
 #
 # Registered host-only, in the overlay's settings.json, not in this repo's settings.json
 # template: the check costs one Haiku call per pull request, and it was chosen for the
-# operator's own hosts only (issue #895). An install that wants it adds the same registration:
+# operator's own hosts only (issue #895). An install that wants it adds the same registration,
+# which runs this file only when it exists, since an overlay can reach a host before the
+# checkout that ships this file does:
 #   "PostToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "timeout": 180,
-#     "command": "\"$HOME/.claude/scripts/comment-check-hook.sh\""}]}]
+#     "command": "[ ! -x \"$HOME/.claude/scripts/comment-check-hook.sh\" ] || exec \"$HOME/.claude/scripts/comment-check-hook.sh\""}]}]
 # It lives under scripts/, not hooks/, because harness-doctor warns about any file under
 # hooks/ that the live settings.json does not register, and on an install without the
 # registration this file would read as an orphan.
