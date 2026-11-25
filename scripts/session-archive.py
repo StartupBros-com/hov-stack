@@ -20,9 +20,19 @@ Rules the code keeps:
     is moved to `<store file>.partial`, never dropped.
   * The quick check (the last 4 KiB before the cursor) is trusted only for a
     `.jsonl` file that grew, on the same inode, when no other path has moved
-    its stream. Every other case compares the whole stored prefix with the
-    source: another project folder holding the same file, a rewritten or
-    touched file, a state file that was lost or restored.
+    its stream, and for a file whose path the quick check does not cover that
+    is another name of a recorded file (a "move", counted as `moved`; the
+    path may be new, or have a stale record of its own, which counts for
+    nothing). That is: the newest record of the file's device and inode is
+    another path, under the same key, and is gone; its stream
+    is whole, not cut this pass, with its cursor at the size recorded for that
+    path; no other recorded path of the stream still exists; the file is
+    unchanged (same size and mtime, any kind of file) or, for `.jsonl` only,
+    longer, and its last 4 KiB before the cursor match the stream. Every other case
+    compares the whole stored prefix with the source: another project folder
+    holding the same file while the old path lives on, a rewritten or touched
+    file, a file shorter than the cursor, a state file that was lost or
+    restored, a record from before the device was kept.
   * The cursor moves only after the appended frame is fsynced. A compressor
     failure, a full disk or an unreadable source leaves that file's cursor
     where it was and the pass goes on.
@@ -133,7 +143,7 @@ DEFAULT_ROOTS = (
     ("factory", ".factory/sessions", 1),
 )
 
-COUNTERS = ("scanned", "changed", "appended", "streams", "versions", "proved", "covered", "adopted",
+COUNTERS = ("scanned", "changed", "appended", "streams", "versions", "proved", "moved", "covered", "adopted",
             "reconciled", "partial_frames_set_aside", "deferred", "skipped", "source_errors",
             "store_errors", "low_disk", "full_walks", "folders_read", "bytes_read", "bytes_stored")
 
@@ -144,7 +154,7 @@ CREATE TABLE IF NOT EXISTS streams(
   broken INTEGER NOT NULL DEFAULT 0, UNIQUE(agent, key, version));
 CREATE TABLE IF NOT EXISTS sources(
   path TEXT PRIMARY KEY, stream INTEGER NOT NULL, size INTEGER NOT NULL,
-  mtime_ns INTEGER NOT NULL, ino INTEGER NOT NULL, seen_ns INTEGER NOT NULL);
+  mtime_ns INTEGER NOT NULL, ino INTEGER NOT NULL, seen_ns INTEGER NOT NULL, dev INTEGER);
 CREATE TABLE IF NOT EXISTS meta(k TEXT PRIMARY KEY, v TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS sources_mtime ON sources(mtime_ns);
 -- What a light pass goes by. A full pass rebuilds `folders` for its root and
@@ -440,6 +450,20 @@ class Archive:
         self.db.execute("PRAGMA synchronous=FULL")
         self.db.executescript(SCHEMA)
 
+    def migrate(self) -> None:
+        """Add the device column and the indexes the move check reads. Called by capture(), under its lock.
+
+        State files written before `sources.dev` existed get the column; their rows keep NULL there.
+        """
+        if "dev" not in {row[1] for row in self.db.execute("PRAGMA table_info(sources)")}:
+            try:
+                self.db.execute("ALTER TABLE sources ADD COLUMN dev INTEGER")
+            except sqlite3.OperationalError:
+                if "dev" not in {row[1] for row in self.db.execute("PRAGMA table_info(sources)")}:
+                    raise
+        self.db.execute("CREATE INDEX IF NOT EXISTS sources_ino ON sources(ino)")
+        self.db.execute("CREATE INDEX IF NOT EXISTS sources_stream ON sources(stream)")
+
     def close(self) -> None:
         self.db.close()
 
@@ -713,6 +737,50 @@ class Archive:
         self.n["appended"] += 1
         return self.save(stream, end, after, tail_hash(tail))
 
+    @staticmethod
+    def gone(path: str) -> bool:
+        try:
+            os.lstat(path)
+        except GONE:
+            return True
+        except OSError:
+            return False                 # cannot tell: the path counts as still there
+        return False
+
+    def moved(self, agent: str, key: str, path: str, fd: int, snap: os.stat_result) -> Optional[tuple]:
+        """(stream, window) when `path` is another name of a file this archive recorded, else None.
+
+        The file's old path is gone, its recorded device and inode are this
+        file's, and nothing else holds the stream, so only the bytes after the
+        cursor can be new. Any doubt returns None and the caller compares in full.
+        """
+        # Only the newest record of this inode counts: an older one may describe a
+        # state this file has since left (shortened and regrown, say).
+        row = self.db.execute(
+            "SELECT path, stream, size, mtime_ns, dev FROM sources WHERE ino=? ORDER BY seen_ns DESC LIMIT 1",
+            (snap.st_ino,)).fetchone()
+        if row is None:
+            return None
+        old, stream_id, size, mtime_ns, dev = row
+        if old == path or dev != snap.st_dev or not self.gone(old):
+            return None
+        stream = self.stream_by_id(stream_id)
+        if stream is None or (stream.agent, stream.key) != (agent, key):
+            return None
+        stream = self.reconcile(stream)
+        if stream.broken or stream.id in self.cut or stream.content_bytes != size:
+            return None
+        if snap.st_size == size:
+            if snap.st_mtime_ns != mtime_ns:
+                return None
+        elif snap.st_size < size or not key.endswith(".jsonl"):
+            return None
+        if not all(self.gone(other) for (other,) in self.db.execute(
+                "SELECT path FROM sources WHERE stream=? AND path NOT IN (?, ?)", (stream.id, old, path))):
+            return None
+        window = self.continues(fd, snap.st_size, stream)
+        return (stream, window) if window is not None else None
+
     def capture_one(self, agent: str, key: str, path: str, seen: Optional[tuple]) -> None:
         try:
             fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
@@ -726,6 +794,7 @@ class Archive:
                 return
             stream = self.stream_by_id(seen[0]) if seen else None
             window = None
+            renamed = False
             if stream is not None:
                 stream = self.reconcile(stream)
                 # The quick check is enough only for an append-only file that grew in
@@ -738,12 +807,18 @@ class Archive:
                         and stream.id not in self.cut):
                     window = self.continues(fd, snap.st_size, stream)
             if window is None:
+                found = self.moved(agent, key, path, fd, snap)
+                stream, window = found if found else (None, None)
+                renamed = window is not None
+            if window is None:
                 stream, window = self.find_or_create(agent, key, fd, snap.st_size)
             if snap.st_size > stream.content_bytes:
                 stream = self.append(stream, fd, snap, window)
             self.db.execute(
-                "INSERT OR REPLACE INTO sources(path, stream, size, mtime_ns, ino, seen_ns) VALUES (?,?,?,?,?,?)",
-                (path, stream.id, snap.st_size, snap.st_mtime_ns, snap.st_ino, time.time_ns()))
+                "INSERT OR REPLACE INTO sources(path, stream, size, mtime_ns, ino, seen_ns, dev) "
+                "VALUES (?,?,?,?,?,?,?)",
+                (path, stream.id, snap.st_size, snap.st_mtime_ns, snap.st_ino, time.time_ns(), snap.st_dev))
+            self.n["moved"] += renamed
         finally:
             os.close(fd)
 
@@ -1021,6 +1096,7 @@ class Archive:
     def capture(self, full: Optional[bool] = None) -> dict:
         """One pass. `full`: True walks every root in full, False none, None each root that is due."""
         started = time.time()
+        self.migrate()
         walked_at = time.time_ns()
         work, folder_rows, walked, clear = self.plan(full)
         self.n["changed"] = len(work)
