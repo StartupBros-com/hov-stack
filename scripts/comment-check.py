@@ -85,8 +85,10 @@ def is_full_comment(line, lang, in_block):
     if not s:
         return False
     if lang == "c":
-        return (in_block or s.startswith(("//", "/*"))
-                or (s.startswith("*") and not s.startswith("**")) or s.startswith("*/"))
+        # A leading "*" outside a tracked block counts only in the doc-continuation shape ("*", "* text",
+        # "*/"): a run of added lines can start inside a block whose "/*" is an unchanged line, while
+        # "*p = 0;" is a pointer write, not a comment.
+        return in_block or s == "*" or s.startswith(("//", "/*", "* ", "*\t", "*/"))
     if lang == "hash":
         return s.startswith("#") and not s.startswith("#!")
     if lang == "sql":

@@ -197,6 +197,34 @@ class Extract(Base):
                          [(2, "# -*- coding: utf-8 -*-"), (4, "# increment x")])
         self.assertEqual([cc.tool_directive(u) for u in units], [True, False])
 
+    def test_pointer_write_is_code_and_doc_continuation_is_a_comment(self):
+        cc = load_module()
+        diff = textwrap.dedent("""\
+            diff --git a/gen.c b/gen.c
+            new file mode 100644
+            --- /dev/null
+            +++ b/gen.c
+            @@ -0,0 +1,6 @@
+            +/* lookup table */
+            +static void load(Item **out, int n) {
+            +  *out=calloc(n + 1, sizeof(Item));
+            +  *out = calloc(n + 1, sizeof(Item));
+            +  **out = (Item){0};
+            +}
+            diff --git a/api.ts b/api.ts
+            --- a/api.ts
+            +++ b/api.ts
+            @@ -1,3 +1,5 @@
+             /**
+            + * Retries once on a 429.
+            + *
+              * Sends the batch.
+              */
+            """)
+        units = cc.units_from_diff(diff)
+        self.assertEqual([(u["file"], u["line"], u["text"]) for u in units],
+                         [("gen.c", 1, "/* lookup table */"), ("api.ts", 2, " * Retries once on a 429.\n *")])
+
     def test_directive_filter_spares_prose(self):
         cc = load_module()
         directive = ["# noqa: E501", "# type: ignore[attr-defined]", "// @ts-expect-error untyped lib",
