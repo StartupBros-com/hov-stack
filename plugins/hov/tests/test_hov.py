@@ -113,6 +113,9 @@ class HovCase(HovFixture):
         by = {r["addr"]: r for r in rows}
         self.assertEqual(by["testhost:alpha"]["unread"], 1)
         self.assertEqual(by["testhost:beta"]["unread"], 0)
+        # a running, titled session carries the name Claude Code's own SendMessage takes; a mailbox has none
+        self.assertEqual((by["testhost:alpha"]["send_to"], by["testhost:beta"]["send_to"]), ("alpha", "beta"))
+        self.assertEqual((by["testhost:ceo"]["kind"], by["testhost:ceo"]["send_to"]), ("mailbox", None))
 
     # ------------------------------------------------------------ where a session works (hov ls)
 
@@ -255,6 +258,9 @@ class HovCase(HovFixture):
         listing = {"HOV_AGENTS_CMD": f"{shutil.which('cat')} {reused}"}
         by = {r["addr"]: r for r in json.loads(self.hov("ls", "--json", env_extra=listing).stdout)}
         self.assertEqual((by["testhost:alpha"]["session_id"], by["testhost:alpha"]["unread"]), (SID_C, 0))
+        # planted negative: this listing gives the session no status, so it is not running and SendMessage cannot
+        # reach it, whatever its title
+        self.assertIsNone(by["testhost:alpha"]["send_to"])
         self.assertEqual(self.inbox_subjects(env_extra=dict(listing, CLAUDE_CODE_SESSION_ID=SID_C)), [])
 
     def test_a_reader_whose_first_command_is_ls_search_or_thread_gets_broadcasts_sent_after_it(self):
@@ -745,7 +751,7 @@ class HovCase(HovFixture):
         # a session titled with '<', '>' or a control character cannot be a mail name (the hook frame shows names);
         # it keeps its 8-character id as its name, so it still sends without --as and is still reached
         listing = Path(self.tmp.name) / "agents-odd.json"
-        listing.write_text(json.dumps([{"sessionId": SID_A, "name": "alpha -> beta <x>", "cwd": "/tmp/a"}]))
+        listing.write_text(json.dumps([{"sessionId": SID_A, "name": "alpha -> beta <x>", "cwd": "/tmp/a", "state": "working", "status": "busy"}]))
         cmd = f"{shutil.which('cat')} {listing}"
         odd = {"CLAUDE_CODE_SESSION_ID": SID_A, "HOV_AGENTS_CMD": cmd}
         me = json.loads(self.hov("whoami", "--json", env_extra=odd).stdout)
@@ -773,6 +779,10 @@ class HovCase(HovFixture):
         self.assertIn(f"testhost:{SID_A[:8]}", ls)
         self.assertIn(f"id={SID_A[:8]}", ls)
         self.assertNotIn("<x>", ls)
+        # and in --json: running, but the refused title is no SendMessage name either
+        as_json = self.hov("ls", "--json", env_extra={"HOV_AGENTS_CMD": cmd}).stdout
+        self.assertIsNone(json.loads(as_json)[0]["send_to"])
+        self.assertNotIn("<x>", as_json)
 
     # ------------------------------------------------------------ what PR 5's review found
 

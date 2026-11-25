@@ -9,7 +9,7 @@
 #
 # Usage:
 #   merge-freeze.sh hold    [--repo OWNER/NAME] --minutes N --reason TEXT [--allow-pr N]...
-#   merge-freeze.sh show    [--repo OWNER/NAME] [--json]
+#   merge-freeze.sh show    [--repo OWNER/NAME] [--json]      (status is the same command)
 #   merge-freeze.sh release [--repo OWNER/NAME] [--force]
 #   merge-freeze.sh check    --repo OWNER/NAME [--pr N]
 #
@@ -33,7 +33,7 @@
 set -euo pipefail
 say() { printf 'merge-freeze: %s\n' "$1" >&2; }
 usage() {
-  say 'usage: merge-freeze.sh hold [--repo OWNER/NAME] --minutes N --reason TEXT [--allow-pr N]... | show [--repo OWNER/NAME] [--json] | release [--repo OWNER/NAME] [--force] | check --repo OWNER/NAME [--pr N]'
+  say 'usage: merge-freeze.sh hold [--repo OWNER/NAME] --minutes N --reason TEXT [--allow-pr N]... | show|status [--repo OWNER/NAME] [--json] | release [--repo OWNER/NAME] [--force] | check --repo OWNER/NAME [--pr N]'
   exit 64
 }
 DIR=${MERGE_FREEZE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/merge-freeze}
@@ -41,7 +41,8 @@ ME=${CLAUDE_CODE_SESSION_ID:-shell:${USER:-unknown}}
 
 [ "$#" -gt 0 ] || usage
 CMD=$1; shift
-case "$CMD" in hold|show|release|check) ;; -h|--help) usage ;; *) usage ;; esac
+# `status` is another word for `show`.
+case "$CMD" in hold|show|release|check) ;; status) CMD=show ;; -h|--help) usage ;; *) usage ;; esac
 REPO="" MINUTES="" REASON="" ALLOW=() PR="" JSON=0 FORCE=0
 while [ "$#" -gt 0 ]; do
   case "$1" in
