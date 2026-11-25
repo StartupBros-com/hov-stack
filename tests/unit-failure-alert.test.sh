@@ -559,7 +559,7 @@ else
 fi
 
 # ── 9. wiring: the units that must page, and the template that pages ─────────
-for u in backup-harness codex-auto-update dcg-auto-update docker-hygiene mcp-servers-update pkg-cache-prune reclaim-sweep session-archive skills-update tools-auto-update wt-sweep; do
+for u in backup-harness codex-auto-update dcg-auto-update docker-hygiene mcp-servers-update pkg-cache-prune reclaim-sweep session-archive session-search skills-update tools-auto-update wt-sweep; do
   grep -qx 'OnFailure=harness-unit-failure-alert@%n.service' "systemd/$u.service" \
     && ok "9: $u.service is wired to the alert template" \
     || bad "9: $u.service has no OnFailure= handler"
@@ -579,7 +579,7 @@ grep -q 'harness-unit-failure-alert@.service' sync.sh \
 # ExecStart is rewritten to /bin/true on portable copies because systemd-analyze
 # resolves executables on the CURRENT host and CI has no /home/user layout.
 # Unit/OnFailure/template semantics are unchanged by that substitution.
-for u in harness-unit-failure-alert@.service $(printf '%s.service ' backup-harness codex-auto-update dcg-auto-update docker-hygiene mcp-servers-update pkg-cache-prune reclaim-sweep session-archive skills-update tools-auto-update wt-sweep); do
+for u in harness-unit-failure-alert@.service $(printf '%s.service ' backup-harness codex-auto-update dcg-auto-update docker-hygiene mcp-servers-update pkg-cache-prune reclaim-sweep session-archive session-search skills-update tools-auto-update wt-sweep); do
   cp "systemd/$u" "$TMP/$u"
   # Collapse multi-line ExecStart before replacing it, or continuation lines are
   # parsed as stray directives after the first-line rewrite.
@@ -589,9 +589,9 @@ for u in harness-unit-failure-alert@.service $(printf '%s.service ' backup-harne
          -e 's|^ConditionFileIsExecutable=.*|ConditionFileIsExecutable=/bin/true|' "$TMP/$u"
 done
 verify_args=("$TMP/harness-unit-failure-alert@.service")
-for u in backup-harness codex-auto-update dcg-auto-update docker-hygiene mcp-servers-update pkg-cache-prune reclaim-sweep session-archive skills-update tools-auto-update wt-sweep; do verify_args+=("$TMP/$u.service"); done
+for u in backup-harness codex-auto-update dcg-auto-update docker-hygiene mcp-servers-update pkg-cache-prune reclaim-sweep session-archive session-search skills-update tools-auto-update wt-sweep; do verify_args+=("$TMP/$u.service"); done
 if systemd-analyze verify "${verify_args[@]}" 2>"$TMP/verify.err"; then
-  ok "10: systemd-analyze verify accepts the template and all eleven wired units"
+  ok "10: systemd-analyze verify accepts the template and all twelve wired units"
 else
   bad "10: systemd-analyze verify rejected a unit: $(cat "$TMP/verify.err")"
 fi

@@ -1,0 +1,38 @@
+[Unit]
+Description=session-search: index what the session archive gained since the last run
+Documentation=https://github.com/StartupBros-com/hov-stack
+
+# A run exits 1 when a stored transcript no longer decodes, the index backend
+# failed, or the disk is below the free-space floor with transcripts waiting.
+# Each of those means searches are going stale, so each pages (once per hour at
+# most, the alert's per-unit cooldown).
+OnFailure=harness-unit-failure-alert@%n.service
+
+[Service]
+Type=oneshot
+# A run reads the archive's state, decodes only the bytes each transcript gained
+# since its cursor, and takes no new transcript after SESSION_SEARCH_MAX_BYTES
+# (8 GiB decoded, as shipped) or SESSION_SEARCH_MAX_SECONDS (15 minutes), so the
+# first build over a long history finishes across several runs. This timeout
+# bounds the 15 minutes, the last transcript taken and the backend call that
+# follows it, and a run that hits it pages. A kill mid-run loses nothing and
+# indexes nothing twice: the names of a batch's transcripts are on disk before
+# the backend is called, and the next run takes those transcripts out of the
+# index and sends them again.
+TimeoutStartSec=45m
+# zstd reads the archive; the script exits 3 when it is not on this PATH.
+Environment=PATH=%h/.local/bin:%h/.local/share/mise/shims:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/usr/bin/python3 %h/.claude/scripts/session-search.py index
+# The first build reads the whole archive and writes the whole index. Page cache
+# is charged to the cgroup that first reads a page, so this bound makes the
+# kernel drop this unit's own cache as it goes instead of pushing other
+# processes' memory out (harness/wsl-memory-bounds.md, "Batch jobs that read a
+# large corpus"). No MemoryMax and no swap cap, as that note says.
+# Measured on the first build (2026-11-25, 63.5 GB of stored transcripts, run in
+# passes under MemoryHigh=3584M): the pass that ran the first large merge (24
+# segments into one of 2.8M docs) peaked at 2,142 MiB for the cgroup, page cache
+# included, and 456 MiB of process memory; the other passes at 469 to 1,736 MiB.
+# 3G sits above every measured peak. A lower value was not tried.
+MemoryHigh=3G
+Nice=10
+IOSchedulingClass=idle
