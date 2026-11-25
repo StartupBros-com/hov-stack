@@ -67,17 +67,11 @@ const NEUTRALIZE = [
   'WACLI_GUARD_TEST_SHA256',
   'WACLI_READONLY',
   'WACLI_STORE_DIR',
-  // codex-quota-guard / codex-pick resolve auth, the catalog cache, caam
-  // profiles, and the API-key lane from these; a developer's live values must
-  // not turn a fixture run into a real usage fetch or an API-key rewrite.
+  // Keep ambient Codex home and API credentials out of spawned fixtures.
   'CODEX_HOME',
   'OPENAI_API_KEY',
+  // verify-on-stop uses this to locate mise when MISE_DATA_DIR is unset.
   'XDG_DATA_HOME',
-  'CODEX_PICK_USAGE_FIXTURE',
-  'CODEX_PICK_CATALOG_FIXTURE',
-  'CODEX_PICK_ACCOUNTS',
-  'CODEX_PICK_API_LANE',
-  'CODEX_PICK_CCFLARE_FIXTURE',
   'CLAUDE_HOME',
   // SessionStart's workspace-trust seed (lib/workspace-trust.js) writes the
   // global config these locate; a runner's live values must not point a
@@ -113,9 +107,8 @@ function testHome() {
 
 // Deliberate require-time side effect: sandbox THIS process too. Some tests
 // require a hook and call run() in-process — no spawn, no buildEnv — so their
-// denial writes use the test process's own HOME (how codex-quota-guard's
-// fixtures reached the live store). os.homedir() honors $HOME on POSIX and
-// USERPROFILE on Windows, both at call time, so re-pointing them here covers
+// denial writes use the test process's own HOME. os.homedir() honors $HOME on
+// POSIX and USERPROFILE on Windows at call time, so re-pointing them here covers
 // every later in-process homedir lookup and any raw {...process.env} spawn.
 process.env.HOME = testHome();
 process.env.USERPROFILE = testHome();
