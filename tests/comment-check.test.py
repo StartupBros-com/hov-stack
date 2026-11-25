@@ -11,6 +11,7 @@ runs against the real model (`--label`, issue #895).
 import importlib.util
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -142,8 +143,10 @@ class Base(unittest.TestCase):
         self.fake_gh.write_text(FAKE_GH)
         self.fake_gh.chmod(0o755)
         self.gh_log = self.tmp / "gh.log"
+        self.state = self.tmp / "state"
         self.env = dict(os.environ, COMMENT_CHECK_CLAUDE=str(self.fake), FAKE_CLAUDE_LOG=str(self.log),
-                        COMMENT_CHECK_GH=str(self.fake_gh), FAKE_GH_LOG=str(self.gh_log))
+                        COMMENT_CHECK_GH=str(self.fake_gh), FAKE_GH_LOG=str(self.gh_log),
+                        COMMENT_CHECK_STATE=str(self.state))
         for name in ("HOOK_DISABLED", "FAKE_GH_MODE", "FAKE_GH_HEAD", "FAKE_GH_BASE"):
             self.env.pop(name, None)
 
@@ -158,6 +161,10 @@ class Base(unittest.TestCase):
         return json.dumps({"tool_name": "Bash", "tool_input": {"command": command},
                            "tool_response": {"stdout": stdout, "stderr": "", "interrupted": False},
                            "cwd": str(cwd or self.repo)})
+
+    def pre_payload(self, command="git push -u origin feature", cwd=None, session="sess-one"):
+        return json.dumps({"hook_event_name": "PreToolUse", "tool_name": "Bash", "session_id": session,
+                           "tool_input": {"command": command}, "cwd": str(cwd or self.repo)})
 
     def calls(self):
         return [json.loads(x) for x in self.log.read_text().splitlines()] if self.log.exists() else []
@@ -363,6 +370,131 @@ class Hook(Base):
         self.assertEqual(self.calls(), [])
 
 
+class PrePush(Base):
+    def pre(self, command="git push -u origin feature", cwd=None, env=None):
+        p = self.cli("--hook", env=env, stdin=self.pre_payload(command, cwd))
+        self.assertEqual(p.returncode, 0, p.stderr)
+        return p.stdout
+
+    def held(self, out, msg=None):
+        self.assertTrue(out, msg)
+        d = json.loads(out)["hookSpecificOutput"]
+        self.assertEqual((d["hookEventName"], d["permissionDecision"]), ("PreToolUse", "deny"), msg)
+        return d["permissionDecisionReason"]
+
+    def stops(self):
+        d = self.state / "stops"
+        return [json.loads(p.read_text()) for p in sorted(d.glob("*.json"))] if d.exists() else []
+
+    def checks(self):
+        p = self.state / "checks.jsonl"
+        return [json.loads(x) for x in p.read_text().splitlines()] if p.exists() else []
+
+    def test_first_push_is_held_once_then_goes_through(self):
+        reason = self.held(self.pre())
+        self.assertTrue(reason.startswith("comment-check held this branch's first push once; the same push run "
+                                          "again goes through. End this turn with the branch pushed."))
+        self.assertIn("commit, then run the same push", reason)
+        self.assertIn("not yours to tidy, run the same push unchanged", reason)
+        self.assertIn("3 of the 7 comments", reason)
+        self.assertIn("- web.ts:1 banner or separator: // ===== helpers =====", reason)
+        self.assertIn("separate from the push gate", reason)
+        [stop] = self.stops()
+        self.assertEqual((stop["session"], stop["branch"], stop["flags"]), ("sess-one", "feature", 3))
+        self.assertNotIn("repush", stop)
+        self.assertIn("holds: 1 from 1 sessions; 1 with no push recorded since the hold;", self.cli("--stops").stdout)
+        # The session pushes again with an edit in the same command: the push goes through, unchecked, and the
+        # outcome is read from the pushed branch, not from the working tree the hook saw before the edit ran.
+        self.assertEqual(self.pre("sed -i '/increment the counter/d' app.py && git commit -qam tidy && git push"), "")
+        self.assertEqual(len(self.calls()), 1, "the re-push is not checked again")
+        [stop] = self.stops()
+        self.assertIn("ts", stop["repush"])
+        self.assertIn("feature: re-pushed; no pushed copy of the branch here", self.cli("--stops").stdout)
+        app = self.repo / "app.py"
+        app.write_text(app.read_text().replace("# increment the counter\n", ""))
+        git(self.repo, "commit", "-q", "-am", "tidy")
+        git(self.repo, "update-ref", "refs/remotes/origin/feature", "HEAD")
+        [rec] = self.checks()
+        self.assertEqual((rec["session"], rec["flags"], rec["checked"]), ("sess-one", 3, 7))
+        self.assertIsInstance(rec["seconds"], float)
+        report = self.cli("--stops").stdout
+        self.assertIn("holds: 1 from 1 sessions; 0 with no push recorded since the hold; "
+                      "1 with at least one flagged comment changed in the pushed branch", report)
+        self.assertIn("feature: re-pushed; 1 of 3 flagged comments changed (remote-tracking ref, read ", report)
+        self.assertIn("checks: 1, median", report)
+        git(self.repo, "update-ref", "refs/remotes/pr-merged/feature", "HEAD~1")
+        self.assertIn("0 of 3 flagged comments changed (merged tip, read ", self.cli("--stops").stdout)
+        # wt-sweep prunes the anchor and the branch: the outcome read last is kept in the hold's record.
+        git(self.repo, "update-ref", "-d", "refs/remotes/pr-merged/feature")
+        git(self.repo, "update-ref", "-d", "refs/remotes/origin/feature")
+        self.assertIn("0 of 3 flagged comments changed (merged tip, read ", self.cli("--stops").stdout)
+
+    def test_pushed_branch_and_main_go_through_unchecked(self):
+        git(self.repo, "update-ref", "refs/remotes/origin/feature", "HEAD")
+        self.assertEqual(self.pre(), "")
+        git(self.repo, "checkout", "-q", "main")
+        self.assertEqual(self.pre("git push origin main"), "")
+        self.assertEqual((self.calls(), self.checks()), ([], []))
+
+    def test_checked_lines_are_what_the_push_sends(self):
+        git(self.repo, "checkout", "-q", "-b", "wip", "main")
+        (self.repo / "c.py").write_text("x = 1\n")
+        git(self.repo, "add", "-A")
+        git(self.repo, "commit", "-q", "-m", "c")
+        (self.repo / "c.py").write_text("x = 1\n# increment x\n")
+        (self.repo / "new.py").write_text("# increment y\ny = 1\n")
+        # A plain push sends only the branch's commits: the edit and the new file stay unchecked.
+        self.assertEqual(self.pre("git push -u origin wip"), "")
+        self.assertEqual(self.pre("git commit -qm z && git push -u origin wip"), "", "an unstaged edit is not sent")
+        self.assertEqual([r["checked"] for r in self.checks()], [0, 0])
+        reason = self.held(self.pre("git commit -qam z && git push -u origin wip"))
+        self.assertIn("- c.py:2 restates the code: # increment x", reason)
+        self.assertNotIn("new.py", reason)
+        shutil.rmtree(self.state)
+        git(self.repo, "add", "c.py")
+        reason = self.held(self.pre("git commit -qm z && git push -u origin wip"))
+        self.assertIn("- c.py:2 restates the code: # increment x", reason, "a staged edit is sent")
+        shutil.rmtree(self.state)
+        reason = self.held(self.pre("git add -A && git commit -qm z && git push -u origin wip"))
+        self.assertIn("- new.py:1 restates the code: # increment y", reason)
+
+    def test_push_folder_comes_from_the_command_or_its_script(self):
+        elsewhere = self.tmp / "elsewhere"
+        elsewhere.mkdir()
+        script = self.tmp / "ship.sh"
+        script.write_text(f'set -e\nR={self.repo}\ncd "$R"\ngit push -u origin feature\n')
+        cases = {"cd": f"cd {self.repo} && git push -u origin feature",
+                 "git -C": f"git -C {self.repo} push -u origin feature",
+                 "variable": f'R={self.repo}; cd "$R" && git push',
+                 "script": f"bash {script}",
+                 "relative script": "bash ../ship.sh"}
+        for name, command in cases.items():
+            shutil.rmtree(self.state, ignore_errors=True)
+            self.held(self.pre(command, cwd=elsewhere), name)
+        unresolved = {"cd this parser cannot read": ('cd "$(mktemp -d)" && git push', self.repo),
+                      "not a repository": ("git push", elsewhere)}
+        for name, (command, cwd) in unresolved.items():
+            shutil.rmtree(self.state, ignore_errors=True)
+            self.assertEqual(self.pre(command, cwd=cwd), "", name)
+
+    def test_commands_that_are_not_a_push_go_through(self):
+        for command in ("git status", "git push --dry-run origin feature", "git push origin --delete feature",
+                        'git commit -m "note: git push later"', "echo push", "bash missing.sh"):
+            self.assertEqual(self.pre(command), "", command)
+        self.assertEqual(self.calls(), [])
+
+    def test_failures_and_the_off_switch_let_the_push_through(self):
+        self.assertEqual(self.pre(env=dict(self.env, HOOK_DISABLED="x,pre:bash:comment-check")), "")
+        self.assertEqual(self.calls(), [])
+        self.held(self.pre(env=dict(self.env, HOOK_DISABLED="post:bash:comment-check")), "the post switch is not this one")
+        shutil.rmtree(self.state)
+        self.assertEqual(self.pre(env=dict(self.env, FAKE_CLAUDE_MODE="fail")), "")
+        self.assertEqual(self.stops(), [], "a failed check holds nothing, so the next push is checked")
+        self.assertGreaterEqual(self.checks()[0]["errors"], 1)
+        unwritable = dict(self.env, COMMENT_CHECK_STATE=str(self.repo / "README.md" / "state"))
+        self.assertEqual(self.pre(env=unwritable), "")
+
+
 class Gate(Base):
     def gate(self, payload, path):
         env = dict(self.env, PATH=path)
@@ -384,11 +516,20 @@ class Gate(Base):
         p = self.gate(self.payload(), path)
         self.assertEqual(p.returncode, 0)
         self.assertTrue(marker.exists(), "a pr create payload must reach Python")
+        marker.unlink()
+        self.gate(self.pre_payload(command="ls -la"), path)
+        self.assertFalse(marker.exists(), "a command that names no push or script stays in the shell")
+        for command in ("git push -u origin feature", "bash /tmp/ship.sh"):
+            self.gate(self.pre_payload(command=command), path)
+            self.assertTrue(marker.exists(), f"{command!r} before the command must reach Python")
+            marker.unlink()
 
     def test_gate_end_to_end_and_fails_open(self):
         path = f"{Path(sys.executable).parent}:/usr/bin:/bin"
         out = json.loads(self.gate(self.payload(), path).stdout)
         self.assertIn("3 of the 7", out["hookSpecificOutput"]["additionalContext"])
+        held = json.loads(self.gate(self.pre_payload(), path).stdout)["hookSpecificOutput"]
+        self.assertEqual(held["permissionDecision"], "deny")
         bin_dir = self.tmp / "bin2"
         bin_dir.mkdir()
         broken = bin_dir / "python3"
