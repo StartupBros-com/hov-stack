@@ -6,13 +6,16 @@ Documentation=https://github.com/StartupBros-com/hov-stack
 # be listed, a store file could not be written or no longer decodes, or the disk
 # is below the free-space floor with files still waiting. Each of those means
 # transcripts are not being saved, so each pages (once per hour at most, the
-# alert's per-unit cooldown).
+# alert's per-unit cooldown). A light pass checks only what it looks at, so a
+# fault it cannot see pages from the next full pass, within the hour.
 OnFailure=harness-unit-failure-alert@%n.service
 
 [Service]
 Type=oneshot
-# A pass walks the transcript folders by metadata, reads only the bytes each
-# file gained, and takes no new file after SESSION_ARCHIVE_MAX_BYTES (8 GiB as
+# A full pass walks the transcript folders by metadata (a light pass looks at
+# recent files and changed folders only; session-archive.timer says when each
+# runs), reads only the bytes each file gained, and takes no new file after
+# SESSION_ARCHIVE_MAX_BYTES (8 GiB as
 # shipped) or SESSION_ARCHIVE_MAX_SECONDS (15 minutes of storing), so the first
 # run over a long history finishes across several passes. The walk is not
 # counted in those 15 minutes: it is slow when the directory cache is cold on a

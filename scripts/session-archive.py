@@ -27,9 +27,20 @@ Rules the code keeps:
     failure, a full disk or an unreadable source leaves that file's cursor
     where it was and the pass goes on.
 
-  * Each pass also checks that every live source's store file still has the
+  * A full pass also checks that every live source's store file still has the
     size the state recorded. A store file that was deleted, cut or damaged is
     reported once, and its sources are stored again while they still exist.
+  * Passes come in two sizes. A full pass walks every folder of a root. A light
+    pass looks only where a change can have happened since: at sources that
+    changed in the last 48 hours, at files an earlier pass found and did not
+    store, and at the folders around them (the root, the folders DEPTH below
+    it, every folder between a recent source and the root, the folder named
+    after a recent source and every folder under it, and folders that changed
+    in the last 48 hours). It lists such a folder again only when the folder's
+    own mtime moved, and there it takes files no pass has stored, files
+    replaced under the same name, and folders no pass has listed. A root gets a
+    full pass once its last one is --full-every seconds old, so the light
+    passes only add captures between full passes; they never stand in for one.
   * A cursor that moves back (its store file lost bytes) unbinds every source
     recorded as longer than what is left. Such a source is compared in full and
     stored again; it is never skipped as unchanged, and never continued on the
@@ -45,10 +56,15 @@ Rules the code keeps:
 
 What a pass does NOT prove: an edit inside a growing `.jsonl` that keeps the
 4 KiB before the cursor is not seen, and neither is a store file changed
-without changing its size. `verify` compares whole files on demand.
+without changing its size. `verify` compares whole files on demand. A light
+pass also does not see, until the next full pass: a file that last changed more
+than 48 hours ago and then grows or is edited in place (an old session resumed),
+a new file or folder in a folder it does not look at, and a store file that was
+cut or removed while its sources stayed as they were.
 
 Usage:
-  session-archive.py capture [--max-bytes N] [--max-seconds N] [--min-free-bytes N] [--json]
+  session-archive.py capture [--full] [--full-every N] [--max-bytes N] [--max-seconds N]
+                             [--min-free-bytes N] [--json]
   session-archive.py status [--json]
   session-archive.py verify [--max-bytes N] [PATH ...]
   session-archive.py where PATH
@@ -59,8 +75,8 @@ the built-in roots; DEPTH is the number of leading folders left out of a
 file's key, 1 for a per-project folder).
 
 Store: $SESSION_ARCHIVE_DIR, else ${XDG_DATA_HOME:-~/.local/share}/session-archive.
-Environment: SESSION_ARCHIVE_MAX_BYTES, SESSION_ARCHIVE_MAX_SECONDS,
-SESSION_ARCHIVE_MIN_FREE_BYTES.
+Environment: SESSION_ARCHIVE_FULL_EVERY, SESSION_ARCHIVE_MAX_BYTES,
+SESSION_ARCHIVE_MAX_SECONDS, SESSION_ARCHIVE_MIN_FREE_BYTES.
 Exit: 0 ok, also when another capture holds the lock · 1 a store or source
 error was counted, the disk is below the free-space floor with files still to
 store, or verify found a difference · 2 usage · 3 zstd is missing.
@@ -91,6 +107,13 @@ COMMIT_EVERY = 100             # files per state commit; the store is fsynced pe
 DEFAULT_MAX_BYTES = 8 << 30    # bytes read or decoded per pass before the rest waits for the next one
 DEFAULT_MAX_SECONDS = 15 * 60  # a pass takes no new file after storing this long (the unit's timeout is 45 min)
 DEFAULT_MIN_FREE = 10 << 30    # free bytes on the store's disk below which a pass stores nothing more
+# Seconds after a root's last full pass before the next pass is full. Under an
+# hour on purpose: on an hourly timer every pass stays full (a timer that fires
+# two minutes early must not push the next full walk out by an hour), and on a
+# ten-minute timer a full walk comes every 50 to 61 minutes.
+DEFAULT_FULL_EVERY = 3000
+RECENT_NS = 48 * 3600 * 10 ** 9   # a light pass looks at sources and folders that changed this recently
+RACY_NS = 2 * 10 ** 9          # a folder listed this soon after it changed is listed again by the next light pass
 ZSTD_MAGIC = b"\x28\xb5\x2f\xfd"
 ZSTD = shutil.which("zstd")
 
@@ -106,7 +129,7 @@ DEFAULT_ROOTS = (
 
 COUNTERS = ("scanned", "changed", "appended", "streams", "versions", "proved", "covered", "adopted",
             "reconciled", "partial_frames_set_aside", "deferred", "skipped", "source_errors",
-            "store_errors", "low_disk", "bytes_read", "bytes_stored")
+            "store_errors", "low_disk", "full_walks", "folders_read", "bytes_read", "bytes_stored")
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS streams(
@@ -117,6 +140,12 @@ CREATE TABLE IF NOT EXISTS sources(
   path TEXT PRIMARY KEY, stream INTEGER NOT NULL, size INTEGER NOT NULL,
   mtime_ns INTEGER NOT NULL, ino INTEGER NOT NULL, seen_ns INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS meta(k TEXT PRIMARY KEY, v TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS sources_mtime ON sources(mtime_ns);
+-- What a light pass goes by. A full pass rebuilds both for its root, and
+-- neither decides what is stored: a wrong row can only delay a capture until
+-- the next full pass. folders.mtime_ns 0 means "list it again next pass".
+CREATE TABLE IF NOT EXISTS folders(path TEXT PRIMARY KEY, depth INTEGER NOT NULL, mtime_ns INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS pending(path TEXT PRIMARY KEY);
 """
 
 
@@ -130,6 +159,10 @@ class SourceError(Exception):
 
 class Skipped(Exception):
     """A transcript disappeared or changed while it was read; the next pass takes it."""
+
+
+class Gone(Skipped):
+    """A transcript was gone before it could be opened: nothing is left waiting for it."""
 
 
 @dataclass(frozen=True)
@@ -174,25 +207,35 @@ def followed(agent: str, parts: tuple) -> bool:
     return parent == "tool-results" or (parent == "workflows" and name.endswith(".json"))
 
 
-def walk(root: Root, problem: Optional[Callable[[str, OSError], None]] = None) -> Iterator[tuple]:
+def walk(root: Root, problem: Optional[Callable[[str, OSError], None]] = None, folders: Optional[list] = None,
+         start: Optional[str] = None, below: tuple = ()) -> Iterator[tuple]:
     """Yield (key, path, stat) for each followed regular file. Metadata only; symlinks are not followed.
 
-    A folder or file that went away (or a root that was never there) is passed
-    over. Any other failure to list a folder or to read an entry's metadata goes
-    to `problem`, and the walk carries on with the rest.
+    Walks the whole root, or only the folder `start`, whose path below the root
+    is `below`. A folder or file that went away (or a root that was never there)
+    is passed over. Any other failure to list a folder or to read an entry's
+    metadata goes to `problem`, and the walk carries on with the rest. Each
+    folder listed is added to `folders` as (path, its depth below the root, its
+    mtime before the listing, the time the listing began).
     """
     def report(path: str, error: OSError) -> None:
         if problem is not None and not isinstance(error, (FileNotFoundError, NotADirectoryError)):
             problem(path, error)
 
-    stack = [(root.path, ())]
+    stack = [(start or root.path, below)]
     while stack:
         directory, parts = stack.pop()
         try:
+            # The mtime is read before the listing: a file added during the
+            # listing moves it on, and the next light pass lists the folder again.
+            before = os.stat(directory).st_mtime_ns
+            read_at = time.time_ns()
             entries = os.scandir(directory)
         except OSError as error:
             report(directory, error)
             continue
+        if folders is not None:
+            folders.append((directory, len(parts), before, read_at))
         with entries:
             while True:
                 try:
@@ -348,13 +391,14 @@ def range_hash(fd: int, start: int, end: int) -> Optional[bytes]:
 
 class Archive:
     def __init__(self, store: str, roots: list, max_bytes: int = DEFAULT_MAX_BYTES, min_free: int = 0,
-                 max_seconds: int = 0, readonly: bool = False):
+                 max_seconds: int = 0, readonly: bool = False, full_every: int = 0):
         self.store = store
         self.data = os.path.join(store, "data")
         self.roots = roots
         self.max_bytes = max_bytes
         self.min_free = min_free          # 0: no floor
         self.max_seconds = max_seconds    # 0: no limit
+        self.full_every = full_every      # seconds between full passes of a root; 0: every pass is full
         self.spent = 0
         self.n: collections.Counter = collections.Counter()
         self.cut: set = set()             # streams whose cursor moved back during this pass
@@ -655,7 +699,7 @@ class Archive:
         try:
             fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
         except FileNotFoundError as error:
-            raise Skipped("the source is gone") from error
+            raise Gone("the source is gone") from error
         except OSError as error:
             raise SourceError(f"cannot open: {error}") from error
         try:
@@ -668,9 +712,9 @@ class Archive:
                 stream = self.reconcile(stream)
                 # The quick check is enough only for an append-only file that grew in
                 # place while no other path moved its stream. `seen` is
-                # (stream, size, mtime_ns, ino) from this path's last pass, read
-                # before the pass began: it says nothing about a stream whose
-                # cursor moved back since, which another file may have refilled.
+                # (stream, size, mtime_ns, ino) recorded when this path was last
+                # stored: it says nothing about a stream whose cursor moved back
+                # since, which another file may have refilled.
                 if (key.endswith(".jsonl") and snap.st_size > stream.content_bytes
                         and stream.content_bytes == seen[1] and snap.st_ino == seen[3]
                         and stream.id not in self.cut):
@@ -706,16 +750,77 @@ class Archive:
         self.n["source_errors"] += 1
         log(f"cannot read {path}: {error.strerror or error}")
 
-    def capture(self) -> dict:
-        started = time.time()
+    def problem(self, path: str, error: OSError) -> None:
+        """Count a failure to read a path's metadata, as walk() does: one that went away is not an error."""
+        if not isinstance(error, (FileNotFoundError, NotADirectoryError)):
+            self.unreadable(path, error)
+
+    # ---- what a pass looks at ----------------------------------------------------
+
+    @staticmethod
+    def walk_key(root: Root) -> str:
+        return f"full_walk\t{root.agent}\t{root.path}\t{root.depth}"
+
+    @staticmethod
+    def below(path: str) -> tuple:
+        """Bounds of a range query over every path under a folder."""
+        return path + os.sep, path + chr(ord(os.sep) + 1)
+
+    @staticmethod
+    def place(path: str, roots: list) -> Optional[tuple]:
+        """(root, parts below it) for a path that is, or is under, one of `roots`."""
+        for root in roots:
+            if path == root.path:
+                return root, ()
+            if path.startswith(root.path + os.sep):
+                return root, tuple(path[len(root.path) + 1:].split(os.sep))
+        return None
+
+    def full_due(self, root: Root, now: int) -> bool:
+        if not self.full_every:
+            return True
+        row = self.db.execute("SELECT v FROM meta WHERE k=?", (self.walk_key(root),)).fetchone()
+        if row is None:
+            return True
+        last = int(row[0])
+        return last > now or now - last >= self.full_every * 10 ** 9     # a clock that moved back walks in full
+
+    def seen(self, path: str) -> Optional[tuple]:
+        """(stream, size, mtime_ns, ino) recorded for a source path by the last pass that stored it."""
+        return self.db.execute("SELECT stream, size, mtime_ns, ino FROM sources WHERE path=?", (path,)).fetchone()
+
+    def plan(self, full: Optional[bool] = None) -> tuple:
+        """What this pass has to store: (work, folder rows, roots walked in full, pending paths to clear).
+
+        Reads metadata and the state and writes nothing. `work` maps a path to
+        (mtime_ns, path, agent, key). With `full` unset, a root is walked in full
+        when its last full pass is full_every seconds old; True walks every root
+        in full, False none.
+        """
+        now = time.time_ns()
+        walked = [root for root in self.roots if full or (full is None and self.full_due(root, now))]
+        light = [root for root in self.roots if root not in walked]
+        work: dict = {}
+        folders: list = []
+        clear: set = set()
+        if walked:
+            self.full_plan(walked, work, folders)
+        if light:
+            self.light_plan(light, now, work, folders, clear)
+        # A folder that changed within RACY_NS of its listing can change again
+        # inside the same timestamp tick, unseen: 0 lists it again next pass.
+        rows = [(path, depth, mtime_ns if read_at - mtime_ns >= RACY_NS else 0)
+                for path, depth, mtime_ns, read_at in folders]
+        return work, rows, walked, clear
+
+    def full_plan(self, roots: list, work: dict, folders: list) -> None:
         known = {row[0]: row[1:] for row in self.db.execute(
             "SELECT path, stream, size, mtime_ns, ino FROM sources")}
         streams = {row[0]: row[1:] for row in self.db.execute(
             "SELECT id, agent, key, version, store_bytes, broken, content_bytes FROM streams")}
         checked: dict = {}
-        work = []
-        for root in self.roots:
-            for key, path, st in walk(root, self.unreadable):
+        for root in roots:
+            for key, path, st in walk(root, self.unreadable, folders):
                 self.n["scanned"] += 1
                 seen = known.get(path)
                 # A file is left alone when it is as the last pass saw it AND its
@@ -728,9 +833,150 @@ class Archive:
                         and self.store_agrees(seen[0], streams, checked)
                         and streams[seen[0]][5] >= seen[1]):
                     continue
-                work.append((st.st_mtime_ns, path, root.agent, key))
-        work.sort()          # oldest first: the files nearest deletion are saved first
+                work[path] = (st.st_mtime_ns, path, root.agent, key)
+
+    def light_plan(self, roots: list, now: int, work: dict, folders: list, clear: set) -> None:
+        """Look where a change can have happened in these roots since their last full pass (module docstring)."""
+        cutoff = now - RECENT_NS
+        looked: set = set()
+
+        def consider(root: Root, key: str, path: str, st: os.stat_result) -> None:
+            looked.add(path)
+            self.n["scanned"] += 1
+            row = self.db.execute(
+                "SELECT s.size, s.mtime_ns, s.ino, t.content_bytes, t.broken FROM sources s "
+                "LEFT JOIN streams t ON t.id = s.stream WHERE s.path=?", (path,)).fetchone()
+            # Left alone on the full pass's terms, except that the store file's
+            # size is not read: that check runs on the full pass.
+            if (row and row[:3] == (st.st_size, st.st_mtime_ns, st.st_ino)
+                    and row[3] is not None and not row[4] and row[3] >= row[0]):
+                return
+            work[path] = (st.st_mtime_ns, path, root.agent, key)
+
+        # Sources that changed lately, and files an earlier pass found and did not store.
+        recent = [row[0] for row in self.db.execute("SELECT path FROM sources WHERE mtime_ns >= ?", (cutoff,))]
+        waiting = [row[0] for row in self.db.execute("SELECT path FROM pending")]
+        ancestors: set = set()
+        named: set = set()
+        for path in recent + waiting:
+            where = self.place(path, roots)
+            if where is None:
+                continue
+            root, parts = where
+            folder = os.path.dirname(path)
+            while folder not in ancestors:
+                ancestors.add(folder)
+                if len(folder) <= len(root.path):
+                    break
+                folder = os.path.dirname(folder)
+            named.add(os.path.splitext(path)[0])      # a session's own folder: <id>.jsonl beside <id>/
+            if path in looked or len(parts) <= root.depth or not followed(root.agent, parts):
+                continue
+            try:
+                st = os.stat(path, follow_symlinks=False)
+            except OSError as error:
+                if isinstance(error, (FileNotFoundError, NotADirectoryError)):
+                    clear.add(path)
+                else:
+                    self.unreadable(path, error)       # stays waiting: tried again next pass
+                continue
+            if stat.S_ISREG(st.st_mode):
+                consider(root, "/".join(parts[root.depth:]), path, st)
+        clear.update(path for path in waiting if path in looked and path not in work)
+
+        # The folders to look at, each with the mtime its last listing saw (None: never listed).
+        check: dict = {}
+        for root in roots:
+            low, high = self.below(root.path)
+            check[root.path] = None
+            for path, mtime_ns in self.db.execute(
+                    "SELECT path, mtime_ns FROM folders WHERE (path=? OR (path >= ? AND path < ?)) "
+                    "AND (depth <= ? OR mtime_ns >= ? OR mtime_ns = 0)", (root.path, low, high, root.depth, cutoff)):
+                check[path] = mtime_ns
+        for folder in named:
+            low, high = self.below(folder)
+            for path, mtime_ns in self.db.execute(
+                    "SELECT path, mtime_ns FROM folders WHERE path=? OR (path >= ? AND path < ?)", (folder, low, high)):
+                check[path] = mtime_ns
+        for folder in ancestors - check.keys():
+            row = self.db.execute("SELECT mtime_ns FROM folders WHERE path=?", (folder,)).fetchone()
+            check[folder] = row[0] if row else None
+
+        listed: set = set()
+        for directory in sorted(check):
+            where = self.place(directory, roots)
+            if where is None or directory in listed:
+                continue
+            root, parts = where
+            try:
+                st = os.stat(directory)
+                if not stat.S_ISDIR(st.st_mode) or st.st_mtime_ns == check[directory]:
+                    continue
+                read_at = time.time_ns()
+                entries = os.scandir(directory)
+            except OSError as error:
+                self.problem(directory, error)
+                continue
+            self.n["folders_read"] += 1
+            listed.add(directory)
+            folders.append((directory, len(parts), st.st_mtime_ns, read_at))
+            with entries:
+                while True:
+                    try:
+                        entry = next(entries)
+                    except StopIteration:
+                        break
+                    except OSError as error:        # the listing itself failed part-way
+                        self.problem(directory, error)
+                        break
+                    try:
+                        if entry.is_dir(follow_symlinks=False):
+                            if entry.path in check or entry.path in listed or self.db.execute(
+                                    "SELECT 1 FROM folders WHERE path=?", (entry.path,)).fetchone():
+                                continue            # looked at in its own turn, or left to the full pass
+                            # A folder no pass has listed: everything in it is new here.
+                            mark = len(folders)
+                            for key, path, fst in walk(root, self.unreadable, folders, entry.path,
+                                                       parts + (entry.name,)):
+                                if path not in looked:
+                                    consider(root, key, path, fst)
+                            listed.update(item[0] for item in folders[mark:])
+                        elif entry.is_file(follow_symlinks=False):
+                            rel = parts + (entry.name,)
+                            if len(rel) <= root.depth or not followed(root.agent, rel) or entry.path in looked:
+                                continue
+                            known = self.db.execute("SELECT ino FROM sources WHERE path=?", (entry.path,)).fetchone()
+                            # A file no pass has stored, or one replaced under its name
+                            # (another inode, which the listing gives without a stat).
+                            if known is None or known[0] != entry.inode():
+                                consider(root, "/".join(rel[root.depth:]), entry.path,
+                                         entry.stat(follow_symlinks=False))
+                    except OSError as error:
+                        self.problem(entry.path, error)
+
+    # ---- capture -------------------------------------------------------------
+
+    def capture(self, full: Optional[bool] = None) -> dict:
+        """One pass. `full`: True walks every root in full, False none, None each root that is due."""
+        started = time.time()
+        walked_at = time.time_ns()
+        work, folder_rows, walked, clear = self.plan(full)
         self.n["changed"] = len(work)
+        self.n["full_walks"] = len(walked)
+        # What the look found is saved before anything is stored, so a pass cut
+        # short by a budget, the free-space floor or a kill leaves the files it
+        # did not store where the next light pass finds them.
+        self.db.execute("BEGIN")
+        for root in walked:
+            low, high = self.below(root.path)
+            self.db.execute("DELETE FROM folders WHERE path=? OR (path >= ? AND path < ?)", (root.path, low, high))
+            self.db.execute("DELETE FROM pending WHERE path >= ? AND path < ?", (low, high))
+            self.db.execute("INSERT OR REPLACE INTO meta(k, v) VALUES (?, ?)", (self.walk_key(root), str(walked_at)))
+        self.db.executemany("INSERT OR REPLACE INTO folders(path, depth, mtime_ns) VALUES (?, ?, ?)", folder_rows)
+        self.db.executemany("DELETE FROM pending WHERE path=?", ((path,) for path in clear))
+        self.db.executemany("INSERT OR IGNORE INTO pending(path) VALUES (?)", ((path,) for path in work))
+        self.db.execute("COMMIT")
+        work = sorted(work.values())    # oldest first: the files nearest deletion are saved first
         self.db.execute("BEGIN")
         uncommitted = 0
         # The time budget starts here, after the walk. Counted from the start of
@@ -752,7 +998,11 @@ class Archive:
                     f"{len(work) - index} file(s) are not stored this pass")
                 break
             try:
-                self.capture_one(agent, key, path, known.get(path))
+                self.capture_one(agent, key, path, self.seen(path))
+                self.db.execute("DELETE FROM pending WHERE path=?", (path,))
+            except Gone:
+                self.n["skipped"] += 1
+                self.db.execute("DELETE FROM pending WHERE path=?", (path,))
             except Skipped:
                 self.n["skipped"] += 1
             except SourceError as error:
@@ -780,8 +1030,14 @@ class Archive:
             "SELECT COUNT(*), COALESCE(SUM(content_bytes), 0), COALESCE(SUM(store_bytes), 0), "
             "COALESCE(SUM(broken), 0) FROM streams").fetchone()
         sources = self.db.execute("SELECT COUNT(*) FROM sources").fetchone()[0]
+        # A state file written before light passes existed has no pending table,
+        # and this handle is read-only, so it cannot be added here.
+        pending = 0
+        if self.db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='pending'").fetchone():
+            pending = self.db.execute("SELECT COUNT(*) FROM pending").fetchone()[0]
         last = self.db.execute("SELECT v FROM meta WHERE k='last_pass'").fetchone()
-        return {"store": self.store, "streams": streams, "sources": sources, "content_bytes": content,
+        return {"store": self.store, "streams": streams, "sources": sources, "pending": pending,
+                "content_bytes": content,
                 "store_bytes": stored, "broken_streams": broken,
                 "ratio": round(content / stored, 2) if stored else None,
                 "last_pass": json.loads(last[0]) if last else None}
@@ -896,6 +1152,11 @@ def build_parser() -> argparse.ArgumentParser:
                         help="follow this folder instead of the built-in roots (repeatable)")
     sub = parser.add_subparsers(dest="command", required=True)
     capture = sub.add_parser("capture", help="one pass: save what every followed file has gained")
+    capture.add_argument("--full", action="store_true", help="walk every folder of every root this pass")
+    capture.add_argument("--full-every", type=int,
+                         default=int(os.environ.get("SESSION_ARCHIVE_FULL_EVERY") or DEFAULT_FULL_EVERY),
+                         help="seconds after a root's last full pass before the next pass walks it in full; "
+                         "the passes between look only where a change can have happened (0: every pass is full)")
     capture.add_argument("--max-bytes", type=int,
                          default=int(os.environ.get("SESSION_ARCHIVE_MAX_BYTES") or DEFAULT_MAX_BYTES),
                          help="stop taking new files once this many bytes were read or decoded")
@@ -932,7 +1193,8 @@ def main(argv: Optional[list] = None) -> int:
     if not readonly:
         os.makedirs(store, mode=0o700, exist_ok=True)
     archive = Archive(store, parse_roots(args.root), getattr(args, "max_bytes", DEFAULT_MAX_BYTES),
-                      getattr(args, "min_free_bytes", 0), getattr(args, "max_seconds", 0), readonly=readonly)
+                      getattr(args, "min_free_bytes", 0), getattr(args, "max_seconds", 0), readonly=readonly,
+                      full_every=getattr(args, "full_every", 0))
     try:
         if args.command == "capture":
             lock = os.open(os.path.join(store, "lock"),
@@ -942,7 +1204,7 @@ def main(argv: Optional[list] = None) -> int:
             except BlockingIOError:
                 log("another capture holds the lock; nothing to do")
                 return 0
-            summary = archive.capture()
+            summary = archive.capture(True if args.full else None)
             if args.json:
                 print(json.dumps(summary, sort_keys=True))
             else:
