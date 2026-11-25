@@ -41,7 +41,7 @@ ME=${CLAUDE_CODE_SESSION_ID:-shell:${USER:-unknown}}
 
 [ "$#" -gt 0 ] || usage
 CMD=$1; shift
-# `status` is `show`: sessions reach for that word first.
+# `status` is another word for `show`.
 case "$CMD" in hold|show|release|check) ;; status) CMD=show ;; -h|--help) usage ;; *) usage ;; esac
 REPO="" MINUTES="" REASON="" ALLOW=() PR="" JSON=0 FORCE=0
 while [ "$#" -gt 0 ]; do

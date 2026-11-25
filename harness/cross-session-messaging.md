@@ -48,13 +48,22 @@ holds is not sent:
 - News that can wait goes on the PR or issue it concerns, and
   `notify_when_idle` answers "is that session done yet".
 
-Re-measure due on or after 2026-12-08 (`harness/deferral-watchlist.tsv`,
-row `peer-wake-remeasure`). If merge and hold notices are still above 10% of
-wakes, propose a no-broadcast refusal in `peer-loop-guard` (the same message
-to 3 or more sessions in one turn). If FYIs and acks are still above 10%,
-propose a sender-side refusal for those kinds. Countermetric: PRs left
-conflicting or blocked for more than 24 hours while their session was live.
-Both hook changes need the operator's go.
+Re-measured on 2026-11-24, 70 hours after the rule changed (numbers on
+hov-stack#844; `harness/deferral-watchlist.tsv`, row `peer-wake-remeasure`).
+The lines were set in advance: above 10% of wakes for merge and hold notices
+meant proposing a no-broadcast refusal in `peer-loop-guard`, above 10% for
+FYIs and acks meant proposing a sender-side refusal for those kinds, and
+either hook change needs the operator's go.
+
+- Peer wakes fell from 79.6 a day to 7.9.
+- Merge and hold notices are 1 of 23 wakes, so no refusal is proposed.
+- FYIs and acks are 8 of 23, about 2.7 a day against about 17.5 before. That
+  is above the line, so the sender-side refusal stands as a proposal awaiting
+  the operator's go. The recommendation on the issue is not to build it: half
+  of those messages changed the receiver's work, and a hook cannot tell them
+  from the rest without a model call.
+- PRs left conflicting or stuck did not rise: 1 and 0 in 204 merged.
+- `merge-freeze.sh hold` had not been run once.
 
 ## Decision 2026-08-08: removed `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`
 
