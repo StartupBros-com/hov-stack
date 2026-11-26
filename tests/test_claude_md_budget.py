@@ -94,7 +94,7 @@ def dated_citation_offenders(text: str) -> list[int]:
 # bytes and no margin: the 7 bytes free before it are the 7 free after it
 # (16,078 to 16,169). Two shorter lines that fit under 16,085 were measured
 # first and rejected: without the example lists, 4 of 10 report runs each
-# wrote no file at all, against 0 of 10 for this sentence. Runs and numbers:
+# wrote no file at all, against 1 of 10 (a timeout) for this sentence. Runs and numbers:
 # `harness/deliverable-locations.md`, "Format".
 #
 # CLAUDE.md only, deliberately. The memory index (MEMORY.md) is the other
