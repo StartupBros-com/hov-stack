@@ -1063,3 +1063,5 @@ refusal itself):
    Matching the builtin only in command position — not as any argv element, and not
    inside a quoted search pattern — would fix a refusal that fires on ordinary code search
    in any repo whose code mentions one of those words.
+   - This one is filed upstream as anthropics/claude-code#95611 (open).
+   - A 2.1.332 reproduction and our refusal counts were added as a comment there on 2026-11-26.

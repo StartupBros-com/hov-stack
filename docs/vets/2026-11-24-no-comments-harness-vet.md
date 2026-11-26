@@ -703,13 +703,14 @@ vetting index.
    - In real sessions it dispatched the Comment Reviewer in 7 of 11, so the skip is not shown
      to carry over.
    - Its inline path deleted 27 of 42 decision facts on this fixture.
-   - Worth an issue upstream with compound-engineering. Not filed: an outbound write this vet
-     was not asked for.
+   - Filed upstream on 2026-11-26 as EveryInc/compound-engineering-plugin#2099.
+     - The filing came after re-reading 3.38.3, still the current release: the skill says size never justifies running a reviewer inline.
+     - Its only comment keep list is in the Comment Reviewer's persona file.
 3. **`code-slop` points to `technical-debt`, a skill hov-stack does not ship.**
    - The pointers are `SKILL.md:18`, a link to `../technical-debt`, and
      `rules/comments-placeholder.md:126`.
    - `UPSTREAM.md:34` records that the sibling skill was deliberately not ported.
-   - Both are dead pointers. Flagged, not fixed here.
+   - Both are dead pointers. Fixed in hov-stack 0.3.11 (#929).
 4. **Vet runners pass the model key to every command an arm runs.** This runner does, and so
    do those of `pstack-2026-11`, `build-design-2026-11` and `learn-taste-2026-11`: each keeps
    `ANTHROPIC_API_KEY` and the other route variables. `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB` (2.6) is the candidate fix for
@@ -1100,8 +1101,12 @@ hook, and it was wired anyway.
     - The remaining flag was a C pointer write, fixed in #905.
     - The auditors agreed on 25 of 27. With nothing planted, treat this as one unchecked read.
   - **What changed.** Because acting after the pull request opens costs a CI run, the check
-    moved to a one-time hold at a branch's first push (#913). It runs as a trial whose
+    moved to a one-time hold at a branch's first push (#913). It ran as a trial whose
     keep-or-kill rule was written before it started (#911).
+  - **Trial result, 2026-11-26: kept.** The counts are on #911.
+    - Rule 1: 7 of the first 10 holds pushed a branch that dropped or rewrote a flagged comment.
+    - Rule 2: a blind re-score in run C's set-up found 0 of the 26 deleted comments load-bearing.
+    - The planted comments were re-found 7 of 9.
 
 **harness-optimizer (replaces row 13).** Its lane table (0.2.1) lists `instructions` with
 "supplied task/routing evidence" as a source, and `tooling`. No listed source is agent output,
