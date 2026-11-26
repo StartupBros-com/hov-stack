@@ -58,6 +58,20 @@ run_report flaky 7; RC=$?
 grep -qF 'ccusage rollup unavailable' "$TMP/out-flaky.log" && ok || bad "flaky npx: informational line missing: $(cat "$TMP/out-flaky.log")"
 grep -qE '^WARN spend report: ccusage' "$TMP/out-flaky.log" && bad "flaky npx: a WARN fired on a fetch failure" || ok
 
+echo "== 6: reads the renamed default ledger under scratch HOME =="
+python3 - "$TMP/home" <<'PYDB'
+import pathlib, sqlite3, sys, time
+root = pathlib.Path(sys.argv[1]) / ".config" / "hov-router"
+root.mkdir(parents=True)
+with sqlite3.connect(root / "hov-router.db") as db:
+    db.execute("CREATE TABLE requests (timestamp INTEGER, cost_usd REAL, total_tokens INTEGER, model TEXT)")
+    db.execute("INSERT INTO requests VALUES (?, 42, 1000000, 'fixture-model')", (int(time.time() * 1000) - 1000,))
+PYDB
+run_report ledger; RC=$?
+[ "$RC" = 0 ] && ok || bad "ledger run: exit $RC"
+grep -qF 'fixture-model' "$TMP/out-ledger.log" && ok || bad "renamed ledger not read: $(cat "$TMP/out-ledger.log")"
+! grep -qF 'DB missing' "$TMP/out-ledger.log" && ok || bad "renamed ledger reported missing"
+
 echo
 echo "spend-report: $pass passed, $fail failed"
 [ "$fail" = 0 ]

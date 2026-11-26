@@ -154,7 +154,7 @@ def sqlite_copy_of(live_db: str):
     return holds
 
 
-CCFLARE = f"{HOME}/.config/better-ccflare"
+HOV_ROUTER = f"{HOME}/.config/hov-router"
 
 
 # Ordered most- to least-valuable. Age floors are deliberately generous: this runs
@@ -179,11 +179,11 @@ RULES = [
     # five minutes from taking it from both DB snapshots.
     Rule(
         "ccflare-db-copy",
-        (f"{CCFLARE}/*.db.bak-*", f"{CCFLARE}/pre-*-backup-*.db",
-         f"{CCFLARE}/*.db.backup*", f"{CCFLARE}/backups/*"),
+        (f"{HOV_ROUTER}/*.db.bak-*", f"{HOV_ROUTER}/pre-*-backup-*.db",
+         f"{HOV_ROUTER}/*.db.backup*", f"{HOV_ROUTER}/backups/*"),
         min_age_days=14,
         keep_newest=1,
-        restorable=sqlite_copy_of(f"{CCFLARE}/better-ccflare.db"),
+        restorable=sqlite_copy_of(f"{HOV_ROUTER}/hov-router.db"),
         why="copy of ccflare's DB, or a recovery point beside it; the newest complete copy is kept",
     ),
     # A 7-day floor, under the 14 days everything else waits: the operator's
@@ -191,7 +191,7 @@ RULES = [
     # feeds cache-telemetry reports and holds no state; ~150 MB a day.
     Rule(
         "ccflare-codex-trace",
-        f"{CCFLARE}/codex-traces/codex-trace-*.jsonl",
+        f"{HOV_ROUTER}/codex-traces/codex-trace-*.jsonl",
         min_age_days=7,
         keep_newest=2,
         why="unbounded append trace with no retention code in trace.ts",

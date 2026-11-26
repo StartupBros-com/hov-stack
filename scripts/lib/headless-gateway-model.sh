@@ -19,7 +19,7 @@ headless_gateway_model_args() {
   while IFS= read -r header; do
     header=${header%%:*}
     header=${header//[[:space:]]/}
-    [ "${header,,}" != x-better-ccflare-account-id ] || return 0
+    [ "${header,,}" != x-hov-router-account-id ] || return 0
   done <<< "${ANTHROPIC_CUSTOM_HEADERS:-}"
   headless_gateway_scope_allows_default || return 0
   HEADLESS_GATEWAY_MODEL_ARGS=(--model fable)
@@ -66,7 +66,7 @@ headless_gateway_scope_allows_default() {
             "CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD", "CLAUDE_CODE_USE_MANTLE", "CLAUDE_CODE_USE_GATEWAY"))) |
             all(.[]; . == null or . == "")) and
           (($env.ANTHROPIC_CUSTOM_HEADERS // "") | type == "string" and
-            (split("\n") | all(.[]; (split(":")[0] | ascii_downcase | gsub("[[:space:]]"; "")) != "x-better-ccflare-account-id")))))
+            (split("\n") | all(.[]; (split(":")[0] | ascii_downcase | gsub("[[:space:]]"; "")) != "x-hov-router-account-id")))))
     ' "$file" >/dev/null 2>&1 || return 1
   done
 }

@@ -5,7 +5,7 @@
 # What this pins:
 #   1. reconcile_runtime_env resolves ANTHROPIC_BASE_URL by profile_role —
 #      workstation -> loopback guard, satellite -> the proxy host's serve URL,
-#      read from CCFLARE_URL_SATELLITE in the environment, else from the
+#      read from HOV_ROUTER_URL_SATELLITE in the environment, else from the
 #      overlay env file (the public tree ships no proxy host; an exported value
 #      wins) — on both the fresh-seed and merge branches, so a fresh satellite
 #      bootstrap can never inherit the workstation's loopback URL (AE5), and a
@@ -46,7 +46,7 @@ bad() { fail=$((fail + 1)); echo "FAIL: $*" >&2; }
 LOOPBACK_URL="http://127.0.0.1:8788"
 # A documentation address stands in for the proxy host: the tree ships none.
 SATELLITE_URL="https://proxy-host.example.net"
-unset CCFLARE_URL_SATELLITE
+unset HOV_ROUTER_URL_SATELLITE
 HOSTNAME_SHORT=$(hostname -s 2>/dev/null || hostname)
 
 # No live user manager exists inside this scratch fixture (mirrors
@@ -158,14 +158,14 @@ jq 'del(.env.ANTHROPIC_AUTH_TOKEN)' "$FIX_REPO/settings.json" \
 build_fixture sat satellite
 # PLANTED NEGATIVE: with no proxy URL in the environment the satellite fails
 # closed, names the variable, and writes nothing.
-unset CCFLARE_URL_SATELLITE
+unset HOV_ROUTER_URL_SATELLITE
 run_sync reconcile-runtime-env
-[ "$RC" -ne 0 ] && ok || bad "satellite reconcile with CCFLARE_URL_SATELLITE unset succeeded; must fail closed"
-grep -q "CCFLARE_URL_SATELLITE is unset" <<<"$OUT" && ok \
-  || bad "satellite failure does not name CCFLARE_URL_SATELLITE: $(printf '%s' "$OUT" | tail -3)"
+[ "$RC" -ne 0 ] && ok || bad "satellite reconcile with HOV_ROUTER_URL_SATELLITE unset succeeded; must fail closed"
+grep -q "HOV_ROUTER_URL_SATELLITE is unset" <<<"$OUT" && ok \
+  || bad "satellite failure does not name HOV_ROUTER_URL_SATELLITE: $(printf '%s' "$OUT" | tail -3)"
 [ ! -e "$FIX_CLAUDE_HOME/settings.json" ] && ok \
-  || bad "satellite reconcile with CCFLARE_URL_SATELLITE unset wrote settings.json; fail-closed must write nothing"
-export CCFLARE_URL_SATELLITE=$SATELLITE_URL
+  || bad "satellite reconcile with HOV_ROUTER_URL_SATELLITE unset wrote settings.json; fail-closed must write nothing"
+export HOV_ROUTER_URL_SATELLITE=$SATELLITE_URL
 run_sync reconcile-runtime-env
 [ "$RC" -eq 0 ] && ok || bad "satellite reconcile exited $RC: $(printf '%s' "$OUT" | tail -3)"
 [ "$(live_env ANTHROPIC_BASE_URL)" = "$SATELLITE_URL" ] && ok \
@@ -184,21 +184,21 @@ grep -q "DRIFT: settings.json differs" <<<"$OUT" \
 # The SessionStart settings hook and an ssh-run install carry no session env, so
 # the overlay env file is the only place the URL is; an exported value still wins.
 OVERLAY_URL="https://overlay-proxy.example.net"
-unset CCFLARE_URL_SATELLITE
+unset HOV_ROUTER_URL_SATELLITE
 build_fixture sat-overlay satellite
-printf 'CCFLARE_URL_SATELLITE=%s\n' "$OVERLAY_URL" > "$FIX_OVERLAY/env"
+printf 'HOV_ROUTER_URL_SATELLITE=%s\n' "$OVERLAY_URL" > "$FIX_OVERLAY/env"
 run_sync reconcile-runtime-env
 [ "$RC" -eq 0 ] && ok || bad "satellite reconcile with the URL only in the overlay env exited $RC: $(printf '%s' "$OUT" | tail -3)"
 [ "$(live_env ANTHROPIC_BASE_URL)" = "$OVERLAY_URL" ] && ok \
   || bad "satellite with the URL only in the overlay env seeded ANTHROPIC_BASE_URL='$(live_env ANTHROPIC_BASE_URL)', want $OVERLAY_URL"
-export CCFLARE_URL_SATELLITE=$SATELLITE_URL
+export HOV_ROUTER_URL_SATELLITE=$SATELLITE_URL
 run_sync reconcile-runtime-env
 [ "$(live_env ANTHROPIC_BASE_URL)" = "$SATELLITE_URL" ] && ok \
-  || bad "an exported CCFLARE_URL_SATELLITE did not win over the overlay env (got '$(live_env ANTHROPIC_BASE_URL)')"
-unset CCFLARE_URL_SATELLITE
+  || bad "an exported HOV_ROUTER_URL_SATELLITE did not win over the overlay env (got '$(live_env ANTHROPIC_BASE_URL)')"
+unset HOV_ROUTER_URL_SATELLITE
 
 # ---- 3. unclassified fixture: fail closed ----------------------------------
-unset CCFLARE_URL_SATELLITE
+unset HOV_ROUTER_URL_SATELLITE
 build_fixture unk none
 run_sync reconcile-runtime-env
 [ "$RC" -ne 0 ] && ok || bad "unclassified-host reconcile succeeded; must fail closed"

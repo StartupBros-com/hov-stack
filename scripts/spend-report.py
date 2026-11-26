@@ -33,7 +33,7 @@ import time
 # rather than holding a pin; a fetch or parse failure stays an in-body line.
 CCUSAGE_SPEC = "ccusage@latest"
 
-DB = os.path.expanduser("~/.config/better-ccflare/better-ccflare.db")
+DB = os.path.expanduser("~/.config/hov-router/hov-router.db")
 DAY_MS = 86_400_000
 
 # Flag thresholds. Week-over-week noise on small absolute numbers is not

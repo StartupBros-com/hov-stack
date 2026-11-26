@@ -322,7 +322,7 @@ test('rejects a future-dated cache instead of pinning stale provenance', () => {
   try {
     const sessionId = 'session-123';
     fs.writeFileSync(
-      path.join(f.dir, `better-ccflare-route-${cacheKey(sessionId)}.json`),
+      path.join(f.dir, `hov-router-route-${cacheKey(sessionId)}.json`),
       JSON.stringify({
         at: Date.now() + 86_400_000,
         data: { status: 'known', account: { name: 'stale-account' } },
@@ -356,7 +356,7 @@ test('an oversized cache file is ignored, not parsed', () => {
   const f = fixture();
   try {
     fs.writeFileSync(
-      path.join(f.dir, `better-ccflare-route-${cacheKey('session-123')}.json`),
+      path.join(f.dir, `hov-router-route-${cacheKey('session-123')}.json`),
       'x'.repeat(70000),
     );
     assert.match(runStatusline(f, 'gpt'), /● acct-a/);
@@ -522,7 +522,7 @@ test('an old reply remains explicitly historical after a newer user turn', () =>
 test('last session route age comes from recordedAt, never the five-second fetch cache', () => {
   const f = fixture();
   try {
-    const cache = path.join(f.dir, `better-ccflare-route-${cacheKey('session-123')}.json`);
+    const cache = path.join(f.dir, `hov-router-route-${cacheKey('session-123')}.json`);
     fs.writeFileSync(cache, JSON.stringify({
       at: Date.now(),
       data: {
@@ -544,7 +544,7 @@ test('missing, invalid and future observation timestamps never imply freshness',
   for (const timestamp of [undefined, null, 'invalid', '2026-01-01T00:00:00Z', 0, -1, Date.now() + 86_400_000]) {
     const f = fixture();
     try {
-      fs.writeFileSync(path.join(f.dir, `better-ccflare-route-${cacheKey('session-123')}.json`), JSON.stringify({
+      fs.writeFileSync(path.join(f.dir, `hov-router-route-${cacheKey('session-123')}.json`), JSON.stringify({
         at: Date.now(), data: { status: 'known', account: { name: 'fixture', recordedAt: timestamp } },
       }));
       const transcript = writeTranscript(f, [assistant('gpt-6.1-sol', { timestamp })]);

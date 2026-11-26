@@ -23,7 +23,7 @@ export PATH="$WORK/bin:/usr/bin:/bin"
 unset DOTFILES_ROLE DOTFILES_ROLE_FILE DOTFILES XDG_CONFIG_HOME XDG_STATE_HOME
 unset CLAUDE_MEMORY_LIVE_ROOT CLAUDE_MEMORY_MIRROR_ROOT HOV_STACK_SYNC_LOCKED
 export CLAUDE_SYNC_SKIP_HOOK_RECONCILE=1
-export CCFLARE_URL_SATELLITE=https://proxy.example.test
+export HOV_ROUTER_URL_SATELLITE=https://proxy.example.test
 
 fresh() {
   HOME=$(mktemp -d "$WORK/home-XXXXXX") || return 1

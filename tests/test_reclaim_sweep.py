@@ -701,16 +701,16 @@ class RealRuleSanityTests(unittest.TestCase):
         2026-10-25. The app's own `.backup.<ms>` copies joined the DB-copy pool
         on 10-25: migrations.ts prunes them to 3 only when it writes another,
         and nothing reads them back."""
-        ccf = f"{R.HOME}/.config/better-ccflare"
-        live = ["better-ccflare.db", "better-ccflare.db-wal", "better-ccflare.db-shm",
-                "better-ccflare.db-journal", "better-ccflare.json",
-                "better-ccflare-v3.7.0-79a95752-5e16ca57", "runners", "guards", "backups",
+        ccf = f"{R.HOME}/.config/hov-router"
+        live = ["hov-router.db", "hov-router.db-wal", "hov-router.db-shm",
+                "hov-router.db-journal", "hov-router.json",
+                "hov-router-v8.0.0-fixture", "runners", "guards", "backups",
                 "codex-traces", "stack-supervisor.log"]
-        copies = ["better-ccflare.db.backup-pre541-20261019-012755",
-                  "better-ccflare.db.backup.1789092886052",
-                  "better-ccflare.db.backup.1789089943418.partial",
-                  "better-ccflare.db.backup.1789089943418.partial-journal",
-                  "better-ccflare.db.bak-20260801",
+        copies = ["hov-router.db.backup-pre541-20261019-012755",
+                  "hov-router.db.backup.1789092886052",
+                  "hov-router.db.backup.1789089943418.partial",
+                  "hov-router.db.backup.1789089943418.partial-journal",
+                  "hov-router.db.bak-20260801",
                   "pre-v3-backup-20260801.db",
                   "backups/pre-native-quota-20260906T002330Z-c1fc60cd.db",
                   "backups/predeploy-10a40371-20260717T0737Z.db.partial",
