@@ -129,6 +129,37 @@ Most of these are not part of this repository: `gsc`, `ga4` and `vastai` are its
 - `cass` (Jeffrey Emanuel): searches past agent sessions on this machine; the `cass-rerank-local` skill builds on it. Its MIT licence carries a rider barring OpenAI, Anthropic and anyone acting for them.
 - `jeffreys-skills` (Jeffrey Emanuel): a paid skill library ($20 a month or $216 a year, no trial) and its manager, `jsm`. This repository never redistributes those skills: `/hov-setup` installs `jsm`, the login runs in the browser through `jsm login --remote`, and you choose which skills to install.
 
+## Optional first-push comment check
+
+`./setup` installs the checker but leaves it off by default. To preview what it would send, run `python3 scripts/comment-check.py --extract-only -C . --base origin/main` from this checkout (replace `.` with the repository to check and choose its base ref). This reads the committed branch diff and makes no model call.
+
+To enable it for Claude Code's Bash tool, add this entry to your overlay's `settings.json` (normally `~/.config/hov-stack/settings.json`). Append the group to any existing `PreToolUse` list; do not replace other hooks or add a second copy if the checker is already registered. Leave `$HOME/.claude` as written: setup renders both paths for your config directory.
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [{
+      "matcher": "Bash",
+      "hooks": [{
+        "type": "command",
+        "timeout": 180,
+        "command": "[ ! -x \"$HOME/.claude/scripts/comment-check-hook.sh\" ] || exec \"$HOME/.claude/scripts/comment-check-hook.sh\""
+      }]
+    }]
+  }
+}
+```
+
+Run `./setup` and start a new Claude Code session. If setup doesn't manage your settings, it writes `settings.hov-stack.json` beside them instead; copy the rendered entry into your settings to activate it.
+
+Before the first push of a feature branch (no local `origin/<branch>` ref yet), the checker uses Git, Python 3 and an authenticated `claude` CLI. It sends added comments, file paths and nearby code to Haiku by default (`COMMENT_CHECK_MODEL` overrides it). It skips tool directives and checks at most 200 comment units, in batches of 40: zero to five model calls, each with a $0.50 budget, not a flat charge per push. The calls have no tools, MCP servers or saved session.
+
+A restatement, banner or commented-out code can hold the push **once**. Review the flags and push again; the checker never edits files or requires you to delete a comment. Missing tools and failed model calls produce no flags; a successful batch can still flag comments if another batch fails. `gh` isn't needed for the first-push check, only for the older post-PR mode and PR-based outcome lookup.
+
+Check metadata and flagged excerpts stay in `COMMENT_CHECK_STATE`, defaulting to `$XDG_STATE_HOME/comment-check` or `~/.local/state/comment-check`. A silent hook is not proof of a successful review: it may have skipped the call or failed open.
+
+To disable it, remove only this entry from the overlay, rerun `./setup` and start a new session. If you installed the entry by hand, remove it from your settings too. To skip it without removing the registration, include `pre:bash:comment-check` in the comma-separated `HOOK_DISABLED` environment variable.
+
 ## Where your own skills go
 
 Keep your own skills in one plugin folder: `<folder>/.claude-plugin/plugin.json`
