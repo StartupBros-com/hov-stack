@@ -75,6 +75,21 @@ rule, so a Codex session follows it only when told.
 what it did. `--print` resolves without launching. `DELIVERABLE_BROWSER=<exe or app>` forces
 a browser.
 
+A Markdown file (`.md`, `.markdown`) is rendered to a styled page first, and that page is what
+opens, because a browser shows a raw `.md` as unstyled text and most reports written since
+2026-10-19 are Markdown. The page is written to `${XDG_CACHE_HOME:-~/.cache}/hov-stack/deliverables/`
+(never beside the source, where `wt-preserve.sh` would rescue it as a deliverable), rewritten on
+every open, and safe to delete. The output line ends with `(rendered from <source>)`, so anything
+that counts what was shown still sees the Markdown path. The renderer is `lib/deliverable-render.js`
+with the vendored parser in `lib/vendor/markdown-it/`: headings get an outline, tables scroll
+inside their own box, task lists and `> [!NOTE]` callouts are drawn, front matter folds away, and
+relative links and images are rewritten to the source's folder. Raw HTML in a report is shown as
+text and the page carries no script and a policy that allows none, since reports quote web
+content. A Mermaid fence is shown as labelled source, not drawn. `--raw` or `DELIVERABLE_RAW=1`
+opens the file unrendered; without node or the renderer the text opens as an escaped plain page.
+This is the floor under a report, not the ceiling: a page whose layout carries the point is
+still written as HTML and opens unchanged.
+
 | Host | Route | Verified |
 |---|---|---|
 | WSL2 | Brave's own executable under the Windows user's AppData (or Program Files), launched detached with `file://wsl.localhost/<distro>/<abs path>`; without Brave, `cmd.exe /c start` on the Windows path (the default browser, Edge on this host) | 2026-09-03: window titled with the test page in the operator's daily Brave |
