@@ -1,7 +1,7 @@
 {
   "name": "Code Slop Detection",
   "version": "1.0.0",
-  "description": "Taste-level review of code for AI-generated patterns in PHP/Laravel and TypeScript/React projects. Catches code that passes every metric but reads like a tutorial \u2014 not human-written. Complements technical-debt's quantitative metrics with qualitative review.",
+  "description": "Taste-level review of code for AI-generated patterns in PHP/Laravel and TypeScript/React projects. Catches code that passes every metric but reads like a tutorial \u2014 not human-written. Complements quantitative metrics with qualitative review.",
   "framework": "PHP / Laravel + Node / TypeScript / React",
   "license": "MIT",
   "author": {

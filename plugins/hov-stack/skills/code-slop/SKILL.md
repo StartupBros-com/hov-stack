@@ -1,7 +1,7 @@
 ---
 name: code-slop
 disable-model-invocation: true
-description: Detect AI-generated code patterns ("slop") in PHP/Laravel and TypeScript/React source — comment narration, generic naming, premature interfaces, defensive overdose, mock-everything tests, and the absence of human "scars". Use when reviewing AI-assisted PRs, auditing code for taste/quality (not metrics — that's technical-debt), or hardening a code-review checklist. Triggers on "review for AI slop", "find AI patterns", "check code feels human", "audit code-quality taste".
+description: Detect AI-generated code patterns ("slop") in PHP/Laravel and TypeScript/React source — comment narration, generic naming, premature interfaces, defensive overdose, mock-everything tests, and the absence of human "scars". Use when reviewing AI-assisted PRs, auditing code for taste/quality rather than metrics, or hardening a code-review checklist. Triggers on "review for AI slop", "find AI patterns", "check code feels human", "audit code-quality taste".
 license: MIT
 metadata:
   author: agent-skills
@@ -15,7 +15,7 @@ metadata:
 
 # Code Slop Detection
 
-Taste-level review of code for AI-generated patterns. Contains 24 rules across 6 categories covering comments, naming, over-engineering, defensive overdose, test slop, and style fingerprints. Where [`technical-debt`](../technical-debt) measures *quantitative* code debt (complexity, duplication, CVEs), this skill measures the *qualitative* failure mode: code that passes every metric but reads like a tutorial blog post, not like a human wrote it.
+Taste-level review of code for AI-generated patterns. Contains 24 rules across 6 categories covering comments, naming, over-engineering, defensive overdose, test slop, and style fingerprints. Where metric tools measure *quantitative* code debt (complexity, duplication, CVEs), this skill measures the *qualitative* failure mode: code that passes every metric but reads like a tutorial blog post, not like a human wrote it.
 
 ## Metadata
 

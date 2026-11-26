@@ -72,7 +72,8 @@ The checker is upstream (Claude Code bundle; dotfiles#436), so route around it
 in every dispatch prompt:
 
 - Plain, separate commands pass, plain `&&`/`;`/pipe chains included. A
-  refused shape (CLAUDE.md's worktree line lists them) goes in a script file
+  refused shape (for example a loop variable, `$( )` in an argument, or an
+  argument that is a builtin name like `eval` or `source`) goes in a script file
   written with the file-write tool, run as `bash /tmp/<scratch>/<name>.sh`;
   never `bash -c`.
 - Never prefix `HOME=` or other env vars onto complex commands — a
