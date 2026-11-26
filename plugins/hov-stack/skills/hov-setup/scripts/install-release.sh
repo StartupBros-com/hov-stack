@@ -65,21 +65,21 @@ umask 022
 # tool|version|platform|url|sha256|members
 # members: comma-separated paths inside the archive; each is installed under its basename.
 TABLE=${HOV_SETUP_RELEASE_TABLE:-'
-gh|2.104.0|linux-x86_64|https://github.com/cli/cli/releases/download/v2.104.0/gh_2.104.0_linux_amd64.tar.gz|98cb101ad87dbbd3f6b2f2bfcbd43197ccd07643140121d8a9cfaa91eadbc24e|gh_2.104.0_linux_amd64/bin/gh
-gh|2.104.0|linux-aarch64|https://github.com/cli/cli/releases/download/v2.104.0/gh_2.104.0_linux_arm64.tar.gz|cb34cefc6f4e77b90731374a2b737516bb8f3033c6ca46aa949e5344f68069e3|gh_2.104.0_linux_arm64/bin/gh
-gh|2.104.0|darwin-arm64|https://github.com/cli/cli/releases/download/v2.104.0/gh_2.104.0_macOS_arm64.zip|23b12706219b9892e44236f988444a24adcf29284e16b35e03ba5b863fb6eb8e|gh_2.104.0_macOS_arm64/bin/gh
-gh|2.104.0|darwin-x86_64|https://github.com/cli/cli/releases/download/v2.104.0/gh_2.104.0_macOS_amd64.zip|a8c2a708dbae89dc7c05ba7b0beafc95bd8d09ab4a3505467b77d32ebf364dc6|gh_2.104.0_macOS_amd64/bin/gh
-uv|0.13.8|linux-x86_64|https://github.com/astral-sh/uv/releases/download/0.13.8/uv-x86_64-unknown-linux-gnu.tar.gz|5acfd9177cfecf0bf87578f059728215ccc884388988f55f7a65041b57387d91|uv-x86_64-unknown-linux-gnu/uv,uv-x86_64-unknown-linux-gnu/uvx
-uv|0.13.8|linux-aarch64|https://github.com/astral-sh/uv/releases/download/0.13.8/uv-aarch64-unknown-linux-gnu.tar.gz|74f2f5c6024d397481db228db8fc25eed420db192243f88438c118e7e013e585|uv-aarch64-unknown-linux-gnu/uv,uv-aarch64-unknown-linux-gnu/uvx
-uv|0.13.8|darwin-arm64|https://github.com/astral-sh/uv/releases/download/0.13.8/uv-aarch64-apple-darwin.tar.gz|6b71028a6b904f2ae3340ef52e595512de807d06c0a20eaef2f692581b246558|uv-aarch64-apple-darwin/uv,uv-aarch64-apple-darwin/uvx
-uv|0.13.8|darwin-x86_64|https://github.com/astral-sh/uv/releases/download/0.13.8/uv-x86_64-apple-darwin.tar.gz|a04c2ffeac28b2003a2c13caf538ab425fcd7def3e4a41571f4a8fb370a66af3|uv-x86_64-apple-darwin/uv,uv-x86_64-apple-darwin/uvx
+gh|2.105.0|linux-x86_64|https://github.com/cli/cli/releases/download/v2.105.0/gh_2.105.0_linux_amd64.tar.gz|79e7ab5db738c48777b696e374f8b428f0647debfb424f44d2f426370407fe2f|gh_2.105.0_linux_amd64/bin/gh
+gh|2.105.0|linux-aarch64|https://github.com/cli/cli/releases/download/v2.105.0/gh_2.105.0_linux_arm64.tar.gz|b1278c75107423d818f1937fd92cafc9e5e9b606631568f68d7fb816f5885a02|gh_2.105.0_linux_arm64/bin/gh
+gh|2.105.0|darwin-arm64|https://github.com/cli/cli/releases/download/v2.105.0/gh_2.105.0_macOS_arm64.zip|2a5d03103ae444927383b93d9ffd65579a26e2eb900ce1cf11f55258d5319ded|gh_2.105.0_macOS_arm64/bin/gh
+gh|2.105.0|darwin-x86_64|https://github.com/cli/cli/releases/download/v2.105.0/gh_2.105.0_macOS_amd64.zip|23602cbccbbdc6285a8520745b714cb927ce2ca621779373c2a20cd8e33fda66|gh_2.105.0_macOS_amd64/bin/gh
+uv|0.13.9|linux-x86_64|https://github.com/astral-sh/uv/releases/download/0.13.9/uv-x86_64-unknown-linux-gnu.tar.gz|a7fbaff2b9a271d85c1bdb540941090fd1ce011797b4abeb48e4dcd39c2471d5|uv-x86_64-unknown-linux-gnu/uv,uv-x86_64-unknown-linux-gnu/uvx
+uv|0.13.9|linux-aarch64|https://github.com/astral-sh/uv/releases/download/0.13.9/uv-aarch64-unknown-linux-gnu.tar.gz|0797542018e541a9288855df555c8077eed06f7a47d206362030480e8ecc9f3d|uv-aarch64-unknown-linux-gnu/uv,uv-aarch64-unknown-linux-gnu/uvx
+uv|0.13.9|darwin-arm64|https://github.com/astral-sh/uv/releases/download/0.13.9/uv-aarch64-apple-darwin.tar.gz|5aeca67f2283f75235de40d0bd9c0a5bbc5fce23b6d48b3bf9fa1b2db08382ca|uv-aarch64-apple-darwin/uv,uv-aarch64-apple-darwin/uvx
+uv|0.13.9|darwin-x86_64|https://github.com/astral-sh/uv/releases/download/0.13.9/uv-x86_64-apple-darwin.tar.gz|617a3211261b0fc739562f0071aa34e9739797c510208ede8e2977c30903d041|uv-x86_64-apple-darwin/uv,uv-x86_64-apple-darwin/uvx
 cass|0.11.0|linux-x86_64|https://github.com/Dicklesworthstone/coding_agent_session_search/releases/download/v0.11.0/cass-linux-amd64.tar.gz|d7b3804847c0b39dd3831e82e4a40d85549147147196810805638f211c5c9812|cass
 cass|0.11.0|linux-aarch64|https://github.com/Dicklesworthstone/coding_agent_session_search/releases/download/v0.11.0/cass-linux-arm64.tar.gz|9ed27b62007d25b1f67feba4208e99dcb53f478d8c13264f7d12aa244472904b|cass
 cass|0.11.0|darwin-arm64|https://github.com/Dicklesworthstone/coding_agent_session_search/releases/download/v0.11.0/cass-darwin-arm64.tar.gz|9f545193dee6061584919367209e3c0471cafe82b481d04e74f91ca963d057fd|cass
-jsm|0.3.48|linux-x86_64|https://jeffreys-skills.md/api/v1/downloads/jsm/v0.3.48/jsm-x86_64-unknown-linux-musl.tar.gz|7f6f2741331790353e7faf68e3b8cec14c734206cf22c33ce6f99c29aef25676|jsm
-jsm|0.3.48|linux-aarch64|https://jeffreys-skills.md/api/v1/downloads/jsm/v0.3.48/jsm-aarch64-unknown-linux-gnu.tar.gz|8ea2f5b4da69d4c9b49a624e7e116ebaec06e81c601d85747409a4d0a3d69998|jsm
-jsm|0.3.48|darwin-arm64|https://jeffreys-skills.md/api/v1/downloads/jsm/v0.3.48/jsm-aarch64-apple-darwin.tar.gz|0fb19dce469e45e97e555c73f3989c2e112ce20ad75fbb5335fd809a8dbb78fc|jsm
-jsm|0.3.48|darwin-x86_64|https://jeffreys-skills.md/api/v1/downloads/jsm/v0.3.48/jsm-x86_64-apple-darwin.tar.gz|c113539741999e9592e8c2db8d0874cbd05784f0d9d8dbd1cb3645259c340054|jsm
+jsm|0.3.51|linux-x86_64|https://jeffreys-skills.md/api/v1/downloads/jsm/v0.3.51/jsm-x86_64-unknown-linux-musl.tar.gz|dd6db9af86fe9ac3da8df3bb9b30c719ed32bbed3ade35e4a04b35882812a6c1|jsm
+jsm|0.3.51|linux-aarch64|https://jeffreys-skills.md/api/v1/downloads/jsm/v0.3.51/jsm-aarch64-unknown-linux-gnu.tar.gz|5bdf2e09aff75849a2c56b928860c1f3a87e94fac3c914fd79b4161365038c66|jsm
+jsm|0.3.51|darwin-arm64|https://jeffreys-skills.md/api/v1/downloads/jsm/v0.3.51/jsm-aarch64-apple-darwin.tar.gz|05e033d84dffe4eed5718dfcd3c3706389903b02c649ef375b028a25d3d747bb|jsm
+jsm|0.3.51|darwin-x86_64|https://jeffreys-skills.md/api/v1/downloads/jsm/v0.3.51/jsm-x86_64-apple-darwin.tar.gz|6981698dcf348a16003ef7c37f77314934e8ccd749c9ab7c679f0e524a2bee2b|jsm
 '}
 
 usage() {
