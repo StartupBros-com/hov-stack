@@ -1046,6 +1046,135 @@ class HovCase(HovFixture):
         ctx = self.hook("UserPromptSubmit", SID_A, permission_mode="bypassPermissions")["hookSpecificOutput"]["additionalContext"]
         self.assertIn("(1 new, from testhost:ceo)", ctx)
 
+    def locked_hook(self, event, cwd="/tmp/x", **extra):
+        """Run one hook while another connection holds the mailbox write lock: (seconds taken, new hook-error lines)."""
+        log = self.state / "hov.log"
+        before = log.read_text().count(" hook-error ") if log.exists() else 0
+        lock = sqlite3.connect(self.state / "mail.db", isolation_level=None)
+        lock.execute("BEGIN IMMEDIATE")
+        try:
+            t0 = time.monotonic()
+            payload = {"session_id": SID_A, "cwd": cwd, "permission_mode": "bypassPermissions", "hook_event_name": event, **extra}
+            res = self.hov("hook", event, stdin=json.dumps(payload), check=False)
+            elapsed = time.monotonic() - t0
+        finally:
+            lock.execute("ROLLBACK")
+            lock.close()
+        self.assertEqual((res.returncode, res.stdout, res.stderr), (0, "", ""))
+        return elapsed, (log.read_text().count(" hook-error ") if log.exists() else 0) - before
+
+    def session_row(self):
+        con = sqlite3.connect(self.state / "mail.db")
+        try:
+            return con.execute("SELECT name, cwd, last_seen, last_lookup FROM sessions WHERE session_id=?", (SID_A,)).fetchone()
+        finally:
+            con.close()
+
+    def test_a_known_session_with_nothing_to_record_takes_no_write_lock(self):
+        """Until 0.1.16 every hook event wrote `sessions.last_seen`, so every tool call of every session took the
+        mailbox write lock and synced the WAL while holding it. With the disk slow, other hooks waited behind those commits
+        past their 2 s wait: 9,457 "database is locked" hook errors in 569,952 tool calls on one host, up to half of
+        all hooks for tens of minutes at a time. A session hov already knows, whose name lookup is not due, whose
+        directory has not changed and which has no mail now only reads, so a held write lock costs it nothing."""
+        self.hook_raw("SessionStart", self.session_start_payload(SID_A, "alpha"))  # first contact and the name lookup
+        self.hook("UserPromptSubmit", SID_A, permission_mode="bypassPermissions")  # the directory this session works in
+        known = self.session_row()
+        self.assertEqual(known[:2], ("alpha", "/tmp/x"))
+        time.sleep(0.01)
+        for event, extra in (("UserPromptSubmit", {}), ("PostToolUse", {"tool_name": "Bash", "tool_input": {"command": "true"}})):
+            elapsed, errors = self.locked_hook(event, **extra)
+            self.assertLess(elapsed, 1.5, f"{event} waited for a lock it does not need")  # HOOK_BUSY_MS is 2 s
+            self.assertEqual(errors, 0, event)
+        self.assertEqual(self.session_row(), known, "nothing was written, with the lock free either")
+        self.assertIsNone(self.hook("PostToolUse", SID_A, permission_mode="bypassPermissions"))
+        self.assertEqual(self.session_row(), known)
+        # Planted negatives: what a hook must still record still needs the lock, so each of these waits out
+        # HOOK_BUSY_MS, logs one error, and is recorded by the next hook once the lock is free.
+        elapsed, errors = self.locked_hook("UserPromptSubmit", cwd="/tmp/moved")  # the session changed directory
+        self.assertGreaterEqual(elapsed, 1.5)
+        self.assertEqual(errors, 1)
+        self.assertEqual(self.session_row()[1], "/tmp/x")
+        self.assertIsNone(self.hook_raw("UserPromptSubmit", {"session_id": SID_A, "cwd": "/tmp/moved", "permission_mode": "bypassPermissions"}))
+        moved = self.session_row()
+        self.assertEqual(moved[1], "/tmp/moved")
+        self.assertGreater(moved[2], known[2], "a write refreshes last_seen")
+        self.age_lookup(SID_A)  # the name lookup is due: its claim is a write
+        elapsed, errors = self.locked_hook("UserPromptSubmit", cwd="/tmp/moved")
+        self.assertGreaterEqual(elapsed, 1.5)
+        self.assertEqual(errors, 1)
+        elapsed, errors = self.locked_hook("SessionStart", cwd="/tmp/moved")  # SessionStart always looks the name up
+        self.assertEqual(errors, 1)
+        self.hov("send", "--as", "ceo", "--to", "alpha", "x")  # mail to hand over: the claim is a write
+        self.hook("UserPromptSubmit", SID_A, permission_mode="bypassPermissions")  # lookup done, mail delivered
+        self.hov("send", "--as", "ceo", "--to", "alpha", "y")
+        elapsed, errors = self.locked_hook("UserPromptSubmit", cwd="/tmp/x")
+        self.assertEqual(errors, 1)
+
+    SLOW_SYNC_C = """
+#define _GNU_SOURCE
+#include <dlfcn.h>
+#include <stdlib.h>
+#include <time.h>
+static void nap(void) {
+    const char *v = getenv("SLOWSYNC_MS");
+    long ms = v ? atol(v) : 0;
+    struct timespec ts = {ms / 1000, (ms % 1000) * 1000000L};
+    if (ms > 0) nanosleep(&ts, NULL);
+}
+int fsync(int fd) { int (*real)(int) = dlsym(RTLD_NEXT, "fsync"); nap(); return real(fd); }
+int fdatasync(int fd) { int (*real)(int) = dlsym(RTLD_NEXT, "fdatasync"); nap(); return real(fd); }
+"""
+
+    def test_a_hook_that_writes_does_not_sync_the_disk_under_the_write_lock(self):
+        """A connection at SQLite's default syncs the WAL on every commit while it holds the write lock, so on a slow
+        disk every writer waits for every other writer's sync: with each sync at 300 ms, 3 hooks a second failed 46%
+        of the time and 6 a second 72%, no single one holding the lock for 2 s. The hook path commits at
+        synchronous=NORMAL (db_hook); `send` stores mail and still syncs."""
+        import importlib.util
+        from importlib.machinery import SourceFileLoader
+        spec = importlib.util.spec_from_loader("hov_under_test_sync", SourceFileLoader("hov_under_test_sync", str(HOV)))
+        mod = importlib.util.module_from_spec(spec)
+        saved = dict(os.environ)
+        os.environ.update({"HOV_STATE_DIR": str(self.state), "HOV_HOST": "testhost"})
+        try:
+            spec.loader.exec_module(mod)
+            plain = sqlite3.connect(":memory:").execute("PRAGMA synchronous").fetchone()[0]
+            hook_con, mail_con = mod.db_hook(), mod.db()
+            try:
+                self.assertEqual(hook_con.execute("PRAGMA synchronous").fetchone()[0], 1, "NORMAL")
+                self.assertEqual(hook_con.execute("PRAGMA busy_timeout").fetchone()[0], mod.HOOK_BUSY_MS)
+                self.assertEqual(mail_con.execute("PRAGMA synchronous").fetchone()[0], plain, "the library's default, FULL as shipped")
+            finally:
+                hook_con.close()
+                mail_con.close()
+        finally:
+            os.environ.clear()
+            os.environ.update(saved)
+        cc = shutil.which("cc")
+        if not (cc and sys.platform.startswith("linux")):
+            self.skipTest("the slowed-sync half needs a C compiler and LD_PRELOAD (Linux)")
+        src, shim = Path(self.tmp.name) / "slowsync.c", Path(self.tmp.name) / "slowsync.so"
+        src.write_text(self.SLOW_SYNC_C)
+        subprocess.run([cc, "-shared", "-fPIC", "-o", str(shim), str(src), "-ldl"], check=True, capture_output=True)
+        slow = {"LD_PRELOAD": str(shim), "SLOWSYNC_MS": "1500"}
+        # Another connection keeps the mailbox open, as `hov mcp` or `hov link` does on a real host, so the WAL file
+        # persists, and another session's hook has written to it. SQLite syncs the header of a WAL it has just
+        # created or restarted whatever the setting, so the first writer after either still waits for one sync.
+        keeper = sqlite3.connect(self.state / "mail.db")
+        try:
+            keeper.execute("SELECT count(*) FROM messages").fetchone()
+            self.hook("UserPromptSubmit", SID_B)
+            t0 = time.monotonic()
+            self.hook_raw("SessionStart", self.session_start_payload(SID_A, "alpha"), env_extra=slow)  # first contact, lookup, name: three commits
+            self.assertLess(time.monotonic() - t0, 1.5, "a hook commit waited for a sync")
+            self.assertEqual(keeper.execute("SELECT name FROM sessions WHERE session_id=?", (SID_A,)).fetchone()[0], "alpha")
+            # Planted negative: the same slowed sync does hold up a command that stores mail.
+            t0 = time.monotonic()
+            self.hov("send", "--as", "ceo", "--to", "alpha", "x", env_extra=slow)
+            self.assertGreaterEqual(time.monotonic() - t0, 1.5, "send no longer syncs the mail it stores")
+        finally:
+            keeper.close()
+
     def test_two_hooks_that_both_saw_a_message_pending_hand_it_over_once(self):
         """The race, interleaved by hand: two connections (two hook processes) each run `pending_for` and both see the
         same row; then both call `deliver`. Before 0.1.3 both built and returned the block, since the claim was a
