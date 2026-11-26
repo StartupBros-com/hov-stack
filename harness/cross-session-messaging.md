@@ -60,10 +60,11 @@ either hook change needs the operator's go.
 - Peer wakes fell from 79.6 a day to 7.9.
 - Merge and hold notices are 1 of 23 wakes, so no refusal is proposed.
 - FYIs and acks are 8 of 23, about 2.7 a day against about 17.5 before. That
-  is above the line, so the sender-side refusal stands as a proposal awaiting
-  the operator's go. The recommendation on the issue is not to build it: half
-  of those messages changed the receiver's work, and a hook cannot tell them
-  from the rest without a model call.
+  is above the line, so the sender-side refusal was proposed. The operator
+  ruled on 2026-11-25 to leave the rule and the hooks as they are (ruling 5
+  on hov-stack#844), so it is not built: half of those messages changed the
+  receiver's work, and a hook cannot tell them from the rest without a model
+  call.
 - PRs left conflicting or stuck did not rise: 1 and 0 in 204 merged.
 - `merge-freeze.sh hold` had not been run once.
 
@@ -95,8 +96,24 @@ says so where the gap is met.
 - hov's PostToolUse hook adds one line after `ListAgents` (finished sessions
   are not in that list) and after a `SendMessage` that reached nobody because
   the session it named has no process, each with the two commands above.
-- This reverses decision 4 of 2026-11-25 on hov-stack#844 ("no resuming a
-  finished session"). `HOV_RESTART=0` turns restarts off.
+  Since hov 0.1.15 the line is written even when another session holds the
+  mailbox database locked; the mail itself then waits for the next hook.
+- This reverses decisions 3 and 4 of 2026-11-25 on hov-stack#844 ("no
+  command to ask a finished session", "no resuming a finished session").
+  `HOV_RESTART=0` in a sender's environment turns restarts off for that
+  sender only.
+- The rules sentence that said a session with no running process "cannot be
+  messaged" lost that clause on 2026-11-26 (hov-stack#915). A fuller sentence
+  naming the two commands was tested and not adopted: it would put the rules
+  file over its size ceiling (`tests/test_claude_md_budget.py`), and the hook
+  line already says it where a session meets the gap.
+
+Not shown as of 2026-11-26: a use by a session other than the author's (none
+had called `ListAgents`, had a send reach nobody, or run `hov ask` or a
+restart in the first hours after the merge), the hook lines from a
+marketplace-installed copy, and a restart on Claude Code older than 2.1.332.
+Open: what holds the mailbox database locked past the hook's 2 s wait
+(hov-stack#925).
 
 Observed on throwaway sessions on 2026-11-25 (Claude Code 2.1.332): a
 restart took under a second and a reply came back in 35 to 52 s; a request
