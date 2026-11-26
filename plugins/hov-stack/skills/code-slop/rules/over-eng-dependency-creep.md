@@ -109,4 +109,4 @@ grep -E '\"(guzzlehttp/guzzle|symfony/http-client|kriswallsmith/buzz)\"' compose
 
 When a new dep lands in a PR, the PR author should justify why the existing options don't fit. "AI suggested this" is not a justification.
 
-Reference: [`technical-debt`'s `deps-unused-deps`](../technical-debt/rules/deps-unused-deps.md) (the broader audit) · [BundlePhobia](https://bundlephobia.com/) (size impact for npm packages)
+Reference: [BundlePhobia](https://bundlephobia.com/) (size impact for npm packages)

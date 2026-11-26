@@ -123,6 +123,4 @@ BARE=$(echo "$NEW" | xargs grep -EnH '\b(TODO|FIXME)\b' 2>/dev/null | grep -v '#
 test -z "$BARE" || { echo "Bare TODO/FIXME found — add (#issue, @owner):"; echo "$BARE"; exit 1; }
 ```
 
-See also `technical-debt`'s `process-todo-fixme-aging` rule — the broader policy for tracked debt markers.
-
 Reference: Internal: [`comments-narration`](comments-narration.md)
