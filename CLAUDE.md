@@ -11,7 +11,7 @@
 - Shell scratch, redirects and scratch deletion go in a fresh `/tmp/<unique-dir>/`; `$CLAUDE_JOB_DIR/tmp` takes Write-tool files only, since dcg guards `$HOME`.
 - Worktree sessions are shape-checked: write plain, separate commands; `bash <file>` for a refused shape, never `bash -c`. Refused: `$( )` or backticks in argument position, `${VAR:-}` modifiers, loop variables, unquoted heredoc delimiters (use `<<'EOF'`), package-manager script operands (`pnpm typecheck`, `npx tsc`), and an argument that is, or is a path ending in, a builtin name such as `eval`, `source`, `enable`, `alias` or `hash`. Table: `harness/worktree-command-shapes.md`.
 - Memory frontmatter: double-quote a `description:` containing `#`, or YAML truncates it.
-- A file the operator reads (report, explainer) goes in `<repo>/.claude/deliverables/<skill>/` (`~/.claude/deliverables/<skill>/` for a background job that hasn't entered a worktree), shown with `open-deliverable <path>`; Artifact only on request or for a deck or doc for others. Tiers: `harness/deliverable-locations.md`.
+- A page the operator reads (report, explainer, audit) is designed HTML; a file an agent reads next (plan, handoff, notes) is Markdown. Both go in `<repo>/.claude/deliverables/<skill>/` (`~/.claude/deliverables/<skill>/` for a background job that hasn't entered a worktree), shown with `open-deliverable <path>`; Artifact only on request or for a deck or doc for others. Tiers: `harness/deliverable-locations.md`.
 
 ## Response shape
 

@@ -65,8 +65,53 @@ the worktree if a copy fails (`scripts/lib/wt-preserve.sh`, hov-stack#384). Back
 write there normally (verified 2026-09-03 from a background session: a Write to
 `<worktree>/.claude/deliverables/...` was allowed). Subagents and workflow agents inherit the
 same rule through this doc. Codex has filesystem access to the same path (no restriction
-found in `~/.codex/config.toml` or `~/.codex/AGENTS.md`), but AGENTS.md does not carry this
-rule, so a Codex session follows it only when told.
+found in `~/.codex/config.toml` or `~/.codex/AGENTS.md`). Codex does not read `CLAUDE.md`, so
+it follows the rule only on a host whose global `AGENTS.md` states it. hov-stack ships no
+`AGENTS.md`; the reference host's carries the format sentence and the folder since 2026-11-26.
+Four Codex runs there that day: three report tasks chose HTML (two wrote the page under
+`.claude/deliverables/` and opened it, one was stopped by the command guard before it saved),
+and a handoff task wrote Markdown.
+
+## Format
+
+A page the operator reads (a report, an explainer, an audit) is designed HTML. A file an agent
+reads next (a plan, a handoff, notes) is Markdown. `CLAUDE.md` says so in one sentence, and the
+wording of that sentence is measured: change it only with a new run.
+
+Before 2026-11-26 the sentence named the folder and the opener but no format, and reports for
+the operator came out as Markdown (383 Markdown opens against 221 HTML between 2026-10-19 and
+2026-11-25 on the reference host). Two runs compared wordings of that one line. Each run used
+bare `claude -p` sessions on claude-opus-5-5, eight invented tasks (five reports for the
+operator, three files for another agent), two runs per task and a 420-second limit.
+
+| Run | Line 14 began | Operator reports written as HTML | Operator runs with no file | Agent files written as HTML |
+|---|---|---|---|---|
+| 2026-11-25 | `A file the operator reads (report, explainer) goes in` (then current) | 0 of 9 | 1 of 10 (timed out) | 0 of 5 |
+| 2026-11-25 | `A file the operator reads (HTML explainer, report, deck) goes in` (the wording before 2026-10-18) | 1 of 8 | 2 of 10 (answered in chat) | 0 of 4 |
+| 2026-11-25 | `... is Markdown, which the opener renders; hand-build HTML when layout carries the point. It goes in` | 0 of 10 | 0 of 10 | 0 of 4 |
+| 2026-11-25 | `A page the operator reads (report, explainer, audit) is designed HTML; a file an agent reads next (plan, handoff, notes) is Markdown. Both go in` | 9 of 9 | 1 of 10 (timed out) | 0 of 4 |
+| 2026-11-26 | the same sentence again, as the control | 9 of 9 | 1 of 10 (timed out) | 0 of 4 |
+| 2026-11-26 | `Operator pages are designed HTML; agent files are Markdown. Both go in` | 5 of 6 | 4 of 10 (answered in chat) | 0 of 4 |
+| 2026-11-26 | `A file for the operator is designed HTML, for an agent Markdown, in` | 6 of 6 | 4 of 10 (answered in chat) | 0 of 3 |
+
+What the runs show:
+
+- A plain statement of what each reader gets changes the format. A hint inside a parenthesis
+  (row 2) and a choice left to the agent (row 3) do not.
+- The example lists carry weight. With them cut, the audit and the explainer tasks were answered
+  in chat with no file in 8 of 8 runs. So the two short lines were not shipped, although both fit
+  the `CLAUDE.md` size ceiling and the full sentence needed it raised by its own 91 bytes
+  (`tests/test_claude_md_budget.py`).
+- Files for another agent stayed Markdown under every wording.
+- A designed page costs time: 360 seconds against 227 at the median, 1.3 times the output tokens,
+  and 3 of 10 ran past the limit on 2026-11-25.
+
+Limits: one model, sessions with no skills or memory loaded, invented tasks, two runs per cell.
+The implementation-plan task timed out in 13 of 14 runs under every wording, so it says nothing
+about format. Whether a designed page is understood faster than a rendered Markdown one has not
+been measured.
+
+A report that does come out as Markdown is still readable: the viewer below renders it.
 
 ## Viewer
 
