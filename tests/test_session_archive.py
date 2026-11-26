@@ -190,6 +190,18 @@ class CaptureTests(Case):
         self.assertEqual((summary["scanned"], summary["changed"], summary["bytes_read"]), (2, 0, 0))
         self.assertEqual(self.store_files(), before)
 
+    def test_a_version_that_holds_nothing_is_tried_after_the_ones_that_hold_bytes(self):
+        data = text(7, 9000)
+        self.put("proj-a/s1.jsonl", data)
+        self.run_pass()
+        empty = self.store_path("claude", "s1.jsonl", 2)
+        Path(empty).write_bytes(b"")            # what a first append that failed leaves behind
+        self.put("proj-b/s1.jsonl", data)       # the same transcript, met under another path
+        summary = self.run_pass()
+        self.assertEqual(summary["store_errors"] + summary["source_errors"], 0)
+        self.assertEqual(os.path.getsize(empty), 0)
+        self.assertEqual(self.versions_on_disk("claude", "s1.jsonl"), {1: data})
+
     def test_rewritten_transcript_becomes_a_new_version_and_the_old_one_is_untouched(self):
         old, new = text(1, 9000), text(2, 12000)
         self.put("proj-a/s1.jsonl", old)

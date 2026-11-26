@@ -637,7 +637,10 @@ class Archive:
     def find_or_create(self, agent: str, key: str, fd: int, size: int) -> tuple:
         """The version this source belongs to, proven by a full comparison, or a new one."""
         versions = self.versions(agent, key)
-        for candidate in sorted(versions, key=lambda item: -item.version):
+        # Newest first, and versions that hold nothing last: an empty version (a
+        # first append that failed, a store file that went missing) continues any
+        # source, so it is the answer only when no version with bytes is.
+        for candidate in sorted(versions, key=lambda item: (item.content_bytes == 0, -item.version)):
             if candidate.broken:
                 continue
             try:
