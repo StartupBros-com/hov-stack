@@ -22,10 +22,17 @@ Rules the code keeps:
     Anything else is refused, counted and named on stderr.
   * No source path is recorded for an imported file, so a capture pass looks at
     nothing new. The file's original path is kept in the import's own ledger.
-  * Captures go first. The lock is held for one file at a time, and when the
-    archive's capture timer is about to fire the import waits, lock released,
-    until that pass has finished.
-  * Below the free-space floor nothing more is stored and the run exits 1.
+  * Captures go first. Reading the mirror and putting a chunked transcript
+    together need no lock; the lock is held only while one file is compared
+    and appended. A file is started only when the archive's next capture pass
+    is further off than the file should take (its size at 16 MiB a second,
+    plus 90 seconds); otherwise the import waits, lock released, until that
+    pass has run. A file that takes longer than that estimate can still cost
+    the archive one pass, which the pass after it makes up.
+  * A file is stored only when the bytes it adds leave the disk at or above the
+    free-space floor. When one does not fit, nothing more is stored and the
+    run exits 1.
+  * One import runs on a store at a time.
 
 What a run does NOT prove: the mirror's blobs are trusted as cass wrote them
 (they are named by a BLAKE3 hash this file cannot recompute with the standard
@@ -42,6 +49,10 @@ manifest's name, the outcome, the stream it landed in and the original path.
 The next run skips those manifests, so a run cut short by a budget or a kill
 is continued by running it again; `--recheck` compares them again. A manifest
 that was refused or hit an error is not in the ledger and is tried again.
+Before the first byte of a key the archive did not have is stored, a `begun`
+line names that key, synced to disk: it is how a later run knows the key is
+the import's own when a kill came between the store write and the row that
+settles it.
 
 Usage:
   session-import.py [--store DIR] [--root AGENT=DIR[:DEPTH]]... mirror [--mirror DIR]
@@ -58,8 +69,8 @@ Usage:
                    chunks (default: the store's `imports` folder, on the store's disk)
 
 Exit: 0 ok, also when a budget ended the run early · 1 an entry was refused, a
-store error was counted, a named manifest is missing, or the disk is below the
-free-space floor · 2 usage · 3 zstd is missing.
+store error was counted, a named manifest is missing, a file did not fit above
+the free-space floor, or another import is running · 2 usage · 3 zstd is missing.
 """
 from __future__ import annotations
 
@@ -68,13 +79,15 @@ import collections
 import fcntl
 import importlib.util
 import json
+import math
 import os
 import shutil
+import sqlite3
 import stat
 import sys
 import tempfile
 import time
-from typing import Callable, Optional
+from collections.abc import Callable
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ARCHIVE_SCRIPT = os.path.join(HERE, "session-archive.py")
@@ -90,6 +103,11 @@ DEFAULT_CAPTURE_EVERY = 600    # session-archive.timer fires every ten minutes
 # before ten minutes are up and stops waiting SLOT_GRACE seconds after.
 SLOT_LEAD = 90
 SLOT_GRACE = 180
+# What a file is assumed to manage under the lock when its run-up is sized: a
+# full comparison with a stored version and one zstd pass, on a busy disk.
+IMPORT_RATE = 16 << 20
+BLOCKED = 5.0                  # a wait for the lock longer than this: something else was writing
+RUN_LOCK = os.path.join(IMPORTS, "run.lock")
 LEDGER_SYNC_EVERY = 50
 
 
@@ -133,11 +151,21 @@ def read_manifest(mirror: str, name: str) -> dict:
     try:
         with open(os.path.join(mirror, "manifests", name), "rb") as fh:
             manifest = json.load(fh)
-    except (OSError, ValueError) as error:
-        raise Refused(f"manifest cannot be read: {error}") from error
+    except (OSError, ValueError, RecursionError) as error:
+        raise Refused(f"manifest cannot be read: {type(error).__name__}: {str(error)[:200]}") from error
     if not isinstance(manifest, dict) or not isinstance(manifest.get("original_path"), str):
         raise Refused("manifest names no original path")
+    if not encodable(manifest["original_path"]):
+        raise Refused("the original path is not text a file name can hold")
     return manifest
+
+
+def encodable(value: str) -> bool:
+    try:
+        value.encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    return True
 
 
 def blob_refs(manifest: dict) -> list:
@@ -167,7 +195,8 @@ def blob_refs(manifest: dict) -> list:
         length = entry.get("blob_size_bytes") if isinstance(entry, dict) else None
         if not isinstance(relative, str) or not relative or not whole_number(length):
             raise Refused("a blob entry has no path or size")
-        if os.path.isabs(relative) or "\0" in relative or ".." in relative.split("/"):
+        if "\0" in relative or not encodable(relative) or any(
+                part in ("", ".", "..") for part in relative.split("/")):
             raise Refused("a blob path leaves the mirror")
         refs.append((relative, length))
     if sum(length for _, length in refs) != size:
@@ -175,22 +204,27 @@ def blob_refs(manifest: dict) -> list:
     return refs
 
 
-def check_blobs(mirror: str, refs: list) -> None:
+def check_blobs(mirror: int, refs: list) -> None:
     """Refused unless every blob is a regular file of the size its manifest gives. Reads no content."""
     for relative, length in refs:
-        try:
-            found = os.stat(os.path.join(mirror, relative), follow_symlinks=False)
-        except OSError as error:
-            raise Refused(f"blob {relative}: {error.strerror or error}") from error
-        if not stat.S_ISREG(found.st_mode) or found.st_size != length:
-            raise Refused(f"blob {relative} is not a file of the {length} bytes its manifest gives")
+        open_blob(mirror, relative, length).close()
 
 
-def open_blob(mirror: str, relative: str, length: int):
+def open_blob(mirror: int, relative: str, length: int):
+    """One blob, opened below the mirror's folder (an open descriptor) with no symbolic link followed
+    at any step: a link inside the mirror cannot make a file from elsewhere part of a transcript."""
+    parts = relative.split("/")
+    folder = os.dup(mirror)
     try:
-        fd = os.open(os.path.join(mirror, relative), os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
+        for part in parts[:-1]:
+            below = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=folder)
+            os.close(folder)
+            folder = below
+        fd = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC, dir_fd=folder)
     except OSError as error:
         raise Refused(f"blob {relative}: {error.strerror or error}") from error
+    finally:
+        os.close(folder)
     fh = os.fdopen(fd, "rb")
     found = os.fstat(fd)
     if not stat.S_ISREG(found.st_mode) or found.st_size != length:
@@ -199,7 +233,7 @@ def open_blob(mirror: str, relative: str, length: int):
     return fh
 
 
-def open_content(mirror: str, refs: list, scratch: str):
+def open_content(mirror: int, refs: list, scratch: str):
     """An open file holding exactly the captured bytes: the blob itself, or the chunks put together.
 
     The copy of a chunked transcript has no name: it goes when it is closed, or
@@ -228,7 +262,7 @@ def open_content(mirror: str, refs: list, scratch: str):
     return out
 
 
-def list_manifests(mirror: str, names: Optional[set], problem: Callable[[str, str], None]) -> list:
+def list_manifests(mirror: str, names: set | None, problem: Callable[[str, str], None]) -> list:
     """[(original path, captured at, name)], a path's captures together and oldest first.
 
     That order lets a file cass captured more than once as it grew extend one
@@ -252,6 +286,13 @@ def list_manifests(mirror: str, names: Optional[set], problem: Callable[[str, st
     return found
 
 
+def free_bytes(folder: str) -> int:
+    """Free bytes on the disk a folder is on, or will be on once it is made."""
+    while not os.path.exists(folder):
+        folder = os.path.dirname(folder)
+    return shutil.disk_usage(folder).free
+
+
 def identity(A, roots: list, path: str) -> tuple:
     """('ok', agent, key), or ('outside_roots' | 'not_followed', None, None), as a capture pass would place it."""
     if "\0" in path or not os.path.isabs(path) or os.path.normpath(path) != path:
@@ -268,14 +309,18 @@ def identity(A, roots: list, path: str) -> tuple:
 # ---- the import -------------------------------------------------------------------
 
 class Importer:
-    def __init__(self, A, store: str, roots: list, mirror: str, scratch: Optional[str] = None,
+    def __init__(self, A, store: str, roots: list, mirror: str, scratch: str | None = None,
                  min_free: int = 0, max_bytes: int = 0, max_seconds: int = 0, capture_every: int = 0,
                  recheck: bool = False, new_keys_only: bool = False, limit: int = 0,
-                 clock: Callable[[], float] = time.time, sleep: Callable[[float], None] = time.sleep):
+                 clock: Callable[[], float] = time.time, sleep: Callable[[float], None] = time.sleep,
+                 free: Callable[[str], int] | None = None):
         self.A = A
         self.store = store
         self.roots = roots
         self.mirror = mirror
+        self.mirror_fd = -1
+        self.free = free or free_bytes
+        self.blocked_after = BLOCKED
         self.scratch = scratch or os.path.join(store, IMPORTS)
         self.min_free = min_free
         self.max_bytes = max_bytes
@@ -287,9 +332,9 @@ class Importer:
         self.clock = clock
         self.sleep = sleep
         self.n: collections.Counter = collections.Counter()
-        self.slot: Optional[float] = None          # when the next capture pass is due
-        self.slot_from: Optional[tuple] = None     # the pass record `slot` was worked out from
-        self.ours: set = set()                     # (agent, key) of streams an import created
+        self.slot: float | None = None          # when the next capture pass is due
+        self.slot_from: tuple | None = None     # the pass record `slot` was worked out from
+        self.ours: set = set()                     # (agent, key) of keys an import began
         self.archive = None
         self.ledger = None
         self.unsynced = 0
@@ -300,22 +345,21 @@ class Importer:
         return os.path.join(self.store, LEDGER)
 
     def read_ledger(self) -> set:
-        """Names of the manifests an earlier run settled; fills `ours`. A torn last line is not a row."""
+        """Names of the manifests an earlier run settled; fills `ours`. A line a kill cut short is not a row."""
         names = set()
         try:
             with open(self.ledger_path(), "rb") as fh:
                 for line in fh:
-                    if not line.endswith(b"\n"):
-                        break
                     try:
                         row = json.loads(line)
                     except ValueError:
                         continue
-                    if not isinstance(row, dict) or row.get("outcome") not in SETTLED:
+                    if not isinstance(row, dict):
                         continue
-                    names.add(row.get("manifest"))
-                    if row["outcome"] == "stored":
+                    if row.get("outcome") in ("begun", "stored"):
                         self.ours.add((row.get("agent"), row.get("key")))
+                    if row.get("outcome") in SETTLED:
+                        names.add(row.get("manifest"))
         except FileNotFoundError:
             pass
         return names
@@ -342,30 +386,63 @@ class Importer:
             os.fsync(self.ledger.fileno())
             self.unsynced = 0
 
+    def begin(self, row: dict) -> None:
+        """Record, durably, that the import is about to create this key. Comes before the first store write,
+        so no kill can leave a key the import made looking like one the archive had."""
+        self.ledger.write((json.dumps({"manifest": row["manifest"], "agent": row["agent"], "key": row["key"],
+                                       "outcome": "begun"}, sort_keys=True) + "\n").encode())
+        self.ledger.flush()
+        os.fsync(self.ledger.fileno())
+        self.unsynced = 0
+        self.ours.add((row["agent"], row["key"]))
+
     # ---- giving way to capture -------------------------------------------------
 
-    def last_pass(self) -> Optional[tuple]:
+    def last_pass(self) -> tuple | None:
         """(end, start) of the archive's last capture pass, in seconds, or None when there has been none."""
         row = self.archive.db.execute("SELECT v FROM meta WHERE k='last_pass'").fetchone()
         if row is None:
             return None
         try:
             record = json.loads(row[0])
-            end = float(record["at"])
-            return end, end - float(record.get("seconds") or 0)
-        except (ValueError, KeyError, TypeError):
+            end, took = float(record["at"]), float(record.get("seconds") or 0)
+        except (ValueError, KeyError, TypeError, OverflowError):
             return None
+        if not (math.isfinite(end) and math.isfinite(took)) or took < 0:
+            return None
+        return end, end - took
 
-    def give_way(self) -> None:
+    def timer_seen(self, last: tuple | None, now: float) -> bool:
+        """Does the state show a capture timer at work? Not when there was never a pass, or none for two intervals."""
+        return last is not None and now - last[0] <= 2 * self.capture_every + SLOT_GRACE
+
+    @staticmethod
+    def lead(size: int) -> float:
+        """How long before a pass is due a file of this size is no longer started."""
+        return SLOT_LEAD + size // IMPORT_RATE
+
+    def due(self, size: int) -> bool:
+        """Is a capture pass due within this file's run-up?"""
+        if not self.capture_every:
+            return False
+        last, now = self.last_pass(), self.clock()
+        if not self.timer_seen(last, now):
+            return False
+        slot = self.slot if last == self.slot_from else last[1] + self.capture_every
+        return slot - self.lead(size) <= now <= slot + SLOT_GRACE
+
+    def give_way(self, size: int = 0) -> None:
         """Wait, holding nothing, while a capture pass is due.
 
         A capture pass takes the archive's lock without waiting and gives up
         when it is held, so an import holding it at that moment would cost the
         archive a pass. The next pass is due `capture_every` seconds after the
-        last one started. From SLOT_LEAD seconds before then the import takes
-        no file, until the state shows a newer pass or SLOT_GRACE seconds have
-        gone by with none. A store whose last pass is more than two intervals
-        old has no timer running, and is not waited for.
+        last one started. A file is not started inside its run-up to that
+        moment (`lead`): the import waits until the state shows a newer pass,
+        or SLOT_GRACE seconds have gone by with none, and then starts the file
+        at once, which is the longest run-up there is. A store whose last pass
+        is more than two intervals old has no timer running, and is not waited
+        for.
         """
         if not self.capture_every:
             return
@@ -373,78 +450,117 @@ class Importer:
         while True:
             last = self.last_pass()
             now = self.clock()
-            if last is None or now - last[0] > 2 * self.capture_every + SLOT_GRACE:
+            if not self.timer_seen(last, now):
                 return
             if last != self.slot_from:
                 self.slot_from, self.slot = last, last[1] + self.capture_every
+                if waited:
+                    return
             if now > self.slot + SLOT_GRACE:
-                self.n["capture_waits_timed_out"] += waited
                 self.slot += self.capture_every * max(1, int((now - self.slot) // self.capture_every))
-                waited = False
+                if waited:
+                    self.n["capture_waits_timed_out"] += 1
+                    return
                 continue
-            if now < self.slot - SLOT_LEAD:
+            if now < self.slot - self.lead(size):
                 return
             if not waited:
                 self.n["waited_for_capture"] += 1
                 waited = True
             self.sleep(1)
 
+    def take_lock(self, lock: int, size: int) -> None:
+        """The archive's lock, taken when no capture pass is due within this file's run-up."""
+        self.give_way(size)
+        asked = time.monotonic()
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        if time.monotonic() - asked > self.blocked_after and self.due(size):
+            # Something else held the lock for a while and a pass has come close
+            # in the meantime: step back for it, once.
+            fcntl.flock(lock, fcntl.LOCK_UN)
+            self.give_way(size)
+            fcntl.flock(lock, fcntl.LOCK_EX)
+
     # ---- one manifest ----------------------------------------------------------
 
-    def low_disk(self, copy: int = 0) -> bool:
-        """Is the store's disk under the floor, or would a temporary copy of `copy` bytes put scratch under it?"""
-        if not self.min_free:
-            return False
-        if shutil.disk_usage(self.store).free < self.min_free:
-            return True
-        if not copy:
-            return False
-        os.makedirs(self.scratch, mode=0o700, exist_ok=True)
-        return shutil.disk_usage(self.scratch).free - copy < self.min_free
+    def room(self, folder: str, more: int) -> bool:
+        """Would `more` further bytes leave this folder's disk at or above the floor?"""
+        return not self.min_free or self.free(folder) - more >= self.min_free
 
-    def one(self, name: str) -> Optional[dict]:
-        """Settle one manifest under the lock. Returns its ledger row, or None when it is left where it is."""
-        A, archive = self.A, self.archive
+    def prepare(self, name: str) -> tuple:
+        """What needs no lock: read and check one manifest, and open its bytes.
+
+        Returns (ledger row or None, open content or None). No content means
+        there is nothing to store: the row, when there is one, is settled as it
+        stands, and without a row the manifest is left where it is.
+        """
         manifest = read_manifest(self.mirror, name)
         path = manifest["original_path"]
-        verdict, agent, key = identity(A, self.roots, path)
+        verdict, agent, key = identity(self.A, self.roots, path)
         if verdict != "ok":
             self.n[verdict] += 1
-            return None
+            return None, None
         refs = blob_refs(manifest)
         size = manifest["source_size_bytes"]
         row = {"manifest": name, "agent": agent, "key": key, "path": path, "bytes": size}
         if size == 0:
             self.n["empty"] += 1
-            return dict(row, outcome="empty")
-        if self.new_keys_only and (agent, key) not in self.ours and archive.listed(agent, key):
+            return dict(row, outcome="empty"), None
+        if self.new_keys_only and (agent, key) not in self.ours and self.archive.listed(agent, key):
+            self.n["key_in_archive_left_for_later"] += 1
+            return None, None
+        check_blobs(self.mirror_fd, refs)
+        # The copy of a chunked transcript is the first thing written: it has to fit.
+        # What goes to the store is checked under the lock, when its size is known.
+        if len(refs) > 1 and not self.room(self.scratch, size):
+            raise LowDisk()
+        content = open_content(self.mirror_fd, refs, self.scratch)
+        if os.fstat(content.fileno()).st_size != size:
+            got = os.fstat(content.fileno()).st_size
+            content.close()
+            raise Refused(f"the mirror gave {got} of the {size} bytes recorded")
+        return row, content
+
+    def settle(self, row: dict, content) -> dict | None:
+        """Under the lock: compare one file with what the archive holds and append what it lacks."""
+        archive = self.archive
+        agent, key, size = row["agent"], row["key"], row["bytes"]
+        fd = content.fileno()
+        snap = os.fstat(fd)
+        new_key = not archive.listed(agent, key)
+        if new_key:
+            # Nothing of this key is held, so all of it is written: it has to fit
+            # before the key is called the import's own.
+            if not self.room(self.store, size):
+                raise LowDisk()
+            if (agent, key) not in self.ours:
+                self.begin(row)
+        elif self.new_keys_only and (agent, key) not in self.ours:
+            # A capture pass stored this key while the import waited for the lock.
             self.n["key_in_archive_left_for_later"] += 1
             return None
-        check_blobs(self.mirror, refs)
-        if self.low_disk(size if len(refs) > 1 else 0):
-            raise LowDisk()
-        with open_content(self.mirror, refs, self.scratch) as content:
-            fd = content.fileno()
-            snap = os.fstat(fd)
-            if snap.st_size != size:
-                raise Refused(f"the mirror gave {snap.st_size} of the {size} bytes recorded")
-            made = archive.n["streams"], archive.n["versions"]
-            archive.db.execute("BEGIN")
+        versions = archive.n["versions"]
+        archive.db.execute("BEGIN")
+        try:
+            stream, window = archive.find_or_create(agent, key, fd, size)
+            had = stream.content_bytes
+            if size > had:
+                # A frame is never larger than what it holds by more than a few bytes.
+                if not self.room(self.store, size - had):
+                    raise LowDisk()
+                stream = archive.append(stream, fd, snap, window)
+            archive.db.execute("COMMIT")
+        except BaseException:
+            # The state goes back to before this file. A frame that reached the
+            # store file stays there, and the next look at this key adopts it.
             try:
-                stream, window = archive.find_or_create(agent, key, fd, size)
-                had = stream.content_bytes
-                if size > had:
-                    stream = archive.append(stream, fd, snap, window)
-                archive.db.execute("COMMIT")
-            except BaseException:
-                # The state goes back to before this file. A frame that reached the
-                # store file stays there, and the next look at this key adopts it.
                 archive.db.execute("ROLLBACK")
-                raise
-        if archive.n["streams"] > made[0]:
+            except sqlite3.Error:
+                pass                 # SQLite had already ended the transaction; the first error is the one to report
+            raise
+        if new_key:
             outcome = "stored"
-            self.ours.add((agent, key))
-        elif archive.n["versions"] > made[1]:
+        elif archive.n["versions"] > versions:
             outcome = "new_version"
         else:
             outcome = "extended" if size > had else "held"
@@ -459,7 +575,7 @@ class Importer:
         self.n["refused"] += 1
         log(f"refused {name}: {reason}")
 
-    def listing(self, names: Optional[set]) -> list:
+    def listing(self, names: set | None) -> list:
         manifests = list_manifests(self.mirror, names, self.refuse)
         self.n["manifests"] = len(manifests)
         if names is not None:
@@ -469,58 +585,87 @@ class Importer:
                 log(f"{self.n['names_not_found']} named manifest(s) are not in the mirror")
         return manifests
 
-    def run(self, names: Optional[set] = None) -> dict:
+    def run(self, names: set | None = None) -> dict:
         A = self.A
         started = time.monotonic()
-        manifests = self.listing(names)
+        began = self.clock()
         os.makedirs(self.store, mode=0o700, exist_ok=True)
-        done = self.read_ledger()
-        if self.recheck:
-            done = set()
-        self.archive = A.Archive(self.store, self.roots)
-        lock = os.open(os.path.join(self.store, "lock"), os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
+        os.makedirs(os.path.join(self.store, IMPORTS), mode=0o700, exist_ok=True)
+        flags = os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC
+        running = os.open(os.path.join(self.store, RUN_LOCK), flags, 0o600)
         try:
-            self.open_ledger()
-            handled = 0
-            for index, (_path, _captured, name) in enumerate(manifests):
-                if name in done:
-                    self.n["settled_before"] += 1
-                    continue
-                if ((self.limit and handled >= self.limit)
-                        or (self.max_bytes and self.n["bytes_read"] >= self.max_bytes)
-                        or (self.max_seconds and time.monotonic() - started >= self.max_seconds)):
-                    self.n["deferred"] = sum(1 for item in manifests[index:] if item[2] not in done)
-                    break
-                self.give_way()
-                handled += 1
-                row = None
-                fcntl.flock(lock, fcntl.LOCK_EX)
-                try:
-                    row = self.one(name)
-                except Refused as error:
-                    self.refuse(name, str(error))
-                except LowDisk:
-                    self.n["low_disk"] = 1
-                    self.n["deferred"] = sum(1 for item in manifests[index:] if item[2] not in done)
-                    log(f"free space is below {self.min_free} bytes; {self.n['deferred']} manifest(s) are not imported")
-                    break
-                except (A.StoreError, A.SourceError, A.Skipped, OSError) as error:
-                    self.n["store_errors"] += 1
-                    log(f"{name}: {error}")
-                finally:
-                    fcntl.flock(lock, fcntl.LOCK_UN)
-                if row is not None:
-                    self.note(dict(row, at=int(self.clock())))
+            try:
+                fcntl.flock(running, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                self.n["busy"] = 1
+                log("another import is running on this store; nothing done")
+                return self.summary(started)
+            self.mirror_fd = os.open(self.mirror, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+            manifests = self.listing(names)
+            done = self.read_ledger()
+            if self.recheck:
+                done = set()
+            self.archive = A.Archive(self.store, self.roots)
+            lock = os.open(os.path.join(self.store, "lock"), flags, 0o600)
+            try:
+                self.open_ledger()
+                handled = 0
+                for index, (_path, _captured, name) in enumerate(manifests):
+                    if name in done:
+                        self.n["settled_before"] += 1
+                        continue
+                    if ((self.limit and handled >= self.limit)
+                            or (self.max_bytes and self.n["bytes_read"] >= self.max_bytes)
+                            or (self.max_seconds and self.clock() - began >= self.max_seconds)):
+                        self.n["deferred"] = sum(1 for item in manifests[index:] if item[2] not in done)
+                        break
+                    handled += 1
+                    settled = None
+                    try:
+                        settled, content = self.prepare(name)
+                        if content is not None:
+                            row, settled = settled, None
+                            with content:
+                                self.take_lock(lock, row["bytes"])
+                                try:
+                                    settled = self.settle(row, content)
+                                finally:
+                                    fcntl.flock(lock, fcntl.LOCK_UN)
+                    except Refused as error:
+                        self.refuse(name, str(error))
+                    except LowDisk:
+                        self.n["low_disk"] = 1
+                        self.n["deferred"] = sum(1 for item in manifests[index:] if item[2] not in done)
+                        log(f"free space is below {self.min_free} bytes, or this file would take it there; "
+                            f"{self.n['deferred']} manifest(s) are not imported")
+                        break
+                    except sqlite3.Error as error:
+                        # The state file itself failed (a full disk, a lock that never cleared).
+                        # The file after this one would meet the same, so the run ends here.
+                        self.n["store_errors"] += 1
+                        self.n["deferred"] = sum(1 for item in manifests[index + 1:] if item[2] not in done)
+                        log(f"{name}: the archive's state file failed, the run ends: {error}")
+                        break
+                    except (A.StoreError, A.SourceError, A.Skipped, OSError) as error:
+                        self.n["store_errors"] += 1
+                        log(f"{name}: {error}")
+                    if settled is not None:
+                        self.note(dict(settled, at=int(self.clock())))
+            finally:
+                self.sync_ledger()
+                if self.ledger is not None:
+                    self.ledger.close()
+                os.close(lock)
+                self.n["store_errors"] += self.archive.n["store_errors"]
+                self.archive.close()
         finally:
-            self.sync_ledger()
-            if self.ledger is not None:
-                self.ledger.close()
-            os.close(lock)
-            self.n["store_errors"] += self.archive.n["store_errors"]
-            self.archive.close()
+            if self.mirror_fd >= 0:
+                os.close(self.mirror_fd)
+                self.mirror_fd = -1
+            os.close(running)
         return self.summary(started)
 
-    def plan(self, names: Optional[set] = None) -> dict:
+    def plan(self, names: set | None = None) -> dict:
         """What a run would do, from manifests, blob sizes and the archive's state. Writes nothing."""
         A = self.A
         started = time.monotonic()
@@ -529,6 +674,7 @@ class Importer:
         if self.recheck:
             done = set()
         self.archive = A.Archive(self.store, self.roots, readonly=True)
+        self.mirror_fd = os.open(self.mirror, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
         try:
             for _path, _captured, name in manifests:
                 if name in done:
@@ -540,7 +686,7 @@ class Importer:
                     if verdict != "ok":
                         self.n[verdict] += 1
                         continue
-                    check_blobs(self.mirror, blob_refs(manifest))
+                    check_blobs(self.mirror_fd, blob_refs(manifest))
                 except Refused as error:
                     self.refuse(name, str(error))
                     continue
@@ -548,13 +694,15 @@ class Importer:
                 self.n[label] += 1
                 self.n[label + "_bytes"] += manifest["source_size_bytes"]
         finally:
+            os.close(self.mirror_fd)
+            self.mirror_fd = -1
             self.archive.close()
         return self.summary(started)
 
     def summary(self, started: float) -> dict:
         names = ("manifests", "names_not_found", "settled_before", "stored", "extended", "new_version", "held",
                  "empty", "outside_roots", "not_followed", "key_in_archive_left_for_later", "refused",
-                 "store_errors", "low_disk", "deferred", "bytes_read", "bytes_added", "waited_for_capture",
+                 "store_errors", "low_disk", "busy", "deferred", "bytes_read", "bytes_added", "waited_for_capture",
                  "capture_waits_timed_out", "key_new", "key_new_bytes", "key_in_archive", "key_in_archive_bytes")
         report = {name: self.n[name] for name in names if self.n[name] or name in ("manifests", "refused")}
         report["seconds"] = round(time.monotonic() - started, 2)
@@ -594,7 +742,7 @@ def build_parser(A) -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: Optional[list] = None) -> int:
+def main(argv: list | None = None) -> int:
     A = load_archive()
     args = build_parser(A).parse_args(argv)
     if A.ZSTD is None:
@@ -627,7 +775,7 @@ def main(argv: Optional[list] = None) -> int:
         print(json.dumps(report, sort_keys=True))
     else:
         print("session-import: " + " ".join(f"{name}={value}" for name, value in report.items()))
-    failed = ("refused", "store_errors", "low_disk", "names_not_found")
+    failed = ("refused", "store_errors", "low_disk", "names_not_found", "busy")
     return 1 if any(report.get(name) for name in failed) else 0
 
 

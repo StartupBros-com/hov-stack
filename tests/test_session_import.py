@@ -214,12 +214,27 @@ class Case(unittest.TestCase):
                     found[os.path.relpath(path, base)] = fh.read()
         return found
 
-    def ledger(self):
+    def ledger(self, outcome=None):
+        """The ledger's rows for settled manifests, or the rows with one outcome (`begun` among them)."""
         path = os.path.join(self.store, "imports", "cass-mirror.jsonl")
         if not os.path.exists(path):
             return []
         with open(path, encoding="utf-8") as fh:
-            return [json.loads(line) for line in fh if line.strip()]
+            rows = [json.loads(line) for line in fh if line.strip()]
+        return [row for row in rows if (row["outcome"] == outcome if outcome else row["outcome"] != "begun")]
+
+    def with_archive(self, change):
+        """Run one import whose Archive object `change` has been applied to."""
+        original = A.Archive
+
+        def changed(*args, **kwargs):
+            archive = original(*args, **kwargs)
+            change(archive)
+            return archive
+        changed.place = original.place
+        A.Archive = changed
+        self.addCleanup(setattr, A, "Archive", original)
+        return original
 
 
 # ---- bytes -----------------------------------------------------------------------
@@ -241,11 +256,11 @@ class StoreTests(Case):
     def test_a_chunked_transcript_is_put_together_in_order_and_no_copy_is_left(self):
         data = text(2, 300_000)
         self.mirror.add(self.source("proj-a/" + U1 + "/subagents/agent-a1.jsonl"), data, chunk=65_536)
-        scratch = os.path.join(self.tmp, "scratch")
-        report = self.run_import(scratch=scratch)
+        report = self.run_import()
         self.assertEqual(report["stored"], 1)
         self.assertEqual(self.stored(U1 + "/subagents/agent-a1.jsonl"), data)
-        self.assertEqual(os.listdir(scratch), [])
+        begun, = self.ledger("begun")
+        self.assertEqual((begun["agent"], begun["key"]), ("claude", U1 + "/subagents/agent-a1.jsonl"))
 
     def test_captures_of_a_growing_file_become_one_version(self):
         data = text(3, 90_000)
@@ -462,6 +477,106 @@ class CaptureTests(Case):
         self.assertEqual(self.rows()[0][4], len(data))
         self.assertEqual(len(self.ledger()), 2)
 
+    def test_new_keys_only_leaves_a_key_a_capture_pass_stored_while_the_import_waited_for_the_lock(self):
+        data = text(25, 30_000)
+        self.mirror.add(self.source("proj-a/" + U1 + ".jsonl"), data)
+        importer = self.importer(new_keys_only=True)
+        take = importer.take_lock
+
+        def a_pass_runs_first(lock, size):
+            self.put("proj-a/" + U1 + ".jsonl", data[:10_000])
+            self.capture()
+            take(lock, size)
+        importer.take_lock = a_pass_runs_first
+        with contextlib.redirect_stderr(io.StringIO()):
+            report = importer.run()
+        self.assertEqual((report["key_in_archive_left_for_later"], report.get("stored", 0), report.get("extended", 0)),
+                         (1, 0, 0))
+        self.assertEqual(self.stored(U1 + ".jsonl"), data[:10_000])
+        self.assertEqual((self.ledger(), self.ledger("begun")), ([], []))
+
+
+# ---- kills and failures part way ----------------------------------------------------
+
+class KillTests(Case):
+    """Under --new-keys-only a key the import began must stay the import's own, whatever stopped it."""
+
+    def setUp(self):
+        super().setUp()
+        self.grown = text(26, 45_000)
+        self.path = self.source("proj-b/" + U2 + ".jsonl")
+        self.mirror.add(self.path, self.grown[:15_000], captured=1000)
+        self.mirror.add(self.path, self.grown, captured=2000)
+
+    def finish(self):
+        report = self.run_import(new_keys_only=True)
+        self.assertEqual((report.get("key_in_archive_left_for_later", 0), report.get("store_errors", 0)), (0, 0))
+        self.assertEqual(self.stored(U2 + ".jsonl"), self.grown)
+        self.assertEqual([row[1:5] for row in self.rows()], [("claude", U2 + ".jsonl", 1, len(self.grown))])
+        self.assertEqual([row["outcome"] for row in self.ledger()][-1], "extended")
+        return report
+
+    def test_a_kill_after_the_state_commit_and_before_the_ledger_row(self):
+        importer = self.importer(new_keys_only=True)
+
+        def killed(row):
+            raise Crash()
+        importer.note = killed
+        with self.assertRaises(Crash), contextlib.redirect_stderr(io.StringIO()):
+            importer.run()
+        self.assertEqual(self.stored(U2 + ".jsonl"), self.grown[:15_000])
+        self.assertEqual((self.ledger(), len(self.ledger("begun"))), ([], 1))
+        self.finish()
+
+    def test_a_kill_after_the_first_frame_of_a_new_key_and_before_the_state_commit(self):
+        def kill(archive):
+            def hook():
+                raise Crash()
+            archive.after_store_write = hook
+        original = self.with_archive(kill)
+        with self.assertRaises(Crash), contextlib.redirect_stderr(io.StringIO()):
+            self.importer(new_keys_only=True).run()
+        A.Archive = original
+        self.assertEqual(self.rows(), [])                       # the frame is in the store file, the state has no row
+        self.assertEqual(self.stored(U2 + ".jsonl"), self.grown[:15_000])
+        self.assertEqual((self.ledger(), len(self.ledger("begun"))), ([], 1))
+        self.finish()
+
+    def test_a_state_file_error_ends_the_run_and_the_first_error_is_the_one_reported(self):
+        def fail(archive):
+            def full(*args):
+                archive.db.execute("ROLLBACK")          # as SQLite does by itself on some errors
+                raise sqlite3.OperationalError("database or disk is full")
+            archive.find_or_create = full
+        original = self.with_archive(fail)
+        report = self.run_import(new_keys_only=True)
+        A.Archive = original
+        self.assertEqual((report["store_errors"], report["deferred"], report.get("stored", 0)), (1, 1, 0))
+        self.assertIn("database or disk is full", self.stderr)
+        self.assertEqual((self.store_files(), self.ledger()), ({}, []))
+        self.finish()
+
+    def test_an_append_that_failed_leaves_an_empty_version_that_does_not_take_older_bytes(self):
+        first, rewritten = text(28, 20_000), text(29, 20_000)
+        path = self.source("proj-a/" + U1 + ".jsonl")
+        self.mirror.add(path, first, captured=1000)
+        self.assertEqual(self.run_import(limit=1)["stored"], 1)
+        self.mirror.add(path, rewritten, captured=2000)
+        broken = os.path.join(self.tmp, "zstd-that-cannot-compress")
+        with open(broken, "w", encoding="utf-8") as fh:
+            fh.write('#!/bin/sh\ncase "$1" in -d*) exec "%s" "$@";; esac\nexit 1\n' % ZSTD)
+        os.chmod(broken, 0o755)
+        A.ZSTD = broken
+        self.addCleanup(setattr, A, "ZSTD", ZSTD)
+        report = self.run_import(limit=1)
+        A.ZSTD = ZSTD
+        self.assertEqual(report["store_errors"], 1)
+        self.assertEqual(os.path.getsize(self.store_path(U1 + ".jsonl", 2)), 0)
+        self.run_import(recheck=True)
+        self.assertEqual(self.stored(U1 + ".jsonl"), first)
+        self.assertEqual(self.stored(U1 + ".jsonl", 2), rewritten)
+        self.assertFalse(os.path.exists(self.store_path(U1 + ".jsonl", 3)))
+
 
 # ---- refusals ---------------------------------------------------------------------
 
@@ -532,7 +647,54 @@ class RefusalTests(Case):
         self.mirror.add(self.source("p/2/" + U1 + ".jsonl"), b"k" * 100, blob_relative_path=secret)
         os.symlink(secret, self.mirror.path("blobs/link"))
         self.mirror.add(self.source("p/3/" + U1 + ".jsonl"), b"k" * 100, blob_relative_path="blobs/link")
-        self.refused(count=3)
+        # A path cass would not write is refused even where it leads to the blob.
+        for n, (old, new) in enumerate((("blobs/", "/blobs/"), ("blobs/", "./blobs/"), ("blobs/", "blobs/./"),
+                                        ("blobs/", "blobs//"))):
+            name = self.mirror.add(self.source("p/%d/%s.jsonl" % (4 + n, U1)), b"k" * 100)
+            manifest = self.mirror.read(name)
+            manifest["blob_relative_path"] = manifest["blob_relative_path"].replace(old, new)
+            self.mirror.write(name, manifest)
+        self.refused(count=7)
+
+    def test_a_folder_in_a_blob_path_that_is_a_link(self):
+        away = os.path.join(self.tmp, "away")
+        os.makedirs(away)
+        with open(os.path.join(away, "x"), "wb") as fh:
+            fh.write(b"k" * 100)
+        os.symlink(away, self.mirror.path("blobs/out"))
+        self.mirror.add(self.source("p/1/" + U1 + ".jsonl"), b"k" * 100, blob_relative_path="blobs/out/x")
+        # A link that stays inside the mirror is refused all the same: cass writes none.
+        name = self.mirror.add(self.source("p/2/" + U1 + ".jsonl"), b"k" * 100)
+        os.symlink(self.mirror.path("blobs/blake3"), self.mirror.path("blobs/alias"))
+        manifest = self.mirror.read(name)
+        manifest["blob_relative_path"] = manifest["blob_relative_path"].replace("blobs/blake3", "blobs/alias")
+        self.mirror.write(name, manifest)
+        self.refused(count=2)
+
+    def test_a_chunk_of_another_size_is_found_before_anything_is_copied(self):
+        name = self.mirror.add(self.source("p/" + U1 + ".jsonl"), text(56, 50_000), chunk=8_192)
+        chunks = self.mirror.read(name)["content_storage"]["chunks"]
+        with open(self.mirror.path(chunks[2]["blob_relative_path"]), "ab") as fh:
+            fh.write(b"x")
+        scratch = os.path.join(self.tmp, "scratch")
+        code, _out, err = self.cli("--scratch", scratch)
+        self.assertEqual(code, 1)
+        self.assertIn(name, err)
+        self.assertFalse(os.path.exists(scratch))
+        self.assertEqual(self.store_files(), {})
+
+    def test_a_manifest_no_reader_can_take_is_refused_and_the_ones_after_it_are_imported(self):
+        with open(os.path.join(self.mirror.root, "manifests", "doctor-raw-mirror-manifest-id-v1-0000-deep.json"), "w") as fh:
+            fh.write("[" * 100_000)
+        self.mirror.add(self.source("proj-a/\udcff/" + U1 + ".jsonl"), text(57, 3_000))
+        self.mirror.add(self.source("proj-a/" + U1 + ".jsonl"), text(58, 3_000),
+                        captured_at_ms="yesterday")                       # sorted as never dated, not a crash
+        good = text(59, 3_000)
+        self.mirror.add(self.source("proj-z/" + U2 + ".jsonl"), good)
+        code, out, err = self.cli("--json")
+        report = json.loads(out)
+        self.assertEqual((code, report["refused"], report["stored"]), (1, 2, 2), err)
+        self.assertEqual(self.stored(U2 + ".jsonl"), good)
 
     def test_a_manifest_that_is_not_json_or_names_no_path(self):
         with open(os.path.join(self.mirror.root, "manifests", "doctor-raw-mirror-manifest-id-v1-cut.json"), "w") as fh:
@@ -655,15 +817,11 @@ class RunTests(Case):
         path = os.path.join(self.store, "imports", "cass-mirror.jsonl")
         with open(path, "rb") as fh:
             lines = fh.read().splitlines(keepends=True)
+        self.assertEqual(len(lines), 4)                 # begun and stored, for each of two keys
         with open(path, "wb") as fh:
-            fh.write(lines[0] + lines[1][:25])
+            fh.write(b"".join(lines[:3]) + lines[3][:25])
         report = self.run_import()
         self.assertEqual((report["settled_before"], report["held"]), (1, 1))
-        rows = self.ledger_rows(path)
-        self.assertEqual([row["manifest"] for row in rows], [names[0], names[1]])
-        self.assertEqual(self.run_import()["settled_before"], 2)
-
-    def ledger_rows(self, path):
         rows = []
         with open(path, "rb") as fh:
             for line in fh:
@@ -671,7 +829,42 @@ class RunTests(Case):
                     rows.append(json.loads(line))
                 except ValueError:
                     pass
-        return rows
+        self.assertEqual([(row["manifest"], row["outcome"]) for row in rows if row["outcome"] != "begun"],
+                         [(names[0], "stored"), (names[1], "held")])
+        self.assertEqual(self.run_import()["settled_before"], 2)
+
+    def test_a_last_ledger_line_that_is_whole_but_for_its_newline_is_a_row(self):
+        self.fill(2)
+        self.run_import()
+        path = os.path.join(self.store, "imports", "cass-mirror.jsonl")
+        with open(path, "rb+") as fh:
+            fh.truncate(os.path.getsize(path) - 1)
+        report = self.run_import()
+        self.assertEqual((report["settled_before"], report.get("held", 0)), (2, 0))
+
+    def test_the_time_budget_ends_a_run_between_files(self):
+        self.fill()
+        now = [1_800_000_000.0]
+
+        def clock():
+            now[0] += 10              # every look at the clock is ten seconds later
+            return now[0]
+        report = self.run_import(max_seconds=45, clock=clock)
+        self.assertEqual(report["stored"] + report["deferred"], 4)
+        self.assertGreater(report["deferred"], 0)
+        self.assertGreater(report["stored"], 0)
+        self.assertEqual(self.run_import()["stored"], report["deferred"])
+
+    def test_a_second_import_on_the_same_store_does_nothing(self):
+        self.fill(1)
+        os.makedirs(os.path.join(self.store, "imports"))
+        held = os.open(os.path.join(self.store, "imports", "run.lock"), os.O_WRONLY | os.O_CREAT, 0o600)
+        self.addCleanup(os.close, held)
+        fcntl.flock(held, fcntl.LOCK_EX)
+        code, out, err = self.cli("--json")
+        self.assertEqual((code, json.loads(out).get("busy")), (1, 1))
+        self.assertIn("another import is running", err)
+        self.assertEqual(self.store_files(), {})
 
     def test_new_keys_only_leaves_a_key_the_archive_had_and_takes_every_capture_of_one_it_did_not(self):
         held = text(100, 30_000)
@@ -716,6 +909,61 @@ class RunTests(Case):
         self.assertIn("free space is below", err.getvalue())
         self.assertEqual(self.store_files(), {})
         self.assertEqual(self.ledger(), [])
+
+    FLOOR = 1 << 30
+
+    def test_a_file_that_would_take_the_disk_under_the_floor_ends_the_run_before_it_is_written(self):
+        self.fill(3)
+        size = len(self.data[1])
+        # Room for the first file and its like; once one is stored, one byte too little for the next.
+        report = self.run_import(min_free=self.FLOOR, free=lambda folder: self.FLOOR + size - bool(self.store_files()))
+        self.assertEqual((report["stored"], report["low_disk"], report["deferred"]), (1, 1, 2))
+        self.assertIn("free space is below", self.stderr)
+        self.assertEqual(sorted(self.store_files()), [os.path.join("claude", self.keys[0][:2], self.keys[0] + ".zst")])
+        self.assertEqual(([row["key"] for row in self.ledger()], [row["key"] for row in self.ledger("begun")]),
+                         ([self.keys[0]], [self.keys[0]]))            # the key that did not fit was never begun
+        self.assertEqual(self.run_import()["stored"], 2)
+
+    def test_the_copy_of_a_chunked_transcript_has_to_fit_before_a_chunk_is_read(self):
+        data = text(95, 40_000)
+        self.mirror.add(self.source("p/" + U1 + ".jsonl"), data, chunk=8_192)
+        scratch = os.path.join(self.tmp, "scratch")
+        tight = {self.store: self.FLOOR + len(data) * 2, scratch: self.FLOOR + len(data) - 1}
+        report = self.run_import(min_free=self.FLOOR, scratch=scratch, free=tight.__getitem__)
+        self.assertEqual((report["low_disk"], report.get("stored", 0)), (1, 0))
+        self.assertFalse(os.path.exists(scratch))
+        self.assertEqual((self.store_files(), self.ledger("begun")), ({}, []))
+        tight[scratch] += 1
+        self.assertEqual(self.run_import(min_free=self.FLOOR, scratch=scratch, free=tight.__getitem__)["stored"], 1)
+        self.assertEqual(self.stored(U1 + ".jsonl"), data)
+
+    def test_under_the_floor_a_file_the_archive_already_holds_is_still_settled(self):
+        self.fill(2)
+        self.assertEqual(self.run_import(limit=1)["stored"], 1)
+        report = self.run_import(recheck=True, min_free=self.FLOOR, free=lambda folder: self.FLOOR - 1)
+        self.assertEqual((report["held"], report["low_disk"], report["deferred"]), (1, 1, 1))
+
+    def test_a_new_store_is_made_for_its_owner_alone(self):
+        self.fill(1)
+        before = os.umask(0o022)
+        self.addCleanup(os.umask, before)
+        self.run_import()
+        for folder in (self.store, os.path.join(self.store, "imports")):
+            self.assertEqual(os.stat(folder).st_mode & 0o777, 0o700, folder)
+
+    def test_growth_that_would_take_the_disk_under_the_floor_is_not_appended(self):
+        data = text(96, 30_000)
+        path = self.source("p/" + U1 + ".jsonl")
+        self.mirror.add(path, data[:10_000], captured=1000)
+        self.mirror.add(path, data, captured=2000)
+        self.assertEqual(self.run_import(limit=1)["stored"], 1)
+        files, rows = self.store_files(), self.rows()
+        report = self.run_import(min_free=self.FLOOR, free=lambda folder: self.FLOOR + 20_000 - 1)
+        self.assertEqual((report["low_disk"], report.get("extended", 0)), (1, 0))
+        self.assertEqual((self.store_files(), self.rows()), (files, rows))
+        report = self.run_import(min_free=self.FLOOR, free=lambda folder: self.FLOOR + 20_000)
+        self.assertEqual(report["extended"], 1)
+        self.assertEqual(self.stored(U1 + ".jsonl"), data)
 
     def test_a_mirror_without_manifests_is_a_usage_error(self):
         out, err = io.StringIO(), io.StringIO()
@@ -799,6 +1047,78 @@ class GiveWayTests(Case):
         self.passed(self.now - 599)
         self.go(capture_every=0)
         self.assertEqual(self.sleeps, 0)
+
+    def pass_at_sleep(self, count):
+        def arrives():
+            if self.sleeps == count:
+                self.passed(self.now - 3)
+        self.on_sleep = arrives
+
+    def test_every_file_gives_way_not_only_the_first(self):
+        self.mirror.add(self.source("proj-b/" + U2 + ".jsonl"), text(111, 5_000))
+        self.passed(self.now - 300)
+        self.pass_at_sleep(40)
+        # Once the first file is stored the clock stands 230 s on: the next pass is 70 s off.
+        report = self.run_import(capture_every=600, sleep=self.tick,
+                                 clock=lambda: self.now + (230 if self.store_files() else 0))
+        self.assertEqual((report["stored"], report["waited_for_capture"], self.sleeps), (2, 1, 40))
+
+    def test_a_larger_file_stops_being_started_sooner(self):
+        self.assertEqual((I.Importer.lead(0), I.Importer.lead(160 << 20)), (I.SLOT_LEAD, I.SLOT_LEAD + 10))
+        self.addCleanup(setattr, I, "IMPORT_RATE", I.IMPORT_RATE)
+        I.IMPORT_RATE = 100                     # the 5,000 byte file now counts for 50 s under the lock
+        self.passed(self.now - 470)             # the next pass is 130 s off: outside 90 s, inside 140 s
+        self.pass_at_sleep(60)
+        report = self.go()
+        self.assertEqual((report["waited_for_capture"], self.sleeps), (1, 60))
+
+    def test_a_file_too_large_to_fit_between_two_passes_starts_right_after_one(self):
+        self.addCleanup(setattr, I, "IMPORT_RATE", I.IMPORT_RATE)
+        I.IMPORT_RATE = 1                       # 5,000 s under the lock: no gap between passes is long enough
+        self.passed(self.now - 300)
+        self.pass_at_sleep(50)
+        report = self.go()
+        self.assertEqual((self.sleeps, report["waited_for_capture"], report.get("capture_waits_timed_out", 0)),
+                         (50, 1, 0))
+
+    def test_a_pass_record_that_is_not_a_time_counts_as_no_pass(self):
+        for value in ('{"at": NaN}', '{"at": 1e999, "seconds": 4}', '{"at": %s}' % ("9" * 400),
+                      '{"at": 1800000000, "seconds": -1e999}', '{"at": "soon"}', "[]"):
+            self.passed(self.now - 599)
+            con = sqlite3.connect(os.path.join(self.store, "state.sqlite3"))
+            con.execute("UPDATE meta SET v = ? WHERE k = 'last_pass'", (value,))
+            con.commit()
+            con.close()
+            importer = self.importer(capture_every=600, clock=lambda: self.now, sleep=self.tick)
+            importer.archive = A.Archive(self.store, self.roots, readonly=True)
+            self.addCleanup(importer.archive.close)
+            self.assertIsNone(importer.last_pass(), value)
+            importer.give_way()
+            self.assertEqual(self.sleeps, 0, value)
+
+    def test_a_pass_that_came_due_while_the_lock_was_held_elsewhere_is_given_way_to(self):
+        self.passed(self.now - 300)
+        held = os.open(os.path.join(self.store, "lock"), os.O_WRONLY | os.O_CREAT, 0o600)
+        self.addCleanup(os.close, held)
+        fcntl.flock(held, fcntl.LOCK_EX)
+        importer = self.importer(capture_every=600, clock=lambda: self.now, sleep=self.tick)
+        importer.blocked_after = 0.2
+        done = {}
+
+        def work():
+            with contextlib.redirect_stderr(io.StringIO()):
+                done.update(report=importer.run())
+        worker = threading.Thread(target=work)
+        worker.start()
+        worker.join(0.6)
+        self.assertTrue(worker.is_alive())
+        self.assertEqual(self.sleeps, 0)        # not due when it asked for the lock
+        self.now += 230                         # the lock holder took its time: the pass is now 70 s off
+        self.pass_at_sleep(30)
+        fcntl.flock(held, fcntl.LOCK_UN)
+        worker.join(30)
+        self.assertFalse(worker.is_alive())
+        self.assertEqual((done["report"]["stored"], done["report"]["waited_for_capture"], self.sleeps), (1, 1, 30))
 
 
 # ---- search ---------------------------------------------------------------------------
