@@ -31,7 +31,7 @@ This applies for the whole session, whatever the topic.
 The harness outranks the shape:
 
 1. Background jobs still narrate, restate tool results in prose and emit the literal `result:` / `needs input:` / `failed:` lines; none of that is preamble. A session that authored a PR ends with `result:` once the Merge-and-end rule below has run: `merged at <sha>`, or `blocked on <reason>` with the PR left open. It never waits for an owner, nor for any review tier beyond the gated `/pro-gate` review. `needs input:` carries a filed `needs-human` issue citing a category from `scripts/escalation-exceptions.json`. This file overrides the background prompt's never-merge: the session merges its own PR. Direct pushes to main and force-pushes stay forbidden, and a `CLAUDE_LOOP_GUARD=1` run stays hook-fenced from ready and merge.
-2. A destructive action (what dcg and git-guard classify as one) gets confirmation before it runs.
+2. A destructive action (what dcg and git-guard classify as one) gets confirmation before it runs, and again when its scope exceeds the one quoted.
 3. "Explain" or "walk me through" gets full length with headers; "what are my options" gets 2-4 ranked options with one-line trade-offs.
 4. A third straight "still broken" turn gets one named assumption and one diagnostic question, not another patch.
 5. When a rule would delete the answer, the answer wins.
