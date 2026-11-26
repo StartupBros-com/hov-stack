@@ -60,6 +60,12 @@ for a refused shape") and points here for the rest:
 
 ## The denial messages, verbatim (grep for these words → this doc)
 
+These are a sample. Every message opens "This session is isolated in the worktree"
+("This agent is…" in a subagent), and `papercut family show
+worktree-isolation-unverifiable --json` lists every variant seen. Count refusals on "is
+isolated in the worktree", never on one message's words: in the 7 days to 2026-11-25,
+a "too complex to verify" census missed 98 "runs a string through" refusals.
+
 Too-complex (the 7.1k-event message; also emitted by the Monitor tool):
 
 > This session is isolated in the worktree `<worktree>`, but this command is **too
@@ -1017,6 +1023,11 @@ planted-negative on issue #534 makes prescribing any of them a review failure:
   (51 sessions/wk).
 - Demoted from `CLAUDE.md` (2026-09-21, dotfiles#1286): "(Fleet's #1 denial
   cluster, 51 sessions/wk, before this line — 2026-08.)"
+- CLAUDE.md's refused list, measured 2026-11-25 (CC 2.1.332, Opus `claude -p -w` arms
+  with no user hooks or CLAUDE.md, 3 runs per cell): without it, a one-word search for
+  `source` was refused 3 of 3 times, against 0 with it. That task was added after three
+  generic tasks showed no difference. Method:
+  `docs/solutions/best-practices/start-a-worktree-rule-arm-with-claude-p-w-and-prove-the-checker-refuses-before-scoring.md`.
 - Verifier behavior is version-bound: re-probe the deny rows on major CC upgrades before
   trusting this table (the bundle is closed; nothing pins these semantics).
 
@@ -1045,8 +1056,10 @@ refusal itself):
    that the substitution is dangerous. At 7.1k events/30d on one fleet, extending the
    existing assignment-value tolerance to arguments whose substituted command is read-only
    would remove most of the friction without weakening the git-targeting checks.
-3. **The `hash` token match is argument-position-blind:** `echo hash` and
-   `grep -rn "hash" file` are both refused with "runs a string through hash". Matching the
-   builtin only in command position — not as any argv element, and not inside a quoted
-   search pattern — would fix a refusal that fires on ordinary code search in any repo
-   whose code mentions hashes.
+3. **The builtin-name match is argument-position-blind:** an argument that is, or is a
+   path ending in, a string-running builtin's name is refused with "runs a string through
+   <word>", for every word in the DENY section above (widened 2026-11-25, CC 2.1.332):
+   `echo hash`, `grep -rn "hash" file` and `grep -rn source config/` are all refused.
+   Matching the builtin only in command position — not as any argv element, and not
+   inside a quoted search pattern — would fix a refusal that fires on ordinary code search
+   in any repo whose code mentions one of those words.
