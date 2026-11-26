@@ -1,0 +1,14 @@
+[Unit]
+Description=session-search index run every hour
+
+[Timer]
+# Twenty past: a capture pass (session-archive.timer) starts at a quarter past
+# and normally ends within a minute, so this run indexes what that pass stored.
+# The two are not chained. A run that overlaps a capture pass indexes what the
+# archive had recorded when the run looked, and takes the rest an hour later.
+OnCalendar=*:20
+RandomizedDelaySec=120
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -236,6 +236,7 @@ class WakeCase(HovFixture):
         for what, kw in (
             ("an entrypoint other than cli", {"env_extra": {"CLAUDE_CODE_ENTRYPOINT": "sdk-cli"}}),
             ("HOV_WAKE=0", {"env_extra": {"HOV_WAKE": "0"}}),
+            ("the read-only copy `hov ask` runs (HOV_HOOKS=0)", {"env_extra": {"HOV_HOOKS": "0"}}),
             ("claude -p", {"print_mode": True}),
             ("a Claude Code older than 2.1.319", {"version": "2.1.300"}),
         ):

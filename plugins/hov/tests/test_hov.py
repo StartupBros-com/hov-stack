@@ -113,6 +113,9 @@ class HovCase(HovFixture):
         by = {r["addr"]: r for r in rows}
         self.assertEqual(by["testhost:alpha"]["unread"], 1)
         self.assertEqual(by["testhost:beta"]["unread"], 0)
+        # a running, titled session carries the name Claude Code's own SendMessage takes; a mailbox has none
+        self.assertEqual((by["testhost:alpha"]["send_to"], by["testhost:beta"]["send_to"]), ("alpha", "beta"))
+        self.assertEqual((by["testhost:ceo"]["kind"], by["testhost:ceo"]["send_to"]), ("mailbox", None))
 
     # ------------------------------------------------------------ where a session works (hov ls)
 
@@ -189,6 +192,199 @@ class HovCase(HovFixture):
         self.assertEqual(set(self.ls_by_addr("--repo", "widgets-extra", env_extra=env)), {"testhost:beta"})
         self.assertEqual(self.ls_by_addr("--repo", "idgets", env_extra=env), {})
 
+    # ------------------------------------------------------------ finished sessions (hov ls --all)
+
+    PROSE = ("PROSE-INTENT-7f3", "PROSE-DETAIL-7f3", "PROSE-OUTPUT-7f3", "PROSE-LINKTITLE-7f3", "PROSE-ROWFIELD-7f3", "fin <refused>")
+
+    def finished(self):
+        """located() plus two finished sessions, a done session still in the default listing and one that started
+        between the two listings; returns (env, expected)."""
+        env, p, gone = self.located()
+        root = Path(self.tmp.name)
+        claude = root / "claude"
+        d = root / "home" / ".claude" / "deliverables" / "study"
+        d.mkdir(parents=True)
+        for n in ("a", "b", "c", "d", "e", "f", *(f"g{i}" for i in range(1, 8))):
+            (d / f"{n}.md").write_text(n)
+        (root / "notes.md").write_text("outside")
+        (root / "home" / ".claude" / "escape.md").write_text("climbed out")
+        f1, f2 = "ffffffff-1111-2222-3333-444444444444", "f2f2f2f2-1111-2222-3333-444444444444"
+        ts1, ts2 = "2026-11-20T10:00:00.000Z", "2026-11-21T10:00:00.000Z"
+
+        def call(cid, name, path, **extra):
+            return {"type": "assistant", "timestamp": ts1, "message": {"role": "assistant", "content": [
+                {"type": "tool_use", "id": cid, "name": name, "input": {"file_path": str(path), **extra}}]}}
+
+        quoted = json.dumps({"type": "tool_use", "id": "q1", "name": "Write", "input": {"file_path": str(d / "e.md")}})
+        f1_lines = [
+            {"type": "user", "timestamp": ts1, "cwd": p["main"], "gitBranch": "main", "message": {"content": "go"}},
+            call("w1", "Write", d / "a.md"),
+            call("w2", "Edit", d / "b.md"),
+            call("r1", "Read", d / "c.md", note="Write"),  # planted negative: a file it only read
+            call("w3", "Write", d / "d.md"),  # planted negative: the write was refused
+            {"type": "user", "timestamp": ts1, "message": {"content": [{"type": "tool_result", "tool_use_id": "w3", "is_error": True, "content": "denied"}]}},
+            # planted negatives: a write call quoted in a tool result and in text, and one in an entry not its own
+            {"type": "user", "timestamp": ts1, "message": {"content": [{"type": "tool_result", "tool_use_id": "r1", "content": quoted}]}},
+            {"type": "assistant", "timestamp": ts1, "message": {"content": [{"type": "text", "text": quoted}]}},
+            {"type": "user", "timestamp": ts1, "message": {"content": [json.loads(quoted)]}},
+            call("w4", "Write", d / "deleted.md"),  # planted negative: no longer on disk
+            call("w5", "Write", root / "notes.md"),  # planted negative: not in a deliverables folder
+            call("w6", "MultiEdit", d / "f.md"),
+            call("w7", "Write", d / "a.md"),  # a second write makes it the newest
+            call("w8", "Write", f"{d.parent}/../escape.md"),  # planted negative: climbs out of the folder
+            {"type": "user", "timestamp": ts1, "cwd": gone, "gitBranch": "feature-x", "message": {"content": "x"}},
+            {"type": "system", "timestamp": "yesterday"},  # planted negative: not a timestamp
+        ]
+        f2_lines = [{"type": "user", "timestamp": ts2, "cwd": p["plain"], "message": {"content": "go"}},
+                    *(call(f"g{i}", "Write", d / f"g{i}.md") for i in range(1, 8)),
+                    {"type": "assistant", "timestamp": ts2, "cwd": p["plain"], "message": {"content": [{"type": "text", "text": "done"}]}}]
+        projects = claude / "projects" / "-widgets"
+        for sid, lines in ((f1, f1_lines), (f2, f2_lines)):
+            (projects / f"{sid}.jsonl").write_text("".join(json.dumps(x) + "\n" for x in lines))
+        jobs = claude / "jobs"
+        for job, record in (
+            ("j1", {"sessionId": f1, "intent": self.PROSE[0], "detail": self.PROSE[1], "output": self.PROSE[2], "children": [
+                {"id": 1, "kind": "pr", "href": "https://github.com/acme/widgets/pull/7", "title": self.PROSE[3]},
+                {"id": 2, "kind": "frame", "href": "https://github.com/acme/widgets/pull/99", "title": self.PROSE[3]},
+                {"id": 3, "kind": "pr", "href": "javascript:alert(1)//https://github.com/acme/widgets/pull/98"},
+                {"id": 4, "kind": "pr", "href": "https://github.com/acme/widgets/pull/8"},
+                {"id": 5, "kind": "pr", "href": "https://github.com/acme/widgets/pull/7"}]}),
+            ("j2", {"sessionId": f2, "children": [{"id": i, "kind": "pr", "href": f"https://github.com/acme/plain/pull/{i}"} for i in range(1, 8)]}),
+        ):
+            (jobs / job).mkdir(parents=True)
+            (jobs / job / "state.json").write_text(json.dumps(record))
+        listing = json.loads(Path(env["HOV_AGENTS_CMD"].split(" ", 1)[1]).read_text())
+        delta = next(r for r in listing if r["name"] == "delta")
+        all_rows = [*(r for r in listing if r["name"] != "delta"), dict(delta, state="done"),  # in both listings
+                    {"sessionId": f1, "name": "fin-gone", "cwd": p["main"], "state": "done", "detail": self.PROSE[4]},
+                    {"sessionId": f2, "name": self.PROSE[5], "cwd": p["plain"], "state": "done", "summary": self.PROSE[4]},
+                    {"sessionId": "abababab-1111-2222-3333-444444444444", "name": "just-started", "cwd": p["plain"], "state": "working"}]
+        (root / "all.json").write_text(json.dumps(all_rows))
+        env = dict(env, HOV_AGENTS_ALL_CMD=f"{shutil.which('cat')} {root / 'all.json'}")
+        return env, {"f1": f1, "f2": f2, "ts1": ts1, "ts2": ts2, "d": d, "gone": gone, "main": p["main"], "plain": p["plain"],
+                     "f1_transcript": str(projects / f"{f1}.jsonl")}
+
+    def ls_finished(self, *args, env_extra=None):
+        return [r for r in json.loads(self.hov("ls", "--all", "--json", *args, env_extra=env_extra).stdout) if r["kind"] == "finished"]
+
+    def test_ls_all_lists_finished_sessions_with_what_they_left_and_an_address(self):
+        env, x = self.finished()
+        d = x["d"]
+        plain = self.hov("ls", "--json", env_extra=env).stdout
+        self.assertNotIn('"finished"', plain)  # without --all nothing changes
+        self.assertEqual(plain, self.hov("ls", "--json", env_extra=dict(env, HOV_AGENTS_ALL_CMD="")).stdout)
+        rows = self.ls_finished(env_extra=env)
+        # newest first; delta is in the default listing and just-started is not done, so neither is a finished row
+        self.assertEqual([r["session_id"] for r in rows], [x["f2"], x["f1"]])
+        f2, f1 = rows
+        # an address `hov send` reaches it at (#902); never a name for Claude Code's own SendMessage
+        self.assertEqual((f1["addr"], f1["send_to"], f1["name"], f1["state"], f1["status"], f1["unread"], f1["restart"]),
+                         ("testhost:fin-gone", None, "fin-gone", "done", None, 0, True))
+        # its worktree was removed after the merge: the repository still comes from the checkout it sat in
+        self.assertEqual((f1["dir"], f1["dir_from"], f1["repo"], f1["branch"], f1["worktree"]), (x["gone"], "gone", "acme/widgets", "feature-x", None))
+        self.assertEqual(os.path.realpath(f1["checkout"]), x["main"])
+        self.assertEqual((f1["last_active"], f1["transcript"]), (x["ts1"], x["f1_transcript"]))
+        self.assertEqual((f1["pr_links"], f1["pr_links_total"]), (["acme/widgets#7", "acme/widgets#8"], 2))
+        self.assertEqual(f1["deliverables_written"], [str(d / "a.md"), str(d / "f.md"), str(d / "b.md")])
+        self.assertEqual(f1["deliverables_read"], "whole")
+        # a title the identity rules refuse is not shown; the newest five of seven pull requests and files
+        self.assertEqual((f2["name"], f2["repo"], f2["dir_from"], f2["branch"], f2["last_active"]), (None, None, "transcript", None, x["ts2"]))
+        self.assertEqual(f2["addr"], f"testhost:{x['f2'][:8]}")  # a refused title is no address: its 8-character id is
+        self.assertEqual((f2["pr_links"], f2["pr_links_total"]), ([f"acme/plain#{i}" for i in range(7, 2, -1)], 7))
+        self.assertEqual(f2["deliverables_written"], [str(d / f"g{i}.md") for i in range(7, 2, -1)])
+        text = self.hov("ls", "--all", env_extra=env).stdout
+        line = next(ln for ln in text.splitlines() if ln.startswith("finished fin-gone"))
+        for part in ("at=acme/widgets:feature-x", "prs=2", f"last={x['ts1']}", "id=ffffffff"):
+            self.assertIn(part, line)
+        self.assertTrue(line.endswith("wrote=3  unread=0"), line)
+        # planted negatives: prose from the job record and the listing, and the refused title, reach no output
+        mcp = self.mcp_ls({"all": True}, env)
+        for out in (json.dumps(rows), text, mcp, self.hov("ls", "--all", "--repo", "widgets", env_extra=env).stdout):
+            for marker in self.PROSE:
+                self.assertNotIn(marker, out)
+        self.assertIn("finished fin-gone", mcp)
+
+    def mcp_ls(self, args, env):
+        reqs = [{"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "t", "version": "0"}}},
+                {"jsonrpc": "2.0", "method": "notifications/initialized"},
+                {"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "ls", "arguments": args}}]
+        res = self.hov("mcp", "--as", "codex", stdin="".join(json.dumps(r) + "\n" for r in reqs), env_extra=env)
+        reply = next(r for r in map(json.loads, res.stdout.splitlines()) if r.get("id") == 2)
+        return reply["result"]["content"][0]["text"]
+
+    def test_ls_all_repo_keeps_finished_sessions_in_that_repository(self):
+        env, x = self.finished()
+        by = json.loads(self.hov("ls", "--all", "--repo", "widgets", "--json", env_extra=env).stdout)
+        self.assertEqual(sorted((r["kind"], r["addr"]) for r in by),
+                         [("finished", "testhost:fin-gone"), ("session", "testhost:alpha"), ("session", "testhost:gamma")])
+        self.assertEqual(self.ls_finished("--repo", "plain", env_extra=env), [])
+
+    def fake_claude(self):
+        """A `claude` first on PATH that logs its arguments and, for `--all`, lists one finished session."""
+        bin_dir, log = Path(self.tmp.name) / "bin", Path(self.tmp.name) / "claude-argv.log"
+        bin_dir.mkdir()
+        (bin_dir / "claude").write_text(
+            f"#!{sys.executable}\nimport json, sys\nopen({str(log)!r}, 'a').write(' '.join(sys.argv[1:]) + '\\n')\n"
+            "print(json.dumps([{'sessionId': 'eeeeeeee-9999-2222-3333-444444444444', 'name': 'from-claude', 'state': 'done',"
+            " 'cwd': '/'}] if '--all' in sys.argv else []))\n")
+        (bin_dir / "claude").chmod(0o755)
+        return {"PATH": f"{bin_dir}:{os.environ.get('PATH', '')}"}, log
+
+    def test_ls_all_with_an_overridden_listing_reads_no_finished_sessions(self):
+        # planted negative: the fixture overrides `claude agents --json` only, so `--all` must not fall back to the
+        # real `claude agents --json --all` and list this host's finished sessions in a test
+        path, log = self.fake_claude()
+        self.assertEqual(self.ls_finished(env_extra=path), [])
+        self.assertEqual(self.ls_finished(env_extra=dict(path, HOV_AGENTS_ALL_CMD="")), [])
+        self.assertFalse(log.exists())
+        # with neither listing overridden, `--all` runs Claude Code's own
+        del self.env["HOV_AGENTS_CMD"]
+        self.assertEqual([r["name"] for r in self.ls_finished(env_extra=path)], ["from-claude"])
+        self.assertIn("agents --json --all", log.read_text().splitlines())
+
+    def test_ls_all_marks_files_read_from_the_end_of_a_longer_transcript(self):
+        env, x = self.finished()
+        short = dict(env, HOV_FINISHED_TAIL="60")  # past the last whole entry with a directory or a write
+        f1 = next(r for r in self.ls_finished(env_extra=short) if r["session_id"] == x["f1"])
+        # planted negative: an empty list from the end of a longer transcript must not read as "wrote nothing"
+        self.assertEqual((f1["deliverables_written"], f1["deliverables_read"]), ([], "tail"))
+        # the shorter tails read before it still give where it worked and when, now and from the cache
+        self.assertEqual((f1["repo"], f1["branch"], f1["dir_from"], f1["last_active"]), ("acme/widgets", "feature-x", "gone", x["ts1"]))
+        line = next(ln for ln in self.hov("ls", "--all", env_extra=short).stdout.splitlines() if ln.startswith("finished fin-gone"))
+        self.assertTrue(line.endswith("wrote=0+  unread=0"), line)
+        cached = next(r for r in self.ls_finished(env_extra=dict(short, HOV_FINISHED_READ_SECONDS="0")) if r["session_id"] == x["f1"])
+        self.assertEqual(cached, f1)
+
+    def test_ls_all_reads_transcripts_in_time_and_caches_them(self):
+        env, x = self.finished()
+        cache = self.state / "finished.json"
+        none = dict(env, HOV_FINISHED_READ_SECONDS="0")
+        rows = self.ls_finished(env_extra=none)
+        # out of time: the files read null, every other field is there
+        self.assertEqual([r["deliverables_written"] for r in rows], [None, None])
+        self.assertEqual([r["repo"] for r in rows], [None, "acme/widgets"])
+        text = self.hov("ls", "--all", env_extra=none).stdout
+        self.assertIn("wrote=?", text)
+        self.assertIn("2 finished session(s) show wrote=?", text)
+        self.assertFalse(cache.exists())
+        full = self.ls_finished(env_extra=env)
+        self.assertEqual(len(full[1]["deliverables_written"]), 3)
+        self.assertEqual(cache.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(self.ls_finished(env_extra=none), full)  # read from the cache, so in time at once
+        self.assertNotIn("wrote=?", self.hov("ls", "--all", env_extra=none).stdout)
+        # a transcript that changed is read again; until then its files read null
+        new = x["d"] / "new.md"
+        new.write_text("n")
+        with open(x["f1_transcript"], "a") as f:
+            f.write(json.dumps({"type": "assistant", "timestamp": x["ts1"], "message": {"content": [
+                {"type": "tool_use", "id": "w9", "name": "Write", "input": {"file_path": str(new)}}]}}) + "\n")
+        self.assertEqual([r["deliverables_written"] is None for r in self.ls_finished(env_extra=none)], [False, True])
+        self.assertEqual(self.ls_finished(env_extra=env)[1]["deliverables_written"][0], str(new))
+        # a damaged cache is ignored and replaced
+        cache.write_text("{not json")
+        self.assertEqual(self.ls_finished(env_extra=env)[1]["deliverables_written"][0], str(new))
+        self.assertEqual(json.loads(cache.read_text())["v"], 1)
+
     def test_unknown_recipient_reaches_nobody(self):
         # planted negative: a wrong implementation that delivers host-wide would fail this
         self.hov("send", "--as", "ceo", "--to", "nobody-here", "lost")
@@ -255,6 +451,9 @@ class HovCase(HovFixture):
         listing = {"HOV_AGENTS_CMD": f"{shutil.which('cat')} {reused}"}
         by = {r["addr"]: r for r in json.loads(self.hov("ls", "--json", env_extra=listing).stdout)}
         self.assertEqual((by["testhost:alpha"]["session_id"], by["testhost:alpha"]["unread"]), (SID_C, 0))
+        # planted negative: this listing gives the session no status, so it is not running and SendMessage cannot
+        # reach it, whatever its title
+        self.assertIsNone(by["testhost:alpha"]["send_to"])
         self.assertEqual(self.inbox_subjects(env_extra=dict(listing, CLAUDE_CODE_SESSION_ID=SID_C)), [])
 
     def test_a_reader_whose_first_command_is_ls_search_or_thread_gets_broadcasts_sent_after_it(self):
@@ -745,7 +944,7 @@ class HovCase(HovFixture):
         # a session titled with '<', '>' or a control character cannot be a mail name (the hook frame shows names);
         # it keeps its 8-character id as its name, so it still sends without --as and is still reached
         listing = Path(self.tmp.name) / "agents-odd.json"
-        listing.write_text(json.dumps([{"sessionId": SID_A, "name": "alpha -> beta <x>", "cwd": "/tmp/a"}]))
+        listing.write_text(json.dumps([{"sessionId": SID_A, "name": "alpha -> beta <x>", "cwd": "/tmp/a", "state": "working", "status": "busy"}]))
         cmd = f"{shutil.which('cat')} {listing}"
         odd = {"CLAUDE_CODE_SESSION_ID": SID_A, "HOV_AGENTS_CMD": cmd}
         me = json.loads(self.hov("whoami", "--json", env_extra=odd).stdout)
@@ -773,6 +972,10 @@ class HovCase(HovFixture):
         self.assertIn(f"testhost:{SID_A[:8]}", ls)
         self.assertIn(f"id={SID_A[:8]}", ls)
         self.assertNotIn("<x>", ls)
+        # and in --json: running, but the refused title is no SendMessage name either
+        as_json = self.hov("ls", "--json", env_extra={"HOV_AGENTS_CMD": cmd}).stdout
+        self.assertIsNone(json.loads(as_json)[0]["send_to"])
+        self.assertNotIn("<x>", as_json)
 
     # ------------------------------------------------------------ what PR 5's review found
 

@@ -28,6 +28,8 @@ tags:
   - codex
 ---
 
+> **Update 2026-11-25 (hov-stack#882):** the guard, `codex-pick` and the resolver's account code were retired; the catalog-policy functions moved into `scripts/cross-model-catalog-check.js`.
+
 # Pick the best available model from the live catalog and per-meter usage, and plant an unknown slug so no name lives in code
 
 ## Context

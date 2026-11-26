@@ -33,12 +33,17 @@ cat >"$TMP/stub/pnpm" <<'FAKE'
 # Fake pnpm 11: global add/root/bin/ls against --config.global-dir/--config.global-bin-dir.
 F=${FAKE_DIR:?}
 # FAKE_PNPM_VERSION set but empty: a pnpm that prints no version.
-# FAKE_PNPM_EMPTY_FIRST=1: the first --version prints nothing (one stderr line), later ones answer.
+# FAKE_PNPM_EMPTY_FIRST=1: the first --version has no stdout. The retry uses its own options.
 if [ "${1:-}" = --version ]; then
   if [ -n "${FAKE_PNPM_EMPTY_FIRST:-}" ] && [ ! -e "$F/probed" ]; then
-    : >"$F/probed"; echo "fake pnpm: shim hiccup" >&2; exit 0
+    : >"$F/probed"
+    printf '%s\n' "${FAKE_PNPM_FIRST_STDERR:-fake pnpm: shim hiccup}" >&2
+    exit "${FAKE_PNPM_FIRST_STATUS:-0}"
   fi
-  echo "${FAKE_PNPM_VERSION-11.10.0}"; exit 0
+  if [ -n "${FAKE_PNPM_VERSION_STDERR:-}" ]; then printf '%s\n' "$FAKE_PNPM_VERSION_STDERR" >&2; fi
+  version=${FAKE_PNPM_VERSION-11.10.0}
+  if [ -n "$version" ]; then printf '%s\n' "$version"; fi
+  exit "${FAKE_PNPM_VERSION_STATUS:-0}"
 fi
 gdir="" bdir="" offline=0 spec=""
 for a in "$@"; do
@@ -613,11 +618,32 @@ out=$(FAKE_PNPM_VERSION=10.33.2 run); rc=$?
 out=$(FAKE_PNPM_VERSION='' CODEX_UPDATE_PROBE_RETRY_DELAY=0 run); rc=$?
 [ "$rc" -eq 1 ] && has "$out" "gave no answer twice" && ! has "$out" "needs pnpm 11" && [ ! -s "$C/fake/log" ] && ok \
   || bad "29: a pnpm with no version was not refused as no-answer ($rc): $out"
-# An empty first answer retries and, when the second is pnpm 11, the run goes on.
+# A first diagnostic remains distinguishable from a completely silent retry, without quoting either.
 rm -f "$C/fake/probed"
-out=$(DRY=1 FAKE_PNPM_EMPTY_FIRST=1 CODEX_UPDATE_PROBE_RETRY_DELAY=0 run); rc=$?
-! has "$out" "needs pnpm 11" && ! has "$out" "gave no answer" && [ -e "$C/fake/probed" ] && ok \
-  || bad "29: an empty first probe was not retried to a pass ($rc): $out"
+first_sentinel='fake-opaque-first-probe-marker'
+retry_sentinel='fake-opaque-retry-probe-marker'
+out=$(FAKE_PNPM_EMPTY_FIRST=1 FAKE_PNPM_FIRST_STDERR="$first_sentinel" FAKE_PNPM_FIRST_STATUS=7 \
+  FAKE_PNPM_VERSION='' CODEX_UPDATE_PROBE_RETRY_DELAY=0 run); rc=$?
+[ "$rc" -eq 1 ] && has "$out" "gave no answer twice" \
+  && has "$out" "attempt 1: status=7 stderr=present; attempt 2: status=0 stderr=empty" \
+  && ! has "$out" "$first_sentinel" && [ ! -s "$C/fake/log" ] && ok \
+  || bad "29: first failure/silent retry metadata did not survive without raw output (rc=$rc)"
+rm -f "$C/fake/probed"
+out=$(FAKE_PNPM_EMPTY_FIRST=1 FAKE_PNPM_FIRST_STDERR="$first_sentinel" FAKE_PNPM_FIRST_STATUS=7 \
+  FAKE_PNPM_VERSION='' FAKE_PNPM_VERSION_STDERR="$retry_sentinel" FAKE_PNPM_VERSION_STATUS=124 \
+  CODEX_UPDATE_PROBE_RETRY_DELAY=0 run); rc=$?
+[ "$rc" -eq 1 ] && has "$out" "gave no answer twice" \
+  && has "$out" "attempt 1: status=7 stderr=present; attempt 2: status=124 stderr=present" \
+  && [ ! -s "$C/fake/log" ] && ok || bad "29: both failed probes were not distinguished (rc=$rc)"
+! has "$out" "$first_sentinel" && ! has "$out" "$retry_sentinel" && ok \
+  || bad "29: failed probe exposed opaque stderr in the diagnostic"
+# An empty first answer retries and, when the second is pnpm 11, the dry run goes on.
+rm -f "$C/fake/probed"
+out=$(DRY=1 FAKE_PNPM_EMPTY_FIRST=1 FAKE_PNPM_FIRST_STDERR="$first_sentinel" \
+  FAKE_PNPM_FIRST_STATUS=7 CODEX_UPDATE_PROBE_RETRY_DELAY=0 run); rc=$?
+[ "$rc" -eq 0 ] && has "$out" "would update codex 0.156.0 -> 0.157.1" \
+  && ! has "$out" "$first_sentinel" && [ -e "$C/fake/probed" ] && ok \
+  || bad "29: an empty first probe was not retried to a clean pass (rc=$rc)"
 # A real pnpm 11 passes the probe (case 1 and the rest run on the default 11.10.0).
 [ "$(live_ver)" = "codex-cli 0.156.0" ] && ok || bad "29: live install changed under a refused pnpm"
 

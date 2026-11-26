@@ -231,13 +231,18 @@ CCFLARE_URL_SATELLITE=${CCFLARE_URL_SATELLITE:-}
 # Flat unit names, plus drop-in overrides written as "<unit>.d/<file>.conf". The
 # jsm-auto-update drop-ins are overrides, not a unit we own: jsm installs and may
 # rewrite jsm-auto-update.service itself, while drop-ins survive that rewrite.
-UNITS="harness-unit-failure-alert@.service backup-harness.service backup-harness.timer dcg-auto-update.service dcg-auto-update.timer tools-auto-update.service tools-auto-update.timer codex-auto-update.service codex-auto-update.timer jsm-auto-update.service.d/override.conf jsm-auto-update.service.d/zz-skills-localize.conf wt-sweep.service wt-sweep.timer pkg-cache-prune.service pkg-cache-prune.timer docker-hygiene.service docker-hygiene.timer reclaim-sweep.service reclaim-sweep.timer disk-watermark.service disk-watermark.timer jsm-auto-update.timer mcp-servers-update.service mcp-servers-update.timer skills-update.service skills-update.timer cass-release-promote.service cass-release-promote.timer"
+UNITS="harness-unit-failure-alert@.service backup-harness.service backup-harness.timer dcg-auto-update.service dcg-auto-update.timer tools-auto-update.service tools-auto-update.timer codex-auto-update.service codex-auto-update.timer jsm-auto-update.service.d/override.conf jsm-auto-update.service.d/zz-skills-localize.conf wt-sweep.service wt-sweep.timer pkg-cache-prune.service pkg-cache-prune.timer docker-hygiene.service docker-hygiene.timer reclaim-sweep.service reclaim-sweep.timer disk-watermark.service disk-watermark.timer jsm-auto-update.timer mcp-servers-update.service mcp-servers-update.timer skills-update.service skills-update.timer cass-release-promote.service cass-release-promote.timer session-archive.service session-archive.timer session-search.service session-search.timer"
 # The deletion-capable hygiene timers stay out of the enable-now line below by
 # convention.
 # codex-auto-update.timer stays out of it too (dotfiles#1377): it promotes a new Codex
 # CLI within minutes of release and feeds better-ccflare's client identity, so
 # turning it on is `systemctl --user enable --now codex-auto-update.timer`, done
 # by hand. It is also absent from all_role_units, so reconcile never disables it.
+# session-archive.timer is the same: installed with the rest, turned on by hand
+# (`systemctl --user enable --now session-archive.timer`), because it starts a
+# multi-GB archive of the host's transcripts and that is the owner's call.
+# session-search.timer too (`systemctl --user enable --now session-search.timer`):
+# its first runs read that whole archive to build the index.
 # Live --user units owned by other repositories are deliberately not managed here.
 # Consumed by check() so another owner's units do not reappear every week.
 # Owners were verified against each repository on 2026-08-27, not assumed.

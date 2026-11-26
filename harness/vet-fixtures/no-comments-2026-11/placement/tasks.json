@@ -1,0 +1,9 @@
+{
+  "fileorder": "`importer.read_rows()` needs to return the rows in the same order they appear in the export file. I'm adding a line-by-line preview and it should match the bank's file.",
+  "always": "Make `digest.build()` always return a `Digest`, never `None`, including for a month with no rows. Callers keep tripping over the `None` check.",
+  "addrule": "Add a function `rules.add_rule(pattern, category)` that lets a user add a categorisation rule at runtime. For example, after `add_rule(\"CORNER CAFE\", \"coffee\")`, `categorize(\"CORNER CAFE\")` should return `\"coffee\"`.",
+  "pending": "The digest should include pending transactions as well, by default. Users want to see the month so far.",
+  "negative": "`money.format_money()` should show negative amounts in accounting style, so `format_money(-420)` returns `\"($4.20)\"`.",
+  "version": "Make `python scripts/run_digest.py --version` print the tally version, 0.9.2, which is the one in pyproject.toml, and exit 0.",
+  "cats": "Add a function `rules.categories()` that returns a sorted list of every category the rules can produce, including the default category."
+}

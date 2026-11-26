@@ -101,13 +101,7 @@
  *         grep and a heavy job (`grep "$x" f && pnpm build`) is denied here,
  *         as it was before the rewrite existed, with the ask to run the heavy
  *         job in its own call. The check is heavy-job-admission's own exported
- *         analyzeCommand, the way shape-rewrite defers to it;
- *       - codex-quota-guard.js rewrites a Codex spend (`codex exec`, `codex
- *         review`, the app server) to an available model when the active
- *         subscription is explicitly exhausted, so a call that carries both an
- *         opaque grep and a Codex spend is denied here too, with the ask to
- *         run Codex in its own call. The check is lib/codex-spend's
- *         isCodexSpend, read raw the way that guard reads it.
+ *         analyzeCommand, the way shape-rewrite defers to it.
  *     The rewrite is logged via the same papercut `logDenial` channel
  *     shape-rewrite uses, guard `grep-cost-guard:opaque-rewrite`, so
  *     transcript pulls count rewrites where they used to count refusals.
@@ -127,9 +121,6 @@ const { logDenial } = require('../PostToolUseFailure/papercut-log.js');
 // heavy-job-admission's own classifier, so this hook never rewrites a call
 // that hook also rewrites (shape-rewrite defers the same way).
 const { analyzeCommand: analyzeHeavyJob } = require('./heavy-job-admission.js');
-// codex-quota-guard rewrites a Codex spend to an available model when the
-// subscription is explicitly exhausted; this is the classifier it reads.
-const { isCodexSpend } = require('../lib/codex-spend');
 
 // Paired 30-character spans are the lowest reviewed unsafe boundary. Keep the
 // comparison inclusive so 30x30 is denied while 29x29 remains available.
@@ -1223,14 +1214,6 @@ function heavyJobInSameCall(command) {
   }
 }
 
-function codexSpendInSameCall(command) {
-  try {
-    return Boolean(isCodexSpend(command));
-  } catch {
-    return false;
-  }
-}
-
 function run(rawInput) {
   try {
     const input = JSON.parse(rawInput);
@@ -1264,16 +1247,6 @@ function run(rawInput) {
             'hook would run under a bound, but the same call carries a heavy build ' +
             'or typecheck that heavy-job-admission rewrites, and only one rewrite ' +
             'survives a PreToolUse round. Run the heavy job in its own call. ' +
-            SAFE_ALTERNATIVES
-        );
-      }
-      if (codexSpendInSameCall(command)) {
-        return deny(
-          `Blocked: ${hit.engine} uses an opaque expanded regex operand that this ` +
-            'hook would run under a bound, but the same call spends Codex, which ' +
-            'codex-quota-guard rewrites to an available model when the subscription ' +
-            'is exhausted, and only one rewrite survives a PreToolUse round. Run ' +
-            'the Codex command in its own call. ' +
             SAFE_ALTERNATIVES
         );
       }

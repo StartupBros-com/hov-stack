@@ -244,12 +244,6 @@ smoke_cmd firecrawl-cli 'usage: firecrawl-cli' - - --help
 smoke_cmd gsc 'usage: gsc' - - --help
 smoke_cmd dfs 'usage: dfs' - - --help
 
-# codex-pick: --version/--help only. Resolving would read ~/.codex/auth.json and
-# reach chatgpt.com; the weekly sweep stays offline and free like every other
-# registration here (dotfiles#991).
-smoke_cmd codex-pick '^codex-pick [0-9]+\.[0-9]+\.[0-9]+$' - - --version
-smoke_cmd codex-pick 'usage: codex-pick'                  - - --help
-
 # jq lives in ~/.local/bin, which systemd user units do NOT have on PATH. dcg-update.sh
 # escaped that trap only because /usr/bin/jq happens to exist — so probe every copy.
 smoke_cmd jq '^jq-[0-9]' - - --version

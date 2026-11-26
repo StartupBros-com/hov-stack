@@ -55,3 +55,7 @@
 # paths are scenario data in the configs and in the reports that replay them.
 ^plugins/skill-tuner/(configs|reports)/	^/home/[a]lex$	skill-tuner eval scenario user alex, fictional, recorded in its configs and reports	linux-home
 ^plugins/skill-tuner/(configs|reports)/	^/home/[o]ps$	skill-tuner eval scenario user ops, fictional, recorded in its configs and reports	linux-home
+# The vendored markdown-it bundle carries the HTML entity table as one packed string; a run of
+# it has the shape of an address. It is data, checked byte-for-byte against UPSTREAM.md by
+# tests/open-deliverable.test.sh.
+^lib/vendor/markdown-it/markdown-it\.umd\.min\.js$	^z@[a]Peb95Si\.ebcpputyvjB$	a run of the packed HTML entity table inside the vendored parser, not an address	email
