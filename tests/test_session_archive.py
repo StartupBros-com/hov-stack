@@ -2425,7 +2425,7 @@ class DeviceFillTests(Case):
             result = real(archive, *args)
             self.assertEqual(len(archive.fills), 3)
             for path, change in changed.items():
-                archive.db.execute("UPDATE sources SET %s WHERE path=?" % change, (path,))
+                archive.db.execute("UPDATE sources SET " + change + " WHERE path=?", (path,))
             return result
         with mock.patch.object(A.Archive, "plan", plan_then_change):
             summary = self.run_pass()
