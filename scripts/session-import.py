@@ -140,8 +140,6 @@ def default_mirror() -> str:
     return os.path.join(base, "coding-agent-search", "raw-mirror", "v1")
 
 
-# ---- the mirror ------------------------------------------------------------------
-
 def whole_number(value) -> bool:
     return isinstance(value, int) and not isinstance(value, bool) and value >= 0
 
@@ -306,8 +304,6 @@ def identity(A, roots: list, path: str) -> tuple:
     return "ok", root.agent, "/".join(parts[root.depth:])
 
 
-# ---- the import -------------------------------------------------------------------
-
 class Importer:
     def __init__(self, A, store: str, roots: list, mirror: str, scratch: str | None = None,
                  min_free: int = 0, max_bytes: int = 0, max_seconds: int = 0, capture_every: int = 0,
@@ -338,8 +334,6 @@ class Importer:
         self.archive = None
         self.ledger = None
         self.unsynced = 0
-
-    # ---- ledger --------------------------------------------------------------
 
     def ledger_path(self) -> str:
         return os.path.join(self.store, LEDGER)
@@ -395,8 +389,6 @@ class Importer:
         os.fsync(self.ledger.fileno())
         self.unsynced = 0
         self.ours.add((row["agent"], row["key"]))
-
-    # ---- giving way to capture -------------------------------------------------
 
     def last_pass(self) -> tuple | None:
         """(end, start) of the archive's last capture pass, in seconds, or None when there has been none."""
@@ -480,8 +472,6 @@ class Importer:
             fcntl.flock(lock, fcntl.LOCK_UN)
             self.give_way(size)
             fcntl.flock(lock, fcntl.LOCK_EX)
-
-    # ---- one manifest ----------------------------------------------------------
 
     def room(self, folder: str, more: int) -> bool:
         """Would `more` further bytes leave this folder's disk at or above the floor?"""
@@ -568,8 +558,6 @@ class Importer:
         self.n["bytes_added"] += max(0, size - had)
         self.n["bytes_read"] += size
         return dict(row, outcome=outcome, version=stream.version)
-
-    # ---- a run -----------------------------------------------------------------
 
     def refuse(self, name: str, reason: str) -> None:
         self.n["refused"] += 1

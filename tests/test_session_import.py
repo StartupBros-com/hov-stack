@@ -145,8 +145,6 @@ class Case(unittest.TestCase):
         self.mirror = Mirror(os.path.join(self.tmp, "mirror"))
         self.clock = 1_700_000_000_000_000_000
 
-    # ---- sources and passes ----------------------------------------------------
-
     def source(self, rel):
         """Where a transcript with this path below the Claude root lived."""
         return os.path.join(self.claude, rel)
@@ -186,8 +184,6 @@ class Case(unittest.TestCase):
             code = I.main(["--store", self.store, *roots, "mirror", "--mirror", self.mirror.root,
                            "--capture-every", "0", "--min-free-bytes", "0", *args])
         return code, out.getvalue(), err.getvalue()
-
-    # ---- the store, read without the tools ---------------------------------------
 
     def store_path(self, key, version=1, agent="claude"):
         return os.path.join(self.store, "data", agent, key[:2], key + (".zst" if version == 1 else ".v%d.zst" % version))
@@ -236,8 +232,6 @@ class Case(unittest.TestCase):
         self.addCleanup(setattr, A, "Archive", original)
         return original
 
-
-# ---- bytes -----------------------------------------------------------------------
 
 class StoreTests(Case):
     def test_a_whole_blob_is_stored_byte_for_byte_under_the_key_capture_would_give_it(self):
@@ -306,8 +300,6 @@ class StoreTests(Case):
         self.assertEqual(self.stored(U1 + "/tool-results/toolu_01.txt"), result)
 
 
-# ---- what the archive already holds ----------------------------------------------
-
 class HeldTests(Case):
     def test_a_file_the_archive_holds_stores_nothing_and_changes_nothing(self):
         data = text(10, 40_000)
@@ -315,7 +307,7 @@ class HeldTests(Case):
         self.capture()
         files, rows, sources = self.store_files(), self.rows(), self.rows("sources")
         self.mirror.add(path, data)
-        self.mirror.add(path, data[:15_000])          # an earlier, shorter capture of the same file
+        self.mirror.add(path, data[:15_000])
         report = self.run_import()
         self.assertEqual((report["held"], report["bytes_added"] if "bytes_added" in report else 0), (2, 0))
         self.assertEqual((self.store_files(), self.rows(), self.rows("sources")), (files, rows, sources))
@@ -330,7 +322,7 @@ class HeldTests(Case):
         self.assertEqual((report["extended"], report["bytes_added"]), (1, 50_000))
         self.assertEqual(self.stored(U1 + ".jsonl"), data)
         with open(self.store_path(U1 + ".jsonl"), "rb") as fh:
-            self.assertEqual(fh.read(len(before)), before)      # the frames already there are untouched
+            self.assertEqual(fh.read(len(before)), before)
         # The live file is still the shorter one. A pass that looks at it again
         # finds every byte stored and starts no version.
         self.put("proj-a/" + U1 + ".jsonl", data[:30_000])
@@ -371,8 +363,6 @@ class HeldTests(Case):
         self.assertEqual(self.stored(U1 + ".jsonl"), data)
         self.assertEqual(len(self.rows()), 1)
 
-
-# ---- living with capture passes ---------------------------------------------------
 
 class CaptureTests(Case):
     def test_capture_and_verify_leave_imported_streams_exactly_as_they_were(self):
@@ -496,8 +486,6 @@ class CaptureTests(Case):
         self.assertEqual((self.ledger(), self.ledger("begun")), ([], []))
 
 
-# ---- kills and failures part way ----------------------------------------------------
-
 class KillTests(Case):
     """Under --new-keys-only a key the import began must stay the import's own, whatever stopped it."""
 
@@ -577,8 +565,6 @@ class KillTests(Case):
         self.assertEqual(self.stored(U1 + ".jsonl", 2), rewritten)
         self.assertFalse(os.path.exists(self.store_path(U1 + ".jsonl", 3)))
 
-
-# ---- refusals ---------------------------------------------------------------------
 
 class RefusalTests(Case):
     def refused(self, name=None, count=1):
@@ -782,8 +768,6 @@ class PlacementTests(Case):
         self.assertFalse(os.path.exists(self.store))
 
 
-# ---- runs that stop and start -------------------------------------------------------
-
 class RunTests(Case):
     def fill(self, count=4):
         self.data = [text(90 + n, 6_000 + n) for n in range(count)]
@@ -847,7 +831,7 @@ class RunTests(Case):
         now = [1_800_000_000.0]
 
         def clock():
-            now[0] += 10              # every look at the clock is ten seconds later
+            now[0] += 10
             return now[0]
         report = self.run_import(max_seconds=45, clock=clock)
         self.assertEqual(report["stored"] + report["deferred"], 4)
@@ -972,8 +956,6 @@ class RunTests(Case):
         self.assertEqual(code, 2)
         self.assertFalse(os.path.exists(self.store))
 
-
-# ---- giving way to the capture timer -----------------------------------------------
 
 class GiveWayTests(Case):
     def setUp(self):
@@ -1120,8 +1102,6 @@ class GiveWayTests(Case):
         self.assertFalse(worker.is_alive())
         self.assertEqual((done["report"]["stored"], done["report"]["waited_for_capture"], self.sleeps), (1, 1, 30))
 
-
-# ---- search ---------------------------------------------------------------------------
 
 class SearchTests(Case):
     def test_an_imported_transcript_is_found_by_a_search_of_the_archive(self):
