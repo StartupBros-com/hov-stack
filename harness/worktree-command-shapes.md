@@ -45,7 +45,7 @@ for a refused shape") and points here for the rest:
   subagents, resumed sessions), and nothing from inside the session relaxes it.
 - Refused: `$( )`/backticks in argument position, `${VAR:-…}` modifiers,
   unquoted heredoc delimiters, loop-var use, package-manager operands
-  (`pnpm typecheck`, `npx tsc`), a bare `hash` token.
+  (`pnpm typecheck`, `npx tsc`), an argument that is a builtin's name (`eval`, `source`, `hash`…).
 - Fine: `&&`/`;`/pipe chains; `<<'EOF'`, except when the body has a quote
   inside `{}` (JSON, a Python dict) or a redirect precedes `<<` after
   `&&`/`||`, as in `mkdir -p d && cat > d/f <<'EOF'`. shape-rewrite runs both
@@ -81,7 +81,7 @@ Git redirected out of the worktree:
 > run it — a worktree-isolated session's git operations must target its own worktree. Run
 > the equivalent from `<worktree>` without the redirect.
 
-A bare `hash` token anywhere in the argv (its own message — the verifier models the shell
+An argument that is a string-running builtin's name, `hash` and the others in its DENY section (its own message — the verifier models the shell
 builtin, which can rewrite command lookup):
 
 > This session is isolated in the worktree `<worktree>`, but this command **runs a string
@@ -192,7 +192,7 @@ clear) and either fold the result into the row directly (refusal reconfirmed) or
 retire the row and re-assess the `interp` family's live necessity (refusal gone for
 good).
 
-### DENY — the `hash` token (its own message)
+### DENY — a builtin's name as an argument, such as `hash` (its own message)
 
 | Shape | Probe |
 |---|---|
@@ -207,6 +207,16 @@ argument that happens to *be* the word triggers it. Practical effect: **never gr
 bare word `hash` in an isolated session** — search for a longer token (`payload-hash`,
 `hash_`, `hashes`) instead. This confirms, and sharpens to token level, the field report in
 memory note `pnpm-is-blocked-in-worktree-isolated-sessions`.
+
+**Wider than `hash`.** The same refusal, naming the word, fires for `eval`, `source`,
+`enable` and `alias` (probed 2026-11-25, CC 2.1.332, isolated session), and refusals in the
+week to 11-25 also named `complete`, `compgen`, `fc`, `trap` and `bind`; there may be more.
+It also fires for a path that ends in one, with or without a trailing `/`: `ls /tmp/x/source`
+and `ls /tmp/x/source/` deny, while `ls /tmp/x/source/y`, `echo 'def eval'` and
+`echo evaluate sourced enabled` pass. `echo eval` and `echo 'source'` deny, so quoting does
+not help. In the week to 2026-11-25 this family drew 98 refusals; in 96 the word was only an
+argument (a search pattern or a path). `eval` drew 35, `source` 32 and `hash` 1. Search for a
+longer token, and name a file inside such a folder rather than the folder.
 
 The package-manager rows discriminate cleanly and across three runners: `pnpm --version`,
 `pnpm --filter startupbros --version` and `npx --version` all pass, and
@@ -950,7 +960,7 @@ What the official docs and issue tracker add on top of the probes:
    hold in any release (unresolved, non-`/tmp`, a loop over words read at run time,
    `$HOME` targets). The literal-word-loop and `2> file` refusals are 0.15.3 limits,
    left unpinned so a release that lifts them can still be promoted.
-6. **Anything genuinely multi-step → put it in a script file and run the file.** Commit,
+6. **A shape you cannot split (a loop, `$( )`) → put it in a script file and run the file.** Commit,
    push and `gh pr create` stay plain commands, one each (Quick rules): in the week to
    2026-11-25, 174 of 289 PR-opening script files had no refused command before them.
    A script's own loops, `$( )` and redirects are never parsed; only the invoking command is
