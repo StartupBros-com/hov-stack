@@ -2274,5 +2274,257 @@ class CommandLineTests(Case):
             self.assertIn("holds 9000 of the 26000 bytes recorded", done.stderr.decode())
 
 
+class DeviceFillTests(Case):
+    """Records written before the device column was kept get their device from a pass that finds the file as recorded."""
+
+    move = MovedFolderTests.move
+    state_rows = MovedFolderTests.state_rows
+    strip_device_column = MovedFolderTests.strip_device_column
+    no_full_comparison = MovedFolderTests.no_full_comparison
+    run_light = LightPassTests.run_light
+    run_full = LightPassTests.run_full
+
+    def setUp(self):
+        super().setUp()
+        self.clock = time.time_ns() - 3600 * 10 ** 9        # files dated an hour ago: recent for a quick pass
+
+    FILES = (("proj-a/s1.jsonl", 40_000), ("proj-a/s2.jsonl", 30_000), ("proj-a/s1/tool-results/out.txt", 20_000))
+
+    def populate(self):
+        for number, (rel, size) in enumerate(self.FILES):
+            self.put(rel, text(number, size))
+
+    def query(self, sql, args=()):
+        db = sqlite3.connect(os.path.join(self.store, "state.sqlite3"))
+        try:
+            return db.execute(sql, args).fetchall()
+        finally:
+            db.close()
+
+    def write(self, sql, args=()):
+        db = sqlite3.connect(os.path.join(self.store, "state.sqlite3"), isolation_level=None)
+        try:
+            db.execute(sql, args)
+        finally:
+            db.close()
+
+    def records(self):
+        return self.query("SELECT path, size, mtime_ns, ino, seen_ns, dev FROM sources ORDER BY path")
+
+    def pre_migration_state(self):
+        """What a pass before the device column left: the records exist and their device is NULL."""
+        self.run_pass()
+        self.write("UPDATE sources SET dev=NULL")
+        self.assertTrue(all(row[5] is None for row in self.records()))
+
+    def full_pass(self):
+        """A full pass; `self.compared` is the source bytes it compared against the store (not in bytes_read)."""
+        archive = self.archive()
+        try:
+            summary = archive.capture()
+            self.compared = archive.spent - summary["bytes_read"]
+            return summary
+        finally:
+            archive.close()
+
+    def scenario(self, run):
+        """Pre-migration records, one pass of `run`, a folder rename, one more pass: (fill pass, rename pass)."""
+        self.populate()
+        self.pre_migration_state()
+        before = self.records()
+        filled = run()
+        after = self.records()
+        self.assertEqual([row[:5] for row in before], [row[:5] for row in after])     # seen_ns and the rest are as they were
+        self.move()
+        return filled, run()
+
+    def test_full_pass_fills_the_device_and_the_renamed_folder_is_not_compared(self):
+        filled, renamed = self.scenario(self.full_pass)
+        self.assertEqual(filled["device_filled"], 3)
+        self.assertEqual({row[5] for row in self.records()}, {os.stat(self.claude).st_dev})
+        self.assertEqual((renamed["moved"], renamed["proved"], renamed["device_filled"]), (3, 0, 0))
+        self.assertEqual((renamed["bytes_read"], self.compared), (0, 0))
+
+    def test_without_the_fill_the_renamed_folder_is_compared_in_full(self):
+        with mock.patch.object(A.Archive, "fill"):
+            filled, renamed = self.scenario(self.full_pass)
+        self.assertEqual((filled["device_filled"], renamed["moved"], renamed["proved"]), (0, 0, 3))
+        self.assertEqual(self.compared, sum(size for _, size in self.FILES))
+
+    def test_quick_pass_fills_recent_records(self):
+        self.populate()
+        self.run_full()
+        self.write("UPDATE sources SET dev=NULL")
+        before = self.records()
+        filled = self.run_light()
+        self.assertEqual(filled["full_walks"], 0)
+        self.assertEqual(filled["device_filled"], 3)
+        self.assertEqual([row[:5] for row in before], [row[:5] for row in self.records()])
+        self.assertTrue(all(row[5] is not None for row in self.records()))
+        self.move()
+        with self.no_full_comparison():
+            renamed = self.run_light()
+        self.assertEqual((renamed["full_walks"], renamed["moved"], renamed["proved"]), (0, 3, 0))
+        self.assertEqual(renamed["bytes_read"], 0)
+
+    def test_quick_pass_leaves_a_record_older_than_the_recent_window_alone(self):
+        path = self.put("proj-a/s1.jsonl", text(1, 5000))
+        old = time.time_ns() - 5 * 24 * 3600 * 10 ** 9
+        os.utime(path, ns=(old, old))
+        self.run_full()
+        self.write("UPDATE sources SET dev=NULL")
+        self.assertEqual(self.run_light()["device_filled"], 0)
+        self.assertEqual(self.run_full()["device_filled"], 1)
+
+    def test_a_file_that_changed_gets_no_fill(self):
+        self.populate()
+        self.pre_migration_state()
+        grown = os.path.join(self.claude, "proj-a/s1.jsonl")
+        self.add("proj-a/s1.jsonl", text(9, 100))
+        touched = os.path.join(self.claude, "proj-a/s2.jsonl")
+        self.stamp(touched)
+        replaced = os.path.join(self.claude, "proj-a/s1/tool-results/out.txt")
+        mtime = os.stat(replaced).st_mtime_ns
+        os.rename(replaced, replaced + ".old")
+        with open(replaced, "wb") as fh:
+            fh.write(Path(replaced + ".old").read_bytes())             # same size, same mtime, other inode
+        os.utime(replaced, ns=(mtime, mtime))
+        os.unlink(replaced + ".old")
+        for full in (True, False):
+            archive = self.archive()
+            try:
+                archive.plan(full)
+                self.assertEqual([fill[1] for fill in archive.fills if fill[1] in (grown, touched, replaced)], [])
+            finally:
+                archive.close()
+
+    def test_a_path_that_is_gone_gets_no_fill(self):
+        self.populate()
+        self.pre_migration_state()
+        gone = os.path.join(self.claude, "proj-a/s2.jsonl")
+        os.unlink(gone)
+        archive = self.archive()
+        try:
+            archive.plan(True)
+            self.assertEqual(len(archive.fills), 2)
+            self.assertNotIn(gone, [fill[1] for fill in archive.fills])
+        finally:
+            archive.close()
+        self.assertEqual(self.run_pass()["device_filled"], 2)
+        self.assertEqual([row[5] is None for row in self.records() if row[0] == gone], [True])
+
+    def test_a_record_changed_between_the_plan_and_the_write_is_not_filled(self):
+        self.populate()
+        self.pre_migration_state()
+        real = A.Archive.plan
+        changed = {os.path.join(self.claude, "proj-a/s1.jsonl"): "size=size+1",
+                   os.path.join(self.claude, "proj-a/s2.jsonl"): "mtime_ns=mtime_ns+1",
+                   os.path.join(self.claude, "proj-a/s1/tool-results/out.txt"): "ino=ino+1"}
+
+        def plan_then_change(archive, *args):
+            result = real(archive, *args)
+            self.assertEqual(len(archive.fills), 3)
+            for path, change in changed.items():
+                archive.db.execute("UPDATE sources SET " + change + " WHERE path=?", (path,))
+            return result
+        with mock.patch.object(A.Archive, "plan", plan_then_change):
+            summary = self.run_pass()
+        self.assertEqual(summary["device_filled"], 0)
+        self.assertTrue(all(row[5] is None for row in self.records()))
+
+    def test_a_fill_does_not_change_which_record_is_the_newest_of_an_inode(self):
+        first = self.put("proj-a/s1.jsonl", text(1, 9000))
+        second = os.path.join(self.claude, "proj-b", "s1.jsonl")
+        os.makedirs(os.path.dirname(second))
+        os.link(first, second)
+        self.run_pass()
+        # Two records of one inode: the one for `second` is the newer.
+        self.write("UPDATE sources SET dev=NULL, seen_ns=CASE WHEN path=? THEN 100 ELSE 200 END", (first,))
+        newest = "SELECT path FROM sources WHERE ino=? ORDER BY seen_ns DESC LIMIT 1"
+        ino = os.stat(first).st_ino
+        before = (self.records(), self.query(newest, (ino,)))
+        summary = self.run_pass()
+        self.assertEqual(summary["device_filled"], 2)
+        after = (self.records(), self.query(newest, (ino,)))
+        self.assertEqual(before[1], after[1])
+        self.assertEqual(before[1], [(second,)])
+        self.assertEqual([row[:5] for row in before[0]], [row[:5] for row in after[0]])
+
+    def test_a_stored_device_that_differs_is_refreshed_and_the_shortcut_follows(self):
+        self.populate()
+        self.run_pass()
+        device = os.stat(self.claude).st_dev
+        self.write("UPDATE sources SET dev=?", (device + 7,))
+        before = self.records()
+        filled = self.run_pass()
+        self.assertEqual(filled["device_filled"], 3)
+        self.assertEqual({row[5] for row in self.records()}, {device})
+        self.assertEqual([row[:5] for row in before], [row[:5] for row in self.records()])
+        self.assertEqual(self.run_pass()["device_filled"], 0)          # a matching device is not written again
+        self.move()
+        with self.no_full_comparison():
+            self.assertEqual(self.run_pass()["moved"], 3)
+
+    def test_plan_still_writes_nothing_on_a_read_only_state(self):
+        self.populate()
+        self.pre_migration_state()
+        state = os.path.join(self.store, "state.sqlite3")
+        before, rows = Path(state).read_bytes(), self.records()
+        archive = A.Archive(self.store, self.roots, readonly=True)
+        try:
+            for full in (True, False):
+                work, _, _, _ = archive.plan(full)
+                self.assertEqual(work, {})
+                self.assertEqual(len(archive.fills), 3)
+        finally:
+            archive.close()
+        self.assertEqual((Path(state).read_bytes(), self.records()), (before, rows))
+
+    def test_plan_on_a_read_only_state_without_the_device_column_collects_nothing(self):
+        self.populate()
+        self.run_pass()
+        self.strip_device_column()
+        archive = A.Archive(self.store, self.roots, readonly=True)
+        try:
+            archive.plan(True)
+            archive.plan(False)
+            self.assertEqual(archive.fills, [])
+        finally:
+            archive.close()
+
+    def test_the_fill_is_written_inside_the_pass_transaction(self):
+        self.populate()
+        self.pre_migration_state()
+        statements = []
+        archive = self.archive()
+        archive.db.set_trace_callback(statements.append)
+        try:
+            summary = archive.capture()
+        finally:
+            archive.close()
+        self.assertEqual(summary["device_filled"], 3)
+        depth, inside = 0, []
+        for sql in statements:
+            word = sql.split(None, 1)[0].upper() if sql.strip() else ""
+            if word == "BEGIN":
+                depth += 1
+            elif word in ("COMMIT", "END"):
+                depth -= 1
+            elif sql.startswith("UPDATE sources SET dev"):
+                inside.append(depth)
+        self.assertEqual(inside, [1, 1, 1])
+
+    def test_the_pass_summary_carries_the_counter(self):
+        self.populate()
+        self.run_pass()
+        self.assertEqual(self.run_pass()["device_filled"], 0)
+        self.assertIn("device_filled", A.COUNTERS)
+        reader = A.Archive(self.store, [], readonly=True)
+        try:
+            self.assertEqual(reader.status()["last_pass"]["device_filled"], 0)
+        finally:
+            reader.close()
+
+
 if __name__ == "__main__":
     unittest.main()

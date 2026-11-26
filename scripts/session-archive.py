@@ -32,7 +32,10 @@ Rules the code keeps:
     compares the whole stored prefix with the source: another project folder
     holding the same file while the old path lives on, a rewritten or touched
     file, a file shorter than the cursor, a state file that was lost or
-    restored, a record from before the device was kept.
+    restored, a record from before the device was kept (a pass that finds a
+    file exactly as recorded sets that record's `dev`, counted as
+    `device_filled`, so only a file that moves before such a pass has looked
+    at it is compared).
   * The cursor moves only after the appended frame is fsynced. A compressor
     failure, a full disk or an unreadable source leaves that file's cursor
     where it was and the pass goes on.
@@ -145,7 +148,8 @@ DEFAULT_ROOTS = (
 
 COUNTERS = ("scanned", "changed", "appended", "streams", "versions", "proved", "moved", "covered", "adopted",
             "reconciled", "partial_frames_set_aside", "deferred", "skipped", "source_errors",
-            "store_errors", "low_disk", "full_walks", "folders_read", "bytes_read", "bytes_stored")
+            "store_errors", "low_disk", "full_walks", "folders_read", "bytes_read", "bytes_stored",
+            "device_filled")
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS streams(
@@ -430,6 +434,9 @@ class Archive:
         self.spent = 0
         self.n: collections.Counter = collections.Counter()
         self.cut: set = set()             # streams whose cursor moved back during this pass
+        # Records whose device plan() found missing or different on a file that is exactly as
+        # recorded: (dev, path, size, mtime_ns, ino). capture() writes them; plan() never does.
+        self.fills: list = []
         # Test seam: runs after a frame is durable and before its cursor is saved.
         self.after_store_write: Callable[[], None] = lambda: None
         state = os.path.join(store, "state.sqlite3")
@@ -882,15 +889,45 @@ class Archive:
         """(stream, size, mtime_ns, ino) recorded for a source path by the last pass that stored it."""
         return self.db.execute("SELECT stream, size, mtime_ns, ino FROM sources WHERE path=?", (path,)).fetchone()
 
+    def has_dev(self) -> bool:
+        """Does this state file have the device column? A read-only handle on an old state file may not."""
+        return "dev" in {row[1] for row in self.db.execute("PRAGMA table_info(sources)")}
+
+    def fill(self, path: str, row: tuple, st: os.stat_result) -> None:
+        """Note that the record `row` = (size, mtime_ns, ino, dev) of `path` needs its device set to `st`'s.
+
+        Called only for a file this pass leaves alone because it is exactly as
+        recorded (size, mtime_ns and inode), so the record already describes
+        this file and only the device is missing. A record from before the
+        device column was kept has NULL there, and until it has one moved()
+        cannot take its shortcut: the first move of that file pays a full
+        comparison.
+
+        A stored device that differs from the file's is refreshed too, under the
+        same condition. The device number belongs to the mount, not to the file:
+        if the host renumbers it (a restart, a remount), every record would
+        otherwise refuse the shortcut until its file changed, and each moved
+        file would be compared in full. The record is matched on path, size,
+        mtime_ns and inode, so it describes the file at the path now, and the
+        new device is the device that file's inode belongs to. The write sets
+        `dev` and nothing else, so which record moved() treats as the newest of
+        an inode (by seen_ns) cannot change. plan() only collects the fill;
+        capture() writes it under its lock.
+        """
+        if row[3] != st.st_dev:
+            self.fills.append((st.st_dev, path, st.st_size, st.st_mtime_ns, st.st_ino))
+
     def plan(self, full: Optional[bool] = None) -> tuple:
         """What this pass has to store: (work, folder rows, roots walked in full, pending paths to clear).
 
-        Reads metadata and the state and writes nothing. `work` maps a path to
+        Reads metadata and the state and writes nothing to the state; the device
+        records it would fill are left in `self.fills` for capture(). `work` maps a path to
         (mtime_ns, path, agent, key). With `full` unset, a root is walked in full
         when its last full pass is full_every seconds old; True walks every root
         in full, False none.
         """
         now = time.time_ns()
+        self.fills = []
         walked = [root for root in self.roots if full or (full is None and self.full_due(root, now))]
         light = [root for root in self.roots if root not in walked]
         work: dict = {}
@@ -907,8 +944,9 @@ class Archive:
         return work, rows, walked, clear
 
     def full_plan(self, roots: list, work: dict, folders: list, clear: set) -> None:
+        fillable = self.has_dev()
         known = {row[0]: row[1:] for row in self.db.execute(
-            "SELECT path, stream, size, mtime_ns, ino FROM sources")}
+            "SELECT path, stream, size, mtime_ns, ino, " + ("dev" if fillable else "NULL") + " FROM sources")}
         streams = {row[0]: row[1:] for row in self.db.execute(
             "SELECT id, agent, key, version, store_bytes, broken, content_bytes FROM streams")}
         checked: dict = {}
@@ -927,9 +965,11 @@ class Archive:
                 # cut, damaged or marked broken sends its sources back through
                 # capture_one, which stores them again. The last test is per
                 # source, not per stream: two sources of one stream differ in size.
-                if (seen and seen[1:] == (st.st_size, st.st_mtime_ns, st.st_ino)
+                if (seen and seen[1:4] == (st.st_size, st.st_mtime_ns, st.st_ino)
                         and self.store_agrees(seen[0], streams, checked)
                         and streams[seen[0]][5] >= seen[1]):
+                    if fillable:
+                        self.fill(path, seen[1:], st)
                     continue
                 work[path] = (st.st_mtime_ns, path, root.agent, key)
         # A file that was waiting stops waiting: the walk found it (`work` puts
@@ -965,17 +1005,21 @@ class Archive:
         cutoff = now - RECENT_NS
         looked: set = set()
         plain: dict = {}
+        fillable = self.has_dev()
 
         def consider(root: Root, key: str, path: str, st: os.stat_result) -> None:
             looked.add(path)
             self.n["scanned"] += 1
             row = self.db.execute(
-                "SELECT s.size, s.mtime_ns, s.ino, t.content_bytes, t.broken FROM sources s "
+                "SELECT s.size, s.mtime_ns, s.ino, t.content_bytes, t.broken, " + ("s.dev" if fillable else "NULL")
+                + " FROM sources s "
                 "LEFT JOIN streams t ON t.id = s.stream WHERE s.path=?", (path,)).fetchone()
             # Left alone on the full pass's terms, except that the store file's
             # size is not read: that check runs on the full pass.
             if (row and row[:3] == (st.st_size, st.st_mtime_ns, st.st_ino)
                     and row[3] is not None and not row[4] and row[3] >= row[0]):
+                if fillable:
+                    self.fill(path, (row[0], row[1], row[2], row[5]), st)
                 return
             work[path] = (st.st_mtime_ns, path, root.agent, key)
 
@@ -1112,6 +1156,13 @@ class Archive:
         self.db.executemany("INSERT OR REPLACE INTO folders(path, depth, mtime_ns) VALUES (?, ?, ?)", folder_rows)
         self.db.executemany("DELETE FROM pending WHERE path=?", ((path,) for path in clear))
         self.db.executemany("INSERT OR IGNORE INTO pending(path) VALUES (?)", ((path,) for path in work))
+        # The devices plan() found missing or different, in this same transaction.
+        # Only `dev` is written, and only where the record still has the size,
+        # mtime_ns and inode the plan saw: a record changed since is left alone.
+        changes = self.db.total_changes
+        self.db.executemany("UPDATE sources SET dev=? WHERE path=? AND size=? AND mtime_ns=? AND ino=? "
+                            "AND dev IS NOT ?", ((*fill, fill[0]) for fill in self.fills))
+        self.n["device_filled"] = self.db.total_changes - changes
         self.db.execute("COMMIT")
         work = sorted(work.values())    # oldest first: the files nearest deletion are saved first
         self.db.execute("BEGIN")
