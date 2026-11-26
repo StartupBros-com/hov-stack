@@ -68,7 +68,7 @@ The one rule that replaces the entire file-reservation protocol:
 Subagents and Workflow agents inherit the session's worktree shape-checker — the
 fleet's #1 measured denial source (7.4k "too complex" refusals/30d; a 2026-08-28
 stratified sample scored 13/15 shape refusals as false positives on safe work).
-The checker is upstream (Claude Code bundle; dotfiles#436), so route around it
+The checker is upstream (it ships in the Claude Code bundle), so route around it
 in every dispatch prompt:
 
 - Plain, separate commands pass, plain `&&`/`;`/pipe chains included. A
@@ -119,8 +119,8 @@ Full mechanism: `harness/gh-tracking-and-claims.md`.
   or command), TIMEBOX (dollars or minutes), FORBIDDEN, REPORT (the return shape, with a literal example
   when parallel workers must agree on it), STANDING (what to do when blocked). TIMEBOX and FORBIDDEN are
   never empty; the rest may be one line. Two parallel workers once shipped a writer storing objects and a
-  reader parsing epochs with both suites green because their packets never pinned the shape (PR #1167);
-  the dispatcher's child prompt used this schema (dotfiles#1202) until the dispatcher's retirement in #1873.
+  reader parsing epochs with both suites green because their packets never pinned the shape;
+  the dispatcher's child prompt used this schema until the dispatcher was retired.
 
 ## Cost routing (operationalizes CLAUDE.md)
 
