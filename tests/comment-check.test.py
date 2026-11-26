@@ -16,6 +16,7 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import time
 import unittest
 from pathlib import Path
 
@@ -62,6 +63,14 @@ if log:
     with open(log, "a") as f:
         f.write(json.dumps(sys.argv[1:]) + "\\n")
 mode = os.environ.get("FAKE_GH_MODE", "ok")
+if mode != "fail" and sys.argv[1:3] == ["pr", "list"]:
+    merged = os.environ.get("FAKE_GH_MERGED_HEAD")
+    if not merged or sys.argv[3:9] != ["--repo", "acme/widget", "--head", "feature", "--state", "merged"]:
+        print("[]")
+        sys.exit(0)
+    print(json.dumps([{{"number": 7, "headRefOid": merged,
+                       "mergedAt": os.environ.get("FAKE_GH_MERGED_AT", "2999-01-01T00:00:00Z")}}]))
+    sys.exit(0)
 if mode == "fail" or sys.argv[1:3] != ["pr", "view"] or sys.argv[4:] != ["--json", "headRefOid,baseRefName"]:
     print("boom", file=sys.stderr)
     sys.exit(1)
@@ -438,6 +447,52 @@ class PrePush(Base):
         git(self.repo, "update-ref", "-d", "refs/remotes/pr-merged/feature")
         git(self.repo, "update-ref", "-d", "refs/remotes/origin/feature")
         self.assertIn("0 of 3 flagged comments changed (merged tip, read ", self.cli("--stops").stdout)
+
+    def test_branch_tidied_after_the_last_read_is_scored_on_the_merged_head(self):
+        self.held(self.pre())
+        self.assertEqual(self.pre(), "")
+        git(self.repo, "update-ref", "refs/remotes/origin/feature", "HEAD")
+        self.assertIn("0 of 3 flagged comments changed (remote-tracking ref, read ", self.cli("--stops").stdout)
+        # The session tidies and pushes after that read, then the pull request merges and the remote branch is
+        # deleted before the next read: no pushed copy of the branch is left here.
+        app = self.repo / "app.py"
+        app.write_text(app.read_text().replace("# increment the counter\n", ""))
+        git(self.repo, "commit", "-q", "-am", "tidy")
+        tidy = git(self.repo, "rev-parse", "HEAD").stdout.strip()
+        git(self.repo, "update-ref", "-d", "refs/remotes/origin/feature")
+        self.assertIn("0 of 3 flagged comments changed (remote-tracking ref, read ", self.cli("--stops").stdout,
+                      "with no merged pull request the saved outcome stands")
+        early = dict(self.env, FAKE_GH_MERGED_HEAD=tidy, FAKE_GH_MERGED_AT="2000-01-01T00:00:00Z")
+        self.assertIn("0 of 3 flagged comments changed (remote-tracking ref, read ", self.cli("--stops", env=early).stdout,
+                      "a pull request merged before the hold is not this hold's outcome")
+        report = self.cli("--stops", env=dict(self.env, FAKE_GH_MERGED_HEAD=tidy)).stdout
+        self.assertIn("feature: re-pushed; 1 of 3 flagged comments changed (merged pull request #7 head, read ", report)
+        self.assertIn("1 with at least one flagged comment changed in the pushed branch", report)
+        self.assertIn("1 of 3 flagged comments changed (merged pull request #7 head, read ", self.cli("--stops").stdout,
+                      "the merged read is saved into the hold's record")
+
+    def test_a_stalled_git_lets_the_push_through(self):
+        bindir = self.tmp / "slow-bin"
+        bindir.mkdir()
+        slow = bindir / "git"
+        slow.write_text(f"#!{sys.executable}\nimport os, sys, time\n"
+                        f"if os.environ.get('SLOW_GIT') in sys.argv[1:]:\n    time.sleep(120)\n"
+                        f"os.execv({shutil.which('git')!r}, ['git', *sys.argv[1:]])\n")
+        slow.chmod(0o755)
+        env = dict(self.env, PATH=f"{bindir}{os.pathsep}{self.env['PATH']}", COMMENT_CHECK_GIT_TIMEOUT="2")
+        started = time.monotonic()
+        p = self.cli("--hook", env=dict(env, SLOW_GIT="merge-base"), stdin=self.pre_payload())
+        self.assertEqual((p.returncode, p.stdout), (0, ""), p.stderr)
+        self.assertIn("git merge-base timed out after 2s", p.stderr)
+        self.assertLess(time.monotonic() - started, 30)
+        self.assertEqual((self.calls(), self.stops()), ([], []), "a stalled check labels and holds nothing")
+        # The trial report reads through a stalled git too, keeping the outcome it read last.
+        self.held(self.pre())
+        git(self.repo, "update-ref", "refs/remotes/origin/feature", "HEAD")
+        self.assertIn("0 of 3 flagged comments changed (remote-tracking ref, read ", self.cli("--stops").stdout)
+        p = self.cli("--stops", env=dict(env, SLOW_GIT="show"))
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertIn("0 of 3 flagged comments changed (remote-tracking ref, read ", p.stdout)
 
     def test_pushed_branch_and_main_go_through_unchecked(self):
         git(self.repo, "update-ref", "refs/remotes/origin/feature", "HEAD")

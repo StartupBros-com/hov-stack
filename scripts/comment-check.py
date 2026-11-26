@@ -61,6 +61,7 @@ MODEL = os.environ.get("COMMENT_CHECK_MODEL", "haiku")
 CLAUDE = os.environ.get("COMMENT_CHECK_CLAUDE", "claude")
 GH = os.environ.get("COMMENT_CHECK_GH", "gh")
 GH_TIMEOUT = 20
+GIT_TIMEOUT = int(os.environ.get("COMMENT_CHECK_GIT_TIMEOUT", "20"))
 CHUNK = 40
 PARALLEL = 4
 MAX_UNITS = 200
@@ -343,8 +344,17 @@ def flag_of(label, ticket):
 
 # --- git ---
 
+def run_git(argv):
+    """git with a time limit. A hung git (a held lock, a stalled filesystem) raises, and hook mode turns any
+    exception into letting the tool call through, so one stall ends the check instead of holding the push."""
+    try:
+        return subprocess.run(["git", *argv], check=False, capture_output=True, text=True, timeout=GIT_TIMEOUT)
+    except subprocess.TimeoutExpired as e:
+        raise RuntimeError(f"git {' '.join(argv[2:3])} timed out after {GIT_TIMEOUT}s") from e
+
+
 def git(cwd, *args):
-    return subprocess.run(["git", "-C", cwd, *args], check=False, capture_output=True, text=True)
+    return run_git(["-C", cwd, *args])
 
 
 def resolve_base(cwd, base):
@@ -583,24 +593,56 @@ def note_repush(stop_file):
         _write_json(stop_file, rec)
 
 
+def merged_pr_head(rec, common, branch):
+    """(head commit, number) of the first pull request merged from the hold's branch after the hold, when that
+    commit is still in the repository, else None. Read once no pushed copy of the branch is left, so a branch tidied
+    after the last --stops read is scored on what merged, not on the stale saved outcome."""
+    m = ORIGIN.search(run_git(["--git-dir", common, "config", "--get", "remote.origin.url"]).stdout.strip())
+    if not m:
+        return None
+    try:
+        p = subprocess.run([GH, "pr", "list", "--repo", m.group(1), "--head", branch, "--state", "merged",
+                            "--json", "number,headRefOid,mergedAt", "--limit", "10"], check=False,
+                           capture_output=True, text=True, timeout=GH_TIMEOUT)
+        prs = json.loads(p.stdout) if p.returncode == 0 else []
+    except (OSError, subprocess.TimeoutExpired, ValueError):
+        return None
+    held = str(rec.get("ts") or "")
+    after = sorted((x for x in prs if isinstance(x, dict) and str(x.get("mergedAt") or "") >= held),
+                   key=lambda x: str(x.get("mergedAt")))
+    sha = str(after[0].get("headRefOid") or "") if after else ""
+    if not sha or run_git(["--git-dir", common, "cat-file", "-e", f"{sha}^{{commit}}"]).returncode != 0:
+        return None
+    return sha, after[0].get("number")
+
+
 def outcome(rec):
     """(flagged comments the pushed branch no longer carries, flagged, where that was read), or None when no
-    pushed copy of the branch is here: the tip wt-done anchors after a merge, else the remote-tracking ref."""
+    pushed copy of the branch is here: the tip wt-done anchors after a merge, else the remote-tracking ref, else
+    the head of the pull request merged from it."""
     common, branch = str(rec.get("common") or ""), str(rec.get("branch") or "")
-    for ref, where in ((f"refs/remotes/pr-merged/{branch}", "merged tip"),
-                       (f"refs/remotes/origin/{branch}", "remote-tracking ref")):
-        if not (common and branch) or subprocess.run(
-                ["git", "--git-dir", common, "rev-parse", "--verify", "--quiet", ref + "^{commit}"],
-                capture_output=True, check=False).returncode != 0:
-            continue
+    if not (common and branch):
+        return None
+    try:
+        rev = where = None
+        for ref, name in ((f"refs/remotes/pr-merged/{branch}", "merged tip"),
+                          (f"refs/remotes/origin/{branch}", "remote-tracking ref")):
+            if run_git(["--git-dir", common, "rev-parse", "--verify", "--quiet", ref + "^{commit}"]).returncode == 0:
+                rev, where = ref, name
+                break
+        if rev is None:
+            got = merged_pr_head(rec, common, branch)
+            if got is None:
+                return None
+            rev, where = got[0], f"merged pull request #{got[1]} head"
         changed = 0
         for fl in rec.get("flagged", []):
-            p = subprocess.run(["git", "--git-dir", common, "show", f"{ref}:{fl['file']}"],
-                               capture_output=True, text=True, check=False)
+            p = run_git(["--git-dir", common, "show", f"{rev}:{fl['file']}"])
             first = next((s.strip() for s in str(fl.get("comment", "")).splitlines() if s.strip()), "")
             changed += not (p.returncode == 0 and first and first in p.stdout)
         return changed, len(rec.get("flagged", [])), where
-    return None
+    except RuntimeError:
+        return None
 
 
 def pre_push_hook(payload):
