@@ -605,18 +605,8 @@ test('a heavy job in the same call is denied, not rewritten, so heavy-job-admiss
   await assertOpaquePatternRewritten('grep "$x" in.txt && pnpm test');
 });
 
-test('a Codex spend in the same call is denied, not rewritten, so codex-quota-guard\'s rewrite is not raced', async () => {
-  // codex-quota-guard.js returns its own updatedInput for `codex exec` when
-  // the subscription is explicitly exhausted; the mixed call is denied (as it
-  // was before the rewrite) and asks for a separate call.
-  const res = await runHook(HOOK, bash('grep "$x" in.txt && codex exec "summarize in.txt"'));
-  assert.strictEqual(decisionOf(res), 'block', res.stderr);
-  assertPreToolUseDeny(res);
-  assert.match(reasonOf(res), /codex-quota-guard/);
-  assert.match(reasonOf(res), /own call/);
-  // `codex login` is not a spend (lib/codex-spend keeps recovery possible):
-  // the same shape is still rewritten.
-  await assertOpaquePatternRewritten('grep "$x" in.txt && codex login');
+test('an opaque grep gets the bounded rewrite even when the same call runs Codex', async () => {
+  await assertOpaquePatternRewritten('grep "$x" in.txt && codex exec "summarize in.txt"');
 });
 
 test('every find -exec is inspected: a denial outranks the bound in either order, and escaped operators do not split the statement', async () => {

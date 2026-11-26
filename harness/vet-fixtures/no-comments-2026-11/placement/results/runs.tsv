@@ -1,0 +1,178 @@
+id	model	arm	task	rep	served_by	delivered	check_green	kept	keep_probes	collateral_broken	cost_usd	turns	seconds	asked_docs	asked_history	asked_decisions_test	shown_docs	shown_history	shown_decisions_test	shown_fact	judges_names_reason
+cb83a1c6	sonnet	comment	fileorder	1	claude-sonnet-5-5	correct	True	True	fileorder_keep=correct		0.1416	18	613	False	False	False	False	False	False	True	
+7de4999d	sonnet	comment	fileorder	2	claude-sonnet-5-5	correct	True	True	fileorder_keep=correct		0.0554	10	60	False	False	False	False	False	False	True	
+d57b2156	sonnet	comment	fileorder	3	claude-sonnet-5-5	correct	True	True	fileorder_keep=correct		0.0723	13	36	False	False	False	False	False	False	True	
+59fd4613	sonnet	comment	always	1	claude-sonnet-5-5	correct	True	True	always_keep=correct		0.0708	10	221	False	False	False	False	False	False	True	
+8a817f02	sonnet	comment	always	2	claude-sonnet-5-5	correct	True	True	always_keep=correct		0.0576	8	148	False	False	False	False	False	False	True	
+dc6a3ea8	sonnet	comment	always	3	claude-sonnet-5-5	correct	True	True	always_keep=correct		0.0903	1	2	False	False	False	False	False	False	True	
+88893f19	sonnet	comment	addrule	1	claude-sonnet-5-5	correct	True	True	addrule_keep_order=correct,addrule_keep_case=correct		0.0485	8	25	False	False	False	False	False	False	True	
+4d1e3981	sonnet	comment	addrule	2	claude-sonnet-5-5	correct	True	True	addrule_keep_order=correct,addrule_keep_case=correct		0.0501	9	75	False	False	False	False	False	False	True	
+3898db8f	sonnet	comment	addrule	3	claude-sonnet-5-5	correct	True	True	addrule_keep_order=correct,addrule_keep_case=correct		0.0386	4	81	False	False	False	False	False	False	True	
+756815e6	sonnet	none	fileorder	1	claude-sonnet-5-5	correct	True	False	fileorder_keep=wrong		0.0330	5	48	False	False	False	False	False	False	False	
+dddfd07a	sonnet	none	fileorder	2	claude-sonnet-5-5	correct	True	True	fileorder_keep=correct		0.0602	8	30	False	False	False	False	False	False	False	
+482a06b2	sonnet	none	fileorder	3	claude-sonnet-5-5	correct	True	True	fileorder_keep=correct		0.1414	1	10	False	False	False	False	False	False	False	
+183c19ac	sonnet	none	always	1	claude-sonnet-5-5	correct	True	True	always_keep=correct		0.0453	6	19	False	False	False	False	False	False	False	
+5610dba1	sonnet	none	always	2	claude-sonnet-5-5	correct	True	True	always_keep=correct		0.0419	6	57	False	False	False	False	False	False	False	
+f034e604	sonnet	none	always	3	claude-sonnet-5-5	correct	True	True	always_keep=correct		0.0503	8	27	False	False	False	False	False	False	False	
+2232ec5e	sonnet	none	addrule	1	claude-sonnet-5-5	correct	True	True	addrule_keep_order=correct,addrule_keep_case=correct		0.0448	8	45	False	False	False	False	False	False	False	
+3df43457	sonnet	none	addrule	2	claude-sonnet-5-5	correct	True	True	addrule_keep_order=correct,addrule_keep_case=correct		0.0414	7	79	False	False	False	False	False	False	False	
+456a69f7	sonnet	none	addrule	3	claude-sonnet-5-5	correct	True	True	addrule_keep_order=correct,addrule_keep_case=correct		0.0385	4	42	False	False	False	False	False	False	False	
+9e72f008	sonnet	tests	fileorder	1	claude-sonnet-5-5	correct	True	True	fileorder_keep=correct		0.0642	11	38	False	False	True	False	False	True	True	
+df5ff1bd	sonnet	tests	fileorder	2	claude-sonnet-5-5	correct	True	True	fileorder_keep=correct		0.0683	12	32	False	False	True	False	False	True	True	
+c61d31c2	sonnet	tests	fileorder	3	claude-sonnet-5-5	correct	True	True	fileorder_keep=correct		0.0550	7	18	False	False	True	False	False	True	True	
+98bb354a	sonnet	tests	always	1	claude-sonnet-5-5	correct	True	True	always_keep=correct		0.0501	6	25	False	False	True	False	False	True	True	
+ae6d71f3	sonnet	tests	always	2	claude-sonnet-5-5	correct	True	True	always_keep=correct		0.0511	6	39	False	False	True	False	False	True	True	
+5e425837	sonnet	tests	always	3	claude-sonnet-5-5	correct	True	True	always_keep=correct		0.0629	13	64	False	False	True	False	False	True	True	
+10dbac64	sonnet	tests	addrule	1	claude-sonnet-5-5	correct	True	True	addrule_keep_order=correct,addrule_keep_case=correct		0.0329	3	14	False	False	False	False	False	False	False	
+3b0652b7	sonnet	tests	addrule	2	claude-sonnet-5-5	correct	True	True	addrule_keep_order=correct,addrule_keep_case=correct		0.0505	6	77	False	False	True	False	False	True	True	
+b39506eb	sonnet	tests	addrule	3	claude-sonnet-5-5	correct	True	True	addrule_keep_order=correct,addrule_keep_case=correct		0.0530	8	32	False	False	True	False	False	True	True	
+41a6cebd	sonnet	doc	fileorder	1	claude-sonnet-5-5	correct	True	True	fileorder_keep=correct		0.0504	6	83	True	False	False	True	False	False	True	
+8b2ad116	sonnet	doc	fileorder	2	claude-sonnet-5-5	correct	True	True	fileorder_keep=correct		0.0633	10	38	True	False	False	True	False	False	True	
+4953f56d	sonnet	doc	fileorder	3	claude-sonnet-5-5	correct	True	True	fileorder_keep=correct		0.0775	15	102	True	False	False	True	False	False	True	
+07536639	sonnet	doc	always	1	claude-sonnet-5-5	correct	True	True	always_keep=correct		0.0562	7	30	True	False	False	True	False	False	True	
+491bae7c	sonnet	doc	always	2	claude-sonnet-5-5	correct	True	True	always_keep=correct		0.1378	1	14	True	False	False	False	False	False	True	
+276f680b	sonnet	doc	always	3	claude-sonnet-5-5	correct	True	True	always_keep=correct		0.0561	7	55	True	False	False	True	False	False	True	
+61c2c6c2	sonnet	doc	addrule	1	claude-sonnet-5-5	correct	True	True	addrule_keep_order=correct,addrule_keep_case=correct		0.0502	5	56	True	False	False	True	False	False	True	
+407e041c	sonnet	doc	addrule	2	claude-sonnet-5-5	correct	True	True	addrule_keep_order=correct,addrule_keep_case=correct		0.0584	6	90	True	False	False	True	False	False	True	
+bfd7dc83	sonnet	doc	addrule	3	claude-sonnet-5-5	correct	True	True	addrule_keep_order=correct,addrule_keep_case=correct		0.0516	10	23	True	False	False	True	False	False	True	
+e03ec3ad	sonnet	claudemd	fileorder	1	claude-sonnet-5-5	correct	True	True	fileorder_keep=correct		0.0523	8	26	False	False	False	False	False	False	True	
+66317d4e	sonnet	claudemd	fileorder	2	claude-sonnet-5-5	correct	True	True	fileorder_keep=correct		0.0507	8	51	False	False	False	False	False	False	True	
+91810e04	sonnet	claudemd	fileorder	3	claude-sonnet-5-5	correct	True	True	fileorder_keep=correct		0.0526	8	19	False	False	False	False	False	False	True	
+9a89d2ec	sonnet	claudemd	always	1	claude-sonnet-5-5	correct	True	True	always_keep=correct		0.0631	11	39	False	False	False	False	False	False	False	
+527d300e	sonnet	claudemd	always	2	claude-sonnet-5-5	correct	True	True	always_keep=correct		0.0514	6	62	False	False	False	False	False	False	False	
+4163f870	sonnet	claudemd	always	3	claude-sonnet-5-5	correct	True	True	always_keep=correct		0.0648	11	92	False	False	False	False	False	False	False	
+b29ce445	sonnet	claudemd	addrule	1	claude-sonnet-5-5	correct	True	True	addrule_keep_order=correct,addrule_keep_case=correct		0.0546	8	50	False	False	False	False	False	False	False	
+d68f56ff	sonnet	claudemd	addrule	2	claude-sonnet-5-5	correct	True	True	addrule_keep_order=correct,addrule_keep_case=correct		0.0507	8	27	False	False	False	False	False	False	False	
+d78bb4ef	sonnet	claudemd	addrule	3	claude-sonnet-5-5	correct	True	True	addrule_keep_order=correct,addrule_keep_case=correct		0.0475	6	25	False	False	False	False	False	False	False	
+eb8fef76	sonnet	history	fileorder	1	claude-sonnet-5-5	correct	True	True	fileorder_keep=correct		0.0481	6	36	False	False	False	False	False	False	False	
+d128204e	sonnet	history	fileorder	2	claude-sonnet-5-5	correct	True	True	fileorder_keep=correct		0.0588	10	26	False	False	False	False	False	False	False	
+3febf83c	sonnet	history	fileorder	3	claude-sonnet-5-5	correct	True	True	fileorder_keep=correct		0.0563	11	105	False	False	False	False	False	False	False	
+cc997110	sonnet	history	always	1	claude-sonnet-5-5	correct	True	True	always_keep=correct		0.0545	9	20	False	False	False	False	False	False	False	
+1ab22712	sonnet	history	always	2	claude-sonnet-5-5	correct	True	True	always_keep=correct		0.0549	9	25	False	False	False	False	False	False	False	
+c40393b9	sonnet	history	always	3	claude-sonnet-5-5	correct	True	True	always_keep=correct		0.0533	9	16	False	False	False	False	False	False	False	
+90f0716d	sonnet	history	addrule	1	claude-sonnet-5-5	correct	True	True	addrule_keep_order=correct,addrule_keep_case=correct		0.0532	9	27	False	False	False	False	False	False	False	
+28abceb4	sonnet	history	addrule	2	claude-sonnet-5-5	correct	True	True	addrule_keep_order=correct,addrule_keep_case=correct		0.0442	7	53	False	False	False	False	False	False	False	
+5f32f76b	sonnet	history	addrule	3	claude-sonnet-5-5	correct	True	True	addrule_keep_order=correct,addrule_keep_case=correct		0.0523	9	60	False	False	False	False	False	False	False	
+910cdc60	sonnet	stale	fileorder	1	claude-sonnet-5-5	correct	True	False	fileorder_keep=wrong		0.0355	6	14	False	False	False	False	False	False	False	
+15a1bd34	sonnet	stale	fileorder	2	claude-sonnet-5-5	correct	True	True	fileorder_keep=correct		0.0604	8	31	False	False	False	False	False	False	False	
+d36df752	sonnet	stale	fileorder	3	claude-sonnet-5-5	correct	True	False	fileorder_keep=wrong		0.0427	8	15	False	False	False	False	False	False	False	
+cd70514d	sonnet	stale	always	1	claude-sonnet-5-5	correct	True	False	always_keep=wrong		0.0516	7	18	False	False	False	False	False	False	False	
+2bfa28e8	sonnet	stale	always	2	claude-sonnet-5-5	correct	True	False	always_keep=wrong		0.0587	10	53	False	False	False	False	False	False	False	
+90ef1d84	sonnet	stale	always	3	claude-sonnet-5-5	correct	True	False	always_keep=wrong		0.0588	10	40	False	False	False	False	False	False	False	
+d758135e	sonnet	stale	addrule	1	claude-sonnet-5-5	correct	True	True	addrule_keep_order=correct,addrule_keep_case=correct		0.0515	5	27	False	False	False	False	False	False	True	
+abe5c4f7	sonnet	stale	addrule	2	claude-sonnet-5-5	correct	True	True	addrule_keep_order=correct,addrule_keep_case=correct		0.0491	6	20	False	False	False	False	False	False	True	
+a7a07b4d	sonnet	stale	addrule	3	claude-sonnet-5-5	correct	True	True	addrule_keep_order=correct,addrule_keep_case=correct		0.0586	9	33	False	False	False	False	False	False	True	
+f550c875	sonnet	comment	pending	1	claude-sonnet-5-5	correct	True				0.0746	10	34	False	False	False	False	False	False	True	False,False
+e72e2f74	sonnet	comment	pending	2	claude-sonnet-5-5	correct	True				0.0735	10	40	False	False	False	False	False	False	True	True,True
+985a4774	sonnet	comment	pending	3	claude-sonnet-5-5	correct	True				0.0721	10	45	False	False	False	False	False	False	True	True,True
+20684ea0	sonnet	comment	negative	1	claude-sonnet-5-5	correct	True				0.0486	9	46	False	False	False	False	False	False	True	True,True
+bec15727	sonnet	comment	negative	2	claude-sonnet-5-5	correct	True				0.0439	8	27	False	False	False	False	False	False	True	True,True
+ca1b9b6d	sonnet	comment	negative	3	claude-sonnet-5-5	correct	True				0.0502	10	21	False	False	False	False	False	False	True	True,True
+c6c0c1ed	sonnet	comment	version	1	claude-sonnet-5-5	correct	True				0.0323	4	13	False	False	False	False	False	False	False	
+a5d3880d	sonnet	comment	version	2	claude-sonnet-5-5	correct	True				0.0316	4	18	False	False	False	False	False	False	False	
+25c00c56	sonnet	comment	version	3	claude-sonnet-5-5	correct	True				0.0317	4	45	False	False	False	False	False	False	False	
+dc922657	sonnet	comment	cats	1	claude-sonnet-5-5	correct	True				0.0413	7	21	False	False	False	False	False	False	False	
+fd9b8259	sonnet	comment	cats	2	claude-sonnet-5-5	correct	True				0.0420	8	25	False	False	False	False	False	False	False	
+6ccef729	sonnet	comment	cats	3	claude-sonnet-5-5	correct	True				0.0489	10	80	False	False	False	False	False	False	False	
+ad0bb48c	sonnet	none	pending	1	claude-sonnet-5-5	correct	True				0.0733	11	55	False	False	False	False	False	False	False	False,False
+67e87464	sonnet	none	pending	2	claude-sonnet-5-5	correct	True				0.0689	10	73	False	False	False	False	False	False	False	False,False
+9a25d4cc	sonnet	none	pending	3	claude-sonnet-5-5	correct	True				0.0693	9	48	False	False	False	False	False	False	False	False,False
+2bd279cd	sonnet	none	negative	1	claude-sonnet-5-5	correct	True				0.0395	7	55	False	False	False	False	False	False	False	False,False
+3865661f	sonnet	none	negative	2	claude-sonnet-5-5	correct	True				0.0736	8	106	False	False	False	False	False	False	False	False,False
+d5396960	sonnet	none	negative	3	claude-sonnet-5-5	correct	True				0.0350	5	17	False	False	False	False	False	False	False	False,False
+729d7b8c	sonnet	none	version	1	claude-sonnet-5-5	correct	True				0.0314	4	40	False	False	False	False	False	False	False	
+56578f82	sonnet	none	version	2	claude-sonnet-5-5	correct	True				0.0334	5	56	False	False	False	False	False	False	False	
+8c2cd680	sonnet	none	version	3	claude-sonnet-5-5	correct	True				0.0336	4	26	False	False	False	False	False	False	False	
+34be1c28	sonnet	none	cats	1	claude-sonnet-5-5	correct	True				0.0410	7	55	False	False	False	False	False	False	False	
+f376ccfd	sonnet	none	cats	2	claude-sonnet-5-5	correct	True				0.0411	8	25	False	False	False	False	False	False	False	
+78427cd7	sonnet	none	cats	3	claude-sonnet-5-5	correct	True				0.0414	7	60	False	False	False	False	False	False	False	
+63101a30	sonnet	tests	pending	1	claude-sonnet-5-5	correct	True				0.0686	9	52	False	False	True	False	False	True	True	False,False
+d5e82f7e	sonnet	tests	pending	2	claude-sonnet-5-5	correct	True				0.0842	12	37	False	False	True	False	False	True	True	False,False
+c93181bd	sonnet	tests	pending	3	claude-sonnet-5-5	correct	True				0.0793	11	30	False	False	True	False	False	True	True	False,False
+81e9f62d	sonnet	tests	negative	1	claude-sonnet-5-5	correct	True				0.0555	9	38	False	False	True	False	False	True	True	True,True
+71bdf324	sonnet	tests	negative	2	claude-sonnet-5-5	correct	True				0.0515	9	58	False	False	True	False	False	True	True	True,True
+081d0d54	sonnet	tests	negative	3	claude-sonnet-5-5	correct	True				0.0535	9	25	False	False	True	False	False	True	True	True,True
+d1a73d9e	sonnet	tests	version	1	claude-sonnet-5-5	correct	True				0.0352	6	11	False	False	False	False	False	False	False	
+b1777a18	sonnet	tests	version	2	claude-sonnet-5-5	correct	True				0.0311	4	31	False	False	False	False	False	False	False	
+5cb472a2	sonnet	tests	version	3	claude-sonnet-5-5	correct	True				0.0334	5	51	False	False	False	False	False	False	False	
+d01dcdc5	sonnet	tests	cats	1	claude-sonnet-5-5	correct	True				0.0435	9	15	False	False	False	False	False	False	False	
+b193fac2	sonnet	tests	cats	2	claude-sonnet-5-5	correct	True				0.0404	8	45	False	False	False	False	False	False	False	
+bdcea0b0	sonnet	tests	cats	3	claude-sonnet-5-5	correct	True				0.0391	7	25	False	False	False	False	False	False	False	
+ebffd4aa	sonnet	doc	pending	1	claude-sonnet-5-5	correct	True				0.0597	8	29	True	False	False	True	False	False	True	True,True
+868487d0	sonnet	doc	pending	2	claude-sonnet-5-5	correct	True				0.0720	10	41	True	False	False	True	False	False	True	True,True
+245ad670	sonnet	doc	pending	3	claude-sonnet-5-5	correct	True				0.0759	8	67	True	False	False	True	False	False	True	True,True
+eaf5118b	sonnet	doc	negative	1	claude-sonnet-5-5	correct	True				0.0521	9	42	True	False	False	True	False	False	True	True,True
+071d3134	sonnet	doc	negative	2	claude-sonnet-5-5	correct	True				0.0464	10	27	True	False	False	True	False	False	True	True,True
+ac5cdab0	sonnet	doc	negative	3	claude-sonnet-5-5	correct	True				0.0500	11	20	True	False	False	True	False	False	True	True,True
+fb3d1d19	sonnet	doc	version	1	claude-sonnet-5-5	correct	True				0.0335	5	21	False	False	False	False	False	False	False	
+12ac4121	sonnet	doc	version	2	claude-sonnet-5-5	correct	True				0.0333	5	15	False	False	False	False	False	False	False	
+50705795	sonnet	doc	version	3	claude-sonnet-5-5	correct	True				0.0333	4	56	False	False	False	False	False	False	False	
+427ff60c	sonnet	doc	cats	1	claude-sonnet-5-5	correct	True				0.0437	8	74	True	False	False	True	False	False	False	
+42d54820	sonnet	doc	cats	2	claude-sonnet-5-5	correct	True				0.0449	10	71	True	False	False	True	False	False	False	
+a619184b	sonnet	doc	cats	3	claude-sonnet-5-5	correct	True				0.0435	8	19	True	False	False	True	False	False	False	
+d9faa49b	sonnet	claudemd	pending	1	claude-sonnet-5-5	correct	True				0.0741	13	34	False	False	False	False	False	False	True	True,True
+b5a1ec15	sonnet	claudemd	pending	2	claude-sonnet-5-5	correct	True				0.0576	7	31	False	False	False	False	False	False	True	True,True
+058cb47c	sonnet	claudemd	pending	3	claude-sonnet-5-5	correct	True				0.0696	11	33	False	False	False	False	False	False	True	True,True
+3d5fac89	sonnet	claudemd	negative	1	claude-sonnet-5-5	correct	True				0.0465	7	92	False	False	False	False	False	False	True	True,True
+06d24c10	sonnet	claudemd	negative	2	claude-sonnet-5-5	correct	True				0.0451	7	24	False	False	False	False	False	False	True	True,True
+04acdc5d	sonnet	claudemd	negative	3	claude-sonnet-5-5	correct	True				0.0454	7	26	False	False	False	False	False	False	True	True,True
+63bafdfd	sonnet	claudemd	version	1	claude-sonnet-5-5	correct	True				0.0358	4	35	False	False	False	False	False	False	False	
+94e23dc8	sonnet	claudemd	version	2	claude-sonnet-5-5	correct	True				0.0396	6	15	False	False	False	False	False	False	False	
+3d90fbd1	sonnet	claudemd	version	3	claude-sonnet-5-5	correct	True				0.0305	3	78	False	False	False	False	False	False	False	
+4bb759a8	sonnet	claudemd	cats	1	claude-sonnet-5-5	correct	True				0.0424	7	64	False	False	False	False	False	False	False	
+44f09f88	sonnet	claudemd	cats	2	claude-sonnet-5-5	correct	True				0.0466	8	55	False	False	False	False	False	False	False	
+34c0b613	sonnet	claudemd	cats	3	claude-sonnet-5-5	correct	True				0.0309	4	37	False	False	False	False	False	False	False	
+96babc93	sonnet	history	pending	1	claude-sonnet-5-5	correct	True				0.0745	10	35	False	False	False	False	False	False	False	False,False
+933b0d1f	sonnet	history	pending	2	claude-sonnet-5-5	correct	True				0.0774	11	35	False	False	False	False	False	False	False	False,False
+25aa560a	sonnet	history	pending	3	claude-sonnet-5-5	correct	True				0.0714	10	57	False	True	False	False	False	False	False	False,False
+3d875f32	sonnet	history	negative	1	claude-sonnet-5-5	correct	True				0.0413	8	101	False	False	False	False	False	False	False	False,False
+485192eb	sonnet	history	negative	2	claude-sonnet-5-5	correct	True				0.0390	8	44	False	False	False	False	False	False	False	False,False
+75c397e9	sonnet	history	negative	3	claude-sonnet-5-5	correct	True				0.0659	6	36	False	False	False	False	False	False	False	False,False
+6e0d6467	sonnet	history	version	1	claude-sonnet-5-5	correct	True				0.0292	3	34	False	False	False	False	False	False	False	
+cd06feb3	sonnet	history	version	2	claude-sonnet-5-5	correct	True				0.0318	4	13	False	False	False	False	False	False	False	
+fd52b06d	sonnet	history	version	3	claude-sonnet-5-5	correct	True				0.0312	4	19	False	False	False	False	False	False	False	
+8a2320ac	sonnet	history	cats	1	claude-sonnet-5-5	correct	True				0.0457	8	34	False	False	False	False	False	False	False	
+ee430371	sonnet	history	cats	2	claude-sonnet-5-5	correct	True				0.0346	4	24	False	False	False	False	False	False	False	
+1a091ae3	sonnet	history	cats	3	claude-sonnet-5-5	correct	True				0.0368	5	20	False	False	False	False	False	False	False	
+8bb492ec	opus	comment	fileorder	1	claude-opus-5-5	correct	True	True	fileorder_keep=correct		0.1294	5	45	False	False	False	False	False	False	True	
+8c8da4e4	opus	comment	fileorder	2	claude-opus-5-5	correct	True	True	fileorder_keep=correct		0.1308	5	59	False	False	False	False	False	False	True	
+78744dfc	opus	comment	always	1	claude-opus-5-5	correct	True	True	always_keep=correct		0.1216	4	55	False	False	False	False	False	False	True	
+8ee46a65	opus	comment	always	2	claude-opus-5-5	correct	True	True	always_keep=correct		0.1148	4	46	False	False	False	False	False	False	True	
+01e85a23	opus	comment	addrule	1	claude-opus-5-5	correct	True	True	addrule_keep_order=correct,addrule_keep_case=correct		0.1688	6	38	False	False	False	False	False	False	True	
+1bb135fb	opus	comment	addrule	2	claude-opus-5-5	correct	True	True	addrule_keep_order=correct,addrule_keep_case=correct		0.1116	7	56	False	False	False	False	False	False	True	
+ef3d6ebc	opus	none	fileorder	1	claude-opus-5-5	correct	True	True	fileorder_keep=correct		0.1218	5	39	False	False	False	False	False	False	False	
+b671f789	opus	none	fileorder	2	claude-opus-5-5	correct	True	True	fileorder_keep=correct		0.1209	4	45	False	False	False	False	False	False	False	
+cd2da487	opus	none	always	1	claude-opus-5-5	correct	True	True	always_keep=correct		0.1011	4	25	False	False	False	False	False	False	False	
+306dfa0b	opus	none	always	2	claude-opus-5-5	correct	True	True	always_keep=correct		0.1083	4	59	False	False	False	False	False	False	False	
+782b6b60	opus	none	addrule	1	claude-opus-5-5	correct	True	True	addrule_keep_order=correct,addrule_keep_case=correct		0.1725	4	64	False	False	False	False	False	False	False	
+ec50adb5	opus	none	addrule	2	claude-opus-5-5	correct	True	True	addrule_keep_order=correct,addrule_keep_case=correct		0.1096	7	41	False	False	False	False	False	False	False	
+92acf424	opus	tests	fileorder	1	claude-opus-5-5	correct	True	True	fileorder_keep=correct		0.1258	5	38	False	False	True	False	False	True	True	
+f0306399	opus	tests	fileorder	2	claude-opus-5-5	correct	True	True	fileorder_keep=correct		0.1352	5	40	False	False	True	False	False	True	True	
+5928d301	opus	tests	always	1	claude-opus-5-5	correct	True	True	always_keep=correct		0.1323	4	75	False	True	True	False	False	True	True	
+eeb14269	opus	tests	always	2	claude-opus-5-5	correct	True	True	always_keep=correct		0.1346	5	48	False	False	True	False	False	True	True	
+b98e6a90	opus	tests	addrule	1	claude-opus-5-5	correct	True	True	addrule_keep_order=correct,addrule_keep_case=correct		0.1055	4	33	False	False	True	False	False	True	True	
+89fa527a	opus	tests	addrule	2	claude-opus-5-5	correct	True	True	addrule_keep_order=correct,addrule_keep_case=correct		0.2157	12	200	False	False	True	False	False	True	True	
+6ec5f3f5	opus	doc	fileorder	1	claude-opus-5-5	correct	True	True	fileorder_keep=correct		0.1264	4	74	True	False	False	True	False	False	True	
+e0642b9b	opus	doc	fileorder	2	claude-opus-5-5	correct	True	True	fileorder_keep=correct		0.1314	5	45	True	False	False	True	False	False	True	
+ad091184	opus	doc	always	1	claude-opus-5-5	correct	True	True	always_keep=correct		0.1275	5	45	True	False	False	True	False	False	True	
+9782f226	opus	doc	always	2	claude-opus-5-5	correct	True	True	always_keep=correct		0.1353	5	76	True	False	False	True	False	False	True	
+d06ea86f	opus	doc	addrule	1	claude-opus-5-5	correct	True	True	addrule_keep_order=correct,addrule_keep_case=correct		0.1256	8	38	True	False	False	True	False	False	True	
+1edbe93e	opus	doc	addrule	2	claude-opus-5-5	correct	True	True	addrule_keep_order=correct,addrule_keep_case=correct		0.1169	8	53	True	False	False	True	False	False	True	
+bd5acfdd	opus	claudemd	fileorder	1	claude-opus-5-5	correct	True	True	fileorder_keep=correct		0.1229	5	42	False	False	False	False	False	False	False	
+e54ca5dc	opus	claudemd	fileorder	2	claude-opus-5-5	correct	True	True	fileorder_keep=correct		0.1390	6	50	False	False	False	False	False	False	False	
+5e2a91da	opus	claudemd	always	1	claude-opus-5-5	correct	True	True	always_keep=correct		0.1190	4	66	False	False	False	False	False	False	False	
+44ee2384	opus	claudemd	always	2	claude-opus-5-5	correct	True	True	always_keep=correct		0.1210	4	61	False	False	False	False	False	False	False	
+3f085183	opus	claudemd	addrule	1	claude-opus-5-5	correct	True	True	addrule_keep_order=correct,addrule_keep_case=correct		0.1040	6	100	False	False	False	False	False	False	False	
+06229dee	opus	claudemd	addrule	2	claude-opus-5-5	correct	True	True	addrule_keep_order=correct,addrule_keep_case=correct		0.1609	4	38	False	False	False	False	False	False	False	
+b73aa681	opus	history	fileorder	1	claude-opus-5-5	correct	True	True	fileorder_keep=correct		0.1255	5	48	False	False	False	False	False	False	False	
+3c29bfee	opus	history	fileorder	2	claude-opus-5-5	correct	True	True	fileorder_keep=correct		0.1815	4	96	False	False	False	False	False	False	False	
+f1b0fb78	opus	history	always	1	claude-opus-5-5	correct	True	True	always_keep=correct		0.1179	6	41	False	False	False	False	False	False	False	
+747cf07e	opus	history	always	2	claude-opus-5-5	correct	True	True	always_keep=correct		0.1170	4	60	False	False	False	False	False	False	False	
+d412d7c7	opus	history	addrule	1	claude-opus-5-5	correct	True	True	addrule_keep_order=correct,addrule_keep_case=correct		0.0968	4	24	False	False	False	False	False	False	False	
+fca47319	opus	history	addrule	2	claude-opus-5-5	correct	True	True	addrule_keep_order=correct,addrule_keep_case=correct		0.1203	8	47	False	False	False	False	False	False	False	
+c9b8c476	opus	stale	fileorder	1	claude-opus-5-5	correct	True	True	fileorder_keep=correct		0.1226	5	31	False	False	False	False	False	False	False	
+7dc3246c	opus	stale	fileorder	2	claude-opus-5-5	correct	True	True	fileorder_keep=correct		0.1455	7	73	False	False	False	False	False	False	False	
+61f9b751	opus	stale	always	1	claude-opus-5-5	correct	True	False	always_keep=wrong		0.1165	5	52	False	False	False	False	False	False	False	
+b6bc7427	opus	stale	always	2	claude-opus-5-5	correct	True	False	always_keep=wrong		0.1009	4	40	False	False	False	False	False	False	False	
+1ba8f870	opus	stale	addrule	1	claude-opus-5-5	correct	True	True	addrule_keep_order=correct,addrule_keep_case=correct		0.1032	4	38	False	False	False	False	False	False	True	
+b805ee21	opus	stale	addrule	2	claude-opus-5-5	correct	True	True	addrule_keep_order=correct,addrule_keep_case=correct		0.1070	4	39	False	False	False	False	False	False	True	

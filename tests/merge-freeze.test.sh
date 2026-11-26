@@ -119,6 +119,11 @@ check 'show --json: one object per freeze, active flagged' \
   test "$(jq -c 'map({repo, active}) | sort_by(.repo)' <<<"$OUT")" = '[{"repo":"acme-org/widgets","active":true},{"repo":"other-org/gadgets","active":false}]'
 as sess-a show --repo "$R" --json
 check 'show --repo: only that repository' test "$(jq length <<<"$OUT")" = 1
+SHOWN=$OUT
+as sess-a status --repo "$R" --json
+check 'status is show: exit 0 and the same listing' test "$RC" -eq 0 -a "$OUT" = "$SHOWN"
+as sess-a status
+check 'status with no options: lists the active freeze' has "$OUT" 'acme-org/widgets frozen until'
 
 # --- usage
 for args in 'hold --repo a/b --reason r' 'hold --repo a/b --minutes 0 --reason r' \

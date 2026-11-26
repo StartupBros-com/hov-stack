@@ -1,8 +1,14 @@
 #!/usr/bin/env bash
 # open-deliverable — show a file or URL in the operator's real browser on whatever host this is.
 #
-# Usage: open-deliverable [--print] <path-or-url>
+# Usage: open-deliverable [--print] [--raw] <path-or-url>
 #   --print   resolve the branch and URL, print them, launch nothing
+#   --raw     hand a Markdown file to the browser as it is, without rendering it
+#
+# A Markdown file (.md, .markdown) is rendered to a styled, self-contained HTML page first and
+# that page is what opens; the output line ends with "(rendered from <source>)". The page lives
+# in ${XDG_CACHE_HOME:-~/.cache}/hov-stack/deliverables/, is rewritten on every open, and is safe
+# to delete. Every other file and every URL opens unchanged.
 #
 # Exit codes: 0 launched (or printed with --print), 2 usage / missing file,
 #             3 no viewer on this host (headless or SSH, or the only launcher failed): the path
@@ -14,19 +20,26 @@
 # one. Skills call this by name after writing a deliverable; no skill carries per-host logic.
 #
 # Override: DELIVERABLE_BROWSER=<executable or macOS app name> forces a browser on any host,
-# including a headless one (an executable there is launched as given).
+# including a headless one (an executable there is launched as given). DELIVERABLE_RAW=1 is
+# --raw from the environment.
 #
 # "launched:" means the browser process was handed the URL and detached; a detached launch
 # cannot confirm rendering, so the caller still reports the path.
 set -u
 
 print_only=0
-case "${1:-}" in
-  --print) print_only=1; shift ;;
-  -h|--help) sed -n '2,19p' "$0"; exit 0 ;;
-esac
+raw=0
+[ "${DELIVERABLE_RAW:-0}" = 1 ] && raw=1
+while [ $# -gt 0 ]; do
+  case $1 in
+    --print) print_only=1; shift ;;
+    --raw) raw=1; shift ;;
+    -h|--help) sed -n '2,24p' "$0"; exit 0 ;;
+    *) break ;;
+  esac
+done
 target=${1:-}
-[ -n "$target" ] || { echo "usage: open-deliverable [--print] <path-or-url>" >&2; exit 2; }
+[ -n "$target" ] || { echo "usage: open-deliverable [--print] [--raw] <path-or-url>" >&2; exit 2; }
 
 abs_path() { ( cd "$(dirname "$1")" 2>/dev/null && printf '%s/%s\n' "$(pwd -P)" "$(basename "$1")" ); }
 
@@ -44,18 +57,67 @@ url_encode_path() {
   printf '%s' "$out"
 }
 
+os=$(uname -s 2>/dev/null || echo unknown)
+is_wsl=0
+distro=""
+if [ -n "${WSL_DISTRO_NAME:-}" ] || grep -qi microsoft /proc/version 2>/dev/null; then
+  is_wsl=1
+  distro=${WSL_DISTRO_NAME:-}
+  if [ -z "$distro" ] && [ -r /proc/1/environ ]; then
+    distro=$(tr '\0' '\n' < /proc/1/environ | grep -E '^WSL_DISTRO_NAME=' | head -1 | cut -d= -f2)
+  fi
+fi
+# What a local absolute path is appended to in a file URL the browser on this host can open.
+file_prefix="file://"
+if [ "$os" != Darwin ] && [ "$is_wsl" = 1 ]; then file_prefix="file://wsl.localhost/${distro:-Ubuntu}"; fi
+
+# Render a Markdown file to a page in the cache and print the page's path. Never fails the
+# open: with no node, no renderer beside this script, or a renderer error, the page is the
+# text in a <pre>; with no writable cache, nothing is printed and the caller opens the source.
+render_markdown() {
+  local src=$1 self root cache out tmp
+  cache="${XDG_CACHE_HOME:-$HOME/.cache}/hov-stack/deliverables"
+  mkdir -p "$cache" 2>/dev/null || return 1
+  out="$cache/$(basename "$src").$(printf '%s' "$src" | cksum | cut -d' ' -f1).html"
+  self=$(readlink -f -- "${BASH_SOURCE[0]}" 2>/dev/null) || self=${BASH_SOURCE[0]}
+  root=$(cd -P "$(dirname "$self")/.." 2>/dev/null && pwd)
+  if command -v node >/dev/null 2>&1 && [ -f "$root/lib/deliverable-render.js" ] \
+     && ( cd / && node "$root/lib/deliverable-render.js" "$src" "$out" --url-prefix "$file_prefix" ) >&2; then
+    printf '%s\n' "$out"; return 0
+  fi
+  echo "open-deliverable: Markdown renderer unavailable, showing plain text" >&2
+  tmp="$out.$$.tmp"
+  {
+    printf '<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">'
+    printf '<meta http-equiv="Content-Security-Policy" content="default-src %s; style-src %s">' "'none'" "'unsafe-inline'"
+    printf '<title>%s</title>' "$(basename "$src" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g')"
+    printf '<style>:root{color-scheme:light dark}body{margin:2rem auto;max-width:56rem;padding:0 1rem;font:15px/1.6 ui-monospace,Consolas,monospace}pre{white-space:pre-wrap;overflow-wrap:anywhere}</style><pre>'
+    sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g' "$src"
+    printf '</pre>\n'
+  } > "$tmp" 2>/dev/null && mv -f "$tmp" "$out" 2>/dev/null || { rm -f "$tmp" 2>/dev/null; return 1; }
+  printf '%s\n' "$out"
+}
+
 # A file:// URL naming a local path is a file, so the WSL rewrite below applies to it too.
 case $target in
   file://localhost/*) target=${target#file://localhost} ;;
   file:///*)          target=${target#file://} ;;
 esac
 
+note=""
 if printf '%s' "$target" | grep -Eq '^[a-zA-Z][a-zA-Z0-9+.-]*://'; then
-  kind="url"; abs=""; url=$target
+  kind="url"; abs=""; src=""; url=$target
 else
   [ -e "$target" ] || { echo "open-deliverable: no such file: $target" >&2; exit 2; }
   kind="file"; abs=$(abs_path "$target")
   [ -n "$abs" ] || { echo "open-deliverable: cannot resolve $target" >&2; exit 2; }
+  src=$abs
+  case $abs in
+    *.[mM][dD]|*.[mM][aA][rR][kK][dD][oO][wW][nN])
+      if [ "$raw" = 0 ] && [ -f "$abs" ] && page=$(render_markdown "$abs") && [ -n "$page" ]; then
+        abs=$page; note=" (rendered from $src)"
+      fi ;;
+  esac
   url="file://$(url_encode_path "$abs")"
 fi
 
@@ -64,27 +126,19 @@ fi
 LAUNCH_CWD=/
 launch() { ( cd "$LAUNCH_CWD" 2>/dev/null || cd /; setsid nohup "$@" >/dev/null 2>&1 & ); }
 
-os=$(uname -s 2>/dev/null || echo unknown)
-is_wsl=0
-if [ -n "${WSL_DISTRO_NAME:-}" ] || grep -qi microsoft /proc/version 2>/dev/null; then is_wsl=1; fi
-
 if [ "$os" = Darwin ]; then
   app=${DELIVERABLE_BROWSER:-}
   if [ -z "$app" ] && [ -d "/Applications/Brave Browser.app" ]; then app="Brave Browser"; fi
-  if [ "$print_only" = 1 ]; then echo "would open: $url via macos ${app:-default-browser}"; exit 0; fi
+  if [ "$print_only" = 1 ]; then echo "would open: $url via macos ${app:-default-browser}$note"; exit 0; fi
   if [ -n "$app" ]; then
     open -a "$app" "$url" || { echo "open-deliverable: could not open $app, using the default browser" >&2; app=""; open "$url"; }
   else
     open "$url"
-  fi || { echo "open-deliverable: open failed for $url" >&2; [ "$kind" = file ] && echo "$abs"; exit 3; }
-  echo "opened: $url via macos ${app:-default-browser}"; exit 0
+  fi || { echo "open-deliverable: open failed for $url" >&2; [ "$kind" = file ] && echo "$src"; exit 3; }
+  echo "opened: $url via macos ${app:-default-browser}$note"; exit 0
 
 elif [ "$is_wsl" = 1 ]; then
-  distro=${WSL_DISTRO_NAME:-}
-  if [ -z "$distro" ] && [ -r /proc/1/environ ]; then
-    distro=$(tr '\0' '\n' < /proc/1/environ | grep -E '^WSL_DISTRO_NAME=' | head -1 | cut -d= -f2)
-  fi
-  if [ "$kind" = file ]; then url="file://wsl.localhost/${distro:-Ubuntu}$(url_encode_path "$abs")"; fi
+  if [ "$kind" = file ]; then url="$file_prefix$(url_encode_path "$abs")"; fi
   exe=${DELIVERABLE_BROWSER:-}
   if [ -z "$exe" ]; then
     for c in /mnt/c/Users/*/AppData/Local/BraveSoftware/Brave-Browser/Application/brave.exe \
@@ -94,18 +148,18 @@ elif [ "$is_wsl" = 1 ]; then
   fi
   LAUNCH_CWD=/mnt/c
   if [ -n "$exe" ]; then
-    if [ "$print_only" = 1 ]; then echo "would open: $url via wsl $(basename "$exe")"; exit 0; fi
+    if [ "$print_only" = 1 ]; then echo "would open: $url via wsl $(basename "$exe")$note"; exit 0; fi
     launch "$exe" "$url"
-    echo "launched: $url via wsl $(basename "$exe")"; exit 0
+    echo "launched: $url via wsl $(basename "$exe")$note"; exit 0
   fi
   # No Brave: Windows' default browser (Edge here), better than nothing.
   if [ "$kind" = file ]; then win=$(wslpath -w "$abs" 2>/dev/null) || win=""; else win=$url; fi
-  [ -n "$win" ] || { echo "open-deliverable: wslpath could not translate $abs" >&2; echo "$abs"; exit 3; }
-  if [ "$print_only" = 1 ]; then echo "would open: $win via wsl cmd.exe start (default browser)"; exit 0; fi
+  [ -n "$win" ] || { echo "open-deliverable: wslpath could not translate $abs" >&2; echo "$src"; exit 3; }
+  if [ "$print_only" = 1 ]; then echo "would open: $win via wsl cmd.exe start (default browser)$note"; exit 0; fi
   if ( cd /mnt/c 2>/dev/null || cd /; cmd.exe /c start "" "$win" >/dev/null 2>&1 ); then
-    echo "launched: $win via wsl cmd.exe start (default browser)"; exit 0
+    echo "launched: $win via wsl cmd.exe start (default browser)$note"; exit 0
   fi
-  echo "open-deliverable: cmd.exe start failed for $win" >&2; [ "$kind" = file ] && echo "$abs"; exit 3
+  echo "open-deliverable: cmd.exe start failed for $win" >&2; [ "$kind" = file ] && echo "$src"; exit 3
 
 elif [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]; then
   bin=${DELIVERABLE_BROWSER:-}
@@ -114,18 +168,18 @@ elif [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]; then
       command -v "$c" >/dev/null 2>&1 && { bin=$c; break; }
     done
   fi
-  if [ "$print_only" = 1 ]; then echo "would open: $url via linux ${bin:-xdg-open}"; exit 0; fi
+  if [ "$print_only" = 1 ]; then echo "would open: $url via linux ${bin:-xdg-open}$note"; exit 0; fi
   if [ -n "$bin" ]; then launch "$bin" "$url"; else launch env -u BROWSER xdg-open "$url"; fi
-  echo "launched: $url via linux ${bin:-xdg-open}"; exit 0
+  echo "launched: $url via linux ${bin:-xdg-open}$note"; exit 0
 
 else
   # Headless: only an explicit, executable override can launch anything here.
   if [ -n "${DELIVERABLE_BROWSER:-}" ] && command -v "$DELIVERABLE_BROWSER" >/dev/null 2>&1; then
-    if [ "$print_only" = 1 ]; then echo "would open: $url via headless $(basename "$DELIVERABLE_BROWSER")"; exit 0; fi
+    if [ "$print_only" = 1 ]; then echo "would open: $url via headless $(basename "$DELIVERABLE_BROWSER")$note"; exit 0; fi
     launch "$DELIVERABLE_BROWSER" "$url"
-    echo "launched: $url via headless $(basename "$DELIVERABLE_BROWSER")"; exit 0
+    echo "launched: $url via headless $(basename "$DELIVERABLE_BROWSER")$note"; exit 0
   fi
-  echo "no viewer on this host (no display, not WSL, not macOS): $url" >&2
-  [ "$kind" = file ] && echo "$abs"
+  echo "no viewer on this host (no display, not WSL, not macOS): $url$note" >&2
+  [ "$kind" = file ] && echo "$src"
   exit 3
 fi

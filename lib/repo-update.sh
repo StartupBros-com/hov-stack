@@ -135,6 +135,93 @@ repo_ff_blockers() {
   return 0
 }
 
+# repo_ff_identical_edits <repo_dir> <default_branch>
+#
+# Emits one NUL-terminated path per tracked local edit that blocks the
+# fast-forward although the update would lose nothing over it. A path qualifies
+# when the update changes it and keeps a blob there, its index still equals HEAD
+# (nothing of the user's is staged on it), its working-tree file is a regular
+# file, and that file's bytes, hashed with the clean filters git applies, equal
+# the incoming blob. repo_ff_blockers still reports these paths as `modified`;
+# this is the subset repo_ff_merge_staging_identical can carry. Read-only.
+repo_ff_identical_edits() {
+  local repo=$1 default=$2 p want live
+  local -A incoming=()
+  local -a edited=()
+
+  while IFS= read -r -d '' p; do
+    [ -n "$p" ] && incoming["$p"]=1
+  done < <(git -C "$repo" diff --name-only -z HEAD "origin/$default" 2>/dev/null)
+  if [ "${#incoming[@]}" -eq 0 ]; then
+    return 0
+  fi
+  # Read in full before the per-path git calls below, which may refresh the index.
+  mapfile -t -d '' edited < <(git -C "$repo" diff --name-only -z HEAD 2>/dev/null)
+  for p in ${edited[@]+"${edited[@]}"}; do
+    [ -n "${incoming[$p]:-}" ] || continue
+    git -C "$repo" diff --cached --quiet -- "$p" 2>/dev/null || continue
+    want=$(git -C "$repo" rev-parse --quiet --verify "origin/$default:$p" 2>/dev/null) || continue
+    if [ -L "$repo/$p" ] || [ ! -f "$repo/$p" ]; then
+      continue
+    fi
+    live=$(git -C "$repo" hash-object --path="$p" -- "$repo/$p" 2>/dev/null) || continue
+    if [ "$live" = "$want" ]; then
+      printf '%s\0' "$p"
+    fi
+  done
+  return 0
+}
+
+# repo_ff_merge_staging_identical <repo_dir> <default_branch>
+#
+# Stages every path repo_ff_identical_edits lists, then retries the guarded
+# fast-forward once. Returns 0 when the retry merged, with REPO_FF_STAGED set to
+# the number of paths staged. Returns 1 when there was nothing to stage, a stage
+# failed, or git still refused; every path it staged is then unstaged, a path it
+# cannot unstage is named in a WARN, and REPO_FF_STAGE_ERR holds the retry's
+# stderr (empty when no retry ran) for the caller's diagnosis.
+#
+# The usual case: a worktree PR commits a file the launchpad keeps modified.
+# Once the PR merges, the launchpad's edit IS the merged blob, and git still
+# refuses the fast-forward over it.
+#
+# Lossless because it changes only the index, never a working-tree file. With
+# the index equal to the incoming blob, git's two-way merge leaves the file
+# alone (git 2.43, measured 2026-11-24): the fast-forward proceeds and the bytes
+# are never rewritten. A write that lands after the stage survives as an
+# ordinary local edit; one that lands before it makes the staged blob differ, so
+# the retry refuses. Only paths whose index equals HEAD are staged, so
+# `git reset -q -- <path>` restores the exact prior index.
+repo_ff_merge_staging_identical() {
+  local repo=$1 default=$2 p stage_ok=1
+  local -a paths=() staged=()
+  REPO_FF_STAGED=0
+  REPO_FF_STAGE_ERR=""
+
+  mapfile -t -d '' paths < <(repo_ff_identical_edits "$repo" "$default")
+  if [ "${#paths[@]}" -eq 0 ]; then
+    return 1
+  fi
+  for p in "${paths[@]}"; do
+    if ! git -C "$repo" add -- "$p" 2>/dev/null; then
+      stage_ok=0
+      break
+    fi
+    staged+=("$p")
+  done
+  if [ "$stage_ok" -eq 1 ] &&
+    REPO_FF_STAGE_ERR=$(git -C "$repo" -c merge.autostash=false merge --ff-only --quiet "origin/$default" 2>&1); then
+    REPO_FF_STAGED=${#staged[@]}
+    return 0
+  fi
+  for p in ${staged[@]+"${staged[@]}"}; do
+    if ! git -C "$repo" reset -q -- "$p" 2>/dev/null; then
+      echo "  WARN: could not unstage '$p'; it is left staged, with bytes identical to the incoming blob"
+    fi
+  done
+  return 1
+}
+
 # repo_ff_explain <repo_dir> <default_branch> <indent> <git_stderr>
 #
 # Prints the human-readable diagnosis for a refused fast-forward. Shared by
@@ -219,7 +306,9 @@ repo_ff_explain() {
 # repo_ff_update <repo_dir> [<auto_restore_prefix>]
 #
 # Fast-forwards <repo_dir> to origin/<default>. Prints one indented status line.
-# Never rebases, never merges non-ff, never stashes.
+# Never rebases, never merges non-ff, never stashes. A tracked local edit whose
+# bytes already equal the incoming blob is staged so the fast-forward can pass
+# it, never rewritten; repo_ff_merge_staging_identical says why that is lossless.
 #
 # <auto_restore_prefix> is optional and opt-in (only dotup passes it, for
 # memory/): when given, and EVERY blocker repo_ff_blockers reports sits
@@ -345,6 +434,15 @@ repo_ff_update() {
     echo "  WARN: local commits not on origin/$default — not fast-forwardable"
     return 1
   fi
+
+  # A tracked edit whose bytes already equal the incoming blob blocks git like
+  # a real one, though the update loses nothing over it.
+  if repo_ff_merge_staging_identical "$repo" "$default"; then
+    after=$(git -C "$repo" rev-parse --short HEAD)
+    echo "  $before -> $after (staged $REPO_FF_STAGED local edit(s) the update already contained)"
+    return 0
+  fi
+  [ -z "$REPO_FF_STAGE_ERR" ] || mergeerr=$REPO_FF_STAGE_ERR
 
   # Auto-restore (dotfiles#1343): opt-in via <auto_restore_prefix>, and only
   # attempted when EVERY blocker sits under that prefix. One blocker outside

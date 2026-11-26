@@ -413,9 +413,8 @@ class UnknownStateTests(SeamCheckBase):
 class SeamCoverageTests(SeamCheckBase):
     """#369: the launcher no longer starts node for loop-guard (matcher `*`) unless
     CLAUDE_LOOP_GUARD=1, nor for settings-guard (Edit|Write|MultiEdit) unless stdin can name a
-    settings file, nor for the Bash guards codex-quota-guard (unless stdin can spell a Codex
-    spend), runner-guard (unless stdin holds `kill` or `systemctl`) and peer-loop-guard (unless
-    stdin holds `send` or `SendMessage`), so only tools a guard
+    settings file, nor for the Bash guards runner-guard (unless stdin holds `kill` or `systemctl`)
+    and peer-loop-guard (unless stdin holds `send` or `SendMessage`), so only tools a guard
     that always starts covers are paired against beats."""
 
     @staticmethod
@@ -442,7 +441,7 @@ class SeamCoverageTests(SeamCheckBase):
         launcher = (CLAUDE / "hooks" / "bin" / "node-hook").read_text(encoding="utf8")
         # PreToolUse scripts the launcher can skip: one `*/PreToolUse/<name>.js)` case arm each.
         gated = set(re.findall(r"^  \*/PreToolUse/([\w-]+\.js)\)$", launcher, re.M))
-        self.assertEqual(gated, {"loop-guard.js", "settings-guard.js", "codex-quota-guard.js", "runner-guard.js", "peer-loop-guard.js"})
+        self.assertEqual(gated, {"loop-guard.js", "settings-guard.js", "runner-guard.js", "peer-loop-guard.js"})
         covered = self.covered_tools(settings, gated)
         self.assertEqual(set(HSC.BEAT_COVERED_TOOLS), covered)
 
@@ -480,8 +479,8 @@ class SeamCoverageTests(SeamCheckBase):
                 if "node-hook" in h["command"] and m:
                     every.add(m.group(1))
         self.assertIn("grep-cost-guard.js", every)
-        self.assertNotIn("Bash", self.covered_tools(settings, every | {"loop-guard.js", "settings-guard.js", "codex-quota-guard.js", "runner-guard.js", "peer-loop-guard.js"}))
-        self.assertNotEqual(set(HSC.BEAT_COVERED_TOOLS), self.covered_tools(settings, every | {"loop-guard.js", "settings-guard.js", "codex-quota-guard.js", "runner-guard.js", "peer-loop-guard.js"}))
+        self.assertNotIn("Bash", self.covered_tools(settings, every | {"loop-guard.js", "settings-guard.js", "runner-guard.js", "peer-loop-guard.js"}))
+        self.assertNotEqual(set(HSC.BEAT_COVERED_TOOLS), self.covered_tools(settings, every | {"loop-guard.js", "settings-guard.js", "runner-guard.js", "peer-loop-guard.js"}))
 
     def test_planted_negative_stale_seam_still_flagged_on_covered_tool(self):
         now = time.time()

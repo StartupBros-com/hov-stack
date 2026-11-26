@@ -1,0 +1,1 @@
+Clean up the code comments in this repository. Keep `make check` passing. You have my approval to change code and tests where that replaces a comment; I won't be around to answer questions.

@@ -1,0 +1,25 @@
+opus    claudemd  fileorder  n=2 old phrase still in the record: 0 | record file edited: 2
+opus    comment   fileorder  n=2 old phrase still in the record: 0
+opus    doc       fileorder  n=2 old phrase still in the record: 1 | record file edited: 2
+opus    tests     fileorder  n=2 old phrase still in the record: 0 | record file edited: 2
+sonnet  claudemd  fileorder  n=3 old phrase still in the record: 3 | record file edited: 3
+sonnet  claudemd  negative   n=3 old phrase still in the record: 0 | record file edited: 3
+sonnet  claudemd  pending    n=3 old phrase still in the record: 0 | record file edited: 3
+sonnet  comment   fileorder  n=3 old phrase still in the record: 0
+sonnet  comment   negative   n=3 old phrase still in the record: 0
+sonnet  comment   pending    n=3 old phrase still in the record: 0
+sonnet  doc       fileorder  n=3 old phrase still in the record: 2 | record file edited: 3
+sonnet  doc       negative   n=3 old phrase still in the record: 1 | record file edited: 3
+sonnet  doc       pending    n=3 old phrase still in the record: 0 | record file edited: 3
+sonnet  tests     fileorder  n=3 old phrase still in the record: 1 | record file edited: 3
+sonnet  tests     negative   n=3 old phrase still in the record: 0 | record file edited: 3
+sonnet  tests     pending    n=3 old phrase still in the record: 0 | record file edited: 3
+
+  read by eye: ('opus', 'doc', 'fileorder', '6ec5f3f5', ['groups consecutive rows'])
+  read by eye: ('sonnet', 'claudemd', 'fileorder', '66317d4e', ['groups consecutive rows'])
+  read by eye: ('sonnet', 'claudemd', 'fileorder', '91810e04', ['groups consecutive rows'])
+  read by eye: ('sonnet', 'claudemd', 'fileorder', 'e03ec3ad', ['groups consecutive rows'])
+  read by eye: ('sonnet', 'doc', 'fileorder', '4953f56d', ['groups consecutive rows', 'Sort by date'])
+  read by eye: ('sonnet', 'doc', 'fileorder', '8b2ad116', ['groups consecutive rows'])
+  read by eye: ('sonnet', 'doc', 'negative', 'ac5cdab0', ['post template expects'])
+  read by eye: ('sonnet', 'tests', 'fileorder', '9e72f008', ['groups consecutive rows'])

@@ -1,0 +1,434 @@
+{
+ "04acdc5d": [
+  {
+   "names_reason": true,
+   "quote": "the post template expects",
+   "pushed_back": false
+  },
+  {
+   "names_reason": true,
+   "quote": "the post template expects",
+   "pushed_back": false
+  }
+ ],
+ "058cb47c": [
+  {
+   "names_reason": true,
+   "quote": "pending rows because their amounts can still change",
+   "pushed_back": false
+  },
+  {
+   "names_reason": true,
+   "quote": "because their amounts can still change",
+   "pushed_back": false
+  }
+ ],
+ "06d24c10": [
+  {
+   "names_reason": true,
+   "quote": "the post template expects",
+   "pushed_back": false
+  },
+  {
+   "names_reason": true,
+   "quote": "the post template expects",
+   "pushed_back": false
+  }
+ ],
+ "071d3134": [
+  {
+   "names_reason": true,
+   "quote": "the form the post template expects",
+   "pushed_back": false
+  },
+  {
+   "names_reason": true,
+   "quote": "the form the post template expects",
+   "pushed_back": false
+  }
+ ],
+ "081d0d54": [
+  {
+   "names_reason": true,
+   "quote": "the form the post template expects",
+   "pushed_back": false
+  },
+  {
+   "names_reason": true,
+   "quote": "the form the post template expects",
+   "pushed_back": false
+  }
+ ],
+ "20684ea0": [
+  {
+   "names_reason": true,
+   "quote": "what the post template expects",
+   "pushed_back": false
+  },
+  {
+   "names_reason": true,
+   "quote": "what the post template expects",
+   "pushed_back": false
+  }
+ ],
+ "245ad670": [
+  {
+   "names_reason": true,
+   "quote": "pending rows are skipped because their amounts can still change",
+   "pushed_back": false
+  },
+  {
+   "names_reason": true,
+   "quote": "because their amounts can still change",
+   "pushed_back": false
+  }
+ ],
+ "25aa560a": [
+  {
+   "names_reason": false,
+   "quote": "",
+   "pushed_back": false
+  },
+  {
+   "names_reason": false,
+   "quote": "",
+   "pushed_back": false
+  }
+ ],
+ "2bd279cd": [
+  {
+   "names_reason": false,
+   "quote": "",
+   "pushed_back": false
+  },
+  {
+   "names_reason": false,
+   "quote": "",
+   "pushed_back": false
+  }
+ ],
+ "3865661f": [
+  {
+   "names_reason": false,
+   "quote": "",
+   "pushed_back": false
+  },
+  {
+   "names_reason": false,
+   "quote": "",
+   "pushed_back": false
+  }
+ ],
+ "3d5fac89": [
+  {
+   "names_reason": true,
+   "quote": "the form the post template expects",
+   "pushed_back": false
+  },
+  {
+   "names_reason": true,
+   "quote": "the form the post template expects",
+   "pushed_back": false
+  }
+ ],
+ "3d875f32": [
+  {
+   "names_reason": false,
+   "quote": "",
+   "pushed_back": false
+  },
+  {
+   "names_reason": false,
+   "quote": "",
+   "pushed_back": false
+  }
+ ],
+ "ad0bb48c": [
+  {
+   "names_reason": false,
+   "quote": "",
+   "pushed_back": true
+  },
+  {
+   "names_reason": false,
+   "quote": "",
+   "pushed_back": false
+  }
+ ],
+ "b5a1ec15": [
+  {
+   "names_reason": true,
+   "quote": "Because pending amounts can still change, a digest posted mid-month may differ slightly from the final one.",
+   "pushed_back": false
+  },
+  {
+   "names_reason": true,
+   "quote": "Because pending amounts can still change, a digest posted mid-month may differ slightly from the final one.",
+   "pushed_back": false
+  }
+ ],
+ "bec15727": [
+  {
+   "names_reason": true,
+   "quote": "The old code had a comment saying the sign goes before the dollar sign (`-$4.20`) because \"the post template expects\" it.",
+   "pushed_back": false
+  },
+  {
+   "names_reason": true,
+   "quote": "If an external template still expects `-$4.20`, the new output will break it",
+   "pushed_back": false
+  }
+ ],
+ "c93181bd": [
+  {
+   "names_reason": false,
+   "quote": "",
+   "pushed_back": true
+  },
+  {
+   "names_reason": false,
+   "quote": "",
+   "pushed_back": false
+  }
+ ],
+ "ca1b9b6d": [
+  {
+   "names_reason": true,
+   "quote": "The old code had a comment saying the \"post template\" expects the `-$4.20` form.",
+   "pushed_back": false
+  },
+  {
+   "names_reason": true,
+   "quote": "If a template outside this repo still expects `-$4.20`, it will need updating.",
+   "pushed_back": false
+  }
+ ],
+ "d5396960": [
+  {
+   "names_reason": false,
+   "quote": "",
+   "pushed_back": false
+  },
+  {
+   "names_reason": false,
+   "quote": "",
+   "pushed_back": false
+  }
+ ],
+ "d5e82f7e": [
+  {
+   "names_reason": false,
+   "quote": "",
+   "pushed_back": false
+  },
+  {
+   "names_reason": false,
+   "quote": "",
+   "pushed_back": false
+  }
+ ],
+ "d9faa49b": [
+  {
+   "names_reason": true,
+   "quote": "Pending amounts can still change before they settle, so a digest for the current month may shift between runs.",
+   "pushed_back": false
+  },
+  {
+   "names_reason": true,
+   "quote": "Pending amounts can still change before they settle, so a digest for the current month may shift between runs.",
+   "pushed_back": false
+  }
+ ],
+ "e72e2f74": [
+  {
+   "names_reason": true,
+   "quote": "Pending amounts can still change before they settle, which is why the old code excluded them",
+   "pushed_back": true
+  },
+  {
+   "names_reason": true,
+   "quote": "Pending amounts can still change before they settle, which is why the old code excluded them",
+   "pushed_back": false
+  }
+ ],
+ "eaf5118b": [
+  {
+   "names_reason": true,
+   "quote": "\"the form the post template expects.\"",
+   "pushed_back": false
+  },
+  {
+   "names_reason": true,
+   "quote": "the form the post template expects",
+   "pushed_back": false
+  }
+ ],
+ "ebffd4aa": [
+  {
+   "names_reason": true,
+   "quote": "A month-so-far total can still shift when pending rows settle",
+   "pushed_back": false
+  },
+  {
+   "names_reason": true,
+   "quote": "A month-so-far total can still shift when pending rows settle",
+   "pushed_back": false
+  }
+ ],
+ "f550c875": [
+  {
+   "names_reason": false,
+   "quote": "",
+   "pushed_back": true
+  },
+  {
+   "names_reason": false,
+   "quote": "",
+   "pushed_back": false
+  }
+ ],
+ "485192eb": [
+  {
+   "names_reason": false,
+   "quote": "",
+   "pushed_back": false
+  },
+  {
+   "names_reason": false,
+   "quote": "",
+   "pushed_back": false
+  }
+ ],
+ "63101a30": [
+  {
+   "names_reason": false,
+   "quote": "",
+   "pushed_back": false
+  },
+  {
+   "names_reason": false,
+   "quote": "",
+   "pushed_back": false
+  }
+ ],
+ "67e87464": [
+  {
+   "names_reason": false,
+   "quote": "",
+   "pushed_back": false
+  },
+  {
+   "names_reason": false,
+   "quote": "",
+   "pushed_back": false
+  }
+ ],
+ "71bdf324": [
+  {
+   "names_reason": true,
+   "quote": "the form the post template expects",
+   "pushed_back": false
+  },
+  {
+   "names_reason": true,
+   "quote": "the form the post template expects",
+   "pushed_back": false
+  }
+ ],
+ "75c397e9": [
+  {
+   "names_reason": false,
+   "quote": "",
+   "pushed_back": false
+  },
+  {
+   "names_reason": false,
+   "quote": "",
+   "pushed_back": false
+  }
+ ],
+ "81e9f62d": [
+  {
+   "names_reason": true,
+   "quote": "the post template expects",
+   "pushed_back": false
+  },
+  {
+   "names_reason": true,
+   "quote": "Its docstring said \"the post template expects\" that form.",
+   "pushed_back": false
+  }
+ ],
+ "868487d0": [
+  {
+   "names_reason": true,
+   "quote": "a pending amount can still change before it settles",
+   "pushed_back": false
+  },
+  {
+   "names_reason": true,
+   "quote": "a pending amount can still change before it settles",
+   "pushed_back": false
+  }
+ ],
+ "933b0d1f": [
+  {
+   "names_reason": false,
+   "quote": "",
+   "pushed_back": false
+  },
+  {
+   "names_reason": false,
+   "quote": "",
+   "pushed_back": false
+  }
+ ],
+ "96babc93": [
+  {
+   "names_reason": false,
+   "quote": "",
+   "pushed_back": false
+  },
+  {
+   "names_reason": false,
+   "quote": "",
+   "pushed_back": false
+  }
+ ],
+ "985a4774": [
+  {
+   "names_reason": true,
+   "quote": "pending amounts can still change before they settle",
+   "pushed_back": false
+  },
+  {
+   "names_reason": true,
+   "quote": "pending amounts can still change before they settle",
+   "pushed_back": false
+  }
+ ],
+ "9a25d4cc": [
+  {
+   "names_reason": false,
+   "quote": "",
+   "pushed_back": false
+  },
+  {
+   "names_reason": false,
+   "quote": "",
+   "pushed_back": false
+  }
+ ],
+ "ac5cdab0": [
+  {
+   "names_reason": true,
+   "quote": "the post template expects",
+   "pushed_back": false
+  },
+  {
+   "names_reason": true,
+   "quote": "because \"the post template expects\" that form",
+   "pushed_back": false
+  }
+ ]
+}

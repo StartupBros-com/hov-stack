@@ -3,8 +3,11 @@
 # attribution conventions depend on, across the org's non-archived repos.
 #
 # Ceremony Test (HARNESS.md § Doctrine):
-#   consumer  — the operator (fleet rollout, DRY_RUN=0) and wt-new.sh, which
-#               cannot file a work-spec in a repo with issues off (smaug, 2026-09-02).
+#   consumer  — a scheduled run on the operator's host (DRY_RUN=0 across the
+#               org, daily since 2026-11-25; a weekly dry run that paged on
+#               drift before that), whoever brings one repository in
+#               (ONLY=<repo>), and wt-new.sh, which cannot file a work-spec in a
+#               repo with issues off (smaug, 2026-09-02).
 #   gate      — attribution-off: with squash_merge_commit_message=COMMIT_MESSAGES
 #               GitHub folds every branch commit's message, Co-authored-by
 #               trailers included, into the main-branch commit (a private evals repository's #1227
@@ -14,11 +17,19 @@
 #               squash message instead. dotfiles#854.
 #   defect    — OBSERVED: all 60 org repos were on COMMIT_MESSAGES on 2026-09-02;
 #               smaug (a fork) had issues disabled.
-#   delete-when — GitHub offers org-level defaults for these four keys.
+#   delete-when — GitHub offers org-level defaults for these four keys. Checked
+#               2026-11-25 against GitHub's published REST description: the
+#               organization update endpoint has none of them, and an
+#               organization ruleset can only restrict the allowed merge methods.
 #
 # Asserted: squash_merge_commit_title=PR_TITLE, squash_merge_commit_message=PR_BODY,
 # delete_branch_on_merge=true, has_issues=true. Nothing else is touched (wiki,
 # projects, merge-commit/rebase allowances, rulesets, templates).
+#
+# The scheduled run reads this script's output: the summary line, and every
+# "patched" line, which it requires to end in "-> [$WANT]" with today's four
+# values. Changing WANT, or the wording of those lines, makes that run fail
+# until its pin changes too. Change both in the same piece of work.
 #
 # Env: DRY_RUN=1 (default) report drift only; DRY_RUN=0 PATCH drifted repos.
 #      ORG=StartupBros-com   ONLY=<repo-name> limit to one repo.

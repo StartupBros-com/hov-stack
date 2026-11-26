@@ -1,0 +1,4 @@
+date,payee,amount,status
+2026-03-02,ALPHA,$1.00,posted
+2026-02-27,BRAVO,$2.00,posted
+2026-03-05,CHARLIE,$3.00,posted
