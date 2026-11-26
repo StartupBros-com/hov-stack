@@ -1,0 +1,6458 @@
+{
+ "021a6281": {
+  "checks": {
+   "ruff": {
+    "rc": 0,
+    "tail": "All checks passed!\n"
+   },
+   "mypy": {
+    "rc": 0,
+    "tail": "Success: no issues found in 5 source files\n"
+   },
+   "unittest": {
+    "rc": 0,
+    "tail": "................\n----------------------------------------------------------------------\nRan 16 tests in 0.002s\n\nOK\n"
+   }
+  },
+  "checks_pass": true,
+  "comment_chunks": 7,
+  "items": {
+   "T1": {
+    "class": "clutter",
+    "present": null
+   },
+   "T2": {
+    "class": "clutter",
+    "present": null
+   },
+   "T3": {
+    "class": "clutter",
+    "present": null
+   },
+   "T4": {
+    "class": "clutter",
+    "present": null
+   },
+   "T5": {
+    "class": "clutter",
+    "present": "kept"
+   },
+   "T6": {
+    "class": "clutter",
+    "present": null
+   },
+   "T7": {
+    "class": "clutter",
+    "present": null
+   },
+   "T8": {
+    "class": "clutter",
+    "present": null
+   },
+   "H1": {
+    "class": "clutter",
+    "present": null
+   },
+   "H2": {
+    "class": "clutter",
+    "present": null
+   },
+   "H3": {
+    "class": "clutter",
+    "present": null
+   },
+   "S1": {
+    "class": "clutter",
+    "present": null
+   },
+   "S2": {
+    "class": "clutter",
+    "present": null
+   },
+   "De1": {
+    "class": "D",
+    "place": null,
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": true,
+    "mutant_probe": "wrong",
+    "outcome": "enforced",
+    "strict_gone": true
+   },
+   "De2": {
+    "class": "D",
+    "place": null,
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": true,
+    "mutant_probe": "wrong",
+    "outcome": "enforced",
+    "strict_gone": true
+   },
+   "De3": {
+    "class": "D",
+    "place": null,
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "lost",
+    "strict_gone": true
+   },
+   "De4": {
+    "class": "D",
+    "place": null,
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": true,
+    "mutant_probe": "wrong",
+    "outcome": "enforced",
+    "strict_gone": true
+   },
+   "De5": {
+    "class": "D",
+    "place": null,
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": true,
+    "mutant_probe": "wrong",
+    "outcome": "enforced",
+    "strict_gone": true
+   },
+   "De6": {
+    "class": "D",
+    "place": null,
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "lost",
+    "strict_gone": true
+   },
+   "Dr1": {
+    "class": "D",
+    "place": null,
+    "outcome": "lost",
+    "strict_gone": true
+   },
+   "Dr2": {
+    "class": "D",
+    "place": null,
+    "outcome": "lost",
+    "strict_gone": true
+   },
+   "Dr3": {
+    "class": "D",
+    "place": null,
+    "outcome": "lost",
+    "strict_gone": true
+   },
+   "Dr4": {
+    "class": "D",
+    "place": null,
+    "outcome": "lost",
+    "strict_gone": true
+   },
+   "Dr5": {
+    "class": "D",
+    "place": null,
+    "outcome": "lost",
+    "strict_gone": true
+   },
+   "Dr6": {
+    "class": "D",
+    "place": null,
+    "outcome": "lost",
+    "strict_gone": true
+   },
+   "Dr7": {
+    "class": "D",
+    "place": null,
+    "outcome": "lost",
+    "strict_gone": true
+   },
+   "Dr8": {
+    "class": "D",
+    "place": "kept",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "K1": {
+    "class": "K",
+    "outcome": "kept"
+   },
+   "K4": {
+    "class": "K",
+    "outcome": "kept"
+   },
+   "K5": {
+    "class": "K",
+    "outcome": "kept"
+   },
+   "K6": {
+    "class": "K",
+    "outcome": "kept"
+   },
+   "K2": {
+    "class": "K",
+    "outcome": "kept",
+    "detail": ""
+   },
+   "K3": {
+    "class": "K",
+    "outcome": "kept",
+    "doctests": 2,
+    "doctest_failures": 0
+   },
+   "P1": {
+    "class": "sep",
+    "probe": "wrong",
+    "comment_present": "kept",
+    "score": 1
+   },
+   "P2": {
+    "class": "sep",
+    "probe": "wrong",
+    "comment_present": "kept",
+    "score": 1
+   },
+   "P3": {
+    "class": "sep",
+    "probe": "wrong",
+    "comment_present": "kept",
+    "score": 1
+   },
+   "W1": {
+    "class": "sep",
+    "probe": "wrong",
+    "comment_present": null,
+    "score": 0
+   },
+   "W2": {
+    "class": "sep",
+    "probe": "raised",
+    "comment_present": null,
+    "score": 0
+   },
+   "W3": {
+    "class": "sep",
+    "probe": "wrong",
+    "comment_present": null,
+    "score": 0
+   }
+  },
+  "numstat": "6\t28\ttally/digest.py\n5\t11\ttally/importer.py\n0\t4\ttally/money.py\n0\t5\ttally/rules.py\n21\t1\ttests/test_tally.py",
+  "cost_usd": 0.146675,
+  "num_turns": 6,
+  "is_error": false,
+  "report": "I cleaned up the comments, and `make check` passes: ruff, mypy and all 16 tests. Nothing is committed.\n\n**Kept**\n- The SPDX header.\n- Every `noqa` and `type: ignore`.\n- The doctests and docstrings.\n- The twitter-text weighting note in `digest.py`.\n- The bank byte-order-mark note in `importer.py`.\n\n**Deleted**\n- Comments that only restated the code, such as \"increment the counter\", \"Return the result\" and the section banners.\n- Comments that recorded history, such as \"Changed in #41\", \"Previously this sorted\u2026\" and \"Added UBER EATS after\u2026\".\n- The stale `Transaction.date` comment, which claimed dates were always ISO when `month_of` also accepts `MM/DD/YYYY`.\n- A few explanations of our own code: the `MAX_ROWS` rationale, the `TOP_N` rationale, the pending-row skip and the refund note.\n\n**Code changes that replace a comment**\n- **Ignored payees:** the variable is now `ignored_lines`, so the trailing-newline comment is no longer needed.\n- **Empty month:** `count` is gone, and `build` now checks `if not rows`.\n- **Thousands separators:** the comma-stripping result now has a name, `amount_without_separators`.\n- **Atomic write:** the temp-file-and-rename comment is now the docstring of `write_digest`, since atomicity is part of its contract.\n\n**Tests added for the rules those comments stated**\n- `AMAZON PRIME` ranks above `AMAZON` in the rules.\n- `read_rows` sorts by date. The checked-in fixture is already sorted, so this test builds an unsorted file.\n- Ignored payees are excluded from `by_category`.\n- An empty month returns `None`.\n- A negative amount formats as `-$4.20`.\n\nI left these alone because they aren't comment work:\n- **`post_text`:** the trim loop never uses `trimmed`, which is why it carries `# noqa: F841`. The post is never actually shortened, so it can exceed `MAX_WEIGHT`. This looks like a real bug.\n- **`rules.remember`:** it uses a shared mutable default argument.\n- **`rules.budget_for`:** it returns `None` for an unknown category, although its docstring says 0.",
+  "tools": "assistant_turns=10\nBash=4\nRead=1\nslash_commands=/compound-engineering:ce-simplify-code\nskills=\nskill_files_read=/tmp/nc-vet-0f9d/plugins/compound-engineering/skills/ce-simplify-code/references/personas/comment-reviewer.md\nsubagents=\n",
+  "summary": {
+   "checks_pass": true,
+   "clutter_removed": 12,
+   "clutter_total": 13,
+   "D_lost": 9,
+   "D_unknown": 0,
+   "D_strict_gone": 13,
+   "D_enforced_or_dissolved": 4,
+   "K_lost": 0,
+   "lost_total": 9,
+   "sep_score": 3,
+   "sep": {
+    "P1": 1,
+    "P2": 1,
+    "P3": 1,
+    "W1": 0,
+    "W2": 0,
+    "W3": 0
+   }
+  }
+ },
+ "1ad8252d": {
+  "checks": {
+   "ruff": {
+    "rc": 0,
+    "tail": "All checks passed!\n"
+   },
+   "mypy": {
+    "rc": 0,
+    "tail": "Success: no issues found in 5 source files\n"
+   },
+   "unittest": {
+    "rc": 0,
+    "tail": ".............\n----------------------------------------------------------------------\nRan 13 tests in 0.004s\n\nOK\n"
+   }
+  },
+  "checks_pass": true,
+  "comment_chunks": 5,
+  "items": {
+   "T1": {
+    "class": "clutter",
+    "present": null
+   },
+   "T2": {
+    "class": "clutter",
+    "present": null
+   },
+   "T3": {
+    "class": "clutter",
+    "present": null
+   },
+   "T4": {
+    "class": "clutter",
+    "present": null
+   },
+   "T5": {
+    "class": "clutter",
+    "present": "kept"
+   },
+   "T6": {
+    "class": "clutter",
+    "present": null
+   },
+   "T7": {
+    "class": "clutter",
+    "present": null
+   },
+   "T8": {
+    "class": "clutter",
+    "present": null
+   },
+   "H1": {
+    "class": "clutter",
+    "present": null
+   },
+   "H2": {
+    "class": "clutter",
+    "present": null
+   },
+   "H3": {
+    "class": "clutter",
+    "present": null
+   },
+   "S1": {
+    "class": "clutter",
+    "present": null
+   },
+   "S2": {
+    "class": "clutter",
+    "present": null
+   },
+   "De1": {
+    "class": "D",
+    "place": "relocated",
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "relocated",
+    "strict_gone": true
+   },
+   "De2": {
+    "class": "D",
+    "place": "relocated",
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "relocated",
+    "strict_gone": true
+   },
+   "De3": {
+    "class": "D",
+    "place": "relocated",
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "relocated",
+    "strict_gone": true
+   },
+   "De4": {
+    "class": "D",
+    "place": "relocated",
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "relocated",
+    "strict_gone": true
+   },
+   "De5": {
+    "class": "D",
+    "place": "relocated",
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "relocated",
+    "strict_gone": true
+   },
+   "De6": {
+    "class": "D",
+    "place": "relocated",
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "relocated",
+    "strict_gone": true
+   },
+   "Dr1": {
+    "class": "D",
+    "place": "relocated",
+    "outcome": "relocated",
+    "strict_gone": true
+   },
+   "Dr2": {
+    "class": "D",
+    "place": "relocated",
+    "outcome": "relocated",
+    "strict_gone": true
+   },
+   "Dr3": {
+    "class": "D",
+    "place": "relocated",
+    "outcome": "relocated",
+    "strict_gone": true
+   },
+   "Dr4": {
+    "class": "D",
+    "place": "relocated",
+    "outcome": "relocated",
+    "strict_gone": true
+   },
+   "Dr5": {
+    "class": "D",
+    "place": "relocated",
+    "outcome": "relocated",
+    "strict_gone": true
+   },
+   "Dr6": {
+    "class": "D",
+    "place": "relocated",
+    "outcome": "relocated",
+    "strict_gone": true
+   },
+   "Dr7": {
+    "class": "D",
+    "place": "relocated",
+    "outcome": "relocated",
+    "strict_gone": true
+   },
+   "Dr8": {
+    "class": "D",
+    "place": "relocated",
+    "outcome": "relocated",
+    "strict_gone": true
+   },
+   "K1": {
+    "class": "K",
+    "outcome": "kept"
+   },
+   "K4": {
+    "class": "K",
+    "outcome": "relocated"
+   },
+   "K5": {
+    "class": "K",
+    "outcome": "kept"
+   },
+   "K6": {
+    "class": "K",
+    "outcome": "relocated"
+   },
+   "K2": {
+    "class": "K",
+    "outcome": "kept",
+    "detail": ""
+   },
+   "K3": {
+    "class": "K",
+    "outcome": "kept",
+    "doctests": 2,
+    "doctest_failures": 0
+   },
+   "P1": {
+    "class": "sep",
+    "probe": "wrong",
+    "comment_present": "kept",
+    "score": 1
+   },
+   "P2": {
+    "class": "sep",
+    "probe": "wrong",
+    "comment_present": "kept",
+    "score": 1
+   },
+   "P3": {
+    "class": "sep",
+    "probe": "wrong",
+    "comment_present": "kept",
+    "score": 1
+   },
+   "W1": {
+    "class": "sep",
+    "probe": "wrong",
+    "comment_present": null,
+    "score": 0
+   },
+   "W2": {
+    "class": "sep",
+    "probe": "raised",
+    "comment_present": null,
+    "score": 0
+   },
+   "W3": {
+    "class": "sep",
+    "probe": "wrong",
+    "comment_present": null,
+    "score": 0
+   }
+  },
+  "numstat": "2\t25\ttally/digest.py\n3\t11\ttally/importer.py\n0\t4\ttally/money.py\n0\t5\ttally/rules.py",
+  "cost_usd": 0.12386860000000002,
+  "num_turns": 8,
+  "is_error": false,
+  "report": "All the code comments are gone and `make check` passes. The checker now lists 0 comments. I haven't committed anything or opened a PR, so the description below is for you to use.\n\nThe repo had no `.comment-ratchet.json`, no `docs/adr/` and no `.pre-commit-config.yaml`. I created the config with `--init` and `--update`. I didn't run `pre-commit run comment-ratchet --all-files`, because there's no pre-commit config in the repo.\n\n**Comments by category (35 deleted, 2 kept)**\n- **Tautology (9):** step narration such as \"Loop over the rows\u2026\", \"increment the counter\", \"Return the result\", \"Default category\", and the two section banners.\n- **Stale (2):** \"Changed in #41\" pandas note and \"Previously this sorted by payee name\u2026\" history lines. The reasons in them are carried into the ADRs.\n- **Excuse (1):** the \"until the importer normalises every date to ISO\" note in `month_of`.\n- **Decision Record (23):** moved into three new ADRs.\n- **Kept (2):** the SPDX and Copyright lines in `tally/__init__.py`. License tooling reads them, so I added anchored regexes for them to `allow`.\n\n**ADRs added** (`docs/adr/README.md` is the index)\n- `0001-digest-rules.md` covers the ignore-file newline, the order of ignoring and totalling, empty months, refunds, tie-breaking, and rule order and casing.\n- `0002-import-and-money-handling.md` covers the row cap, the ISO date format, the byte-order mark, pending rows, thousands separators, sort order, `Decimal`, and the negative-amount format.\n- `0003-post-format-and-delivery.md` covers the five-payee limit, the X weighting rules, and atomic digest writes.\n\n**Follow-up fixes** (for the PR description)\n- `tally/digest.py` slices `MM/DD/YYYY` dates by hand in `month_of`. Normalise every date to ISO in `importer.read_rows` and remove that branch. The slash-date path has no test today.\n\n**Bugs I noticed and left alone** (none are comments)\n- `post_text` in `tally/digest.py` computes `trimmed` but never uses it. The trimming loop has no effect, and the `# noqa: F841` hides that.\n- `remember` in `tally/rules.py` uses a mutable default argument, hidden by `# noqa: B006`.\n- `budget_for` in `tally/rules.py` can return `None` while its signature says `int`. A `# type: ignore` hides that.",
+  "tools": "assistant_turns=15\nBash=7\nslash_commands=/comment-ratchet:delete-comment\nskills=\nskill_files_read=\nsubagents=\n",
+  "summary": {
+   "checks_pass": true,
+   "clutter_removed": 12,
+   "clutter_total": 13,
+   "D_lost": 0,
+   "D_unknown": 0,
+   "D_strict_gone": 14,
+   "D_enforced_or_dissolved": 0,
+   "K_lost": 0,
+   "lost_total": 0,
+   "sep_score": 3,
+   "sep": {
+    "P1": 1,
+    "P2": 1,
+    "P3": 1,
+    "W1": 0,
+    "W2": 0,
+    "W3": 0
+   }
+  }
+ },
+ "1bcc7be9": {
+  "checks": {
+   "ruff": {
+    "rc": 0,
+    "tail": "All checks passed!\n"
+   },
+   "mypy": {
+    "rc": 0,
+    "tail": "Success: no issues found in 5 source files\n"
+   },
+   "unittest": {
+    "rc": 0,
+    "tail": ".............\n----------------------------------------------------------------------\nRan 13 tests in 0.003s\n\nOK\n"
+   }
+  },
+  "checks_pass": true,
+  "comment_chunks": 4,
+  "items": {
+   "T1": {
+    "class": "clutter",
+    "present": null
+   },
+   "T2": {
+    "class": "clutter",
+    "present": null
+   },
+   "T3": {
+    "class": "clutter",
+    "present": null
+   },
+   "T4": {
+    "class": "clutter",
+    "present": null
+   },
+   "T5": {
+    "class": "clutter",
+    "present": "kept"
+   },
+   "T6": {
+    "class": "clutter",
+    "present": null
+   },
+   "T7": {
+    "class": "clutter",
+    "present": null
+   },
+   "T8": {
+    "class": "clutter",
+    "present": null
+   },
+   "H1": {
+    "class": "clutter",
+    "present": null
+   },
+   "H2": {
+    "class": "clutter",
+    "present": null
+   },
+   "H3": {
+    "class": "clutter",
+    "present": null
+   },
+   "S1": {
+    "class": "clutter",
+    "present": null
+   },
+   "S2": {
+    "class": "clutter",
+    "present": null
+   },
+   "De1": {
+    "class": "D",
+    "place": null,
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "lost",
+    "strict_gone": true
+   },
+   "De2": {
+    "class": "D",
+    "place": null,
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "correct",
+    "outcome": "dissolved",
+    "strict_gone": true
+   },
+   "De3": {
+    "class": "D",
+    "place": null,
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "lost",
+    "strict_gone": true
+   },
+   "De4": {
+    "class": "D",
+    "place": null,
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "lost",
+    "strict_gone": true
+   },
+   "De5": {
+    "class": "D",
+    "place": null,
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "lost",
+    "strict_gone": true
+   },
+   "De6": {
+    "class": "D",
+    "place": null,
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "lost",
+    "strict_gone": true
+   },
+   "Dr1": {
+    "class": "D",
+    "place": null,
+    "outcome": "lost",
+    "strict_gone": true
+   },
+   "Dr2": {
+    "class": "D",
+    "place": null,
+    "outcome": "lost",
+    "strict_gone": true
+   },
+   "Dr3": {
+    "class": "D",
+    "place": null,
+    "outcome": "lost",
+    "strict_gone": true
+   },
+   "Dr4": {
+    "class": "D",
+    "place": null,
+    "outcome": "lost",
+    "strict_gone": true
+   },
+   "Dr5": {
+    "class": "D",
+    "place": null,
+    "outcome": "lost",
+    "strict_gone": true
+   },
+   "Dr6": {
+    "class": "D",
+    "place": null,
+    "outcome": "lost",
+    "strict_gone": true
+   },
+   "Dr7": {
+    "class": "D",
+    "place": null,
+    "outcome": "lost",
+    "strict_gone": true
+   },
+   "Dr8": {
+    "class": "D",
+    "place": null,
+    "outcome": "lost",
+    "strict_gone": true
+   },
+   "K1": {
+    "class": "K",
+    "outcome": "kept"
+   },
+   "K4": {
+    "class": "K",
+    "outcome": "kept"
+   },
+   "K5": {
+    "class": "K",
+    "outcome": "kept"
+   },
+   "K6": {
+    "class": "K",
+    "outcome": "kept"
+   },
+   "K2": {
+    "class": "K",
+    "outcome": "kept",
+    "detail": ""
+   },
+   "K3": {
+    "class": "K",
+    "outcome": "kept",
+    "doctests": 2,
+    "doctest_failures": 0
+   },
+   "P1": {
+    "class": "sep",
+    "probe": "wrong",
+    "comment_present": null,
+    "score": 0
+   },
+   "P2": {
+    "class": "sep",
+    "probe": "correct",
+    "comment_present": null,
+    "score": 2
+   },
+   "P3": {
+    "class": "sep",
+    "probe": "correct",
+    "comment_present": null,
+    "score": 2
+   },
+   "W1": {
+    "class": "sep",
+    "probe": "correct",
+    "comment_present": null,
+    "score": 2
+   },
+   "W2": {
+    "class": "sep",
+    "probe": "correct",
+    "comment_present": null,
+    "score": 2
+   },
+   "W3": {
+    "class": "sep",
+    "probe": "correct",
+    "comment_present": null,
+    "score": 2
+   }
+  },
+  "numstat": "8\t36\ttally/digest.py\n12\t12\ttally/importer.py\n1\t5\ttally/money.py\n9\t11\ttally/rules.py",
+  "cost_usd": 0.1855255,
+  "num_turns": 4,
+  "is_error": false,
+  "report": "I deleted 31 comments across `tally/rules.py`, `tally/money.py`, `tally/digest.py` and `tally/importer.py`. `make check` passes: ruff and mypy are clean, and all 13 tests pass. I reviewed the diff and found nothing to restore or rerun. Nothing else in the repo uses the symbols that changed, such as `RULES`, `remember` and `learned`.\n\nOf the 31 deleted comments, 28 were narration, history notes, section banners and trailing remarks. The other three were lint or type suppressions (`noqa: B006`, `type: ignore[return-value]`, `noqa: F841`). Each of those was hiding a real defect, so the code changed rather than the suppression moving.\n\nWhere a comment explained a workaround, the code was fixed instead:\n- **`rules.remember`**: it had a mutable default argument. It now writes to a module-level `_learned` dict and no longer takes a `learned` parameter.\n- **`rules.budget_for`**: it returned `None` for a category with no budget. It now returns 0.\n- **`rules.RULES`**: renamed `RULES_BY_PRIORITY`, so the \"first match wins\" ordering is in the name.\n- **`digest.post_text`**: the trimming loop computed `trimmed` and discarded it, so over-length posts were never trimmed. It now rebuilds the text after dropping lines. This changes behaviour, but only for posts over the 280 weight limit.\n- **Dates**: `importer._iso_date` converts MM/DD/YYYY to ISO when the file is read, so the slash branch in `digest.month_of` is gone.\n- **`digest.month_totals`**: it used `itertools.groupby`, which only worked on date-sorted input. It now accumulates into a dict, so row order no longer matters.\n- **`importer.load_ignored_payees`**: it now strips lines and skips blanks, so `digest.build` no longer appends `\"\\n\"` before the membership check.\n- **`money.parse_amount`**: it strips thousands separators itself, so the importer no longer does.\n- **`digest.build`**: the `count` counter is replaced by an `if not rows` check.\n\nI kept three comments, all about things we can't change:\n- **`tally/__init__.py`**: the license header.\n- **`tally/digest.py`**: the comment on `LIGHT`, `URL_WEIGHT` and `MAX_WEIGHT`, which records X's twitter-text v3 weighting rules.\n- **`tally/importer.py`**: the `utf-8-sig` comment in `read_rows`. The bank writes a byte-order mark at the start of every export, and the test CSV has one.\n\nThe two `# noqa: E402` lines in `scripts/run_digest.py` also stay, because the script has to set `sys.path` before importing `tally`. I kept the docstrings too, since they describe public contracts and the `money.to_cents` doctests run as tests.\n\nI deleted a few comments that recorded intent rather than mechanics. They covered why an empty month posts nothing, why a refund counts in the month it lands, and why the digest file is written to a temp file and renamed. The code still does all three. Only the reasons are gone, so say if you want any of them back.\n\nThere are no open constraint comments or other open work.",
+  "tools": "assistant_turns=15\nAgent=1\nBash=6\nslash_commands=/pstack:no-comments\nskills=\nskill_files_read=\nsubagents=pstack:comment-sicko\n",
+  "summary": {
+   "checks_pass": true,
+   "clutter_removed": 12,
+   "clutter_total": 13,
+   "D_lost": 13,
+   "D_unknown": 0,
+   "D_strict_gone": 14,
+   "D_enforced_or_dissolved": 1,
+   "K_lost": 0,
+   "lost_total": 13,
+   "sep_score": 10,
+   "sep": {
+    "P1": 0,
+    "P2": 2,
+    "P3": 2,
+    "W1": 2,
+    "W2": 2,
+    "W3": 2
+   }
+  }
+ },
+ "1bfba6d9": {
+  "checks": {
+   "ruff": {
+    "rc": 0,
+    "tail": "All checks passed!\n"
+   },
+   "mypy": {
+    "rc": 0,
+    "tail": "Success: no issues found in 5 source files\n"
+   },
+   "unittest": {
+    "rc": 0,
+    "tail": ".............\n----------------------------------------------------------------------\nRan 13 tests in 0.002s\n\nOK\n"
+   }
+  },
+  "checks_pass": true,
+  "comment_chunks": 25,
+  "items": {
+   "T1": {
+    "class": "clutter",
+    "present": null
+   },
+   "T2": {
+    "class": "clutter",
+    "present": null
+   },
+   "T3": {
+    "class": "clutter",
+    "present": null
+   },
+   "T4": {
+    "class": "clutter",
+    "present": null
+   },
+   "T5": {
+    "class": "clutter",
+    "present": null
+   },
+   "T6": {
+    "class": "clutter",
+    "present": null
+   },
+   "T7": {
+    "class": "clutter",
+    "present": null
+   },
+   "T8": {
+    "class": "clutter",
+    "present": null
+   },
+   "H1": {
+    "class": "clutter",
+    "present": null
+   },
+   "H2": {
+    "class": "clutter",
+    "present": "kept"
+   },
+   "H3": {
+    "class": "clutter",
+    "present": null
+   },
+   "S1": {
+    "class": "clutter",
+    "present": null
+   },
+   "S2": {
+    "class": "clutter",
+    "present": null
+   },
+   "De1": {
+    "class": "D",
+    "place": "kept",
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "De2": {
+    "class": "D",
+    "place": "kept",
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "De3": {
+    "class": "D",
+    "place": "kept",
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "De4": {
+    "class": "D",
+    "place": "kept",
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "De5": {
+    "class": "D",
+    "place": "kept",
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "De6": {
+    "class": "D",
+    "place": "kept",
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "Dr1": {
+    "class": "D",
+    "place": "kept",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "Dr2": {
+    "class": "D",
+    "place": "kept",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "Dr3": {
+    "class": "D",
+    "place": "kept",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "Dr4": {
+    "class": "D",
+    "place": "kept",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "Dr5": {
+    "class": "D",
+    "place": "kept",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "Dr6": {
+    "class": "D",
+    "place": "kept",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "Dr7": {
+    "class": "D",
+    "place": "kept",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "Dr8": {
+    "class": "D",
+    "place": "kept",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "K1": {
+    "class": "K",
+    "outcome": "kept"
+   },
+   "K4": {
+    "class": "K",
+    "outcome": "kept"
+   },
+   "K5": {
+    "class": "K",
+    "outcome": "kept"
+   },
+   "K6": {
+    "class": "K",
+    "outcome": "kept"
+   },
+   "K2": {
+    "class": "K",
+    "outcome": "kept",
+    "detail": ""
+   },
+   "K3": {
+    "class": "K",
+    "outcome": "kept",
+    "doctests": 2,
+    "doctest_failures": 0
+   },
+   "P1": {
+    "class": "sep",
+    "probe": "wrong",
+    "comment_present": "kept",
+    "score": 1
+   },
+   "P2": {
+    "class": "sep",
+    "probe": "wrong",
+    "comment_present": "kept",
+    "score": 1
+   },
+   "P3": {
+    "class": "sep",
+    "probe": "wrong",
+    "comment_present": "kept",
+    "score": 1
+   },
+   "W1": {
+    "class": "sep",
+    "probe": "wrong",
+    "comment_present": "kept",
+    "score": 1
+   },
+   "W2": {
+    "class": "sep",
+    "probe": "raised",
+    "comment_present": "kept",
+    "score": 1
+   },
+   "W3": {
+    "class": "sep",
+    "probe": "wrong",
+    "comment_present": "kept",
+    "score": 1
+   }
+  },
+  "numstat": "1\t11\ttally/digest.py\n1\t3\ttally/importer.py\n0\t1\ttally/money.py\n0\t1\ttally/rules.py",
+  "cost_usd": 0.0775342,
+  "num_turns": 5,
+  "is_error": false,
+  "report": "I removed 14 comments that restated the code or recorded history. `make check` still passes (ruff, mypy and 13 tests). I didn't change any code or tests, because no comment needed replacing with one.\n\n**Removed**\n- **`tally/digest.py`:**\n  - the `helpers` and `posting` banner comments\n  - the docstring on `_sum_cents`\n  - the \"Loop over the rows\u2026\", \"increment the counter\" and \"Return the result\" comments\n  - the \"Previously this sorted by payee name\u2026\" history, keeping the tie-break reason\n- **`tally/importer.py`:** the \"Open the file\u2026\" and \"add the row to the list\" comments, plus the \"Changed in #41 \u2026 pandas\" history note.\n- **`tally/money.py`:** the \"Strip the currency symbol\u2026\" comment.\n- **`tally/rules.py`:** the \"Default category.\" comment.\n\n**Kept**\nI kept the comments that explain a reason. Examples are the trailing-newline quirk in the ignore file, the BOM, the thousands separators, the sort that `month_totals` depends on, and the rule order. The same goes for the SPDX header and the docstrings that add information.\n\n**Problems I left alone**\n- **`post_text` in `tally/digest.py`:** the trimming loop assigns `trimmed` and never uses it. It is hidden behind `# noqa: F841`. `body` is never shortened, so a post over 280 weight comes back at full length. This looks like a real bug, so I left it for you to fix instead of editing behaviour under a comment cleanup.\n- **`remember` in `tally/rules.py`:** it has a mutable default argument, silenced with `# noqa: B006`.\n- **`budget_for` in `tally/rules.py`:** it returns `None` for an unknown category. Its docstring promises 0, and a `# type: ignore` hides the mismatch.\n\nI haven't committed anything.",
+  "tools": "assistant_turns=6\nBash=3\nGrep=1\nslash_commands=/hov-stack:code-slop\nskills=\nskill_files_read=\nsubagents=\n",
+  "summary": {
+   "checks_pass": true,
+   "clutter_removed": 12,
+   "clutter_total": 13,
+   "D_lost": 0,
+   "D_unknown": 0,
+   "D_strict_gone": 0,
+   "D_enforced_or_dissolved": 0,
+   "K_lost": 0,
+   "lost_total": 0,
+   "sep_score": 6,
+   "sep": {
+    "P1": 1,
+    "P2": 1,
+    "P3": 1,
+    "W1": 1,
+    "W2": 1,
+    "W3": 1
+   }
+  }
+ },
+ "2807ba5c": {
+  "checks": {
+   "ruff": {
+    "rc": 0,
+    "tail": "All checks passed!\n"
+   },
+   "mypy": {
+    "rc": 0,
+    "tail": "Success: no issues found in 5 source files\n"
+   },
+   "unittest": {
+    "rc": 0,
+    "tail": ".............\n----------------------------------------------------------------------\nRan 13 tests in 0.002s\n\nOK\n"
+   }
+  },
+  "checks_pass": true,
+  "comment_chunks": 4,
+  "items": {
+   "T1": {
+    "class": "clutter",
+    "present": null
+   },
+   "T2": {
+    "class": "clutter",
+    "present": null
+   },
+   "T3": {
+    "class": "clutter",
+    "present": null
+   },
+   "T4": {
+    "class": "clutter",
+    "present": null
+   },
+   "T5": {
+    "class": "clutter",
+    "present": null
+   },
+   "T6": {
+    "class": "clutter",
+    "present": null
+   },
+   "T7": {
+    "class": "clutter",
+    "present": null
+   },
+   "T8": {
+    "class": "clutter",
+    "present": null
+   },
+   "H1": {
+    "class": "clutter",
+    "present": null
+   },
+   "H2": {
+    "class": "clutter",
+    "present": null
+   },
+   "H3": {
+    "class": "clutter",
+    "present": null
+   },
+   "S1": {
+    "class": "clutter",
+    "present": null
+   },
+   "S2": {
+    "class": "clutter",
+    "present": null
+   },
+   "De1": {
+    "class": "D",
+    "place": null,
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "lost",
+    "strict_gone": true
+   },
+   "De2": {
+    "class": "D",
+    "place": null,
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "lost",
+    "strict_gone": true
+   },
+   "De3": {
+    "class": "D",
+    "place": null,
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "lost",
+    "strict_gone": true
+   },
+   "De4": {
+    "class": "D",
+    "place": null,
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "lost",
+    "strict_gone": true
+   },
+   "De5": {
+    "class": "D",
+    "place": null,
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "lost",
+    "strict_gone": true
+   },
+   "De6": {
+    "class": "D",
+    "place": null,
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "lost",
+    "strict_gone": true
+   },
+   "Dr1": {
+    "class": "D",
+    "place": null,
+    "outcome": "lost",
+    "strict_gone": true
+   },
+   "Dr2": {
+    "class": "D",
+    "place": null,
+    "outcome": "lost",
+    "strict_gone": true
+   },
+   "Dr3": {
+    "class": "D",
+    "place": null,
+    "outcome": "lost",
+    "strict_gone": true
+   },
+   "Dr4": {
+    "class": "D",
+    "place": null,
+    "outcome": "lost",
+    "strict_gone": true
+   },
+   "Dr5": {
+    "class": "D",
+    "place": null,
+    "outcome": "lost",
+    "strict_gone": true
+   },
+   "Dr6": {
+    "class": "D",
+    "place": null,
+    "outcome": "lost",
+    "strict_gone": true
+   },
+   "Dr7": {
+    "class": "D",
+    "place": null,
+    "outcome": "lost",
+    "strict_gone": true
+   },
+   "Dr8": {
+    "class": "D",
+    "place": null,
+    "outcome": "lost",
+    "strict_gone": true
+   },
+   "K1": {
+    "class": "K",
+    "outcome": "kept"
+   },
+   "K4": {
+    "class": "K",
+    "outcome": "kept"
+   },
+   "K5": {
+    "class": "K",
+    "outcome": "kept"
+   },
+   "K6": {
+    "class": "K",
+    "outcome": "kept"
+   },
+   "K2": {
+    "class": "K",
+    "outcome": "kept",
+    "detail": ""
+   },
+   "K3": {
+    "class": "K",
+    "outcome": "kept",
+    "doctests": 2,
+    "doctest_failures": 0
+   },
+   "P1": {
+    "class": "sep",
+    "probe": "correct",
+    "comment_present": null,
+    "score": 2
+   },
+   "P2": {
+    "class": "sep",
+    "probe": "correct",
+    "comment_present": null,
+    "score": 2
+   },
+   "P3": {
+    "class": "sep",
+    "probe": "correct",
+    "comment_present": null,
+    "score": 2
+   },
+   "W1": {
+    "class": "sep",
+    "probe": "correct",
+    "comment_present": null,
+    "score": 2
+   },
+   "W2": {
+    "class": "sep",
+    "probe": "raised",
+    "comment_present": null,
+    "score": 0
+   },
+   "W3": {
+    "class": "sep",
+    "probe": "wrong",
+    "comment_present": null,
+    "score": 0
+   }
+  },
+  "numstat": "4\t26\ttally/digest.py\n4\t11\ttally/importer.py\n0\t4\ttally/money.py\n4\t7\ttally/rules.py",
+  "cost_usd": 0.2023719,
+  "num_turns": 4,
+  "is_error": false,
+  "report": "The comment cleanup is done and `make check` passes: ruff, mypy and all 13 tests. I didn't commit anything.\n\n**Comments removed:** Comment Sicko deleted 38 comments and comment-like items across `tally/digest.py`, `tally/importer.py`, `tally/money.py` and `tally/rules.py`. That includes the `# noqa: F841` and `# noqa: B006` suppressions and the mypy `type: ignore`. I didn't have to restore any, and nothing needed a rerun.\n\n**Real bugs the suppressions were hiding, now fixed:**\n- **`post_text`:** it assigned `trimmed` and never used it, so long posts were never shortened. It now rebuilds `body` inside the loop.\n- **`remember`:** its `learned={}` default was shared across calls. It now defaults to `None` and creates a fresh dict.\n- **`budget_for`:** it returned `None` for a category with no budget, though its docstring promises 0. It now uses `budgets.get(category, 0)`.\n\n**Workaround removed:** `load_ignored_payees` now strips its lines. That let me drop the `r.payee + \"\\n\" not in ignored` hack in `build`.\n\n**Comments kept:**\n- the license header in `tally/__init__.py`\n- the twitter-text weighting note in `digest.py`\n- the BOM note on `utf-8-sig` in `importer.py`\n- `# noqa: E402` in `scripts/run_digest.py`\n- the public docstrings and doctests\n\n**Not fixed, because the root cause needs wider changes.** Each of these still works around something upstream:\n- `month_of` has an MM/DD/YYYY branch because the importer doesn't normalise dates to ISO.\n- `read_rows` strips commas before `parse_amount`, which should handle thousands separators itself.\n- `month_totals` uses `groupby`, which only works because `read_rows` sorts by date. A dict accumulator would remove that dependency.\n- `RULES` relies on first-match-wins ordering.\n\nThere were no \"do not remove\" style constraint comments.",
+  "tools": "assistant_turns=22\nAgent=1\nBash=8\nslash_commands=/pstack:no-comments\nskills=\nskill_files_read=\nsubagents=pstack:comment-sicko\n",
+  "summary": {
+   "checks_pass": true,
+   "clutter_removed": 13,
+   "clutter_total": 13,
+   "D_lost": 14,
+   "D_unknown": 0,
+   "D_strict_gone": 14,
+   "D_enforced_or_dissolved": 0,
+   "K_lost": 0,
+   "lost_total": 14,
+   "sep_score": 8,
+   "sep": {
+    "P1": 2,
+    "P2": 2,
+    "P3": 2,
+    "W1": 2,
+    "W2": 0,
+    "W3": 0
+   }
+  }
+ },
+ "350e335b": {
+  "checks": {
+   "ruff": {
+    "rc": 0,
+    "tail": "All checks passed!\n"
+   },
+   "mypy": {
+    "rc": 0,
+    "tail": "Success: no issues found in 5 source files\n"
+   },
+   "unittest": {
+    "rc": 0,
+    "tail": ".............\n----------------------------------------------------------------------\nRan 13 tests in 0.003s\n\nOK\n"
+   }
+  },
+  "checks_pass": true,
+  "comment_chunks": 22,
+  "items": {
+   "T1": {
+    "class": "clutter",
+    "present": null
+   },
+   "T2": {
+    "class": "clutter",
+    "present": null
+   },
+   "T3": {
+    "class": "clutter",
+    "present": null
+   },
+   "T4": {
+    "class": "clutter",
+    "present": null
+   },
+   "T5": {
+    "class": "clutter",
+    "present": "kept"
+   },
+   "T6": {
+    "class": "clutter",
+    "present": null
+   },
+   "T7": {
+    "class": "clutter",
+    "present": null
+   },
+   "T8": {
+    "class": "clutter",
+    "present": null
+   },
+   "H1": {
+    "class": "clutter",
+    "present": null
+   },
+   "H2": {
+    "class": "clutter",
+    "present": null
+   },
+   "H3": {
+    "class": "clutter",
+    "present": null
+   },
+   "S1": {
+    "class": "clutter",
+    "present": null
+   },
+   "S2": {
+    "class": "clutter",
+    "present": null
+   },
+   "De1": {
+    "class": "D",
+    "place": "kept",
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "De2": {
+    "class": "D",
+    "place": "kept",
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "De3": {
+    "class": "D",
+    "place": "kept",
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "De4": {
+    "class": "D",
+    "place": "kept",
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "De5": {
+    "class": "D",
+    "place": "kept",
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "De6": {
+    "class": "D",
+    "place": "kept",
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "Dr1": {
+    "class": "D",
+    "place": "kept",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "Dr2": {
+    "class": "D",
+    "place": "kept",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "Dr3": {
+    "class": "D",
+    "place": "kept",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "Dr4": {
+    "class": "D",
+    "place": "kept",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "Dr5": {
+    "class": "D",
+    "place": "kept",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "Dr6": {
+    "class": "D",
+    "place": "kept",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "Dr7": {
+    "class": "D",
+    "place": "kept",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "Dr8": {
+    "class": "D",
+    "place": "kept",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "K1": {
+    "class": "K",
+    "outcome": "kept"
+   },
+   "K4": {
+    "class": "K",
+    "outcome": "kept"
+   },
+   "K5": {
+    "class": "K",
+    "outcome": "kept"
+   },
+   "K6": {
+    "class": "K",
+    "outcome": "kept"
+   },
+   "K2": {
+    "class": "K",
+    "outcome": "kept",
+    "detail": ""
+   },
+   "K3": {
+    "class": "K",
+    "outcome": "kept",
+    "doctests": 2,
+    "doctest_failures": 0
+   },
+   "P1": {
+    "class": "sep",
+    "probe": "wrong",
+    "comment_present": "kept",
+    "score": 1
+   },
+   "P2": {
+    "class": "sep",
+    "probe": "wrong",
+    "comment_present": "kept",
+    "score": 1
+   },
+   "P3": {
+    "class": "sep",
+    "probe": "wrong",
+    "comment_present": "kept",
+    "score": 1
+   },
+   "W1": {
+    "class": "sep",
+    "probe": "correct",
+    "comment_present": null,
+    "score": 2
+   },
+   "W2": {
+    "class": "sep",
+    "probe": "correct",
+    "comment_present": null,
+    "score": 2
+   },
+   "W3": {
+    "class": "sep",
+    "probe": "wrong",
+    "comment_present": "kept",
+    "score": 1
+   }
+  },
+  "numstat": "2\t13\ttally/digest.py\n3\t7\ttally/importer.py\n1\t2\ttally/money.py\n0\t2\ttally/rules.py",
+  "cost_usd": 0.0928252,
+  "num_turns": 6,
+  "is_error": false,
+  "report": "I removed the narration, history and banner comments, and `make check` still passes (ruff, mypy and all 13 tests). I haven't committed anything.\n\n**Removed:**\n- Narration: \"Open the file and read each row\", \"Loop over the rows\u2026\", \"increment the counter\", \"add the row to the list\", \"Return the result\", \"Default category\", \"Strip the currency symbol\u2026\".\n- History notes: \"Changed in #41\u2026 pandas\", \"Added UBER EATS after March\", \"Previously this sorted by payee name\".\n- The `helpers` and `posting` banner comments in `digest.py`.\n\n**Replaced by code:**\n- **Thousands separators:** `parse_amount` now strips commas itself, so the importer no longer needs a comment and a `.replace`.\n- **Trailing newlines:** `load_ignored_payees` now strips each line's trailing newline, so `build` no longer adds `\"\\n\"` before the membership check.\n\nI kept the comments that explain why the code does something: the rule ordering, the twitter-text weights, the pending-row skip, the BOM, the sort order the grouping relies on, the refund and empty-month notes, the atomic write, and the MM/DD/YYYY workaround.\n\n**Bugs I found and left alone:**\n- **`post_text` never trims:** it pops lines into `trimmed` but then returns the untrimmed `body`. The `# noqa: F841` hides that, so over-long posts are never shortened, and the trimming loop still runs. Return `\"\\n\".join(lines)` to fix it.\n- **`remember`:** it uses a shared mutable default argument, hidden by `# noqa: B006`.\n- **`budget_for`:** it returns `None` for a category with no budget, despite the `-> int` annotation and the docstring that promises 0. A `# type: ignore` hides it.\n\nAll three are behaviour changes beyond comment cleanup, so I didn't touch them.",
+  "tools": "assistant_turns=8\nBash=5\nslash_commands=/hov-stack:code-slop\nskills=\nskill_files_read=\nsubagents=\n",
+  "summary": {
+   "checks_pass": true,
+   "clutter_removed": 12,
+   "clutter_total": 13,
+   "D_lost": 0,
+   "D_unknown": 0,
+   "D_strict_gone": 0,
+   "D_enforced_or_dissolved": 0,
+   "K_lost": 0,
+   "lost_total": 0,
+   "sep_score": 8,
+   "sep": {
+    "P1": 1,
+    "P2": 1,
+    "P3": 1,
+    "W1": 2,
+    "W2": 2,
+    "W3": 1
+   }
+  }
+ },
+ "3f3a8f27": {
+  "checks": {
+   "ruff": {
+    "rc": 0,
+    "tail": "All checks passed!\n"
+   },
+   "mypy": {
+    "rc": 0,
+    "tail": "Success: no issues found in 5 source files\n"
+   },
+   "unittest": {
+    "rc": 0,
+    "tail": "................\n----------------------------------------------------------------------\nRan 16 tests in 0.003s\n\nOK\n"
+   }
+  },
+  "checks_pass": true,
+  "comment_chunks": 9,
+  "items": {
+   "T1": {
+    "class": "clutter",
+    "present": null
+   },
+   "T2": {
+    "class": "clutter",
+    "present": null
+   },
+   "T3": {
+    "class": "clutter",
+    "present": null
+   },
+   "T4": {
+    "class": "clutter",
+    "present": null
+   },
+   "T5": {
+    "class": "clutter",
+    "present": null
+   },
+   "T6": {
+    "class": "clutter",
+    "present": null
+   },
+   "T7": {
+    "class": "clutter",
+    "present": null
+   },
+   "T8": {
+    "class": "clutter",
+    "present": null
+   },
+   "H1": {
+    "class": "clutter",
+    "present": null
+   },
+   "H2": {
+    "class": "clutter",
+    "present": null
+   },
+   "H3": {
+    "class": "clutter",
+    "present": null
+   },
+   "S1": {
+    "class": "clutter",
+    "present": null
+   },
+   "S2": {
+    "class": "clutter",
+    "present": null
+   },
+   "De1": {
+    "class": "D",
+    "place": null,
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": true,
+    "mutant_probe": "wrong",
+    "outcome": "enforced",
+    "strict_gone": true
+   },
+   "De2": {
+    "class": "D",
+    "place": null,
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "lost",
+    "strict_gone": true
+   },
+   "De3": {
+    "class": "D",
+    "place": null,
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "lost",
+    "strict_gone": true
+   },
+   "De4": {
+    "class": "D",
+    "place": null,
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": true,
+    "mutant_probe": "wrong",
+    "outcome": "enforced",
+    "strict_gone": true
+   },
+   "De5": {
+    "class": "D",
+    "place": null,
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": true,
+    "mutant_probe": "wrong",
+    "outcome": "enforced",
+    "strict_gone": true
+   },
+   "De6": {
+    "class": "D",
+    "place": null,
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "lost",
+    "strict_gone": true
+   },
+   "Dr1": {
+    "class": "D",
+    "place": null,
+    "outcome": "lost",
+    "strict_gone": true
+   },
+   "Dr2": {
+    "class": "D",
+    "place": null,
+    "outcome": "lost",
+    "strict_gone": true
+   },
+   "Dr3": {
+    "class": "D",
+    "place": null,
+    "outcome": "lost",
+    "strict_gone": true
+   },
+   "Dr4": {
+    "class": "D",
+    "place": null,
+    "outcome": "lost",
+    "strict_gone": true
+   },
+   "Dr5": {
+    "class": "D",
+    "place": null,
+    "outcome": "lost",
+    "strict_gone": true
+   },
+   "Dr6": {
+    "class": "D",
+    "place": null,
+    "outcome": "lost",
+    "strict_gone": true
+   },
+   "Dr7": {
+    "class": "D",
+    "place": null,
+    "outcome": "lost",
+    "strict_gone": true
+   },
+   "Dr8": {
+    "class": "D",
+    "place": "kept",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "K1": {
+    "class": "K",
+    "outcome": "kept"
+   },
+   "K4": {
+    "class": "K",
+    "outcome": "kept"
+   },
+   "K5": {
+    "class": "K",
+    "outcome": "kept"
+   },
+   "K6": {
+    "class": "K",
+    "outcome": "kept"
+   },
+   "K2": {
+    "class": "K",
+    "outcome": "kept",
+    "detail": ""
+   },
+   "K3": {
+    "class": "K",
+    "outcome": "kept",
+    "doctests": 2,
+    "doctest_failures": 0
+   },
+   "P1": {
+    "class": "sep",
+    "probe": "wrong",
+    "comment_present": "kept",
+    "score": 1
+   },
+   "P2": {
+    "class": "sep",
+    "probe": "wrong",
+    "comment_present": "kept",
+    "score": 1
+   },
+   "P3": {
+    "class": "sep",
+    "probe": "wrong",
+    "comment_present": "kept",
+    "score": 1
+   },
+   "W1": {
+    "class": "sep",
+    "probe": "wrong",
+    "comment_present": null,
+    "score": 0
+   },
+   "W2": {
+    "class": "sep",
+    "probe": "raised",
+    "comment_present": null,
+    "score": 0
+   },
+   "W3": {
+    "class": "sep",
+    "probe": "wrong",
+    "comment_present": "kept",
+    "score": 1
+   }
+  },
+  "numstat": "4\t22\ttally/digest.py\n8\t11\ttally/importer.py\n0\t4\ttally/money.py\n0\t5\ttally/rules.py\n11\t0\ttests/test_tally.py",
+  "cost_usd": 0.1227925,
+  "num_turns": 4,
+  "is_error": false,
+  "report": "I cleaned up the comments, and `make check` passes (ruff, mypy and 16 tests). I did the review inline instead of dispatching subagents, because the scope is only about 320 lines. I haven't committed anything.\n\n**Deleted:**\n- Comments that restated the code, such as \"Return the result\", \"increment the counter\", \"add the row to the list\" and the section banners.\n- History notes: \"Changed in #41\", \"Previously this sorted by payee name\", \"Added UBER EATS after March\".\n- Explanations of the code's own behavior, such as the `TOP_N` and `MAX_ROWS` rationales and the pending-row reason.\n\n**Replaced with a test:** I added four tests, then deleted the comment each one covers.\n- Negative amounts format as `-$4.20`.\n- `read_rows` returns rows sorted by date.\n- `AMAZON PRIME VIDEO` is categorized as `subscriptions`, which covers the \"first matching rule wins\" ordering.\n- `build` returns `None` for an empty month.\n\nI dropped the \"Decimal, not float\" comment without adding a test, because the existing `to_cents(\"12.345\")` doctest already covers it.\n\n**Replaced with a code change:**\n- I moved the comma stripping in `read_rows` into a helper, `_without_thousands_separators`.\n- In `build`, I renamed `ignored` to `ignored_lines`, so the trailing-newline membership check reads clearly without its comment.\n\n**Kept:**\n- The SPDX license header.\n- The `noqa` and `type: ignore` suppressions.\n- The doc comments and doctests.\n- The notes on constraints outside the code: X's post-weight rules, the bank's byte-order mark, the MM/DD/YYYY date exports, and the atomic temp-file-then-rename in `write_digest`. I couldn't encode the atomic write as a test, so its comment stays.\n\nI also found two things in the code and left them alone, since changing them would change behavior:\n- `build` only matches ignored payees if the ignore file ends with a newline. Changing `load_ignored_payees` to strip newlines would be a better fix than the `\"\\n\"` concatenation.\n- The loop in `post_text` computes `trimmed` but never uses it, so the post is never actually trimmed. The `noqa: F841` is hiding this.",
+  "tools": "assistant_turns=9\nBash=3\nslash_commands=/compound-engineering:ce-simplify-code\nskills=\nskill_files_read=\nsubagents=\n",
+  "summary": {
+   "checks_pass": true,
+   "clutter_removed": 13,
+   "clutter_total": 13,
+   "D_lost": 10,
+   "D_unknown": 0,
+   "D_strict_gone": 13,
+   "D_enforced_or_dissolved": 3,
+   "K_lost": 0,
+   "lost_total": 10,
+   "sep_score": 4,
+   "sep": {
+    "P1": 1,
+    "P2": 1,
+    "P3": 1,
+    "W1": 0,
+    "W2": 0,
+    "W3": 1
+   }
+  }
+ },
+ "4ad62f0b": {
+  "checks": {
+   "ruff": {
+    "rc": 0,
+    "tail": "All checks passed!\n"
+   },
+   "mypy": {
+    "rc": 0,
+    "tail": "Success: no issues found in 5 source files\n"
+   },
+   "unittest": {
+    "rc": 0,
+    "tail": "..........................\n----------------------------------------------------------------------\nRan 26 tests in 0.003s\n\nOK\n"
+   }
+  },
+  "checks_pass": true,
+  "comment_chunks": 3,
+  "items": {
+   "T1": {
+    "class": "clutter",
+    "present": null
+   },
+   "T2": {
+    "class": "clutter",
+    "present": null
+   },
+   "T3": {
+    "class": "clutter",
+    "present": null
+   },
+   "T4": {
+    "class": "clutter",
+    "present": null
+   },
+   "T5": {
+    "class": "clutter",
+    "present": null
+   },
+   "T6": {
+    "class": "clutter",
+    "present": null
+   },
+   "T7": {
+    "class": "clutter",
+    "present": null
+   },
+   "T8": {
+    "class": "clutter",
+    "present": null
+   },
+   "H1": {
+    "class": "clutter",
+    "present": null
+   },
+   "H2": {
+    "class": "clutter",
+    "present": null
+   },
+   "H3": {
+    "class": "clutter",
+    "present": null
+   },
+   "S1": {
+    "class": "clutter",
+    "present": null
+   },
+   "S2": {
+    "class": "clutter",
+    "present": null
+   },
+   "De1": {
+    "class": "D",
+    "place": null,
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": true,
+    "mutant_probe": "wrong",
+    "outcome": "enforced",
+    "strict_gone": true
+   },
+   "De2": {
+    "class": "D",
+    "place": null,
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "lost",
+    "strict_gone": true
+   },
+   "De3": {
+    "class": "D",
+    "place": null,
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": true,
+    "mutant_probe": "wrong",
+    "outcome": "enforced",
+    "strict_gone": true
+   },
+   "De4": {
+    "class": "D",
+    "place": null,
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": true,
+    "mutant_probe": "wrong",
+    "outcome": "enforced",
+    "strict_gone": true
+   },
+   "De5": {
+    "class": "D",
+    "place": "relocated",
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": true,
+    "mutant_probe": "wrong",
+    "outcome": "relocated",
+    "strict_gone": true
+   },
+   "De6": {
+    "class": "D",
+    "place": "relocated",
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": true,
+    "mutant_probe": "wrong",
+    "outcome": "relocated",
+    "strict_gone": true
+   },
+   "Dr1": {
+    "class": "D",
+    "place": null,
+    "outcome": "lost",
+    "strict_gone": true
+   },
+   "Dr2": {
+    "class": "D",
+    "place": "relocated",
+    "outcome": "relocated",
+    "strict_gone": true
+   },
+   "Dr3": {
+    "class": "D",
+    "place": "relocated",
+    "outcome": "relocated",
+    "strict_gone": true
+   },
+   "Dr4": {
+    "class": "D",
+    "place": "relocated",
+    "outcome": "relocated",
+    "strict_gone": true
+   },
+   "Dr5": {
+    "class": "D",
+    "place": "relocated",
+    "outcome": "relocated",
+    "strict_gone": true
+   },
+   "Dr6": {
+    "class": "D",
+    "place": "relocated",
+    "outcome": "relocated",
+    "strict_gone": true
+   },
+   "Dr7": {
+    "class": "D",
+    "place": "relocated",
+    "outcome": "relocated",
+    "strict_gone": true
+   },
+   "Dr8": {
+    "class": "D",
+    "place": "relocated",
+    "outcome": "relocated",
+    "strict_gone": true
+   },
+   "K1": {
+    "class": "K",
+    "outcome": "kept"
+   },
+   "K4": {
+    "class": "K",
+    "outcome": "relocated"
+   },
+   "K5": {
+    "class": "K",
+    "outcome": "kept"
+   },
+   "K6": {
+    "class": "K",
+    "outcome": "lost"
+   },
+   "K2": {
+    "class": "K",
+    "outcome": "kept",
+    "detail": ""
+   },
+   "K3": {
+    "class": "K",
+    "outcome": "kept",
+    "doctests": 2,
+    "doctest_failures": 0
+   },
+   "P1": {
+    "class": "sep",
+    "probe": "wrong",
+    "comment_present": "kept",
+    "score": 1
+   },
+   "P2": {
+    "class": "sep",
+    "probe": "correct",
+    "comment_present": null,
+    "score": 2
+   },
+   "P3": {
+    "class": "sep",
+    "probe": "correct",
+    "comment_present": null,
+    "score": 2
+   },
+   "W1": {
+    "class": "sep",
+    "probe": "correct",
+    "comment_present": null,
+    "score": 2
+   },
+   "W2": {
+    "class": "sep",
+    "probe": "correct",
+    "comment_present": null,
+    "score": 2
+   },
+   "W3": {
+    "class": "sep",
+    "probe": "wrong",
+    "comment_present": null,
+    "score": 0
+   }
+  },
+  "numstat": "8\t0\tREADME.md\n5\t31\ttally/digest.py\n12\t15\ttally/importer.py\n1\t5\ttally/money.py\n1\t6\ttally/rules.py\n51\t0\ttests/test_tally.py",
+  "cost_usd": 0.15946609999999997,
+  "num_turns": 7,
+  "is_error": false,
+  "report": "The comment sweep is done and `make check` passes (ruff, mypy and 26 tests, up from 13).\n\n**Comments removed**\n- **Tautologies deleted:** 10. These were the section banners, \"Loop over the rows\u2026\", \"increment the counter\", \"Return the result\", \"Open the file\u2026\", \"add the row\u2026\", \"Strip the currency symbol\u2026\", \"Default category\", the upper-casing note and the `_sum_cents` docstring.\n- **Stale deleted:** 3. These were \"Previously sorted by name\", \"Changed in #41\" and \"Added UBER EATS after March\".\n- **Excuses deleted:** 2, with tasks filed.\n  - The slash-date hand-slicing in `month_of` is now `tasks/normalise-dates-in-importer.md`.\n  - The `learned` mutable default in `rules.remember` is now `tasks/remember-mutable-default.md`.\n  - The `# noqa: B006` pragma stays, so the `remember` hack is only recorded in the task.\n- **Decision records moved:** 4 ADRs in `docs/adr/`. I created the directory because the project had none.\n  - 0001: atomic digest writes.\n  - 0002: the 50,000-row import limit.\n  - 0003: pending rows are excluded.\n  - 0004: digest semantics (empty month returns `None`, refund timing, ignored payees dropped before totals, tie ordering).\n- **Moved to the README:** the X post-weight rules and the \"room for five payee lines\" fact.\n- **Kept, not touched:** the SPDX header, the `noqa` and `type: ignore` pragmas, the `run_digest.py` usage docstring, and the docstrings in `money.py` and `rules.py`.\n- **Config comments:** none were in scope. `Makefile` and `pyproject.toml` had none.\n- **Uncertain files:** none.\n\n**Comments replaced by code or tests**\n- **Renames and extractions:**\n  - `TOP_N` is now `POST_PAYEE_LINES`.\n  - `BANK_EXPORT_ENCODING` replaces the byte-order-mark note.\n  - `_is_pending` replaces the \"skip pending rows\" note.\n- **Behaviour changes:**\n  - `load_ignored_payees` now strips newlines, so `build` no longer adds `\"\\n\"` before checking the ignore list.\n  - Comma stripping moved from `read_rows` into `parse_amount`.\n  - `count` was dropped in favour of `if not rows`.\n  - `budget_for` now returns 0 for a missing category, as its docstring says, instead of `None` behind a `type: ignore`.\n- **Bug fix you didn't ask for:** `post_text` popped lines but never rebuilt `body`, and a `noqa: F841` hid the dead `trimmed` variable. It now rebuilds `body` inside the loop, so over-long posts are actually trimmed. A new test covers it.\n- **New tests for the invariants the comments described:**\n  - The sort order of `read_rows`.\n  - Refunds can total below zero.\n  - Ties break on payee name.\n  - Empty-month handling.\n  - Ignored payees are excluded from totals.\n  - The sign placement in `format_money`.\n  - Decimal rounding, with `1.15` as the case.\n  - Thousands separators in `parse_amount`.\n  - A missing budget returns 0.\n  - Rule ordering and case-insensitive matching.\n  - The slash-date branch of `month_of`.\n\n**Lines shed:** about 60 comment lines. The commit adds files for the ADRs, tasks and tests.\n\n**Deferred:** nothing. The remaining pragmas are machine-read and exempt, and the `remember` hack is tracked in its task.\n\nI didn't commit anything.",
+  "tools": "assistant_turns=10\nBash=5\nRead=1\nslash_commands=/code-comments:code-comments\nskills=\nskill_files_read=/tmp/nc-vet-0f9d/plugins/code-comments/skills/code-comments/references/seek-and-destroy.md\nsubagents=\n",
+  "summary": {
+   "checks_pass": true,
+   "clutter_removed": 13,
+   "clutter_total": 13,
+   "D_lost": 2,
+   "D_unknown": 0,
+   "D_strict_gone": 14,
+   "D_enforced_or_dissolved": 3,
+   "K_lost": 1,
+   "lost_total": 3,
+   "sep_score": 9,
+   "sep": {
+    "P1": 1,
+    "P2": 2,
+    "P3": 2,
+    "W1": 2,
+    "W2": 2,
+    "W3": 0
+   }
+  }
+ },
+ "4e5666cb": {
+  "checks": {
+   "ruff": {
+    "rc": 0,
+    "tail": "All checks passed!\n"
+   },
+   "mypy": {
+    "rc": 0,
+    "tail": "Success: no issues found in 5 source files\n"
+   },
+   "unittest": {
+    "rc": 0,
+    "tail": ".............\n----------------------------------------------------------------------\nRan 13 tests in 0.002s\n\nOK\n"
+   }
+  },
+  "checks_pass": true,
+  "comment_chunks": 25,
+  "items": {
+   "T1": {
+    "class": "clutter",
+    "present": null
+   },
+   "T2": {
+    "class": "clutter",
+    "present": null
+   },
+   "T3": {
+    "class": "clutter",
+    "present": null
+   },
+   "T4": {
+    "class": "clutter",
+    "present": null
+   },
+   "T5": {
+    "class": "clutter",
+    "present": null
+   },
+   "T6": {
+    "class": "clutter",
+    "present": null
+   },
+   "T7": {
+    "class": "clutter",
+    "present": null
+   },
+   "T8": {
+    "class": "clutter",
+    "present": null
+   },
+   "H1": {
+    "class": "clutter",
+    "present": "kept"
+   },
+   "H2": {
+    "class": "clutter",
+    "present": null
+   },
+   "H3": {
+    "class": "clutter",
+    "present": null
+   },
+   "S1": {
+    "class": "clutter",
+    "present": null
+   },
+   "S2": {
+    "class": "clutter",
+    "present": null
+   },
+   "De1": {
+    "class": "D",
+    "place": "kept",
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "De2": {
+    "class": "D",
+    "place": "kept",
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "De3": {
+    "class": "D",
+    "place": "kept",
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "De4": {
+    "class": "D",
+    "place": "kept",
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "De5": {
+    "class": "D",
+    "place": "kept",
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "De6": {
+    "class": "D",
+    "place": "kept",
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "Dr1": {
+    "class": "D",
+    "place": "kept",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "Dr2": {
+    "class": "D",
+    "place": "kept",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "Dr3": {
+    "class": "D",
+    "place": "kept",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "Dr4": {
+    "class": "D",
+    "place": "kept",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "Dr5": {
+    "class": "D",
+    "place": "kept",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "Dr6": {
+    "class": "D",
+    "place": "kept",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "Dr7": {
+    "class": "D",
+    "place": "kept",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "Dr8": {
+    "class": "D",
+    "place": "kept",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "K1": {
+    "class": "K",
+    "outcome": "kept"
+   },
+   "K4": {
+    "class": "K",
+    "outcome": "kept"
+   },
+   "K5": {
+    "class": "K",
+    "outcome": "kept"
+   },
+   "K6": {
+    "class": "K",
+    "outcome": "kept"
+   },
+   "K2": {
+    "class": "K",
+    "outcome": "kept",
+    "detail": ""
+   },
+   "K3": {
+    "class": "K",
+    "outcome": "kept",
+    "doctests": 2,
+    "doctest_failures": 0
+   },
+   "P1": {
+    "class": "sep",
+    "probe": "wrong",
+    "comment_present": "kept",
+    "score": 1
+   },
+   "P2": {
+    "class": "sep",
+    "probe": "wrong",
+    "comment_present": "kept",
+    "score": 1
+   },
+   "P3": {
+    "class": "sep",
+    "probe": "wrong",
+    "comment_present": "kept",
+    "score": 1
+   },
+   "W1": {
+    "class": "sep",
+    "probe": "wrong",
+    "comment_present": "kept",
+    "score": 1
+   },
+   "W2": {
+    "class": "sep",
+    "probe": "raised",
+    "comment_present": "kept",
+    "score": 1
+   },
+   "W3": {
+    "class": "sep",
+    "probe": "wrong",
+    "comment_present": "kept",
+    "score": 1
+   }
+  },
+  "numstat": "1\t11\ttally/digest.py\n2\t3\ttally/importer.py\n0\t1\ttally/money.py\n0\t2\ttally/rules.py",
+  "cost_usd": 0.08394940000000001,
+  "num_turns": 5,
+  "is_error": false,
+  "report": "I cleaned up the comments in `tally/`, and `make check` still passes (ruff, mypy, 13 tests). I didn't need to change any code or tests, because no comment turned out to be covering for code that should be rewritten.\n\n**Removed:**\n- Comments that restated the next line: \"Loop over the rows\u2026\", \"increment the counter\", \"Return the result.\", \"Open the file and read each row.\", \"add the row to the list\", \"Strip the currency symbol\u2026\", \"Default category.\"\n- The empty docstring on `_sum_cents`.\n- The `# ===== helpers =====` and `# ----- posting -----` banners in `digest.py`.\n- Change-history comments that git already records: \"Added UBER EATS after the March digest\u2026\" and \"Previously this sorted by payee name\u2026\". I kept the tie-break reason from the second one.\n\n**Reworded:** \"Changed in #41: rows used to be read with pandas\u2026\" now reads \"Plain csv rather than pandas keeps the install light.\"\n\n**Kept:** the comments that explain why, such as the ordering of the rules, the byte-order mark, the thousands-separator workaround, the ISO-date assumption and the refund and empty-month behaviour. I also kept the docstrings and the SPDX header.\n\nI noticed a few bugs while reading, and I left them alone because they're outside comment cleanup:\n- **`post_text` in `digest.py`:** the trimming loop writes to `trimmed`, which is never used (hidden by `noqa: F841`). The post is never actually shortened, so it can go over the length limit.\n- **`remember` in `rules.py`:** it uses a mutable default argument (hidden by `noqa: B006`), so choices carry over between calls.\n- **`budget_for` in `rules.py`:** its docstring says a missing category gets 0, but the code returns `None` (hidden by `type: ignore`).\n\nI haven't committed anything.",
+  "tools": "assistant_turns=7\nBash=4\nslash_commands=/hov-stack:code-slop\nskills=\nskill_files_read=\nsubagents=\n",
+  "summary": {
+   "checks_pass": true,
+   "clutter_removed": 12,
+   "clutter_total": 13,
+   "D_lost": 0,
+   "D_unknown": 0,
+   "D_strict_gone": 0,
+   "D_enforced_or_dissolved": 0,
+   "K_lost": 0,
+   "lost_total": 0,
+   "sep_score": 6,
+   "sep": {
+    "P1": 1,
+    "P2": 1,
+    "P3": 1,
+    "W1": 1,
+    "W2": 1,
+    "W3": 1
+   }
+  }
+ },
+ "63df0a49": {
+  "checks": {
+   "ruff": {
+    "rc": 0,
+    "tail": "All checks passed!\n"
+   },
+   "mypy": {
+    "rc": 0,
+    "tail": "Success: no issues found in 5 source files\n"
+   },
+   "unittest": {
+    "rc": 0,
+    "tail": "..............\n----------------------------------------------------------------------\nRan 14 tests in 0.003s\n\nOK\n"
+   }
+  },
+  "checks_pass": true,
+  "comment_chunks": 22,
+  "items": {
+   "T1": {
+    "class": "clutter",
+    "present": null
+   },
+   "T2": {
+    "class": "clutter",
+    "present": null
+   },
+   "T3": {
+    "class": "clutter",
+    "present": null
+   },
+   "T4": {
+    "class": "clutter",
+    "present": null
+   },
+   "T5": {
+    "class": "clutter",
+    "present": "kept"
+   },
+   "T6": {
+    "class": "clutter",
+    "present": null
+   },
+   "T7": {
+    "class": "clutter",
+    "present": null
+   },
+   "T8": {
+    "class": "clutter",
+    "present": null
+   },
+   "H1": {
+    "class": "clutter",
+    "present": null
+   },
+   "H2": {
+    "class": "clutter",
+    "present": null
+   },
+   "H3": {
+    "class": "clutter",
+    "present": null
+   },
+   "S1": {
+    "class": "clutter",
+    "present": null
+   },
+   "S2": {
+    "class": "clutter",
+    "present": null
+   },
+   "De1": {
+    "class": "D",
+    "place": "kept",
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "De2": {
+    "class": "D",
+    "place": "kept",
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "De3": {
+    "class": "D",
+    "place": "kept",
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "De4": {
+    "class": "D",
+    "place": "kept",
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "De5": {
+    "class": "D",
+    "place": "kept",
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "De6": {
+    "class": "D",
+    "place": "kept",
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "Dr1": {
+    "class": "D",
+    "place": "kept",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "Dr2": {
+    "class": "D",
+    "place": "kept",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "Dr3": {
+    "class": "D",
+    "place": "kept",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "Dr4": {
+    "class": "D",
+    "place": "kept",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "Dr5": {
+    "class": "D",
+    "place": "kept",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "Dr6": {
+    "class": "D",
+    "place": "kept",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "Dr7": {
+    "class": "D",
+    "place": "kept",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "Dr8": {
+    "class": "D",
+    "place": "kept",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "K1": {
+    "class": "K",
+    "outcome": "kept"
+   },
+   "K4": {
+    "class": "K",
+    "outcome": "kept"
+   },
+   "K5": {
+    "class": "K",
+    "outcome": "kept"
+   },
+   "K6": {
+    "class": "K",
+    "outcome": "kept"
+   },
+   "K2": {
+    "class": "K",
+    "outcome": "kept",
+    "detail": ""
+   },
+   "K3": {
+    "class": "K",
+    "outcome": "kept",
+    "doctests": 2,
+    "doctest_failures": 0
+   },
+   "P1": {
+    "class": "sep",
+    "probe": "wrong",
+    "comment_present": "kept",
+    "score": 1
+   },
+   "P2": {
+    "class": "sep",
+    "probe": "wrong",
+    "comment_present": "kept",
+    "score": 1
+   },
+   "P3": {
+    "class": "sep",
+    "probe": "wrong",
+    "comment_present": "kept",
+    "score": 1
+   },
+   "W1": {
+    "class": "sep",
+    "probe": "correct",
+    "comment_present": null,
+    "score": 2
+   },
+   "W2": {
+    "class": "sep",
+    "probe": "correct",
+    "comment_present": null,
+    "score": 2
+   },
+   "W3": {
+    "class": "sep",
+    "probe": "wrong",
+    "comment_present": "kept",
+    "score": 1
+   }
+  },
+  "numstat": "4\t15\ttally/digest.py\n3\t7\ttally/importer.py\n1\t2\ttally/money.py\n0\t2\ttally/rules.py\n3\t0\ttests/test_tally.py",
+  "cost_usd": 0.1109211,
+  "num_turns": 6,
+  "is_error": false,
+  "report": "I cleaned up the comments, and `make check` passes with ruff, mypy and 14 tests. I made no commit.\n\n**Removed:**\n- Comments that only restated the next line: \"Loop over the rows\u2026\", \"increment the counter\", \"Return the result\", \"Open the file\u2026\", \"add the row to the list\", \"Strip the currency symbol\u2026\" and \"Default category.\"\n- Comments recording history: \"Added UBER EATS after the March digest\u2026\", \"Changed in #41\u2026 pandas\" and \"Previously this sorted by payee name\u2026\".\n- The `# ===== helpers =====` and `# ---- posting ----` banners in `digest.py`.\n\n**Replaced with code:**\n- **Ignore list:** a comment explained that `load_ignored_payees` keeps trailing newlines, so `build` appended `\"\\n\"` before checking. The loader now strips each line and skips blanks, and `build` checks `r.payee not in ignored`.\n- **Thousands separators:** a comment in the importer explained why it removed commas before calling `parse_amount`. `parse_amount` now removes them itself. I added a test for `\"$1,234.50\"`.\n\nI kept the comments that explain why the code does something. Examples are the first-match-wins rule order, the BOM handling, the pending-row skip, the refund and empty-month notes, the tie-break on payee name, the atomic write, and the X weighting.\n\nI left one thing alone because it is a bug rather than a comment. In `post_text`, the trim loop assigns to `trimmed # noqa: F841` and never updates `body`. Long posts therefore never get trimmed. The fix is `body = \"\\n\".join(lines)` inside the loop.",
+  "tools": "assistant_turns=9\nBash=5\nslash_commands=\nskills=\nskill_files_read=\nsubagents=\n",
+  "summary": {
+   "checks_pass": true,
+   "clutter_removed": 12,
+   "clutter_total": 13,
+   "D_lost": 0,
+   "D_unknown": 0,
+   "D_strict_gone": 0,
+   "D_enforced_or_dissolved": 0,
+   "K_lost": 0,
+   "lost_total": 0,
+   "sep_score": 8,
+   "sep": {
+    "P1": 1,
+    "P2": 1,
+    "P3": 1,
+    "W1": 2,
+    "W2": 2,
+    "W3": 1
+   }
+  }
+ },
+ "677331d6": {
+  "checks": {
+   "ruff": {
+    "rc": 0,
+    "tail": "All checks passed!\n"
+   },
+   "mypy": {
+    "rc": 0,
+    "tail": "Success: no issues found in 5 source files\n"
+   },
+   "unittest": {
+    "rc": 0,
+    "tail": ".............\n----------------------------------------------------------------------\nRan 13 tests in 0.002s\n\nOK\n"
+   }
+  },
+  "checks_pass": true,
+  "comment_chunks": 21,
+  "items": {
+   "T1": {
+    "class": "clutter",
+    "present": null
+   },
+   "T2": {
+    "class": "clutter",
+    "present": null
+   },
+   "T3": {
+    "class": "clutter",
+    "present": null
+   },
+   "T4": {
+    "class": "clutter",
+    "present": null
+   },
+   "T5": {
+    "class": "clutter",
+    "present": null
+   },
+   "T6": {
+    "class": "clutter",
+    "present": null
+   },
+   "T7": {
+    "class": "clutter",
+    "present": null
+   },
+   "T8": {
+    "class": "clutter",
+    "present": null
+   },
+   "H1": {
+    "class": "clutter",
+    "present": null
+   },
+   "H2": {
+    "class": "clutter",
+    "present": null
+   },
+   "H3": {
+    "class": "clutter",
+    "present": null
+   },
+   "S1": {
+    "class": "clutter",
+    "present": null
+   },
+   "S2": {
+    "class": "clutter",
+    "present": null
+   },
+   "De1": {
+    "class": "D",
+    "place": "kept",
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "De2": {
+    "class": "D",
+    "place": "kept",
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "De3": {
+    "class": "D",
+    "place": "kept",
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "De4": {
+    "class": "D",
+    "place": "kept",
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "De5": {
+    "class": "D",
+    "place": "kept",
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "De6": {
+    "class": "D",
+    "place": "kept",
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "Dr1": {
+    "class": "D",
+    "place": "kept",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "Dr2": {
+    "class": "D",
+    "place": "kept",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "Dr3": {
+    "class": "D",
+    "place": "kept",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "Dr4": {
+    "class": "D",
+    "place": "kept",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "Dr5": {
+    "class": "D",
+    "place": "kept",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "Dr6": {
+    "class": "D",
+    "place": "kept",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "Dr7": {
+    "class": "D",
+    "place": "kept",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "Dr8": {
+    "class": "D",
+    "place": "kept",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "K1": {
+    "class": "K",
+    "outcome": "kept"
+   },
+   "K4": {
+    "class": "K",
+    "outcome": "kept"
+   },
+   "K5": {
+    "class": "K",
+    "outcome": "kept"
+   },
+   "K6": {
+    "class": "K",
+    "outcome": "kept"
+   },
+   "K2": {
+    "class": "K",
+    "outcome": "kept",
+    "detail": ""
+   },
+   "K3": {
+    "class": "K",
+    "outcome": "kept",
+    "doctests": 2,
+    "doctest_failures": 0
+   },
+   "P1": {
+    "class": "sep",
+    "probe": "wrong",
+    "comment_present": "kept",
+    "score": 1
+   },
+   "P2": {
+    "class": "sep",
+    "probe": "correct",
+    "comment_present": null,
+    "score": 2
+   },
+   "P3": {
+    "class": "sep",
+    "probe": "correct",
+    "comment_present": null,
+    "score": 2
+   },
+   "W1": {
+    "class": "sep",
+    "probe": "wrong",
+    "comment_present": "kept",
+    "score": 1
+   },
+   "W2": {
+    "class": "sep",
+    "probe": "raised",
+    "comment_present": "kept",
+    "score": 1
+   },
+   "W3": {
+    "class": "sep",
+    "probe": "wrong",
+    "comment_present": "kept",
+    "score": 1
+   }
+  },
+  "numstat": "5\t18\ttally/digest.py\n1\t3\ttally/importer.py\n0\t1\ttally/money.py\n1\t3\ttally/rules.py",
+  "cost_usd": 0.1103771,
+  "num_turns": 6,
+  "is_error": false,
+  "report": "I cleaned up the comments, and `make check` passes: ruff, mypy and all 13 tests.\n\n**Comments removed**\n- Ones that only restated the code: \"increment the counter\", \"Return the result\", \"Loop over the rows\u2026\", \"Open the file\u2026\", \"add the row to the list\", \"Strip the currency symbol\", \"Default category\", and the trivial `_sum_cents` docstring.\n- The decorative section banners in `digest.py`.\n- Change-history notes that belong in git: \"Changed in #41\", \"Previously this sorted by payee name\", and the \"Added UBER EATS after March\" note.\n\n**Comments replaced by code changes**\n- `count` and `count += 1` in `build()` are gone. It now checks `if not rows`.\n- `budget_for` had a `# type: ignore` and returned `None` for a missing category, although its docstring says 0. It now does `budgets.get(category, 0)` and the ignore is gone.\n- `post_text` had a `# noqa: F841` on a `trimmed` variable that was assigned and never used. The trimming loop therefore never changed the returned text, so over-long posts weren't shortened. It now reassigns `body`, and the noqa is gone. This changes behavior: over-long posts now lose their lowest payee lines.\n\nI kept the comments that explain why: the rule ordering, the Decimal use, the byte-order mark, pending rows, the sort order the grouping relies on, the refund month, the atomic write, the post weight rules, and the MM/DD/YYYY workaround. I also moved the \"ignored payees dropped before totals\" note to sit next to the code it describes.\n\nI left `remember()` alone. Its shared mutable default dict has a `# noqa: B006`. It may be intentional, but it's a smell you may want to look at.\n\nI haven't committed anything.",
+  "tools": "assistant_turns=8\nBash=5\nslash_commands=\nskills=\nskill_files_read=\nsubagents=\n",
+  "summary": {
+   "checks_pass": true,
+   "clutter_removed": 13,
+   "clutter_total": 13,
+   "D_lost": 0,
+   "D_unknown": 0,
+   "D_strict_gone": 0,
+   "D_enforced_or_dissolved": 0,
+   "K_lost": 0,
+   "lost_total": 0,
+   "sep_score": 8,
+   "sep": {
+    "P1": 1,
+    "P2": 2,
+    "P3": 2,
+    "W1": 1,
+    "W2": 1,
+    "W3": 1
+   }
+  }
+ },
+ "826da3ac": {
+  "checks": {
+   "ruff": {
+    "rc": 0,
+    "tail": "All checks passed!\n"
+   },
+   "mypy": {
+    "rc": 0,
+    "tail": "Success: no issues found in 5 source files\n"
+   },
+   "unittest": {
+    "rc": 0,
+    "tail": ".............\n----------------------------------------------------------------------\nRan 13 tests in 0.018s\n\nOK\n"
+   }
+  },
+  "checks_pass": true,
+  "comment_chunks": 24,
+  "items": {
+   "T1": {
+    "class": "clutter",
+    "present": "kept"
+   },
+   "T2": {
+    "class": "clutter",
+    "present": null
+   },
+   "T3": {
+    "class": "clutter",
+    "present": null
+   },
+   "T4": {
+    "class": "clutter",
+    "present": null
+   },
+   "T5": {
+    "class": "clutter",
+    "present": null
+   },
+   "T6": {
+    "class": "clutter",
+    "present": null
+   },
+   "T7": {
+    "class": "clutter",
+    "present": null
+   },
+   "T8": {
+    "class": "clutter",
+    "present": null
+   },
+   "H1": {
+    "class": "clutter",
+    "present": null
+   },
+   "H2": {
+    "class": "clutter",
+    "present": null
+   },
+   "H3": {
+    "class": "clutter",
+    "present": null
+   },
+   "S1": {
+    "class": "clutter",
+    "present": null
+   },
+   "S2": {
+    "class": "clutter",
+    "present": null
+   },
+   "De1": {
+    "class": "D",
+    "place": "kept",
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "De2": {
+    "class": "D",
+    "place": "kept",
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "De3": {
+    "class": "D",
+    "place": "kept",
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "De4": {
+    "class": "D",
+    "place": "kept",
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "De5": {
+    "class": "D",
+    "place": "kept",
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "De6": {
+    "class": "D",
+    "place": "kept",
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "Dr1": {
+    "class": "D",
+    "place": "kept",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "Dr2": {
+    "class": "D",
+    "place": "kept",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "Dr3": {
+    "class": "D",
+    "place": "kept",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "Dr4": {
+    "class": "D",
+    "place": "kept",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "Dr5": {
+    "class": "D",
+    "place": "kept",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "Dr6": {
+    "class": "D",
+    "place": "kept",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "Dr7": {
+    "class": "D",
+    "place": "kept",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "Dr8": {
+    "class": "D",
+    "place": "kept",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "K1": {
+    "class": "K",
+    "outcome": "kept"
+   },
+   "K4": {
+    "class": "K",
+    "outcome": "kept"
+   },
+   "K5": {
+    "class": "K",
+    "outcome": "kept"
+   },
+   "K6": {
+    "class": "K",
+    "outcome": "kept"
+   },
+   "K2": {
+    "class": "K",
+    "outcome": "kept",
+    "detail": ""
+   },
+   "K3": {
+    "class": "K",
+    "outcome": "kept",
+    "doctests": 2,
+    "doctest_failures": 0
+   },
+   "P1": {
+    "class": "sep",
+    "probe": "wrong",
+    "comment_present": "kept",
+    "score": 1
+   },
+   "P2": {
+    "class": "sep",
+    "probe": "correct",
+    "comment_present": null,
+    "score": 2
+   },
+   "P3": {
+    "class": "sep",
+    "probe": "wrong",
+    "comment_present": "kept",
+    "score": 1
+   },
+   "W1": {
+    "class": "sep",
+    "probe": "wrong",
+    "comment_present": "kept",
+    "score": 1
+   },
+   "W2": {
+    "class": "sep",
+    "probe": "raised",
+    "comment_present": "kept",
+    "score": 1
+   },
+   "W3": {
+    "class": "sep",
+    "probe": "wrong",
+    "comment_present": "kept",
+    "score": 1
+   }
+  },
+  "numstat": "2\t13\ttally/digest.py\n1\t3\ttally/importer.py\n1\t3\ttally/rules.py\n1\t0\ttests/test_tally.py",
+  "cost_usd": 0.0862716,
+  "num_turns": 7,
+  "is_error": false,
+  "report": "I removed the noise comments, and `make check` passes (ruff, mypy, 13 tests). The scanner now reports clean.\n\n**Deleted**\n- **Changelog:**\n  - the \"Previously this sorted by payee name\u2026\" line in `digest.py`\n  - \"Changed in #41\u2026\" in `importer.py`\n  - \"Added UBER EATS after the March digest\u2026\" in `rules.py`\n- **Obvious or narration:**\n  - \"Loop over the rows\u2026\"\n  - \"increment the counter\"\n  - \"Return the result.\"\n  - \"Open the file and read each row.\"\n  - \"add the row to the list\"\n  - \"Default category.\"\n- **Other noise:** the `# ====` and `# ----` section banners, and the \"Sum the cents of the rows.\" docstring on a private helper.\n- **Reworded:** the `month_of` comment now says the importer passes `MM/DD/YYYY` dates through unchanged. It used to say \"until the importer normalises every date to ISO\", which isn't true today.\n\nI kept the WHY comments, the license header, the public docstrings and the `noqa` and `type: ignore` directives that are still needed. I extracted no TODOs, because there were none.\n\n**One code change that replaced a comment:** `budget_for`'s docstring says a category without a budget gets 0, but the code returned `None` behind a `type: ignore`. I changed it to `budgets.get(category, 0)`, removed the `type: ignore`, and added a test for the missing-category case. A missing budget used to give `None` and now gives 0, so `remaining()` will no longer fail on a category with no budget.\n\n**Not changed, but worth a look:**\n- **Infinite loop in `post_text`:** in `digest.py`, the trimming loop pops from `lines` but never updates `body`. Weight never drops, so a digest over 280 weight loops forever. The `# noqa: F841` on `trimmed` hides the unused variable that points to this. The likely fix is `body = \"\\n\".join(lines)`. I left it because it changes behavior beyond comments.\n- **Shared default in `remember`:** the mutable default argument in `rules.remember` is shared across calls. It is silenced with `noqa: B006`, and I don't know whether that's intended.",
+  "tools": "assistant_turns=10\nBash=6\nslash_commands=/comment-audit:comment-audit-skill\nskills=\nskill_files_read=\nsubagents=\n",
+  "summary": {
+   "checks_pass": true,
+   "clutter_removed": 12,
+   "clutter_total": 13,
+   "D_lost": 0,
+   "D_unknown": 0,
+   "D_strict_gone": 0,
+   "D_enforced_or_dissolved": 0,
+   "K_lost": 0,
+   "lost_total": 0,
+   "sep_score": 7,
+   "sep": {
+    "P1": 1,
+    "P2": 2,
+    "P3": 1,
+    "W1": 1,
+    "W2": 1,
+    "W3": 1
+   }
+  }
+ },
+ "95bd35f8": {
+  "checks": {
+   "ruff": {
+    "rc": 0,
+    "tail": "All checks passed!\n"
+   },
+   "mypy": {
+    "rc": 0,
+    "tail": "Success: no issues found in 5 source files\n"
+   },
+   "unittest": {
+    "rc": 0,
+    "tail": ".............\n----------------------------------------------------------------------\nRan 13 tests in 0.002s\n\nOK\n"
+   }
+  },
+  "checks_pass": true,
+  "comment_chunks": 21,
+  "items": {
+   "T1": {
+    "class": "clutter",
+    "present": null
+   },
+   "T2": {
+    "class": "clutter",
+    "present": null
+   },
+   "T3": {
+    "class": "clutter",
+    "present": null
+   },
+   "T4": {
+    "class": "clutter",
+    "present": null
+   },
+   "T5": {
+    "class": "clutter",
+    "present": "kept"
+   },
+   "T6": {
+    "class": "clutter",
+    "present": null
+   },
+   "T7": {
+    "class": "clutter",
+    "present": null
+   },
+   "T8": {
+    "class": "clutter",
+    "present": null
+   },
+   "H1": {
+    "class": "clutter",
+    "present": null
+   },
+   "H2": {
+    "class": "clutter",
+    "present": null
+   },
+   "H3": {
+    "class": "clutter",
+    "present": null
+   },
+   "S1": {
+    "class": "clutter",
+    "present": null
+   },
+   "S2": {
+    "class": "clutter",
+    "present": null
+   },
+   "De1": {
+    "class": "D",
+    "place": "kept",
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "De2": {
+    "class": "D",
+    "place": "kept",
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "De3": {
+    "class": "D",
+    "place": "kept",
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "De4": {
+    "class": "D",
+    "place": "kept",
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "De5": {
+    "class": "D",
+    "place": "kept",
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "De6": {
+    "class": "D",
+    "place": "kept",
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "Dr1": {
+    "class": "D",
+    "place": "kept",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "Dr2": {
+    "class": "D",
+    "place": "kept",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "Dr3": {
+    "class": "D",
+    "place": "kept",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "Dr4": {
+    "class": "D",
+    "place": "kept",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "Dr5": {
+    "class": "D",
+    "place": "kept",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "Dr6": {
+    "class": "D",
+    "place": "kept",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "Dr7": {
+    "class": "D",
+    "place": "kept",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "Dr8": {
+    "class": "D",
+    "place": "kept",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "K1": {
+    "class": "K",
+    "outcome": "kept"
+   },
+   "K4": {
+    "class": "K",
+    "outcome": "kept"
+   },
+   "K5": {
+    "class": "K",
+    "outcome": "kept"
+   },
+   "K6": {
+    "class": "K",
+    "outcome": "kept"
+   },
+   "K2": {
+    "class": "K",
+    "outcome": "kept",
+    "detail": ""
+   },
+   "K3": {
+    "class": "K",
+    "outcome": "kept",
+    "doctests": 2,
+    "doctest_failures": 0
+   },
+   "P1": {
+    "class": "sep",
+    "probe": "wrong",
+    "comment_present": "kept",
+    "score": 1
+   },
+   "P2": {
+    "class": "sep",
+    "probe": "correct",
+    "comment_present": null,
+    "score": 2
+   },
+   "P3": {
+    "class": "sep",
+    "probe": "correct",
+    "comment_present": null,
+    "score": 2
+   },
+   "W1": {
+    "class": "sep",
+    "probe": "wrong",
+    "comment_present": "kept",
+    "score": 1
+   },
+   "W2": {
+    "class": "sep",
+    "probe": "raised",
+    "comment_present": "kept",
+    "score": 1
+   },
+   "W3": {
+    "class": "sep",
+    "probe": "wrong",
+    "comment_present": "kept",
+    "score": 1
+   }
+  },
+  "numstat": "5\t15\ttally/digest.py\n1\t3\ttally/importer.py\n0\t1\ttally/money.py\n1\t3\ttally/rules.py",
+  "cost_usd": 0.09788479999999998,
+  "num_turns": 5,
+  "is_error": false,
+  "report": "I cleaned up the comments, and `make check` passes (ruff, mypy and 13 tests).\n\n**Removed**\n- Comments that only restated the code, such as \"Loop over the rows\u2026\", \"increment the counter\", \"Return the result\", \"Open the file\u2026\" and \"Default category\".\n- History notes that belong in git: \"Changed in #41\", \"Previously this sorted by\u2026\" and \"Added UBER EATS after the March digest\u2026\".\n- The `# ===== helpers =====` and `# ----- posting -----` banner comments.\n\n**Kept**\n- The comments that explain why: Decimal versus float, the byte-order mark, the thousands-separator workaround, the pending-row skip, the sort-order dependency, tie-breaking, the atomic write, the refund rule, and the rule-order note.\n- I merged the two ignore-list comments in `build` into one comment placed where the ignore list is applied.\n\n**Code changes that replaced comments**\n- **`post_text`:** the `# noqa: F841` hid an unused `trimmed` variable. The trimming loop never updated `body`, so any over-length post would have looped forever. It now sets `body` and the `noqa` is gone.\n- **`budget_for`:** the `# type: ignore` hid a bug, because it returned `None` for a category with no budget even though its docstring says 0. It now uses `budgets.get(category, 0)`.\n\nI left the `# noqa: B006` on `remember` in `tally/rules.py`. It suppresses a mutable default argument, and fixing that would change behavior (the learned map is shared across calls), which goes beyond cleaning up comments. You may want to look at it separately.\n\nI haven't committed anything.",
+  "tools": "assistant_turns=6\nBash=4\nslash_commands=\nskills=\nskill_files_read=\nsubagents=\n",
+  "summary": {
+   "checks_pass": true,
+   "clutter_removed": 12,
+   "clutter_total": 13,
+   "D_lost": 0,
+   "D_unknown": 0,
+   "D_strict_gone": 0,
+   "D_enforced_or_dissolved": 0,
+   "K_lost": 0,
+   "lost_total": 0,
+   "sep_score": 8,
+   "sep": {
+    "P1": 1,
+    "P2": 2,
+    "P3": 2,
+    "W1": 1,
+    "W2": 1,
+    "W3": 1
+   }
+  }
+ },
+ "ae083cdb": {
+  "checks": {
+   "ruff": {
+    "rc": 0,
+    "tail": "All checks passed!\n"
+   },
+   "mypy": {
+    "rc": 0,
+    "tail": "Success: no issues found in 5 source files\n"
+   },
+   "unittest": {
+    "rc": 0,
+    "tail": "...................\n----------------------------------------------------------------------\nRan 19 tests in 0.002s\n\nOK\n"
+   }
+  },
+  "checks_pass": true,
+  "comment_chunks": 10,
+  "items": {
+   "T1": {
+    "class": "clutter",
+    "present": null
+   },
+   "T2": {
+    "class": "clutter",
+    "present": null
+   },
+   "T3": {
+    "class": "clutter",
+    "present": null
+   },
+   "T4": {
+    "class": "clutter",
+    "present": null
+   },
+   "T5": {
+    "class": "clutter",
+    "present": "kept"
+   },
+   "T6": {
+    "class": "clutter",
+    "present": null
+   },
+   "T7": {
+    "class": "clutter",
+    "present": null
+   },
+   "T8": {
+    "class": "clutter",
+    "present": null
+   },
+   "H1": {
+    "class": "clutter",
+    "present": null
+   },
+   "H2": {
+    "class": "clutter",
+    "present": null
+   },
+   "H3": {
+    "class": "clutter",
+    "present": null
+   },
+   "S1": {
+    "class": "clutter",
+    "present": null
+   },
+   "S2": {
+    "class": "clutter",
+    "present": null
+   },
+   "De1": {
+    "class": "D",
+    "place": null,
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": true,
+    "mutant_probe": "wrong",
+    "outcome": "enforced",
+    "strict_gone": true
+   },
+   "De2": {
+    "class": "D",
+    "place": null,
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": true,
+    "mutant_probe": "wrong",
+    "outcome": "enforced",
+    "strict_gone": true
+   },
+   "De3": {
+    "class": "D",
+    "place": null,
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "lost",
+    "strict_gone": true
+   },
+   "De4": {
+    "class": "D",
+    "place": null,
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": true,
+    "mutant_probe": "wrong",
+    "outcome": "enforced",
+    "strict_gone": true
+   },
+   "De5": {
+    "class": "D",
+    "place": null,
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": true,
+    "mutant_probe": "wrong",
+    "outcome": "enforced",
+    "strict_gone": true
+   },
+   "De6": {
+    "class": "D",
+    "place": null,
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": true,
+    "mutant_probe": "wrong",
+    "outcome": "enforced",
+    "strict_gone": true
+   },
+   "Dr1": {
+    "class": "D",
+    "place": null,
+    "outcome": "lost",
+    "strict_gone": true
+   },
+   "Dr2": {
+    "class": "D",
+    "place": null,
+    "outcome": "lost",
+    "strict_gone": true
+   },
+   "Dr3": {
+    "class": "D",
+    "place": null,
+    "outcome": "lost",
+    "strict_gone": true
+   },
+   "Dr4": {
+    "class": "D",
+    "place": null,
+    "outcome": "lost",
+    "strict_gone": true
+   },
+   "Dr5": {
+    "class": "D",
+    "place": null,
+    "outcome": "lost",
+    "strict_gone": true
+   },
+   "Dr6": {
+    "class": "D",
+    "place": null,
+    "outcome": "lost",
+    "strict_gone": true
+   },
+   "Dr7": {
+    "class": "D",
+    "place": null,
+    "outcome": "lost",
+    "strict_gone": true
+   },
+   "Dr8": {
+    "class": "D",
+    "place": "kept",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "K1": {
+    "class": "K",
+    "outcome": "kept"
+   },
+   "K4": {
+    "class": "K",
+    "outcome": "kept"
+   },
+   "K5": {
+    "class": "K",
+    "outcome": "kept"
+   },
+   "K6": {
+    "class": "K",
+    "outcome": "kept"
+   },
+   "K2": {
+    "class": "K",
+    "outcome": "kept",
+    "detail": ""
+   },
+   "K3": {
+    "class": "K",
+    "outcome": "kept",
+    "doctests": 2,
+    "doctest_failures": 0
+   },
+   "P1": {
+    "class": "sep",
+    "probe": "wrong",
+    "comment_present": "kept",
+    "score": 1
+   },
+   "P2": {
+    "class": "sep",
+    "probe": "wrong",
+    "comment_present": "kept",
+    "score": 1
+   },
+   "P3": {
+    "class": "sep",
+    "probe": "wrong",
+    "comment_present": "kept",
+    "score": 1
+   },
+   "W1": {
+    "class": "sep",
+    "probe": "wrong",
+    "comment_present": "kept",
+    "score": 1
+   },
+   "W2": {
+    "class": "sep",
+    "probe": "raised",
+    "comment_present": null,
+    "score": 0
+   },
+   "W3": {
+    "class": "sep",
+    "probe": "wrong",
+    "comment_present": "kept",
+    "score": 1
+   }
+  },
+  "numstat": "2\t17\ttally/digest.py\n8\t11\ttally/importer.py\n0\t4\ttally/money.py\n0\t5\ttally/rules.py\n34\t1\ttests/test_tally.py",
+  "cost_usd": 0.1694036,
+  "num_turns": 6,
+  "is_error": false,
+  "report": "I cleaned up the comments, and `make check` passes: ruff, mypy and all 19 tests. I read the five source files and the tests myself rather than dispatching the reviewer subagents, because the repo is only 345 lines.\n\n**Comments I turned into tests or code, then deleted** (the six new tests are in `tests/test_tally.py`):\n- **Ignored payees:** the ignored-payee rule now has a test. It checks that the dropped payee also leaves the category totals, not just the top-payee list.\n- **Empty month:** a test checks that `build` returns `None`.\n- **Payee ties:** a test checks that tied payees sort by name.\n- **Sorted rows:** a test feeds `read_rows` out-of-order rows and checks `month_totals`. With `rows.sort` removed, it fails.\n- **Decimal vs float:** a test checks that `to_cents(\"1.005\")` gives 101, where float arithmetic gives 100.\n- **Negative sign:** a test checks that `format_money(-420)` gives `-$4.20`.\n- **Rule order:** a test checks that \"AMAZON PRIME VIDEO\" lands in subscriptions.\n- **Thousands separators:** I extracted `_without_thousands_separators` in `tally/importer.py`, so the \"parse_amount chokes\" comment is no longer needed.\n\n**Comments deleted outright:** these restated the code or told its history.\n- The section banners and the narration comments (\"increment the counter\", \"Return the result\", and similar).\n- The \"Changed in #41\" and \"Added UBER EATS\" history notes.\n- The `TOP_N` and `MAX_ROWS` rationales.\n- The stale `Transaction.date` \"ISO date\" note, which contradicted the MM/DD/YYYY handling in `month_of`.\n- The comments on the pending-row skip, the refund month, and the upper-casing of payees.\n\n**Comments I kept:**\n- **Licence header and suppressions:** the SPDX header, the `noqa` comments, the `type: ignore` and the doctests.\n- **External constraints:** the X post-weight note, the bank's byte-order mark, and the MM/DD/YYYY export dates in `month_of`.\n- **Ignore-file newline in `build`:** I kept the comment about adding a newline to the payee. Stripping newlines in `load_ignored_payees` would be cleaner, but it would change behavior for an ignore file whose last line has no trailing newline.\n- **Atomic write in `write_digest`:** I kept the comment about writing a temp file and renaming it. It records the crash-safety reason, and a test can't easily check it.\n\n**Possible bugs I didn't touch** (they are code, not comments):\n- `post_text` never trims `body`. It assigns to an unused `trimmed` variable under `# noqa: F841`, so over-long posts are not shortened.\n- `budget_for` returns `None` for a missing category, despite the \"gets 0\" docstring.\n- `remember` has a mutable default argument.\n\nI didn't commit anything.",
+  "tools": "assistant_turns=11\nBash=5\nslash_commands=/compound-engineering:ce-simplify-code\nskills=\nskill_files_read=\nsubagents=\n",
+  "summary": {
+   "checks_pass": true,
+   "clutter_removed": 12,
+   "clutter_total": 13,
+   "D_lost": 8,
+   "D_unknown": 0,
+   "D_strict_gone": 13,
+   "D_enforced_or_dissolved": 5,
+   "K_lost": 0,
+   "lost_total": 8,
+   "sep_score": 5,
+   "sep": {
+    "P1": 1,
+    "P2": 1,
+    "P3": 1,
+    "W1": 1,
+    "W2": 0,
+    "W3": 1
+   }
+  }
+ },
+ "b7160700": {
+  "checks": {
+   "ruff": {
+    "rc": 0,
+    "tail": "All checks passed!\n"
+   },
+   "mypy": {
+    "rc": 0,
+    "tail": "Success: no issues found in 5 source files\n"
+   },
+   "unittest": {
+    "rc": 0,
+    "tail": ".......................\n----------------------------------------------------------------------\nRan 23 tests in 0.002s\n\nOK\n"
+   }
+  },
+  "checks_pass": true,
+  "comment_chunks": 5,
+  "items": {
+   "T1": {
+    "class": "clutter",
+    "present": null
+   },
+   "T2": {
+    "class": "clutter",
+    "present": null
+   },
+   "T3": {
+    "class": "clutter",
+    "present": null
+   },
+   "T4": {
+    "class": "clutter",
+    "present": null
+   },
+   "T5": {
+    "class": "clutter",
+    "present": "kept"
+   },
+   "T6": {
+    "class": "clutter",
+    "present": null
+   },
+   "T7": {
+    "class": "clutter",
+    "present": null
+   },
+   "T8": {
+    "class": "clutter",
+    "present": null
+   },
+   "H1": {
+    "class": "clutter",
+    "present": null
+   },
+   "H2": {
+    "class": "clutter",
+    "present": null
+   },
+   "H3": {
+    "class": "clutter",
+    "present": null
+   },
+   "S1": {
+    "class": "clutter",
+    "present": null
+   },
+   "S2": {
+    "class": "clutter",
+    "present": null
+   },
+   "De1": {
+    "class": "D",
+    "place": null,
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": true,
+    "mutant_probe": "wrong",
+    "outcome": "enforced",
+    "strict_gone": true
+   },
+   "De2": {
+    "class": "D",
+    "place": null,
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "lost",
+    "strict_gone": true
+   },
+   "De3": {
+    "class": "D",
+    "place": null,
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": true,
+    "mutant_probe": "wrong",
+    "outcome": "enforced",
+    "strict_gone": true
+   },
+   "De4": {
+    "class": "D",
+    "place": null,
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": true,
+    "mutant_probe": "wrong",
+    "outcome": "enforced",
+    "strict_gone": true
+   },
+   "De5": {
+    "class": "D",
+    "place": null,
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": true,
+    "mutant_probe": "wrong",
+    "outcome": "enforced",
+    "strict_gone": true
+   },
+   "De6": {
+    "class": "D",
+    "place": null,
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": true,
+    "mutant_probe": "wrong",
+    "outcome": "enforced",
+    "strict_gone": true
+   },
+   "Dr1": {
+    "class": "D",
+    "place": null,
+    "outcome": "lost",
+    "strict_gone": true
+   },
+   "Dr2": {
+    "class": "D",
+    "place": null,
+    "outcome": "lost",
+    "strict_gone": true
+   },
+   "Dr3": {
+    "class": "D",
+    "place": null,
+    "outcome": "lost",
+    "strict_gone": true
+   },
+   "Dr4": {
+    "class": "D",
+    "place": "relocated",
+    "outcome": "relocated",
+    "strict_gone": true
+   },
+   "Dr5": {
+    "class": "D",
+    "place": null,
+    "outcome": "lost",
+    "strict_gone": true
+   },
+   "Dr6": {
+    "class": "D",
+    "place": null,
+    "outcome": "lost",
+    "strict_gone": true
+   },
+   "Dr7": {
+    "class": "D",
+    "place": null,
+    "outcome": "lost",
+    "strict_gone": true
+   },
+   "Dr8": {
+    "class": "D",
+    "place": null,
+    "outcome": "lost",
+    "strict_gone": true
+   },
+   "K1": {
+    "class": "K",
+    "outcome": "kept"
+   },
+   "K4": {
+    "class": "K",
+    "outcome": "lost"
+   },
+   "K5": {
+    "class": "K",
+    "outcome": "kept"
+   },
+   "K6": {
+    "class": "K",
+    "outcome": "lost"
+   },
+   "K2": {
+    "class": "K",
+    "outcome": "kept",
+    "detail": ""
+   },
+   "K3": {
+    "class": "K",
+    "outcome": "kept",
+    "doctests": 2,
+    "doctest_failures": 0
+   },
+   "P1": {
+    "class": "sep",
+    "probe": "wrong",
+    "comment_present": "kept",
+    "score": 1
+   },
+   "P2": {
+    "class": "sep",
+    "probe": "wrong",
+    "comment_present": "kept",
+    "score": 1
+   },
+   "P3": {
+    "class": "sep",
+    "probe": "wrong",
+    "comment_present": "kept",
+    "score": 1
+   },
+   "W1": {
+    "class": "sep",
+    "probe": "correct",
+    "comment_present": null,
+    "score": 2
+   },
+   "W2": {
+    "class": "sep",
+    "probe": "correct",
+    "comment_present": null,
+    "score": 2
+   },
+   "W3": {
+    "class": "sep",
+    "probe": "wrong",
+    "comment_present": null,
+    "score": 0
+   }
+  },
+  "numstat": "10\t29\ttally/digest.py\n7\t14\ttally/importer.py\n1\t5\ttally/money.py\n0\t5\ttally/rules.py\n38\t0\ttests/test_tally.py",
+  "cost_usd": 0.137241,
+  "num_turns": 7,
+  "is_error": false,
+  "report": "I removed every prose comment from the source. `make check` passes: ruff and mypy are clean, and all 23 tests pass (12 of them new).\n\n**Deleted (about 30 comments)**\n- **Tautologies and banners:** the \"Loop over the rows\", \"increment the counter\", \"Return the result\", \"add the row\" and \"Strip the currency symbol\" comments, plus the `helpers` and `posting` banners. The `Default category.` and `Open the file\u2026` comments went too.\n- **Stale:** the \"Changed in #41\" pandas note, the \"Previously this sorted by payee name\" note, the \"Added UBER EATS after March\" note, and the importer's `date` field comment. That last one contradicted `month_of`, which also accepts slash dates.\n- **Excuses:** 1, the `month_of` MM/DD/YYYY slicing. I filed `tasks/normalise-dates-in-importer.md` for the real fix. `tasks/` is a new directory, since the repo had none.\n- **Decision records:** none. No ADRs were written.\n\n**Fixed in code or tests instead of commenting**\n- **Ignore file:** `load_ignored_payees` now strips newlines, so the `payee + \"\\n\"` workaround in `build` is gone.\n- **Thousands separators:** `parse_amount` now strips them, so the importer no longer does it.\n- **Renames:**\n  - `TOP_N` is now `MAX_POST_PAYEES`.\n  - `LIGHT` is now `TWITTER_TEXT_V3_WEIGHT_1_RANGES`.\n  - The encoding is now `BANK_EXPORT_ENCODING`.\n  - I extracted `_replace_atomically` from `write_digest`.\n- **New tests for the invariants the comments described:**\n  - rule order\n  - case-insensitive matching\n  - float drift in `to_cents`\n  - the negative-sign format\n  - an empty month returning `None`\n  - refunds\n  - payee tie-breaking\n  - sorted rows\n  - slash dates\n  - ignored payees excluded from category totals\n\n**Skipped**\n- **Kept as docstrings:** the project uses them, so the module, function and doctest docstrings stay.\n- **Kept as machine-read:** the SPDX header, the `noqa` pragmas and the `type: ignore` pragma stay.\n\n**Bugs I found and left alone**\n- **`post_text`:** it never trims the post. The loop updates `trimmed`, but the function returns the unchanged `body`, and `# noqa: F841` hides the unused variable. Over-long posts go out untrimmed.\n- **`budget_for`:** it returns `None` for a missing category, although its docstring says 0. `type: ignore` hides the mismatch.\n- **`remember`:** it has a mutable default argument, silenced with `noqa: B006`.\n\nI didn't fix these because they change behavior. I didn't file tasks for them either, since the pragmas aren't prose comments.",
+  "tools": "assistant_turns=10\nBash=5\nRead=1\nslash_commands=/code-comments:code-comments\nskills=\nskill_files_read=/tmp/nc-vet-0f9d/plugins/code-comments/skills/code-comments/references/seek-and-destroy.md\nsubagents=\n",
+  "summary": {
+   "checks_pass": true,
+   "clutter_removed": 12,
+   "clutter_total": 13,
+   "D_lost": 8,
+   "D_unknown": 0,
+   "D_strict_gone": 14,
+   "D_enforced_or_dissolved": 5,
+   "K_lost": 2,
+   "lost_total": 10,
+   "sep_score": 7,
+   "sep": {
+    "P1": 1,
+    "P2": 1,
+    "P3": 1,
+    "W1": 2,
+    "W2": 2,
+    "W3": 0
+   }
+  }
+ },
+ "bd556c0b": {
+  "checks": {
+   "ruff": {
+    "rc": 0,
+    "tail": "All checks passed!\n"
+   },
+   "mypy": {
+    "rc": 0,
+    "tail": "Success: no issues found in 5 source files\n"
+   },
+   "unittest": {
+    "rc": 0,
+    "tail": ".............\n----------------------------------------------------------------------\nRan 13 tests in 0.002s\n\nOK\n"
+   }
+  },
+  "checks_pass": true,
+  "comment_chunks": 23,
+  "items": {
+   "T1": {
+    "class": "clutter",
+    "present": null
+   },
+   "T2": {
+    "class": "clutter",
+    "present": null
+   },
+   "T3": {
+    "class": "clutter",
+    "present": null
+   },
+   "T4": {
+    "class": "clutter",
+    "present": null
+   },
+   "T5": {
+    "class": "clutter",
+    "present": "kept"
+   },
+   "T6": {
+    "class": "clutter",
+    "present": null
+   },
+   "T7": {
+    "class": "clutter",
+    "present": null
+   },
+   "T8": {
+    "class": "clutter",
+    "present": null
+   },
+   "H1": {
+    "class": "clutter",
+    "present": null
+   },
+   "H2": {
+    "class": "clutter",
+    "present": null
+   },
+   "H3": {
+    "class": "clutter",
+    "present": null
+   },
+   "S1": {
+    "class": "clutter",
+    "present": null
+   },
+   "S2": {
+    "class": "clutter",
+    "present": null
+   },
+   "De1": {
+    "class": "D",
+    "place": "kept",
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "De2": {
+    "class": "D",
+    "place": "kept",
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "De3": {
+    "class": "D",
+    "place": "kept",
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "De4": {
+    "class": "D",
+    "place": "kept",
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "De5": {
+    "class": "D",
+    "place": "kept",
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "De6": {
+    "class": "D",
+    "place": "kept",
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "Dr1": {
+    "class": "D",
+    "place": "kept",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "Dr2": {
+    "class": "D",
+    "place": "kept",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "Dr3": {
+    "class": "D",
+    "place": "kept",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "Dr4": {
+    "class": "D",
+    "place": "kept",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "Dr5": {
+    "class": "D",
+    "place": "kept",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "Dr6": {
+    "class": "D",
+    "place": "kept",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "Dr7": {
+    "class": "D",
+    "place": "kept",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "Dr8": {
+    "class": "D",
+    "place": "kept",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "K1": {
+    "class": "K",
+    "outcome": "kept"
+   },
+   "K4": {
+    "class": "K",
+    "outcome": "kept"
+   },
+   "K5": {
+    "class": "K",
+    "outcome": "kept"
+   },
+   "K6": {
+    "class": "K",
+    "outcome": "kept"
+   },
+   "K2": {
+    "class": "K",
+    "outcome": "kept",
+    "detail": ""
+   },
+   "K3": {
+    "class": "K",
+    "outcome": "kept",
+    "doctests": 2,
+    "doctest_failures": 0
+   },
+   "P1": {
+    "class": "sep",
+    "probe": "wrong",
+    "comment_present": "kept",
+    "score": 1
+   },
+   "P2": {
+    "class": "sep",
+    "probe": "wrong",
+    "comment_present": "kept",
+    "score": 1
+   },
+   "P3": {
+    "class": "sep",
+    "probe": "wrong",
+    "comment_present": "kept",
+    "score": 1
+   },
+   "W1": {
+    "class": "sep",
+    "probe": "correct",
+    "comment_present": null,
+    "score": 2
+   },
+   "W2": {
+    "class": "sep",
+    "probe": "raised",
+    "comment_present": "kept",
+    "score": 1
+   },
+   "W3": {
+    "class": "sep",
+    "probe": "wrong",
+    "comment_present": "kept",
+    "score": 1
+   }
+  },
+  "numstat": "3\t17\ttally/digest.py\n2\t4\ttally/importer.py\n0\t1\ttally/money.py\n0\t2\ttally/rules.py",
+  "cost_usd": 0.0889914,
+  "num_turns": 7,
+  "is_error": false,
+  "report": "I removed the noisy comments, and `make check` passes (ruff, mypy, 13 tests). The scanner now reports nothing.\n\n**Deleted**\n- **Changelog:** the \"Previously this sorted by payee name\u2026\" note in `digest.py`, the \"Changed in #41\u2026 pandas\" note in `importer.py`, and the \"Added UBER EATS after the March digest\u2026\" note in `rules.py`.\n- **Obvious or narration:** \"increment the counter\", \"Return the result\", \"Loop over the rows\u2026\", \"Strip the currency symbol\u2026\", \"Open the file and read each row\", \"add the row to the list\", and \"# Default category.\"\n- **Banner comments:** the `# ===== helpers =====` and `# ----- posting -----` dividers.\n\n**Replaced by a code change**\n- The \"add a newline before the membership check\" comment explained an awkward workaround. `load_ignored_payees` now strips the newline and skips blank lines, and `build` checks `r.payee not in ignored` directly.\n  - This is a small change to a public function. Blank lines in the ignore file are now dropped, and the tests still pass.\n- The `count` variable that was only compared to 0 is gone. `build` now checks `if not rows`.\n- I rewrote the `month_of` comment to say why the code is there, not what it does.\n\n**Kept**\n- The WHY comments, the SPDX header, docstrings, and the `noqa` and `type: ignore` directives.\n\nI did not create any `to-do/` files or `reports/code-clarity.md`, because there were no essay TODOs and nothing needed a clarity report.\n\n**Bugs I left alone** (outside comment cleanup)\n- In `post_text`, the loop pops lines but never updates `body`. The unused `trimmed` variable is silenced with `noqa: F841`, so over-length posts are never actually trimmed. I briefly changed this, saw that the edit would turn the loop into an infinite loop, and reverted it. It needs a proper fix.\n- `remember` uses a mutable default argument, silenced with `noqa: B006`.\n- `budget_for` can return `None` despite its `int` return type, hidden by `type: ignore`. Its docstring says a missing category should get 0.",
+  "tools": "assistant_turns=11\nBash=6\nslash_commands=/comment-audit:comment-audit-skill\nskills=\nskill_files_read=\nsubagents=\n",
+  "summary": {
+   "checks_pass": true,
+   "clutter_removed": 12,
+   "clutter_total": 13,
+   "D_lost": 0,
+   "D_unknown": 0,
+   "D_strict_gone": 0,
+   "D_enforced_or_dissolved": 0,
+   "K_lost": 0,
+   "lost_total": 0,
+   "sep_score": 7,
+   "sep": {
+    "P1": 1,
+    "P2": 1,
+    "P3": 1,
+    "W1": 2,
+    "W2": 1,
+    "W3": 1
+   }
+  }
+ },
+ "de3369e1": {
+  "checks": {
+   "ruff": {
+    "rc": 0,
+    "tail": "All checks passed!\n"
+   },
+   "mypy": {
+    "rc": 0,
+    "tail": "Success: no issues found in 5 source files\n"
+   },
+   "unittest": {
+    "rc": 0,
+    "tail": ".......................\n----------------------------------------------------------------------\nRan 23 tests in 0.002s\n\nOK\n"
+   }
+  },
+  "checks_pass": true,
+  "comment_chunks": 5,
+  "items": {
+   "T1": {
+    "class": "clutter",
+    "present": null
+   },
+   "T2": {
+    "class": "clutter",
+    "present": null
+   },
+   "T3": {
+    "class": "clutter",
+    "present": null
+   },
+   "T4": {
+    "class": "clutter",
+    "present": null
+   },
+   "T5": {
+    "class": "clutter",
+    "present": "kept"
+   },
+   "T6": {
+    "class": "clutter",
+    "present": null
+   },
+   "T7": {
+    "class": "clutter",
+    "present": null
+   },
+   "T8": {
+    "class": "clutter",
+    "present": null
+   },
+   "H1": {
+    "class": "clutter",
+    "present": null
+   },
+   "H2": {
+    "class": "clutter",
+    "present": null
+   },
+   "H3": {
+    "class": "clutter",
+    "present": null
+   },
+   "S1": {
+    "class": "clutter",
+    "present": null
+   },
+   "S2": {
+    "class": "clutter",
+    "present": null
+   },
+   "De1": {
+    "class": "D",
+    "place": null,
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": true,
+    "mutant_probe": "wrong",
+    "outcome": "enforced",
+    "strict_gone": true
+   },
+   "De2": {
+    "class": "D",
+    "place": "relocated",
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "relocated",
+    "strict_gone": true
+   },
+   "De3": {
+    "class": "D",
+    "place": null,
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": true,
+    "mutant_probe": "wrong",
+    "outcome": "enforced",
+    "strict_gone": true
+   },
+   "De4": {
+    "class": "D",
+    "place": null,
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": true,
+    "mutant_probe": "wrong",
+    "outcome": "enforced",
+    "strict_gone": true
+   },
+   "De5": {
+    "class": "D",
+    "place": "relocated",
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": true,
+    "mutant_probe": "wrong",
+    "outcome": "relocated",
+    "strict_gone": true
+   },
+   "De6": {
+    "class": "D",
+    "place": null,
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": true,
+    "mutant_probe": "wrong",
+    "outcome": "enforced",
+    "strict_gone": true
+   },
+   "Dr1": {
+    "class": "D",
+    "place": "relocated",
+    "outcome": "relocated",
+    "strict_gone": true
+   },
+   "Dr2": {
+    "class": "D",
+    "place": "relocated",
+    "outcome": "relocated",
+    "strict_gone": true
+   },
+   "Dr3": {
+    "class": "D",
+    "place": "relocated",
+    "outcome": "relocated",
+    "strict_gone": true
+   },
+   "Dr4": {
+    "class": "D",
+    "place": null,
+    "outcome": "lost",
+    "strict_gone": true
+   },
+   "Dr5": {
+    "class": "D",
+    "place": "relocated",
+    "outcome": "relocated",
+    "strict_gone": true
+   },
+   "Dr6": {
+    "class": "D",
+    "place": "relocated",
+    "outcome": "relocated",
+    "strict_gone": true
+   },
+   "Dr7": {
+    "class": "D",
+    "place": "relocated",
+    "outcome": "relocated",
+    "strict_gone": true
+   },
+   "Dr8": {
+    "class": "D",
+    "place": "relocated",
+    "outcome": "relocated",
+    "strict_gone": true
+   },
+   "K1": {
+    "class": "K",
+    "outcome": "kept"
+   },
+   "K4": {
+    "class": "K",
+    "outcome": "relocated"
+   },
+   "K5": {
+    "class": "K",
+    "outcome": "kept"
+   },
+   "K6": {
+    "class": "K",
+    "outcome": "relocated"
+   },
+   "K2": {
+    "class": "K",
+    "outcome": "kept",
+    "detail": ""
+   },
+   "K3": {
+    "class": "K",
+    "outcome": "kept",
+    "doctests": 2,
+    "doctest_failures": 0
+   },
+   "P1": {
+    "class": "sep",
+    "probe": "wrong",
+    "comment_present": "kept",
+    "score": 1
+   },
+   "P2": {
+    "class": "sep",
+    "probe": "wrong",
+    "comment_present": "kept",
+    "score": 1
+   },
+   "P3": {
+    "class": "sep",
+    "probe": "wrong",
+    "comment_present": "kept",
+    "score": 1
+   },
+   "W1": {
+    "class": "sep",
+    "probe": "correct",
+    "comment_present": null,
+    "score": 2
+   },
+   "W2": {
+    "class": "sep",
+    "probe": "correct",
+    "comment_present": null,
+    "score": 2
+   },
+   "W3": {
+    "class": "sep",
+    "probe": "wrong",
+    "comment_present": null,
+    "score": 0
+   }
+  },
+  "numstat": "5\t30\ttally/digest.py\n5\t13\ttally/importer.py\n1\t6\ttally/money.py\n0\t5\ttally/rules.py\n45\t2\ttests/test_tally.py",
+  "cost_usd": 0.1478158,
+  "num_turns": 8,
+  "is_error": false,
+  "report": "The sweep is done and `make check` passes: ruff and mypy are clean, and all 23 tests pass.\n\n**What went**\n- **Tautologies deleted:** 13. Examples are \"Loop over the rows\u2026\", \"increment the counter\", \"Return the result\", \"Open the file\u2026\", \"Default category\", and the section banners.\n- **Excuses deleted:** 1. The `MM/DD/YYYY` slicing in `month_of` was a stopgap until the importer normalises dates. It is now `tasks/normalise-dates-in-importer.md`.\n- **Stale deleted:** 3. These were the \"Changed in #41 / pandas\" note, the \"Previously sorted by payee name\" note, and the `TOP_N` and `MAX_ROWS` size notes.\n- **Moved to docs:**\n  - **`docs/post-weighting.md`:** X's weighting rules and the reasons behind `POST_PAYEE_LINES` and `MAX_ROWS`.\n  - **`docs/adr/0001-reader-facts-from-comments.md`:** one ADR covering the Decimal rounding, empty-month, refund, pending-row, ignored-payee, atomic-write, BOM, plain-csv and date-sort decisions. It bundles several decisions into one file, where the skill asks for one ADR per decision. Say if you want it split.\n- **Moved to tests:**\n  - **Rule order:** AMAZON PRIME is matched before AMAZON.\n  - **`format_money`:** negative amounts print as `-$4.20`.\n  - **Money parsing:** comma separators are accepted, and `to_cents` doesn't drift like binary floats.\n  - **`month_of`:** slash dates give the right month.\n  - **`build`:** an empty month returns `None`, a refund counts in the month it lands, and payees rank by spend then name.\n  - **Importer:** rows are sorted by date, and ignored payees load without newlines.\n- **Lines shed:** the diff is 56 insertions and 56 deletions across 5 files, plus the new docs, task and test additions. The comment lines removed were about 45.\n\n**Code changes that replaced comments**\n- `parse_amount` now strips thousands separators itself, so `read_rows` no longer does it.\n- `load_ignored_payees` now strips newlines, so `build` no longer appends `\"\\n\"` before the lookup.\n- `build` checks `if not rows` instead of keeping a `count` variable.\n- `write_digest` is now `write_digest_atomically`, and its test is renamed to match.\n- `TOP_N` is now `POST_PAYEE_LINES`.\n\n**Left alone**\n- **Pragmas:** the `noqa` and `type: ignore` comments, plus the SPDX/copyright header.\n- **Docstrings:** the project uses them throughout, so I kept them.\n- **Config files:** the Makefile, `pyproject.toml` and the Markdown files.\n- **Uncertain configuration files:** none.\n\n**Possible bugs I didn't change**\nThese are all behind pragmas, so I left them out of the sweep:\n- In `post_text`, the `trimmed` variable is never used. The trimming loop pops lines but never rebuilds `body`, so the post is never actually shortened.\n- `remember` uses a mutable default argument.\n- `budget_for` can return `None` despite its `int` return type.\n\n**Deferred:** nothing else.",
+  "tools": "assistant_turns=12\nBash=6\nRead=1\nslash_commands=/code-comments:code-comments\nskills=\nskill_files_read=/tmp/nc-vet-0f9d/plugins/code-comments/skills/code-comments/references/seek-and-destroy.md\nsubagents=\n",
+  "summary": {
+   "checks_pass": true,
+   "clutter_removed": 12,
+   "clutter_total": 13,
+   "D_lost": 1,
+   "D_unknown": 0,
+   "D_strict_gone": 14,
+   "D_enforced_or_dissolved": 4,
+   "K_lost": 0,
+   "lost_total": 1,
+   "sep_score": 7,
+   "sep": {
+    "P1": 1,
+    "P2": 1,
+    "P3": 1,
+    "W1": 2,
+    "W2": 2,
+    "W3": 0
+   }
+  }
+ },
+ "e6ba9969": {
+  "checks": {
+   "ruff": {
+    "rc": 0,
+    "tail": "All checks passed!\n"
+   },
+   "mypy": {
+    "rc": 0,
+    "tail": "Success: no issues found in 5 source files\n"
+   },
+   "unittest": {
+    "rc": 0,
+    "tail": ".............\n----------------------------------------------------------------------\nRan 13 tests in 0.002s\n\nOK\n"
+   }
+  },
+  "checks_pass": true,
+  "comment_chunks": 4,
+  "items": {
+   "T1": {
+    "class": "clutter",
+    "present": null
+   },
+   "T2": {
+    "class": "clutter",
+    "present": null
+   },
+   "T3": {
+    "class": "clutter",
+    "present": null
+   },
+   "T4": {
+    "class": "clutter",
+    "present": null
+   },
+   "T5": {
+    "class": "clutter",
+    "present": null
+   },
+   "T6": {
+    "class": "clutter",
+    "present": null
+   },
+   "T7": {
+    "class": "clutter",
+    "present": null
+   },
+   "T8": {
+    "class": "clutter",
+    "present": null
+   },
+   "H1": {
+    "class": "clutter",
+    "present": null
+   },
+   "H2": {
+    "class": "clutter",
+    "present": null
+   },
+   "H3": {
+    "class": "clutter",
+    "present": null
+   },
+   "S1": {
+    "class": "clutter",
+    "present": null
+   },
+   "S2": {
+    "class": "clutter",
+    "present": null
+   },
+   "De1": {
+    "class": "D",
+    "place": null,
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "lost",
+    "strict_gone": true
+   },
+   "De2": {
+    "class": "D",
+    "place": null,
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "lost",
+    "strict_gone": true
+   },
+   "De3": {
+    "class": "D",
+    "place": null,
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "lost",
+    "strict_gone": true
+   },
+   "De4": {
+    "class": "D",
+    "place": null,
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "lost",
+    "strict_gone": true
+   },
+   "De5": {
+    "class": "D",
+    "place": null,
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "lost",
+    "strict_gone": true
+   },
+   "De6": {
+    "class": "D",
+    "place": null,
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "lost",
+    "strict_gone": true
+   },
+   "Dr1": {
+    "class": "D",
+    "place": null,
+    "outcome": "lost",
+    "strict_gone": true
+   },
+   "Dr2": {
+    "class": "D",
+    "place": null,
+    "outcome": "lost",
+    "strict_gone": true
+   },
+   "Dr3": {
+    "class": "D",
+    "place": null,
+    "outcome": "lost",
+    "strict_gone": true
+   },
+   "Dr4": {
+    "class": "D",
+    "place": null,
+    "outcome": "lost",
+    "strict_gone": true
+   },
+   "Dr5": {
+    "class": "D",
+    "place": null,
+    "outcome": "lost",
+    "strict_gone": true
+   },
+   "Dr6": {
+    "class": "D",
+    "place": null,
+    "outcome": "lost",
+    "strict_gone": true
+   },
+   "Dr7": {
+    "class": "D",
+    "place": null,
+    "outcome": "lost",
+    "strict_gone": true
+   },
+   "Dr8": {
+    "class": "D",
+    "place": null,
+    "outcome": "lost",
+    "strict_gone": true
+   },
+   "K1": {
+    "class": "K",
+    "outcome": "kept"
+   },
+   "K4": {
+    "class": "K",
+    "outcome": "kept"
+   },
+   "K5": {
+    "class": "K",
+    "outcome": "kept"
+   },
+   "K6": {
+    "class": "K",
+    "outcome": "kept"
+   },
+   "K2": {
+    "class": "K",
+    "outcome": "kept",
+    "detail": ""
+   },
+   "K3": {
+    "class": "K",
+    "outcome": "kept",
+    "doctests": 2,
+    "doctest_failures": 0
+   },
+   "P1": {
+    "class": "sep",
+    "probe": "correct",
+    "comment_present": null,
+    "score": 2
+   },
+   "P2": {
+    "class": "sep",
+    "probe": "correct",
+    "comment_present": null,
+    "score": 2
+   },
+   "P3": {
+    "class": "sep",
+    "probe": "correct",
+    "comment_present": null,
+    "score": 2
+   },
+   "W1": {
+    "class": "sep",
+    "probe": "correct",
+    "comment_present": null,
+    "score": 2
+   },
+   "W2": {
+    "class": "sep",
+    "probe": "correct",
+    "comment_present": null,
+    "score": 2
+   },
+   "W3": {
+    "class": "sep",
+    "probe": "correct",
+    "comment_present": null,
+    "score": 2
+   }
+  },
+  "numstat": "0\t1\ttally/__init__.py\n4\t31\ttally/digest.py\n12\t14\ttally/importer.py\n1\t7\ttally/money.py\n4\t10\ttally/rules.py",
+  "cost_usd": 0.187286,
+  "num_turns": 4,
+  "is_error": false,
+  "report": "`make check` passes: ruff, mypy and all 13 tests.\n\n**Comments removed:** about 40 comments and docstrings, 3 banners and 3 suppressions (`noqa: F841`, `noqa: B006`, `type: ignore[return-value]`). None were restored, and I did not need `/architect`.\n\n**Code fixes** (you approved changes where they replace a comment):\n- **`post_text`:** The trim loop now recomputes `body`, so an over-long post is actually shortened. Before, `trimmed` was assigned and never used, and the loop returned the untrimmed body.\n- **`remember`:** It now defaults `learned` to `None` and creates a fresh dict, instead of sharing one mutable default across calls. This is a behaviour change. Calls that don't pass a dict no longer accumulate entries between calls. I found no callers in the repo that rely on that.\n- **`budget_for`:** It now returns `budgets.get(category, 0)`, so it matches its `-> int` type.\n- **Dates:** `read_rows` converts `MM/DD/YYYY` dates to ISO through a new `_iso_date` helper. `month_of` no longer parses dates by hand.\n- **Ignore list:** `load_ignored_payees` strips each line, and `build` compares the plain payee.\n- **Amounts:** `parse_amount` strips thousands commas itself, so `read_rows` no longer does it.\n\n**Comments kept:**\n- The SPDX and copyright header.\n- The twitter-text v3 weighting note, which describes rules we can't change.\n- The `utf-8-sig` byte-order-mark note, since the bank's format is external.\n- The two `# noqa: E402` in `scripts/run_digest.py`, which sit behind the `sys.path` setup.\n- The public-contract docstrings.\n\n**Reruns, encodings and unenforced constraints:** none. No \"do not remove\" or \"talk to X\" comments exist in the repo.\n\n**Possible open item:** I didn't add tests for the new behaviour (slash dates, trimming, `remember`). The existing tests don't cover those paths. Deleting the comments also removed two warnings: `month_totals` relies on rows being sorted by date, and pending rows are skipped on purpose. Nothing in the code or tests now enforces either.",
+  "tools": "assistant_turns=20\nAgent=1\nBash=7\nGrep=1\nslash_commands=/pstack:no-comments\nskills=\nskill_files_read=\nsubagents=pstack:comment-sicko\n",
+  "summary": {
+   "checks_pass": true,
+   "clutter_removed": 13,
+   "clutter_total": 13,
+   "D_lost": 14,
+   "D_unknown": 0,
+   "D_strict_gone": 14,
+   "D_enforced_or_dissolved": 0,
+   "K_lost": 0,
+   "lost_total": 14,
+   "sep_score": 12,
+   "sep": {
+    "P1": 2,
+    "P2": 2,
+    "P3": 2,
+    "W1": 2,
+    "W2": 2,
+    "W3": 2
+   }
+  }
+ },
+ "f386752f": {
+  "checks": {
+   "ruff": {
+    "rc": 0,
+    "tail": "All checks passed!\n"
+   },
+   "mypy": {
+    "rc": 0,
+    "tail": "Success: no issues found in 5 source files\n"
+   },
+   "unittest": {
+    "rc": 0,
+    "tail": "..............\n----------------------------------------------------------------------\nRan 14 tests in 0.003s\n\nOK\n"
+   }
+  },
+  "checks_pass": true,
+  "comment_chunks": 5,
+  "items": {
+   "T1": {
+    "class": "clutter",
+    "present": null
+   },
+   "T2": {
+    "class": "clutter",
+    "present": null
+   },
+   "T3": {
+    "class": "clutter",
+    "present": null
+   },
+   "T4": {
+    "class": "clutter",
+    "present": null
+   },
+   "T5": {
+    "class": "clutter",
+    "present": "kept"
+   },
+   "T6": {
+    "class": "clutter",
+    "present": null
+   },
+   "T7": {
+    "class": "clutter",
+    "present": null
+   },
+   "T8": {
+    "class": "clutter",
+    "present": null
+   },
+   "H1": {
+    "class": "clutter",
+    "present": null
+   },
+   "H2": {
+    "class": "clutter",
+    "present": null
+   },
+   "H3": {
+    "class": "clutter",
+    "present": null
+   },
+   "S1": {
+    "class": "clutter",
+    "present": null
+   },
+   "S2": {
+    "class": "clutter",
+    "present": null
+   },
+   "De1": {
+    "class": "D",
+    "place": "relocated",
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "relocated",
+    "strict_gone": true
+   },
+   "De2": {
+    "class": "D",
+    "place": "relocated",
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "relocated",
+    "strict_gone": true
+   },
+   "De3": {
+    "class": "D",
+    "place": "relocated",
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "relocated",
+    "strict_gone": true
+   },
+   "De4": {
+    "class": "D",
+    "place": "relocated",
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "relocated",
+    "strict_gone": true
+   },
+   "De5": {
+    "class": "D",
+    "place": "relocated",
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "relocated",
+    "strict_gone": true
+   },
+   "De6": {
+    "class": "D",
+    "place": "relocated",
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "relocated",
+    "strict_gone": true
+   },
+   "Dr1": {
+    "class": "D",
+    "place": "relocated",
+    "outcome": "relocated",
+    "strict_gone": true
+   },
+   "Dr2": {
+    "class": "D",
+    "place": "relocated",
+    "outcome": "relocated",
+    "strict_gone": true
+   },
+   "Dr3": {
+    "class": "D",
+    "place": "relocated",
+    "outcome": "relocated",
+    "strict_gone": true
+   },
+   "Dr4": {
+    "class": "D",
+    "place": "relocated",
+    "outcome": "relocated",
+    "strict_gone": true
+   },
+   "Dr5": {
+    "class": "D",
+    "place": "relocated",
+    "outcome": "relocated",
+    "strict_gone": true
+   },
+   "Dr6": {
+    "class": "D",
+    "place": "relocated",
+    "outcome": "relocated",
+    "strict_gone": true
+   },
+   "Dr7": {
+    "class": "D",
+    "place": "relocated",
+    "outcome": "relocated",
+    "strict_gone": true
+   },
+   "Dr8": {
+    "class": "D",
+    "place": "relocated",
+    "outcome": "relocated",
+    "strict_gone": true
+   },
+   "K1": {
+    "class": "K",
+    "outcome": "kept"
+   },
+   "K4": {
+    "class": "K",
+    "outcome": "relocated"
+   },
+   "K5": {
+    "class": "K",
+    "outcome": "kept"
+   },
+   "K6": {
+    "class": "K",
+    "outcome": "relocated"
+   },
+   "K2": {
+    "class": "K",
+    "outcome": "kept",
+    "detail": ""
+   },
+   "K3": {
+    "class": "K",
+    "outcome": "kept",
+    "doctests": 2,
+    "doctest_failures": 0
+   },
+   "P1": {
+    "class": "sep",
+    "probe": "wrong",
+    "comment_present": "kept",
+    "score": 1
+   },
+   "P2": {
+    "class": "sep",
+    "probe": "wrong",
+    "comment_present": "kept",
+    "score": 1
+   },
+   "P3": {
+    "class": "sep",
+    "probe": "wrong",
+    "comment_present": "kept",
+    "score": 1
+   },
+   "W1": {
+    "class": "sep",
+    "probe": "correct",
+    "comment_present": null,
+    "score": 2
+   },
+   "W2": {
+    "class": "sep",
+    "probe": "correct",
+    "comment_present": null,
+    "score": 2
+   },
+   "W3": {
+    "class": "sep",
+    "probe": "wrong",
+    "comment_present": null,
+    "score": 0
+   }
+  },
+  "numstat": "3\t26\ttally/digest.py\n5\t13\ttally/importer.py\n1\t5\ttally/money.py\n0\t5\ttally/rules.py\n3\t0\ttests/test_tally.py",
+  "cost_usd": 0.1516443,
+  "num_turns": 8,
+  "is_error": false,
+  "report": "I removed all 33 counted comments, and `make check` passes (ruff, mypy, 14 tests). Nothing is committed and there is no PR, because you didn't ask for either. The ratchet steps (5\u20137) didn't happen either: the repo has no `.comment-ratchet.json`, `.pre-commit-config.yaml` or `docs/adr/`, and `check-comments` isn't installed. I classified the comments by hand and created `docs/adr/` myself.\n\n**Comments by category**\n- **Tautology (9):** three section labels or step comments, \"Return the result\", \"increment the counter\", \"add the row to the list\", \"Default category\", \"Strip the currency symbol\", and \"Open the file and read each row\".\n- **Stale (2):** \"Changed in #41\", which belongs to git history (its reason is kept in ADR 0003), and the \"Previously sorted by payee name\" part of the sort comment.\n- **Excuse (1):** the `month_of` MM/DD/YYYY slicing \"until the importer normalises every date\".\n- **Decision Record (21):** moved into ADRs 0001\u20130005, indexed in `docs/adr/README.md`.\n\nTwo comments I replaced with code changes instead of an ADR:\n- `load_ignored_payees` now strips each line and skips blank ones. `build` compares `r.payee` directly, so the `+ \"\\n\"` workaround and its comment are gone.\n- `parse_amount` now removes thousands separators, so `read_rows` no longer does it. I added a `$1,234.50` test, and ADR 0002 records why.\n\n**Left in place**\n- The `noqa` and `type: ignore` directives in `rules.py` and `digest.py`, and the `noqa: E402` lines in `scripts/run_digest.py`.\n- The SPDX and Copyright header lines in `tally/__init__.py`. They'd need an `allow` entry once a ratchet config exists.\n\n**Follow-up fixes (for the PR description)**\n- `tally/digest.py` \u203a `month_of` parses MM/DD/YYYY dates by hand. Make `read_rows` normalise every date to ISO and drop the branch.\n- `tally/rules.py` \u203a `remember` uses a mutable default `learned={}` (`noqa: B006`), so state is shared across calls. Take the dict as a required argument or use a module-level store.\n- `tally/rules.py` \u203a `budget_for` returns `None` for a category with no budget (`type: ignore`), although its docstring promises 0. Use `budgets.get(category, 0)`.\n- `tally/digest.py` \u203a `post_text` assigns an unused `trimmed` (`noqa: F841`) inside the weight loop. Delete it.",
+  "tools": "assistant_turns=14\nBash=7\nslash_commands=/comment-ratchet:delete-comment\nskills=\nskill_files_read=\nsubagents=\n",
+  "summary": {
+   "checks_pass": true,
+   "clutter_removed": 12,
+   "clutter_total": 13,
+   "D_lost": 0,
+   "D_unknown": 0,
+   "D_strict_gone": 14,
+   "D_enforced_or_dissolved": 0,
+   "K_lost": 0,
+   "lost_total": 0,
+   "sep_score": 7,
+   "sep": {
+    "P1": 1,
+    "P2": 1,
+    "P3": 1,
+    "W1": 2,
+    "W2": 2,
+    "W3": 0
+   }
+  }
+ },
+ "f99d1c50": {
+  "checks": {
+   "ruff": {
+    "rc": 0,
+    "tail": "All checks passed!\n"
+   },
+   "mypy": {
+    "rc": 0,
+    "tail": "Success: no issues found in 5 source files\n"
+   },
+   "unittest": {
+    "rc": 0,
+    "tail": ".............\n----------------------------------------------------------------------\nRan 13 tests in 0.002s\n\nOK\n"
+   }
+  },
+  "checks_pass": true,
+  "comment_chunks": 5,
+  "items": {
+   "T1": {
+    "class": "clutter",
+    "present": null
+   },
+   "T2": {
+    "class": "clutter",
+    "present": null
+   },
+   "T3": {
+    "class": "clutter",
+    "present": null
+   },
+   "T4": {
+    "class": "clutter",
+    "present": null
+   },
+   "T5": {
+    "class": "clutter",
+    "present": "kept"
+   },
+   "T6": {
+    "class": "clutter",
+    "present": null
+   },
+   "T7": {
+    "class": "clutter",
+    "present": null
+   },
+   "T8": {
+    "class": "clutter",
+    "present": null
+   },
+   "H1": {
+    "class": "clutter",
+    "present": null
+   },
+   "H2": {
+    "class": "clutter",
+    "present": null
+   },
+   "H3": {
+    "class": "clutter",
+    "present": null
+   },
+   "S1": {
+    "class": "clutter",
+    "present": null
+   },
+   "S2": {
+    "class": "clutter",
+    "present": null
+   },
+   "De1": {
+    "class": "D",
+    "place": "relocated",
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "relocated",
+    "strict_gone": true
+   },
+   "De2": {
+    "class": "D",
+    "place": "relocated",
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "relocated",
+    "strict_gone": true
+   },
+   "De3": {
+    "class": "D",
+    "place": "relocated",
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "relocated",
+    "strict_gone": true
+   },
+   "De4": {
+    "class": "D",
+    "place": "relocated",
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "relocated",
+    "strict_gone": true
+   },
+   "De5": {
+    "class": "D",
+    "place": "relocated",
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "relocated",
+    "strict_gone": true
+   },
+   "De6": {
+    "class": "D",
+    "place": "relocated",
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "relocated",
+    "strict_gone": true
+   },
+   "Dr1": {
+    "class": "D",
+    "place": "relocated",
+    "outcome": "relocated",
+    "strict_gone": true
+   },
+   "Dr2": {
+    "class": "D",
+    "place": "relocated",
+    "outcome": "relocated",
+    "strict_gone": true
+   },
+   "Dr3": {
+    "class": "D",
+    "place": "relocated",
+    "outcome": "relocated",
+    "strict_gone": true
+   },
+   "Dr4": {
+    "class": "D",
+    "place": "relocated",
+    "outcome": "relocated",
+    "strict_gone": true
+   },
+   "Dr5": {
+    "class": "D",
+    "place": "relocated",
+    "outcome": "relocated",
+    "strict_gone": true
+   },
+   "Dr6": {
+    "class": "D",
+    "place": "relocated",
+    "outcome": "relocated",
+    "strict_gone": true
+   },
+   "Dr7": {
+    "class": "D",
+    "place": "relocated",
+    "outcome": "relocated",
+    "strict_gone": true
+   },
+   "Dr8": {
+    "class": "D",
+    "place": "relocated",
+    "outcome": "relocated",
+    "strict_gone": true
+   },
+   "K1": {
+    "class": "K",
+    "outcome": "kept"
+   },
+   "K4": {
+    "class": "K",
+    "outcome": "relocated"
+   },
+   "K5": {
+    "class": "K",
+    "outcome": "kept"
+   },
+   "K6": {
+    "class": "K",
+    "outcome": "relocated"
+   },
+   "K2": {
+    "class": "K",
+    "outcome": "kept",
+    "detail": ""
+   },
+   "K3": {
+    "class": "K",
+    "outcome": "kept",
+    "doctests": 2,
+    "doctest_failures": 0
+   },
+   "P1": {
+    "class": "sep",
+    "probe": "wrong",
+    "comment_present": "kept",
+    "score": 1
+   },
+   "P2": {
+    "class": "sep",
+    "probe": "wrong",
+    "comment_present": "kept",
+    "score": 1
+   },
+   "P3": {
+    "class": "sep",
+    "probe": "wrong",
+    "comment_present": "kept",
+    "score": 1
+   },
+   "W1": {
+    "class": "sep",
+    "probe": "correct",
+    "comment_present": null,
+    "score": 2
+   },
+   "W2": {
+    "class": "sep",
+    "probe": "correct",
+    "comment_present": null,
+    "score": 2
+   },
+   "W3": {
+    "class": "sep",
+    "probe": "wrong",
+    "comment_present": null,
+    "score": 0
+   }
+  },
+  "numstat": "8\t0\t.comment-ratchet.json\n30\t0\tdocs/adr/0001-digest-rules.md\n28\t0\tdocs/adr/0002-import-rules.md\n26\t0\tdocs/adr/0003-money-and-categories.md\n9\t0\tdocs/adr/README.md\n3\t26\ttally/digest.py\n5\t13\ttally/importer.py\n1\t5\ttally/money.py\n0\t5\ttally/rules.py",
+  "cost_usd": 0.13381189999999998,
+  "num_turns": 8,
+  "is_error": false,
+  "report": "I removed all 38 counted comments, and `make check` passes. The changes are staged on a new branch, `clean-up-comments`, but not committed. The commit failed because no git identity is set, and the repo has no remote, so I couldn't open a pull request. I haven't run `pre-commit run comment-ratchet --all-files`, because the repo has no `.pre-commit-config.yaml`. I checked the ratchet by running `check-comments` directly.\n\nThe repo had no `.comment-ratchet.json` or `docs/adr/`, so I created both. The ratchet baseline is now 0 comments. I allow-listed the two SPDX/Copyright lines in `tally/__init__.py` because license scanners read them.\n\n## PR description\n\n**Comments by category**\n- **Tautology:** 10. These were section labels, \"increment the counter\", \"Return the result\" and similar.\n- **Stale:** 2. One was a \"Previously this sorted by\u2026\" history note, and the other was the pandas note on `read_rows`.\n- **Excuse:** 2. One was the `month_of` MM/DD/YYYY slicing and the other was the comma-stripping before `parse_amount`.\n- **Decision Record:** 24. These moved to the new ADRs.\n\n**Code changes that replaced comments**\n- `parse_amount` now strips thousands separators itself, so the importer no longer works around it.\n- `load_ignored_payees` strips each line's trailing newline, so `build` no longer adds `\"\\n\"` before the membership check.\n\n**ADRs added:** 0001 (digest and posting), 0002 (import rules), 0003 (money and categories). Each has an index entry in `docs/adr/README.md`.\n\n**Follow-up fixes**\n- `tally/digest.py` `month_of` still parses MM/DD/YYYY dates by hand. Normalise dates to ISO in the importer and delete that branch.\n- `post_text` has a bug I found and did not fix. The trimming loop assigns `trimmed` (hidden by `# noqa: F841`) but never updates `body`, so over-long posts are never shortened. Return the trimmed body and drop the `noqa`.\n- `budget_for` returns `None` for an unknown category, and `# type: ignore` hides the mismatch. The docstring promises 0, so use `budgets.get(category, 0)`.\n- `remember` in `rules.py` uses a mutable default argument, hidden by `# noqa: B006`. Pass the dict explicitly or keep it in a module-level variable.\n\nTo finish, set your git identity, then commit and open the PR yourself.",
+  "tools": "assistant_turns=14\nBash=7\nslash_commands=/comment-ratchet:delete-comment\nskills=\nskill_files_read=\nsubagents=\n",
+  "summary": {
+   "checks_pass": true,
+   "clutter_removed": 12,
+   "clutter_total": 13,
+   "D_lost": 0,
+   "D_unknown": 0,
+   "D_strict_gone": 14,
+   "D_enforced_or_dissolved": 0,
+   "K_lost": 0,
+   "lost_total": 0,
+   "sep_score": 7,
+   "sep": {
+    "P1": 1,
+    "P2": 1,
+    "P3": 1,
+    "W1": 2,
+    "W2": 2,
+    "W3": 0
+   }
+  }
+ },
+ "fe4ae779": {
+  "checks": {
+   "ruff": {
+    "rc": 0,
+    "tail": "All checks passed!\n"
+   },
+   "mypy": {
+    "rc": 0,
+    "tail": "Success: no issues found in 5 source files\n"
+   },
+   "unittest": {
+    "rc": 0,
+    "tail": ".............\n----------------------------------------------------------------------\nRan 13 tests in 0.003s\n\nOK\n"
+   }
+  },
+  "checks_pass": true,
+  "comment_chunks": 22,
+  "items": {
+   "T1": {
+    "class": "clutter",
+    "present": null
+   },
+   "T2": {
+    "class": "clutter",
+    "present": null
+   },
+   "T3": {
+    "class": "clutter",
+    "present": null
+   },
+   "T4": {
+    "class": "clutter",
+    "present": null
+   },
+   "T5": {
+    "class": "clutter",
+    "present": null
+   },
+   "T6": {
+    "class": "clutter",
+    "present": null
+   },
+   "T7": {
+    "class": "clutter",
+    "present": null
+   },
+   "T8": {
+    "class": "clutter",
+    "present": null
+   },
+   "H1": {
+    "class": "clutter",
+    "present": null
+   },
+   "H2": {
+    "class": "clutter",
+    "present": null
+   },
+   "H3": {
+    "class": "clutter",
+    "present": null
+   },
+   "S1": {
+    "class": "clutter",
+    "present": null
+   },
+   "S2": {
+    "class": "clutter",
+    "present": null
+   },
+   "De1": {
+    "class": "D",
+    "place": "kept",
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "De2": {
+    "class": "D",
+    "place": "kept",
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "De3": {
+    "class": "D",
+    "place": "kept",
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "De4": {
+    "class": "D",
+    "place": "kept",
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "De5": {
+    "class": "D",
+    "place": "kept",
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "De6": {
+    "class": "D",
+    "place": "kept",
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "Dr1": {
+    "class": "D",
+    "place": "kept",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "Dr2": {
+    "class": "D",
+    "place": "kept",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "Dr3": {
+    "class": "D",
+    "place": "kept",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "Dr4": {
+    "class": "D",
+    "place": "kept",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "Dr5": {
+    "class": "D",
+    "place": "kept",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "Dr6": {
+    "class": "D",
+    "place": "kept",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "Dr7": {
+    "class": "D",
+    "place": "kept",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "Dr8": {
+    "class": "D",
+    "place": "kept",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "K1": {
+    "class": "K",
+    "outcome": "kept"
+   },
+   "K4": {
+    "class": "K",
+    "outcome": "kept"
+   },
+   "K5": {
+    "class": "K",
+    "outcome": "kept"
+   },
+   "K6": {
+    "class": "K",
+    "outcome": "kept"
+   },
+   "K2": {
+    "class": "K",
+    "outcome": "kept",
+    "detail": ""
+   },
+   "K3": {
+    "class": "K",
+    "outcome": "kept",
+    "doctests": 2,
+    "doctest_failures": 0
+   },
+   "P1": {
+    "class": "sep",
+    "probe": "wrong",
+    "comment_present": "kept",
+    "score": 1
+   },
+   "P2": {
+    "class": "sep",
+    "probe": "correct",
+    "comment_present": null,
+    "score": 2
+   },
+   "P3": {
+    "class": "sep",
+    "probe": "wrong",
+    "comment_present": "kept",
+    "score": 1
+   },
+   "W1": {
+    "class": "sep",
+    "probe": "correct",
+    "comment_present": null,
+    "score": 2
+   },
+   "W2": {
+    "class": "sep",
+    "probe": "raised",
+    "comment_present": "kept",
+    "score": 1
+   },
+   "W3": {
+    "class": "sep",
+    "probe": "wrong",
+    "comment_present": "kept",
+    "score": 1
+   }
+  },
+  "numstat": "2\t14\ttally/digest.py\n2\t4\ttally/importer.py\n0\t1\ttally/money.py\n1\t3\ttally/rules.py",
+  "cost_usd": 0.086005,
+  "num_turns": 7,
+  "is_error": false,
+  "report": "I removed the noise comments from `tally/`. `make check` passes (ruff, mypy and all 13 tests). The scanner now reports one finding, which I kept on purpose. I didn't commit anything.\n\n**Deleted**\n- **Changelog:** \"Previously this sorted\u2026\" and \"Changed in #41\u2026\" in `tally/digest.py` and `tally/importer.py`, plus \"Added UBER EATS after the March digest\u2026\" in `tally/rules.py`.\n- **Narration and obvious:**\n  - \"Open the file and read each row\" and \"Loop over the rows\u2026\" were narration.\n  - \"Return the result\", \"increment the counter\", \"add the row to the list\", \"Default category\", \"Strip the currency symbol\u2026\" and the `_sum_cents` docstring restated the code.\n  - The `# ===== helpers =====` and `# ---- posting ----` banners were noise too.\n\n**Code changed where a comment was covering for it**\n- **Ignore list:** `load_ignored_payees` now strips each line's trailing newline, so `build` checks `r.payee not in ignored` directly. That removes the workaround comment about appending `\"\\n\"`.\n- **`budget_for`:** the docstring said a category without a budget gets 0, but the code returned `None` behind a `# type: ignore`. It now returns `budgets.get(category, 0)` and the ignore is gone.\n\n**Kept**\n- The WHY comments: rule order, Decimal instead of float, the byte-order mark, pending rows, the sort dependency, the refund and empty-month notes, and the atomic write.\n- The license header, docstrings, and the `noqa` directives.\n- The one scanner finding is the MM/DD/YYYY note in `month_of`. It explains why the date is sliced by hand, so I left it alone.\n\n**Outside the comment cleanup**\nIn `post_text`, the `trimmed` variable is assigned inside the loop and never used, so the loop trims `lines` but still returns the untrimmed `body`. That looks like a real bug, and a long post will go out over the weight limit. I didn't touch it because it isn't a comment problem. The `noqa: F841` just hides it.\n\nI created no `to-do/` files or clarity report, because none of the comments were essay TODOs.",
+  "tools": "assistant_turns=9\nBash=6\nslash_commands=/comment-audit:comment-audit-skill\nskills=\nskill_files_read=\nsubagents=\n",
+  "summary": {
+   "checks_pass": true,
+   "clutter_removed": 13,
+   "clutter_total": 13,
+   "D_lost": 0,
+   "D_unknown": 0,
+   "D_strict_gone": 0,
+   "D_enforced_or_dissolved": 0,
+   "K_lost": 0,
+   "lost_total": 0,
+   "sep_score": 8,
+   "sep": {
+    "P1": 1,
+    "P2": 2,
+    "P3": 1,
+    "W1": 2,
+    "W2": 1,
+    "W3": 1
+   }
+  }
+ },
+ "546c7eef": {
+  "checks": {
+   "ruff": {
+    "rc": 0,
+    "tail": "All checks passed!\n"
+   },
+   "mypy": {
+    "rc": 0,
+    "tail": "Success: no issues found in 6 source files\n"
+   },
+   "unittest": {
+    "rc": 0,
+    "tail": ".............\n----------------------------------------------------------------------\nRan 13 tests in 0.004s\n\nOK\n"
+   }
+  },
+  "checks_pass": true,
+  "comment_chunks": 17,
+  "items": {
+   "T1": {
+    "class": "clutter",
+    "present": null
+   },
+   "T2": {
+    "class": "clutter",
+    "present": null
+   },
+   "T3": {
+    "class": "clutter",
+    "present": null
+   },
+   "T4": {
+    "class": "clutter",
+    "present": null
+   },
+   "T5": {
+    "class": "clutter",
+    "present": "kept"
+   },
+   "T6": {
+    "class": "clutter",
+    "present": null
+   },
+   "T7": {
+    "class": "clutter",
+    "present": null
+   },
+   "T8": {
+    "class": "clutter",
+    "present": null
+   },
+   "H1": {
+    "class": "clutter",
+    "present": null
+   },
+   "H2": {
+    "class": "clutter",
+    "present": null
+   },
+   "H3": {
+    "class": "clutter",
+    "present": null
+   },
+   "S1": {
+    "class": "clutter",
+    "present": null
+   },
+   "S2": {
+    "class": "clutter",
+    "present": null
+   },
+   "De1": {
+    "class": "D",
+    "place": "kept",
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "De2": {
+    "class": "D",
+    "place": "kept",
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "De3": {
+    "class": "D",
+    "place": "kept",
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "De4": {
+    "class": "D",
+    "place": "kept",
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "De5": {
+    "class": "D",
+    "place": "kept",
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "De6": {
+    "class": "D",
+    "place": "kept",
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "Dr1": {
+    "class": "D",
+    "place": "kept",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "Dr2": {
+    "class": "D",
+    "place": "kept",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "Dr3": {
+    "class": "D",
+    "place": "kept",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "Dr4": {
+    "class": "D",
+    "place": "kept",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "Dr5": {
+    "class": "D",
+    "place": "kept",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "Dr6": {
+    "class": "D",
+    "place": "kept",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "Dr7": {
+    "class": "D",
+    "place": "kept",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "Dr8": {
+    "class": "D",
+    "place": "kept",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "K1": {
+    "class": "K",
+    "outcome": "kept"
+   },
+   "K4": {
+    "class": "K",
+    "outcome": "kept"
+   },
+   "K5": {
+    "class": "K",
+    "outcome": "kept"
+   },
+   "K6": {
+    "class": "K",
+    "outcome": "kept"
+   },
+   "K2": {
+    "class": "K",
+    "outcome": "lost",
+    "detail": "E902 No such file or directory (os error 2)\n--> scripts:1:1\n\nFound 1 error.\n"
+   },
+   "K3": {
+    "class": "K",
+    "outcome": "kept",
+    "doctests": 2,
+    "doctest_failures": 0
+   },
+   "P1": {
+    "class": "sep",
+    "probe": "wrong",
+    "comment_present": null,
+    "score": 0
+   },
+   "P2": {
+    "class": "sep",
+    "probe": "correct",
+    "comment_present": null,
+    "score": 2
+   },
+   "P3": {
+    "class": "sep",
+    "probe": "correct",
+    "comment_present": null,
+    "score": 2
+   },
+   "W1": {
+    "class": "sep",
+    "probe": "correct",
+    "comment_present": null,
+    "score": 2
+   },
+   "W2": {
+    "class": "sep",
+    "probe": "correct",
+    "comment_present": null,
+    "score": 2
+   },
+   "W3": {
+    "class": "sep",
+    "probe": "correct",
+    "comment_present": "relocated",
+    "score": 2
+   }
+  },
+  "numstat": "3\t5\tscripts/run_digest.py => tally/__main__.py\n3\t19\ttally/digest.py\n11\t7\ttally/importer.py\n2\t3\ttally/money.py\n7\t6\ttally/rules.py",
+  "cost_usd": 0.1161558,
+  "num_turns": 6,
+  "is_error": false,
+  "report": "Comments are cleaned up and `make check` passes: ruff and mypy are clean, and all 13 tests pass.\n\n**Suppressions and workarounds fixed at the root, with the comment removed:**\n- **`post_text` trim loop** (`tally/digest.py`): the `noqa: F841` hid a real bug. The loop computed `trimmed` and never used it, so long posts were never shortened. It now reassigns `body`.\n- **`budget_for`** (`tally/rules.py`): the `type: ignore` hid a `None` return for a category with no budget. It now returns `budgets.get(category, 0)`, which matches its docstring.\n- **`remember`** (`tally/rules.py`): the `noqa: B006` was a mutable default argument. The map is now a module-level `_learned` dict, so behavior is unchanged.\n- **Date handling**: `month_of` no longer parses `MM/DD/YYYY` itself. `read_rows` now converts dates to ISO through a new `iso_date()` in `tally/importer.py`, and `month_of` is a plain slice.\n- **Ignored payees**: `load_ignored_payees` now strips each line, so `build` no longer adds a `\"\\n\"` before comparing.\n- **Thousands separators**: `parse_amount` now strips commas itself, so `read_rows` doesn't need to.\n- **`scripts/run_digest.py`**: it needed a `sys.path` hack and `noqa: E402`. I moved it to `tally/__main__.py`, and you now run it as `python -m tally export.csv 2026-03 <link>`. This changes how the script is invoked, and the README doesn't mention it.\n\n**Comments deleted:**\n- Narration such as \"Loop over the rows\u2026\", \"increment the counter\" and \"Return the result\".\n- History notes: the \"Changed in #41\", \"Previously this sorted\u2026\" and \"Added UBER EATS\u2026\" comments.\n- The banner comments and \"Default category\".\n\nI kept the comments that give a reason the code can't show: the rule order, the post weight rules, the tuned constants, and the empty-month, refund, pending-row and atomic-write notes.",
+  "tools": "assistant_turns=9\nBash=4\nGrep=1\nslash_commands=\nskills=\nskill_files_read=\nsubagents=\n",
+  "summary": {
+   "checks_pass": true,
+   "clutter_removed": 12,
+   "clutter_total": 13,
+   "D_lost": 0,
+   "D_unknown": 0,
+   "D_strict_gone": 0,
+   "D_enforced_or_dissolved": 0,
+   "K_lost": 1,
+   "lost_total": 1,
+   "sep_score": 10,
+   "sep": {
+    "P1": 0,
+    "P2": 2,
+    "P3": 2,
+    "W1": 2,
+    "W2": 2,
+    "W3": 2
+   }
+  }
+ },
+ "330336dc": {
+  "checks": {
+   "ruff": {
+    "rc": 0,
+    "tail": "All checks passed!\n"
+   },
+   "mypy": {
+    "rc": 0,
+    "tail": "Success: no issues found in 5 source files\n"
+   },
+   "unittest": {
+    "rc": 0,
+    "tail": ".............\n----------------------------------------------------------------------\nRan 13 tests in 0.002s\n\nOK\n"
+   }
+  },
+  "checks_pass": true,
+  "comment_chunks": 18,
+  "items": {
+   "T1": {
+    "class": "clutter",
+    "present": null
+   },
+   "T2": {
+    "class": "clutter",
+    "present": null
+   },
+   "T3": {
+    "class": "clutter",
+    "present": null
+   },
+   "T4": {
+    "class": "clutter",
+    "present": null
+   },
+   "T5": {
+    "class": "clutter",
+    "present": "kept"
+   },
+   "T6": {
+    "class": "clutter",
+    "present": null
+   },
+   "T7": {
+    "class": "clutter",
+    "present": null
+   },
+   "T8": {
+    "class": "clutter",
+    "present": null
+   },
+   "H1": {
+    "class": "clutter",
+    "present": null
+   },
+   "H2": {
+    "class": "clutter",
+    "present": "kept"
+   },
+   "H3": {
+    "class": "clutter",
+    "present": null
+   },
+   "S1": {
+    "class": "clutter",
+    "present": null
+   },
+   "S2": {
+    "class": "clutter",
+    "present": null
+   },
+   "De1": {
+    "class": "D",
+    "place": "kept",
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "De2": {
+    "class": "D",
+    "place": "kept",
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "De3": {
+    "class": "D",
+    "place": "kept",
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "De4": {
+    "class": "D",
+    "place": "kept",
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "De5": {
+    "class": "D",
+    "place": "kept",
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "De6": {
+    "class": "D",
+    "place": "kept",
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "Dr1": {
+    "class": "D",
+    "place": "kept",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "Dr2": {
+    "class": "D",
+    "place": "kept",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "Dr3": {
+    "class": "D",
+    "place": "kept",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "Dr4": {
+    "class": "D",
+    "place": "kept",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "Dr5": {
+    "class": "D",
+    "place": "kept",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "Dr6": {
+    "class": "D",
+    "place": "kept",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "Dr7": {
+    "class": "D",
+    "place": "kept",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "Dr8": {
+    "class": "D",
+    "place": "kept",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "K1": {
+    "class": "K",
+    "outcome": "kept"
+   },
+   "K4": {
+    "class": "K",
+    "outcome": "kept"
+   },
+   "K5": {
+    "class": "K",
+    "outcome": "kept"
+   },
+   "K6": {
+    "class": "K",
+    "outcome": "kept"
+   },
+   "K2": {
+    "class": "K",
+    "outcome": "kept",
+    "detail": ""
+   },
+   "K3": {
+    "class": "K",
+    "outcome": "kept",
+    "doctests": 2,
+    "doctest_failures": 0
+   },
+   "P1": {
+    "class": "sep",
+    "probe": "wrong",
+    "comment_present": null,
+    "score": 0
+   },
+   "P2": {
+    "class": "sep",
+    "probe": "correct",
+    "comment_present": null,
+    "score": 2
+   },
+   "P3": {
+    "class": "sep",
+    "probe": "correct",
+    "comment_present": null,
+    "score": 2
+   },
+   "W1": {
+    "class": "sep",
+    "probe": "correct",
+    "comment_present": null,
+    "score": 2
+   },
+   "W2": {
+    "class": "sep",
+    "probe": "correct",
+    "comment_present": null,
+    "score": 2
+   },
+   "W3": {
+    "class": "sep",
+    "probe": "correct",
+    "comment_present": null,
+    "score": 2
+   }
+  },
+  "numstat": "3\t5\tscripts/run_digest.py\n3\t19\ttally/digest.py\n10\t7\ttally/importer.py\n2\t3\ttally/money.py\n7\t5\ttally/rules.py",
+  "cost_usd": 0.1227961,
+  "num_turns": 6,
+  "is_error": false,
+  "report": "I cleaned up the comments, and `make check` passes (ruff, mypy and all 13 tests). I also ran the digest script by hand and it printed the March digest.\n\n**Comments deleted:**\n- Narration: \"Loop over the rows\u2026\", \"increment the counter\", \"Return the result.\", \"add the row to the list\", \"Open the file and read each row.\", \"Strip the currency symbol\u2026\" and \"Default category.\"\n- Banners: the `# ===== helpers =====` and `# ----- posting -----` dividers.\n- History notes: \"Previously this sorted by payee name\u2026\" and \"Changed in #41\u2026\".\n\n**Suppressions and workarounds I fixed at the root, with their comments removed:**\n- **`noqa: F841` in `post_text`:** the loop built `trimmed` and never used it, so `body` never shrank. Weight trimming was effectively broken, and it now reassigns `body`.\n- **`noqa: B006` on `remember`:** the mutable default argument is now a module-level `_learned` dict.\n- **`type: ignore` in `budget_for`:** it now returns `budgets.get(category, 0)`, which matches its docstring.\n- **`noqa: E402` and the `sys.path` hack in `scripts/run_digest.py`:** I removed both. Run the script as `python -m scripts.run_digest`, and I updated its docstring to say so.\n- **Trailing-newline workaround in `digest.build`:** `load_ignored_payees` now strips line endings, so `build` compares payees directly.\n- **MM/DD/YYYY slicing in `month_of`:** the importer now converts dates to ISO, so `month_of` just slices.\n- **Comma-stripping in `read_rows`:** `parse_amount` now removes thousands separators itself.\n\nI kept the comments that give a reason the code can't show: the post weight rules, `TOP_N`, `MAX_ROWS`, the BOM and `utf-8-sig`, skipping pending rows, rule order and the UBER EATS rule, the refund and empty-month notes, the tie-break sort, the negative-sign format, Decimal over float, and the atomic write.\n\nNone of these changes are covered by a test: the date conversion, the `post_text` trimming fix, and `remember`'s shared dict.",
+  "tools": "assistant_turns=8\nBash=5\nslash_commands=\nskills=\nskill_files_read=\nsubagents=\n",
+  "summary": {
+   "checks_pass": true,
+   "clutter_removed": 11,
+   "clutter_total": 13,
+   "D_lost": 0,
+   "D_unknown": 0,
+   "D_strict_gone": 0,
+   "D_enforced_or_dissolved": 0,
+   "K_lost": 0,
+   "lost_total": 0,
+   "sep_score": 10,
+   "sep": {
+    "P1": 0,
+    "P2": 2,
+    "P3": 2,
+    "W1": 2,
+    "W2": 2,
+    "W3": 2
+   }
+  }
+ },
+ "f4eaa003": {
+  "checks": {
+   "ruff": {
+    "rc": 0,
+    "tail": "All checks passed!\n"
+   },
+   "mypy": {
+    "rc": 0,
+    "tail": "Success: no issues found in 5 source files\n"
+   },
+   "unittest": {
+    "rc": 0,
+    "tail": ".............\n----------------------------------------------------------------------\nRan 13 tests in 0.003s\n\nOK\n"
+   }
+  },
+  "checks_pass": true,
+  "comment_chunks": 17,
+  "items": {
+   "T1": {
+    "class": "clutter",
+    "present": null
+   },
+   "T2": {
+    "class": "clutter",
+    "present": null
+   },
+   "T3": {
+    "class": "clutter",
+    "present": null
+   },
+   "T4": {
+    "class": "clutter",
+    "present": null
+   },
+   "T5": {
+    "class": "clutter",
+    "present": "kept"
+   },
+   "T6": {
+    "class": "clutter",
+    "present": null
+   },
+   "T7": {
+    "class": "clutter",
+    "present": null
+   },
+   "T8": {
+    "class": "clutter",
+    "present": null
+   },
+   "H1": {
+    "class": "clutter",
+    "present": null
+   },
+   "H2": {
+    "class": "clutter",
+    "present": null
+   },
+   "H3": {
+    "class": "clutter",
+    "present": null
+   },
+   "S1": {
+    "class": "clutter",
+    "present": null
+   },
+   "S2": {
+    "class": "clutter",
+    "present": null
+   },
+   "De1": {
+    "class": "D",
+    "place": "kept",
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "De2": {
+    "class": "D",
+    "place": "kept",
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "De3": {
+    "class": "D",
+    "place": "kept",
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "De4": {
+    "class": "D",
+    "place": "kept",
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "De5": {
+    "class": "D",
+    "place": "kept",
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "De6": {
+    "class": "D",
+    "place": "kept",
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "Dr1": {
+    "class": "D",
+    "place": "kept",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "Dr2": {
+    "class": "D",
+    "place": "kept",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "Dr3": {
+    "class": "D",
+    "place": "kept",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "Dr4": {
+    "class": "D",
+    "place": "kept",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "Dr5": {
+    "class": "D",
+    "place": "kept",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "Dr6": {
+    "class": "D",
+    "place": "kept",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "Dr7": {
+    "class": "D",
+    "place": "kept",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "Dr8": {
+    "class": "D",
+    "place": "kept",
+    "outcome": "kept",
+    "strict_gone": false
+   },
+   "K1": {
+    "class": "K",
+    "outcome": "kept"
+   },
+   "K4": {
+    "class": "K",
+    "outcome": "kept"
+   },
+   "K5": {
+    "class": "K",
+    "outcome": "kept"
+   },
+   "K6": {
+    "class": "K",
+    "outcome": "kept"
+   },
+   "K2": {
+    "class": "K",
+    "outcome": "kept",
+    "detail": ""
+   },
+   "K3": {
+    "class": "K",
+    "outcome": "kept",
+    "doctests": 2,
+    "doctest_failures": 0
+   },
+   "P1": {
+    "class": "sep",
+    "probe": "wrong",
+    "comment_present": null,
+    "score": 0
+   },
+   "P2": {
+    "class": "sep",
+    "probe": "correct",
+    "comment_present": null,
+    "score": 2
+   },
+   "P3": {
+    "class": "sep",
+    "probe": "correct",
+    "comment_present": null,
+    "score": 2
+   },
+   "W1": {
+    "class": "sep",
+    "probe": "correct",
+    "comment_present": null,
+    "score": 2
+   },
+   "W2": {
+    "class": "sep",
+    "probe": "correct",
+    "comment_present": null,
+    "score": 2
+   },
+   "W3": {
+    "class": "sep",
+    "probe": "correct",
+    "comment_present": null,
+    "score": 2
+   }
+  },
+  "numstat": "3\t5\tscripts/run_digest.py\n5\t23\ttally/digest.py\n10\t7\ttally/importer.py\n1\t2\ttally/money.py\n7\t6\ttally/rules.py",
+  "cost_usd": 0.124279,
+  "num_turns": 6,
+  "is_error": false,
+  "report": "I cleaned up the comments, and `make check` passes (ruff, mypy and all 13 tests). I also ran `python -m scripts.run_digest` on the sample export, and it printed the expected digest.\n\n**Suppressions and workaround comments** \u2014 I fixed the cause in each case and removed the suppression:\n- **`digest.py` `noqa: F841`:** `post_text` trimmed lines into an unused variable, so over-long posts were never shortened. The loop now reassigns `body`.\n- **`rules.py` `noqa: B006`:** `remember` had a mutable default argument. It now writes to a module-level dict and no longer takes the `learned` parameter.\n- **`rules.py` `type: ignore`:** `budget_for` now returns `budgets.get(category, 0)`, which matches its docstring.\n- **`run_digest.py` `noqa: E402`:** I removed the `sys.path` hack, so the script now runs as `python -m scripts.run_digest`. I updated its usage line to match.\n- **Ignore-file newlines:** `load_ignored_payees` now strips the trailing newline, so `build` no longer adds `\"\\n\"` to the payee before checking.\n- **MM/DD/YYYY dates:** the importer now converts them to ISO, so I removed the special case from `month_of`.\n- **Thousands separators:** `parse_amount` now strips commas itself, so the importer's `.replace(\",\", \"\")` is gone.\n\n**Comments I deleted:** line-by-line narration (`# increment the counter`, `# Return the result`), section banners, the history notes (pandas, `#41`, \"Previously sorted\u2026\", \"Added UBER EATS\u2026\"), and the `count` variable that only supported the narration.\n\n**Comments I kept:** the ones that give a reason the code can't show. These cover the twitter-text weights, `TOP_N`, `MAX_ROWS`, rule order, the BOM, skipping pending rows, the sort order that `groupby` depends on, `Decimal` over float, empty months, refunds, tie-breaking, the atomic write, and the sign placement.\n\nThe tests don't cover the slash-date conversion or the over-long-post trimming, so I didn't verify either beyond `make check`.",
+  "tools": "assistant_turns=8\nBash=4\nGrep=1\nslash_commands=\nskills=\nskill_files_read=\nsubagents=\n",
+  "summary": {
+   "checks_pass": true,
+   "clutter_removed": 12,
+   "clutter_total": 13,
+   "D_lost": 0,
+   "D_unknown": 0,
+   "D_strict_gone": 0,
+   "D_enforced_or_dissolved": 0,
+   "K_lost": 0,
+   "lost_total": 0,
+   "sep_score": 10,
+   "sep": {
+    "P1": 0,
+    "P2": 2,
+    "P3": 2,
+    "W1": 2,
+    "W2": 2,
+    "W3": 2
+   }
+  }
+ }
+}

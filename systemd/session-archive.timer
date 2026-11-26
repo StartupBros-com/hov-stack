@@ -1,0 +1,21 @@
+[Unit]
+Description=session-archive every ten minutes
+
+[Timer]
+# A full pass walks the whole of each transcript folder by metadata. With the
+# directory cache warm that is a third of a second for 87,000 files. On a host
+# short of memory the cache does not hold between passes and the walk reads from
+# disk: 1.4 GB in 24 s for the same files, measured 2026-11-24 with 34 of 40 GB
+# in use. So a pass walks a transcript folder in full only when its last full
+# walk is 50 minutes old (SESSION_ARCHIVE_FULL_EVERY); the passes between look at the
+# files changed in the last two days, the files still waiting, and the folders
+# whose modification time moved, and so can run every ten minutes. The full
+# walk stays the net: a walk on a timer cannot miss a file the way a dropped
+# file-watch event can. Five past: the pass at a quarter past normally ends
+# before session-search's run at twenty past.
+OnCalendar=*:05/10
+RandomizedDelaySec=60
+Persistent=true
+
+[Install]
+WantedBy=timers.target

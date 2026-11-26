@@ -10,11 +10,15 @@ Repo LICENSE copied verbatim beside this file.
 path: skills/code-slop
 sha256 of upstream SKILL.md: d8cb86c721eb474a9eeb650543339e6a6696166ebf9db2c91456837adca7d17a
 
-Local changes (SKILL.md, plus sample data in two rules; the other rules/ files and
-metadata.json are byte-identical):
+Local changes (SKILL.md, metadata.json's description, and four rules; the other rules/
+files are byte-identical):
 - `rules/test-doesnt-throw.md` and `rules/test-mock-everything.md`: the sample email
   addresses in the code examples are `example.com` addresses here, so this repository's
   public-safety scan passes. A re-pull brings upstream's addresses back.
+- No pointer to the unported `technical-debt` skill (hov-stack v0.3.11): SKILL.md's
+  description and intro and `metadata.json`'s description say "metrics" without naming it,
+  and the links in `rules/comments-placeholder.md` and `rules/over-eng-dependency-creep.md`
+  are removed. A re-pull brings the dead pointers back.
 - `disable-model-invocation: true` added to the frontmatter — invoke-only, like every other
   third-party drop here. Upstream's description asks to trigger on "review for AI slop" and
   similar phrases; that auto-fire is deliberately off.

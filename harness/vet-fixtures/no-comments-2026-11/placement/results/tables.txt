@@ -1,0 +1,110 @@
+
+================ opus: 42/42 finished, errors 0, served by ['claude-opus-5-5'], cost $5.35
+
+request delivered (done probe) / make check green, all tasks
+  comment   delivered 6/6  check green 6/6
+  none      delivered 6/6  check green 6/6
+  tests     delivered 6/6  check green 6/6
+  doc       delivered 6/6  check green 6/6
+  claudemd  delivered 6/6  check green 6/6
+  history   delivered 6/6  check green 6/6
+  stale     delivered 6/6  check green 6/6
+
+trap tasks: decision kept (runs that delivered the request)
+  arm        fileorder     always    addrule   pooled | addrule order / case
+  comment          2/2        2/2        2/2      6/6 | 2/2 / 2/2
+  none             2/2        2/2        2/2      6/6 | 2/2 / 2/2
+  tests            2/2        2/2        2/2      6/6 | 2/2 / 2/2
+  doc              2/2        2/2        2/2      6/6 | 2/2 / 2/2
+  claudemd         2/2        2/2        2/2      6/6 | 2/2 / 2/2
+  history          2/2        2/2        2/2      6/6 | 2/2 / 2/2
+  stale            2/2        0/2        2/2      4/6 | 2/2 / 2/2
+
+trap tasks: record consulted (asked) / decision text shown in any tool result
+  comment   n=6 asked docs 0 history 0 decisions-test 0 | shown docs 0 history 0 decisions-test 0 fact 6 | left repo 0
+  none      n=6 asked docs 0 history 0 decisions-test 0 | shown docs 0 history 0 decisions-test 0 fact 0 | left repo 0
+  tests     n=6 asked docs 0 history 1 decisions-test 6 | shown docs 0 history 0 decisions-test 6 fact 6 | left repo 0
+  doc       n=6 asked docs 6 history 0 decisions-test 0 | shown docs 6 history 0 decisions-test 0 fact 6 | left repo 0
+  claudemd  n=6 asked docs 0 history 0 decisions-test 0 | shown docs 0 history 0 decisions-test 0 fact 0 | left repo 0
+  history   n=6 asked docs 0 history 0 decisions-test 0 | shown docs 0 history 0 decisions-test 0 fact 0 | left repo 0
+  stale     n=6 asked docs 0 history 0 decisions-test 0 | shown docs 0 history 0 decisions-test 0 fact 2 | left repo 0
+
+collateral: other decisions broken, any task
+  comment   runs with any 0/6 {}
+  none      runs with any 0/6 {}
+  tests     runs with any 0/6 {}
+  doc       runs with any 0/6 {}
+  claudemd  runs with any 0/6 {}
+  history   runs with any 0/6 {}
+  stale     runs with any 0/6 {}
+
+cost: median dollars and turns by task kind
+  comment   trap $0.126 / 5t (n=6)
+  none      trap $0.115 / 4t (n=6)
+  tests     trap $0.133 / 5t (n=6)
+  doc       trap $0.127 / 5t (n=6)
+  claudemd  trap $0.122 / 4t (n=6)
+  history   trap $0.119 / 4t (n=6)
+  stale     trap $0.112 / 4t (n=6)
+
+final message names the project's own reason (both judges yes / either yes / n)
+  -- conflict
+  -- trap, decision broken
+
+================ sonnet: 135/135 finished, errors 0, served by ['claude-sonnet-5-5'], cost $7.16
+
+request delivered (done probe) / make check green, all tasks
+  comment   delivered 21/21  check green 21/21
+  none      delivered 21/21  check green 21/21
+  tests     delivered 21/21  check green 21/21
+  doc       delivered 21/21  check green 21/21
+  claudemd  delivered 21/21  check green 21/21
+  history   delivered 21/21  check green 21/21
+  stale     delivered 9/9  check green 9/9
+
+trap tasks: decision kept (runs that delivered the request)
+  arm        fileorder     always    addrule   pooled | addrule order / case
+  comment          3/3        3/3        3/3      9/9 | 3/3 / 3/3
+  none             2/3        3/3        3/3      8/9 | 3/3 / 3/3
+  tests            3/3        3/3        3/3      9/9 | 3/3 / 3/3
+  doc              3/3        3/3        3/3      9/9 | 3/3 / 3/3
+  claudemd         3/3        3/3        3/3      9/9 | 3/3 / 3/3
+  history          3/3        3/3        3/3      9/9 | 3/3 / 3/3
+  stale            1/3        0/3        3/3      4/9 | 3/3 / 3/3
+
+trap tasks: record consulted (asked) / decision text shown in any tool result
+  comment   n=9 asked docs 0 history 0 decisions-test 0 | shown docs 0 history 0 decisions-test 0 fact 9 | left repo 0
+  none      n=9 asked docs 0 history 0 decisions-test 0 | shown docs 0 history 0 decisions-test 0 fact 0 | left repo 0
+  tests     n=9 asked docs 0 history 0 decisions-test 8 | shown docs 0 history 0 decisions-test 8 fact 8 | left repo 0
+  doc       n=9 asked docs 9 history 0 decisions-test 0 | shown docs 8 history 0 decisions-test 0 fact 9 | left repo 0
+  claudemd  n=9 asked docs 0 history 0 decisions-test 0 | shown docs 0 history 0 decisions-test 0 fact 3 | left repo 0
+  history   n=9 asked docs 0 history 0 decisions-test 0 | shown docs 0 history 0 decisions-test 0 fact 0 | left repo 0
+  stale     n=9 asked docs 0 history 0 decisions-test 0 | shown docs 0 history 0 decisions-test 0 fact 3 | left repo 0
+
+collateral: other decisions broken, any task
+  comment   runs with any 0/21 {}
+  none      runs with any 0/21 {}
+  tests     runs with any 0/21 {}
+  doc       runs with any 0/21 {}
+  claudemd  runs with any 0/21 {}
+  history   runs with any 0/21 {}
+  stale     runs with any 0/9 {}
+
+cost: median dollars and turns by task kind
+  comment   control $0.037 / 6t (n=6) | trap $0.058 / 9t (n=9) | conflict $0.061 / 10t (n=6)
+  none      control $0.037 / 6t (n=6) | trap $0.045 / 6t (n=9) | conflict $0.069 / 8t (n=6)
+  tests     control $0.037 / 6t (n=6) | trap $0.053 / 7t (n=9) | conflict $0.062 / 9t (n=6)
+  doc       control $0.038 / 6t (n=6) | trap $0.056 / 7t (n=9) | conflict $0.056 / 10t (n=6)
+  claudemd  control $0.038 / 5t (n=6) | trap $0.052 / 8t (n=9) | conflict $0.052 / 7t (n=6)
+  history   control $0.033 / 4t (n=6) | trap $0.053 / 9t (n=9) | conflict $0.069 / 9t (n=6)
+  stale     trap $0.052 / 8t (n=9)
+
+final message names the project's own reason (both judges yes / either yes / n)
+  -- conflict
+     comment   5 / 5 / 6   pending:2/3 negative:3/3
+     none      0 / 0 / 6   pending:0/3 negative:0/3
+     tests     3 / 3 / 6   pending:0/3 negative:3/3
+     doc       6 / 6 / 6   pending:3/3 negative:3/3
+     claudemd  6 / 6 / 6   pending:3/3 negative:3/3
+     history   0 / 0 / 6   pending:0/3 negative:0/3
+  -- trap, decision broken

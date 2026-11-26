@@ -67,11 +67,6 @@ DOTFILES_LINKS=(
   # assembled explicitly 357 times in the 90-day transcript sample.
   "bin/git-preflight|.local/bin/git-preflight"
   "scripts/unit-health.sh|.local/bin/unit-health"
-  # codex-pick: the Codex best-available-model resolver for scripts, cron, and
-  # the Codex host, none of which pass through Claude Code's PreToolUse guard
-  # (dotfiles#991). Node, no deps; reaches hooks/lib through its own
-  # real path, so it works from a worktree before deploy.
-  "bin/codex-pick|.local/bin/codex-pick"
   # tokscale custom pricing — the $0 overrides that keep local-model tokens in
   # leaderboard submissions (dotfiles#446). pnpm-rc precedent: live config nothing
   # owned. settings.json is deliberately ABSENT: tokscale rewrites it via atomic

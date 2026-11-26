@@ -26,8 +26,16 @@ remedy is writing commands in verifiable shapes.
 
 ## Quick rules (full text; `CLAUDE.md` Global Rules carries the short form)
 
-The always-loaded file keeps one line ("put multi-step work in a script file and
-run `bash <file>`") and points here for the rest:
+The always-loaded file keeps one line ("write plain, separate commands; `bash <file>`
+for a refused shape") and points here for the rest:
+
+- Commit, push and open a PR as plain commands, one each, in another repo too. On CC
+  2.1.332 (2026-11-25), a hov-stack worktree session ran these against a dotfiles
+  worktree with no refusal: `git -C <that worktree> add <paths>`,
+  `git -C <that worktree> commit -F <file>`, `git -C <that worktree> push -u origin
+  <branch>`, and `gh pr create --repo <owner/name> --head <branch> --body-file <file>`.
+  The check guards the session's own repo's shared checkout (the `-C` and `cd`
+  refusals below).
 
 - Shell scratch lives in `/tmp/<unique-dir>/`: point redirects (`>`, `2>`) and
   scratch deletion there, and start a fresh uniquely-named dir instead of
@@ -37,7 +45,7 @@ run `bash <file>`") and points here for the rest:
   subagents, resumed sessions), and nothing from inside the session relaxes it.
 - Refused: `$( )`/backticks in argument position, `${VAR:-…}` modifiers,
   unquoted heredoc delimiters, loop-var use, package-manager operands
-  (`pnpm typecheck`, `npx tsc`), a bare `hash` token.
+  (`pnpm typecheck`, `npx tsc`), an argument that is a builtin's name (`eval`, `source`, `hash`…).
 - Fine: `&&`/`;`/pipe chains; `<<'EOF'`, except when the body has a quote
   inside `{}` (JSON, a Python dict) or a redirect precedes `<<` after
   `&&`/`||`, as in `mkdir -p d && cat > d/f <<'EOF'`. shape-rewrite runs both
@@ -51,6 +59,12 @@ run `bash <file>`") and points here for the rest:
   through a `bash -c` string.
 
 ## The denial messages, verbatim (grep for these words → this doc)
+
+These are a sample. Every message opens "This session is isolated in the worktree"
+("This agent is…" in a subagent), and `papercut family show
+worktree-isolation-unverifiable --json` lists every variant seen. Count refusals on "is
+isolated in the worktree", never on one message's words: in the 7 days to 2026-11-25,
+a "too complex to verify" census missed 98 "runs a string through" refusals.
 
 Too-complex (the 7.1k-event message; also emitted by the Monitor tool):
 
@@ -73,7 +87,7 @@ Git redirected out of the worktree:
 > run it — a worktree-isolated session's git operations must target its own worktree. Run
 > the equivalent from `<worktree>` without the redirect.
 
-A bare `hash` token anywhere in the argv (its own message — the verifier models the shell
+An argument that is a string-running builtin's name, `hash` and the others in its DENY section (its own message — the verifier models the shell
 builtin, which can rewrite command lookup):
 
 > This session is isolated in the worktree `<worktree>`, but this command **runs a string
@@ -184,7 +198,7 @@ clear) and either fold the result into the row directly (refusal reconfirmed) or
 retire the row and re-assess the `interp` family's live necessity (refusal gone for
 good).
 
-### DENY — the `hash` token (its own message)
+### DENY — a builtin's name as an argument, such as `hash` (its own message)
 
 | Shape | Probe |
 |---|---|
@@ -199,6 +213,16 @@ argument that happens to *be* the word triggers it. Practical effect: **never gr
 bare word `hash` in an isolated session** — search for a longer token (`payload-hash`,
 `hash_`, `hashes`) instead. This confirms, and sharpens to token level, the field report in
 memory note `pnpm-is-blocked-in-worktree-isolated-sessions`.
+
+**Wider than `hash`.** The same refusal, naming the word, fires for `eval`, `source`,
+`enable` and `alias` (probed 2026-11-25, CC 2.1.332, isolated session), and refusals in the
+week to 11-25 also named `complete`, `compgen`, `fc`, `trap` and `bind`; there may be more.
+It also fires for a path that ends in one, with or without a trailing `/`: `ls /tmp/x/source`
+and `ls /tmp/x/source/` deny, while `ls /tmp/x/source/y`, `echo 'def eval'` and
+`echo evaluate sourced enabled` pass. `echo eval` and `echo 'source'` deny, so quoting does
+not help. In the week to 2026-11-25 this family drew 98 refusals; in 96 the word was only an
+argument (a search pattern or a path). `eval` drew 35, `source` 32 and `hash` 1. Search for a
+longer token, and name a file inside such a folder rather than the folder.
 
 The package-manager rows discriminate cleanly and across three runners: `pnpm --version`,
 `pnpm --filter startupbros --version` and `npx --version` all pass, and
@@ -942,8 +966,10 @@ What the official docs and issue tracker add on top of the probes:
    hold in any release (unresolved, non-`/tmp`, a loop over words read at run time,
    `$HOME` targets). The literal-word-loop and `2> file` refusals are 0.15.3 limits,
    left unpinned so a release that lifts them can still be promoted.
-6. **Anything genuinely multi-step → put it in a script file and run the file.** A script's
-   own loops, `$( )` and redirects are never parsed; only the invoking command is
+6. **A shape you cannot split (a loop, `$( )`) → put it in a script file and run the file.** Commit,
+   push and `gh pr create` stay plain commands, one each (Quick rules): in the week to
+   2026-11-25, 174 of 289 PR-opening script files had no refused command before them.
+   A script's own loops, `$( )` and redirects are never parsed; only the invoking command is
    (`bash /abs/path/runner.sh` — verified PASS, and how the 52-suite local test run in this
    PR was executed).
    Be honest about what that is: **the verifier does not inspect script contents**, so this
@@ -997,6 +1023,11 @@ planted-negative on issue #534 makes prescribing any of them a review failure:
   (51 sessions/wk).
 - Demoted from `CLAUDE.md` (2026-09-21, dotfiles#1286): "(Fleet's #1 denial
   cluster, 51 sessions/wk, before this line — 2026-08.)"
+- CLAUDE.md's refused list, measured 2026-11-25 (CC 2.1.332, Opus `claude -p -w` arms
+  with no user hooks or CLAUDE.md, 3 runs per cell): without it, a one-word search for
+  `source` was refused 3 of 3 times, against 0 with it. That task was added after three
+  generic tasks showed no difference. Method:
+  `docs/solutions/best-practices/start-a-worktree-rule-arm-with-claude-p-w-and-prove-the-checker-refuses-before-scoring.md`.
 - Verifier behavior is version-bound: re-probe the deny rows on major CC upgrades before
   trusting this table (the bundle is closed; nothing pins these semantics).
 
@@ -1025,8 +1056,12 @@ refusal itself):
    that the substitution is dangerous. At 7.1k events/30d on one fleet, extending the
    existing assignment-value tolerance to arguments whose substituted command is read-only
    would remove most of the friction without weakening the git-targeting checks.
-3. **The `hash` token match is argument-position-blind:** `echo hash` and
-   `grep -rn "hash" file` are both refused with "runs a string through hash". Matching the
-   builtin only in command position — not as any argv element, and not inside a quoted
-   search pattern — would fix a refusal that fires on ordinary code search in any repo
-   whose code mentions hashes.
+3. **The builtin-name match is argument-position-blind:** an argument that is, or is a
+   path ending in, a string-running builtin's name is refused with "runs a string through
+   <word>", for every word in the DENY section above (widened 2026-11-25, CC 2.1.332):
+   `echo hash`, `grep -rn "hash" file` and `grep -rn source config/` are all refused.
+   Matching the builtin only in command position — not as any argv element, and not
+   inside a quoted search pattern — would fix a refusal that fires on ordinary code search
+   in any repo whose code mentions one of those words.
+   - This one is filed upstream as anthropics/claude-code#95611 (open).
+   - A 2.1.332 reproduction and our refusal counts were added as a comment there on 2026-11-26.

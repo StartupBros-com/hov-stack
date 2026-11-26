@@ -34,20 +34,91 @@ holds is not sent:
   to its check wait, and exits pending naming the holder. A direct
   `gh pr merge`, or an auto-merge armed before the freeze, is not held.
 - A deploy lock refuses a second deploy.
-- Recipients are found by repository and branch with
-  `hov ls --repo <name> --json`, never by name. Claude Code's listing keeps
-  a session's launch directory, so hov reads the newest directory from its
-  transcript.
+- Recipients are chosen by repository and branch with
+  `hov ls --repo <name> --json`, not guessed from session names. Claude
+  Code's listing keeps a session's launch directory, so hov reads the newest
+  directory from its transcript. The chosen row is then addressed by name:
+  its `send_to` is what `SendMessage` takes (hov 0.1.12).
+- A row with no `send_to` is a session with no running process, and
+  `ListAgents` does not show it: `SendMessage` has no way to look it up. A
+  session that has finished is listed only by `hov ls --all` (hov 0.1.13), as
+  a `finished` row: when it last ran, its repository and branch, the pull
+  requests linked from its output, its transcript and the files it wrote into
+  a deliverables folder. Since hov 0.1.14 the row also carries `addr`, and a
+  finished session can be reached (next section). When a task names a session
+  to talk to and no row matches it, say so in the report.
 - News that can wait goes on the PR or issue it concerns, and
   `notify_when_idle` answers "is that session done yet".
 
-Re-measure due on or after 2026-12-08 (`harness/deferral-watchlist.tsv`,
-row `peer-wake-remeasure`). If merge and hold notices are still above 10% of
-wakes, propose a no-broadcast refusal in `peer-loop-guard` (the same message
-to 3 or more sessions in one turn). If FYIs and acks are still above 10%,
-propose a sender-side refusal for those kinds. Countermetric: PRs left
-conflicting or blocked for more than 24 hours while their session was live.
-Both hook changes need the operator's go.
+Re-measured on 2026-11-24, 70 hours after the rule changed (numbers on
+hov-stack#844; `harness/deferral-watchlist.tsv`, row `peer-wake-remeasure`).
+The lines were set in advance: above 10% of wakes for merge and hold notices
+meant proposing a no-broadcast refusal in `peer-loop-guard`, above 10% for
+FYIs and acks meant proposing a sender-side refusal for those kinds, and
+either hook change needs the operator's go.
+
+- Peer wakes fell from 79.6 a day to 7.9.
+- Merge and hold notices are 1 of 23 wakes, so no refusal is proposed.
+- FYIs and acks are 8 of 23, about 2.7 a day against about 17.5 before. That
+  is above the line, so the sender-side refusal was proposed. The operator
+  ruled on 2026-11-25 to leave the rule and the hooks as they are (ruling 5
+  on hov-stack#844), so it is not built: half of those messages changed the
+  receiver's work, and a hook cannot tell them from the rest without a model
+  call.
+- PRs left conflicting or stuck did not rise: 1 and 0 in 204 merged.
+- `merge-freeze.sh hold` had not been run once.
+
+## Decision 2026-11-25: a finished session can be reached (hov-stack#902)
+
+Claude Code's messaging stops at the process: a background session that
+finished keeps an idle process for about an hour, and after that `SendMessage`
+answers "No agent named ... is reachable". hov 0.1.14 covers the rest, and
+says so where the gap is met.
+
+| The session is | Reached by |
+| --- | --- |
+| running, mid-turn | `SendMessage` (read at its next tool round), or `hov send` (handed over by its hook at its next tool call) |
+| running, idle | `SendMessage` (starts a turn), or `hov send` (the idle wake starts a turn) |
+| finished, no process | `hov send --to <addr>`: hov restarts it with `claude --bg --resume` on a fixed sentence and it reads the mail. `hov ask <name-or-id> "question"`: a read-only copy answers, nothing is restarted |
+| no process, not `done`, or its launch folder is gone | `hov ask` only; `hov send` leaves mail that waits, and says so |
+
+- Cheapest first: read what the row points at, then `hov ask`, then
+  `hov send`. An ask or a restart loads the whole conversation, which for a
+  long session is minutes and hundreds of thousands of input tokens.
+- A restarted session reads the mail as peer text. It carries out a request
+  that fits its own task and declines one that does not, under its own
+  permission mode; one that asks for permission waits at the prompt in the
+  agents view.
+- `hov send` typed as a command is what `peer-loop-guard` counts, so a
+  restart is counted as a send. A `hov send` inside a script file is not
+  seen by the guard; hov's own per-session limits (one wake or restart per
+  30 s, 12 an hour, 48 a day) still hold there.
+- hov's PostToolUse hook adds one line after `ListAgents` (finished sessions
+  are not in that list) and after a `SendMessage` that reached nobody because
+  the session it named has no process, each with the two commands above.
+  Since hov 0.1.15 the line is written even when another session holds the
+  mailbox database locked; the mail itself then waits for the next hook.
+- This reverses decisions 3 and 4 of 2026-11-25 on hov-stack#844 ("no
+  command to ask a finished session", "no resuming a finished session").
+  `HOV_RESTART=0` in a sender's environment turns restarts off for that
+  sender only.
+- The rules sentence that said a session with no running process "cannot be
+  messaged" lost that clause on 2026-11-26 (hov-stack#915). A fuller sentence
+  naming the two commands was tested and not adopted: it would put the rules
+  file over its size ceiling (`tests/test_claude_md_budget.py`), and the hook
+  line already says it where a session meets the gap.
+
+Not shown as of 2026-11-26: a use by a session other than the author's (none
+had called `ListAgents`, had a send reach nobody, or run `hov ask` or a
+restart in the first hours after the merge), the hook lines from a
+marketplace-installed copy, and a restart on Claude Code older than 2.1.332.
+Open: what holds the mailbox database locked past the hook's 2 s wait
+(hov-stack#925).
+
+Observed on throwaway sessions on 2026-11-25 (Claude Code 2.1.332): a
+restart took under a second and a reply came back in 35 to 52 s; a request
+inside the session's own task was carried out, one outside it was declined;
+a session that asks for permission waited 57 s at its prompt until approved.
 
 ## Decision 2026-08-08: removed `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`
 

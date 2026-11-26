@@ -4,13 +4,8 @@
  * cross-model-catalog-check — standalone auditor behind harness-doctor's
  * check 33 (#1355 / #1356 round 3).
  *
- * Extracted from harness-doctor.sh's inline bash block: the review found
- * that block re-deriving policy (catalog freshness, model selectability,
- * plugin-version resolution) the harness already owns in one place
- * (hooks/lib/codex-model-resolver.js). This script owns that
- * comparison; the doctor becomes a thin `timeout` + `jq` consumer of its
- * JSON (same shape as memory-audit.py / skills-beads-sweep-check.py /
- * wf-pin-audit.py --json elsewhere in this doctor).
+ * Owns the catalog policy and plugin-version comparison for check 33.
+ * The doctor consumes its JSON through timeout and jq.
  *
  * Contract: always prints exactly one JSON object to stdout and exits 0 —
  * findings are data, not an exit code; the doctor turns findings into WARNs.
@@ -19,25 +14,17 @@
  * one of repos.checked / skipped_other_peer / skipped_no_plugin / unreadable,
  * and those four always sum to repos.discovered (the doctor checks the sum).
  *
- * "One resolver, two entry points"
- * (docs/solutions/best-practices/pick-the-best-available-model-from-live-
- * catalog-and-per-meter-usage.md): the served/selectable model set and its
- * ranking come from hooks/lib/codex-model-resolver.js's exported
- * readCatalogCache/availableListed/candidates/isListed — never re-derived
- * here. "Selectable" means an explicit pin the ChatGPT-login (OAuth) lane
- * can keep: availableListed(), including models with upgrade pointers.
- * Recommended replacements use candidates(): ranked, deprecations followed. The
- * resolver's supported_in_api filter belongs only to its opt-in API-key lane
- * (apiCandidate, CODEX_PICK_API_LANE=1) and is deliberately not applied here.
+ * The catalog policy lives here. availableListed() defines which explicit
+ * pins are selectable, including models with upgrade pointers.
+ * candidates() ranks recommended replacements and follows deprecations.
  */
 
 const fs = require('node:fs');
 const path = require('node:path');
 
-const resolver = require(path.join(path.dirname(fs.realpathSync(__filename)), '..', 'hooks', 'lib', 'codex-model-resolver.js'));
-
 const DAY_MS = 24 * 60 * 60 * 1000;
 const STALE_DAYS = 30;
+const CATALOG_CACHE_MAX_AGE_MS = 6 * 60 * 60 * 1000;
 
 // ---------------------------------------------------------------------------
 // CLI
@@ -176,6 +163,71 @@ function ceKey(raw, key) {
 // missing" items)
 // ---------------------------------------------------------------------------
 
+function readCatalogCache(cachePath, nowMs) {
+  try {
+    const cache = JSON.parse(fs.readFileSync(cachePath, 'utf8'));
+    if (!cache || !Array.isArray(cache.models)) return null;
+    const fetchedAt = typeof cache.fetched_at === 'string' ? Date.parse(cache.fetched_at) : NaN;
+    const fresh = Number.isFinite(fetchedAt) && nowMs - fetchedAt >= 0 && nowMs - fetchedAt < CATALOG_CACHE_MAX_AGE_MS;
+    return {
+      models: cache.models,
+      fetchedAt: Number.isFinite(fetchedAt) ? new Date(fetchedAt).toISOString() : null,
+      clientVersion: typeof cache.client_version === 'string' ? cache.client_version : null,
+      fresh,
+    };
+  } catch {
+    return null;
+  }
+}
+
+const priorityOf = (m) => (Number.isFinite(m && m.priority) ? m.priority : Number.POSITIVE_INFINITY);
+const isListed = (m) => m && typeof m.slug === 'string' && m.slug && m.visibility === 'list';
+
+/** Explicit-state read of one rate_limit object: ok | blocked | uncertain. */
+function rateLimitState(rateLimit) {
+  if (!rateLimit || typeof rateLimit !== 'object' || Array.isArray(rateLimit)) return 'uncertain';
+  const hasAllowed = typeof rateLimit.allowed === 'boolean';
+  const hasReached = typeof rateLimit.limit_reached === 'boolean';
+  if (!hasAllowed && !hasReached) return 'uncertain';
+  if (rateLimit.allowed === false || rateLimit.limit_reached === true) return 'blocked';
+  return 'ok';
+}
+
+/** Which meter governs a model, and its explicit state. */
+function availability(model, usage) {
+  if (!usage || typeof usage !== 'object') return { separate: false, state: 'uncertain' };
+  const extras = Array.isArray(usage.additional_rate_limits) ? usage.additional_rate_limits : [];
+  const own = extras.find((a) => a && typeof a === 'object' && a.limit_name && a.limit_name === model.display_name);
+  if (own) return { separate: true, state: rateLimitState(own.rate_limit) };
+  return { separate: false, state: rateLimitState(usage.rate_limit) };
+}
+
+/** Listed models whose governing meter is explicitly open, catalog order. */
+function availableListed(catalog, usage) {
+  return (Array.isArray(catalog) ? catalog : []).filter((m) => isListed(m) && availability(m, usage).state === 'ok');
+}
+
+/**
+ * Listed, available models sorted best-first, with deprecations followed when
+ * the replacement is itself available. Pure: (catalog, usage) -> models.
+ */
+function candidates(catalog, usage) {
+  const listed = (Array.isArray(catalog) ? catalog : []).filter(isListed);
+  const bySlug = new Map(listed.map((m) => [m.slug, m]));
+  const available = (m) => availability(m, usage).state === 'ok';
+  const out = new Map();
+  for (const m of listed) {
+    if (!available(m)) continue;
+    let pick = m;
+    const target = m.upgrade && typeof m.upgrade === 'object' && typeof m.upgrade.model === 'string'
+      ? bySlug.get(m.upgrade.model)
+      : null;
+    if (target && available(target)) pick = target;
+    if (!out.has(pick.slug)) out.set(pick.slug, pick);
+  }
+  return [...out.values()].sort((a, b) => priorityOf(a) - priorityOf(b));
+}
+
 function classifyCatalog(catalogPath, nowMs) {
   const findings = [];
   const unreadable = (detail) => {
@@ -209,20 +261,20 @@ function classifyCatalog(catalogPath, nowMs) {
   // second read or parse fails — which the checks above just ruled out unless
   // the file changed in between. Fall back to the payload parsed here rather
   // than turning that race into a spurious "no fetched_at".
-  const cache = resolver.readCatalogCache(catalogPath, nowMs);
+  const cache = module.exports.readCatalogCache(catalogPath, nowMs);
   const models = cache ? cache.models : parsed.models;
   const fetchedAtRaw = cache ? cache.fetchedAt : (typeof parsed.fetched_at === 'string' ? parsed.fetched_at : null);
   const modelsBySlug = new Map(models.filter((m) => m && typeof m.slug === 'string').map((m) => [m.slug, m]));
   const served = [...modelsBySlug.keys()];
 
-  // Match selectModel's explicit-pin policy: available listed models stay,
-  // upgrade pointer or not. Only recommendations follow upgrades and rank.
+  // An explicit pin can keep any available listed model, including models
+  // with an upgrade pointer. Only recommendations follow upgrades and rank.
   // Synthetic always-open usage neutralizes account quota for both helpers:
   // no per-model additional_rate_limits entry matches, so every listed
   // model uses the open main meter. This audits catalog policy, not quota.
   const SYNTHETIC_USAGE = { rate_limit: { allowed: true } };
-  const ranked = resolver.candidates(models, SYNTHETIC_USAGE);
-  const selectable = resolver.availableListed(models, SYNTHETIC_USAGE).map((m) => m.slug);
+  const ranked = candidates(models, SYNTHETIC_USAGE);
+  const selectable = availableListed(models, SYNTHETIC_USAGE).map((m) => m.slug);
 
   let ageDays = null;
   let state = 'ok';
@@ -262,7 +314,7 @@ function classifyCatalog(catalogPath, nowMs) {
 function reasonNotSelectable(slug, catalog) {
   const m = catalog.modelsBySlug.get(slug);
   if (!m) return 'not in the catalog payload';
-  if (!resolver.isListed(m)) return 'hidden';
+  if (!isListed(m)) return 'hidden';
   return null;
 }
 
@@ -429,7 +481,10 @@ function resolvePeer(repoPath, repoRealPath, layers, ctx) {
   return { resolved, findings, plugin };
 }
 
-module.exports = { parseArgs, resolveOptions, statState, ceKey, classifyCatalog, reasonNotSelectable, loadRegistry, loadPluginScript, resolveApplicablePlugin, resolvePeer, readFileState, readDirState, audit, main };
+module.exports = { parseArgs, resolveOptions, statState, ceKey, classifyCatalog, reasonNotSelectable, loadRegistry, loadPluginScript, resolveApplicablePlugin, resolvePeer, readFileState, readDirState, audit, main,
+  readCatalogCache, CATALOG_CACHE_MAX_AGE_MS, isListed, priorityOf,
+  availability, rateLimitState, availableListed, candidates,
+};
 
 // ---------------------------------------------------------------------------
 // Per-repo audit. Returns exactly one bucket: checked, skipped_other_peer,

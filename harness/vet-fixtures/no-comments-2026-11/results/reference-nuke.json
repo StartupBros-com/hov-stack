@@ -1,0 +1,266 @@
+{
+ "summary": {
+  "checks_pass": true,
+  "clutter_removed": 12,
+  "clutter_total": 13,
+  "D_lost": 14,
+  "D_unknown": 0,
+  "D_strict_gone": 14,
+  "D_enforced_or_dissolved": 0,
+  "K_lost": 3,
+  "lost_total": 17,
+  "sep_score": 3,
+  "sep": {
+   "P1": 1,
+   "P2": 1,
+   "P3": 1,
+   "W1": 0,
+   "W2": 0,
+   "W3": 0
+  }
+ },
+ "grade": {
+  "checks": {
+   "ruff": {
+    "rc": 0,
+    "tail": "All checks passed!\n"
+   },
+   "mypy": {
+    "rc": 0,
+    "tail": "Success: no issues found in 5 source files\n"
+   },
+   "unittest": {
+    "rc": 0,
+    "tail": ".............\n----------------------------------------------------------------------\nRan 13 tests in 0.003s\n\nOK\n"
+   }
+  },
+  "checks_pass": true,
+  "comment_chunks": 4,
+  "items": {
+   "T1": {
+    "class": "clutter",
+    "present": null
+   },
+   "T2": {
+    "class": "clutter",
+    "present": null
+   },
+   "T3": {
+    "class": "clutter",
+    "present": null
+   },
+   "T4": {
+    "class": "clutter",
+    "present": null
+   },
+   "T5": {
+    "class": "clutter",
+    "present": "kept"
+   },
+   "T6": {
+    "class": "clutter",
+    "present": null
+   },
+   "T7": {
+    "class": "clutter",
+    "present": null
+   },
+   "T8": {
+    "class": "clutter",
+    "present": null
+   },
+   "H1": {
+    "class": "clutter",
+    "present": null
+   },
+   "H2": {
+    "class": "clutter",
+    "present": null
+   },
+   "H3": {
+    "class": "clutter",
+    "present": null
+   },
+   "S1": {
+    "class": "clutter",
+    "present": null
+   },
+   "S2": {
+    "class": "clutter",
+    "present": null
+   },
+   "De1": {
+    "class": "D",
+    "place": null,
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "lost",
+    "strict_gone": true
+   },
+   "De2": {
+    "class": "D",
+    "place": null,
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "lost",
+    "strict_gone": true
+   },
+   "De3": {
+    "class": "D",
+    "place": null,
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "lost",
+    "strict_gone": true
+   },
+   "De4": {
+    "class": "D",
+    "place": null,
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "lost",
+    "strict_gone": true
+   },
+   "De5": {
+    "class": "D",
+    "place": null,
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "lost",
+    "strict_gone": true
+   },
+   "De6": {
+    "class": "D",
+    "place": null,
+    "probe_unmutated": "correct",
+    "mutant_applied": true,
+    "mutant_caught_by_checks": false,
+    "mutant_probe": "wrong",
+    "outcome": "lost",
+    "strict_gone": true
+   },
+   "Dr1": {
+    "class": "D",
+    "place": null,
+    "outcome": "lost",
+    "strict_gone": true
+   },
+   "Dr2": {
+    "class": "D",
+    "place": null,
+    "outcome": "lost",
+    "strict_gone": true
+   },
+   "Dr3": {
+    "class": "D",
+    "place": null,
+    "outcome": "lost",
+    "strict_gone": true
+   },
+   "Dr4": {
+    "class": "D",
+    "place": null,
+    "outcome": "lost",
+    "strict_gone": true
+   },
+   "Dr5": {
+    "class": "D",
+    "place": null,
+    "outcome": "lost",
+    "strict_gone": true
+   },
+   "Dr6": {
+    "class": "D",
+    "place": null,
+    "outcome": "lost",
+    "strict_gone": true
+   },
+   "Dr7": {
+    "class": "D",
+    "place": null,
+    "outcome": "lost",
+    "strict_gone": true
+   },
+   "Dr8": {
+    "class": "D",
+    "place": null,
+    "outcome": "lost",
+    "strict_gone": true
+   },
+   "K1": {
+    "class": "K",
+    "outcome": "lost"
+   },
+   "K4": {
+    "class": "K",
+    "outcome": "lost"
+   },
+   "K5": {
+    "class": "K",
+    "outcome": "kept"
+   },
+   "K6": {
+    "class": "K",
+    "outcome": "lost"
+   },
+   "K2": {
+    "class": "K",
+    "outcome": "kept",
+    "detail": ""
+   },
+   "K3": {
+    "class": "K",
+    "outcome": "kept",
+    "doctests": 2,
+    "doctest_failures": 0
+   },
+   "P1": {
+    "class": "sep",
+    "probe": "wrong",
+    "comment_present": "kept",
+    "score": 1
+   },
+   "P2": {
+    "class": "sep",
+    "probe": "wrong",
+    "comment_present": "kept",
+    "score": 1
+   },
+   "P3": {
+    "class": "sep",
+    "probe": "wrong",
+    "comment_present": "kept",
+    "score": 1
+   },
+   "W1": {
+    "class": "sep",
+    "probe": "wrong",
+    "comment_present": null,
+    "score": 0
+   },
+   "W2": {
+    "class": "sep",
+    "probe": "raised",
+    "comment_present": null,
+    "score": 0
+   },
+   "W3": {
+    "class": "sep",
+    "probe": "wrong",
+    "comment_present": null,
+    "score": 0
+   }
+  },
+  "numstat": "0\t2\ttally/__init__.py\n2\t21\ttally/digest.py\n3\t11\ttally/importer.py\n0\t4\ttally/money.py\n0\t5\ttally/rules.py"
+ }
+}

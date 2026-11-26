@@ -68,20 +68,21 @@ The one rule that replaces the entire file-reservation protocol:
 Subagents and Workflow agents inherit the session's worktree shape-checker — the
 fleet's #1 measured denial source (7.4k "too complex" refusals/30d; a 2026-08-28
 stratified sample scored 13/15 shape refusals as false positives on safe work).
-The checker is upstream (Claude Code bundle; dotfiles#436), so route around it
+The checker is upstream (it ships in the Claude Code bundle), so route around it
 in every dispatch prompt:
 
-- Multi-step or loop-bearing work goes in a script file written with the
-  file-write tool, run as `bash /tmp/<scratch>/<name>.sh` — plain
-  `bash <script-file>` always passes; inline for-loops, `$( )` in argument
-  position, and compound chains may not.
+- Plain, separate commands pass, plain `&&`/`;`/pipe chains included. A
+  refused shape (for example a loop variable, `$( )` in an argument, or an
+  argument that is a builtin name like `eval` or `source`) goes in a script file
+  written with the file-write tool, run as `bash /tmp/<scratch>/<name>.sh`;
+  never `bash -c`.
 - Never prefix `HOME=` or other env vars onto complex commands — a
   `HOME=… cargo build` with no git in it is still refused for "injecting git
   configuration."
 - Keep `git -C` inside the session worktree or `/tmp` clones; sibling-worktree
   reads get refused.
 
-Measured effect: dispatches carrying this preamble ran 0 shape refusals across
+Measured effect of the earlier wording: dispatches carrying it ran 0 shape refusals across
 7 agents (2026-08-28); the two dispatches before it each lost a stage to the
 checker.
 
@@ -118,8 +119,8 @@ Full mechanism: `harness/gh-tracking-and-claims.md`.
   or command), TIMEBOX (dollars or minutes), FORBIDDEN, REPORT (the return shape, with a literal example
   when parallel workers must agree on it), STANDING (what to do when blocked). TIMEBOX and FORBIDDEN are
   never empty; the rest may be one line. Two parallel workers once shipped a writer storing objects and a
-  reader parsing epochs with both suites green because their packets never pinned the shape (PR #1167);
-  the dispatcher's child prompt used this schema (dotfiles#1202) until the dispatcher's retirement in #1873.
+  reader parsing epochs with both suites green because their packets never pinned the shape;
+  the dispatcher's child prompt used this schema until the dispatcher was retired.
 
 ## Cost routing (operationalizes CLAUDE.md)
 

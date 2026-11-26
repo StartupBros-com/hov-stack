@@ -515,25 +515,57 @@ except Exception:
 done
 
 # External-workspace advisory (dotfiles #908). A skill that emits a whole sibling bundle
-# names it <project>__<skill>_workspace/ beside the repo; de-monolithize is the one such
-# skill today (<project>__demonolith_workspace/, e.g. ~/SITES/<project>__demonolith_workspace).
+# names it <project>__<skill>_workspace/ beside the repo: de-monolithize
+# (<project>__demonolith_workspace/), and a campaign skill whose workspace holds one git
+# checkout per campaign, each on a campaign/<name> branch of the project's remote.
 # wt_roots yields the roots the repos live under (~/SITES, ~), so the bundles sit directly
 # under each root. Past AGE_ALIVE_DAYS — the same threshold as an abandoned worktree — they
 # are almost always forgotten. Warn only, never delete: the skill that made one says when it
-# is consumed, and nothing here can know that.
+# is consumed, and nothing here can know that. A link to a workspace is read as the folder it
+# names, so each workspace is reported once.
 n_ws=0; now=$(date +%s)
 while IFS= read -r ws; do
   [ -n "$ws" ] && [ -d "$ws" ] || continue
   wsb=$(basename "$ws")
   [ -n "$ONLY" ] && [ "${wsb%%__*}" != "$ONLY" ] && continue   # ONLY=<repo> scopes this too
+  # A workspace holding git checkouts is dated by its newest checkout: a commit touches
+  # <checkout>/.git, while the workspace folder changes only when a sub-folder is added.
+  checkouts=( "$ws"/*/.git )
+  [ -e "${checkouts[0]}" ] || checkouts=()
   # An unreadable mtime reads as epoch 0, i.e. maximally old, the same way line ~160 treats
   # a worktree whose stat fails: a bundle we cannot date is a bundle to look at, not to hide.
-  age=$(( (now - $(stat -c %Y "$ws" 2>/dev/null || echo 0)) / 86400 ))
+  newest=$(stat -c %Y "$ws" "${checkouts[@]}" 2>/dev/null | sort -n | tail -1)
+  age=$(( (now - ${newest:-0}) / 86400 ))
   if (( age > AGE_ALIVE_DAYS )); then
-    echo "  • external workspace ${ws} is ${age}d old (>${AGE_ALIVE_DAYS}d): bundle its history (git bundle create <archive>/<name>.bundle --all), verify it, then ask before deleting"
+    if (( ${#checkouts[@]} )); then
+      echo "  • external workspace ${ws} is ${age}d old (>${AGE_ALIVE_DAYS}d) and holds ${#checkouts[@]} git checkout(s): push what is not pushed, keep the files they leave out of git (a campaign record lists them under off-git/), then ask before deleting"
+      # The state is computed here rather than left to a command for the reader: a campaign
+      # record pushes HEAD:refs/heads/<branch> and sets no upstream, so `git log @{u}..` fails
+      # in every one of them. --not --remotes counts against what the last fetch or push saw.
+      for co in "$ws"/*/; do
+        co=${co%/}
+        if [ ! -e "$co/.git" ]; then
+          echo "      $(basename "$co"): not in git, so it exists only here"
+          continue
+        fi
+        dirty=$(git -C "$co" status --porcelain 2>/dev/null | wc -l)
+        if git -C "$co" remote get-url origin >/dev/null 2>&1; then
+          ahead=$(git -C "$co" rev-list --count --branches --not --remotes 2>/dev/null || echo '?')
+          if [ "$ahead" = 0 ]; then where="origin has every commit"; else where="origin lacks ${ahead} commit(s)"; fi
+        else
+          where="no remote, so its $(git -C "$co" rev-list --count --branches 2>/dev/null || echo '?') commit(s) exist only here"
+        fi
+        echo "      $(basename "$co"): ${where}; ${dirty} uncommitted path(s)"
+      done
+    elif [ -e "$ws/.git" ]; then
+      echo "  • external workspace ${ws} is ${age}d old (>${AGE_ALIVE_DAYS}d): bundle its history (git bundle create <archive>/<name>.bundle --all), verify it, then ask before deleting"
+    else
+      echo "  • external workspace ${ws} is ${age}d old (>${AGE_ALIVE_DAYS}d) and is not in git, so it exists only here: archive a copy (tar -czf <archive>/${wsb}.tgz -C $(dirname "$ws") ${wsb}), verify it, then ask before deleting"
+    fi
     n_ws=$((n_ws+1))
   fi
-done < <(wt_roots | while IFS= read -r r; do ls -d "$r"/*__*_workspace 2>/dev/null; done | sort -u)
+done < <(wt_roots | while IFS= read -r r; do ls -d "$r"/*__*_workspace 2>/dev/null; done \
+  | while IFS= read -r p; do readlink -f "$p"; done | sort -u)
 
 echo; echo "===== wt-sweep $([ $DRY_RUN = 1 ]&&echo '(DRY RUN)') ====="
 printf 'scope: %d repos under %s\n' "${#_candidates[@]}" "$(wt_roots | paste -sd' ' -)"

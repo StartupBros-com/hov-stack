@@ -81,6 +81,17 @@ if repo_ff_update "$C" >/dev/null; then bad "overwrote a locally-modified incomi
 [ "$(git -C "$C" rev-parse HEAD)" = "$before" ] && ok || bad "HEAD moved despite the refusal"
 grep -q PRECIOUS-UNCOMMITTED "$C/tracked" && ok || bad "uncommitted work was DESTROYED"
 
+# A matching worktree file is still an unstaged edit. Don't stage it on the
+# caller's behalf: doing so made rollback able to erase a concurrent index write.
+C=$(fixture dirty-identical)
+printf 'v2\n' >"$C/tracked"
+before=$(git -C "$C" rev-parse HEAD)
+index_before=$(git -C "$C" rev-parse :tracked)
+if repo_ff_update "$C" >/dev/null; then bad "automatically staged an unstaged collision"; else ok; fi
+[ "$(git -C "$C" rev-parse HEAD)" = "$before" ] && ok || bad "byte-identical collision advanced HEAD"
+[ "$(git -C "$C" rev-parse :tracked)" = "$index_before" ] && ok || bad "byte-identical collision changed the index"
+[ "$(cat "$C/tracked")" = v2 ] && ok || bad "byte-identical collision changed the worktree"
+
 # ── 4. wrong branch: skipped, does not touch the checkout ────────────────────────────────
 C=$(fixture wrong-branch)
 git_q "$C" checkout -qb side

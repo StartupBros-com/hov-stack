@@ -21,10 +21,10 @@ Report, never actor: this script reads `ledger.jsonl`, lists
 --json` which reservations still hold capacity, and runs `git remote
 get-url origin` against checkout paths so two checkouts of one GitHub repo
 count once; it writes nothing under `$PRO_GATE_HOME`, never labels a PR,
-never spends a slot. The headroom line is a fail-open preflight in the
-`codex-quota-guard.js` sense — it reports what the engine says (or, when the
-engine is absent or fails, what the reservation directory says as an upper
-bound) and never denies anything itself. A superseded reservation (the PR
+never spends a slot. The headroom line is a fail-open preflight that reports
+what the engine says. If the engine is absent or fails, it reports the
+reservation directory's count as an upper bound. The report never denies
+anything itself. A superseded reservation (the PR
 moved to a new commit) stays in `in-progress/` awaiting an optional harvest
 but holds no capacity; counting it as busy is what printed "0 of 4 free"
 on 2026-09-02 when the engine had 2 of 4 pinned (dotfiles#883).
