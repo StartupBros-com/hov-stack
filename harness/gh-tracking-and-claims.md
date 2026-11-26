@@ -59,11 +59,48 @@ branch commit's message, `Co-authored-by` trailers included, into the
 main-branch commit; measured 2026-09-02 on all 60 org repos (a private evals repository's #1227
 reproduced it, smaug #5 carried 44 AI trailers). `PR_BODY` makes the reviewed
 PR body the squash message instead, which is also the one attribution control
-that reaches Cursor, droid and Codex commits. A fork inherits the upstream's
-settings, so run `ONLY=<fork>` after forking (smaug had issues off, which
-blocks `wt-new.sh`). The fleet-wide `DRY_RUN=0` run is an operator action; the
-script does not run on a timer. Nothing else is touched: wiki, projects,
-rulesets and templates stay as they are.
+that reaches Cursor, droid and Codex commits. Nothing else is touched: wiki,
+projects, rulesets and templates stay as they are.
+
+GitHub has no organization-level default for these four. Checked 2026-11-25
+against GitHub's published REST description: the organization update
+endpoint carries none of them, and an organization ruleset can only restrict
+which merge methods are allowed. So every repository arrives without them,
+however it arrives:
+
+| Arrival | What it held before the script ran (observed) |
+|---|---|
+| Created in the organization | GitHub's defaults: `COMMIT_OR_PR_TITLE`, `COMMIT_MESSAGES`, delete-on-merge off, issues on (3 repositories created 2026-11-24 and 2026-11-25) |
+| Transferred in | Whatever it held before the move: the same defaults on 6 repositories moved on 2026-11-25 |
+| Fork | The same squash defaults, and twice with issues off, which blocks `wt-new.sh`: smaug on 2026-09-02, and oracle on 2026-11-25 while its upstream had issues on. Do not assume a fork matches its upstream. |
+
+The 10 drifted repositories found on 2026-11-25 were all arrivals: 3 created
+that week and 7 transferred in that day.
+
+**Who applies them.** A scheduled run on the operator's host runs the script
+with `DRY_RUN=0` across the organization every day (since 2026-11-25; a
+weekly dry run that paged on drift before that). It no longer pages on
+drift, only when applying fails or the run cannot judge, so a new repository
+holds GitHub's defaults until the next daily run. When a repository's first
+merge will not wait that long, run
+`DRY_RUN=0 ONLY=<repo> scripts/gh-repo-settings.sh` when you create, fork or
+transfer it. A setting changed by hand on purpose is put back on the next
+run; an exception belongs in the script.
+
+The scheduled run also pins what the script may write: it fails when the
+script reports any target other than these four values. Change `WANT` in the
+script and that pin in the same piece of work.
+
+**Where a repository lives.** Create new repositories under the organization:
+`gh repo create StartupBros-com/<name>`. A bare `gh repo create <name>` lands
+on the personal account of whoever is logged in, and a repository there is
+outside this script and outside every organization-level control in
+[Public repository baseline](#public-repository-baseline). The same scheduled
+run lists the operator's personal account and pages on any repository there
+that is not a fork and not on a short allowlist (the profile README
+repository, plus any exception with a dated reason). Forks are exempt: a fork
+opened to send a pull request upstream has to sit on a user account for the
+upstream's maintainers to push to its branch.
 
 ## Public repository baseline
 
@@ -82,6 +119,16 @@ reusable workflow each repository would adopt.
 | Default `CONTRIBUTING.md` and `SECURITY.md` | `StartupBros-com/.github` | shows them unless it has its own |
 | Fork pull requests never reach owned runners | Owned runner groups deny public repositories; only the hosted scale-set groups allow them, and nothing local sits behind those | inherits it |
 
+How a repository arrived does not change these rows. Read on 2026-11-25 on
+3 repositories created that week, 6 forks and 7 repositories transferred in
+that day (15 in all, since one is both a fork and a transfer): every one had
+the organization ruleset on its default branch (no
+deletion, no force-push, pull requests) and the read-only workflow token with
+pull request approval off, and every public one had the first-time
+contributor approval policy, which GitHub does not offer on a private
+repository. What differs is visibility: every public one read configuration
+17, and every private one the organization's private default.
+
 The code security features are free on public repositories and billed per
 active committer on private ones, so agents cannot turn them on: dcg denies
 every enable form (operator decision 2026-10-28), and the operator runs the
@@ -92,11 +139,17 @@ gh api orgs/StartupBros-com/code-security/configurations/defaults --jq '.[] | {d
 gh api --paginate orgs/StartupBros-com/code-security/configurations/17/repositories --jq '.[] | {status, repo: .repository.name}'
 ```
 
-GitHub applies a default configuration only when a repository is created. A
-repository that turns public, or is transferred in, needs the operator to
-attach configuration 17 again with `scope=public`: one idempotent call that
-touches public repositories only. Run `gh-repo-settings.sh` with
-`ONLY=<repo>` at the same time.
+GitHub documents that a default configuration is applied only when a
+repository is created, and that a repository transferred in needs one
+applied by hand. Even so, 7 repositories transferred in on 2026-11-25 read
+`attached` to the configuration for their visibility a few hours later. The
+session that moved them ran no attach, and what attached them is not
+established. So after a transfer or a change to public, run the two reads
+above first. If the repository is
+missing, the operator attaches configuration 17 again with `scope=public`:
+one idempotent call that touches public repositories only. Run
+`gh-repo-settings.sh` with `ONLY=<repo>` at the same time, or leave it to the
+next daily run.
 
 Before a public repository turns private, take it out of the baseline first.
 Those features bill per active committer on a private repository from the
