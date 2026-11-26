@@ -179,9 +179,64 @@ class Base(unittest.TestCase):
         return [json.loads(x) for x in self.log.read_text().splitlines()] if self.log.exists() else []
 
 
+class Registration(unittest.TestCase):
+    def test_documented_opt_in_through_seed_and_merge(self):
+        section = (ROOT / "README.md").read_text().split("## Optional first-push comment check\n", 1)[1]
+        example = json.loads(section.split("```json\n", 1)[1].split("```", 1)[0])
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            cfg = home / "custom config"
+            cfg.mkdir()
+            (cfg / "scripts").symlink_to(ROOT / "scripts")
+            (cfg / "hooks").symlink_to(ROOT / "hooks")
+            live, base, desired = (cfg / name for name in ("settings.json", "base.json", "desired.json"))
+            overlay = home / "opt-in.json"
+            overlay.write_text(json.dumps(example))
+            target = cfg / "scripts/comment-check-hook.sh"
+            expected = {"type": "command", "timeout": 180, "command": f'[ ! -x "{target}" ] || exec "{target}"'}
+
+            def seed(output, *extra):
+                subprocess.run(["node", ROOT / "lib/settings-seed.js", ROOT / "settings.json", output,
+                                cfg, home, "", *extra], check=True, stdout=subprocess.PIPE)
+
+            def registrations(file):
+                return [hook for group in json.loads(file.read_text())["hooks"]["PreToolUse"]
+                        if group.get("matcher") == "Bash" for hook in group["hooks"]
+                        if "comment-check-hook.sh" in hook.get("command", "")]
+
+            seed(live)
+            self.assertEqual(registrations(live), [])
+            shutil.copyfile(live, base)
+            def apply_overlay():
+                seed(desired, overlay)
+                self.assertEqual(registrations(desired), [expected])
+                subprocess.run(["node", ROOT / "lib/settings-apply.js", "--desired", desired, "--live", live,
+                                "--base", base, "--config-dir", cfg, "--home", home], check=True,
+                               stdout=subprocess.PIPE)
+                self.assertEqual(registrations(live), [expected])
+
+            apply_overlay()
+            apply_overlay()
+
+            # A host that already registered the same command need not replace its live entry.
+            seed(base)
+            before = json.loads(live.read_text())
+            apply_overlay()
+            self.assertEqual(json.loads(live.read_text()), before)
+
+            # Removing the managed opt-in must leave every unrelated setting intact.
+            seed(base, overlay)
+            seed(desired)
+            subprocess.run(["node", ROOT / "lib/settings-apply.js", "--desired", desired, "--live", live,
+                            "--base", base, "--config-dir", cfg, "--home", home], check=True,
+                           stdout=subprocess.PIPE)
+            self.assertEqual(registrations(live), [])
+            self.assertEqual(json.loads(live.read_text()), json.loads(desired.read_text()))
+
+
 class Extract(Base):
     def test_units_skip_paths_and_filter(self):
-        p = self.cli("--extract-only")
+        p = self.cli("--extract-only", "-C", ".", "--base", "origin/main")
         self.assertEqual(p.returncode, 0, p.stderr)
         r = json.loads(p.stdout)
         got = {(u["file"], u["line"], u["kind"]) for u in r["units_list"]}
