@@ -69,7 +69,7 @@ env "${UNSET[@]}" "${SET[@]}" claude -p "$PROMPT" \
   --allowedTools "Bash,Read,Glob,Grep,Write,Edit,Skill,Agent,TodoWrite" \
   --permission-mode acceptEdits "${PLUGIN[@]}" \
   > "$RUN/result.json" 2> "$RUN/stderr.txt" || rc=$?
-echo "EXIT_CODE=$rc" >> "$RUN/stderr.txt"
+printf '\nEXIT_CODE=%s\n' "$rc" >> "$RUN/stderr.txt"
 
 # What the arm reached for: tool counts, skills invoked, skill/doc files read,
 # subagents spawned. Read before comparing any scores.
