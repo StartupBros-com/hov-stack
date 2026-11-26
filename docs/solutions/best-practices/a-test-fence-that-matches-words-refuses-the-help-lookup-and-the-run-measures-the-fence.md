@@ -39,7 +39,7 @@ The line set before the run was 5 of 6 on each model. The result:
 | default model | 6 of 6 | 6 of 6 |
 | Opus | 2 of 6 | 0 of 6 |
 
-The refusal log explained the Opus row. Nine of the twelve Opus sessions had first run `hov ask --help`, were told the command was switched off, and stopped there. The widened rule refused the help lookup for the command under test. The two models learn a new command by different routes: the default model opened the hov skill in 12 of 12 sessions and Opus in 6 of 24 across both runs (the count is on issue #844), and the fence closed only the `--help` route. So the row is a count of fence refusals. It says nothing about either rule wording.
+The refusal log explained the Opus row. Nine of the twelve Opus sessions had first run `hov ask --help`, were told the command was switched off, and stopped there. The widened rule refused the help lookup for the command under test. The two models learn a new command by different routes: the default model opened the hov skill in 12 of 12 sessions and Opus in 6 of 24 across both runs (the count is on issue #844), and the fence closed only the `--help` route. That is the likely explanation for the row, and it is not a proven one: this record does not say whether the default model's sessions also ran help lookups, and the size of any real difference between the two models is unknown. What the log does settle is that the row cannot be read as a measure of either rule wording, because nine of its twelve sessions were stopped by the fence before the wording could matter.
 
 One follow-up was declared after the first run was scored and before it started: 12 Opus sessions behind a copy of the fence that let a command through when every use of the two commands in it was a `--help` lookup at the end of a statement. It scored 3 of 6 and 5 of 6, and it still refused too much in 4 of the 12 sessions, because it was still a word match with one carve-out:
 
@@ -55,7 +55,7 @@ Two 12-session runs on that model therefore produced no clean measure of the wor
 1. **Refuse the call that has the effect, found by parsing.** Split the command into its calls, and refuse a call only when its first word is the tool and its second is an effect subcommand, with no `--help` or `-h` among its arguments. A help lookup, a search for the command's name, a path containing the word and text that quotes the command are not calls to it.
 2. **When a form slips past, add it as a case and teach the parser. Do not widen to words.** The quoted full path that started the widening is one `shlex` call away from being handled (see the example). A word match closes every disguise at once, and it closes the lookups a session makes on the way to the command as well.
 3. **Put a second layer where the effect happens, so the hook does not have to be the only barrier.** No command parser sees a subcommand held in a variable or a call made from inside a script file. This run already had the second layer: a scratch state folder (`HOV_STATE_DIR`), and a stand-in that starts nothing both as `HOV_CLAUDE_CMD` and as the `claude` first on `PATH`. With that in place the hook's job is to count attempts and to stop what the stand-ins cannot, which leaves it free to be narrow.
-4. **Test the fence in both directions, starting from the command under test.** Harmless neighbours that must pass: its help lookup (plain, piped, and redirected to a file), a documentation search for its name, a statement that mentions a path containing the word, and text that quotes it. Disguises that must be refused: full path, quoted path, through an interpreter, behind an environment assignment, in a loop, on a second line, in a command substitution, inside `sh -c`, and after a help lookup in the same command. A self-test that records a refusal of a harmless command as "known" is recording the defect.
+4. **Test the fence in both directions, starting from the command under test.** Harmless neighbours that must pass: its help lookup (plain, piped, and redirected to a file), a documentation search for its name, a statement that mentions a path containing the word, and text that quotes it. Disguises that must be refused: full path, quoted path, through an interpreter (with and without an option of its own, as in `python3 -I <script>`), behind an environment assignment, in a loop, on a second line, in a command substitution, inside `sh -c`, and after a help lookup in the same command. A self-test that records a refusal of a harmless command as "known" is recording the defect.
 5. **Read the refusal log before reading the score.** List the refusals by reason, and for each session that did not reach the outcome, find the last call before it gave up. A session whose last call was a refused harmless command is void for the outcome. It is not a failure.
 6. **Pilot one free-form session per cell before the counted run.** This run's setup check told its session exactly which five steps to take, so it could show that the fence and the environment were wired, and it could never show a session reaching for `--help`.
 7. **Say beforehand what a fence-caused void buys.** No rerun had been declared for the first run, so its Opus row could only be reported as an instrument flaw, and the follow-up had to be declared as a separate run with its own line.
@@ -64,7 +64,7 @@ Two 12-session runs on that model therefore produced no clean measure of the wor
 
 A fence that refuses too little is the failure everyone tests for, because a missed refusal sends a real message. A fence that refuses too much is silent: the session reads "switched off for this run", reports the command as unavailable, and scores as a session that did not try. Nothing in the score separates that from a rule wording that failed to send the session to the command.
 
-The damage is not spread evenly, which is what makes it look like a result. Here it fell on the model that looks a command up before using it, so a difference in how two models learn a command turned into a difference in how often they "reached" it, by 12 of 12 against 2 of 12.
+The damage is not spread evenly, which is what makes it look like a result. Here it fell on the model that looks a command up before using it, so a difference in how two models learn a command was scored as a difference in how often they "reached" it: 12 of 12 against 2 of 12. With help lookups let through, that model reached the commands in 8 of 12 sessions while the fence still refused too much in 4 of them. So the fence is the likely cause of most of the gap, and how much of it is a real difference between the models was never measured.
 
 The self-test did not catch it because it tested one direction. It passed, and it held no help lookup for the two commands until the follow-up. The follow-up's self-test then added four help-lookup cases (one piped, two chained with a second help lookup, one through the script path) and none of the shapes that were refused in the counted sessions: no search, no `cd`, no redirect to a file.
 
@@ -78,7 +78,9 @@ It does not apply to a fence whose refused commands are not the behaviour being 
 
 ## Examples
 
-A parser that refuses only the effect. It was checked on 20 commands and got all 20 right. Nine were harmless: the six neighbours in guidance 4, another subcommand of the tool, two help lookups in one command, and a search chained with a help lookup. Eleven were effects: the plain call, the nine disguises in guidance 4, and a question that contains the text `--help`. The words-anywhere rule got 12 right: it refused 8 of the 9 harmless ones. The parser was written after the runs and has not been used in a counted session.
+A parser that refuses only the effect. It was checked on 22 commands and got all 22 right. Ten were harmless: the six neighbours in guidance 4, another subcommand of the tool, two help lookups in one command, a search chained with a help lookup, and a help lookup through an interpreter that takes an option. Twelve were effects: the plain call, the nine disguises in guidance 4 (the interpreter one both ways), and a question that contains the text `--help`. The words-anywhere rule got 13 right: it refused 9 of the 10 harmless ones.
+
+The parser was written after the runs and has not been used in a counted session. Its first draft let `python3 -I <script> send` through, because the interpreter's own option sat where the script was expected. That case was added and the parser taught to skip such options, which is guidance 2 applied to the example itself.
 
 ```python
 import os, re, shlex
@@ -106,6 +108,8 @@ def effect_calls(cmd, tool="hov"):
             if os.path.basename(argv[0]) in {"bash", "sh"} and argv[1:2] == ["-c"]:
                 calls += effect_calls(" ".join(argv[2:3]), tool)  # the quoted program of `sh -c`
             argv = argv[1:]
+            while argv and argv[0].startswith("-"):
+                argv = argv[1:]  # the prefix word's own options, as in `python3 -I <script>`
         if len(argv) >= 2 and os.path.basename(argv[0]) == tool and argv[1] in EFFECT:
             if not {"--help", "-h"} & set(argv[2:]):
                 calls.append(" ".join(argv))
@@ -119,6 +123,7 @@ def effect_calls(cmd, tool="hov"):
 | `rg -n "hov ask" docs/ harness/` | refused | passes |
 | `cd /tmp/x/notes-ask-me && hov ask --help` | refused | passes |
 | `"/opt/tools/hov/scripts/hov" send --to worker-a "text"` | refused | refused |
+| `python3 -I /opt/tools/hov/scripts/hov send --to worker-a "text"` | refused | refused |
 | `hov ask --help; hov ask worker-a "q"` | refused | refused |
 | `hov ask worker-a "what does --help print?"` | refused | refused |
 | `c="hov ask"; $c worker-a "q"` | refused | **passes** (left to the second layer) |
