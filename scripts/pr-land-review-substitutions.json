@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "substitutions": [
+    {
+      "repo": "StartupBros-com/hov-router",
+      "pr": 1060,
+      "head": "fc70f3b3f9b37929739bce780b35cf213f90a34a",
+      "base": "6370cc6a40147a5e7a7af23e44886e7988373b53",
+      "decision": "operator-approved-ce-substitution",
+      "review": "ce-code-review",
+      "resolution": "findings-fixed",
+      "reason": "Pro stopped before submission because the full diff exceeded its size ceiling. The operator approved CE for this PR and explicitly authorized reconciling the landing gate on 2026-11-27.",
+      "evidence": "https://github.com/StartupBros-com/hov-router/pull/1060#issuecomment-7211421471",
+      "authorization": "https://github.com/StartupBros-com/hov-router/issues/1056#issuecomment-7211797940"
+    }
+  ]
+}

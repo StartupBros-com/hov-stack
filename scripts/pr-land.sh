@@ -23,7 +23,10 @@
 # Its wait-and-merge core is marketplace-repin-merge.sh's, without that script's bot-repin
 # identity checks.
 #
-# It refuses to merge when a Pro round is due and has not finished clean. A round is due
+# A reviewed operator decision in pr-land-review-substitutions.json can substitute
+# CE for one exact repo/PR/head/base; it never counts as a Pro pass or skips other
+# checks. There is no command-line or environment switch for granting exceptions.
+# Otherwise it refuses when a Pro round is due and has not finished clean. A round is due
 # when the diff touches .github/ or a migrations directory, or when --pro says so (billing,
 # auth, real money or user data: paths alone cannot show those). The pro-gate rounds record
 # for the PR must exist (absent is unknown, not zero) and show 0 open P0 and 0 open P1, or,
@@ -153,14 +156,59 @@ esac
 [ "$(jq -r .isDraft "$S/pr.json")" = false ] || refuse "PR #$PR is a draft; mark it ready (gh pr ready $PR) first"
 [[ "$HEAD" =~ ^[0-9a-f]{40}$ ]] || retry 'PR head unreadable'
 
-# 2. A due Pro round must have finished with no open P0 or P1, or have its fixes pushed.
+# Operator decisions live beside this reviewed script, never in a caller-selected
+# file or a Pro record. Adding a decision requires the operator's approval; PR
+# text is evidence, not authority. Missing entries retain the normal Pro gate.
+SUBSTITUTION=0
+select_substitution() {
+  local table="$HERE/pr-land-review-substitutions.json"
+  [ -f "$table" ] || return 1
+  jq -e '
+    .version == 1 and (.substitutions | type == "array") and
+    all(.substitutions[]; . as $entry |
+      (.repo | type == "string" and test("^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")) and
+      (.pr | type == "number" and . > 0 and . == floor) and
+      (.head | type == "string" and test("^[0-9a-f]{40}$")) and
+      (.base | type == "string" and test("^[0-9a-f]{40}$")) and
+      .decision == "operator-approved-ce-substitution" and
+      .review == "ce-code-review" and .resolution == "findings-fixed" and
+      (.reason | type == "string" and length > 0) and
+      (.evidence | type == "string" and
+        startswith("https://github.com/" + $entry.repo + "/pull/" + ($entry.pr | tostring) + "#issuecomment-") and
+        test("#issuecomment-[0-9]+$")) and
+      (.authorization | type == "string" and
+        startswith("https://github.com/" + $entry.repo + "/issues/") and
+        test("/issues/[0-9]+#issuecomment-[0-9]+$"))) and
+    (.substitutions | group_by([.repo,.pr,.head,.base]) | all(length == 1))
+  ' "$table" >/dev/null || refuse 'review substitutions are invalid; no substitution granted'
+  jq -ce --arg repo "$REPO" --argjson pr "$PR" --arg head "$HEAD" '
+    [.substitutions[] | select(.repo == $repo and .pr == $pr and .head == $head)]
+    | if length == 1 then .[0] else empty end
+  ' "$table" >"$S/substitution.json"
+}
+check_substitution_identity() {
+  [ "$SUBSTITUTION" = 1 ] || return 0
+  gh pr view "$PR" --repo "$REPO" --json headRefOid,baseRefOid >"$S/identity.json" \
+    || retry 'review substitution identity could not be read; nothing merged'
+  jq -e --arg head "$HEAD" --slurpfile decision "$S/substitution.json" '
+    .headRefOid == $head and .headRefOid == $decision[0].head and .baseRefOid == $decision[0].base
+  ' "$S/identity.json" >/dev/null || refuse 'review substitution identity no longer matches the approved head and base; nothing merged'
+}
+
+# 2. A due Pro round must have finished, unless this exact identity has a
+# separately reviewed operator-approved substitute. Neither path skips CI.
 gh api --paginate "repos/$REPO/pulls/$PR/files?per_page=100" --jq '.[].filename' >"$S/files.txt" \
   || retry "PR #$PR file list unreadable"
 WHY=""
 if grep -q -E '^\.github/' "$S/files.txt"; then WHY=".github/"; fi
 if grep -q -E '(^|/)migrations?/' "$S/files.txt"; then WHY="${WHY:+$WHY, }a migrations directory"; fi
 if [ "$PRO" = 1 ]; then WHY="${WHY:+$WHY, }--pro"; fi
-if [ -n "$WHY" ]; then
+if [ -n "$WHY" ] && select_substitution; then
+  SUBSTITUTION=1
+  check_substitution_identity
+  NOTE="operator-approved CE substitution; not a Pro pass"
+  say "$NOTE for $REPO#$PR at $HEAD; evidence $(jq -r .evidence "$S/substitution.json")"
+elif [ -n "$WHY" ]; then
   REC="${PRO_GATE_ROUNDS_DIR:-${PRO_GATE_HOME:-$HOME/.pro-review-daemon}/rounds}/${REPO/\//-}-$PR.last"
   [ -f "$REC" ] || refuse "a Pro round is due ($WHY) and none has finished for PR #$PR; run /pro-gate, fix its P0/P1, push, then re-run"
   EPOCH="" P0="" P1=""
@@ -272,6 +320,7 @@ wait_checks() {
 }
 
 update_branch() {
+  [ "$SUBSTITUTION" = 0 ] || refuse 'review substitution identity would change on a branch update; obtain a new operator decision after updating separately'
   [ "$UPDATES" -lt "$MAX_UPDATES" ] || refuse "PR #$PR is still behind $BASE after $UPDATES update(s); $BASE keeps moving, re-run later"
   gh pr update-branch "$PR" --repo "$REPO" >&2 || retry "updating PR #$PR's branch from $BASE failed"
   UPDATES=$((UPDATES + 1))
@@ -345,6 +394,7 @@ while :; do
   wait_checks
   check_closes
   if wait_freeze; then continue; fi
+  check_substitution_identity
   if gh pr merge "$PR" --repo "$REPO" --squash --match-head-commit "$HEAD" >"$S/merge.out" 2>&1; then break; fi
   # The command can fail after GitHub merged (a client timeout): read the state before deciding.
   POST=$(gh pr view "$PR" --repo "$REPO" --json state,mergeStateStatus --jq '"\(.state) \(.mergeStateStatus)"') \
