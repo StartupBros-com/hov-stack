@@ -520,7 +520,6 @@ reset_case; mkdir -p "$FIX/freeze"; echo 'not json' >"$(frozen_file "$R")"
 refused 'a freeze file that does not parse holds the merge' 2 'does not parse' 7 --repo "$R"
 check 'unparseable freeze: says how to clear it' has "$OUT" 'release --repo startupbros-com/hov-stack --force'
 
-# --- The reviewed, operator-authorized substitution is an exact identity, not a skip flag.
 substitution_case() {
   reset_case
   export R=StartupBros-com/hov-router P=1060 H=fc70f3b3f9b37929739bce780b35cf213f90a34a
@@ -539,7 +538,13 @@ refused 'substitution: wrong repo' 1 'none has finished' "$P" --repo "$R"
 substitution_case; echo "$H2" >"$FIX/head"
 refused 'substitution: wrong head' 1 'none has finished' "$P" --repo "$R"
 substitution_case; echo "$H2" >"$FIX/base"
-refused 'substitution: wrong base' 1 'substitution identity' "$P" --repo "$R"
+refused 'substitution: wrong base without Pro' 1 'none has finished' "$P" --repo "$R"
+substitution_case; echo "$H2" >"$FIX/base"
+printf '1795000000\t0\t0\n' >"$FIX/rounds/StartupBros-com-hov-router-1060.last"
+run "$P" --repo "$R" --no-closeout
+landed 'substitution: wrong base falls back to valid Pro'
+check 'wrong base: normal Pro decision used' has "$ERR" 'last completed round left 0 open P0/P1'
+check 'wrong base: no CE grant reported' bash -c '[[ "$1" != *"operator-approved CE substitution"* ]]' _ "$OUT"
 substitution_case; export STUB_BASE_MOVED=1
 refused 'substitution: base moved before merge' 1 'substitution identity' "$P" --repo "$R"
 substitution_case; export STUB_HEAD_MOVED=1
@@ -581,6 +586,27 @@ substitution_case; export CLAUDE_LOOP_GUARD=1
 refused 'substitution: loop still cannot merge' 1 'CLAUDE_LOOP_GUARD=1' "$P" --repo "$R"
 substitution_case; closes 'still not closed: #12' "$R#12" >"$FIX/closes.json"
 refused 'substitution: prose closing still refused' 1 'would close' "$P" --repo "$R"
+
+substitution_case
+jq 'del(.substitutions[0].evidence)' "$TMP/pr-land-review-substitutions.json" >"$FIX/table"
+printf '\n{"version":1,"substitutions":[]}\n' >>"$FIX/table"
+cp "$FIX/table" "$TMP/pr-land-review-substitutions.json"
+refused 'substitution: multiple JSON documents cannot hide invalid decision' 1 'substitutions are invalid' "$P" --repo "$R"
+substitution_case
+printf '\n{"version":1,"substitutions":[]}\n' >>"$TMP/pr-land-review-substitutions.json"
+refused 'substitution: multiple valid JSON documents refused' 1 'substitutions are invalid' "$P" --repo "$R"
+substitution_case
+jq '.substitutions[0].evidence = "https://github.com/StartupBros-com/hov-router/pull/1060#issuecomment-invalid#issuecomment-123"' "$TMP/pr-land-review-substitutions.json" >"$FIX/table"
+cp "$FIX/table" "$TMP/pr-land-review-substitutions.json"
+refused 'substitution: evidence has malformed middle' 1 'substitutions are invalid' "$P" --repo "$R"
+substitution_case
+jq '.substitutions[0].authorization = "https://github.com/StartupBros-com/hov-router/issues/invalid/issues/1056#issuecomment-123"' "$TMP/pr-land-review-substitutions.json" >"$FIX/table"
+cp "$FIX/table" "$TMP/pr-land-review-substitutions.json"
+refused 'substitution: authorization has malformed middle' 1 'substitutions are invalid' "$P" --repo "$R"
+substitution_case
+jq '. + [{type:"merge_queue"}]' "$FIX/rules.json" >"$FIX/rules.new"
+cp "$FIX/rules.new" "$FIX/rules.json"
+refused 'substitution: merge queue cannot use fresh-read base pin' 1 'CE substitution cannot use a merge queue' "$P" --repo "$R"
 
 printf 'pr-land: %s passed, %s failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

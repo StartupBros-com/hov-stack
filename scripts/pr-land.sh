@@ -163,6 +163,9 @@ SUBSTITUTION=0
 select_substitution() {
   local table="$HERE/pr-land-review-substitutions.json"
   [ -f "$table" ] || return 1
+  # Read the policy once: jq -e alone accepts a valid final document after an invalid one.
+  jq -ces 'if length == 1 then .[0] else error("expected one JSON document") end' "$table" >"$S/substitutions.json" \
+    || refuse 'review substitutions are invalid; no substitution granted'
   jq -e '
     .version == 1 and (.substitutions | type == "array") and
     all(.substitutions[]; . as $entry |
@@ -175,16 +178,24 @@ select_substitution() {
       (.reason | type == "string" and length > 0) and
       (.evidence | type == "string" and
         startswith("https://github.com/" + $entry.repo + "/pull/" + ($entry.pr | tostring) + "#issuecomment-") and
-        test("#issuecomment-[0-9]+$")) and
+        (ltrimstr("https://github.com/" + $entry.repo + "/pull/" + ($entry.pr | tostring) + "#issuecomment-") | test("^[0-9]+$"))) and
       (.authorization | type == "string" and
         startswith("https://github.com/" + $entry.repo + "/issues/") and
-        test("/issues/[0-9]+#issuecomment-[0-9]+$"))) and
+        (ltrimstr("https://github.com/" + $entry.repo + "/issues/") | test("^[0-9]+#issuecomment-[0-9]+$")))) and
     (.substitutions | group_by([.repo,.pr,.head,.base]) | all(length == 1))
-  ' "$table" >/dev/null || refuse 'review substitutions are invalid; no substitution granted'
-  jq -ce --arg repo "$REPO" --argjson pr "$PR" --arg head "$HEAD" '
-    [.substitutions[] | select(.repo == $repo and .pr == $pr and .head == $head)]
+  ' "$S/substitutions.json" >/dev/null || refuse 'review substitutions are invalid; no substitution granted'
+  jq -e --arg repo "$REPO" --argjson pr "$PR" --arg head "$HEAD" '
+    any(.substitutions[]; .repo == $repo and .pr == $pr and .head == $head)
+  ' "$S/substitutions.json" >/dev/null || return 1
+  gh pr view "$PR" --repo "$REPO" --json headRefOid,baseRefOid >"$S/identity.json" \
+    || retry 'review substitution identity could not be read; nothing merged'
+  jq -e 'all(.headRefOid,.baseRefOid; type == "string" and test("^[0-9a-f]{40}$"))' "$S/identity.json" >/dev/null \
+    || retry 'review substitution identity is unreadable; nothing merged'
+  jq -ce --arg repo "$REPO" --argjson pr "$PR" --arg head "$HEAD" --slurpfile identity "$S/identity.json" '
+    [.substitutions[] | select(.repo == $repo and .pr == $pr and .head == $head
+      and .head == $identity[0].headRefOid and .base == $identity[0].baseRefOid)]
     | if length == 1 then .[0] else empty end
-  ' "$table" >"$S/substitution.json"
+  ' "$S/substitutions.json" >"$S/substitution.json"
 }
 check_substitution_identity() {
   [ "$SUBSTITUTION" = 1 ] || return 0
@@ -205,7 +216,6 @@ if grep -q -E '(^|/)migrations?/' "$S/files.txt"; then WHY="${WHY:+$WHY, }a migr
 if [ "$PRO" = 1 ]; then WHY="${WHY:+$WHY, }--pro"; fi
 if [ -n "$WHY" ] && select_substitution; then
   SUBSTITUTION=1
-  check_substitution_identity
   NOTE="operator-approved CE substitution; not a Pro pass"
   say "$NOTE for $REPO#$PR at $HEAD; evidence $(jq -r .evidence "$S/substitution.json")"
 elif [ -n "$WHY" ]; then
@@ -257,6 +267,10 @@ REQUIRED=$(jq -cn --slurpfile r "$S/rules.json" --slurpfile c "$S/classic.json" 
 STRICT=$(jq -rn --slurpfile r "$S/rules.json" --slurpfile c "$S/classic.json" \
   '[$r[0][] | select(.type == "required_status_checks") | .parameters.strict_required_status_checks_policy] + [$c[0].strict // false] | any')
 QUEUE=$(jq -r 'any(.[]; .type == "merge_queue")' "$S/rules.json")
+# GitHub atomically pins only the head. A base read cannot bind a delayed queued merge.
+if [ "$SUBSTITUTION" = 1 ] && [ "$QUEUE" = true ]; then
+  refuse 'CE substitution cannot use a merge queue; the base identity is only a fresh pre-merge read'
+fi
 
 # Every reported check and every required one. A check passes on SUCCESS, SKIPPED or
 # NEUTRAL, as GitHub's merge does. Within one workflow a not-yet-finished run (a queued
