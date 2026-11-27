@@ -22,6 +22,7 @@ silently reports nothing is the silent-fallback failure mode.
 """
 
 import json
+import math
 import os
 import sqlite3
 import subprocess
@@ -120,8 +121,18 @@ def report_ccusage() -> None:
             check=True,
         ).stdout
         data = json.loads(out)
-        days = data.get("daily", [])
-        total = sum(d.get("totalCost", 0) for d in days)
+        days = data.get("daily") if isinstance(data, dict) else None
+        if not isinstance(days, list):
+            raise ValueError("ccusage daily must be an array")
+        costs = []
+        for day in days:
+            cost = day.get("totalCost") if isinstance(day, dict) else None
+            if type(cost) not in (int, float) or not math.isfinite(cost):
+                raise ValueError("ccusage day must have a finite numeric totalCost")
+            costs.append(cost)
+        total = sum(costs)
+        if not math.isfinite(total):
+            raise ValueError("ccusage total cost is not finite")
         agents = sorted({a for d in days for a in (d.get("metadata", {}) or {}).get("agents", [])})
         print(
             f"cross-tool 8d plan-equivalent (ccusage: {', '.join(agents) or 'no agents field'}): "
