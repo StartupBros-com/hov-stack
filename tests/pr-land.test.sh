@@ -18,7 +18,8 @@ H=1111111111111111111111111111111111111111
 H2=6666666666666666666666666666666666666666
 M=3333333333333333333333333333333333333333
 R=StartupBros-com/hov-stack
-export H H2 M R FIX="$TMP/fix" GH_LOG="$TMP/gh.log" GIT_LOG="$TMP/git.log" WT_LOG="$TMP/wt.log"
+P=7
+export P H H2 M R FIX="$TMP/fix" GH_LOG="$TMP/gh.log" GIT_LOG="$TMP/git.log" WT_LOG="$TMP/wt.log"
 mkdir -p "$TMP/bin" "$FIX"
 
 cat >"$TMP/bin/gh" <<'STUB'
@@ -39,10 +40,10 @@ head_now() { cat "$FIX/head"; }
 case "$*" in
   "repo view --json nameWithOwner") printf '{"nameWithOwner":"%s"}\n' "$R" >"$FIX/repo.json"; serve "$FIX/repo.json" ;;
   "pr list --repo $R --head pr-land --state all --json number,state") serve "$FIX/list.json" ;;
-  "pr view 7 --repo $R --json state,isDraft,baseRefName,headRefName,headRefOid,mergeStateStatus,mergeCommit")
+  "pr view $P --repo $R --json state,isDraft,baseRefName,headRefName,headRefOid,mergeStateStatus,mergeCommit")
     jq --arg h "$(head_now)" '.headRefOid = $h' "$FIX/pr.json" >"$FIX/pr.now.json"; serve "$FIX/pr.now.json" ;;
-  "api --paginate repos/$R/pulls/7/files?per_page=100") serve "$FIX/files.json" ;;
-  "api --paginate repos/$R/pulls/7/commits?per_page=100") serve "$FIX/commits.json" ;;
+  "api --paginate repos/$R/pulls/$P/files?per_page=100") serve "$FIX/files.json" ;;
+  "api --paginate repos/$R/pulls/$P/commits?per_page=100") serve "$FIX/commits.json" ;;
   "api repos/$R/rules/branches/main")
     case "${STUB_RULES:-file}" in
       gated) echo '{"message":"Upgrade to GitHub Pro or make this repository public to enable this feature.","status":"403"}'
@@ -59,16 +60,22 @@ case "$*" in
       403) echo 'gh: Must have admin rights to Repository. (HTTP 403)' >&2; exit 1 ;;
       file) serve "$FIX/classic.json" ;;
     esac ;;
-  "pr view 7 --repo $R --json headRefOid,mergeable,statusCheckRollup")
+  "pr view $P --repo $R --json headRefOid,mergeable,statusCheckRollup")
     n=$(count checks); f="$FIX/checks.json"; [ -f "$FIX/checks.$n.json" ] && f="$FIX/checks.$n.json"
     h=$(head_now); [ "${STUB_HEAD_MOVED:-0}" = 0 ] || h=$H2
     jq --arg h "$h" '.headRefOid = $h' "$f" >"$FIX/checks.now.json"; serve "$FIX/checks.now.json" ;;
-  "pr view 7 --repo $R --json body,closingIssuesReferences")
+  "pr view $P --repo $R --json headRefOid,baseRefOid")
+    n=$(count identity)
+    b=$(cat "$FIX/base")
+    if [ "${STUB_BASE_MOVED:-0}" = 1 ] && [ "$n" -gt 1 ]; then b=$H2; fi
+    jq -n --arg h "$(head_now)" --arg b "$b" '{headRefOid:$h,baseRefOid:$b}' >"$FIX/identity.json"
+    serve "$FIX/identity.json" ;;
+  "pr view $P --repo $R --json body,closingIssuesReferences")
     [ "${STUB_CLOSES_FAIL:-0}" = 0 ] || { echo 'gh: Bad Gateway (HTTP 502)' >&2; exit 1; }
     n=$(count closes); f="$FIX/closes.json"; [ -f "$FIX/closes.$n.json" ] && f="$FIX/closes.$n.json"; serve "$f" ;;
   "api repos/$R/actions/runs?head_sha="*"&per_page=100")
     n=$(count runs); f="$FIX/runs.json"; [ -f "$FIX/runs.$n.json" ] && f="$FIX/runs.$n.json"; serve "$f" ;;
-  "pr merge 7 --repo $R --squash --match-head-commit "*)
+  "pr merge $P --repo $R --squash --match-head-commit "*)
     all="$*"; sha=${all##* }
     [ "$sha" = "$(head_now)" ] || { echo "head mismatch: $sha" >&2; exit 1; }
     if [ -f "$FIX/behind" ]; then rm -f "$FIX/behind"; touch "$FIX/behind.seen"; echo 'head branch is not up to date' >&2; exit 1; fi
@@ -77,15 +84,15 @@ case "$*" in
       echo 'merge blocked by ruleset' >&2; exit 1
     fi
     if [ -n "${STUB_QUEUE_READS:-}" ]; then touch "$FIX/queued"; else touch "$FIX/merged"; fi ;;
-  "pr view 7 --repo $R --json state,mergeStateStatus")
+  "pr view $P --repo $R --json state,mergeStateStatus")
     if [ -f "$FIX/merged" ]; then printf '{"state":"MERGED","mergeStateStatus":"UNKNOWN"}\n' >"$FIX/mstate.json"
     elif [ -f "$FIX/behind.seen" ]; then rm -f "$FIX/behind.seen"; printf '{"state":"OPEN","mergeStateStatus":"BEHIND"}\n' >"$FIX/mstate.json"
     else printf '{"state":"OPEN","mergeStateStatus":"%s"}\n' "${STUB_MERGE_STATE:-BLOCKED}" >"$FIX/mstate.json"; fi
     serve "$FIX/mstate.json" ;;
-  "pr update-branch 7 --repo $R") echo "$H2" >"$FIX/head"; echo 'branch updated' ;;
-  "pr view 7 --repo $R --json headRefOid")
+  "pr update-branch $P --repo $R") echo "$H2" >"$FIX/head"; echo 'branch updated' ;;
+  "pr view $P --repo $R --json headRefOid")
     printf '{"headRefOid":"%s"}\n' "$(head_now)" >"$FIX/headonly.json"; serve "$FIX/headonly.json" ;;
-  "api graphql -f owner=StartupBros-com -f name=hov-stack -F number=7 -f query="*)
+  "api graphql -f owner=${R%/*} -f name=${R#*/} -F number=$P -f query="*)
     # A queued PR reads OPEN and in the queue for STUB_QUEUE_READS reads; then STUB_QUEUE_THEN:
     # landed (default), dropped or closed.
     n=$(count state)
@@ -153,6 +160,9 @@ green() {
 }
 
 reset_case() {
+  export H=1111111111111111111111111111111111111111 R=StartupBros-com/hov-stack P=7
+  unset STUB_BASE_MOVED
+  cp "$ROOT/scripts/pr-land-review-substitutions.json" "$TMP/pr-land-review-substitutions.json"
   rm -rf "$FIX"; mkdir -p "$FIX"; : >"$GH_LOG"; : >"$GIT_LOG"; : >"$WT_LOG"
   unset STUB_RULES STUB_CLASSIC STUB_HEAD_MOVED STUB_MERGE_RC STUB_MERGE_LANDED STUB_MERGE_STATE STUB_QUEUE_READS STUB_QUEUE_THEN
   unset STUB_GIT_BRANCH STUB_GIT_TIP STUB_GIT_FF_RC STUB_WTDONE_RC STUB_CLOSES_FAIL CLAUDE_LOOP_GUARD STUB_THAW_AFTER
@@ -509,6 +519,94 @@ check 'freeze ended: checks re-read after the wait' test "$(reads checks)" = 4
 reset_case; mkdir -p "$FIX/freeze"; echo 'not json' >"$(frozen_file "$R")"
 refused 'a freeze file that does not parse holds the merge' 2 'does not parse' 7 --repo "$R"
 check 'unparseable freeze: says how to clear it' has "$OUT" 'release --repo startupbros-com/hov-stack --force'
+
+substitution_case() {
+  reset_case
+  export R=StartupBros-com/hov-router P=1060 H=fc70f3b3f9b37929739bce780b35cf213f90a34a
+  echo "$H" >"$FIX/head"
+  echo 6370cc6a40147a5e7a7af23e44886e7988373b53 >"$FIX/base"
+  echo '[{"filename":".github/workflows/ci.yml"}]' >"$FIX/files.json"
+}
+substitution_case; run "$P" --repo "$R" --no-closeout
+landed 'approved CE substitution'
+check 'substitution: named honestly' has "$OUT" 'operator-approved CE substitution; not a Pro pass'
+check 'substitution: did not manufacture a Pro record' test ! -e "$FIX/rounds/StartupBros-com-hov-router-1060.last"
+substitution_case; export P=1061
+refused 'substitution: wrong PR' 1 'none has finished' "$P" --repo "$R"
+substitution_case; export R=example-org/hov-router
+refused 'substitution: wrong repo' 1 'none has finished' "$P" --repo "$R"
+substitution_case; echo "$H2" >"$FIX/head"
+refused 'substitution: wrong head' 1 'none has finished' "$P" --repo "$R"
+substitution_case; echo "$H2" >"$FIX/base"
+refused 'substitution: wrong base without Pro' 1 'none has finished' "$P" --repo "$R"
+substitution_case; echo "$H2" >"$FIX/base"
+printf '1795000000\t0\t0\n' >"$FIX/rounds/StartupBros-com-hov-router-1060.last"
+run "$P" --repo "$R" --no-closeout
+landed 'substitution: wrong base falls back to valid Pro'
+check 'wrong base: normal Pro decision used' has "$ERR" 'last completed round left 0 open P0/P1'
+check 'wrong base: no CE grant reported' bash -c '[[ "$1" != *"operator-approved CE substitution"* ]]' _ "$OUT"
+substitution_case; export STUB_BASE_MOVED=1
+refused 'substitution: base moved before merge' 1 'substitution identity' "$P" --repo "$R"
+substitution_case; export STUB_HEAD_MOVED=1
+refused 'substitution: head moved during checks' 2 'head moved' "$P" --repo "$R"
+substitution_case; touch "$FIX/behind"; run "$P" --repo "$R"
+check 'substitution: branch update refuses' test "$RC" -eq 1
+check 'substitution: branch update names invalid identity' has "$OUT" 'substitution identity'
+check 'substitution: never merges updated head' test "$(merges_at "$H2")" = 0
+substitution_case; rm "$TMP/pr-land-review-substitutions.json"
+refused 'substitution: missing table' 1 'none has finished' "$P" --repo "$R"
+substitution_case; echo '{' >"$TMP/pr-land-review-substitutions.json"
+refused 'substitution: malformed table' 1 'substitutions are invalid' "$P" --repo "$R"
+substitution_case
+jq 'del(.substitutions[0].evidence)' "$TMP/pr-land-review-substitutions.json" >"$FIX/table"
+cp "$FIX/table" "$TMP/pr-land-review-substitutions.json"
+refused 'substitution: missing evidence' 1 'substitutions are invalid' "$P" --repo "$R"
+substitution_case
+jq '.substitutions[0].evidence = "https://github.com/"' "$TMP/pr-land-review-substitutions.json" >"$FIX/table"
+cp "$FIX/table" "$TMP/pr-land-review-substitutions.json"
+refused 'substitution: malformed evidence' 1 'substitutions are invalid' "$P" --repo "$R"
+substitution_case
+jq 'del(.substitutions[0].authorization)' "$TMP/pr-land-review-substitutions.json" >"$FIX/table"
+cp "$FIX/table" "$TMP/pr-land-review-substitutions.json"
+refused 'substitution: missing authorization evidence' 1 'substitutions are invalid' "$P" --repo "$R"
+substitution_case; check_run 'Trusted syntax and policy' COMPLETED FAILURE | rollup >"$FIX/checks.json"
+refused 'substitution: red CI remains red' 1 'red:' "$P" --repo "$R"
+substitution_case; check_run 'Trusted syntax and policy' COMPLETED SUCCESS | rollup >"$FIX/checks.json"
+refused 'substitution: missing required check' 2 'Pinned sources' "$P" --repo "$R" --wait 0
+substitution_case
+jq '.[1].parameters.strict_required_status_checks_policy = true' "$FIX/rules.json" >"$FIX/rules.new"
+cp "$FIX/rules.new" "$FIX/rules.json"
+jq '.mergeStateStatus = "BEHIND"' "$FIX/pr.json" >"$FIX/pr.new"
+cp "$FIX/pr.new" "$FIX/pr.json"
+refused 'substitution: strict behind branch cannot change grant' 1 'substitution identity' "$P" --repo "$R"
+check 'substitution: no implicit branch update' bash -c '! grep -q -F "pr update-branch" "$1"' _ "$GH_LOG"
+substitution_case; freeze "$R"
+refused 'substitution: freeze still holds' 2 'frozen until' "$P" --repo "$R" --wait 0
+substitution_case; export CLAUDE_LOOP_GUARD=1
+refused 'substitution: loop still cannot merge' 1 'CLAUDE_LOOP_GUARD=1' "$P" --repo "$R"
+substitution_case; closes 'still not closed: #12' "$R#12" >"$FIX/closes.json"
+refused 'substitution: prose closing still refused' 1 'would close' "$P" --repo "$R"
+
+substitution_case
+jq 'del(.substitutions[0].evidence)' "$TMP/pr-land-review-substitutions.json" >"$FIX/table"
+printf '\n{"version":1,"substitutions":[]}\n' >>"$FIX/table"
+cp "$FIX/table" "$TMP/pr-land-review-substitutions.json"
+refused 'substitution: multiple JSON documents cannot hide invalid decision' 1 'substitutions are invalid' "$P" --repo "$R"
+substitution_case
+printf '\n{"version":1,"substitutions":[]}\n' >>"$TMP/pr-land-review-substitutions.json"
+refused 'substitution: multiple valid JSON documents refused' 1 'substitutions are invalid' "$P" --repo "$R"
+substitution_case
+jq '.substitutions[0].evidence = "https://github.com/StartupBros-com/hov-router/pull/1060#issuecomment-invalid#issuecomment-123"' "$TMP/pr-land-review-substitutions.json" >"$FIX/table"
+cp "$FIX/table" "$TMP/pr-land-review-substitutions.json"
+refused 'substitution: evidence has malformed middle' 1 'substitutions are invalid' "$P" --repo "$R"
+substitution_case
+jq '.substitutions[0].authorization = "https://github.com/StartupBros-com/hov-router/issues/invalid/issues/1056#issuecomment-123"' "$TMP/pr-land-review-substitutions.json" >"$FIX/table"
+cp "$FIX/table" "$TMP/pr-land-review-substitutions.json"
+refused 'substitution: authorization has malformed middle' 1 'substitutions are invalid' "$P" --repo "$R"
+substitution_case
+jq '. + [{type:"merge_queue"}]' "$FIX/rules.json" >"$FIX/rules.new"
+cp "$FIX/rules.new" "$FIX/rules.json"
+refused 'substitution: merge queue cannot use fresh-read base pin' 1 'CE substitution cannot use a merge queue' "$P" --repo "$R"
 
 printf 'pr-land: %s passed, %s failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
