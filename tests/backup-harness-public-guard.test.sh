@@ -29,6 +29,33 @@ printf '%s' "${STUB_CODE:-000}"
 EOF
 chmod +x "$TMP/bin/curl"
 
+# Trace setup and cleanup in the real script, with failure injection before local Git runs.
+cat > "$TMP/bin/git" <<'EOF'
+#!/usr/bin/env bash
+stage=
+case ${1:-} in
+  fetch)
+    case ${4:-} in
+      +refs/heads/main:*) stage=fetch-main ;;
+      +refs/heads/backup/claude-memory:*) stage=fetch-backup-branch ;;
+    esac
+    ;;
+  worktree) [[ ${2:-} == add ]] && stage=add-worktree ;;
+  -C) [[ ${3:-} == worktree && ${4:-} == remove ]] && stage=remove-worktree ;;
+esac
+if [ -n "$stage" ]; then
+  printf '%s\n' "$stage" >> "$STUB_GIT_LOG"
+  if [ "$stage" = "${STUB_GIT_FAIL:-}" ]; then
+    printf 'fixture Git stderr: %s\n' "$stage" >&2
+    exit "$STUB_GIT_RC"
+  fi
+  # Cleanup failure must not change the setup command's status.
+  if [ "$stage" = remove-worktree ] && [ -n "${STUB_GIT_FAIL:-}" ]; then exit 97; fi
+fi
+exec /usr/bin/git "$@"
+EOF
+chmod +x "$TMP/bin/git"
+
 # The backup source: a bare origin whose main carries a stub sync.sh that writes one note.
 g() { git -c user.name=t -c user.email=t@example.invalid -c init.defaultBranch=main "$@"; }
 g init -q --bare "$TMP/origin.git"
@@ -50,9 +77,11 @@ g clone -q "$TMP/origin.git" "$TMP/repo"
 run() {
   g -C "$TMP/repo" remote set-url origin "$1"
   : > "$TMP/curl.log"
+  : > "$TMP/git.log"
   env -i HOME="$TMP/home" PATH="$TMP/bin:/usr/bin:/bin" \
     GIT_CONFIG_NOSYSTEM=1 GIT_ALLOW_PROTOCOL=file GIT_TERMINAL_PROMPT=0 \
     STUB_LOG="$TMP/curl.log" STUB_CODE="${STUB_CODE:-000}" \
+    STUB_GIT_LOG="$TMP/git.log" STUB_GIT_FAIL="${STUB_GIT_FAIL:-}" STUB_GIT_RC="${STUB_GIT_RC:-1}" \
     HARNESS_BACKUP_REMOTE_PRIVATE="${VOUCH:-0}" \
     DOTFILES="$TMP/repo" BACKUP_TMP_ROOT="$TMP/cache" CLAUDE_HOME="$TMP/home/.claude" \
     bash "$SCRIPT" 2>&1
@@ -100,8 +129,32 @@ case $out in *"REFUSED: origin is not a github.com"*) ok ;; *) bad "local origin
 [ ! -s "$TMP/curl.log" ] && ok || bad "local origin: GitHub was asked about it"
 out=$(VOUCH=1 run "$TMP/origin.git"); rc=$?
 [ "$rc" -eq 0 ] && ok || bad "local origin, vouched: rc=$rc: $out"
+if grep -Fxq fetch-backup-branch "$TMP/git.log"; then
+  bad "first backup fetched a branch that did not exist"
+else
+  ok
+fi
 note=$(git --git-dir="$TMP/origin.git" show backup/claude-memory:memory/-home-x/note.md 2>&1)
 [ "$note" = "a private note" ] && ok || bad "local origin, vouched: backup branch lacks the note: $note"
+
+# 7. Each setup failure logs a fixed parent-shell stage, preserves the primary status
+#    despite cleanup failure, and does not replay or swallow the original stderr.
+for pair in fetch-main:61 fetch-backup-branch:62 add-worktree:63; do
+  stage=${pair%:*} want=${pair#*:}
+  out=$(VOUCH=1 STUB_GIT_FAIL="$stage" STUB_GIT_RC="$want" run "$TMP/origin.git"); rc=$?
+  [ "$rc" -eq "$want" ] && ok || bad "$stage: rc=$rc, want $want: $out"
+  case $out in
+    *"backup-harness: git setup $stage failed (exit $want)"*) ok ;;
+    *) bad "$stage: expected setup diagnostic: $out" ;;
+  esac
+  [ "$(grep -Fxc "fixture Git stderr: $stage" <<< "$out")" -eq 1 ] && ok ||
+    bad "$stage: original Git stderr lost or replayed: $out"
+  grep -Fxq remove-worktree "$TMP/git.log" && ok || bad "$stage: cleanup trap did not run"
+  case $out in
+    *"memory-push:"*|*"pushed current harness"*) bad "$stage: ran copy or push after setup failure" ;;
+    *) ok ;;
+  esac
+done
 
 echo "backup-harness public guard: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]
