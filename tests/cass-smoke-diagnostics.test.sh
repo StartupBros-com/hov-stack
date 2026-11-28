@@ -23,6 +23,7 @@
 set -uo pipefail
 
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+SCRIPT=$REPO/scripts/cass-release-promote.sh
 HERE=$REPO/scripts
 TMP=$(mktemp -d) || exit 1
 trap 'rm -rf "$TMP"' EXIT
@@ -32,21 +33,11 @@ bad() { fail=$((fail + 1)); echo "FAIL: $*" >&2; }
 
 command -v jq >/dev/null 2>&1 || { echo "FAIL: jq required" >&2; exit 1; }
 
-# Extract just the functions; sourcing the script would run a promote.
-# live_archive_advisory is included because candidate_smoke calls it: without it
-# every case absorbs a "command not found" on stderr, which this suite greps.
-sed -n '/^smoke_fail() {/,/^}/p'            "$REPO/scripts/cass-release-promote.sh" >  "$TMP/fn.sh"
-sed -n '/^candidate_smoke() {/,/^}/p'       "$REPO/scripts/cass-release-promote.sh" >> "$TMP/fn.sh"
-sed -n '/^live_archive_advisory() {/,/^}/p' "$REPO/scripts/cass-release-promote.sh" >> "$TMP/fn.sh"
-[ -s "$TMP/fn.sh" ] || { echo "FAIL: could not extract smoke functions" >&2; exit 1; }
-grep -q '^live_archive_advisory() {' "$TMP/fn.sh" \
-  || { echo "FAIL: could not extract live_archive_advisory" >&2; exit 1; }
+# Record advisories locally; neither suite sends a notification.
 say() { printf '%s\n' "$*" >> "$TMP/said"; return 0; }
-# shellcheck source=/dev/null
-. "$TMP/fn.sh"
-for fn in smoke_fail candidate_smoke live_archive_advisory; do
-  declare -F "$fn" >/dev/null || { echo "FAIL: could not extract $fn" >&2; exit 1; }
-done
+# shellcheck source=./fixtures/cass-smoke-functions.sh
+. "$REPO/tests/fixtures/cass-smoke-functions.sh" || exit 1
+load_cass_smoke_functions "$SCRIPT" "$TMP/fn.sh" || exit 1
 
 # stub <name> <version-line> <capabilities> <status> <search>
 # Each payload is valid JSON, the literal NOTJSON, or FAIL:<code>.
