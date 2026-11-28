@@ -28,8 +28,9 @@
 # checks. There is no command-line or environment switch for granting exceptions.
 # Otherwise it refuses when a Pro round is due and has not finished clean. A round is due
 # when the diff touches .github/ or a migrations directory, or when --pro says so (billing,
-# auth, real money or user data: paths alone cannot show those). The pro-gate rounds record
-# for the PR must exist (absent is unknown, not zero) and show 0 open P0 and 0 open P1, or,
+# auth, real money or user data: paths alone cannot show those). An expired rounds record
+# uses the runtime's retained decision with fresh proof, never a new review or fabricated
+# record. Otherwise the record must show 0 open P0 and 0 open P1, or,
 # with --pro-fixed, the PR must have a non-merge commit newer than that round: the "fix its
 # P0/P1, push, no second round" path. That merge is reported as such, never as a Pro pass.
 # It also refuses under CLAUDE_LOOP_GUARD=1: loop-guard fences `gh pr merge` by its command
@@ -206,6 +207,64 @@ check_substitution_identity() {
   ' "$S/identity.json" >/dev/null || refuse 'review substitution identity no longer matches the approved head and base; nothing merged'
 }
 
+# An expired round-budget summary is not a missing review. Recover only through
+# the runtime's no-spend proof/decision API; never rebuild its records or dispatch
+# an effect. Recheck after CI/freezes, immediately before each merge attempt.
+DURABLE_REVIEW=0 PROOF_SEQ=0
+check_retained_review() {
+  local runtime="${PRO_GATE_HOME:-$HOME/.pro-review-daemon}" plugin="$HERE/../plugins/pro-gate"
+  local fields version cid cv cd xd checkout proof decision
+  local oracle="$runtime/oracle-review.sh" resolver="$plugin/skills/pro-gate/scripts/resolve-identity.sh"
+  [ -x "$oracle" ] && [ -x "$resolver" ] && [ -f "$runtime/lib.sh" ] \
+    || refuse "a Pro round is due ($WHY); no usable retained review runtime is available"
+  fields=$(CLAUDE_PLUGIN_ROOT="$plugin" PRO_GATE_PLUGIN_MANIFEST="$plugin/.claude-plugin/plugin.json" "$resolver") \
+    || refuse 'the promoted Pro review identity is unreadable'
+  IFS=$'\t' read -r version cid cv cd xd <<<"$fields"
+  [ -f "$runtime/VERSION" ] && [ "$(tr -d '[:space:]' <"$runtime/VERSION")" = "$version" ] \
+    || refuse 'Pro runtime version differs from the promoted adapter; align them before landing'
+  jq -e --arg id "$cid" --argjson v "$cv" --arg cd "$cd" --arg xd "$xd" \
+    '. == {contract_id:$id,contract_version:$v,contract_digest:$cd,corpus_digest:$xd}' \
+    "$runtime/review-decision-v1.json" >/dev/null \
+    || refuse 'Pro runtime identity differs from the promoted adapter'
+  checkout=$(git rev-parse --show-toplevel) || refuse 'retained review validation needs a local PR worktree'
+  [ "$(git rev-parse HEAD)" = "$HEAD" ] \
+    || refuse "retained review validation must run from PR #$PR at ${HEAD:0:12}; no review was started"
+  PROOF_SEQ=$((PROOF_SEQ + 1))
+  proof="$S/review-proof-$PROOF_SEQ"
+  decision="$S/review-decision.json"
+  "$oracle" --prepare-review-evidence "$proof" --repo "$checkout" \
+    --pr "https://github.com/$REPO/pull/$PR" --candidate-head "$HEAD" >"$S/review-paths.json" \
+    || refuse 'fresh Pro review evidence could not be prepared; no review was started'
+  PRO_GATE_REVIEW_ENDPOINT_PATCH="$proof/endpoint.patch" PRO_GATE_REVIEW_PR_EVIDENCE="$proof/pr-evidence.json" \
+    "$oracle" --review-decision --json --repo "$checkout" --pr "https://github.com/$REPO/pull/$PR" \
+    --diff "$proof/endpoint.patch" >"$decision" \
+    || refuse 'retained Pro review decision could not be read; no review was started'
+  # Use the shared validator, including its reducer replay, rather than trusting
+  # a plausible outer action or a successful command exit. Keep sourcing scoped.
+  if ! (
+    # shellcheck source=/dev/null
+    source "$runtime/lib.sh"
+    [ "$(pg_review_decision_identity_json)" = "$(jq -cS . "$runtime/review-decision-v1.json")" ] &&
+      jq -es 'length == 1' "$decision" >/dev/null &&
+      pg_review_decision_envelope_valid "$decision"
+  ); then refuse 'retained Pro review decision is invalid or incompatible'; fi
+  jq -e --arg owner "${REPO%/*}" --arg repo "${REPO#*/}" --argjson pr "$PR" --arg head "$HEAD" '
+    .facts.target == {host:"github.com",owner:$owner,repo:$repo,pr:$pr,head_oid:$head} and
+    .action == "allow-existing-merge-workflow" and .effect_request.execution_class == "report-only" and
+    .facts.open_blocking == 0
+  ' "$decision" >/dev/null \
+    || refuse "retained Pro review does not authorize this merge ($(jq -r .reason "$decision")); no review was started"
+  gh pr view "$PR" --repo "$REPO" --json headRefOid,baseRefOid >"$S/review-identity.json" \
+    || retry 'retained review target could not be rechecked; nothing merged'
+  jq -e --arg head "$HEAD" --slurpfile proof "$proof/pr-evidence.json" '
+    .headRefOid == $head and .headRefOid == $proof[0].metadata.target.head_oid and
+    .baseRefOid == $proof[0].metadata.target.base_oid
+  ' "$S/review-identity.json" >/dev/null \
+    || refuse 'retained review target changed after proof preparation; nothing merged'
+  [ "$(git rev-parse HEAD)" = "$HEAD" ] || refuse 'local review head changed; nothing merged'
+  say "Pro round due ($WHY): retained review permits this merge ($(jq -r .reason "$decision"))"
+}
+
 # 2. A due Pro round must have finished, unless this exact identity has a
 # separately reviewed operator-approved substitute. Neither path skips CI.
 gh api --paginate "repos/$REPO/pulls/$PR/files?per_page=100" --jq '.[].filename' >"$S/files.txt" \
@@ -220,7 +279,10 @@ if [ -n "$WHY" ] && select_substitution; then
   say "$NOTE for $REPO#$PR at $HEAD; evidence $(jq -r .evidence "$S/substitution.json")"
 elif [ -n "$WHY" ]; then
   REC="${PRO_GATE_ROUNDS_DIR:-${PRO_GATE_HOME:-$HOME/.pro-review-daemon}/rounds}/${REPO/\//-}-$PR.last"
-  [ -f "$REC" ] || refuse "a Pro round is due ($WHY) and none has finished for PR #$PR; run /pro-gate, fix its P0/P1, push, then re-run"
+  if [ ! -e "$REC" ] && [ ! -L "$REC" ]; then
+    DURABLE_REVIEW=1
+    check_retained_review
+  else
   EPOCH="" P0="" P1=""
   IFS=$'\t' read -r EPOCH P0 P1 <"$REC" || true
   [[ "$EPOCH" =~ ^[0-9]+$ && "$P0" =~ ^[0-9]+$ && "$P1" =~ ^[0-9]+$ ]] || refuse "the Pro rounds record $REC is unreadable"
@@ -242,6 +304,7 @@ elif [ -n "$WHY" ]; then
     say "Pro round due ($WHY): $NOTE"
   else
     refuse "the last Pro round on PR #$PR left $P0 open P0 and $P1 open P1; fix them, push (no second round), then re-run with --pro-fixed"
+  fi
   fi
 fi
 
@@ -409,6 +472,7 @@ while :; do
   check_closes
   if wait_freeze; then continue; fi
   check_substitution_identity
+  if [ "$DURABLE_REVIEW" = 1 ]; then check_retained_review; fi
   if gh pr merge "$PR" --repo "$REPO" --squash --match-head-commit "$HEAD" >"$S/merge.out" 2>&1; then break; fi
   # The command can fail after GitHub merged (a client timeout): read the state before deciding.
   POST=$(gh pr view "$PR" --repo "$REPO" --json state,mergeStateStatus --jq '"\(.state) \(.mergeStateStatus)"') \
