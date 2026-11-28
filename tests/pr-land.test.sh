@@ -267,6 +267,13 @@ check 'retained review queried twice, including after CI' test "$(grep -c -F -- 
 check 'retained review never requests an effect' bash -c '! grep -q -F -- --review-decision-effect "$1"' _ "$FIX/pro.calls"
 check 'retained review uses full PR URL' grep -q -F -- "--pr https://github.com/$R/pull/$P" "$FIX/pro.calls"
 
+durable_case
+mkdir -p "$FIX/installed"
+ln -s "$FIX/scripts" "$FIX/installed/scripts"
+SCRIPT="$FIX/installed/scripts/pr-land.sh"
+run 7 --repo "$R" --pro
+landed 'retained review through installed scripts symlink'
+
 mutate_decision() { jq "$1" "$PG_TEST_DECISION" >"$FIX/mutated" && mv "$FIX/mutated" "$PG_TEST_DECISION"; }
 regenerate_decision() { ( . "$PRO_GATE_HOME/lib.sh"; pg_review_decision_reduce "$(cat "$FIX/facts.json")" ) >"$PG_TEST_DECISION"; }
 mutate_facts() { jq "$1" "$FIX/facts.json" >"$FIX/mutated" && mv "$FIX/mutated" "$FIX/facts.json"; regenerate_decision; }
