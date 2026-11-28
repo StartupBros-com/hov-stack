@@ -15,9 +15,9 @@ ln -s "$(readlink -f "$real_node")" "$WORK/bin/node"
 export PATH="$WORK/bin:/usr/bin:/bin"
 unset DOTFILES_ROLE DOTFILES_ROLE_FILE DOTFILES XDG_CONFIG_HOME XDG_STATE_HOME REPO_ROUTE_STATE
 unset CLAUDE_MEMORY_LIVE_ROOT CLAUDE_SYNC_STATUSLINE_DIR CLAUDE_SYNC_CUTOVER_LOCK
-unset HOV_STACK_SYNC_LOCKED HOV_STACK_UPDATE_FROM CCFLARE_URL_SATELLITE
+unset HOV_STACK_SYNC_LOCKED HOV_STACK_UPDATE_FROM HOV_ROUTER_URL_SATELLITE
 export CLAUDE_SYNC_SKIP_HOOK_RECONCILE=1
-export CCFLARE_URL_SATELLITE=https://proxy.example.test
+export HOV_ROUTER_URL_SATELLITE=https://proxy.example.test
 export CLAUDE_MEMORY_MIRROR_ROOT="$WORK/mirror"
 printf 'seed memory\n' | tee "$WORK/mirror/project/MEMORY.md" >/dev/null
 export TOOL_UPDATE_TABLE='role-tool|fake/repo|role-tool|SHA256SUMS|raw|role-tool|role-tool'
@@ -124,7 +124,7 @@ assert_end_state() {
   fi
   diff <({ (cd "$REPO/systemd" && find . -type f ! -name README.md -printf '%P\n'); printf '%s\n' wt-sweep.service.d/50-hygiene-posture.conf wt-sweep.timer.d/50-hygiene-posture.conf; } | sort) \
     <(cd "$HOME/.config/systemd/user" && find . -type f -printf '%P\n' | sort) || fail "$role user unit inventory differs"
-  jq -e --arg proxy "$CCFLARE_URL_SATELLITE" --arg role "$role" '
+  jq -e --arg proxy "$HOV_ROUTER_URL_SATELLITE" --arg role "$role" '
     .permissions.disableAutoMode == "disable" and
     (.permissions.deny | index("EnterPlanMode") != null) and
     .autoCompactWindow == 300000 and (.hooks.PreToolUse | length > 0) and
@@ -358,7 +358,7 @@ ok 'papercut soft failure still merges settings and exits with a named warning'
 
 select_home "$WORK/hard-failure" satellite
 printf '{"env":{"ROLE_OVERLAY_TEST":"not-merged"}}\n' | tee "$HOV_STACK_OVERLAY/settings.json" >/dev/null
-CCFLARE_URL_SATELLITE='' run 1 setup --no-dcg
+HOV_ROUTER_URL_SATELLITE='' run 1 setup --no-dcg
 contains 'settings merge not run'
 contains 'the merge into'
 jq -e '.env.ROLE_OVERLAY_TEST == null' "$CLAUDE_HOME/settings.json" >/dev/null || fail 'hard owner failure allowed merge'
@@ -653,13 +653,13 @@ cmp "$WORK/claude-first.json" "$CLAUDE_HOME/settings.json" || fail 'rerun change
 ok 'fresh role home with Claude Code: auto-update stays on after the marketplace add; a rerun changes nothing'
 
 fresh_home "$WORK/satellite-fresh-no-proxy" satellite
-CCFLARE_URL_SATELLITE='' run 1 setup --no-dcg
+HOV_ROUTER_URL_SATELLITE='' run 1 setup --no-dcg
 contains 'settings merge not run'
 [ ! -e "$CLAUDE_HOME/.hov-stack/settings-base.json" ] && [ ! -e "$CLAUDE_HOME/.hov-stack/setup-settings-base.json" ] || fail 'refused owner phase left a record'
 jq -e '.env.ANTHROPIC_BASE_URL == null' "$CLAUDE_HOME/settings.json" >/dev/null || fail 'refused owner phase changed the seed'
 run 0 setup --no-dcg
 first_merge_row 'satellite rerun with a proxy URL'
-jq -e --arg proxy "$CCFLARE_URL_SATELLITE" '.env.ANTHROPIC_BASE_URL == $proxy' "$CLAUDE_HOME/settings.json" >/dev/null || fail 'rerun did not merge the satellite proxy'
+jq -e --arg proxy "$HOV_ROUTER_URL_SATELLITE" '.env.ANTHROPIC_BASE_URL == $proxy' "$CLAUDE_HOME/settings.json" >/dev/null || fail 'rerun did not merge the satellite proxy'
 [ -f "$CLAUDE_HOME/.hov-stack/settings-base.json" ] || fail 'rerun made no sync.sh record'
 ok 'satellite with no proxy URL keeps the seed and no record; a rerun with one makes the first merge'
 

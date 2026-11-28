@@ -6,7 +6,7 @@
  * Retired 2026-11-25 (#882). This PreToolUse hook checked the one direct
  * ChatGPT login's Codex quota before a Bash `codex exec` and rewrote or denied
  * the call when that account was out. Every Codex run now goes through the
- * local ccflare pool (top-level `model_provider = "better_ccflare"`,
+ * local HoV Router pool (top-level `model_provider = "hov_router"`,
  * dotfiles#1002), which rotates across every ChatGPT account, so the template
  * stopped registering it. An install seeded while the template registered it,
  * and a session started before that change, still run this path, and a

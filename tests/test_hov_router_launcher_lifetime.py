@@ -17,7 +17,7 @@ REPO = Path(__file__).resolve().parents[1]
 
 class LauncherLifetimeTests(unittest.TestCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory(prefix="ccflare-launcher-lifetime-")
+        self.tmp = tempfile.TemporaryDirectory(prefix="hov-router-launcher-lifetime-")
         self.root = Path(self.tmp.name)
         self.project = self.root / "project"
         self.project.mkdir()
@@ -27,8 +27,8 @@ class LauncherLifetimeTests(unittest.TestCase):
         self.bin.mkdir()
         self.record = self.root / "child.json"
         source = (REPO / ".bashrc").read_text()
-        source = source.split("# --- ccflare-launcher begin", 1)[1]
-        source = source.split("\n", 1)[1].split("# --- ccflare-launcher end", 1)[0]
+        source = source.split("# --- hov-router-launcher begin", 1)[1]
+        source = source.split("\n", 1)[1].split("# --- hov-router-launcher end", 1)[0]
         self.assertEqual(source.count("local managed_settings_dir=/etc/claude-code"), 1)
         source = source.replace("local managed_settings_dir=/etc/claude-code", f"local managed_settings_dir={self.root}/policy")
         self.launcher = self.root / "launcher.sh"

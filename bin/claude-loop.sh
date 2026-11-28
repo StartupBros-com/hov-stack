@@ -612,7 +612,7 @@ CLAUDE_RC=0
 # the child. The 2026-09-03 #923 run read the global "merge your own
 # gate-green PRs" convention and planned to merge on green; its session ended
 # before CI did, which is the only reason it did not. (dotfiles#965)
-# Keep thinking display visible (dotfiles#1225, better-ccflare#356). Without an
+# Keep thinking display visible for HoV Router (dotfiles#1225, better-ccflare#356). Without an
 # explicit display the API returns thinking as empty deltas (signature only),
 # and the gateway's progress guard counts a thinking delta as progress only when
 # it carries text, so a step that thinks for more than ~450s is aborted,

@@ -660,7 +660,7 @@ const target = (f) =>
   );
   await test("satellite apply reads the overlay URL and never writes loopback", (f) => {
     // The SessionStart settings hook runs the apply with Claude Code's env, which
-    // carries no CCFLARE_URL_SATELLITE; the apply used to write the tracked
+    // carries no HOV_ROUTER_URL_SATELLITE; the apply used to write the tracked
     // loopback over the satellite's live URL there.
     fs.writeFileSync(
       path.join(f.root, "hosts.tsv"),
@@ -671,7 +671,7 @@ const target = (f) =>
       moved = "https://moved-proxy.example.net";
     const url = () => f.read(f.live).env.ANTHROPIC_BASE_URL;
     const apply = (value) => {
-      const r = f.run(["apply-settings"], { CCFLARE_URL_SATELLITE: value });
+      const r = f.run(["apply-settings"], { HOV_ROUTER_URL_SATELLITE: value });
       assert.equal(r.status, 0, r.stderr + r.stdout);
       return r.stdout;
     };
@@ -685,7 +685,7 @@ const target = (f) =>
     assert.match(out, /skipped env\.ANTHROPIC_BASE_URL \(this host is a satellite/);
     fs.writeFileSync(
       path.join(f.env.HOV_STACK_OVERLAY, "env"),
-      `CCFLARE_URL_SATELLITE=${moved}\n`,
+      `HOV_ROUTER_URL_SATELLITE=${moved}\n`,
     );
     apply("");
     assert.equal(url(), moved, "the overlay env's URL must reach live when none is exported");

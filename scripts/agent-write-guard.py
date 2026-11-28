@@ -65,7 +65,7 @@ CHURN_RATIO_WARN = 1_000
 CODEX_FIXED = (0, 143, 0)
 
 AGENT_PAT = re.compile(
-    r"(codex|claude|ccflare|opencode|cass|coding-agent-search|app-server|broker\.mjs)",
+    r"(codex|claude|hov-router|opencode|cass|coding-agent-search|app-server|broker\.mjs)",
     re.I,
 )
 CWD_FLAG = re.compile(r"--(?:cwd|worktree|workdir|project-dir)[= ]([^\s\0]+)")

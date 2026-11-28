@@ -20,7 +20,7 @@
 #      (drill-caught 2026-08-30: route aliases break the native session with
 #      unrecognized_model); any other model value passes through untouched.
 #   4. Hermeticity: ambient proxy env is set BY THIS SUITE, not inherited.
-#   5. ccflare-key-install (KTD3): install writes CUSTOM_HEADERS and MIGRATES
+#   5. hov-router-key-install (KTD3): install writes CUSTOM_HEADERS and MIGRATES
 #      any legacy ANTHROPIC_AUTH_TOKEN away; rotation idempotence; unrelated
 #      keys survive; non-btr rejection; valid JSON; verify-retry-once branch
 #      (driven by a first-read-stale jq stub).
@@ -44,7 +44,7 @@ bad() { fail=$((fail + 1)); echo "FAIL: $*" >&2; }
 REAL_JQ=$(command -v jq)
 
 # ---- extract the launcher function from .bashrc ----------------------------
-sed -n '/^# --- ccflare-launcher begin/,/^# --- ccflare-launcher end/p' \
+sed -n '/^# --- hov-router-launcher begin/,/^# --- hov-router-launcher end/p' \
   "$REPO/.bashrc" > "$TMP/launcher.sh"
 # Redirect the fixed policy root in the scratch source only. No production env
 # override exists, and no test reads/writes the host's enforced policy files.
@@ -96,7 +96,7 @@ cat > "$STUB_BIN/curl" <<'SH'
 # (Authorization or x-api-key) is recorded as a leak. Wrong endpoint or
 # missing auth answers 000 so a contract regression surfaces as failures.
 { printf 'curl-argv:'; printf ' %q' "$@"; printf '\n'; } >> "$CURL_STUB_RECORD"
-if [ "${CCFLARE_TEST_CURL_EXIT:-0}" != 0 ]; then exit "$CCFLARE_TEST_CURL_EXIT"; fi
+if [ "${HOV_ROUTER_TEST_CURL_EXIT:-0}" != 0 ]; then exit "$HOV_ROUTER_TEST_CURL_EXIT"; fi
 url_ok=0 auth_ok=0 prev=
 for a in "$@"; do
   if [ "$prev" = "-K" ] && grep -q 'x-api-key' "$a" 2>/dev/null; then auth_ok=1; fi
@@ -107,7 +107,7 @@ for a in "$@"; do
   prev=$a
 done
 if [ "$url_ok" = 1 ] && [ "$auth_ok" = 1 ]; then
-  printf '%s' "${CCFLARE_TEST_HTTP_CODE:-200}"
+  printf '%s' "${HOV_ROUTER_TEST_HTTP_CODE:-200}"
 else
   printf '000'
 fi
@@ -126,7 +126,7 @@ mkdir -p "$CLAUDE_HOME"
 mkdir -p "$TMP/project"
 cd "$TMP/project" || exit 1
 SETTINGS=$CLAUDE_HOME/settings.json
-LOG=$XDG_STATE_HOME/ccflare-launcher/fallback.log
+LOG=$XDG_STATE_HOME/hov-router-launcher/fallback.log
 RECORD=$TMP/claude-record
 CURL_RECORD=$TMP/curl-record
 export CLAUDE_STUB_RECORD=$RECORD
@@ -155,10 +155,14 @@ run_claude() { # <http-code> <curl-exit> [args...]
   local http=$1 cexit=$2; shift 2
   : > "$RECORD"
   : > "$CURL_RECORD"
-  CCFLARE_TEST_HTTP_CODE=$http CCFLARE_TEST_CURL_EXIT=$cexit claude "$@" 2> "$TMP/stderr"
+  HOV_ROUTER_TEST_HTTP_CODE=$http HOV_ROUTER_TEST_CURL_EXIT=$cexit claude "$@" 2> "$TMP/stderr"
 }
 
 log_lines() { [ -f "$LOG" ] && wc -l < "$LOG" || echo 0; }
+
+# The renamed timeout reaches the actual probe command.
+HOV_ROUTER_PROBE_TIMEOUT=11 run_claude 200 0 --continue
+grep -q -- '--max-time 11' "$CURL_RECORD" && ok || bad "renamed probe timeout did not reach curl"
 
 # ---- 1. probe 200: proxied, env passed through, no log ---------------------
 run_claude 200 0 --continue
@@ -308,7 +312,7 @@ grep -q '^API_FORCE_IDLE_TIMEOUT=__UNSET__$' "$RECORD" && ok || bad "CLI explici
 grep -q 'API_FORCE_IDLE_TIMEOUT' "$RECORD" && ok || bad "CLI explicit timeout: settings removed"
 # Native overrides are per-child, private, and removed after normal child exit.
 run_claude 401 0 --settings "$CALLER_SETTINGS"
-[ -z "$(find "$XDG_STATE_HOME/ccflare-launcher" -name 'native-overlay.*.json' -print)" ] && ok || bad "fallback settings file retained after child exit"
+[ -z "$(find "$XDG_STATE_HOME/hov-router-launcher" -name 'native-overlay.*.json' -print)" ] && ok || bad "fallback settings file retained after child exit"
 
 grep -q '^overlay-mode:600$' "$RECORD" && ok || bad "fallback overlay is not private"
 CLAUDE_STUB_EXIT=17 run_claude 401 0
@@ -416,9 +420,9 @@ run_claude 401 0 --continue
 grep -q '^argv: --continue$' "$RECORD" && ok || bad "ambiguous managed fragment: native overlay attempted"
 rm "$MANAGED" "$FRAGMENT"
 
-# ---- 8. ccflare-key-install: install, MIGRATE legacy, rotate, validate -----
+# ---- 8. hov-router-key-install: install, MIGRATE legacy, rotate, validate -----
 printf '{"env":{"ANTHROPIC_BASE_URL":"http://127.0.0.1:8788","ANTHROPIC_AUTH_TOKEN":"btr-legacy-old","OTHER":"keep"}}\n' > "$SETTINGS"
-KI=$REPO/bin/ccflare-key-install
+KI=$REPO/bin/hov-router-key-install
 printf 'btr-first-key\n' | bash "$KI" >/dev/null 2>&1
 [ "$("$REAL_JQ" -r '.env.ANTHROPIC_CUSTOM_HEADERS' "$SETTINGS")" = "x-api-key: btr-first-key" ] && ok \
   || bad "key-install: first key not installed as custom header"
@@ -459,5 +463,5 @@ rm -f "$STUB_BIN/jq"
 [ "$("$REAL_JQ" -r '.env.ANTHROPIC_CUSTOM_HEADERS' "$SETTINGS")" = "x-api-key: btr-retry-key" ] && ok \
   || bad "retry: key not installed after retry (got '$("$REAL_JQ" -r '.env.ANTHROPIC_CUSTOM_HEADERS' "$SETTINGS")')"
 
-echo "ccflare-launcher: pass=$pass fail=$fail"
+echo "hov-router-launcher: pass=$pass fail=$fail"
 [ "$fail" -eq 0 ]
