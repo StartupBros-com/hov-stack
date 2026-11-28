@@ -359,14 +359,23 @@ export function classifyFrameMatch({
   if (unresolved) {
     return { ...base, outcome: 'not-discriminating' };
   }
-  // Beating a differing neighbour on one side bounds the timing in that direction
-  // only: when the source is static on the other side, a render that is early (or
-  // late) by any amount within that static run shows the same picture. Proof needs
-  // a differing neighbour on both sides of n.
-  const bothSides =
-    differing.some((neighbour) => neighbour.offset < 0) &&
-    differing.some((neighbour) => neighbour.offset > 0);
-  if (!bothSides) {
+  // Distant frames can falsify a match, but cannot prove which exact frame
+  // was rendered within a run of repeated pictures. Require observed change and
+  // a decisive score at both immediate neighbours.
+  const immediateProof = [-1, 1].every(
+    (offset) =>
+      sourceNeighbours.some(
+        (neighbour) =>
+          neighbour.offset === offset && neighbour.changedPixels > 0,
+      ) &&
+      differing.some(
+        (neighbour) =>
+          neighbour.offset === offset &&
+          Number.isFinite(neighbour.ssim) &&
+          microRound(matchSsim - neighbour.ssim) > frameMatchNeighbourMargin,
+      ),
+  );
+  if (!immediateProof) {
     return { ...base, outcome: 'not-discriminating' };
   }
   return { ...base, outcome: 'match' };
