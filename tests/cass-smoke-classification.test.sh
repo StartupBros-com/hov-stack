@@ -36,23 +36,11 @@ bad() { fail=$((fail + 1)); echo "FAIL: $*" >&2; }
 
 command -v jq >/dev/null 2>&1 || { echo "FAIL: jq required" >&2; exit 1; }
 
-# Extract only the functions; sourcing the script would attempt a promote.
-# live_archive_advisory is extracted too: candidate_smoke calls it, so without it
-# every case would eat a "command not found" and the advisory path would be
-# untested precisely where this change moved the risk.
-sed -n '/^smoke_fail() {/,/^}/p'             "$SCRIPT" >  "$TMP/fn.sh"
-sed -n '/^candidate_smoke() {/,/^}/p'        "$SCRIPT" >> "$TMP/fn.sh"
-sed -n '/^live_archive_advisory() {/,/^}/p'  "$SCRIPT" >> "$TMP/fn.sh"
-[ -s "$TMP/fn.sh" ] || { echo "FAIL: could not extract candidate_smoke" >&2; exit 1; }
-grep -q '^live_archive_advisory() {' "$TMP/fn.sh" \
-  || { echo "FAIL: could not extract live_archive_advisory" >&2; exit 1; }
-# Record notifications instead of sending them, so case 6 can assert one fired.
+# Record advisories locally; neither suite sends a notification.
 say() { printf '%s\n' "$*" >> "$TMP/said"; return 0; }
-# shellcheck source=/dev/null
-. "$TMP/fn.sh"
-for fn in smoke_fail candidate_smoke live_archive_advisory; do
-  declare -F "$fn" >/dev/null || { echo "FAIL: could not extract $fn" >&2; exit 1; }
-done
+# shellcheck source=./fixtures/cass-smoke-functions.sh
+. "$REPO/tests/fixtures/cass-smoke-functions.sh" || exit 1
+load_cass_smoke_functions "$SCRIPT" "$TMP/fn.sh" || exit 1
 
 # stub <name> <break-at>
 #   break-at: none|version|mismatch|capabilities|status|search|live
