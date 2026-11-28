@@ -1480,22 +1480,22 @@ printf '# satellite fixture table\n%s\t%s\n' "$fixture_hostname" satellite \
 # PLANTED NEGATIVE: a satellite whose environment carries no proxy URL fails
 # closed at the runtime-env step, names the variable, and leaves the live URL
 # as it was. The public tree ships no proxy host; the overlay env is the only
-# source of CCFLARE_URL_SATELLITE.
-unset CCFLARE_URL_SATELLITE
+# source of HOV_ROUTER_URL_SATELLITE.
+unset HOV_ROUTER_URL_SATELLITE
 sat_unset_url_before=$(jq -r '.env.ANTHROPIC_BASE_URL // ""' "$CLAUDE_HOME/settings.json" 2>/dev/null)
 sat_unset_out=$(setup_phases 2>&1); sat_unset_status=$?
-if [ "$sat_unset_status" -ne 0 ] && grep -Fq 'CCFLARE_URL_SATELLITE is unset' <<<"$sat_unset_out"; then
+if [ "$sat_unset_status" -ne 0 ] && grep -Fq 'HOV_ROUTER_URL_SATELLITE is unset' <<<"$sat_unset_out"; then
   ok
 else
-  bad "satellite install with CCFLARE_URL_SATELLITE unset did not fail closed naming the variable (exit $sat_unset_status):"$'\n'"$sat_unset_out"
+  bad "satellite install with HOV_ROUTER_URL_SATELLITE unset did not fail closed naming the variable (exit $sat_unset_status):"$'\n'"$sat_unset_out"
 fi
 sat_unset_url_after=$(jq -r '.env.ANTHROPIC_BASE_URL // ""' "$CLAUDE_HOME/settings.json" 2>/dev/null)
 if [ "$sat_unset_url_after" = "$sat_unset_url_before" ]; then
   ok
 else
-  bad "satellite install with CCFLARE_URL_SATELLITE unset changed ANTHROPIC_BASE_URL from '$sat_unset_url_before' to '$sat_unset_url_after'"
+  bad "satellite install with HOV_ROUTER_URL_SATELLITE unset changed ANTHROPIC_BASE_URL from '$sat_unset_url_before' to '$sat_unset_url_after'"
 fi
-export CCFLARE_URL_SATELLITE=https://proxy-host.example.net
+export HOV_ROUTER_URL_SATELLITE=https://proxy-host.example.net
 : >"$CRONTAB_FIXTURE"
 docker_satellite_before=$(sha256sum "$DOCKER_DAEMON_TARGET" "$DOCKER_ADOPTION_STATE" "$DOCKER_ADOPTION_BACKUP")
 docker_satellite_validations_before=$(wc -l <"$DOCKER_VALIDATE_LOG")
@@ -1675,7 +1675,7 @@ fi
 
 printf '# workstation fixture table\n%s\t%s\n' "$fixture_hostname" workstation \
   >"$REPO/hosts.tsv"
-unset CCFLARE_URL_SATELLITE
+unset HOV_ROUTER_URL_SATELLITE
 
 # Read failure disables both migrated timers, preserves unrelated state,
 # and is visible to the caller.

@@ -223,11 +223,11 @@ VOLATILE_FILES="settings.json keybindings.json"
 # of truth for reconcile_runtime_env, apply-settings and check(). The
 # workstation runs the proxy, so its URL is loopback; a satellite reaches the
 # workstation's serve URL, which names a private host and therefore never
-# comes from this tree: an exported CCFLARE_URL_SATELLITE wins, else the
+# comes from this tree: an exported HOV_ROUTER_URL_SATELLITE wins, else the
 # overlay env file (~/.config/hov-stack/env) answers, read below once
 # lib/overlay.sh is loaded.
-CCFLARE_URL_WORKSTATION="http://127.0.0.1:8788"
-CCFLARE_URL_SATELLITE=${CCFLARE_URL_SATELLITE:-}
+HOV_ROUTER_URL_WORKSTATION="http://127.0.0.1:8788"
+HOV_ROUTER_URL_SATELLITE=${HOV_ROUTER_URL_SATELLITE:-}
 # Flat unit names, plus drop-in overrides written as "<unit>.d/<file>.conf". The
 # jsm-auto-update drop-ins are overrides, not a unit we own: jsm installs and may
 # rewrite jsm-auto-update.service itself, while drop-ins survive that rewrite.
@@ -320,7 +320,7 @@ if declare -F overlay_record_load >/dev/null; then overlay_record_load; fi
 # session's Bash calls get that file through claude-env.sh, but the SessionStart
 # settings hook, an ssh-run install and a systemd unit run without it; an apply
 # that found no URL there wrote the tracked loopback over a satellite's live one.
-[ -n "$CCFLARE_URL_SATELLITE" ] || CCFLARE_URL_SATELLITE=$(overlay_env_get CCFLARE_URL_SATELLITE)
+[ -n "$HOV_ROUTER_URL_SATELLITE" ] || HOV_ROUTER_URL_SATELLITE=$(overlay_env_get HOV_ROUTER_URL_SATELLITE)
 
 # Root-owned system units (systemd-system/ -> $SYSTEM_SYS), NOT --user units —
 # see the header comment. Deliberately never enabled/started by `./setup --root`; see
@@ -1279,11 +1279,11 @@ reconcile_runtime_env() (
   # inherit either role's URL (the author's infrastructure repository plan
   # 2026-08-30-0030-feat-ccflare-tailnet-sharing-plan.md, R7).
   case "$(profile_role 2>/dev/null || echo unknown)" in
-    workstation) proxy_base_url="$CCFLARE_URL_WORKSTATION" ;;
+    workstation) proxy_base_url="$HOV_ROUTER_URL_WORKSTATION" ;;
     satellite)
-      proxy_base_url="$CCFLARE_URL_SATELLITE"
+      proxy_base_url="$HOV_ROUTER_URL_SATELLITE"
       [ -n "$proxy_base_url" ] || {
-        echo "runtime-env reconcile: this host is a satellite and CCFLARE_URL_SATELLITE is unset." >&2
+        echo "runtime-env reconcile: this host is a satellite and HOV_ROUTER_URL_SATELLITE is unset." >&2
         echo "  Set it in the overlay env (~/.config/hov-stack/env) to the proxy host's serve URL;" >&2
         echo "  live settings were not changed." >&2
         return 1
@@ -1586,7 +1586,7 @@ push() {
     if [ "$f" = "settings.json" ] && command -v jq >/dev/null 2>&1; then
       # The live file may carry the host-local better-ccflare API key
       # (env.ANTHROPIC_CUSTOM_HEADERS, or legacy env.ANTHROPIC_AUTH_TOKEN,
-      # written by ccflare-key-install). It is a
+      # written by hov-router-key-install). It is a
       # secret and must never enter the tracked canonical copy — strip it on
       # the way in. guard_no_credentials cannot catch it (PEM-shaped secrets
       # only), and check() deliberately excludes the key from both sides of
@@ -2861,8 +2861,8 @@ build_settings_desired() (
   env_file=$(target_in_harness_home "$(jq -r '.env.CLAUDE_ENV_FILE // empty' "$src")")
   plugin_dirs=$(plugin_dirs_with_overlay "$(mapped_plugin_dirs_of "$(jq -r '.env.CLAUDE_CODE_PLUGIN_DIRS // empty' "$src")")")
   case "$(profile_role 2>/dev/null)" in
-    workstation) proxy_url=$CCFLARE_URL_WORKSTATION ;;
-    satellite) proxy_url=$CCFLARE_URL_SATELLITE ;;
+    workstation) proxy_url=$HOV_ROUTER_URL_WORKSTATION ;;
+    satellite) proxy_url=$HOV_ROUTER_URL_SATELLITE ;;
   esac
   node -e 'const fs=require("fs"); const {stripOwned}=require(process.argv[1]); fs.writeFileSync(process.argv[3],JSON.stringify(stripOwned(JSON.parse(fs.readFileSync(process.argv[2])))))' "$HERE/lib/settings-apply.js" "$tmp/seed.json" "$tmp/owned.json" || return 1
   jq --arg env_file "$env_file" --arg plugin_dirs "$plugin_dirs" --arg proxy_url "$proxy_url" '
@@ -2931,9 +2931,9 @@ apply_settings() (
   # ANTHROPIC_BASE_URL: desired would carry the tracked loopback, which no
   # satellite serves. install refuses outright here (reconcile_runtime_env); the
   # apply skips only this key, so the rest of the settings still land.
-  if [ "$role" = satellite ] && [ -z "$CCFLARE_URL_SATELLITE" ] \
+  if [ "$role" = satellite ] && [ -z "$HOV_ROUTER_URL_SATELLITE" ] \
      && jq -e '.env | has("ANTHROPIC_BASE_URL")' "$tmp/desired.json" >/dev/null 2>&1; then
-    flags+=(--skip-path "env.ANTHROPIC_BASE_URL=this host is a satellite and CCFLARE_URL_SATELLITE is unset; set it in the overlay env")
+    flags+=(--skip-path "env.ANTHROPIC_BASE_URL=this host is a satellite and HOV_ROUTER_URL_SATELLITE is unset; set it in the overlay env")
   fi
   value=$(jq -r '.env.CLAUDE_CODE_PLUGIN_DIRS // empty' "$tmp/desired.json")
   if jq -e '.env | has("CLAUDE_CODE_PLUGIN_DIRS")' "$tmp/desired.json" >/dev/null 2>&1; then
@@ -3065,10 +3065,10 @@ check() {
       # a raw comparison is the honest signal.
       proxy_base_url=""
       case "$(profile_role 2>/dev/null || echo unknown)" in
-        workstation) proxy_base_url="$CCFLARE_URL_WORKSTATION" ;;
+        workstation) proxy_base_url="$HOV_ROUTER_URL_WORKSTATION" ;;
         satellite)
-          proxy_base_url="$CCFLARE_URL_SATELLITE"
-          [ -n "$proxy_base_url" ] || echo "  note: this host is a satellite and CCFLARE_URL_SATELLITE is unset (the overlay env, ~/.config/hov-stack/env, sets it); ANTHROPIC_BASE_URL is compared as written" ;;
+          proxy_base_url="$HOV_ROUTER_URL_SATELLITE"
+          [ -n "$proxy_base_url" ] || echo "  note: this host is a satellite and HOV_ROUTER_URL_SATELLITE is unset (the overlay env, ~/.config/hov-stack/env, sets it); ANTHROPIC_BASE_URL is compared as written" ;;
       esac
       # The projection is conditional because assigning the key outright CREATES
       # it on settings that never declared one, so two byte-identical files (a

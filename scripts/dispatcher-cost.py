@@ -32,7 +32,7 @@ import os
 import sqlite3
 import sys
 
-DB = os.path.expanduser("~/.config/better-ccflare/better-ccflare.db")
+DB = os.path.expanduser("~/.config/hov-router/hov-router.db")
 NULLS = {"window_cost_usd": None, "tokens": None}
 
 

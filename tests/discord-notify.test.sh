@@ -170,8 +170,8 @@ if [ -n "${CLAUDE_ENV_CHECK_FILE:-}" ]; then
   if [ -n "${ANTHROPIC_API_KEY+x}" ]; then printf 'SET\n' >"$CLAUDE_ENV_CHECK_FILE"; else printf 'UNSET\n' >"$CLAUDE_ENV_CHECK_FILE"; fi
 fi
 # U4e2: record one gateway request stamped now, which falls inside claude-loop's run window.
-if [ -n "${CLAUDE_STUB_CCFLARE_DB:-}" ]; then
-  python3 -c 'import sqlite3, sys, time; c = sqlite3.connect(sys.argv[1]); c.execute("INSERT INTO requests (timestamp, cost_usd, total_tokens) VALUES (?, ?, ?)", (int(time.time() * 1000), 1.25, 4200)); c.commit()' "$CLAUDE_STUB_CCFLARE_DB"
+if [ -n "${CLAUDE_STUB_HOV_ROUTER_DB:-}" ]; then
+  python3 -c 'import sqlite3, sys, time; c = sqlite3.connect(sys.argv[1]); c.execute("INSERT INTO requests (timestamp, cost_usd, total_tokens) VALUES (?, ?, ?)", (int(time.time() * 1000), 1.25, 4200)); c.commit()' "$CLAUDE_STUB_HOV_ROUTER_DB"
 fi
 if [ "${CLAUDE_STUB_COMMIT:-0}" = 1 ]; then
   printf 'completed\n' > completed
@@ -326,16 +326,16 @@ grep -q "WARN" "$LOG4E" 2>/dev/null && ok || bad "U4e missing ccflare DB should 
 grep -A1 -- '^--cost$' "$LEDGER_CALLS" | grep -q "^<EMPTY>$" && ok || bad "U4e ledger --cost should be null/empty on a missing DB: $(cat "$LEDGER_CALLS")"
 
 echo "== U4e2: dispatcher-cost success path: the real script's window_cost_usd reaches the ledger's --cost and --tokens (writer and reader agree on the key) =="
-CCFLARE_DB="$HOME/.config/better-ccflare/better-ccflare.db"
-mkdir -p "$HOME/.config/better-ccflare"
-python3 -c 'import sqlite3, sys; c = sqlite3.connect(sys.argv[1]); c.execute("CREATE TABLE requests (timestamp INTEGER, cost_usd REAL, total_tokens INTEGER)"); c.execute("INSERT INTO requests VALUES (1, 100.0, 999999)"); c.commit()' "$CCFLARE_DB"
+HOV_ROUTER_DB="$HOME/.config/hov-router/hov-router.db"
+mkdir -p "$HOME/.config/hov-router"
+python3 -c 'import sqlite3, sys; c = sqlite3.connect(sys.argv[1]); c.execute("CREATE TABLE requests (timestamp INTEGER, cost_usd REAL, total_tokens INTEGER)"); c.execute("INSERT INTO requests VALUES (1, 100.0, 999999)"); c.commit()' "$HOV_ROUTER_DB"
 read -r R4E2 _ <<<"$(mk_repo_with_origin loop-u4e2)"
 WT4E2=$(mk_worktree "$R4E2" dispatch-u4e2)
 : >"$LEDGER_CALLS"
-CLAUDE_STUB_CCFLARE_DB="$CCFLARE_DB" DISCORD_WEBHOOK_URL="https://stub.invalid/wh" \
+CLAUDE_STUB_HOV_ROUTER_DB="$HOV_ROUTER_DB" DISCORD_WEBHOOK_URL="https://stub.invalid/wh" \
   bash "$LOOP" "$R4E2" "test prompt" --use-worktree "$WT4E2" --run-id run-u4e2 >/dev/null 2>&1; RC=$?
 OUT4E2=$(python3 "$HERE/scripts/dispatcher-cost.py" 0 9999999999999 2>/dev/null)
-rm -f "$CCFLARE_DB"   # the later cases keep U4e's no-gateway-DB state
+rm -f "$HOV_ROUTER_DB"   # the later cases keep U4e's no-gateway-DB state
 [ "$RC" = 0 ] && ok || bad "U4e2 loop exit $RC"
 grep -A1 -- '^--cost$' "$LEDGER_CALLS" | grep -qx '1.25' && ok || bad "U4e2 ledger --cost should be the in-window row's 1.25, not the timestamp-1 row outside the window: $(cat "$LEDGER_CALLS")"
 grep -A1 -- '^--tokens$' "$LEDGER_CALLS" | grep -qx '4200' && ok || bad "U4e2 ledger --tokens should be the in-window row's 4200: $(cat "$LEDGER_CALLS")"

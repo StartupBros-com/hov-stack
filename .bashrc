@@ -174,7 +174,7 @@ save() {
     fi
 }
 
-# --- ccflare-launcher begin (tests redirect only the fixed policy-root literal) ---
+# --- hov-router-launcher begin (tests redirect only the fixed policy-root literal) ---
 # better-ccflare probe-then-decide launcher (the author's infrastructure repository plan
 # 2026-08-30-0030, R8/R11/R13/R14, KTD4/KTD5). A bash function, not a
 # ~/.local/bin shadow, because mise's shim PATH ordering would bypass a file
@@ -202,7 +202,7 @@ claude() {
         drop_login=(-u CLAUDE_CODE_OAUTH_TOKEN)
     fi
     local base_url="" auth_hdr="" model_pin="" code="" cls="" note=""
-    local state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/ccflare-launcher"
+    local state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/hov-router-launcher"
     local managed_settings_dir=/etc/claude-code
     local overlay="" caller_settings='{}' caller_value="" caller_trimmed="" caller_source="" caller_kind=default
     local caller_invalid=0 idle_default=1 route_verified=1
@@ -247,7 +247,7 @@ claude() {
     done
     set -- "${original_args[@]}"
     if (( caller_invalid )); then
-        printf 'ccflare-launcher: --settings must contain exactly one JSON object; launch cancelled.\n' >&2
+        printf 'hov-router-launcher: --settings must contain exactly one JSON object; launch cancelled.\n' >&2
         return 2
     fi
     if command -v jq >/dev/null 2>&1 && [ -f "$settings" ]; then
@@ -341,7 +341,7 @@ claude() {
     # The auth header rides a -K process-substitution config, never argv:
     # /proc/*/cmdline is world-readable, so an -H header would expose the key
     # to any process lister for the probe's lifetime.
-    code=$(curl -s -o /dev/null -w '%{http_code}' --max-time "${CCFLARE_PROBE_TIMEOUT:-3}" \
+    code=$(curl -s -o /dev/null -w '%{http_code}' --max-time "${HOV_ROUTER_PROBE_TIMEOUT:-3}" \
         -K <(printf 'header = "%s"\n' "${auth_hdr:-x-api-key: unset}") \
         "$base_url/api/api-keys" 2>/dev/null) || code=000
     case "$code" in
@@ -354,7 +354,7 @@ claude() {
                 env "${drop_login[@]}" claude "$@"
             fi
             return ;;
-        401|403) cls=key-invalid; note="proxy reachable but this host's API key was rejected (HTTP $code) — check ccflare-key-install / rotation" ;;
+        401|403) cls=key-invalid; note="proxy reachable but this host's API key was rejected (HTTP $code) — check hov-router-key-install / rotation" ;;
         000)     cls=bypass;      note="proxy unreachable" ;;
         *)       cls=proxy-error; note="proxy returned HTTP $code" ;;
     esac
@@ -364,7 +364,7 @@ claude() {
     case "$model_pin" in
         claude-bccf-*)
             model_pin=sonnet
-            printf 'ccflare-launcher: proxy-routed model pin overridden to sonnet for the native session.\n' >&2 ;;
+            printf 'hov-router-launcher: proxy-routed model pin overridden to sonnet for the native session.\n' >&2 ;;
         *) model_pin="" ;;
     esac
     local native_settings
@@ -386,7 +386,7 @@ claude() {
             # Relative permission/sandbox paths are rooted at the resolved
             # settings file's directory. Never relocate to a writable fallback.
             overlay=$(umask 077; mktemp "$overlay_dir/native-overlay.XXXXXX.json") || {
-                printf 'ccflare-launcher: cannot preserve the settings source directory; launch cancelled.\n' >&2
+                printf 'hov-router-launcher: cannot preserve the settings source directory; launch cancelled.\n' >&2
                 exit 1
             }
             printf '%s\n' "$native_settings" > "$overlay" || exit 1
@@ -394,15 +394,15 @@ claude() {
         fi
         # Keep inline JSON inline: Claude assigns its own synthetic temp origin,
         # which is different from both cwd and the launcher state directory.
-        printf 'ccflare-launcher: %s — starting a NATIVE claude.ai session instead (logged: %s).\n' "$note" "$cls" >&2
-        printf 'ccflare-launcher: re-invoking (e.g. claude --continue) re-probes the proxy.\n' >&2
+        printf 'hov-router-launcher: %s — starting a NATIVE claude.ai session instead (logged: %s).\n' "$note" "$cls" >&2
+        printf 'hov-router-launcher: re-invoking (e.g. claude --continue) re-probes the proxy.\n' >&2
         env -u ANTHROPIC_BASE_URL -u ANTHROPIC_AUTH_TOKEN -u ANTHROPIC_CUSTOM_HEADERS -u API_FORCE_IDLE_TIMEOUT \
             "${drop_login[@]}" claude --settings "$native_settings" "${native_args[@]}" || child_status=$?
         exit "$child_status"
     )
 
 }
-# --- ccflare-launcher end ---
+# --- hov-router-launcher end ---
 
 # Claude Code power aliases
 alias cc='claude --continue'

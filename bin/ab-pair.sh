@@ -3,7 +3,7 @@
 #
 # Ceremony Test (HARNESS.md § Doctrine):
 #   consumer  — anyone about to claim "X is faster than Y" (a private evals repository runtime_benchmarks,
-#               better-ccflare latency work, frankensqlite).
+#               HoV Router latency work, frankensqlite).
 #   gate      — any comparative perf claim. Non-zero exit means the claim is not landable.
 #   defect    — OBSERVED: a private evals repository's runtime_benchmarks compares arms run sequentially in
 #               separate directories with repeats:3 and medians, but no cv, no stdev and no

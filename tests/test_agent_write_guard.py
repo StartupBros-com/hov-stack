@@ -39,7 +39,7 @@ SHELL_WRAPPER_FALSE_POSITIVE = (
     "&& eval 'cd --cwd /nonexistent/jobs/50993da2/tmp/atomic-supabase-v2'"
 )
 
-HEALTHY_DAEMON = "/home/user/.config/better-ccflare/better-ccflare-v3.5.44 --serve --port 8789"
+HEALTHY_DAEMON = "/home/user/.config/hov-router/hov-router-v8.0.0 --serve --port 8789"
 
 
 class OrphanDetectionTests(unittest.TestCase):
@@ -55,6 +55,10 @@ class OrphanDetectionTests(unittest.TestCase):
 
     def test_ignores_healthy_daemon_with_no_cwd_flag(self):
         self.assertIsNone(G.is_orphan_candidate(HEALTHY_DAEMON))
+
+    def test_flags_renamed_router_with_missing_cwd(self):
+        cmd = HEALTHY_DAEMON + " --cwd /nonexistent/router-fixture"
+        self.assertEqual(G.is_orphan_candidate(cmd), "/nonexistent/router-fixture")
 
     def test_ignores_daemon_whose_cwd_still_exists(self):
         cmd = f"node app-server-broker.mjs serve --cwd {CLAUDE}"

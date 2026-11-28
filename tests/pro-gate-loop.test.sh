@@ -1173,7 +1173,7 @@ for route in model account role fable foreign; do
   gateway=http://127.0.0.1:8788 model= headers= sonnet= fable=
   case "$route" in
     model) model=claude-opus-5-5 ;;
-    account) headers=$'x-client-note: fixture\nX-Better-Ccflare-Account-Id: pinned-fixture' ;;
+    account) headers=$'x-client-note: fixture\nX-Hov-Router-Account-Id: pinned-fixture' ;;
     role) sonnet=claude-sonnet-5-5 ;;
     fable) fable=claude-fable-5-1 ;;
     foreign) gateway=https://api.anthropic.com ;;
@@ -1189,7 +1189,7 @@ mkdir -p "$TREE/.claude"
 for scoped in model account backend fable harmless malformed; do
   case "$scoped" in
     model) printf '{"model":"claude-opus-5-5"}\n' ;;
-    account) printf '{"env":{"ANTHROPIC_CUSTOM_HEADERS":"x-better-ccflare-account-id: pinned-fixture"}}\n' ;;
+    account) printf '{"env":{"ANTHROPIC_CUSTOM_HEADERS":"x-hov-router-account-id: pinned-fixture"}}\n' ;;
     backend) printf '{"env":{"ANTHROPIC_BASE_URL":"https://api.anthropic.com"}}\n' ;;
     fable) printf '{"env":{"ANTHROPIC_DEFAULT_FABLE_MODEL":"claude-fable-5-1"}}\n' ;;
     harmless) printf '{"permissions":{"deny":["Bash(git push --force:*)"]}}\n' ;;

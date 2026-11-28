@@ -3,7 +3,7 @@
 # (dotfiles#1377).
 #
 # Ceremony Test (HARNESS.md § Doctrine):
-#   consumer    — codex-auto-update.timer (every 15 min, opt-in), better-ccflare's Codex
+#   consumer    — codex-auto-update.timer (every 15 min, opt-in), HoV Router's Codex
 #                 client identity (it reads the verified-version record below),
 #                 harness-weekly (`--report`), and the operator by hand.
 #   gate        — exact stable dist-tag; candidate manifest and host native artifact
@@ -53,7 +53,7 @@
 # does not retry it every 15 minutes; a newer release clears the hold.
 #
 # Verified-version record ($STATE_DIR/verified-version.json), the contract that
-# better-ccflare's CCFLARE_CODEX_VERIFIED_VERSION_FILE reader enforces:
+# HoV Router's HOV_ROUTER_CODEX_VERIFIED_VERSION_FILE reader enforces:
 #   {"schemaVersion":1,"packageName":"@openai/codex","version":"X.Y.Z","verifiedAt":"<UTC>Z"}
 # A regular file under 4 KiB, replaced by rename because the reader opens it O_NOFOLLOW.
 # A current install re-stamps it daily; the reader treats >30 days as stale, so a stopped
@@ -62,7 +62,7 @@
 # Activation is manual and separate; ./setup --enable-units deploys the units but never enables
 # them:
 #   systemctl --user enable --now codex-auto-update.timer
-# and, for better-ccflare, CCFLARE_CODEX_VERIFIED_VERSION_FILE=<record path> on its unit.
+# and, for HoV Router, HOV_ROUTER_CODEX_VERIFIED_VERSION_FILE=<record path> on its unit.
 #
 # Usage:  codex-update.sh                 report only (default)
 #         DRY_RUN=0 codex-update.sh       stage, verify, promote, publish the record
@@ -103,7 +103,7 @@ PKG=@openai/codex
 RECORD=$STATE_DIR/verified-version.json
 STATUS=$STATE_DIR/status.json
 HOLD=$STATE_DIR/hold
-# Same shape better-ccflare's reader accepts.
+# Same shape HoV Router's reader accepts.
 STABLE_RE='^(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})$'
 
 say() { "$NOTIFY" "$1" "${2:-default}" >/dev/null 2>&1 || echo "WARN notify failed: $1"; return 0; }

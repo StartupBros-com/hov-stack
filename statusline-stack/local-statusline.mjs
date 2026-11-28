@@ -298,7 +298,7 @@ function observationAge(timestamp) {
 // the TTL can never surface the other proxy's account for the same session.
 function provenanceCachePath(sessionId, base) {
   const key = createHash('sha256').update(`${base}\n${sessionId}`).digest('hex').slice(0, 24);
-  return path.join(os.tmpdir(), `better-ccflare-route-${key}.json`);
+  return path.join(os.tmpdir(), `hov-router-route-${key}.json`);
 }
 
 // Last observed session route, not necessarily the latest main-chain reply.
