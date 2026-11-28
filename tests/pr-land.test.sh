@@ -121,6 +121,7 @@ case "$*" in
   "rev-parse --abbrev-ref HEAD") echo "${STUB_GIT_BRANCH:-main}" ;;
   "remote get-url origin") echo "https://github.com/$R.git" ;;
   "rev-parse HEAD") echo "${STUB_GIT_TIP:-$H}" ;;
+  "rev-parse --show-toplevel") echo "$FIX/checkout" ;;
   "fetch -q origin refs/pull/7/head") exit 0 ;;
   "merge -q --ff-only --no-autostash FETCH_HEAD") exit "${STUB_GIT_FF_RC:-0}" ;;
   *) echo "unexpected git call: $*" >&2; exit 92 ;;
@@ -138,7 +139,7 @@ printf '#!/usr/bin/env bash\nif [ -n "${STUB_THAW_AFTER:-}" ] && [ "$(cat "$FIX/
   "$(command -v sleep)" >"$TMP/bin/sleep"
 chmod +x "$TMP/bin/gh" "$TMP/bin/git" "$TMP/bin/wt-done" "$TMP/bin/sleep"
 # Closed PATH: only the tools the script and the stubs use.
-for name in bash jq mktemp rm cat touch grep tr cut dirname date; do
+for name in bash jq mktemp rm cat touch grep tr cut dirname date python3 sha256sum wc mkdir awk; do
   ln -s "$(command -v "$name")" "$TMP/bin/$name"
 done
 cp "$SCRIPT_SRC" "$TMP/pr-land.sh"
@@ -161,7 +162,8 @@ green() {
 
 reset_case() {
   export H=1111111111111111111111111111111111111111 R=StartupBros-com/hov-stack P=7
-  unset STUB_BASE_MOVED
+  unset STUB_BASE_MOVED PRO_GATE_HOME STUB_PRO_PREPARE_FAIL STUB_PRO_QUERY_FAIL
+  SCRIPT="$TMP/pr-land.sh"
   cp "$ROOT/scripts/pr-land-review-substitutions.json" "$TMP/pr-land-review-substitutions.json"
   rm -rf "$FIX"; mkdir -p "$FIX"; : >"$GH_LOG"; : >"$GIT_LOG"; : >"$WT_LOG"
   unset STUB_RULES STUB_CLASSIC STUB_HEAD_MOVED STUB_MERGE_RC STUB_MERGE_LANDED STUB_MERGE_STATE STUB_QUEUE_READS STUB_QUEUE_THEN
@@ -211,6 +213,119 @@ refused() {  # name rc reason [args...]: that exit, the reason on stdout, no mer
   check "$name: one stdout line" one_line
   check "$name: no merge call" test "$(merges)" = 0
 }
+
+# Expired round summaries must not discard an authenticated, applicable review.
+# A fixture runtime emits decisions through the real shared reducer/validator.
+durable_case() {
+  reset_case
+  export PRO_GATE_HOME="$FIX/runtime" PG_TEST_DECISION="$FIX/decision.json"
+  SCRIPT="$FIX/scripts/pr-land.sh"
+  local plugin="$FIX/plugins/pro-gate"
+  mkdir -p "$PRO_GATE_HOME" "$FIX/scripts" "$plugin/.claude-plugin" "$plugin/skills/pro-gate/scripts"
+  cp "$SCRIPT_SRC" "$SCRIPT"
+  cp "$ROOT/scripts/merge-freeze.sh" "$ROOT/scripts/pr-land-review-substitutions.json" "$FIX/scripts/"
+  cp "$ROOT/plugins/pro-gate/.claude-plugin/plugin.json" "$plugin/.claude-plugin/"
+  cp "$ROOT/plugins/pro-gate/skills/pro-gate/review-decision-v1.json" "$plugin/skills/pro-gate/"
+  cp "$ROOT/plugins/pro-gate/skills/pro-gate/scripts/resolve-identity.sh" "$plugin/skills/pro-gate/scripts/"
+  cp "$ROOT/plugins/pro-gate/lib/pro-gate-lib.sh" "$PRO_GATE_HOME/lib.sh"
+  cp "$ROOT/plugins/pro-gate/skills/pro-gate/review-decision-v1.json" "$PRO_GATE_HOME/review-decision-v1.json"
+  jq -r .version "$ROOT/plugins/pro-gate/.claude-plugin/plugin.json" >"$PRO_GATE_HOME/VERSION"
+  cat >"$PRO_GATE_HOME/oracle-review.sh" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >>"$FIX/pro.calls"
+case "$1" in
+  --prepare-review-evidence)
+    [ "${STUB_PRO_PREPARE_FAIL:-0}" = 0 ] || exit 1
+    mkdir "$2" || exit 1
+    printf 'fixture patch\n' >"$2/endpoint.patch"
+    jq -n --arg h "$H" --arg b "$M" '{metadata:{target:{head_oid:$h,base_oid:$b}}}' >"$2/pr-evidence.json"
+    ;;
+  --review-decision)
+    [ "${STUB_PRO_QUERY_FAIL:-0}" = 0 ] || exit 1
+    [ -f "$PRO_GATE_REVIEW_ENDPOINT_PATCH" ] && [ -f "$PRO_GATE_REVIEW_PR_EVIDENCE" ] || exit 1
+    cat "$PG_TEST_DECISION"
+    ;;
+  *) exit 99 ;;
+esac
+STUB
+  chmod +x "$PRO_GATE_HOME/oracle-review.sh"
+  jq --slurpfile identity "$PRO_GATE_HOME/review-decision-v1.json" --arg h "$H" --arg r "$R" --argjson p "$P" '
+    .base_facts * (.cases[] | select(.expected.reason == "current-ship-is-merge-eligible") | .patch)
+    | .contract = $identity[0]
+    | .target = {host:"github.com",owner:($r|split("/")[0]),repo:($r|split("/")[1]),pr:$p,head_oid:$h}
+    | .open_blocking = 0
+  ' "$ROOT/plugins/pro-gate/tests/fixtures/review-decision/v1/corpus.json" >"$FIX/facts.json"
+  ( . "$PRO_GATE_HOME/lib.sh"; pg_review_decision_reduce "$(cat "$FIX/facts.json")" ) >"$PG_TEST_DECISION"
+  echo "$M" >"$FIX/base"
+}
+
+durable_case
+run 7 --repo "$R" --pro
+landed 'expired summary with applicable retained SHIP'
+check 'retained review never recreates summary' test ! -e "$FIX/rounds/StartupBros-com-hov-stack-7.last"
+check 'retained review queried twice, including after CI' test "$(grep -c -F -- --review-decision "$FIX/pro.calls")" = 2
+check 'retained review never requests an effect' bash -c '! grep -q -F -- --review-decision-effect "$1"' _ "$FIX/pro.calls"
+check 'retained review uses full PR URL' grep -q -F -- "--pr https://github.com/$R/pull/$P" "$FIX/pro.calls"
+
+durable_case
+mkdir -p "$FIX/installed"
+ln -s "$FIX/scripts" "$FIX/installed/scripts"
+SCRIPT="$FIX/installed/scripts/pr-land.sh"
+run 7 --repo "$R" --pro
+landed 'retained review through installed scripts symlink'
+
+mutate_decision() { jq "$1" "$PG_TEST_DECISION" >"$FIX/mutated" && mv "$FIX/mutated" "$PG_TEST_DECISION"; }
+regenerate_decision() { ( . "$PRO_GATE_HOME/lib.sh"; pg_review_decision_reduce "$(cat "$FIX/facts.json")" ) >"$PG_TEST_DECISION"; }
+mutate_facts() { jq "$1" "$FIX/facts.json" >"$FIX/mutated" && mv "$FIX/mutated" "$FIX/facts.json"; regenerate_decision; }
+
+durable_case; export STUB_PRO_PREPARE_FAIL=1
+refused 'retained review: proof failure' 1 'could not be prepared' 7 --repo "$R" --pro
+durable_case; export STUB_PRO_QUERY_FAIL=1
+refused 'retained review: query failure' 1 'could not be read' 7 --repo "$R" --pro
+durable_case; export STUB_GIT_TIP="$H2"
+refused 'retained review: wrong local head' 1 'must run from PR' 7 --repo "$R" --pro
+durable_case; echo invalid >"$PG_TEST_DECISION"
+refused 'retained review: malformed output' 1 'invalid or incompatible' 7 --repo "$R" --pro
+durable_case; cp "$PG_TEST_DECISION" "$FIX/another"; cat "$FIX/another" >>"$PG_TEST_DECISION"
+refused 'retained review: multiple JSON documents' 1 'invalid or incompatible' 7 --repo "$R" --pro
+durable_case; mutate_decision '.contract.contract_digest = "bad"'
+refused 'retained review: incompatible contract' 1 'invalid or incompatible' 7 --repo "$R" --pro
+durable_case; echo 0.0.0 >"$PRO_GATE_HOME/VERSION"
+refused 'retained review: runtime version mismatch' 1 'runtime version differs' 7 --repo "$R" --pro
+durable_case; echo '{}' >"$PRO_GATE_HOME/review-decision-v1.json"
+refused 'retained review: runtime identity mismatch' 1 'runtime identity differs' 7 --repo "$R" --pro
+durable_case; mutate_facts '.target.pr = 8'
+refused 'retained review: valid decision for another PR' 1 'does not authorize' 7 --repo "$R" --pro
+durable_case; mutate_facts '.target.repo = "other"'
+refused 'retained review: valid decision for another repository' 1 'does not authorize' 7 --repo "$R" --pro
+durable_case; mutate_facts '.target.head_oid = "6666666666666666666666666666666666666666"'
+refused 'retained review: valid decision for another head' 1 'does not authorize' 7 --repo "$R" --pro
+durable_case; mutate_facts '.prior_review.applicable = false | .governor.granted = false'
+refused 'retained review: typed stop' 1 'does not authorize' 7 --repo "$R" --pro
+durable_case; mutate_facts '.prior_review.verdict = "FIX-FIRST" | .open_blocking = 1'
+refused 'retained review: open blocker' 1 'does not authorize' 7 --repo "$R" --pro-fixed --pro
+durable_case; mutate_facts '.prior_review.verdict = "FIX-FIRST" | .open_blocking = 1'
+mutate_decision '.action = "allow-existing-merge-workflow" | .effect_request.action = .action | .effect_request.effect = .action | .effect_request.execution_class = "report-only"'
+refused 'retained review: fabricated outer allow fails reducer replay' 1 'invalid or incompatible' 7 --repo "$R" --pro
+durable_case; export STUB_BASE_MOVED=1
+refused 'retained review: base changes before merge' 1 'target changed' 7 --repo "$R" --pro
+durable_case; export STUB_HEAD_MOVED=1
+refused 'retained review: head changes during CI' 2 'head moved' 7 --repo "$R" --pro
+durable_case; check_run 'Trusted syntax and policy' COMPLETED FAILURE | rollup >"$FIX/checks.json"
+refused 'retained review: red CI remains red' 1 'red:' 7 --repo "$R" --pro
+durable_case; closes 'still not closed: #12' "$R#12" >"$FIX/closes.json"
+refused 'retained review: prose-close guard remains' 1 'would close' 7 --repo "$R" --pro
+durable_case; export CLAUDE_LOOP_GUARD=1
+refused 'retained review: loop remains fenced' 1 'CLAUDE_LOOP_GUARD=1' 7 --repo "$R" --pro
+durable_case; export STUB_QUEUE_READS=2
+jq '. + [{type:"merge_queue"}]' "$FIX/rules.json" >"$FIX/new"; mv "$FIX/new" "$FIX/rules.json"
+run 7 --repo "$R" --pro
+landed 'retained review preserves ordinary merge queue support'
+durable_case; mutate_facts '.prior_review.verdict = "FIX-FIRST" | .deferred_count = 1 | .deferred_findings = [{severity:"P2",text:"Optional follow-up"}]'
+run 7 --repo "$R" --pro
+landed 'retained FIX-FIRST with proven zero blockers and only deferred findings'
+durable_case; mutate_facts '.open_blocking = null'
+refused 'retained review: unavailable blocker count is not zero' 1 'does not authorize' 7 --repo "$R" --pro
 
 # --- Landing cases.
 reset_case; run 7 --repo "$R"
@@ -532,13 +647,13 @@ landed 'approved CE substitution'
 check 'substitution: named honestly' has "$OUT" 'operator-approved CE substitution; not a Pro pass'
 check 'substitution: did not manufacture a Pro record' test ! -e "$FIX/rounds/StartupBros-com-hov-router-1060.last"
 substitution_case; export P=1061
-refused 'substitution: wrong PR' 1 'none has finished' "$P" --repo "$R"
+refused 'substitution: wrong PR' 1 'no usable retained review' "$P" --repo "$R"
 substitution_case; export R=example-org/hov-router
-refused 'substitution: wrong repo' 1 'none has finished' "$P" --repo "$R"
+refused 'substitution: wrong repo' 1 'no usable retained review' "$P" --repo "$R"
 substitution_case; echo "$H2" >"$FIX/head"
-refused 'substitution: wrong head' 1 'none has finished' "$P" --repo "$R"
+refused 'substitution: wrong head' 1 'no usable retained review' "$P" --repo "$R"
 substitution_case; echo "$H2" >"$FIX/base"
-refused 'substitution: wrong base without Pro' 1 'none has finished' "$P" --repo "$R"
+refused 'substitution: wrong base without Pro' 1 'no usable retained review' "$P" --repo "$R"
 substitution_case; echo "$H2" >"$FIX/base"
 printf '1795000000\t0\t0\n' >"$FIX/rounds/StartupBros-com-hov-router-1060.last"
 run "$P" --repo "$R" --no-closeout
@@ -554,7 +669,7 @@ check 'substitution: branch update refuses' test "$RC" -eq 1
 check 'substitution: branch update names invalid identity' has "$OUT" 'substitution identity'
 check 'substitution: never merges updated head' test "$(merges_at "$H2")" = 0
 substitution_case; rm "$TMP/pr-land-review-substitutions.json"
-refused 'substitution: missing table' 1 'none has finished' "$P" --repo "$R"
+refused 'substitution: missing table' 1 'no usable retained review' "$P" --repo "$R"
 substitution_case; echo '{' >"$TMP/pr-land-review-substitutions.json"
 refused 'substitution: malformed table' 1 'substitutions are invalid' "$P" --repo "$R"
 substitution_case
