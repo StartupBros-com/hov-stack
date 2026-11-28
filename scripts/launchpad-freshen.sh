@@ -142,7 +142,7 @@ sync_harness() {
 }
 
 process_repo() {
-  local repo=$1 heal=$2 name def branch tracked behind state pushed tipage mergeerr nblock nident
+  local repo=$1 heal=$2 name def branch tracked behind state pushed tipage mergeerr
   name=$(basename "$repo")
   # Must precede default-branch, in-progress, switch, fetch and merge reads: a
   # warned/enforced independent launch pad has no mutation authority.
@@ -221,24 +221,14 @@ process_repo() {
   # same question the same way; this path kept a second, cruder answer, and the
   # crude one silently won. $tracked survives only as a cosmetic count now, so its
   # staleness as a pre-fetch snapshot can no longer decide anything.
-  #
-  # A tracked edit whose bytes already equal the incoming blob is not in the way:
-  # the live path below stages it and retries (repo_ff_merge_staging_identical),
-  # so the dry run subtracts those paths before predicting a refusal.
   if [ "$DRY" = "1" ]; then
-    nblock=0 nident=0
+    nblock=0
     if declare -F repo_ff_blockers >/dev/null 2>&1; then
       nblock=$(repo_ff_blockers "$repo" "$def" 2>/dev/null | tr -cd '\0' | wc -c | tr -d '[:space:]')
       [ -n "$nblock" ] || nblock=0
     fi
-    if declare -F repo_ff_identical_edits >/dev/null 2>&1; then
-      nident=$(repo_ff_identical_edits "$repo" "$def" 2>/dev/null | tr -cd '\0' | wc -c | tr -d '[:space:]')
-      [ -n "$nident" ] || nident=0
-    fi
-    if [ "$nblock" -gt "$nident" ]; then
-      echo "launchpad $name: would REFUSE ff of $behind commit(s): $((nblock - nident)) local path(s) collide with incoming changes (DRY_RUN)"
-    elif [ "$nident" -gt 0 ]; then
-      echo "launchpad $name: would fast-forward $behind commit(s), staging $nident local edit(s) the update already contains (DRY_RUN)"
+    if [ "$nblock" -gt 0 ]; then
+      echo "launchpad $name: would REFUSE ff of $behind commit(s): $nblock local path(s) collide with incoming changes (DRY_RUN)"
     elif [ "$tracked" -gt 0 ]; then
       echo "launchpad $name: would fast-forward $behind commit(s), carrying $tracked unrelated local edit(s) (DRY_RUN)"
     else
@@ -252,11 +242,7 @@ process_repo() {
     else
       echo "launchpad $name: fast-forwarded $behind commit(s)"
     fi
-  elif declare -F repo_ff_merge_staging_identical >/dev/null 2>&1 &&
-    repo_ff_merge_staging_identical "$repo" "$def"; then
-    echo "launchpad $name: fast-forwarded $behind commit(s), staged $REPO_FF_STAGED local edit(s) the update already contained"
   else
-    [ -z "${REPO_FF_STAGE_ERR:-}" ] || mergeerr=$REPO_FF_STAGE_ERR
     # Name the cause and the files. "diverged or untracked collision" told the
     # operator which two things it might be and nothing about which, so the
     # message could be read for four days without acting on it (dotfiles#484).
